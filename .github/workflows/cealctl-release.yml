@@ -1,0 +1,146 @@
+# cealctl release pipeline (lives in corca-ai/ceal-cli).
+#
+# DRAFT, 2026-06-16. The cosign keyless identity is bound to THIS repo's
+# workflow file (corca-ai/ceal-cli/.github/workflows/cealctl-release.yml@refs/tags/v<version>),
+# which is exactly what `cealctl-release-candidate-verify.mjs` expects. Do not
+# rename this file without updating the verifier's DEFAULT_WORKFLOW_FILE.
+#
+# PREREQUISITES before a real run:
+#   - Secret CEAL_SOURCE_TOKEN: read-only access to the PRIVATE corca-ai/ceal
+#     source (the build scripts + cealctl source live there). A fine-grained PAT
+#     or GitHub App token scoped to Contents:read on corca-ai/ceal.
+#   - The linux-arm64 runner label must be available (ubuntu-24.04-arm or a
+#     self-hosted arm64 runner). Binaries MUST be built on their target arch.
+#
+# This run produces a DRAFT release; a human promotes it to published.
+
+name: cealctl-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "cealctl version, no leading v (e.g. 0.1.0)"
+        required: true
+      source_ref:
+        description: "corca-ai/ceal git ref to build from"
+        required: true
+        default: main
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # create the release in this (ceal-cli) repo
+  id-token: write   # keyless cosign OIDC identity
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux-x64
+            runs-on: ubuntu-latest
+          - platform: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out private source (build scripts + cealctl)
+        uses: actions/checkout@v6
+        with:
+          repository: corca-ai/ceal
+          token: ${{ secrets.CEAL_SOURCE_TOKEN }}
+          ref: ${{ github.event.inputs.source_ref || 'main' }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts
+      - name: Build SEA binary (${{ matrix.platform }})
+        run: |
+          node scripts/agent-runtime/cealctl-platform-binary-build.mjs \
+            --platform ${{ matrix.platform }} \
+            --version "${{ steps.ver.outputs.version }}" \
+            --out dist --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cealctl-${{ matrix.platform }}
+          path: dist/cealctl-${{ matrix.platform }}*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out private source (release scripts)
+        uses: actions/checkout@v6
+        with:
+          repository: corca-ai/ceal
+          token: ${{ secrets.CEAL_SOURCE_TOKEN }}
+          ref: ${{ github.event.inputs.source_ref || 'main' }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+      - name: Collect binaries into dist/
+        run: |
+          mkdir -p dist
+          cp dist-artifacts/cealctl-linux-x64/cealctl-linux-x64 dist/
+          cp dist-artifacts/cealctl-linux-arm64/cealctl-linux-arm64 dist/
+      - uses: sigstore/cosign-installer@v3
+      - name: Keyless cosign sign (identity = this workflow)
+        run: |
+          for p in linux-x64 linux-arm64; do
+            cosign sign-blob --yes \
+              --output-signature "dist/cealctl-$p.sig" \
+              --output-certificate "dist/cealctl-$p.pem" \
+              "dist/cealctl-$p"
+          done
+      - name: Stage manifest + checksums
+        run: |
+          node scripts/agent-runtime/cealctl-release-artifacts.mjs \
+            --version "${{ steps.ver.outputs.version }}" \
+            --out dist --require-signatures --channel stable \
+            --asset dist/cealctl-linux-x64 \
+            --signature dist/cealctl-linux-x64.sig \
+            --certificate dist/cealctl-linux-x64.pem \
+            --asset dist/cealctl-linux-arm64 \
+            --signature dist/cealctl-linux-arm64.sig \
+            --certificate dist/cealctl-linux-arm64.pem \
+            --json
+      - name: Verify release candidate (cosign + checksums)
+        run: |
+          node scripts/agent-runtime/cealctl-release-candidate-verify.mjs \
+            --dir dist --require-signatures --verify-cosign \
+            --workflow-file cealctl-release.yml --json
+      - name: Create draft release on ceal-cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.version }}" \
+            --repo "${{ github.repository }}" --draft \
+            --title "cealctl v${{ steps.ver.outputs.version }}" \
+            --notes "Draft cealctl release. Promote after manual verification." \
+            dist/cealctl-linux-x64 dist/cealctl-linux-x64.sig dist/cealctl-linux-x64.pem \
+            dist/cealctl-linux-arm64 dist/cealctl-linux-arm64.sig dist/cealctl-linux-arm64.pem \
+            dist/ceal-release-manifest.json dist/SHA256SUMS
