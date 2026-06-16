@@ -1,0 +1,32 @@
+{
+  "schema_version": "cealctl.public_repo_seed_manifest.v1",
+  "repository": "corca-ai/ceal-cli",
+  "proof_level": "surface",
+  "writes_external": false,
+  "files": [
+    {
+      "path": "README.md",
+      "kind": "operator_docs",
+      "classification": "public_distribution_seed",
+      "sha256": "826931429a35adc9578bd4088205a8cf26b3ae5e02814d70d87feca10229f0e1"
+    },
+    {
+      "path": "install.sh",
+      "kind": "install_script",
+      "classification": "public_distribution_seed",
+      "sha256": "9c9f898e38e9c2e95367d7f637b9cb22f99cf28c41614a67778e2021561f5f11"
+    },
+    {
+      "path": ".github/workflows/cealctl-release.yml",
+      "kind": "release_signing_workflow",
+      "classification": "public_distribution_seed",
+      "sha256": "c5f9d4ce1d87733510fb84fbc3e3821565636bb64f5a7092a0fc8581f65895b2"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "kind": "operator_docs",
+      "classification": "public_distribution_seed",
+      "sha256": "df178c8bc8dc135caf080a29f158cb20fa47b4ca186109620bad05accfdcf738"
+    }
+  ]
+}

@@ -1,65 +1,77 @@
 #!/usr/bin/env sh
-# cealctl installer — downloads a signed release binary from corca-ai/ceal-cli
-# Releases and verifies its SHA-256 before installing. Ceal's source stays
-# private; this installs a signed binary, not source.
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/corca-ai/ceal-cli/main/install.sh | sh
-#   VERSION=0.1.0 INSTALL_DIR="$HOME/.local/bin" sh install.sh
 set -eu
 
 REPO="corca-ai/ceal-cli"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${VERSION:-latest}"
+VERSION="${CEALCTL_VERSION:-}"
+INSTALL_DIR="${CEALCTL_INSTALL_DIR:-$HOME/.local/bin}"
+WORKFLOW_FILE="cealctl-release.yml"
+ISSUER="https://token.actions.githubusercontent.com"
 
-# Detect platform (Linux only for the first release channel).
-os="$(uname -s)"
-arch="$(uname -m)"
-if [ "$os" != "Linux" ]; then
-  echo "cealctl: only Linux binaries are published today (got: $os)." >&2
+fail() {
+  printf '%s\n' "$1" >&2
   exit 1
-fi
-case "$arch" in
-  x86_64|amd64) plat="linux-x64" ;;
-  aarch64|arm64) plat="linux-arm64" ;;
-  *) echo "cealctl: unsupported architecture: $arch" >&2; exit 1 ;;
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
+}
+
+detect_platform() {
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  case "$os:$arch" in
+    Linux:x86_64|Linux:amd64) printf '%s\n' linux-x64 ;;
+    Linux:aarch64|Linux:arm64) printf '%s\n' linux-arm64 ;;
+    *) fail "Unsupported cealctl platform: $os $arch. Initial public cealctl binaries are Linux-only." ;;
+  esac
+}
+
+case "$VERSION" in
+  v[0-9]*.[0-9]*.[0-9]*)
+    ;;
+  "")
+    fail "Set CEALCTL_VERSION to a release tag such as v0.1.0"
+    ;;
+  *)
+    fail "CEALCTL_VERSION must be a v-prefixed release tag"
+    ;;
 esac
 
-base="https://github.com/$REPO/releases"
-if [ "$VERSION" = "latest" ]; then
-  dl="$base/latest/download"
-else
-  dl="$base/download/v$VERSION"
-fi
+PLATFORM="$(detect_platform)"
+need curl
+need sha256sum
+need cosign
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+ASSET="cealctl-$PLATFORM"
+BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
-echo "cealctl: downloading $plat from $dl ..."
-curl -fSL "$dl/cealctl-$plat" -o "$tmp/cealctl"
-curl -fSL "$dl/SHA256SUMS" -o "$tmp/SHA256SUMS"
+curl -fsSL "$BASE_URL/$ASSET" -o "$TMP_DIR/$ASSET"
+curl -fsSL "$BASE_URL/$ASSET.sig" -o "$TMP_DIR/$ASSET.sig"
+curl -fsSL "$BASE_URL/$ASSET.pem" -o "$TMP_DIR/$ASSET.pem"
+curl -fsSL "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
 
-echo "cealctl: verifying checksum ..."
-expected="$(grep " cealctl-$plat\$" "$tmp/SHA256SUMS" | awk '{print $1}')"
-if [ -z "$expected" ]; then
-  echo "cealctl: no checksum found for cealctl-$plat in SHA256SUMS." >&2
-  exit 1
-fi
-actual="$(sha256sum "$tmp/cealctl" | awk '{print $1}')"
-if [ "$expected" != "$actual" ]; then
-  echo "cealctl: checksum mismatch (expected $expected, got $actual)." >&2
-  exit 1
-fi
+grep -E "^[a-f0-9]{64}  $ASSET$" "$TMP_DIR/SHA256SUMS" >/dev/null || fail "SHA256SUMS is missing $ASSET"
+(cd "$TMP_DIR" && sha256sum -c SHA256SUMS --ignore-missing)
 
-# Optional signature verification when cosign is available.
-if command -v cosign >/dev/null 2>&1; then
-  echo "cealctl: cosign found — fetching signature material (verify with the"
-  echo "         published identity per the release notes)."
-  curl -fSL "$dl/cealctl-$plat.sig" -o "$tmp/cealctl.sig" || true
-  curl -fSL "$dl/cealctl-$plat.pem" -o "$tmp/cealctl.pem" || true
-fi
+IDENTITY="^https://github[.]com/$REPO/[.]github/workflows/$WORKFLOW_FILE@refs/tags/$VERSION$"
+cosign verify-blob \
+  --certificate "$TMP_DIR/$ASSET.pem" \
+  --signature "$TMP_DIR/$ASSET.sig" \
+  --certificate-identity-regexp "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" \
+  --certificate-github-workflow-repository "$REPO" \
+  --certificate-github-workflow-ref "refs/tags/$VERSION" \
+  "$TMP_DIR/$ASSET" >/dev/null
 
 mkdir -p "$INSTALL_DIR"
-install -m 0755 "$tmp/cealctl" "$INSTALL_DIR/cealctl"
-echo "cealctl: installed to $INSTALL_DIR/cealctl"
-echo "cealctl: ensure $INSTALL_DIR is on your PATH, then run: cealctl doctor"
+[ ! -L "$INSTALL_DIR" ] || fail "Install directory must not be a symlink"
+chmod 700 "$INSTALL_DIR"
+chmod 755 "$TMP_DIR/$ASSET"
+TARGET="$INSTALL_DIR/cealctl"
+NEXT="$TARGET.tmp.$$"
+cp "$TMP_DIR/$ASSET" "$NEXT"
+mv "$NEXT" "$TARGET"
+
+printf 'Installed cealctl at %s\n' "$TARGET"

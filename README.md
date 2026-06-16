@@ -1,45 +1,37 @@
 # cealctl
 
-`cealctl` is the operator/control client for [Ceal](https://ceal.borca.ai) — a
-Slack-first organizational AI coworker runtime that runs in **your** environment.
+Public operator CLI distribution for Ceal.
 
-This repository distributes **signed `cealctl` binaries only**. Ceal's source
-stays private; nothing here is the product source.
+This repository contains only customer-facing cealctl release material:
+platform binaries, checksums, cosign signatures, release manifests, install
+scripts, and operator documentation. It is not a mirror of the Ceal product
+source tree.
 
-## Install (Linux)
+Initial public binaries are Linux-only: `linux-x64` and `linux-arm64`.
+
+## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/corca-ai/ceal-cli/main/install.sh | sh
 ```
 
-This downloads the latest signed binary and verifies its SHA-256 before
-installing to `~/.local/bin`. To pin a version or change the location:
+The installer downloads a GitHub Release asset, verifies SHA256, verifies the
+cosign certificate identity for the cealctl release workflow, and installs the
+binary atomically under `$HOME/.local/bin` by default.
 
-```sh
-VERSION=0.1.0 INSTALL_DIR="$HOME/.local/bin" sh install.sh
-```
+## Verify Manually
 
-Binaries are published per release with `SHA256SUMS`, a release manifest, and
-keyless [cosign](https://docs.sigstore.dev/) signatures (`.sig` + `.pem`). The
-signing identity is this repo's `cealctl-release.yml` workflow at the matching
-release tag — verify with `cosign verify-blob` using that identity.
+Release assets are published under tags such as `v0.1.0`:
 
-Linux `x64` and `arm64` are supported today. macOS/Windows are not yet published.
+- `cealctl-linux-x64`
+- `cealctl-linux-x64.sig`
+- `cealctl-linux-x64.pem`
+- `cealctl-linux-arm64`
+- `cealctl-linux-arm64.sig`
+- `cealctl-linux-arm64.pem`
+- `SHA256SUMS`
+- `ceal-release-manifest.json`
 
-## Getting started
-
-See the **[Quickstart](https://ceal.borca.ai/quickstart)**.
-
-Common commands:
-
-```sh
-cealctl doctor      # readiness (Slack tokens, AI auth, scopes, provider health)
-cealctl status      # healthy / degraded / blocked
-cealctl logs --limit 50
-```
-
-Recovery is preview-first (`cealctl restart --plan`, `cealctl update --check`).
-
-## Status
-
-Ceal is invitation-only MVP. Request access through your Ceal contact.
+Use `cosign verify-blob` with issuer
+`https://token.actions.githubusercontent.com`, repository
+`corca-ai/ceal-cli`, and workflow ref `refs/tags/<tag>`.
