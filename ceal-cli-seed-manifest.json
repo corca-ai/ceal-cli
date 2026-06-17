@@ -8,19 +8,19 @@
       "path": "README.md",
       "kind": "operator_docs",
       "classification": "public_distribution_seed",
-      "sha256": "826931429a35adc9578bd4088205a8cf26b3ae5e02814d70d87feca10229f0e1"
+      "sha256": "cd834fe25f4af9bc46a1917cd397b30dfff0809f37708b820fcb674f25ffdc95"
     },
     {
       "path": "install.sh",
       "kind": "install_script",
       "classification": "public_distribution_seed",
-      "sha256": "9c9f898e38e9c2e95367d7f637b9cb22f99cf28c41614a67778e2021561f5f11"
+      "sha256": "7833b17d42179b96becaa2b425a313a3f410d7c08cd74f3ec798f51896b8d57e"
     },
     {
       "path": ".github/workflows/cealctl-release.yml",
       "kind": "release_signing_workflow",
       "classification": "public_distribution_seed",
-      "sha256": "c5f9d4ce1d87733510fb84fbc3e3821565636bb64f5a7092a0fc8581f65895b2"
+      "sha256": "52c814bade0f23de5529dd4592f91a5cc87716ef3e777bccd899781e435cccb4"
     },
     {
       "path": "CHANGELOG.md",

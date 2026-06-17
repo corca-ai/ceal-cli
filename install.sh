@@ -22,25 +22,39 @@ detect_platform() {
   case "$os:$arch" in
     Linux:x86_64|Linux:amd64) printf '%s\n' linux-x64 ;;
     Linux:aarch64|Linux:arm64) printf '%s\n' linux-arm64 ;;
-    *) fail "Unsupported cealctl platform: $os $arch. Initial public cealctl binaries are Linux-only." ;;
+    Darwin:arm64) printf '%s\n' macos-arm64 ;;
+    Darwin:x86_64) printf '%s\n' macos-x64 ;;
+    *) fail "Unsupported cealctl platform: $os $arch (supported: linux-x64, linux-arm64, macos-x64, macos-arm64)" ;;
   esac
 }
 
-case "$VERSION" in
-  v[0-9]*.[0-9]*.[0-9]*)
-    ;;
-  "")
-    fail "Set CEALCTL_VERSION to a release tag such as v0.1.0"
-    ;;
-  *)
-    fail "CEALCTL_VERSION must be a v-prefixed release tag"
-    ;;
-esac
+# macOS ships shasum (not sha256sum); support both rather than depend on one.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+resolve_latest_version() {
+  curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+    | grep '"tag_name":' | head -n 1 | sed -e 's/.*"tag_name":[[:space:]]*"//' -e 's/".*//'
+}
 
 PLATFORM="$(detect_platform)"
 need curl
-need sha256sum
 need cosign
+command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required"
+
+# CEALCTL_VERSION pins a release tag; if unset, install the latest release.
+if [ -z "$VERSION" ]; then
+  VERSION="$(resolve_latest_version)"
+fi
+case "$VERSION" in
+  v[0-9]*.[0-9]*.[0-9]*) ;;
+  *) fail "Could not determine a cealctl release version. Set CEALCTL_VERSION to a tag such as v0.1.0." ;;
+esac
 
 ASSET="cealctl-$PLATFORM"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
@@ -52,8 +66,10 @@ curl -fsSL "$BASE_URL/$ASSET.sig" -o "$TMP_DIR/$ASSET.sig"
 curl -fsSL "$BASE_URL/$ASSET.pem" -o "$TMP_DIR/$ASSET.pem"
 curl -fsSL "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
 
-grep -E "^[a-f0-9]{64}  $ASSET$" "$TMP_DIR/SHA256SUMS" >/dev/null || fail "SHA256SUMS is missing $ASSET"
-(cd "$TMP_DIR" && sha256sum -c SHA256SUMS --ignore-missing)
+EXPECTED="$(grep -E "^[a-f0-9]{64}  $ASSET$" "$TMP_DIR/SHA256SUMS" | head -n 1 | cut -d' ' -f1)"
+[ -n "$EXPECTED" ] || fail "SHA256SUMS is missing $ASSET"
+ACTUAL="$(sha256_of "$TMP_DIR/$ASSET")"
+[ "$EXPECTED" = "$ACTUAL" ] || fail "Checksum mismatch for $ASSET"
 
 IDENTITY="^https://github[.]com/$REPO/[.]github/workflows/$WORKFLOW_FILE@refs/tags/$VERSION$"
 cosign verify-blob \
@@ -74,4 +90,4 @@ NEXT="$TARGET.tmp.$$"
 cp "$TMP_DIR/$ASSET" "$NEXT"
 mv "$NEXT" "$TARGET"
 
-printf 'Installed cealctl at %s\n' "$TARGET"
+printf 'Installed cealctl %s (%s) at %s\n' "$VERSION" "$PLATFORM" "$TARGET"

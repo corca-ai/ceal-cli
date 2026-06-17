@@ -7,7 +7,8 @@ platform binaries, checksums, cosign signatures, release manifests, install
 scripts, and operator documentation. It is not a mirror of the Ceal product
 source tree.
 
-Initial public binaries are Linux-only: `linux-x64` and `linux-arm64`.
+Public binaries are built for Linux and macOS: `linux-x64`, `linux-arm64`,
+`macos-x64` (Intel), and `macos-arm64` (Apple Silicon).
 
 ## Install
 
@@ -15,20 +16,21 @@ Initial public binaries are Linux-only: `linux-x64` and `linux-arm64`.
 curl -fsSL https://raw.githubusercontent.com/corca-ai/ceal-cli/main/install.sh | sh
 ```
 
-The installer downloads a GitHub Release asset, verifies SHA256, verifies the
+The installer detects your platform, installs the latest release (set
+`CEALCTL_VERSION=v0.1.0` to pin a specific tag), verifies SHA256, verifies the
 cosign certificate identity for the cealctl release workflow, and installs the
-binary atomically under `$HOME/.local/bin` by default.
+binary atomically under `$HOME/.local/bin` by default. On macOS the binary is
+installed via `curl` (no quarantine attribute), so Gatekeeper does not block it.
+`cosign` is required for signature verification.
 
 ## Verify Manually
 
 Release assets are published under tags such as `v0.1.0`:
 
-- `cealctl-linux-x64`
-- `cealctl-linux-x64.sig`
-- `cealctl-linux-x64.pem`
-- `cealctl-linux-arm64`
-- `cealctl-linux-arm64.sig`
-- `cealctl-linux-arm64.pem`
+- `cealctl-linux-x64` (+ `.sig`, `.pem`)
+- `cealctl-linux-arm64` (+ `.sig`, `.pem`)
+- `cealctl-macos-x64` (+ `.sig`, `.pem`)
+- `cealctl-macos-arm64` (+ `.sig`, `.pem`)
 - `SHA256SUMS`
 - `ceal-release-manifest.json`
 

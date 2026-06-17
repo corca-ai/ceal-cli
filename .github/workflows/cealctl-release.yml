@@ -18,14 +18,16 @@ jobs:
       - name: Download draft release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
           mkdir -p dist
-          gh release download "$TAG" --dir dist --pattern 'cealctl-*'
+          gh release download "$TAG" --repo "$GH_REPO" --dir dist --pattern 'cealctl-*'
       - name: Sign cealctl binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
@@ -37,5 +39,5 @@ jobs:
               --output-signature "$asset.sig" \
               --output-certificate "$asset.pem" \
               "$asset"
-            gh release upload "$TAG" "$asset.sig" "$asset.pem"
+            gh release upload "$TAG" --repo "$GH_REPO" "$asset.sig" "$asset.pem"
           done
