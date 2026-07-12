@@ -111,7 +111,6 @@
 		"npm_scope_ownership_and_2fa_bootstrap_not_proven",
 		"npm_trusted_publisher_not_configured",
 		"signed_release_execution_not_approved",
-		"public_source_additive_push_not_approved",
 		"release_publication_not_approved"
 	],
 	"non_claims": [
