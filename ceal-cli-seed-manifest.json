@@ -1,32 +1,41 @@
 {
-  "schema_version": "cealctl.public_repo_seed_manifest.v1",
+  "schema_version": "ceal.cli_public_distribution_surface.v1",
   "repository": "corca-ai/ceal-cli",
-  "proof_level": "surface",
+  "proof_level": "local_state",
   "writes_external": false,
+  "first_supported_platform": "linux-arm64",
   "files": [
     {
-      "path": "README.md",
-      "kind": "operator_docs",
-      "classification": "public_distribution_seed",
-      "sha256": "cd834fe25f4af9bc46a1917cd397b30dfff0809f37708b820fcb674f25ffdc95"
-    },
-    {
       "path": "install.sh",
-      "kind": "install_script",
-      "classification": "public_distribution_seed",
-      "sha256": "7833b17d42179b96becaa2b425a313a3f410d7c08cd74f3ec798f51896b8d57e"
+      "kind": "dual_binary_installer"
     },
     {
       "path": ".github/workflows/cealctl-release.yml",
-      "kind": "release_signing_workflow",
-      "classification": "public_distribution_seed",
-      "sha256": "52c814bade0f23de5529dd4592f91a5cc87716ef3e777bccd899781e435cccb4"
+      "kind": "source_build_signing_workflow"
     },
     {
-      "path": "CHANGELOG.md",
-      "kind": "operator_docs",
-      "classification": "public_distribution_seed",
-      "sha256": "df178c8bc8dc135caf080a29f158cb20fa47b4ca186109620bad05accfdcf738"
+      "path": ".github/workflows/npm-package-stage.yml",
+      "kind": "oidc_npm_staging_workflow"
+    },
+    {
+      "path": "scripts/build-platform-binaries.mjs",
+      "kind": "dual_binary_builder"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.txt",
+      "kind": "bundled_dependency_notice"
+    },
+    {
+      "path": "skills/ceal-guide/SKILL.md",
+      "kind": "worker_guide_skill"
+    },
+    {
+      "path": "skills/cealctl-guide/SKILL.md",
+      "kind": "operator_guide_skill"
     }
+  ],
+  "non_claims": [
+    "This inventory does not authorize a tag, release, upload, repository mutation, or installation.",
+    "Only linux-arm64 is in the first supported release lane."
   ]
 }

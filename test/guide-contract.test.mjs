@@ -1,0 +1,108 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { parseAllDocuments } from "yaml";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
+const CASES = [
+	{ skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-cli" },
+	{ skill: "cealctl-guide", binary: "cealctl", packageDir: "ceal-operator-cli" },
+];
+
+test("guide packages teach help-driven discovery without command snapshots", () => {
+	for (const item of CASES) {
+		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
+		assert.match(guide, new RegExp(`^name: ${item.skill}$`, "mu"));
+		assert.match(guide, new RegExp(`\\b${item.binary} --help\\b`, "u"));
+		assert.match(guide, new RegExp(`${item.binary} <command> --help`, "u"));
+		assert.doesNotMatch(guide, /--json|--format json/u);
+		const top = runBinary(item, ["--help"]);
+		for (const route of parseRoutes(top.stdout)) {
+			assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
+		}
+	}
+});
+
+test("cold-start customer intents select semantic leaves and preserve proof limits", () => {
+	const scenarios = [
+		{
+			...CASES[0],
+			prompt: "Find what Ceal can do safely.",
+			purpose: /Gateway-issued capabilities/u,
+			schema: "ceal.capabilities.v1",
+			assertResult: (value) => {
+				assert.equal(value.status, "unavailable");
+				assert.equal(value.proof_level, "surface");
+				assert.equal(value.live_gateway_checked, false);
+				assert.ok(value.non_claims.some((claim) => /No live Gateway discovery/u.test(claim)));
+			},
+		},
+		{
+			...CASES[1],
+			prompt: "Check whether cealctl is ready.",
+			purpose: /Check this binary and protocol surface/u,
+			schema: "cealctl.doctor.v1",
+			assertResult: (value) => {
+				assert.equal(value.status, "surface_ready");
+				assert.equal(value.proof_level, "surface");
+				assert.deepEqual(value.setup, { status: "not_checked" });
+				assert.deepEqual(value.runtime, { status: "not_checked" });
+				assert.equal(value.writes_external, false);
+			},
+		},
+	];
+	for (const scenario of scenarios) exerciseCustomerScenario(scenario);
+});
+
+test("missing matching binary fails closed without a guessed fallback", () => {
+	for (const item of CASES) {
+		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
+		assert.match(guide, /stop and request installation or update of the matching binary/u);
+		assert.match(guide, /Do not fall\s+back to another guide, another binary, or a guessed command/u);
+		const missing = spawnSync(process.execPath, [path.join(ROOT, "missing", item.binary), "--help"], { encoding: "utf8" });
+		assert.notEqual(missing.status, 0);
+	}
+});
+
+function exerciseCustomerScenario(scenario) {
+	const guide = readFileSync(path.join(ROOT, "skills", scenario.skill, "SKILL.md"), "utf8");
+	assert.match(guide, /command registry is navigation only|Command discovery is navigation only/u);
+	const top = runBinary(scenario, ["--help"]);
+	const candidates = parseRoutes(top.stdout).map((route) => ({
+		...route,
+		help: runBinary(scenario, [route.name, "--help"]).stdout,
+	}));
+	const selected = candidates.find((candidate) => scenario.purpose.test(candidate.description)
+		&& candidate.help.includes(`Result schema: ${scenario.schema}`));
+	assert.ok(selected, `no semantic leaf found for customer prompt: ${scenario.prompt}`);
+	for (const field of ["Usage:", "Effect: read_only", "Evidence:", "Result schema:", "Recovery/readback:"]) {
+		assert.match(selected.help, new RegExp(field, "u"));
+	}
+	const result = runBinary(scenario, [selected.name]);
+	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
+	assert.equal(documents.length, 1);
+	assert.deepEqual(documents[0].errors, []);
+	const value = documents[0].toJS();
+	assert.equal(value.command, scenario.binary);
+	scenario.assertResult(value);
+}
+
+function runBinary(item, args) {
+	const bin = path.join(BINARY_ROOT, "packages", item.packageDir, "dist", "bin.js");
+	const result = spawnSync(process.execPath, [bin, ...args], { encoding: "utf8" });
+	assert.equal(result.status, 0, result.stderr);
+	assert.equal(result.stderr, "");
+	return result;
+}
+
+function parseRoutes(help) {
+	return help.split("\n").flatMap((line) => {
+		const match = /^ {2}([a-z][a-z0-9-]*)\s{2,}(.+)$/u.exec(line);
+		return match ? [{ name: match[1], description: match[2] }] : [];
+	});
+}

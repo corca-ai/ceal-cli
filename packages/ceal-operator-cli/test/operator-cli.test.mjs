@@ -1,0 +1,162 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import process from "node:process";
+import test from "node:test";
+import { URL } from "node:url";
+import { parseAllDocuments } from "yaml";
+import { CEALCTL_COMMANDS, renderPlainYamlDocument, runCealctlCommand } from "../dist/index.js";
+
+test("canonical registry is reachable through stable, read-only help", () => {
+	for (const args of [[], ["-h"], ["--help"], ["help"]]) {
+		const result = run(args);
+		assert.equal(result.code, 0);
+		assert.match(result.stdout, /^Usage: cealctl <command>/u);
+		assert.equal(result.stderr, "");
+		for (const command of CEALCTL_COMMANDS) assert.match(result.stdout, new RegExp(`^  ${command.name}\\s`, "mu"));
+	}
+	for (const command of CEALCTL_COMMANDS) {
+		for (const args of [[command.name, "--help"], [command.name, "-h"], ["help", command.name]]) {
+			const result = run(args);
+			assert.equal(result.code, 0);
+			assert.equal(result.stderr, "");
+			assert.match(result.stdout, new RegExp(`^Usage: ${command.usage}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Effect: ${command.effect}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Evidence: ${command.evidence}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Result schema: ${command.result_schema}$`, "mu"));
+			assert.match(result.stdout, /^Recovery\/readback: /mu);
+		}
+	}
+});
+
+test("every public command emits one YAML document without a format flag", () => {
+	for (const command of CEALCTL_COMMANDS) {
+		const payload = yamlRun([command.name]);
+		assert.equal(payload.schema_version, command.result_schema);
+		assert.equal(payload.command, "cealctl");
+	}
+});
+
+test("version reports package, protocol, range, and operator credential context", () => {
+	assert.deepEqual(yamlRun(["version"]), {
+		schema_version: "cealctl.version.v1",
+		command: "cealctl",
+		version: "0.64.0",
+		protocol_version: "1.0.0",
+		supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+		credential_context: "cealctl_operator_admin_profile",
+	});
+});
+
+test("commands YAML discovers only the small operator surface", () => {
+	const payload = yamlRun(["commands"]);
+	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "doctor"]);
+	assert.equal(payload.worker_command_surface_included, false);
+	assert.equal(payload.credential_context, "cealctl_operator_admin_profile");
+});
+
+test("doctor reports surface health without setup, runtime, writes, or network claims", () => {
+	const payload = yamlRun(["doctor"]);
+	assert.equal(payload.status, "surface_ready");
+	assert.equal(payload.proof_level, "surface");
+	assert.deepEqual(payload.setup, { status: "not_checked" });
+	assert.deepEqual(payload.runtime, { status: "not_checked" });
+	assert.equal(payload.writes_local_state, false);
+	assert.equal(payload.writes_external, false);
+	assert.equal(payload.network_accessed, false);
+});
+
+test("worker commands, JSON modes, and unsafe operands fail as redacted YAML", () => {
+	for (const args of [["version", "--json"], ["version", "--format", "json"]]) {
+		assert.equal(yamlRun(args, 2).error.kind, "invalid_argument");
+	}
+	for (const command of ["targets", "integrations", "objects", "profiles", "call"]) {
+		assert.equal(yamlRun([command], 2).error.kind, "unknown_command");
+	}
+	const secret = ["xoxb", "unsafe", "secret", "material"].join("-");
+	const opaqueOperand = ["", "home", "opaque", "operand"].join("/");
+	const result = run(["call", "message.search", `token=${secret}`, opaqueOperand]);
+	assert.equal(result.code, 2);
+	assert.doesNotMatch(`${result.stdout}${result.stderr}`, /xoxb|message[.]search|home|opaque/u);
+});
+
+test("runtime surface performs no HOME, filesystem, or network access", () => {
+	const untouchedPath = path.join(tmpdir(), `cealctl-no-mutation-${randomUUID()}`);
+	assert.equal(existsSync(untouchedPath), false);
+	let fetchCalls = 0;
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => { fetchCalls += 1; throw new Error("network must not run"); };
+	try {
+		for (const args of [[], ["version"], ["commands"], ["doctor"], ["call", "unsafe"]]) run(args);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+	assert.equal(fetchCalls, 0);
+	assert.equal(existsSync(untouchedPath), false);
+	const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+	assert.doesNotMatch(source, /node:(?:fs|http|https|net)|process[.]env|HOME|fetch\s*\(|[.]ceal[/\\]/u);
+});
+
+test("packaged bin delegates once and preserves process exit codes", () => {
+	const binSource = readFileSync(new URL("../src/bin.ts", import.meta.url), "utf8");
+	assert.match(binSource, /^#!\/usr\/bin\/env node/u);
+	assert.match(binSource, /process[.]exitCode = runCealctlCommand/u);
+	assert.doesNotMatch(binSource, /process[.]exit\s*\(/u);
+	const binPath = new URL("../dist/bin.js", import.meta.url);
+	const version = spawnSync(process.execPath, [binPath.pathname, "version"], { encoding: "utf8" });
+	assert.equal(version.status, 0, version.stderr);
+	assert.equal(parseYaml(version.stdout).version, "0.64.0");
+	const unknown = spawnSync(process.execPath, [binPath.pathname, "call", "unsafe-secret"], { encoding: "utf8" });
+	assert.equal(unknown.status, 2);
+	assert.doesNotMatch(`${unknown.stdout}${unknown.stderr}`, /unsafe-secret/u);
+});
+
+test("package metadata stays exact and packages only dist plus MIT license", () => {
+	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	assert.equal(manifest.name, "@corca-ai/ceal-operator-cli");
+	assert.equal(manifest.version, "0.64.0");
+	assert.equal(manifest.dependencies["@corca-ai/ceal-protocol"], "0.64.0");
+	assert.equal(manifest.dependencies["@corca-ai/ceal"], undefined);
+	assert.equal(manifest.dependencies.yaml, "2.9.0");
+	assert.equal(manifest.license, "MIT");
+	assert.deepEqual(manifest.files, ["dist", "LICENSE"]);
+	assert.equal(manifest.bin.cealctl, "./dist/bin.js");
+});
+
+test("YAML renderer rejects non-plain scalars, objects, cycles, and aliases", () => {
+	const shared = { value: 1 };
+	const cyclic = {};
+	cyclic.self = cyclic;
+	for (const value of [undefined, Number.POSITIVE_INFINITY, 1n, new Date(), new Set(), { nested: undefined }, [shared, shared], cyclic]) {
+		assert.throws(() => renderPlainYamlDocument(value), TypeError);
+	}
+	assert.doesNotMatch(renderPlainYamlDocument({ text: "plain", nested: [true, null, 1.5] }), /^(?:---|%YAML)|[&*][A-Za-z0-9_-]+/mu);
+});
+
+function run(args) {
+	let stdout = "";
+	let stderr = "";
+	const code = runCealctlCommand(args, {
+		stdout: { write(chunk) { stdout += String(chunk); } },
+		stderr: { write(chunk) { stderr += String(chunk); } },
+	});
+	return { code, stdout, stderr };
+}
+
+function parseYaml(stdout) {
+	const documents = parseAllDocuments(stdout, { uniqueKeys: true });
+	assert.equal(documents.length, 1, "stdout must contain exactly one YAML document");
+	assert.deepEqual(documents[0].errors, []);
+	return documents[0].toJS();
+}
+
+function yamlRun(args, expectedCode = 0) {
+	const result = run(args);
+	assert.equal(result.code, expectedCode, result.stderr);
+	assert.equal(result.stderr, "");
+	return parseYaml(result.stdout);
+}

@@ -1,0 +1,42 @@
+{
+	"name": "@corca-ai/ceal-worker-cli",
+	"version": "0.64.0",
+	"private": true,
+	"license": "MIT",
+	"description": "Credential-separated worker-facing Ceal CLI",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"bin": {
+		"ceal": "./dist/bin.js"
+	},
+	"files": [
+		"dist",
+		"LICENSE"
+	],
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"pretest": "npm run build",
+		"test": "node --test test/*.test.mjs",
+		"prepack": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@corca-ai/ceal": "0.64.0",
+		"@corca-ai/ceal-protocol": "0.64.0",
+		"yaml": "2.9.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.6.0",
+		"typescript": "5.9.3"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

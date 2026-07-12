@@ -1,0 +1,122 @@
+{
+	"schema_version": "ceal.cli_release_contract.v1",
+	"status": "local_candidate_not_published",
+	"repository": "corca-ai/ceal-cli",
+	"release_version": "0.64.0",
+	"license": {
+		"spdx_identifier": "MIT",
+		"copyright": "Copyright (c) 2026 Corca, Inc.",
+		"first_party_notice": "not_required",
+		"third_party_attribution": "THIRD_PARTY_NOTICES.json",
+		"bundled_notice_asset": "THIRD_PARTY_NOTICES.txt",
+		"bundled_runtime_dependencies": {
+			"yaml": "2.9.0"
+		}
+	},
+	"protocol": {
+		"package": "@corca-ai/ceal-protocol",
+		"package_version": "0.64.0",
+		"wire_version": "1.0.0",
+		"supported_gateway_range": {
+			"minimum": "1.0.0",
+			"maximum": "1.0.0"
+		}
+	},
+	"client": {
+		"package": "@corca-ai/ceal",
+		"package_version": "0.64.0",
+		"role": "client_sdk_only"
+	},
+	"npm_packages": {
+		"registry": "https://registry.npmjs.org",
+		"public": [
+			"@corca-ai/ceal-protocol",
+			"@corca-ai/ceal"
+		],
+		"private_build_inputs": [
+			"@corca-ai/ceal-worker-cli",
+			"@corca-ai/ceal-operator-cli"
+		],
+		"initial_bootstrap": {
+			"version": "0.64.0",
+			"method": "maintainer_direct_publish_with_2fa",
+			"order": [
+				"@corca-ai/ceal-protocol",
+				"@corca-ai/ceal"
+			],
+			"temporary_tag": "bootstrap-0-64-0",
+			"promotion_requires_registry_readback": true
+		},
+		"subsequent_releases": {
+			"method": "npm_stage_with_oidc_trusted_publisher",
+			"workflow": ".github/workflows/npm-package-stage.yml",
+			"environment": "ceal-npm-release",
+			"approved_tarball_sha256_required": true,
+			"promotion_requires_human_2fa_and_registry_readback": true,
+			"partial_stage_recovery": "list_view_download_both_stages_then_approve_exact_pair_or_reject_orphan_with_2fa"
+		},
+		"publication_state": "not_published"
+	},
+	"artifacts": {
+		"ceal": {
+			"package": "@corca-ai/ceal-worker-cli",
+			"package_version": "0.64.0",
+			"command": "ceal",
+			"credential_context": "gateway_issued_client_profile"
+		},
+		"cealctl": {
+			"package": "@corca-ai/ceal-operator-cli",
+			"package_version": "0.64.0",
+			"command": "cealctl",
+			"credential_context": "cealctl_operator_admin_profile"
+		}
+	},
+	"guides": {
+		"ceal-guide": {
+			"path": "skills/ceal-guide/SKILL.md",
+			"binary": "ceal",
+			"discovery": "installed_help",
+			"sha256": "9a8ed3bd5b9b4b761ae4bf4fa2862aec5834b1b82f9a13404e057490f7567ab3"
+		},
+		"cealctl-guide": {
+			"path": "skills/cealctl-guide/SKILL.md",
+			"binary": "cealctl",
+			"discovery": "installed_help",
+			"sha256": "1ade5e42589f2e9f503e8963bc9d2407a897b2d4af8cbb6e48a10338466e94fc"
+		}
+	},
+	"first_proof_matrix": {
+		"platform": "linux-arm64",
+		"build_runtime": "node>=22.19.0",
+		"installed_runtime": "standalone_no_node_required",
+		"distribution": "github_release_node_sea_dual_binary"
+	},
+	"rollback": {
+		"npm": {
+			"strategy": "additive_patch_or_dist_tag_correction",
+			"unpublish_is_not_a_rollback_plan": true
+		},
+		"source": {
+			"strategy": "normal_additive_revert",
+			"immutable_commit": "f458a0bce291123644c84efdbeb48d5255a74c64"
+		},
+		"legacy_cealctl_distribution": {
+			"scope": "cealctl_only",
+			"observed_tag": "v0.1.1",
+			"observed_release_manifest_sha256": "55103bcd7d7e614c816e69ade4620b600eec98129df57918b03bdada3a4ab0f3",
+			"tag_and_release_are_mutable_pointers": true
+		}
+	},
+	"publication_blockers": [
+		"npm_scope_ownership_and_2fa_bootstrap_not_proven",
+		"npm_trusted_publisher_not_configured",
+		"signed_release_execution_not_approved",
+		"public_source_additive_push_not_approved",
+		"release_publication_not_approved"
+	],
+	"non_claims": [
+		"This contract describes a local source candidate, not a published release.",
+		"No private Gateway, authentication, provider action, customer readiness, or production audit roundtrip is proven.",
+		"No public tag, release, signature, installer execution, or artifact upload has occurred for this candidate."
+	]
+}

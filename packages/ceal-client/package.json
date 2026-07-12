@@ -1,0 +1,43 @@
+{
+	"name": "@corca-ai/ceal",
+	"version": "0.64.0",
+	"license": "MIT",
+	"description": "Public Ceal client SDK for Gateway-neutral requests and responses; no CLI, Agent, or Gateway server",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/corca-ai/ceal-cli.git",
+		"directory": "packages/ceal-client"
+	},
+	"homepage": "https://github.com/corca-ai/ceal-cli#readme",
+	"bugs": "https://github.com/corca-ai/ceal-cli/issues",
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": ["dist", "LICENSE"],
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"test": "npm run build && node --test test/*.test.mjs",
+		"prepack": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@corca-ai/ceal-protocol": "0.64.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.6.0",
+		"typescript": "5.9.3"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
