@@ -34,7 +34,7 @@
         "@esbuild/win32-ia32",
         "@esbuild/win32-x64"
       ],
-      "version": "0.27.7",
+      "version": "0.28.1",
       "license": "MIT",
       "distribution": "not_bundled_build_or_development_dependency"
     },
@@ -52,7 +52,7 @@
     },
     {
       "names": ["esbuild"],
-      "version": "0.27.7",
+      "version": "0.28.1",
       "license": "MIT",
       "distribution": "not_bundled_build_or_development_dependency"
     },
