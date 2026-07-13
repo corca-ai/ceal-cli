@@ -1,12 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	decodeCealEnrollmentCreateRequest,
+	decodeCealEnrollmentCreateResult,
 	decodeCealEnrollmentExchangeRequest,
 	decodeCealEnrollmentResponse,
 } from "../dist/index.js";
 
 const CODE = "A".repeat(43);
 const TOKEN = `ceal_personal_${"B".repeat(43)}`;
+
+test("administrator enrollment creation has one strict public wire contract", () => {
+	const request = decodeCealEnrollmentCreateRequest({
+		schema_version: "ceal.enrollment_create.v1",
+		profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia",
+		runner_ref: "runner:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+	});
+	assert.equal(request.runner_ref, "runner:narnia");
+	const result = decodeCealEnrollmentCreateResult({
+		schema_version: "ceal.enrollment_create_result.v1", ok: true, code: CODE, expires_at: "2026-07-14T00:00:00.000Z",
+	});
+	assert.equal(result.code, CODE);
+	assert.throws(() => decodeCealEnrollmentCreateRequest({ ...request, authority: "gateway" }), TypeError);
+	assert.throws(() => decodeCealEnrollmentCreateResult({ ...result, code: "short" }), TypeError);
+});
 
 test("enrollment request and issued result decode exact bounded material", () => {
 	assert.equal(decodeCealEnrollmentExchangeRequest({

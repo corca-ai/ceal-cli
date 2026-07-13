@@ -1,5 +1,26 @@
 export const CEAL_ENROLLMENT_EXCHANGE_SCHEMA = "ceal.enrollment_exchange.v1" as const;
 export const CEAL_ENROLLMENT_RESULT_SCHEMA = "ceal.enrollment_result.v1" as const;
+export const CEAL_ENROLLMENT_CREATE_SCHEMA = "ceal.enrollment_create.v1" as const;
+export const CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA = "ceal.enrollment_create_result.v1" as const;
+
+export interface CealEnrollmentCreateRequest {
+	schema_version: typeof CEAL_ENROLLMENT_CREATE_SCHEMA;
+	profile_ref: string;
+	registration_ref: string;
+	client_ref: string;
+	runner_ref: string;
+	subject_ref: string;
+	instance_ref: string;
+	enrollment_expires_at?: string;
+	credential_expires_at?: string;
+}
+
+export interface CealEnrollmentCreateResult {
+	schema_version: typeof CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA;
+	ok: true;
+	code: string;
+	expires_at: string;
+}
 
 export interface CealEnrollmentExchangeRequest {
 	schema_version: typeof CEAL_ENROLLMENT_EXCHANGE_SCHEMA;
@@ -33,6 +54,32 @@ export type CealEnrollmentResponse = CealEnrollmentResult | CealEnrollmentFailur
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_CODE = /^[A-Za-z0-9_-]{32,256}$/u;
 const ACCESS_TOKEN = /^ceal_personal_[A-Za-z0-9_-]{43}$/u;
+
+export function decodeCealEnrollmentCreateRequest(value: unknown): CealEnrollmentCreateRequest {
+	const record = requireRecord(value);
+	const required = ["client_ref", "instance_ref", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
+	const optional = ["credential_expires_at", "enrollment_expires_at"];
+	const keys = Object.keys(record);
+	if (record.schema_version !== CEAL_ENROLLMENT_CREATE_SCHEMA || required.some((key) => !keys.includes(key))
+		|| keys.some((key) => !required.includes(key) && !optional.includes(key))) invalidResponse();
+	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
+		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalidResponse();
+	}
+	for (const key of optional) {
+		const timestamp = record[key];
+		if (timestamp !== undefined && (typeof timestamp !== "string" || !validFutureTimestampShape(timestamp))) invalidResponse();
+	}
+	return record as unknown as CealEnrollmentCreateRequest;
+}
+
+export function decodeCealEnrollmentCreateResult(value: unknown): CealEnrollmentCreateResult {
+	const record = requireRecord(value);
+	requireExactKeys(record, ["code", "expires_at", "ok", "schema_version"]);
+	if (record.schema_version !== CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA || record.ok !== true
+		|| typeof record.code !== "string" || !SAFE_CODE.test(record.code)
+		|| typeof record.expires_at !== "string" || !validFutureTimestampShape(record.expires_at)) invalidResponse();
+	return record as unknown as CealEnrollmentCreateResult;
+}
 
 export function decodeCealEnrollmentExchangeRequest(value: unknown): CealEnrollmentExchangeRequest {
 	const record = requireRecord(value);

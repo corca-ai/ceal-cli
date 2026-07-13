@@ -24,12 +24,18 @@ export {
 } from "./gateway-response-types.js";
 export {
 	CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
+	CEAL_ENROLLMENT_CREATE_SCHEMA,
+	CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA,
 	CEAL_ENROLLMENT_RESULT_SCHEMA,
+	decodeCealEnrollmentCreateRequest,
+	decodeCealEnrollmentCreateResult,
 	decodeCealEnrollmentExchangeRequest,
 	decodeCealEnrollmentResponse,
 } from "./enrollment.js";
 export type {
 	CealEnrollmentExchangeRequest,
+	CealEnrollmentCreateRequest,
+	CealEnrollmentCreateResult,
 	CealEnrollmentFailure,
 	CealEnrollmentResponse,
 	CealEnrollmentResult,

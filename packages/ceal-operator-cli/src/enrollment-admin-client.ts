@@ -43,7 +43,7 @@ export async function createCealEnrollment(
 			method: "POST",
 			headers: { accept: "application/json", authorization: `Bearer ${input.adminToken}`, "content-type": "application/json" },
 			body: JSON.stringify({
-				schema_version: "ceal.enrollment_create.v1",
+				schema_version: CEAL_ENROLLMENT_CREATE_SCHEMA,
 				profile_ref: input.profileRef,
 				registration_ref: input.registrationRef,
 				client_ref: input.clientRef,
@@ -79,14 +79,10 @@ function safeEndpoint(value: string): URL {
 }
 
 function decodeResult(value: unknown): CealEnrollmentCreateResult {
-	if (!value || typeof value !== "object" || Array.isArray(value)) invalidResponse();
-	const record = value as Record<string, unknown>;
-	const keys = ["code", "expires_at", "ok", "schema_version"];
-	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(keys.sort())
-		|| record.schema_version !== "ceal.enrollment_create_result.v1" || record.ok !== true
-		|| typeof record.code !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(record.code)
-		|| typeof record.expires_at !== "string" || !Number.isFinite(Date.parse(record.expires_at))) invalidResponse();
-	return { code: record.code, expiresAt: record.expires_at };
+	try {
+		const record = decodeCealEnrollmentCreateResult(value);
+		return { code: record.code, expiresAt: record.expires_at };
+	} catch { invalidResponse(); }
 }
 
 async function readBounded(response: Response): Promise<Uint8Array> {
@@ -113,3 +109,7 @@ async function readBounded(response: Response): Promise<Uint8Array> {
 function invalidResponse(): never {
 	throw new CealEnrollmentAdminClientError("invalid_response");
 }
+import {
+	CEAL_ENROLLMENT_CREATE_SCHEMA,
+	decodeCealEnrollmentCreateResult,
+} from "@corca-ai/ceal-protocol";
