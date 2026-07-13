@@ -1,9 +1,9 @@
 import {
 	adminRequestUrl,
 	normalizeAdminOrigin,
-	OperatorSession,
 	replaceOperatorSession,
 } from "./operator-session-store.js";
+import type { OperatorSession } from "./operator-session-store.js";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -223,14 +223,19 @@ async function postJson(url: string, body: Record<string, unknown>, fetchFn: typ
 }
 
 async function readBoundedJson(response: Response): Promise<Record<string, unknown>> {
-	if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
-		throw new OperatorSessionClientError("invalid_response");
-	}
+	validateJsonResponseHeaders(response);
+	const bytes = await readBoundedBody(response);
+	return decodeJsonRecord(bytes);
+}
+
+function validateJsonResponseHeaders(response: Response): void {
+	if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
 	const declared = response.headers.get("content-length");
-	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
-		throw new OperatorSessionClientError("invalid_response");
-	}
-	if (!response.body) throw new OperatorSessionClientError("invalid_response");
+	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) invalidResponse();
+}
+
+async function readBoundedBody(response: Response): Promise<Uint8Array> {
+	if (!response.body) invalidResponse();
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let total = 0;
@@ -241,17 +246,25 @@ async function readBoundedJson(response: Response): Promise<Record<string, unkno
 		total += value.byteLength;
 		if (total > MAX_RESPONSE_BYTES) {
 			await reader.cancel();
-			throw new OperatorSessionClientError("invalid_response");
+			invalidResponse();
 		}
 		chunks.push(value);
 	}
 	const bytes = new Uint8Array(total);
 	let offset = 0;
 	for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+	return bytes;
+}
+
+function decodeJsonRecord(bytes: Uint8Array): Record<string, unknown> {
 	let value: unknown;
-	try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new OperatorSessionClientError("invalid_response"); }
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new OperatorSessionClientError("invalid_response");
+	try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { invalidResponse(); }
+	if (typeof value !== "object" || value === null || Array.isArray(value)) invalidResponse();
 	return value as Record<string, unknown>;
+}
+
+function invalidResponse(): never {
+	throw new OperatorSessionClientError("invalid_response");
 }
 
 function requireVerificationUrl(value: unknown, adminOrigin: string, userCode: string): string {

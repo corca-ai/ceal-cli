@@ -302,19 +302,30 @@ interface ParsedEnrollmentCreateOptions {
 	operatorProfile?: string;
 }
 
+const ENROLLMENT_CREATE_FLAGS = new Set(["--name", "--profile", "--subject", "--instance", "--operator-profile"]);
+const REQUIRED_ENROLLMENT_CREATE_FLAGS = ["--name", "--profile", "--subject", "--instance"] as const;
+const SAFE_LOCAL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+
 function parseEnrollmentCreateOptions(options: readonly string[]): ParsedEnrollmentCreateOptions | null {
 	if (options[0] !== "create") return null;
+	const values = parseNamedValues(options.slice(1), ENROLLMENT_CREATE_FLAGS);
+	if (!values || !REQUIRED_ENROLLMENT_CREATE_FLAGS.every((option) => values.has(option))) return null;
+	if (![...values.values()].every((value) => SAFE_LOCAL_NAME.test(value))) return null;
+	return enrollmentOptionsFrom(values);
+}
+
+function parseNamedValues(options: readonly string[], allowed: ReadonlySet<string>): Map<string, string> | null {
 	const values = new Map<string, string>();
-	for (let index = 1; index < options.length; index += 1) {
+	for (let index = 0; index < options.length; index += 2) {
 		const option = options[index];
-		if (!option || !new Set(["--name", "--profile", "--subject", "--instance", "--operator-profile"]).has(option) || values.has(option)) return null;
-		const value = options[++index];
-		if (!value) return null;
+		const value = options[index + 1];
+		if (!option || !allowed.has(option) || values.has(option) || !value) return null;
 		values.set(option, value);
 	}
-	if (!["--name", "--profile", "--subject", "--instance"].every((option) => values.has(option))) return null;
-	const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-	for (const value of values.values()) if (!safeName.test(value)) return null;
+	return values;
+}
+
+function enrollmentOptionsFrom(values: ReadonlyMap<string, string>): ParsedEnrollmentCreateOptions {
 	return {
 		name: values.get("--name") ?? "",
 		profile: values.get("--profile") ?? "",
