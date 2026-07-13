@@ -200,7 +200,7 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 			fetchFn: runtime.fetchFn,
 			sleepFn: runtime.sleepFn,
 			onChallenge: (challenge) => {
-				io.stderr.write(`Open ${challenge.verification_url}\nEnter code: ${challenge.user_code}\nWaiting for approval...\n`);
+				io.stderr.write(`Open ${challenge.verification_url}\nEnter code: ${challenge.user_code}\nExpires at: ${challenge.expires_at}\nWaiting for approval...\n`);
 			},
 		});
 		saveOperatorSession(session, runtime.homeDir);

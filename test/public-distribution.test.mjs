@@ -7,6 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install.sh");
@@ -39,6 +40,17 @@ test("installer verifies and installs both commands as one release", () => {
 		assert.match(log, /corca-ai\/ceal-cli/u);
 		assert.match(log, /refs\/tags\/v0[.]64[.]0/u);
 		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]64[.]0/u);
+	});
+});
+
+test("installer selects the signed amd64 pair on x86_64", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
+		const result = runInstaller({ root, release, tools, install, cosignLog });
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/current/ceal-linux-amd64");
+		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /architecture-amd64/u);
+		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /architecture-amd64/u);
 	});
 });
 
@@ -164,16 +176,39 @@ test("checksum failure preserves both existing commands", () => {
 	});
 });
 
+test("installer rejects signed checksum files with malformed extra lines", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		const sums = readFileSync(path.join(release, "SHA256SUMS"), "utf8");
+		writeFileSync(path.join(release, "SHA256SUMS"), `${sums}not-a-checksum-line\n`);
+		const result = runInstaller({ root, release, tools, install, cosignLog });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /exactly eight physical lines|malformed or unexpected entry/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+		assert.equal(existsSync(path.join(install, "cealctl")), false);
+	});
+});
+
 test("workflow builds from public source and never downloads injected draft binaries", () => {
 	const workflow = readFileSync(path.join(ROOT, ".github/workflows/cealctl-release.yml"), "utf8");
+	const parsed = parse(workflow);
+	assert.equal(parsed.jobs.assemble.needs, "build");
+	assert.equal(parsed.jobs.assemble.environment, undefined);
+	assert.equal(parsed.jobs["sign-and-draft"].needs, "assemble");
+	assert.equal(parsed.jobs["sign-and-draft"].environment, "ceal-cli-release");
 	assert.match(workflow, /npm ci --ignore-scripts/u);
 	assert.match(workflow, /npm run check/u);
 	assert.match(workflow, /scripts\/build-platform-binaries[.]mjs/u);
 	assert.match(workflow, /ceal-linux-arm64/u);
 	assert.match(workflow, /cealctl-linux-arm64/u);
+	assert.match(workflow, /ceal-linux-amd64/u);
+	assert.match(workflow, /cealctl-linux-amd64/u);
+	assert.match(workflow, /ubuntu-24[.]04-arm/u);
+	assert.match(workflow, /runner: ubuntu-24[.]04/u);
 	assert.match(workflow, /dist-a[\s\S]+dist-b/u);
 	assert.match(workflow, /CEAL_CLI_APPROVED_COMMIT/u);
 	assert.match(workflow, /CEAL_CLI_APPROVED_SHA256SUMS_SHA256/u);
+	assert.match(workflow, /Unprivileged dual-platform release handoff/u);
+	assert.match(workflow, /THIRD_PARTY_NOTICES[.]txt SHA256SUMS install[.]sh/u);
 	assert.match(workflow, /permissions:\n\s+contents: read/u);
 	assert.match(workflow, /environment: ceal-cli-release[\s\S]+contents: write[\s\S]+id-token: write/u);
 	assert.match(workflow, /gh release download/u);
@@ -219,8 +254,12 @@ function withFixture(callback) {
 		mkdirSync(tools);
 		writeBinary(path.join(release, "ceal-linux-arm64"), "ceal");
 		writeBinary(path.join(release, "cealctl-linux-arm64"), "cealctl");
-		writeFileSync(path.join(release, "ceal-cli-platform-release-manifest.json"), "{\"release_version\":\"0.64.0\"}\n");
+		writeBinary(path.join(release, "ceal-linux-amd64"), "ceal", "architecture-amd64");
+		writeBinary(path.join(release, "cealctl-linux-amd64"), "cealctl", "architecture-amd64");
+		writeFileSync(path.join(release, "ceal-cli-platform-release-manifest-linux-arm64.json"), "{\"release_version\":\"0.64.0\",\"platform\":\"linux-arm64\"}\n");
+		writeFileSync(path.join(release, "ceal-cli-platform-release-manifest-linux-amd64.json"), "{\"release_version\":\"0.64.0\",\"platform\":\"linux-amd64\"}\n");
 		writeFileSync(path.join(release, "THIRD_PARTY_NOTICES.txt"), "yaml 2.9.0 (ISC)\n");
+		writeFileSync(path.join(release, "install.sh"), "signed installer asset\n");
 		const checksummed = writeChecksums(release);
 		for (const name of [...checksummed, "SHA256SUMS"]) {
 			writeFileSync(path.join(release, `${name}.sig`), "signature\n");
@@ -245,7 +284,16 @@ function withFixture(callback) {
 }
 
 function writeChecksums(release) {
-	const checksummed = ["ceal-linux-arm64", "cealctl-linux-arm64", "ceal-cli-platform-release-manifest.json", "THIRD_PARTY_NOTICES.txt"];
+	const checksummed = [
+		"THIRD_PARTY_NOTICES.txt",
+		"ceal-cli-platform-release-manifest-linux-amd64.json",
+		"ceal-cli-platform-release-manifest-linux-arm64.json",
+		"ceal-linux-amd64",
+		"ceal-linux-arm64",
+		"cealctl-linux-amd64",
+		"cealctl-linux-arm64",
+		"install.sh",
+	];
 	writeFileSync(path.join(release, "SHA256SUMS"), checksummed.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
 	return checksummed;
 }

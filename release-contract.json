@@ -97,7 +97,8 @@
 			"linux-amd64"
 		],
 		"signed_release_platforms": [
-			"linux-arm64"
+			"linux-arm64",
+			"linux-amd64"
 		]
 	},
 	"rollback": {

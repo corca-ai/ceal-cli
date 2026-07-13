@@ -116,6 +116,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const login = await asyncRun(["login", origin, "--profile", "operator"], { homeDir, sleepFn: async () => {} });
 		assert.equal(login.code, 0);
 		assert.match(login.stderr, /ABCD-1234/u);
+		assert.match(login.stderr, /Expires at: 2099-07-14T00:00:00[.]000Z/u);
 		assert.equal(parseYaml(login.stdout).status, "authenticated");
 		const sessionsPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
 		assert.equal(statSync(sessionsPath).mode & 0o077, 0);

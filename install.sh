@@ -32,7 +32,8 @@ detect_platform() {
   arch="$(uname -m)"
   case "$os:$arch" in
     Linux:aarch64|Linux:arm64) printf '%s\n' linux-arm64 ;;
-    *) fail "Unsupported Ceal CLI platform: $os $arch (supported: linux-arm64)" ;;
+    Linux:x86_64|Linux:amd64) printf '%s\n' linux-amd64 ;;
+    *) fail "Unsupported Ceal CLI platform: $os $arch (supported: linux-arm64, linux-amd64)" ;;
   esac
 }
 
@@ -63,8 +64,20 @@ verify_checksum() {
 }
 
 verify_checksum_inventory() {
-  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 4 ] \
-    || fail "SHA256SUMS must contain exactly the four expected entries"
+	[ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 8 ] \
+		|| fail "SHA256SUMS must contain exactly eight physical lines"
+	invalid_lines="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-cli-platform-release-manifest-linux-(amd64|arm64)[.]json|ceal-linux-(amd64|arm64)|cealctl-linux-(amd64|arm64)|install[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
+	[ "$invalid_lines" = 0 ] \
+		|| fail "SHA256SUMS contains a malformed or unexpected entry"
+	observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
+	expected="$(printf '%s\n' \
+		THIRD_PARTY_NOTICES.txt \
+		ceal-cli-platform-release-manifest-linux-amd64.json \
+		ceal-cli-platform-release-manifest-linux-arm64.json \
+		ceal-linux-amd64 ceal-linux-arm64 \
+		cealctl-linux-amd64 cealctl-linux-arm64 install.sh | sort)"
+	[ "$observed" = "$expected" ] \
+		|| fail "SHA256SUMS must contain exactly the eight dual-platform release entries"
   verify_checksum "$CEAL_ASSET"
   verify_checksum "$CEALCTL_ASSET"
   verify_checksum "$MANIFEST_ASSET"
@@ -215,7 +228,7 @@ acquire_install_lock
 
 CEAL_ASSET="ceal-$PLATFORM"
 CEALCTL_ASSET="cealctl-$PLATFORM"
-MANIFEST_ASSET="ceal-cli-platform-release-manifest.json"
+MANIFEST_ASSET="ceal-cli-platform-release-manifest-$PLATFORM.json"
 NOTICE_ASSET="THIRD_PARTY_NOTICES.txt"
 
 for asset in "$CEAL_ASSET" "$CEALCTL_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "SHA256SUMS"; do

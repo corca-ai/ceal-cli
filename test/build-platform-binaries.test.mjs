@@ -98,7 +98,7 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 			release_version: "0.64.0",
 			protocol: {},
 			first_proof_matrix: { platform: "linux-arm64" },
-			native_build_matrix: { platforms: ["linux-arm64", "linux-amd64"], signed_release_platforms: ["linux-arm64"] },
+			native_build_matrix: { platforms: ["linux-arm64", "linux-amd64"], signed_release_platforms: ["linux-arm64", "linux-amd64"] },
 			publication_blockers: [],
 			non_claims: [],
 		}),

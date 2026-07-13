@@ -41,6 +41,39 @@ scans the archives for private paths and cross-command implementation. Its
 cold-start guide test receives only each guide and the built matching binary,
 then discovers a read-only route through help and parses its YAML result.
 
+## Install a signed release
+
+The installer supports Linux arm64 (`aarch64`/`arm64`) and amd64
+(`x86_64`/`amd64`) and selects the native pair automatically. It requires a
+POSIX shell, `cmp`, `curl`, `cosign`, `flock`, `sha256sum`, `mktemp`,
+`readlink`, `uname`, and standard Linux userland. Install and verify `cosign`
+using the [official Sigstore instructions](https://docs.sigstore.dev/cosign/system_config/installation/),
+then acquire the tag-bound installer as a signed release asset:
+
+```sh
+VERSION=v0.64.0
+BASE="https://github.com/corca-ai/ceal-cli/releases/download/$VERSION"
+for asset in install.sh install.sh.sig install.sh.pem; do
+  curl -fsSLO "$BASE/$asset"
+done
+cosign verify-blob \
+  --certificate install.sh.pem \
+  --signature install.sh.sig \
+  --certificate-identity "https://github.com/corca-ai/ceal-cli/.github/workflows/cealctl-release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-github-workflow-repository corca-ai/ceal-cli \
+  --certificate-github-workflow-ref "refs/tags/$VERSION" \
+  install.sh
+CEAL_VERSION="$VERSION" sh ./install.sh
+ceal version
+cealctl version
+cealctl login --help
+```
+
+An omitted `CEAL_VERSION` is rejected rather than resolving GitHub's mutable
+`latest` pointer. The default command directory is `$HOME/.local/bin`; it must
+be on `PATH`. Set `CEAL_INSTALL_DIR` for another user-owned directory.
+
 ## Operator login and outbound Gateway use
 
 An operator authenticates through the customer Gateway's same-origin browser
@@ -106,13 +139,16 @@ Before calling transferred artifacts ready, compare both installed checksums to
 the exact platform build output and run both `ceal commands` and `cealctl
 commands`; a version string alone does not distinguish two unpublished
 candidate builds. Node 22.19 or newer is a
-build input; the installed SEA commands do not require Node. This local
-`linux-amd64` result is an unsigned acceptance artifact, not an approved release.
-The first signed tag workflow remains deliberately `linux-arm64` only and
-packages one checked compiled candidate through two isolated SEA assembly runs
-in an unprivileged job, requires identical outputs,
-and hands the exact set to a separate protected release job. That job signs
-each of the five primary assets with GitHub Actions OIDC and uploads them with
+build input; the installed SEA commands do not require Node. This local result
+is an unsigned acceptance artifact, not an approved release.
+The signed tag workflow builds both `linux-arm64` and `linux-amd64` on native
+GitHub runners and packages each checked compiled candidate through two
+isolated SEA assembly runs in an unprivileged job, requires identical outputs,
+and hands both exact sets to an unprivileged assembly job. That job creates one
+dual-platform checksum set, includes the tag-bound installer, uploads the exact
+handoff, and reports its digest for review. The protected release job only
+accepts that handoff, verifies the operator-approved commit and digest, signs
+each of the nine primary assets with GitHub Actions OIDC, and uploads them with
 their signature and certificate sidecars to a draft release. The legacy
 `cealctl-release.yml` filename is retained because it is part of the signing
 identity verified by the installer.
@@ -120,30 +156,20 @@ identity verified by the installer.
 The privileged job is gated by the `ceal-cli-release` environment. Its
 `CEAL_CLI_APPROVED_COMMIT` variable must equal the tagged commit and
 `CEAL_CLI_APPROVED_SHA256SUMS_SHA256` must equal the approved digest of the
-unprivileged build's `SHA256SUMS`. A non-empty draft is reused only when its
-full 15-file primary/sidecar inventory and remote bytes/signatures verify. A
+unprivileged assembly artifact's `SHA256SUMS`. The operator order is: inspect
+the assembly job summary and exact downloadable handoff, set both environment
+variables, then approve the protected job. A non-empty draft is reused only
+when its full 27-file primary/sidecar inventory and remote bytes/signatures verify. A
 partial or unexpected draft fails with an explicit delete/recreate instruction
 instead of overwriting assets.
 
-### Install or update both commands
+### Installer update and rollback behavior
 
-The installer supports Linux arm64 and requires a POSIX shell, `cmp`, `curl`,
-`cosign`, `flock`, `sha256sum`, `mktemp`, `readlink`, `uname`, and standard Linux
-userland. Pin an explicitly approved
-dual-binary tag; before the first such release, GitHub's `latest` pointer may
-still identify a legacy `cealctl`-only release. The installer therefore rejects
-an omitted `CEAL_VERSION` instead of resolving `latest`.
+System-wide or privileged installation is not supported. The installer
+preserves an existing directory's mode and unrelated files.
 
-```sh
-CEAL_VERSION=v0.64.0 sh ./install.sh
-```
-
-The default command directory is `$HOME/.local/bin`; it must be on `PATH`.
-Set `CEAL_INSTALL_DIR` to use another user-owned directory. System-wide or
-privileged installation is not supported. The installer preserves an existing
-directory's mode and unrelated files.
-
-`install.sh` downloads the five signed primary files plus sidecars, constrains
+`install.sh` downloads the five signed primary files needed by the current
+platform plus sidecars, constrains
 the signing identity to this repository, workflow, issuer, and tag, validates
 the exact signed checksum inventory, checks both binary digests, and smoke-runs
 both commands. It installs the pair into one versioned generation and switches

@@ -11,7 +11,15 @@ jobs:
   build:
     permissions:
       contents: read
-    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact tag
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -29,19 +37,20 @@ jobs:
       - name: Package the checked compiled candidate twice
         env:
           TAG: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           set -eu
           version="${TAG#v}"
           for output in dist-a dist-b; do
             node scripts/build-platform-binaries.mjs \
               --version "$version" \
-              --platform linux-arm64 \
+              --platform "$PLATFORM" \
               --out "$output" \
               --json
           done
           for asset in \
-            ceal-linux-arm64 \
-            cealctl-linux-arm64 \
+            "ceal-$PLATFORM" \
+            "cealctl-$PLATFORM" \
             ceal-cli-platform-release-manifest.json \
             THIRD_PARTY_NOTICES.txt \
             SHA256SUMS
@@ -51,25 +60,89 @@ jobs:
       - name: Preserve exact unprivileged build output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ceal-cli-release-${{ github.sha }}
+          name: ceal-cli-release-${{ github.sha }}-${{ matrix.platform }}
           retention-days: 1
           if-no-files-found: error
           path: |
-            dist-a/ceal-linux-arm64
-            dist-a/cealctl-linux-arm64
+            dist-a/ceal-${{ matrix.platform }}
+            dist-a/cealctl-${{ matrix.platform }}
             dist-a/ceal-cli-platform-release-manifest.json
             dist-a/THIRD_PARTY_NOTICES.txt
             dist-a/SHA256SUMS
 
-  sign-and-draft:
+  assemble:
     needs: build
+    permissions:
+      contents: read
+    outputs:
+      sha256sums_sha256: ${{ steps.release-set.outputs.sha256sums_sha256 }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact tag for installer asset
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Download exact arm64 build handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-cli-release-${{ github.sha }}-linux-arm64
+          path: handoff/linux-arm64
+      - name: Download exact amd64 build handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-cli-release-${{ github.sha }}-linux-amd64
+          path: handoff/linux-amd64
+      - name: Assemble one dual-platform release set
+        id: release-set
+        run: |
+          set -eu
+          mkdir dist
+          for platform in linux-arm64 linux-amd64; do
+            source="handoff/$platform"
+            [ "$(find "$source" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
+              "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-$platform cealctl-$platform " ] \
+              || { echo "Unexpected $platform build handoff inventory" >&2; exit 1; }
+            (cd "$source" && sha256sum -c SHA256SUMS)
+            cp "$source/ceal-$platform" "$source/cealctl-$platform" dist/
+            cp "$source/ceal-cli-platform-release-manifest.json" \
+              "dist/ceal-cli-platform-release-manifest-$platform.json"
+          done
+          cmp handoff/linux-arm64/THIRD_PARTY_NOTICES.txt handoff/linux-amd64/THIRD_PARTY_NOTICES.txt
+          cp handoff/linux-arm64/THIRD_PARTY_NOTICES.txt dist/
+          cp install.sh dist/
+          (cd dist && sha256sum \
+            THIRD_PARTY_NOTICES.txt \
+            ceal-cli-platform-release-manifest-linux-amd64.json \
+            ceal-cli-platform-release-manifest-linux-arm64.json \
+            ceal-linux-amd64 ceal-linux-arm64 \
+            cealctl-linux-amd64 cealctl-linux-arm64 \
+            install.sh > SHA256SUMS)
+          digest="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+          echo "sha256sums_sha256=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Unprivileged dual-platform release handoff"
+            echo
+            echo "- commit: $GITHUB_SHA"
+            echo "- SHA256SUMS digest for environment approval: $digest"
+            echo "- artifact: ceal-cli-release-$GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact unprivileged dual-platform release handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ceal-cli-release-${{ github.sha }}
+          retention-days: 1
+          if-no-files-found: error
+          path: dist/
+
+  sign-and-draft:
+    needs: assemble
     environment: ceal-cli-release
     permissions:
       contents: write
       id-token: write
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     steps:
-      - name: Download exact build handoff
+      - name: Download exact approved release handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ceal-cli-release-${{ github.sha }}
@@ -78,20 +151,26 @@ jobs:
         env:
           APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
           APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
+          ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
           [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
             || { echo "The ceal-cli-release environment has not approved commit $GITHUB_SHA" >&2; exit 1; }
           observed="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+          [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
+            || { echo "Downloaded handoff does not match unprivileged assembly $ASSEMBLED_SHA256SUMS_SHA256" >&2; exit 1; }
           [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "The ceal-cli-release environment has not approved SHA256SUMS $observed" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
-            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-linux-arm64 cealctl-linux-arm64 " ] \
+            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest-linux-amd64.json ceal-cli-platform-release-manifest-linux-arm64.json ceal-linux-amd64 ceal-linux-arm64 cealctl-linux-amd64 cealctl-linux-arm64 install.sh " ] \
             || { echo "Unexpected build handoff inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)
-          grep -F "\"release_version\": \"${TAG#v}\"" dist/ceal-cli-platform-release-manifest.json >/dev/null
-          grep -F '"platform": "linux-arm64"' dist/ceal-cli-platform-release-manifest.json >/dev/null
+          for platform in linux-arm64 linux-amd64; do
+            manifest="dist/ceal-cli-platform-release-manifest-$platform.json"
+            grep -F "\"release_version\": \"${TAG#v}\"" "$manifest" >/dev/null
+            grep -F "\"platform\": \"$platform\"" "$manifest" >/dev/null
+          done
       - name: Install cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
       - name: Reconcile one exact signed draft inventory
@@ -101,7 +180,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          primary=(ceal-linux-arm64 cealctl-linux-arm64 ceal-cli-platform-release-manifest.json THIRD_PARTY_NOTICES.txt SHA256SUMS)
+          primary=(
+            ceal-linux-arm64 cealctl-linux-arm64
+            ceal-linux-amd64 cealctl-linux-amd64
+            ceal-cli-platform-release-manifest-linux-arm64.json
+            ceal-cli-platform-release-manifest-linux-amd64.json
+            THIRD_PARTY_NOTICES.txt SHA256SUMS install.sh
+          )
           expected=()
           for asset in "${primary[@]}"; do
             expected+=("$asset" "$asset.pem" "$asset.sig")
