@@ -41,26 +41,27 @@ scans the archives for private paths and cross-command implementation. Its
 cold-start guide test receives only each guide and the built matching binary,
 then discovers a read-only route through help and parses its YAML result.
 
-## First platform release lane
+## Native platform builds and first release lane
 
-The first release lane is deliberately one platform: `linux-arm64`. After
+Native local builds support `linux-arm64` and `linux-amd64`; each build must run
+on its target architecture and cross-architecture output is refused. After
 `npm ci` and `npm run check`, build both standalone Node SEA commands from the
-same source tree:
+same source tree, selecting the current host platform:
 
 ```sh
 npm run release:binaries -- \
   --version 0.64.0 \
-  --platform linux-arm64 \
+  --platform linux-amd64 \
   --out dist \
   --json
 ```
 
-The builder accepts only the contract's first proof platform, refuses
-cross-architecture output, and emits `ceal-linux-arm64`,
-`cealctl-linux-arm64`, one platform release manifest, the bundled dependency
-notice, and `SHA256SUMS`. It
+The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
+manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success. Node 22.19 or newer is a
-build input; the installed SEA commands do not require Node. The tag workflow
+build input; the installed SEA commands do not require Node. This local
+`linux-amd64` result is an unsigned acceptance artifact, not an approved release.
+The first signed tag workflow remains deliberately `linux-arm64` only and
 packages one checked compiled candidate through two isolated SEA assembly runs
 in an unprivileged job, requires identical outputs,
 and hands the exact set to a separate protected release job. That job signs

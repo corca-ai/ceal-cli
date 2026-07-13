@@ -91,6 +91,15 @@
 		"installed_runtime": "standalone_no_node_required",
 		"distribution": "github_release_node_sea_dual_binary"
 	},
+	"native_build_matrix": {
+		"platforms": [
+			"linux-arm64",
+			"linux-amd64"
+		],
+		"signed_release_platforms": [
+			"linux-arm64"
+		]
+	},
 	"rollback": {
 		"npm": {
 			"strategy": "additive_patch_or_dist_tag_correction",

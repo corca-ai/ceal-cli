@@ -128,7 +128,10 @@ function assertPackageIdentities(deps, version) {
 }
 
 function requireTargetPlatform(contract, platform, deps) {
-	if (platform !== contract.first_proof_matrix?.platform) fail("unsupported_platform", "Platform must match the release contract first proof platform.");
+	const supported = contract.native_build_matrix?.platforms;
+	if (!Array.isArray(supported) || !supported.includes(platform)) {
+		fail("unsupported_platform", "Platform must match the release contract native build matrix.");
+	}
 	if (platform !== (deps.currentPlatform ?? currentPlatform)()) fail("platform_mismatch", "Platform binaries must be built on their target architecture.");
 	return platform;
 }
@@ -234,7 +237,7 @@ function resolvePostjectCli() {
 }
 
 function currentPlatform() {
-	const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : process.arch;
+	const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "amd64" : process.arch;
 	return `${process.platform}-${arch}`;
 }
 
