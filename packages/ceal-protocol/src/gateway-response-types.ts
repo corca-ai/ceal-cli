@@ -71,41 +71,32 @@ export interface CealGatewayDiscoveryValue {
 }
 
 export interface CealGatewayDiscoveryCapability {
-	capability_id: "message.search";
+	capability_id: string;
 	label: string;
-	effect: "read";
-	target_requirement: "required";
-	input_contract: {
-		schema_version: "ceal.message_search_input.v1";
-		required: readonly ["query"];
-		query: { type: "string"; max_bytes: 512 };
-		limit: { type: "integer"; minimum: 1; maximum: 10; default: 5 };
-	};
-	evidence_requirement: "gateway_audit";
+	effect: "read" | "write";
+	target_requirement: "required" | "optional" | "none";
+	input_contract: Record<string, unknown>;
+	evidence_requirement: string;
 }
 
-export type CealMessageSearchBackendMode = "mature_search" | "degraded_fallback";
-export type CealMessageSearchCredentialIdentityClass = "delegated_user" | "organization_service" | "bot";
-export type CealMessageSearchProvenance = "provider_search" | "recent_channel_history";
-export type CealMessageSearchMatchMode = "provider_ranked" | "literal_case_insensitive_substring";
+export type CealCapabilityAvailability = "available" | "degraded";
+export type CealCredentialIdentityClass = "delegated_principal" | "organization_service" | "workload_identity";
 
-export interface CealMessageSearchBackendDescriptor {
-	schema_version: "ceal.message_search_backend.v1";
-	mode: CealMessageSearchBackendMode;
-	credential_identity_class: CealMessageSearchCredentialIdentityClass;
+export interface CealCapabilityBindingDescriptor {
+	schema_version: "ceal.capability_binding.v1";
+	capability_id: string;
+	capability_backend_ref: string;
+	availability: CealCapabilityAvailability;
+	credential_identity_class: CealCredentialIdentityClass;
 	scope: "granted_target";
-	provenance: CealMessageSearchProvenance;
-	match_mode: CealMessageSearchMatchMode;
-	thread_replies: "included" | "excluded";
-	completeness: "bounded" | "incomplete";
 }
 
 export interface CealGatewayGrantedDiscoveryTarget {
 	target_ref: string;
 	label: string;
 	access: "granted";
-	capability_ids: ["message.search"];
-	search_backend: CealMessageSearchBackendDescriptor;
+	capability_ids: string[];
+	capability_bindings: CealCapabilityBindingDescriptor[];
 }
 
 export interface CealGatewayRequestRequiredDiscoveryTarget {
@@ -119,12 +110,13 @@ export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | Cea
 
 export interface CealGatewayCallValue {
 	schema_version: "ceal.gateway_call_result.v1";
-	capability_id: "message.search";
+	capability_id: string;
+	capability_backend_ref: string;
 	target_ref: string;
-	data: CealGatewayMessageSearchResult;
+	data: Record<string, unknown>;
 	redaction: {
 		state: "applied";
-		omitted_classes: readonly ["query_text", "raw_provider_ids", "raw_messages"];
+		omitted_classes: readonly string[];
 	};
 	host_decision: "accepted";
 	proof_level: "host_decision";
@@ -144,8 +136,18 @@ export interface CealGatewayMessageSearchResult {
 	};
 }
 
-export interface CealGatewayMessageSearchCoverage extends CealMessageSearchBackendDescriptor {
-	provider_truncated: boolean;
+export type CealGatewayMessageSearchCallValue = Omit<CealGatewayCallValue, "capability_id" | "data"> & {
+	capability_id: "message.search";
+	data: CealGatewayMessageSearchResult;
+};
+
+export interface CealGatewayMessageSearchCoverage {
+	schema_version: "ceal.message_search_coverage.v1";
+	source: "authoritative_index" | "bounded_projection";
+	match_semantics: "backend_ranked" | "literal_case_insensitive";
+	reply_coverage: "included" | "excluded";
+	completeness: "bounded" | "incomplete";
+	truncated: boolean;
 }
 
 export interface CealGatewayMessageSearchResultItem {
@@ -201,15 +203,27 @@ export interface CealGatewayAuditEvent {
 	non_claims: CealGatewayHostNonClaims;
 }
 
-export interface CealGatewayAuditCallDetail {
+export interface CealGatewayMessageSearchAuditCallDetail {
 	schema_version: "ceal.gateway_audit_call_detail.v1";
 	capability_id: "message.search";
+	capability_backend_ref: string;
 	target_ref: string;
 	requested_limit: number;
 	query_utf8_bytes: number;
 	result_count: number;
 	coverage: CealGatewayMessageSearchCoverage;
 }
+
+export interface CealGatewayGenericAuditCallDetail {
+	schema_version: "ceal.gateway_audit_call_detail.v1";
+	capability_id: string;
+	capability_backend_ref: string;
+	target_ref: string;
+	input_summary: Record<string, unknown>;
+	output_summary: Record<string, unknown>;
+}
+
+export type CealGatewayAuditCallDetail = CealGatewayMessageSearchAuditCallDetail | CealGatewayGenericAuditCallDetail;
 
 export interface CealGatewayAuditReadbackValue {
 	schema_version: "ceal.gateway_audit_readback.v1";

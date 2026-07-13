@@ -228,12 +228,7 @@ function hasTransportCode(code) {
 }
 
 function handshakeResponse(input) {
-	return {
-		ok: true,
-		request_id: input.request_id,
-		protocol_version: "1.1.0",
-		proof_ref_or_unavailable: `proof:${input.request_id}`,
-		value: {
+	return successResponse(input, {
 			schema_version: "ceal.gateway_handshake.v1",
 			negotiated_protocol_version: "1.1.0",
 			supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
@@ -244,17 +239,11 @@ function handshakeResponse(input) {
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		},
-	};
+	});
 }
 
 function discoveryResponse(input) {
-	return {
-		ok: true,
-		request_id: input.request_id,
-		protocol_version: "1.1.0",
-		proof_ref_or_unavailable: `proof:${input.request_id}`,
-		value: {
+	return successResponse(input, {
 			schema_version: "ceal.gateway_discovery.v1",
 			profile_ref: input.profile_ref,
 			capabilities: [{
@@ -275,24 +264,19 @@ function discoveryResponse(input) {
 				label: "Approved workspace",
 				access: "granted",
 				capability_ids: ["message.search"],
-				search_backend: matureSearchBackend(),
+				capability_bindings: [matureCapabilityBinding()],
 			}],
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		},
-	};
+	});
 }
 
 function allowedCallResponse(input) {
-	return {
-		ok: true,
-		request_id: input.request_id,
-		protocol_version: "1.1.0",
-		proof_ref_or_unavailable: `proof:${input.request_id}`,
-		value: {
+	return successResponse(input, {
 			schema_version: "ceal.gateway_call_result.v1",
 			capability_id: input.body.capability_id,
+			capability_backend_ref: "capability-backend:message-search-primary",
 			target_ref: input.body.target_ref,
 			data: {
 				schema_version: "ceal.message_search_result.v1",
@@ -305,7 +289,7 @@ function allowedCallResponse(input) {
 					source_label: "Approved workspace",
 					text_preview: "Quarterly plan review is scheduled.",
 				}],
-				coverage: { ...matureSearchBackend(), provider_truncated: false },
+				coverage: matureSearchCoverage(),
 				minimization: {
 					raw_provider_ids_included: false,
 					raw_messages_included: false,
@@ -319,20 +303,38 @@ function allowedCallResponse(input) {
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		},
+	});
+}
+
+function successResponse(input, value) {
+	return {
+		ok: true,
+		request_id: input.request_id,
+		protocol_version: "1.1.0",
+		proof_ref_or_unavailable: `proof:${input.request_id}`,
+		value,
 	};
 }
 
-function matureSearchBackend() {
+function matureCapabilityBinding() {
 	return {
-		schema_version: "ceal.message_search_backend.v1",
-		mode: "mature_search",
-		credential_identity_class: "delegated_user",
+		schema_version: "ceal.capability_binding.v1",
+		capability_id: "message.search",
+		capability_backend_ref: "capability-backend:message-search-primary",
+		availability: "available",
+		credential_identity_class: "delegated_principal",
 		scope: "granted_target",
-		provenance: "provider_search",
-		match_mode: "provider_ranked",
-		thread_replies: "included",
+	};
+}
+
+function matureSearchCoverage() {
+	return {
+		schema_version: "ceal.message_search_coverage.v1",
+		source: "authoritative_index",
+		match_semantics: "backend_ranked",
+		reply_coverage: "included",
 		completeness: "bounded",
+		truncated: false,
 	};
 }
 

@@ -71,13 +71,12 @@ export type {
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
 	CealGatewayMessageSearchResult,
+	CealGatewayMessageSearchCallValue,
 	CealGatewayMessageSearchCoverage,
 	CealGatewayMessageSearchResultItem,
-	CealMessageSearchBackendDescriptor,
-	CealMessageSearchBackendMode,
-	CealMessageSearchCredentialIdentityClass,
-	CealMessageSearchMatchMode,
-	CealMessageSearchProvenance,
+	CealCapabilityAvailability,
+	CealCapabilityBindingDescriptor,
+	CealCredentialIdentityClass,
 	CealGatewayPolicyDenial,
 	CealGatewayPolicyDenialDecision,
 	CealGatewayRequestForInput,
@@ -383,21 +382,31 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 		|| discovery.profile_ref !== expectedRequest.profile_ref
 		|| discovery.host_decision !== "accepted"
 		|| discovery.proof_level !== "host_decision") invalidResponse();
-	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length !== 1) invalidResponse();
-	validateDiscoveryCapability(discovery.capabilities[0]);
-	validateDiscoveryTargets(discovery.targets);
+	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length === 0 || discovery.capabilities.length > 128) invalidResponse();
+	const capabilityIds = new Set<string>();
+	for (const capability of discovery.capabilities) validateDiscoveryCapability(capability, capabilityIds);
+	validateDiscoveryTargets(discovery.targets, capabilityIds);
 	validateHostNonClaims(discovery.non_claims);
 }
 
-function validateDiscoveryCapability(value: unknown): void {
+function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	const capability = requireRecord(value);
 	requireExactKeys(capability, ["capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement"]);
-	if (capability.capability_id !== "message.search"
-		|| capability.effect !== "read"
-		|| capability.target_requirement !== "required"
-		|| capability.evidence_requirement !== "gateway_audit") invalidResponse();
+	requireSafeRef(capability.capability_id);
+	if (seen.has(String(capability.capability_id))
+		|| !["read", "write"].includes(String(capability.effect))
+		|| !["required", "optional", "none"].includes(String(capability.target_requirement))) invalidResponse();
+	seen.add(String(capability.capability_id));
 	requireSafeText(capability.label, 128);
-	validateMessageSearchInputContract(capability.input_contract);
+	requireSafeRef(capability.evidence_requirement);
+	if (capability.capability_id === "message.search") validateMessageSearchInputContract(capability.input_contract);
+	else validateGenericInputContract(capability.input_contract);
+}
+
+function validateGenericInputContract(value: unknown): void {
+	const contract = requireRecord(value);
+	requireSafeRef(contract.schema_version);
+	if (!String(contract.schema_version).startsWith("ceal.")) invalidResponse();
 }
 
 function validateMessageSearchInputContract(value: unknown): void {
@@ -415,38 +424,50 @@ function validateMessageSearchInputContract(value: unknown): void {
 	if (limit.type !== "integer" || limit.minimum !== 1 || limit.maximum !== 10 || limit.default !== 5) invalidResponse();
 }
 
-function validateDiscoveryTargets(value: unknown): void {
+function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<string>): void {
 	if (!Array.isArray(value) || value.length === 0 || value.length > 64) invalidResponse();
 	const seen = new Set<string>();
-	for (const item of value) validateDiscoveryTarget(item, seen);
+	for (const item of value) validateDiscoveryTarget(item, seen, capabilityIds);
 }
 
-function validateDiscoveryTarget(value: unknown, seen: Set<string>): void {
+function validateDiscoveryTarget(value: unknown, seen: Set<string>, availableCapabilities: ReadonlySet<string>): void {
 	const target = requireRecord(value);
-	requireExactKeys(target, ["access", "capability_ids", "label", "search_backend", "target_ref"], ["search_backend"]);
+	requireExactKeys(target, ["access", "capability_bindings", "capability_ids", "label", "target_ref"], ["capability_bindings"]);
 	requirePrefixedRef(target.target_ref, "target:");
 	if (seen.has(target.target_ref)) invalidResponse();
 	seen.add(target.target_ref);
 	requireSafeText(target.label, 128);
 	if (target.access !== "granted" && target.access !== "request_required") invalidResponse();
-	const expectedCapabilities = target.access === "granted" ? ["message.search"] : [];
-	if (JSON.stringify(target.capability_ids) !== JSON.stringify(expectedCapabilities)) invalidResponse();
-	if (target.access === "granted") validateMessageSearchBackendDescriptor(target.search_backend);
-	else if ("search_backend" in target) invalidResponse();
+	if (!Array.isArray(target.capability_ids) || target.capability_ids.length > availableCapabilities.size) invalidResponse();
+	const expectedCapabilities = target.capability_ids.map(String);
+	if (new Set(expectedCapabilities).size !== expectedCapabilities.length
+		|| expectedCapabilities.some((id) => !availableCapabilities.has(id))) invalidResponse();
+	if (target.access === "granted" && expectedCapabilities.length === 0) invalidResponse();
+	if (target.access === "request_required" && expectedCapabilities.length !== 0) invalidResponse();
+	if (target.access === "granted") validateCapabilityBindings(target.capability_bindings, expectedCapabilities);
+	else if ("capability_bindings" in target) invalidResponse();
 }
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const call = requireRecord(value);
-	requireExactKeys(call, ["capability_id", "data", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"]);
+	requireExactKeys(call, ["capability_backend_ref", "capability_id", "data", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"]);
 	if (call.schema_version !== "ceal.gateway_call_result.v1"
 		|| call.capability_id !== expectedRequest.body.capability_id
-		|| call.capability_id !== "message.search"
 		|| call.target_ref !== expectedRequest.body.target_ref
 		|| call.host_decision !== "accepted"
 		|| call.proof_level !== "host_decision") invalidResponse();
-	validateMessageSearchResult(call.data, expectedRequest);
-	validateCallRedaction(call.redaction);
+	requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
+	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest);
+	else validateGenericCapabilityResult(call.data, call.capability_id);
+	validateCallRedaction(call.redaction, call.capability_id);
 	validateHostNonClaims(call.non_claims, true);
+}
+
+function validateGenericCapabilityResult(value: unknown, capabilityId: unknown): void {
+	const result = requireRecord(value);
+	requireSafeRef(result.schema_version);
+	const expectedPrefix = `ceal.${String(capabilityId).replaceAll(".", "_")}_result.`;
+	if (!String(result.schema_version).startsWith(expectedPrefix)) invalidResponse();
 }
 
 function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
@@ -466,33 +487,35 @@ function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<C
 		|| minimization.raw_provider_ids_included !== false) invalidResponse();
 }
 
-function validateMessageSearchBackendDescriptor(value: unknown): void {
-	const backend = requireRecord(value);
-	requireExactKeys(backend, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "schema_version", "scope", "thread_replies"]);
-	const fieldsAreValid = [
-		backend.schema_version === "ceal.message_search_backend.v1", ["mature_search", "degraded_fallback"].includes(String(backend.mode)),
-		["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class)), backend.scope === "granted_target",
-		["provider_search", "recent_channel_history"].includes(String(backend.provenance)), ["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode)),
-		["included", "excluded"].includes(String(backend.thread_replies)), ["bounded", "incomplete"].includes(String(backend.completeness)),
-	].every(Boolean);
-	if (!fieldsAreValid) invalidResponse();
-	if (backend.mode === "mature_search") requireBackendFields(backend, "provider_search", "included", backend.completeness);
-	if (backend.mode === "degraded_fallback") requireBackendFields(backend, "recent_channel_history", backend.thread_replies, "incomplete");
-}
-
-function requireBackendFields(
-	backend: Record<string, unknown>, provenance: unknown, threadReplies: unknown, completeness: unknown,
-): void {
-	if (![backend.provenance === provenance, backend.thread_replies === threadReplies, backend.completeness === completeness].every(Boolean)) invalidResponse();
+function validateCapabilityBindings(value: unknown, expectedCapabilities: readonly string[]): void {
+	if (!Array.isArray(value) || value.length !== expectedCapabilities.length) invalidResponse();
+	const seen = new Set<string>();
+	for (const item of value) {
+		const binding = requireRecord(item);
+		requireExactKeys(binding, ["availability", "capability_backend_ref", "capability_id", "credential_identity_class", "schema_version", "scope"]);
+		if (binding.schema_version !== "ceal.capability_binding.v1"
+			|| !expectedCapabilities.includes(String(binding.capability_id))
+			|| seen.has(String(binding.capability_id))
+			|| !["available", "degraded"].includes(String(binding.availability))
+			|| !["delegated_principal", "organization_service", "workload_identity"].includes(String(binding.credential_identity_class))
+			|| binding.scope !== "granted_target") invalidResponse();
+		requirePrefixedRef(binding.capability_backend_ref, "capability-backend:");
+		seen.add(String(binding.capability_id));
+	}
 }
 
 function validateMessageSearchCoverage(value: unknown): void {
 	const coverage = requireRecord(value);
-	requireExactKeys(coverage, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "provider_truncated", "schema_version", "scope", "thread_replies"]);
-	if (typeof coverage.provider_truncated !== "boolean") invalidResponse();
-	const { provider_truncated: _providerTruncated, ...backend } = coverage;
-	validateMessageSearchBackendDescriptor(backend);
-	if (coverage.provider_truncated && coverage.completeness !== "incomplete") invalidResponse();
+	requireExactKeys(coverage, ["completeness", "match_semantics", "reply_coverage", "schema_version", "source", "truncated"]);
+	if (coverage.schema_version !== "ceal.message_search_coverage.v1"
+		|| !["authoritative_index", "bounded_projection"].includes(String(coverage.source))
+		|| !["backend_ranked", "literal_case_insensitive"].includes(String(coverage.match_semantics))
+		|| !["included", "excluded"].includes(String(coverage.reply_coverage))
+		|| !["bounded", "incomplete"].includes(String(coverage.completeness))
+		|| typeof coverage.truncated !== "boolean") invalidResponse();
+	if (coverage.source === "authoritative_index" && coverage.reply_coverage !== "included") invalidResponse();
+	if (coverage.source === "bounded_projection" && coverage.completeness !== "incomplete") invalidResponse();
+	if (coverage.truncated && coverage.completeness !== "incomplete") invalidResponse();
 }
 
 function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number } {
@@ -526,12 +549,16 @@ function validateMessageSearchResultItem(value: unknown, expectedTargetRef: stri
 	requireSafeText(item.text_preview, 1024);
 }
 
-function validateCallRedaction(value: unknown): void {
+function validateCallRedaction(value: unknown, capabilityId: unknown): void {
 	const redaction = requireRecord(value);
 	requireExactKeys(redaction, ["omitted_classes", "state"]);
 	if (redaction.state !== "applied"
 		|| !Array.isArray(redaction.omitted_classes)
-		|| JSON.stringify(redaction.omitted_classes) !== JSON.stringify(["query_text", "raw_provider_ids", "raw_messages"])) invalidResponse();
+		|| redaction.omitted_classes.length === 0
+		|| redaction.omitted_classes.length > 32) invalidResponse();
+	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
+	if (capabilityId === "message.search"
+		&& JSON.stringify(redaction.omitted_classes) !== JSON.stringify(["query_text", "raw_provider_ids", "raw_messages"])) invalidResponse();
 }
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {
@@ -586,10 +613,21 @@ function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequ
 
 function validateAuditCallDetail(value: unknown, event: Record<string, unknown>): void {
 	const call = requireRecord(value);
-	requireExactKeys(call, ["capability_id", "coverage", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
+	if (call.capability_id !== "message.search") {
+		requireExactKeys(call, ["capability_backend_ref", "capability_id", "input_summary", "output_summary", "schema_version", "target_ref"]);
+		if (call.schema_version !== "ceal.gateway_audit_call_detail.v1") invalidResponse();
+		requireSafeRef(call.capability_id);
+		requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
+		requirePrefixedRef(call.target_ref, "target:");
+		requireRecord(call.input_summary);
+		requireRecord(call.output_summary);
+		return;
+	}
+	requireExactKeys(call, ["capability_backend_ref", "capability_id", "coverage", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
 	if (![call.schema_version === "ceal.gateway_audit_call_detail.v1", call.capability_id === "message.search",
 		event.operation === "call", event.outcome === "succeeded"].every(Boolean)) invalidResponse();
 	requirePrefixedRef(call.target_ref, "target:");
+	requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
 	requireIntegerRange(call.requested_limit, 1, 10);
 	requireIntegerRange(call.query_utf8_bytes, 1, 512);
 	requireIntegerRange(call.result_count, 0, call.requested_limit);

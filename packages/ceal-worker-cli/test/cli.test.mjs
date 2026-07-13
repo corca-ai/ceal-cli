@@ -61,7 +61,7 @@ test("every public command emits one YAML document without a format flag", async
 	for (const command of CEAL_COMMANDS) {
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"] : [command.name];
 		const payload = await yamlRun(args, command.name === "call" ? 3 : 0);
-		assert.equal(payload.schema_version, command.result_schema);
+		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		assert.equal(payload.command, "ceal");
 	}
 });
@@ -148,8 +148,12 @@ test("call invokes one granted capability and independently reads back its audit
 			loadProfile: async () => storedProfile(endpoint),
 			nextRequestId: (() => { let id = 0; return () => `narnia:call:${++id}`; })(),
 		});
-		assert.equal(payload.status, "completed");
-		assert.equal(payload.audit.verified, true);
+		assert.equal(payload.schema, "ceal.result.v1");
+		assert.equal(payload.status, "ok");
+		assert.equal(payload.ok, true);
+		assert.equal(payload.claim.allowed, true);
+		assert.equal(payload.audit.state, "recorded");
+		assert.equal(payload.profile, "profile:narnia");
 		assert.equal(payload.data.result_count, 1);
 		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "readback"]);
 		assert.equal(requests[0].body.body.arguments.query, "launch");
@@ -166,8 +170,9 @@ test("call preserves one request identity across authentication refresh and fina
 			saveProfile: async (profile) => { saved = profile; },
 			nextRequestId: (() => { let id = 0; return () => `narnia:retry-call:${++id}`; })(),
 		});
-		assert.equal(payload.status, "completed");
-		assert.equal(payload.audit.verified, true);
+		assert.equal(payload.status, "ok");
+		assert.equal(payload.claim.allowed, true);
+		assert.equal(payload.audit.state, "recorded");
 		assert.equal(saved.accessToken, newAccessToken);
 		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "call", "readback"]);
 		assert.deepEqual(requests.map((item) => item.authorization), [
@@ -176,6 +181,41 @@ test("call preserves one request identity across authentication refresh and fina
 		assert.equal(requests[0].body.request_id, requests[1].body.request_id);
 		assert.equal(requests[2].body.body.request_id, requests[1].body.request_id);
 	}, { rejectFirstGateway: true });
+});
+
+test("call forwards a discovered provider-neutral capability without a CLI command rewrite", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(["call", "file.search", "--target", "target:workspace", "query=roadmap", "kind=document"], 0, {
+			loadProfile: async () => storedProfile(endpoint),
+			nextRequestId: (() => { let id = 0; return () => `narnia:generic:${++id}`; })(),
+		});
+		assert.equal(payload.schema, "ceal.result.v1");
+		assert.equal(payload.status, "ok");
+		assert.equal(payload.request.capability_id, "file.search");
+		assert.equal(payload.capability_backend_ref, "capability-backend:file-search-primary");
+		assert.deepEqual(requests[0].body.body.arguments, { query: "roadmap", kind: "document" });
+	}, (request) => request.operation === "call" ? success(request, {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
+		capability_backend_ref: "capability-backend:file-search-primary", target_ref: request.body.target_ref,
+		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
+		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	}) : success(request, {
+		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
+		events: [{
+			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:generic",
+			request_id: request.body.request_id, profile_ref: request.profile_ref,
+			registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			occurred_at: "2026-07-13T21:00:00.000Z", operation: "call", auth_decision: "allowed",
+			policy_decision: "allowed", outcome: "succeeded", error_code: null,
+			call: {
+				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
+				capability_backend_ref: "capability-backend:file-search-primary", target_ref: "target:workspace",
+				input_summary: { field_count: 2 }, output_summary: { result_count: 1 },
+			},
+			proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		}],
+	}));
 });
 
 test("capabilities uses an enrolled profile without endpoint or token options", async () => {
@@ -508,7 +548,7 @@ function discoveryResponse(request) {
 			},
 			evidence_requirement: "gateway_audit",
 		}],
-		targets: [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], search_backend: matureSearchBackend() }],
+		targets: [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_bindings: [matureCapabilityBinding()] }],
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -517,12 +557,12 @@ function discoveryResponse(request) {
 
 function callResponse(request) {
 	return success(request, {
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search", target_ref: request.body.target_ref,
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search", capability_backend_ref: "capability-backend:message-search-primary", target_ref: request.body.target_ref,
 		data: {
 			schema_version: "ceal.message_search_result.v1", query: { redacted: true, utf8_bytes: 6, empty: false },
 			result_count: 1,
 			results: [{ ref: "message:msg_001", target_ref: request.body.target_ref, created_at: "2026-07-10T00:00:00.000Z", source_label: "Team inbox", text_preview: "Launch readiness is green." }],
-			coverage: { ...matureSearchBackend(), provider_truncated: false },
+			coverage: matureSearchCoverage(),
 			minimization: { raw_provider_ids_included: false, raw_messages_included: false, credential_material_included: false },
 		},
 		redaction: { state: "applied", omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"] },
@@ -540,25 +580,34 @@ function readbackResponse(request) {
 			occurred_at: "2026-07-13T21:00:00.000Z",
 			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
 			call: {
-				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search", target_ref: "target:team-inbox",
+				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search", capability_backend_ref: "capability-backend:message-search-primary", target_ref: "target:team-inbox",
 				requested_limit: 5, query_utf8_bytes: 6, result_count: 1,
-				coverage: { ...matureSearchBackend(), provider_truncated: false },
+				coverage: matureSearchCoverage(),
 			},
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		}],
 	});
 }
 
-function matureSearchBackend() {
+function matureCapabilityBinding() {
 	return {
-		schema_version: "ceal.message_search_backend.v1",
-		mode: "mature_search",
-		credential_identity_class: "delegated_user",
+		schema_version: "ceal.capability_binding.v1",
+		capability_id: "message.search",
+		capability_backend_ref: "capability-backend:message-search-primary",
+		availability: "available",
+		credential_identity_class: "delegated_principal",
 		scope: "granted_target",
-		provenance: "provider_search",
-		match_mode: "provider_ranked",
-		thread_replies: "included",
+	};
+}
+
+function matureSearchCoverage() {
+	return {
+		schema_version: "ceal.message_search_coverage.v1",
+		source: "authoritative_index",
+		match_semantics: "backend_ranked",
+		reply_coverage: "included",
 		completeness: "bounded",
+		truncated: false,
 	};
 }
 

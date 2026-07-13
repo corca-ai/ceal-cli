@@ -21,6 +21,27 @@ Every non-help result, including parser failures, is exactly one compact YAML
 document. The public commands reject `--json` and `--format json`; typed callers
 use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 
+Capability discovery and invocation are provider-neutral contracts. `ceal
+capabilities` exposes stable capability/target references, input contracts,
+evidence requirements, and a redacted `credential_identity_class`; it does not
+expose Slack, GitHub, Notion, or another provider's credential kind, API mode,
+or internal connector binding. `ceal call <capability-id> --target <target-ref>
+[key=value ...]` forwards that discovered vocabulary without requiring a new
+top-level CLI command. Known core capabilities receive stricter local and wire
+validation, while a bounded generic envelope admits future manifest-defined
+capabilities without weakening secret and raw-provider-reference rejection.
+Successful calls use `ceal.result.v1`, including identity, authorization,
+evidence, claim, audit, redaction, usage, data, and error fields so agents do not
+infer completion from an exit code alone.
+
+Provider-specific richness belongs behind the customer Gateway adapter. For
+example, a Slack adapter may use indexed search, ranked results, thread replies,
+and a delegated Slack principal, but the public contract reports only neutral
+coverage semantics and `delegated_principal`. Another adapter can satisfy the
+same public identity class and capability contract with its own credential and
+API mechanism. A less capable fallback must advertise `degraded` availability
+and incomplete coverage rather than impersonating the richer path.
+
 The repository also owns two Agent Skill packages under `skills/`:
 `ceal-guide` for worker capability use and `cealctl-guide` for operator/control
 work. They teach a help-driven method and deliberately contain no copied command,
@@ -110,8 +131,8 @@ ceal call message.search --target target:team-inbox query=incident limit=3
 Both operator and worker sessions rotate automatically and revoke server-side
 before local logout. Every network request is client-initiated HTTPS, so a
 worker behind a VPN or firewall needs outbound reachability to the Gateway but
-no SSH access, listening port, or Gateway-initiated push. A successful call is
-reported as completed only after matching Gateway audit readback; whether it
+no SSH access, listening port, or Gateway-initiated push. A successful call sets
+`status: ok` and `claim.allowed: true` only after matching Gateway audit readback; whether it
 reached a real provider depends on the Gateway's configured connector and is
 reported explicitly in the result's proof and non-claims.
 

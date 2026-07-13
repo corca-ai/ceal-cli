@@ -92,10 +92,10 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "call",
 		description: "Invoke an approved capability and read back its Gateway audit event.",
-		usage: "ceal call message.search --target <target-ref> query=<text> [limit=<1-10>]",
+		usage: "ceal call <capability-id> --target <target-ref> [key=value ...]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
-		result_schema: "ceal.call.v1",
+		result_schema: "ceal.result.v1",
 		recovery: "Run 'ceal capabilities', then use one granted capability and target exactly as discovered.",
 	},
 ];
@@ -164,10 +164,10 @@ function commandHelp(command: CealCommandDefinition): string {
 			"  --gateway <https-url>  Gateway client endpoint.",
 			"  --code-stdin            Read the one-time enrollment code from stdin.",
 		] : command.name === "call" ? [
-			"  message.search          Search an approved message target.",
+			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
-			"  query=<text>            Non-empty UTF-8 query, at most 512 bytes.",
-			"  limit=<1-10>            Optional result limit; defaults to 5.",
+			"  key=value               Capability input; repeat for each discovered field.",
+			"  message.search          Requires query=<text>; optional limit=<1-10>.",
 		] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -314,9 +314,9 @@ function writeCapabilitiesAvailable(
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseCallOptions(options);
-	if (!parsed.ok) return writeError("invalid_argument", "Invalid capability call options.", io);
-	const resolved = await resolveCallProfile(runtime, io);
-	if (!resolved.ok) return resolved.exitCode;
+	if (!parsed.ok) return writeCallValidationFailure(io);
+	const resolved = await resolveCallProfile(runtime);
+	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
 	return executeCall(resolved.profile, parsed, requestId, io, runtime);
 }
@@ -328,47 +328,49 @@ async function executeCall(
 	io: CealCliIo,
 	runtime: CealCommandRuntime,
 ): Promise<number> {
+	let completed: { value: CealGatewayCallValue; events: unknown; profile: CealStoredProfile } | null = null;
 	try {
 		const { call, client, profile } = await requestCapabilityCall(initialProfile, parsed, requestId, runtime);
-		if (!call.ok) return writeCallGatewayFailure(call, io);
+		if (!call.ok) return writeCallGatewayFailure(call, io, profile, parsed, requestId);
 		const readback = await client.request({
 			request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
 			operation: "readback",
 			profile_ref: profile.profileRef,
 			body: { request_id: requestId },
 		});
-		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io);
-		return writeCallCompleted(call.value, readback.value.events, requestId, io);
+		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, profile, parsed);
+		completed = { value: call.value, events: readback.value.events, profile };
 	} catch (error) {
-		if (error instanceof CealProfileSessionError) return writeCallUnavailable(error.code, io);
+		if (error instanceof CealProfileSessionError) return writeCallUnavailable(error.code, io, initialProfile, parsed);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeCallUnavailable(reason, io);
+		return writeCallUnavailable(reason, io, initialProfile, parsed);
 	}
+	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.profile, parsed);
 }
 
-type CallProfileResolution = { ok: true; profile: CealStoredProfile } | { ok: false; exitCode: number };
+type CallProfileResolution = { ok: true; profile: CealStoredProfile } | { ok: false; reason: string };
 
-async function resolveCallProfile(runtime: CealCommandRuntime, io: CealCliIo): Promise<CallProfileResolution> {
-	if (!runtime.loadProfile) return { ok: false, exitCode: writeCallUnavailable("profile_unavailable", io) };
+async function resolveCallProfile(runtime: CealCommandRuntime): Promise<CallProfileResolution> {
+	if (!runtime.loadProfile) return { ok: false, reason: "profile_unavailable" };
 	try {
 		const loaded = await runtime.loadProfile();
 		const profile = loaded ? await ensureCurrentProfile(loaded, runtime) : null;
-		return profile ? { ok: true, profile } : { ok: false, exitCode: writeCallUnavailable("profile_unavailable", io) };
+		return profile ? { ok: true, profile } : { ok: false, reason: "profile_unavailable" };
 	} catch (error) {
 		const reason = error instanceof CealProfileSessionError ? error.code : "profile_load_failed";
-		return { ok: false, exitCode: writeCallUnavailable(reason, io) };
+		return { ok: false, reason };
 	}
 }
 
-function requestMessageSearch(
+function requestCapability(
 	client: ReturnType<typeof createCealClient>, profileRef: string, parsed: Extract<ParsedCallOptions, { ok: true }>, requestId: string,
 ) {
 	return client.request({
 		request_id: requestId, operation: "call", profile_ref: profileRef,
 		body: {
-			capability_id: "message.search", target_ref: parsed.targetRef,
-			arguments: { query: parsed.query, limit: parsed.limit },
-			purpose: "Search approved messages for the current task.",
+				capability_id: parsed.capabilityId, target_ref: parsed.targetRef,
+				arguments: parsed.arguments,
+				purpose: parsed.purpose,
 		},
 	});
 }
@@ -381,88 +383,155 @@ async function requestCapabilityCall(
 ) {
 	let profile = initialProfile;
 	let client = createCealClient(createCealHttpTransport({ endpoint: profile.gatewayEndpoint, accessToken: profile.accessToken }));
-	let call = await requestMessageSearch(client, profile.profileRef, parsed, requestId);
+	let call = await requestCapability(client, profile.profileRef, parsed, requestId);
 	if (!shouldRetryAuthentication(call, profile)) return { call, client, profile };
 	profile = await ensureCurrentProfile(profile, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: profile.gatewayEndpoint, accessToken: profile.accessToken }));
-	call = await requestMessageSearch(client, profile.profileRef, parsed, requestId);
+	call = await requestCapability(client, profile.profileRef, parsed, requestId);
 	return { call, client, profile };
 }
 
-function writeCallCompleted(value: CealGatewayCallValue, events: unknown, requestId: string, io: CealCliIo): number {
+function writeCallCompleted(
+	value: CealGatewayCallValue, events: unknown, requestId: string, io: CealCliIo,
+	profile: CealStoredProfile, parsed: Extract<ParsedCallOptions, { ok: true }>,
+): number {
+	const eventRefs = Array.isArray(events) ? events.flatMap((event) => event && typeof event === "object" && "event_ref" in event ? [String(event.event_ref)] : []) : [];
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.call.v1", command: "ceal", status: "completed", credential_context: CREDENTIAL_CONTEXT,
-		capability_id: value.capability_id, target_ref: value.target_ref, data: value.data, redaction: value.redaction,
-		host_decision: value.host_decision, audit: { verified: true, request_id: requestId, events },
-		proof_level: "host_decision", non_claims: value.non_claims,
+		schema: "ceal.result.v1", command: "ceal", ok: true, status: "ok", ...resultIdentity(profile),
+		request: resultRequest(parsed, requestId), authorization: { result: "allowed" },
+		capability_backend_ref: value.capability_backend_ref,
+		evidence: { requirement: "gateway_audit", reached: "gateway_audit", refs: [...eventRefs] },
+		claim: { allowed: true }, warnings: [], data: value.data,
+		audit: { state: "recorded", refs: [...eventRefs] }, redaction: value.redaction,
+		usage: { state: "not_applicable", reason: "no_model_or_metered_component" },
+		error: null, proof_level: "host_decision", non_claims: value.non_claims,
 	});
 }
 
-type ParsedCallOptions = { ok: true; targetRef: string; query: string; limit: number } | { ok: false };
+type ParsedCallOptions = {
+	ok: true; capabilityId: string; targetRef: string; arguments: Record<string, string | number>; purpose: string;
+} | { ok: false };
 
 function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	if (!validCallPrefix(options)) return { ok: false };
+	const capabilityId = options[0];
 	const targetRef = options[2];
+	if (!validCapabilityId(capabilityId)) return { ok: false };
 	if (!validTargetRef(targetRef)) return { ok: false };
-	const operands = parseKeyValueOperands(options.slice(3), new Set(["query", "limit"]));
+	const operands = parseKeyValueOperands(options.slice(3));
 	if (!operands) return { ok: false };
-	const query = operands.get("query");
-	const limit = operands.has("limit") ? Number(operands.get("limit")) : 5;
-	return validCallArguments(query, limit) ? { ok: true, targetRef: targetRef as string, query: query as string, limit } : { ok: false };
+	const arguments_ = Object.fromEntries(operands);
+	if (capabilityId === "message.search" && !normalizeMessageSearchArguments(arguments_)) return { ok: false };
+	return {
+		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_,
+		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
+	};
 }
 
 function validCallPrefix(options: readonly string[]): boolean {
-	return options.length >= 4 && options.length <= 5 && options[0] === "message.search" && options[1] === "--target";
+	return options.length >= 3 && options.length <= 67 && options[1] === "--target";
+}
+
+function validCapabilityId(value: string | undefined): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
 }
 
 function validTargetRef(value: string | undefined): boolean {
 	return typeof value === "string" && /^target:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(value);
 }
 
-function validCallArguments(query: string | undefined, limit: number): boolean {
-	return Boolean(query) && new TextEncoder().encode(query).byteLength <= 512
-		&& Number.isInteger(limit) && limit >= 1 && limit <= 10;
+function normalizeMessageSearchArguments(arguments_: Record<string, string | number>): boolean {
+	if (!Object.keys(arguments_).every((key) => key === "query" || key === "limit")) return false;
+	const query = arguments_.query;
+	if (typeof query !== "string" || query.trim() === "" || new TextEncoder().encode(query).byteLength > 512) return false;
+	const limit = arguments_.limit === undefined ? 5 : Number(arguments_.limit);
+	if (!Number.isInteger(limit) || limit < 1 || limit > 10) return false;
+	arguments_.limit = limit;
+	return true;
 }
 
-function parseKeyValueOperands(operands: readonly string[], allowed: ReadonlySet<string>): Map<string, string> | null {
+function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {
 	const parsed = new Map<string, string>();
 	for (const operand of operands) {
 		const separator = operand.indexOf("=");
 		const key = separator > 0 ? operand.slice(0, separator) : "";
-		if (!allowed.has(key) || parsed.has(key)) return null;
+		if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key) || parsed.has(key)) return null;
 		parsed.set(key, operand.slice(separator + 1));
 	}
 	return parsed;
 }
 
-function writeCallGatewayFailure(response: { error: unknown }, io: CealCliIo): number {
+function writeCallGatewayFailure(
+	response: { error: unknown; proof_ref_or_unavailable?: unknown }, io: CealCliIo, profile: CealStoredProfile,
+	parsed: Extract<ParsedCallOptions, { ok: true }>, requestId: string,
+): number {
 	const failure = classifyGatewayFailure(response.error);
+	const proofRefs = typeof response.proof_ref_or_unavailable === "string" ? [response.proof_ref_or_unavailable] : [];
 	writeYaml(io.stdout, {
-		schema_version: "ceal.call.v1", command: "ceal", status: failure.denial ? "denied" : "unavailable",
-		credential_context: CREDENTIAL_CONTEXT, audit: { verified: false }, proof_level: "host_decision",
-		error: { code: failure.code, message: failure.message, next_action: failure.nextAction },
+		schema: "ceal.result.v1", command: "ceal", ok: false, status: failure.denial ? "blocked" : "error",
+		...resultIdentity(profile), request: resultRequest(parsed, requestId),
+		authorization: { result: failure.denial ? "denied" : "not_evaluated" },
+		evidence: { requirement: "gateway_audit", reached: "host_decision", refs: proofRefs },
+		claim: { allowed: false }, warnings: [], data: null,
+		audit: proofRefs.length ? { state: "recorded", refs: proofRefs } : { state: "unavailable", reason: "readback_not_reached", scope: "runtime" },
+		redaction: { state: "unavailable", reason: "capability_did_not_complete", scope: "runtime" },
+		usage: { state: "unavailable", reason: "capability_did_not_complete", scope: "runtime" },
+		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
+		proof_level: "host_decision",
 		non_claims: ["No successful capability result or audit completion readback was reached."],
 	});
 	return 3;
 }
 
-function writeCallIncomplete(value: unknown, requestId: string, reason: string, io: CealCliIo): number {
+function writeCallIncomplete(
+	value: CealGatewayCallValue, requestId: string, reason: string, io: CealCliIo,
+	profile: CealStoredProfile, parsed: Extract<ParsedCallOptions, { ok: true }>,
+): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.call.v1", command: "ceal", status: "completed_unverified",
-		credential_context: CREDENTIAL_CONTEXT, result: value,
-		audit: { verified: false, request_id: requestId }, proof_level: "host_decision",
+		schema: "ceal.result.v1", command: "ceal", ok: false, status: "error", ...resultIdentity(profile),
+		request: resultRequest(parsed, requestId), authorization: { result: "allowed" },
+		capability_backend_ref: value.capability_backend_ref,
+		evidence: { requirement: "gateway_audit", reached: "host_decision", refs: [] },
+		claim: { allowed: false }, warnings: [], data: value.data,
+		audit: { state: "unavailable", reason, scope: "runtime" }, redaction: value.redaction,
+		usage: { state: "unavailable", reason: "completion_unverified", scope: "runtime" }, proof_level: "host_decision",
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
 	});
 	return 3;
 }
 
-function writeCallUnavailable(reason: string, io: CealCliIo): number {
+function writeCallUnavailable(
+	reason: string, io: CealCliIo, profile: CealStoredProfile | null,
+	parsed: Extract<ParsedCallOptions, { ok: true }> | null,
+): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.call.v1", command: "ceal", status: "unavailable",
-		credential_context: CREDENTIAL_CONTEXT, audit: { verified: false }, proof_level: "surface",
+		schema: "ceal.result.v1", command: "ceal", ok: false, status: "error", ...resultIdentity(profile),
+		request: parsed ? resultRequest(parsed, null) : null, authorization: { result: "not_evaluated" },
+		evidence: { requirement: "gateway_audit", reached: "surface", refs: [] }, claim: { allowed: false }, warnings: [], data: null,
+		audit: { state: "unavailable", reason: "pre_instance", scope: "local_cli" },
+		redaction: { state: "not_applicable", reason: "no_instance_data_handling" },
+		usage: { state: "not_applicable", reason: "no_model_or_metered_component" }, proof_level: "surface",
 		error: { kind: reason, message: "The capability call could not be completed.", next_action: "Run 'ceal capabilities' and verify the stored profile and target grant." },
 	});
 	return 3;
+}
+
+function writeCallValidationFailure(io: CealCliIo): number {
+	return writeCallUnavailable("validation_error", io, null, null);
+}
+
+function resultIdentity(profile: CealStoredProfile | null): Record<string, string | null> {
+	return {
+		profile: profile?.profileRef ?? null, instance: profile?.instanceRef ?? null,
+		subject: profile?.subjectRef ?? null, client: profile?.clientRef ?? null,
+	};
+}
+
+function resultRequest(parsed: Extract<ParsedCallOptions, { ok: true }>, requestId: string | null): Record<string, string | null> {
+	return {
+		request_id: requestId, command_family: "capability.call", capability_id: parsed.capabilityId,
+		target_ref: parsed.targetRef, purpose: parsed.purpose,
+	};
 }
 
 async function runProfiles(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {

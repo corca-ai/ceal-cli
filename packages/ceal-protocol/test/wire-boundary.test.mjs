@@ -145,6 +145,61 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 });
 
+test("public capability evidence uses provider-neutral binding and coverage vocabulary", () => {
+	const discoveryRequest = envelope("discover", {});
+	const callRequest = envelope("call", {
+		capability_id: "message.search",
+		target_ref: "target:workspace",
+		arguments: { query: "quarterly plan", limit: 5 },
+		purpose: "Find approved planning context",
+	});
+	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
+	const rendered = JSON.stringify([
+		discoveryResponse(discoveryRequest),
+		callResponse(callRequest),
+		readbackResponse(readbackRequest, callRequest.request_id),
+	]);
+	assert.match(rendered, /capability-backend:message-search-primary/u);
+	assert.match(rendered, /authoritative_index/u);
+	assert.doesNotMatch(rendered, /slack|mature_search|degraded_fallback|delegated_user|\bbot\b|provider_search|recent_channel_history|provider_ranked|provider_truncated/u);
+});
+
+test("public discovery, call, and audit envelopes admit provider-neutral capability extensions", () => {
+	const discoveryRequest = envelope("discover", {});
+	const discovery = discoveryResponse(discoveryRequest);
+	discovery.value.capabilities.push({
+		capability_id: "file.search", label: "Search files", effect: "read", target_requirement: "required",
+		input_contract: { schema_version: "ceal.file_search_input.v1", required: ["query"] },
+		evidence_requirement: "gateway_audit",
+	});
+	discovery.value.targets[0].capability_ids.push("file.search");
+	discovery.value.targets[0].capability_bindings.push({
+		...matureCapabilityBinding(), capability_id: "file.search", capability_backend_ref: "capability-backend:file-search-primary",
+	});
+	assert.equal(decodeCealClientResponse(discovery, discoveryRequest).value.capabilities.length, 2);
+
+	const callRequest = envelope("call", {
+		capability_id: "file.search", target_ref: "target:workspace", arguments: { query: "roadmap" }, purpose: "Find approved files",
+	});
+	const call = responseEnvelope(callRequest, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
+		capability_backend_ref: "capability-backend:file-search-primary", target_ref: "target:workspace",
+		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
+		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.equal(decodeCealClientResponse(call, callRequest).value.capability_id, "file.search");
+
+	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
+	const readback = readbackResponse(readbackRequest, callRequest.request_id);
+	readback.value.events[0].call = {
+		schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
+		capability_backend_ref: "capability-backend:file-search-primary", target_ref: "target:workspace",
+		input_summary: { field_count: 1 }, output_summary: { result_count: 1 },
+	};
+	assert.equal(decodeCealClientResponse(readback, readbackRequest).value.events[0].call.capability_id, "file.search");
+});
+
 test("discovery decoder rejects drift, authority promotion, and target visibility ambiguity", () => {
 	const request = envelope("discover", {});
 	const exact = discoveryResponse(request);
@@ -175,15 +230,15 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	cases.push(ambiguousGrant);
 
 	const missingBackend = structuredClone(exact);
-	delete missingBackend.value.targets[0].search_backend;
+	delete missingBackend.value.targets[0].capability_bindings;
 	cases.push(missingBackend);
 
 	const contradictoryBackend = structuredClone(exact);
-	contradictoryBackend.value.targets[0].search_backend.mode = "degraded_fallback";
+	contradictoryBackend.value.targets[0].capability_bindings[0].availability = "unknown";
 	cases.push(contradictoryBackend);
 
 	const deniedBackend = structuredClone(exact);
-	deniedBackend.value.targets[1].search_backend = matureSearchBackend();
+	deniedBackend.value.targets[1].capability_bindings = [matureCapabilityBinding()];
 	cases.push(deniedBackend);
 
 	const authorityPromotion = structuredClone(exact);
@@ -260,7 +315,7 @@ test("call decoder rejects mismatches, unsafe results, and false minimization cl
 	cases.push(missingCoverage);
 
 	const falseCompleteness = structuredClone(exact);
-	falseCompleteness.value.data.coverage.provider_truncated = true;
+	falseCompleteness.value.data.coverage.truncated = true;
 	cases.push(falseCompleteness);
 
 	const rawCoverageScope = structuredClone(exact);
@@ -405,7 +460,7 @@ function discoveryResponse(request) {
 				evidence_requirement: "gateway_audit",
 			}],
 			targets: [
-				{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], search_backend: matureSearchBackend() },
+				{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_bindings: [matureCapabilityBinding()] },
 				{ target_ref: "target:customer-health", label: "Customer health", access: "request_required", capability_ids: [] },
 			],
 			host_decision: "accepted",
@@ -421,6 +476,7 @@ function callResponse(request) {
 		value: {
 			schema_version: "ceal.gateway_call_result.v1",
 			capability_id: request.body.capability_id,
+			capability_backend_ref: "capability-backend:message-search-primary",
 			target_ref: request.body.target_ref,
 			data: {
 				schema_version: "ceal.message_search_result.v1",
@@ -434,7 +490,7 @@ function callResponse(request) {
 					source_label: "Team inbox",
 					text_preview: "Launch readiness is green.",
 				}],
-				coverage: { ...matureSearchBackend(), provider_truncated: false },
+				coverage: matureSearchCoverage(),
 				minimization: {
 					raw_provider_ids_included: false,
 					raw_messages_included: false,
@@ -509,11 +565,12 @@ function readbackResponse(request, targetRequestId) {
 				call: {
 					schema_version: "ceal.gateway_audit_call_detail.v1",
 					capability_id: "message.search",
+					capability_backend_ref: "capability-backend:message-search-primary",
 					target_ref: "target:workspace",
 					requested_limit: 5,
 					query_utf8_bytes: 14,
 					result_count: 1,
-					coverage: { ...matureSearchBackend(), provider_truncated: false },
+					coverage: matureSearchCoverage(),
 				},
 				proof_level: "host_decision",
 				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -522,16 +579,25 @@ function readbackResponse(request, targetRequestId) {
 	});
 }
 
-function matureSearchBackend() {
+function matureCapabilityBinding() {
 	return {
-		schema_version: "ceal.message_search_backend.v1",
-		mode: "mature_search",
-		credential_identity_class: "delegated_user",
+		schema_version: "ceal.capability_binding.v1",
+		capability_id: "message.search",
+		capability_backend_ref: "capability-backend:message-search-primary",
+		availability: "available",
+		credential_identity_class: "delegated_principal",
 		scope: "granted_target",
-		provenance: "provider_search",
-		match_mode: "provider_ranked",
-		thread_replies: "included",
+	};
+}
+
+function matureSearchCoverage() {
+	return {
+		schema_version: "ceal.message_search_coverage.v1",
+		source: "authoritative_index",
+		match_semantics: "backend_ranked",
+		reply_coverage: "included",
 		completeness: "bounded",
+		truncated: false,
 	};
 }
 
