@@ -8,6 +8,8 @@ export interface CealStoredProfile {
 	registrationRef: string;
 	clientRef: string;
 	runnerRef: string;
+	subjectRef: string;
+	instanceRef: string;
 	accessToken: string;
 	expiresAt: string;
 }
@@ -79,6 +81,8 @@ function serializeProfile(profile: CealStoredProfile): Record<string, unknown> {
 		registration_ref: profile.registrationRef,
 		client_ref: profile.clientRef,
 		runner_ref: profile.runnerRef,
+		subject_ref: profile.subjectRef,
+		instance_ref: profile.instanceRef,
 		access_token: profile.accessToken,
 		expires_at: profile.expiresAt,
 	};
@@ -87,7 +91,7 @@ function serializeProfile(profile: CealStoredProfile): Record<string, unknown> {
 function parseProfile(value: unknown): CealStoredProfile {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new CealProfileStoreError("invalid_store");
 	const record = value as Record<string, unknown>;
-	const keys = ["access_token", "client_ref", "expires_at", "gateway_endpoint", "profile_ref", "registration_ref", "runner_ref", "schema_version"];
+	const keys = ["access_token", "client_ref", "expires_at", "gateway_endpoint", "instance_ref", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
 	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(keys.sort()) || record.schema_version !== "ceal.client_profile_store.v1") {
 		throw new CealProfileStoreError("invalid_store");
 	}
@@ -97,6 +101,8 @@ function parseProfile(value: unknown): CealStoredProfile {
 		registrationRef: record.registration_ref,
 		clientRef: record.client_ref,
 		runnerRef: record.runner_ref,
+		subjectRef: record.subject_ref,
+		instanceRef: record.instance_ref,
 		accessToken: record.access_token,
 		expiresAt: record.expires_at,
 	};
@@ -110,6 +116,8 @@ interface CandidateProfile {
 	registrationRef: unknown;
 	clientRef: unknown;
 	runnerRef: unknown;
+	subjectRef: unknown;
+	instanceRef: unknown;
 	accessToken: unknown;
 	expiresAt: unknown;
 }
@@ -120,7 +128,7 @@ function validateProfile(value: CandidateProfile): void {
 		|| typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) {
 		throw new CealProfileStoreError("invalid_store");
 	}
-	for (const key of ["profileRef", "registrationRef", "clientRef", "runnerRef"] as const) {
+	for (const key of ["profileRef", "registrationRef", "clientRef", "runnerRef", "subjectRef", "instanceRef"] as const) {
 		if (typeof value[key] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value[key])) {
 			throw new CealProfileStoreError("invalid_store");
 		}

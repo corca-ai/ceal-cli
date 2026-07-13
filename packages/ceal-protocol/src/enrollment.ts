@@ -19,6 +19,7 @@ export interface CealEnrollmentCreateResult {
 	schema_version: typeof CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA;
 	ok: true;
 	code: string;
+	gateway_endpoint: string;
 	expires_at: string;
 }
 
@@ -35,6 +36,8 @@ export interface CealEnrollmentResult {
 	registration_ref: string;
 	client_ref: string;
 	runner_ref: string;
+	subject_ref: string;
+	instance_ref: string;
 	access_token: string;
 	expires_at: string;
 }
@@ -74,11 +77,21 @@ export function decodeCealEnrollmentCreateRequest(value: unknown): CealEnrollmen
 
 export function decodeCealEnrollmentCreateResult(value: unknown): CealEnrollmentCreateResult {
 	const record = requireRecord(value);
-	requireExactKeys(record, ["code", "expires_at", "ok", "schema_version"]);
+	requireExactKeys(record, ["code", "expires_at", "gateway_endpoint", "ok", "schema_version"]);
 	if (record.schema_version !== CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA || record.ok !== true
 		|| typeof record.code !== "string" || !SAFE_CODE.test(record.code)
+		|| typeof record.gateway_endpoint !== "string" || !safeGatewayEndpoint(record.gateway_endpoint)
 		|| typeof record.expires_at !== "string" || !validFutureTimestampShape(record.expires_at)) invalidResponse();
 	return record as unknown as CealEnrollmentCreateResult;
+}
+
+function safeGatewayEndpoint(value: string): boolean {
+	try {
+		const endpoint = new URL(value);
+		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+		return !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
+			&& (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")));
+	} catch { return false; }
 }
 
 export function decodeCealEnrollmentExchangeRequest(value: unknown): CealEnrollmentExchangeRequest {
@@ -99,8 +112,8 @@ export function decodeCealEnrollmentResponse(value: unknown): CealEnrollmentResp
 	const record = requireRecord(value);
 	if (record.schema_version !== CEAL_ENROLLMENT_RESULT_SCHEMA || typeof record.ok !== "boolean") invalidResponse();
 	if (record.ok === false) return decodeFailure(record);
-	requireExactKeys(record, ["access_token", "client_ref", "expires_at", "ok", "profile_ref", "registration_ref", "runner_ref", "schema_version"]);
-	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref"] as const) {
+	requireExactKeys(record, ["access_token", "client_ref", "expires_at", "instance_ref", "ok", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"]);
+	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
 		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalidResponse();
 	}
 	if (typeof record.access_token !== "string" || !ACCESS_TOKEN.test(record.access_token)

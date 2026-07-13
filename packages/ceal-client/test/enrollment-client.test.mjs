@@ -17,6 +17,8 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 			registration_ref: "registration:narnia",
 			client_ref: "client:narnia",
 			runner_ref: "runner:narnia",
+			subject_ref: "subject:hwidong",
+			instance_ref: "instance:corca",
 			access_token: `ceal_personal_${"B".repeat(43)}`,
 			expires_at: "2026-07-14T00:00:00.000Z",
 		}));

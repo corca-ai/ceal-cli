@@ -79,7 +79,7 @@ test("enrollments create uses only the administrator session and emits transfera
 		for await (const chunk of request) chunks.push(chunk);
 		observed = { authorization: request.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
 		response.writeHead(201, { "content-type": "application/json" });
-		response.end(JSON.stringify({ schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43), expires_at: "2099-07-14T00:00:00.000Z" }));
+		response.end(JSON.stringify({ schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43), gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2099-07-14T00:00:00.000Z" }));
 	});
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
 	const address = server.address();
@@ -88,12 +88,12 @@ test("enrollments create uses only the administrator session and emits transfera
 		const payload = await asyncYamlRun([
 			"enrollments", "create",
 			"--admin-endpoint", `http://127.0.0.1:${address.port}/api/cealctl/v1/enrollments`,
-			"--gateway", "https://gateway.example.test/api/ceal/v1",
 			"--name", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
 			"--admin-token-stdin",
 		], 0, { readSecret: async () => adminToken });
 		assert.equal(payload.status, "created");
 		assert.equal(payload.enrollment_code, "C".repeat(43));
+		assert.equal(payload.gateway_endpoint, "https://gateway.example.test/api/ceal/v1");
 		assert.equal(payload.one_time, true);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(adminToken, "u"));
 		assert.equal(observed.authorization, `Bearer ${adminToken}`);

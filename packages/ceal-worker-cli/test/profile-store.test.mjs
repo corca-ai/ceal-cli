@@ -11,6 +11,8 @@ const PROFILE = {
 	registrationRef: "registration:narnia",
 	clientRef: "client:narnia",
 	runnerRef: "runner:narnia",
+	subjectRef: "subject:hwidong",
+	instanceRef: "instance:corca",
 	accessToken: `ceal_personal_${"B".repeat(43)}`,
 	expiresAt: "2099-07-14T00:00:00.000Z",
 };

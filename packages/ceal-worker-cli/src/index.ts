@@ -34,7 +34,7 @@ export interface CealCommandDefinition {
 	name: "version" | "commands" | "capabilities" | "profiles";
 	description: string;
 	usage: string;
-	effect: "read_only";
+	effect: "read_only" | "local_write";
 	evidence: "surface" | "surface_or_host_decision";
 	result_schema: string;
 	recovery: string;
@@ -63,7 +63,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		name: "profiles",
 		description: "Enroll and inspect the local Gateway-issued profile.",
 		usage: "ceal profiles [enroll --gateway <https-url> --code-stdin]",
-		effect: "read_only",
+		effect: "local_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.profiles.v1",
 		recovery: "Ask a Gateway administrator for a new one-time enrollment code, then retry.",
@@ -257,6 +257,8 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			registration_ref: profile?.registrationRef ?? null,
 			client_ref: profile?.clientRef ?? null,
 			runner_ref: profile?.runnerRef ?? null,
+			subject_ref: profile?.subjectRef ?? null,
+			instance_ref: profile?.instanceRef ?? null,
 			expires_at: profile?.expiresAt ?? null,
 			raw_token_visible: false,
 			proof_level: "local_state",
@@ -277,6 +279,8 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			registrationRef: response.registration_ref,
 			clientRef: response.client_ref,
 			runnerRef: response.runner_ref,
+			subjectRef: response.subject_ref,
+			instanceRef: response.instance_ref,
 			accessToken: response.access_token,
 			expiresAt: response.expires_at,
 		});
@@ -289,6 +293,8 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			registration_ref: response.registration_ref,
 			client_ref: response.client_ref,
 			runner_ref: response.runner_ref,
+			subject_ref: response.subject_ref,
+			instance_ref: response.instance_ref,
 			expires_at: response.expires_at,
 			raw_token_visible: false,
 			proof_level: "host_decision",

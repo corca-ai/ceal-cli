@@ -101,7 +101,8 @@ test("capabilities uses an enrolled profile without endpoint or token options", 
 		const payload = await yamlRun(["capabilities"], 0, {
 			loadProfile: async () => ({
 				gatewayEndpoint: endpoint, profileRef: "profile:narnia", registrationRef: "registration:narnia",
-				clientRef: "client:narnia", runnerRef: "runner:narnia", accessToken: token, expiresAt: "2099-07-14T00:00:00.000Z",
+				clientRef: "client:narnia", runnerRef: "runner:narnia", subjectRef: "subject:hwidong", instanceRef: "instance:corca",
+				accessToken: token, expiresAt: "2099-07-14T00:00:00.000Z",
 			}),
 			nextRequestId: () => "narnia:stored:001",
 		});
@@ -307,6 +308,7 @@ async function withEnrollmentGateway(callback) {
 		response.end(JSON.stringify({
 			schema_version: "ceal.enrollment_result.v1", ok: true,
 			profile_ref: "profile:narnia", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			access_token: token, expires_at: "2099-07-14T00:00:00.000Z",
 		}));
 	});

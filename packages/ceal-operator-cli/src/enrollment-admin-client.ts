@@ -11,6 +11,7 @@ export interface CealEnrollmentCreateInput {
 
 export interface CealEnrollmentCreateResult {
 	code: string;
+	gatewayEndpoint: string;
 	expiresAt: string;
 }
 
@@ -81,7 +82,7 @@ function safeEndpoint(value: string): URL {
 function decodeResult(value: unknown): CealEnrollmentCreateResult {
 	try {
 		const record = decodeCealEnrollmentCreateResult(value);
-		return { code: record.code, expiresAt: record.expires_at };
+		return { code: record.code, gatewayEndpoint: record.gateway_endpoint, expiresAt: record.expires_at };
 	} catch { invalidResponse(); }
 }
 

@@ -18,7 +18,8 @@ test("administrator enrollment creation has one strict public wire contract", ()
 	});
 	assert.equal(request.runner_ref, "runner:narnia");
 	const result = decodeCealEnrollmentCreateResult({
-		schema_version: "ceal.enrollment_create_result.v1", ok: true, code: CODE, expires_at: "2026-07-14T00:00:00.000Z",
+		schema_version: "ceal.enrollment_create_result.v1", ok: true, code: CODE,
+		gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2026-07-14T00:00:00.000Z",
 	});
 	assert.equal(result.code, CODE);
 	assert.throws(() => decodeCealEnrollmentCreateRequest({ ...request, authority: "gateway" }), TypeError);
@@ -38,6 +39,8 @@ test("enrollment request and issued result decode exact bounded material", () =>
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
 		runner_ref: "runner:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:corca",
 		access_token: TOKEN,
 		expires_at: "2026-07-14T00:00:00.000Z",
 	});
@@ -57,6 +60,8 @@ test("enrollment decoders reject extra fields, malformed codes, and token drift"
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
 		runner_ref: "runner:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:corca",
 		access_token: "provider-token",
 		expires_at: "2026-07-14T00:00:00.000Z",
 	}), TypeError);

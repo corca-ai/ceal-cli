@@ -108,7 +108,6 @@ function commandHelp(command: CealctlCommandDefinition): string {
 	const options = command.name === "enrollments" ? [
 		"  create                         Create one short-lived, one-time enrollment code.",
 		"  --admin-endpoint <https-url>  Gateway administrator API endpoint.",
-		"  --gateway <https-url>         Client endpoint given to the enrolling user.",
 		"  --name <safe-name>            Registration, client, and runner name.",
 		"  --profile <safe-name>         Profile name bound by the Gateway.",
 		"  --subject <safe-name>         User identity bound by the Gateway.",
@@ -163,13 +162,15 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			schema_version: "cealctl.enrollment_created.v1",
 			command: "cealctl",
 			status: "created",
-			gateway_endpoint: parsed.gateway,
+			gateway_endpoint: result.gatewayEndpoint,
 			enrollment_code: result.code,
 			expires_at: result.expiresAt,
 			one_time: true,
+			sensitive_material_visible: true,
+			transfer_warning: "Transfer privately. Do not place this code in logs, tickets, or shared chat.",
 			credential_context: CEALCTL_CREDENTIAL_CONTEXT,
 			proof_level: "host_decision",
-			next_action: `On the user machine, send this code through stdin to 'ceal profiles enroll --gateway ${parsed.gateway} --code-stdin'.`,
+			next_action: `On the user machine, send this code through stdin to 'ceal profiles enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
 		});
 	} catch (error) {
 		return writeEnrollmentFailure(error instanceof CealEnrollmentAdminClientError ? error.code : "request_failed", io);
@@ -178,7 +179,6 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 
 interface ParsedEnrollmentCreateOptions {
 	adminEndpoint: string;
-	gateway: string;
 	name: string;
 	profile: string;
 	subject: string;
@@ -192,33 +192,21 @@ function parseEnrollmentCreateOptions(options: readonly string[]): ParsedEnrollm
 	for (let index = 1; index < options.length; index += 1) {
 		const option = options[index];
 		if (option === "--admin-token-stdin") { if (tokenStdin) return null; tokenStdin = true; continue; }
-		if (!option || !new Set(["--admin-endpoint", "--gateway", "--name", "--profile", "--subject", "--instance"]).has(option) || values.has(option)) return null;
+		if (!option || !new Set(["--admin-endpoint", "--name", "--profile", "--subject", "--instance"]).has(option) || values.has(option)) return null;
 		const value = options[++index];
 		if (!value) return null;
 		values.set(option, value);
 	}
-	if (!tokenStdin || values.size !== 6) return null;
+	if (!tokenStdin || values.size !== 5) return null;
 	const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 	for (const option of ["--name", "--profile", "--subject", "--instance"]) if (!safeName.test(values.get(option) ?? "")) return null;
-	const gateway = values.get("--gateway") ?? "";
-	if (!safeGatewayEndpoint(gateway)) return null;
 	return {
 		adminEndpoint: values.get("--admin-endpoint") ?? "",
-		gateway,
 		name: values.get("--name") ?? "",
 		profile: values.get("--profile") ?? "",
 		subject: values.get("--subject") ?? "",
 		instance: values.get("--instance") ?? "",
 	};
-}
-
-function safeGatewayEndpoint(value: string): boolean {
-	try {
-		const endpoint = new URL(value);
-		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-		return !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
-			&& (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")));
-	} catch { return false; }
 }
 
 function writeEnrollmentFailure(kind: string, io: CealctlIo): number {
