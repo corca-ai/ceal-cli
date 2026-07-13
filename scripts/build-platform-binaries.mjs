@@ -208,28 +208,38 @@ function injectBlob({ artifactPath, blobPath, postjectCli }) {
 }
 
 function smokeBinary({ artifactPath, command, expectedVersion }) {
-	const version = parse(execFileSync(artifactPath, ["version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-	const help = execFileSync(artifactPath, ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-	if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help)) fail("smoke_failed", "Built command identity or help did not match.");
-	const discovery = parse(execFileSync(artifactPath, ["commands"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-	const discoveredCommands = Array.isArray(discovery?.commands)
-		? discovery.commands.map((item) => item?.name).filter((name) => typeof name === "string")
-		: [];
-	assertRequiredCommandDiscovery(discoveredCommands, command.requiredCommands);
-	let unconfiguredCapabilities = false;
-	if (command.id === "ceal") {
-		const capabilities = parse(execFileSync(artifactPath, ["capabilities"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-		unconfiguredCapabilities = capabilities?.status === "unavailable" && capabilities?.live_gateway_checked === false;
-		if (!unconfiguredCapabilities) fail("smoke_failed", "Built ceal command did not complete its async unconfigured capability readback.");
+	const smokeHome = mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-smoke-home-"));
+	const run = (args) => execFileSync(artifactPath, args, {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, HOME: smokeHome },
+	});
+	try {
+		const version = parse(run(["version"]));
+		const help = run(["--help"]);
+		if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help)) fail("smoke_failed", "Built command identity or help did not match.");
+		const discovery = parse(run(["commands"]));
+		const discoveredCommands = Array.isArray(discovery?.commands)
+			? discovery.commands.map((item) => item?.name).filter((name) => typeof name === "string")
+			: [];
+		assertRequiredCommandDiscovery(discoveredCommands, command.requiredCommands);
+		let unconfiguredCapabilities = false;
+		if (command.id === "ceal") {
+			const capabilities = parse(run(["capabilities"]));
+			unconfiguredCapabilities = capabilities?.status === "unavailable" && capabilities?.live_gateway_checked === false;
+			if (!unconfiguredCapabilities) fail("smoke_failed", "Built ceal command did not complete its async unconfigured capability readback.");
+		}
+		return {
+			ok: true,
+			command: version.command,
+			version: version.version,
+			help: true,
+			required_commands: command.requiredCommands,
+			unconfigured_capabilities: unconfiguredCapabilities,
+		};
+	} finally {
+		rmSync(smokeHome, { recursive: true, force: true });
 	}
-	return {
-		ok: true,
-		command: version.command,
-		version: version.version,
-		help: true,
-		required_commands: command.requiredCommands,
-		unconfigured_capabilities: unconfiguredCapabilities,
-	};
 }
 
 export function assertRequiredCommandDiscovery(discoveredCommands, requiredCommands) {
