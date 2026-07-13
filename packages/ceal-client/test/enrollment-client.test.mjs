@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import { createCealEnrollmentClient, CealEnrollmentClientError } from "../dist/index.js";
@@ -42,7 +43,7 @@ test("enrollment client rejects plaintext remote, malformed codes, and unsafe re
 	);
 	const client = createCealEnrollmentClient({
 		endpoint: "https://gateway.example.test/api/ceal/v1",
-		fetchFn: async () => Response.json({ ok: true, access_token: "unsafe" }),
+		fetchFn: async () => globalThis.Response.json({ ok: true, access_token: "unsafe" }),
 	});
 	await assert.rejects(client.exchange("short"), (error) => error.code === "invalid_configuration");
 	await assert.rejects(client.exchange("A".repeat(43)), (error) => error.code === "invalid_response");

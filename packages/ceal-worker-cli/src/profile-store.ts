@@ -148,18 +148,29 @@ interface CandidateProfile {
 }
 
 function validateProfile(value: CandidateProfile): void {
-	if (typeof value.gatewayEndpoint !== "string" || !safeEndpoint(value.gatewayEndpoint)
-		|| typeof value.accessToken !== "string" || !/^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken)
-		|| typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) {
-		throw new CealProfileStoreError("invalid_store");
-	}
+	validateBaseProfile(value);
+	validateRefreshProfile(value);
+	validateProfileReferences(value);
+}
+
+function validateBaseProfile(value: CandidateProfile): void {
+	const valid = typeof value.gatewayEndpoint === "string" && safeEndpoint(value.gatewayEndpoint)
+		&& typeof value.accessToken === "string" && /^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken)
+		&& typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt));
+	if (!valid) throw new CealProfileStoreError("invalid_store");
+}
+
+function validateRefreshProfile(value: CandidateProfile): void {
 	const refreshValues = [value.refreshToken, value.refreshTokenIdleExpiresAt, value.refreshTokenAbsoluteExpiresAt];
 	const hasRefresh = refreshValues.some((item) => item !== undefined);
-	if (hasRefresh && (typeof value.refreshToken !== "string" || !/^ceal_refresh_[A-Za-z0-9_-]{43}$/u.test(value.refreshToken)
-		|| typeof value.refreshTokenIdleExpiresAt !== "string" || !Number.isFinite(Date.parse(value.refreshTokenIdleExpiresAt))
-		|| typeof value.refreshTokenAbsoluteExpiresAt !== "string" || !Number.isFinite(Date.parse(value.refreshTokenAbsoluteExpiresAt)))) {
-		throw new CealProfileStoreError("invalid_store");
-	}
+	if (!hasRefresh) return;
+	const valid = typeof value.refreshToken === "string" && /^ceal_refresh_[A-Za-z0-9_-]{43}$/u.test(value.refreshToken)
+		&& typeof value.refreshTokenIdleExpiresAt === "string" && Number.isFinite(Date.parse(value.refreshTokenIdleExpiresAt))
+		&& typeof value.refreshTokenAbsoluteExpiresAt === "string" && Number.isFinite(Date.parse(value.refreshTokenAbsoluteExpiresAt));
+	if (!valid) throw new CealProfileStoreError("invalid_store");
+}
+
+function validateProfileReferences(value: CandidateProfile): void {
 	for (const key of ["profileRef", "registrationRef", "clientRef", "runnerRef", "subjectRef", "instanceRef"] as const) {
 		if (typeof value[key] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value[key])) {
 			throw new CealProfileStoreError("invalid_store");

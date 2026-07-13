@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -153,6 +154,28 @@ test("call invokes one granted capability and independently reads back its audit
 		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "readback"]);
 		assert.equal(requests[0].body.body.arguments.query, "launch");
 	});
+});
+
+test("call preserves one request identity across authentication refresh and final audit readback", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
+		let saved = null;
+		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
+			loadProfile: async () => storedProfile(endpoint, {
+				refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+			}),
+			saveProfile: async (profile) => { saved = profile; },
+			nextRequestId: (() => { let id = 0; return () => `narnia:retry-call:${++id}`; })(),
+		});
+		assert.equal(payload.status, "completed");
+		assert.equal(payload.audit.verified, true);
+		assert.equal(saved.accessToken, newAccessToken);
+		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "call", "readback"]);
+		assert.deepEqual(requests.map((item) => item.authorization), [
+			`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`,
+		]);
+		assert.equal(requests[0].body.request_id, requests[1].body.request_id);
+		assert.equal(requests[2].body.body.request_id, requests[1].body.request_id);
+	}, { rejectFirstGateway: true });
 });
 
 test("capabilities uses an enrolled profile without endpoint or token options", async () => {
@@ -420,7 +443,9 @@ async function withRenewingGateway(callback, options = {}) {
 			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.0.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
 			return;
 		}
-		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
+		const value = body.operation === "handshake" ? handshakeResponse(body)
+			: body.operation === "discover" ? discoveryResponse(body)
+				: body.operation === "call" ? callResponse(body) : readbackResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
