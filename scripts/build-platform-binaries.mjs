@@ -26,8 +26,18 @@ const REQUIRE = createRequire(import.meta.url);
 const MARKER = ".ceal-cli-platform-binaries";
 const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 const COMMANDS = Object.freeze([
-	{ id: "ceal", packageDir: "ceal-worker-cli", help: "Usage: ceal <command> [options]" },
-	{ id: "cealctl", packageDir: "ceal-operator-cli", help: "Usage: cealctl <command> [options]" },
+	{
+		id: "ceal",
+		packageDir: "ceal-worker-cli",
+		help: "Usage: ceal <command> [options]",
+		requiredCommands: ["profiles", "capabilities"],
+	},
+	{
+		id: "cealctl",
+		packageDir: "ceal-operator-cli",
+		help: "Usage: cealctl <command> [options]",
+		requiredCommands: ["enrollments"],
+	},
 ]);
 
 export class CealCliPlatformBuildError extends Error {
@@ -201,13 +211,32 @@ function smokeBinary({ artifactPath, command, expectedVersion }) {
 	const version = parse(execFileSync(artifactPath, ["version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 	const help = execFileSync(artifactPath, ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 	if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help)) fail("smoke_failed", "Built command identity or help did not match.");
+	const discovery = parse(execFileSync(artifactPath, ["commands"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+	const discoveredCommands = Array.isArray(discovery?.commands)
+		? discovery.commands.map((item) => item?.name).filter((name) => typeof name === "string")
+		: [];
+	assertRequiredCommandDiscovery(discoveredCommands, command.requiredCommands);
 	let unconfiguredCapabilities = false;
 	if (command.id === "ceal") {
 		const capabilities = parse(execFileSync(artifactPath, ["capabilities"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 		unconfiguredCapabilities = capabilities?.status === "unavailable" && capabilities?.live_gateway_checked === false;
 		if (!unconfiguredCapabilities) fail("smoke_failed", "Built ceal command did not complete its async unconfigured capability readback.");
 	}
-	return { ok: true, command: version.command, version: version.version, help: true, unconfigured_capabilities: unconfiguredCapabilities };
+	return {
+		ok: true,
+		command: version.command,
+		version: version.version,
+		help: true,
+		required_commands: command.requiredCommands,
+		unconfigured_capabilities: unconfiguredCapabilities,
+	};
+}
+
+export function assertRequiredCommandDiscovery(discoveredCommands, requiredCommands) {
+	if (!Array.isArray(discoveredCommands) || !Array.isArray(requiredCommands)
+		|| !requiredCommands.every((name) => discoveredCommands.includes(name))) {
+		fail("smoke_failed", "Built command discovery omitted a required enrollment workflow command.");
+	}
 }
 
 function buildManifest(normalized, artifacts, notices) {

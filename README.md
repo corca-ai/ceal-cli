@@ -81,7 +81,12 @@ npm run release:binaries -- \
 
 The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
 manifest, the bundled dependency notice, and `SHA256SUMS`. It
-smoke-runs both commands before returning success. Node 22.19 or newer is a
+smoke-runs both commands before returning success, including discovery of the
+worker `profiles`/`capabilities` and operator `enrollments` workflow commands.
+Before calling transferred artifacts ready, compare both installed checksums to
+the exact platform build output and run both `ceal commands` and `cealctl
+commands`; a version string alone does not distinguish two unpublished
+candidate builds. Node 22.19 or newer is a
 build input; the installed SEA commands do not require Node. This local
 `linux-amd64` result is an unsigned acceptance artifact, not an approved release.
 The first signed tag workflow remains deliberately `linux-arm64` only and

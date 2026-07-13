@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+	assertRequiredCommandDiscovery,
 	buildCealCliPlatformBinaries,
 	CealCliPlatformBuildError,
 } from "../scripts/build-platform-binaries.mjs";
@@ -22,6 +23,10 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.equal(result.ok, true);
 			assert.equal(result.writes_external, false);
 			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
+			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
+				["profiles", "capabilities"],
+				["enrollments"],
+			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
 				"bundle", "blob", "runtime", "inject", "smoke",
 				"bundle", "blob", "runtime", "inject", "smoke",
@@ -68,6 +73,14 @@ test("rejects cross-platform builds, version drift, and unsafe replacement", asy
 	});
 });
 
+test("rejects platform artifacts that omit required enrollment workflow commands", () => {
+	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "profiles", "capabilities"], ["profiles", "capabilities"]));
+	assert.throws(
+		() => assertRequiredCommandDiscovery(["version", "capabilities"], ["profiles", "capabilities"]),
+		hasCode("smoke_failed"),
+	);
+});
+
 function fakeDeps(calls, currentPlatform = "linux-arm64") {
 	return {
 		currentPlatform: () => currentPlatform,
@@ -100,7 +113,13 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 		},
 		smoke: ({ command, expectedVersion }) => {
 			calls.push({ kind: "smoke", command: command.id });
-			return { ok: true, command: command.id, version: expectedVersion, help: true };
+			return {
+				ok: true,
+				command: command.id,
+				version: expectedVersion,
+				help: true,
+				required_commands: command.requiredCommands,
+			};
 		},
 	};
 }
