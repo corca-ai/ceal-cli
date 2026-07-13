@@ -87,6 +87,9 @@ test("client response decoder accepts exact operation-correlated Gateway results
 
 	const call = callResponse(callRequest);
 	assert.deepEqual(decodeCealClientResponse(call, callRequest), call);
+	const liveCall = structuredClone(call);
+	liveCall.value.non_claims = ["production_audit_not_reached"];
+	assert.deepEqual(decodeCealClientResponse(liveCall, callRequest), liveCall);
 
 	const emptyCall = callResponse(callRequest);
 	emptyCall.value.data.result_count = 0;
@@ -108,6 +111,9 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
 	const readback = readbackResponse(readbackRequest, callRequest.request_id);
 	assert.deepEqual(decodeCealClientResponse(readback, readbackRequest), readback);
+	const liveReadback = structuredClone(readback);
+	liveReadback.value.events[0].non_claims = ["production_audit_not_reached"];
+	assert.deepEqual(decodeCealClientResponse(liveReadback, readbackRequest), liveReadback);
 });
 
 test("discovery decoder rejects drift, authority promotion, and target visibility ambiguity", () => {

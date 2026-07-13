@@ -437,7 +437,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 		|| call.proof_level !== "host_decision") invalidResponse();
 	validateMessageSearchResult(call.data, expectedRequest);
 	validateCallRedaction(call.redaction);
-	validateHostNonClaims(call.non_claims);
+	validateHostNonClaims(call.non_claims, true);
 }
 
 function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
@@ -527,7 +527,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	for (const field of ["event_ref", "registration_ref", "client_ref", "runner_ref"] as const) requireSafeRef(event[field]);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
-	validateHostNonClaims(event.non_claims);
+	validateHostNonClaims(event.non_claims, event.operation === "call" && event.outcome === "succeeded");
 }
 
 function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequest: Readonly<CealGatewayReadbackRequest>, targetRequestId: string): void {
@@ -569,11 +569,11 @@ function validateDeniedAuditEvent(event: Record<string, unknown>): void {
 	if (!authenticationDenied && !authenticatedDenial) invalidResponse();
 }
 
-function validateHostNonClaims(value: unknown): void {
-	if (!Array.isArray(value)
-		|| value.length !== 2
-		|| value[0] !== "provider_execution_not_reached"
-		|| value[1] !== "production_audit_not_reached") invalidResponse();
+function validateHostNonClaims(value: unknown, providerMayBeReached = false): void {
+	const fixture = ["provider_execution_not_reached", "production_audit_not_reached"];
+	const liveProvider = ["production_audit_not_reached"];
+	if (!Array.isArray(value) || (JSON.stringify(value) !== JSON.stringify(fixture)
+		&& (!providerMayBeReached || JSON.stringify(value) !== JSON.stringify(liveProvider)))) invalidResponse();
 }
 
 function validateFailureResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>): void {

@@ -45,7 +45,7 @@ export type CealGatewayReadbackRequest = CealGatewayRequestEnvelope<"readback", 
 export type CealGatewayRequest = CealGatewayHandshakeRequest | CealGatewayDiscoverRequest | CealGatewayCallRequest | CealGatewayReadbackRequest;
 
 export type CealGatewayHostNonClaim = "provider_execution_not_reached" | "production_audit_not_reached";
-export type CealGatewayHostNonClaims = readonly ["provider_execution_not_reached", "production_audit_not_reached"];
+export type CealGatewayHostNonClaims = readonly CealGatewayHostNonClaim[];
 
 export interface CealGatewayHandshakeValue {
 	schema_version: "ceal.gateway_handshake.v1";
