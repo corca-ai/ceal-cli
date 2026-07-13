@@ -12,11 +12,14 @@ export interface CealStoredProfile {
 	instanceRef: string;
 	accessToken: string;
 	expiresAt: string;
+	refreshToken?: string;
+	refreshTokenIdleExpiresAt?: string;
+	refreshTokenAbsoluteExpiresAt?: string;
 }
 
 export class CealProfileStoreError extends Error {
 	override readonly name = "CealProfileStoreError";
-	constructor(readonly code: "home_unavailable" | "unsafe_store" | "invalid_store" | "profile_expired") {
+	constructor(readonly code: "home_unavailable" | "unsafe_store" | "invalid_store") {
 		super(`Ceal profile store ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -24,6 +27,7 @@ export class CealProfileStoreError extends Error {
 export function createCealProfileStore(home: string | undefined): {
 	load(): Promise<CealStoredProfile | null>;
 	save(profile: CealStoredProfile): Promise<void>;
+	remove(): Promise<void>;
 } {
 	if (!home || !path.isAbsolute(home)) throw new CealProfileStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
@@ -35,9 +39,7 @@ export function createCealProfileStore(home: string | undefined): {
 			assertFile(file);
 			let parsed: unknown;
 			try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { throw new CealProfileStoreError("invalid_store"); }
-			const profile = parseProfile(parsed);
-			if (Date.parse(profile.expiresAt) <= Date.now()) throw new CealProfileStoreError("profile_expired");
-			return profile;
+			return parseProfile(parsed);
 		},
 		async save(profile) {
 			validateProfile(profile);
@@ -51,6 +53,12 @@ export function createCealProfileStore(home: string | undefined): {
 			} finally {
 				rmSync(temporary, { force: true });
 			}
+		},
+		async remove() {
+			if (!existsSync(file)) return;
+			assertDirectory(directory);
+			assertFile(file);
+			rmSync(file);
 		},
 	};
 }
@@ -74,8 +82,8 @@ function assertFile(file: string): void {
 }
 
 function serializeProfile(profile: CealStoredProfile): Record<string, unknown> {
-	return {
-		schema_version: "ceal.client_profile_store.v1",
+	const base = {
+		schema_version: profile.refreshToken ? "ceal.client_profile_store.v2" : "ceal.client_profile_store.v1",
 		gateway_endpoint: profile.gatewayEndpoint,
 		profile_ref: profile.profileRef,
 		registration_ref: profile.registrationRef,
@@ -86,13 +94,22 @@ function serializeProfile(profile: CealStoredProfile): Record<string, unknown> {
 		access_token: profile.accessToken,
 		expires_at: profile.expiresAt,
 	};
+	return profile.refreshToken ? {
+		...base,
+		refresh_token: profile.refreshToken,
+		refresh_token_idle_expires_at: profile.refreshTokenIdleExpiresAt,
+		refresh_token_absolute_expires_at: profile.refreshTokenAbsoluteExpiresAt,
+	} : base;
 }
 
 function parseProfile(value: unknown): CealStoredProfile {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new CealProfileStoreError("invalid_store");
 	const record = value as Record<string, unknown>;
-	const keys = ["access_token", "client_ref", "expires_at", "gateway_endpoint", "instance_ref", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
-	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(keys.sort()) || record.schema_version !== "ceal.client_profile_store.v1") {
+	const v1Keys = ["access_token", "client_ref", "expires_at", "gateway_endpoint", "instance_ref", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
+	const v2Keys = [...v1Keys, "refresh_token", "refresh_token_idle_expires_at", "refresh_token_absolute_expires_at"];
+	const expectedKeys = record.schema_version === "ceal.client_profile_store.v1" ? v1Keys
+		: record.schema_version === "ceal.client_profile_store.v2" ? v2Keys : [];
+	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify([...expectedKeys].sort())) {
 		throw new CealProfileStoreError("invalid_store");
 	}
 	const profile = {
@@ -105,6 +122,11 @@ function parseProfile(value: unknown): CealStoredProfile {
 		instanceRef: record.instance_ref,
 		accessToken: record.access_token,
 		expiresAt: record.expires_at,
+		...(record.schema_version === "ceal.client_profile_store.v2" ? {
+			refreshToken: record.refresh_token,
+			refreshTokenIdleExpiresAt: record.refresh_token_idle_expires_at,
+			refreshTokenAbsoluteExpiresAt: record.refresh_token_absolute_expires_at,
+		} : {}),
 	};
 	validateProfile(profile);
 	return profile as CealStoredProfile;
@@ -120,12 +142,22 @@ interface CandidateProfile {
 	instanceRef: unknown;
 	accessToken: unknown;
 	expiresAt: unknown;
+	refreshToken?: unknown;
+	refreshTokenIdleExpiresAt?: unknown;
+	refreshTokenAbsoluteExpiresAt?: unknown;
 }
 
 function validateProfile(value: CandidateProfile): void {
 	if (typeof value.gatewayEndpoint !== "string" || !safeEndpoint(value.gatewayEndpoint)
 		|| typeof value.accessToken !== "string" || !/^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken)
 		|| typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))) {
+		throw new CealProfileStoreError("invalid_store");
+	}
+	const refreshValues = [value.refreshToken, value.refreshTokenIdleExpiresAt, value.refreshTokenAbsoluteExpiresAt];
+	const hasRefresh = refreshValues.some((item) => item !== undefined);
+	if (hasRefresh && (typeof value.refreshToken !== "string" || !/^ceal_refresh_[A-Za-z0-9_-]{43}$/u.test(value.refreshToken)
+		|| typeof value.refreshTokenIdleExpiresAt !== "string" || !Number.isFinite(Date.parse(value.refreshTokenIdleExpiresAt))
+		|| typeof value.refreshTokenAbsoluteExpiresAt !== "string" || !Number.isFinite(Date.parse(value.refreshTokenAbsoluteExpiresAt)))) {
 		throw new CealProfileStoreError("invalid_store");
 	}
 	for (const key of ["profileRef", "registrationRef", "clientRef", "runnerRef", "subjectRef", "instanceRef"] as const) {

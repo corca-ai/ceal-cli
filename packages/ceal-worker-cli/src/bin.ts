@@ -14,6 +14,7 @@ void runCealCommand(process.argv.slice(2), {
 	readSecret: readStdinSecret,
 	loadProfile: profileStore ? () => profileStore.load() : undefined,
 	saveProfile: profileStore ? (profile) => profileStore.save(profile) : undefined,
+	removeProfile: profileStore ? () => profileStore.remove() : undefined,
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
 	process.exitCode = code;

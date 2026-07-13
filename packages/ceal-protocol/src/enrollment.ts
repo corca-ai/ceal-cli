@@ -40,6 +40,9 @@ export interface CealEnrollmentResult {
 	instance_ref: string;
 	access_token: string;
 	expires_at: string;
+	refresh_token?: string;
+	refresh_token_idle_expires_at?: string;
+	refresh_token_absolute_expires_at?: string;
 }
 
 export interface CealEnrollmentFailure {
@@ -57,6 +60,7 @@ export type CealEnrollmentResponse = CealEnrollmentResult | CealEnrollmentFailur
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_CODE = /^[A-Za-z0-9_-]{32,256}$/u;
 const ACCESS_TOKEN = /^ceal_personal_[A-Za-z0-9_-]{43}$/u;
+const REFRESH_TOKEN = /^ceal_refresh_[A-Za-z0-9_-]{43}$/u;
 
 export function decodeCealEnrollmentCreateRequest(value: unknown): CealEnrollmentCreateRequest {
 	const record = requireRecord(value);
@@ -112,12 +116,20 @@ export function decodeCealEnrollmentResponse(value: unknown): CealEnrollmentResp
 	const record = requireRecord(value);
 	if (record.schema_version !== CEAL_ENROLLMENT_RESULT_SCHEMA || typeof record.ok !== "boolean") invalidResponse();
 	if (record.ok === false) return decodeFailure(record);
-	requireExactKeys(record, ["access_token", "client_ref", "expires_at", "instance_ref", "ok", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"]);
+	const baseKeys = ["access_token", "client_ref", "expires_at", "instance_ref", "ok", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
+	const refreshKeys = ["refresh_token", "refresh_token_absolute_expires_at", "refresh_token_idle_expires_at"];
+	const actualKeys = Object.keys(record).sort();
+	const baseOnly = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys].sort());
+	const refreshCapable = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys, ...refreshKeys].sort());
+	if (!baseOnly && !refreshCapable) invalidResponse();
 	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
 		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalidResponse();
 	}
 	if (typeof record.access_token !== "string" || !ACCESS_TOKEN.test(record.access_token)
 		|| typeof record.expires_at !== "string" || !validFutureTimestampShape(record.expires_at)) invalidResponse();
+	if (refreshCapable && (typeof record.refresh_token !== "string" || !REFRESH_TOKEN.test(record.refresh_token)
+		|| typeof record.refresh_token_idle_expires_at !== "string" || !validFutureTimestampShape(record.refresh_token_idle_expires_at)
+		|| typeof record.refresh_token_absolute_expires_at !== "string" || !validFutureTimestampShape(record.refresh_token_absolute_expires_at))) invalidResponse();
 	return record as unknown as CealEnrollmentResult;
 }
 

@@ -7,9 +7,11 @@ import {
 import {
 	CealEnrollmentClientError,
 	CealHttpTransportError,
+	CealPersonalClientSessionError,
 	createCealClient,
 	createCealEnrollmentClient,
 	createCealHttpTransport,
+	createCealPersonalClientSessionClient,
 } from "@corca-ai/ceal";
 import { stringify } from "yaml";
 import type { CealStoredProfile } from "./profile-store.js";
@@ -27,11 +29,13 @@ export interface CealCommandRuntime {
 	readSecret?: () => Promise<string>;
 	loadProfile?: () => Promise<CealStoredProfile | null>;
 	saveProfile?: (profile: CealStoredProfile) => Promise<void>;
+	removeProfile?: () => Promise<void>;
 	nextRequestId?: () => string;
+	now?: () => number;
 }
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "capabilities" | "profiles";
+	name: "version" | "commands" | "capabilities" | "profiles" | "call";
 	description: string;
 	usage: string;
 	effect: "read_only" | "local_write";
@@ -62,7 +66,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "profiles",
 		description: "Enroll and inspect the local Gateway-issued profile.",
-		usage: "ceal profiles [enroll --gateway <https-url> --code-stdin]",
+		usage: "ceal profiles [enroll --gateway <https-url> --code-stdin | logout]",
 		effect: "local_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.profiles.v1",
@@ -76,6 +80,15 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery: "Configure a Gateway-issued client profile, then run 'ceal capabilities' again.",
+	},
+	{
+		name: "call",
+		description: "Invoke an approved capability and read back its Gateway audit event.",
+		usage: "ceal call message.search --target <target-ref> query=<text> [limit=<1-10>]",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.call.v1",
+		recovery: "Run 'ceal capabilities', then use one granted capability and target exactly as discovered.",
 	},
 ];
 
@@ -100,7 +113,7 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
 	const options = args.slice(1);
 	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
-	if (options.length !== 0 && command.name !== "capabilities" && command.name !== "profiles") return writeError("invalid_argument", "Invalid ceal command options.", io);
+	if (options.length !== 0 && command.name !== "capabilities" && command.name !== "profiles" && command.name !== "call") return writeError("invalid_argument", "Invalid ceal command options.", io);
 	return runKnownCommand(command.name, options, io, runtime);
 }
 
@@ -113,6 +126,7 @@ async function runKnownCommand(
 	if (command === "version") return writeVersion(io);
 	if (command === "commands") return writeCommands(io);
 	if (command === "profiles") return runProfiles(options, io, runtime);
+	if (command === "call") return runCall(options, io, runtime);
 	return runCapabilities(options, io, runtime);
 }
 
@@ -132,8 +146,14 @@ function commandHelp(command: CealCommandDefinition): string {
 		]
 		: command.name === "profiles" ? [
 			"  enroll                 Exchange a one-time code for a local profile.",
+			"  logout                 Revoke the renewable session and remove the local profile.",
 			"  --gateway <https-url>  Gateway client endpoint.",
 			"  --code-stdin            Read the one-time enrollment code from stdin.",
+		] : command.name === "call" ? [
+			"  message.search          Search an approved message target.",
+			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
+			"  query=<text>            Non-empty UTF-8 query, at most 512 bytes.",
+			"  limit=<1-10>            Optional result limit; defaults to 5.",
 		] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -176,16 +196,20 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	let profileRef: string;
 	let requestId: string;
 	let accessToken: string;
+	let storedProfile: CealStoredProfile | null = null;
 	if (options.length === 0) {
 		if (!runtime.loadProfile) return writeCapabilitiesUnavailable(io);
 		try {
-			const profile = await runtime.loadProfile();
+			const loaded = await runtime.loadProfile();
+			const profile = loaded ? await ensureCurrentProfile(loaded, runtime) : null;
 			if (!profile) return writeCapabilitiesUnavailable(io);
 			endpoint = profile.gatewayEndpoint;
 			profileRef = profile.profileRef;
 			accessToken = profile.accessToken;
+			storedProfile = profile;
 			requestId = runtime.nextRequestId?.() ?? "ceal:capabilities";
-		} catch {
+		} catch (error) {
+			if (error instanceof CealProfileSessionError) return writeProfileSessionUnavailable(error.code, io);
 			return writeGatewayUnavailable("profile_load_failed", io);
 		}
 	} else {
@@ -198,13 +222,21 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		try { accessToken = await runtime.readSecret(); } catch { return writeGatewayUnavailable("credential_input_failed", io); }
 	}
 	try {
-		const client = createCealClient(createCealHttpTransport({ endpoint, accessToken }));
-		const handshake = await client.request({
+		let client = createCealClient(createCealHttpTransport({ endpoint, accessToken }));
+		let handshake = await client.request({
 			request_id: `${requestId}:handshake`,
 			operation: "handshake",
 			profile_ref: profileRef,
 			body: { client: { name: "ceal", version: CEAL_PACKAGE_VERSION } },
 		});
+		if (!handshake.ok && gatewayFailureCode(handshake.error) === "authentication_failed" && storedProfile?.refreshToken) {
+			storedProfile = await ensureCurrentProfile(storedProfile, runtime, true);
+			client = createCealClient(createCealHttpTransport({ endpoint, accessToken: storedProfile.accessToken }));
+			handshake = await client.request({
+				request_id: `${requestId}:handshake`, operation: "handshake", profile_ref: profileRef,
+				body: { client: { name: "ceal", version: CEAL_PACKAGE_VERSION } },
+			});
+		}
 		if (!handshake.ok) return writeGatewayFailure(handshake, io);
 		const discovery = await client.request({
 			request_id: `${requestId}:discover`,
@@ -239,9 +271,115 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			},
 		});
 	} catch (error) {
+		if (error instanceof CealProfileSessionError) return writeProfileSessionUnavailable(error.code, io);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
 		return writeGatewayUnavailable(reason, io);
 	}
+}
+
+async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const parsed = parseCallOptions(options);
+	if (!parsed.ok) return writeError("invalid_argument", "Invalid capability call options.", io);
+	if (!runtime.loadProfile) return writeCallUnavailable("profile_unavailable", io);
+	let profile: CealStoredProfile | null;
+	try {
+		const loaded = await runtime.loadProfile();
+		profile = loaded ? await ensureCurrentProfile(loaded, runtime) : null;
+	} catch (error) {
+		return error instanceof CealProfileSessionError
+			? writeCallUnavailable(error.code, io) : writeCallUnavailable("profile_load_failed", io);
+	}
+	if (!profile) return writeCallUnavailable("profile_unavailable", io);
+	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
+	try {
+		let client = createCealClient(createCealHttpTransport({ endpoint: profile.gatewayEndpoint, accessToken: profile.accessToken }));
+		const callInput = {
+			request_id: requestId,
+			operation: "call" as const,
+			profile_ref: profile.profileRef,
+			body: {
+				capability_id: "message.search",
+				target_ref: parsed.targetRef,
+				arguments: { query: parsed.query, limit: parsed.limit },
+				purpose: "Search approved messages for the current task.",
+			},
+		};
+		let call = await client.request(callInput);
+		if (!call.ok && gatewayFailureCode(call.error) === "authentication_failed" && profile.refreshToken) {
+			profile = await ensureCurrentProfile(profile, runtime, true);
+			client = createCealClient(createCealHttpTransport({ endpoint: profile.gatewayEndpoint, accessToken: profile.accessToken }));
+			call = await client.request(callInput);
+		}
+		if (!call.ok) return writeCallGatewayFailure(call, io);
+		const readback = await client.request({
+			request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
+			operation: "readback",
+			profile_ref: profile.profileRef,
+			body: { request_id: requestId },
+		});
+		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io);
+		return writeYaml(io.stdout, {
+			schema_version: "ceal.call.v1", command: "ceal", status: "completed",
+			credential_context: CREDENTIAL_CONTEXT,
+			capability_id: call.value.capability_id, target_ref: call.value.target_ref,
+			data: call.value.data, redaction: call.value.redaction,
+			host_decision: call.value.host_decision,
+			audit: { verified: true, request_id: requestId, events: readback.value.events },
+			proof_level: "host_decision",
+			non_claims: call.value.non_claims,
+		});
+	} catch (error) {
+		if (error instanceof CealProfileSessionError) return writeCallUnavailable(error.code, io);
+		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
+		return writeCallUnavailable(reason, io);
+	}
+}
+
+type ParsedCallOptions = { ok: true; targetRef: string; query: string; limit: number } | { ok: false };
+
+function parseCallOptions(options: readonly string[]): ParsedCallOptions {
+	if (options.length < 4 || options.length > 5 || options[0] !== "message.search" || options[1] !== "--target") return { ok: false };
+	const targetRef = options[2];
+	if (!targetRef || !/^target:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(targetRef)) return { ok: false };
+	let query: string | undefined;
+	let limit = 5;
+	for (const operand of options.slice(3)) {
+		if (operand.startsWith("query=") && query === undefined) query = operand.slice(6);
+		else if (operand.startsWith("limit=") && limit === 5) limit = Number(operand.slice(6));
+		else return { ok: false };
+	}
+	if (!query || new TextEncoder().encode(query).byteLength > 512 || !Number.isInteger(limit) || limit < 1 || limit > 10) return { ok: false };
+	return { ok: true, targetRef, query, limit };
+}
+
+function writeCallGatewayFailure(response: { error: unknown }, io: CealCliIo): number {
+	const failure = classifyGatewayFailure(response.error);
+	writeYaml(io.stdout, {
+		schema_version: "ceal.call.v1", command: "ceal", status: failure.denial ? "denied" : "unavailable",
+		credential_context: CREDENTIAL_CONTEXT, audit: { verified: false }, proof_level: "host_decision",
+		error: { code: failure.code, message: failure.message, next_action: failure.nextAction },
+		non_claims: ["No successful capability result or audit completion readback was reached."],
+	});
+	return 3;
+}
+
+function writeCallIncomplete(value: unknown, requestId: string, reason: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.call.v1", command: "ceal", status: "completed_unverified",
+		credential_context: CREDENTIAL_CONTEXT, result: value,
+		audit: { verified: false, request_id: requestId }, proof_level: "host_decision",
+		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
+	});
+	return 3;
+}
+
+function writeCallUnavailable(reason: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.call.v1", command: "ceal", status: "unavailable",
+		credential_context: CREDENTIAL_CONTEXT, audit: { verified: false }, proof_level: "surface",
+		error: { kind: reason, message: "The capability call could not be completed.", next_action: "Run 'ceal capabilities' and verify the stored profile and target grant." },
+	});
+	return 3;
 }
 
 async function runProfiles(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -260,11 +398,16 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			subject_ref: profile?.subjectRef ?? null,
 			instance_ref: profile?.instanceRef ?? null,
 			expires_at: profile?.expiresAt ?? null,
+			access_status: profile ? (Date.parse(profile.expiresAt) > (runtime.now?.() ?? Date.now()) ? "current" : "expired") : null,
+			renewal_available: Boolean(profile?.refreshToken),
+			refresh_token_idle_expires_at: profile?.refreshTokenIdleExpiresAt ?? null,
+			refresh_token_absolute_expires_at: profile?.refreshTokenAbsoluteExpiresAt ?? null,
 			raw_token_visible: false,
 			proof_level: "local_state",
 			next_action: profile ? "Run 'ceal capabilities' to verify live Gateway access." : "Run 'ceal profiles enroll --help'.",
 		});
 	}
+	if (options.length === 1 && options[0] === "logout") return runProfileLogout(io, runtime);
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeError("invalid_argument", "Invalid profile enrollment options.", io);
 	if (!runtime.readSecret || !runtime.saveProfile) return writeEnrollmentUnavailable("profile_runtime_unavailable", io);
@@ -283,6 +426,11 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			instanceRef: response.instance_ref,
 			accessToken: response.access_token,
 			expiresAt: response.expires_at,
+			...(response.refresh_token ? {
+				refreshToken: response.refresh_token,
+				refreshTokenIdleExpiresAt: response.refresh_token_idle_expires_at,
+				refreshTokenAbsoluteExpiresAt: response.refresh_token_absolute_expires_at,
+			} : {}),
 		});
 		return writeYaml(io.stdout, {
 			schema_version: "ceal.profile_enrollment.v1",
@@ -296,6 +444,9 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 			subject_ref: response.subject_ref,
 			instance_ref: response.instance_ref,
 			expires_at: response.expires_at,
+			renewal_available: Boolean(response.refresh_token),
+			refresh_token_idle_expires_at: response.refresh_token_idle_expires_at ?? null,
+			refresh_token_absolute_expires_at: response.refresh_token_absolute_expires_at ?? null,
 			raw_token_visible: false,
 			proof_level: "host_decision",
 			next_action: "Run 'ceal capabilities' to verify the stored profile and Gateway binding.",
@@ -304,6 +455,90 @@ async function runProfiles(options: readonly string[], io: CealCliIo, runtime: C
 		const reason = error instanceof CealEnrollmentClientError ? error.code : "profile_save_failed";
 		return writeEnrollmentUnavailable(reason, io);
 	}
+}
+
+async function runProfileLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	if (!runtime.loadProfile || !runtime.removeProfile) return writeEnrollmentUnavailable("profile_runtime_unavailable", io);
+	let profile: CealStoredProfile | null;
+	try { profile = await runtime.loadProfile(); } catch { return writeEnrollmentUnavailable("profile_load_failed", io); }
+	if (!profile) {
+		return writeYaml(io.stdout, {
+			schema_version: "ceal.profile_logout.v1", command: "ceal", status: "already_logged_out",
+			server_session_revoked: false, local_profile_removed: false, raw_token_visible: false,
+			proof_level: "local_state", next_action: "Run 'ceal profiles enroll --help' to configure a profile.",
+		});
+	}
+	if (profile.refreshToken) {
+		try {
+			const response = await createCealPersonalClientSessionClient({ endpoint: profile.gatewayEndpoint }).revoke(profile.refreshToken);
+			if (!response.ok && response.error.code !== "refresh_revoked") return writeProfileSessionUnavailable(response.error.code, io);
+		} catch (error) {
+			const reason = error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
+			return writeProfileSessionUnavailable(reason, io);
+		}
+	}
+	try { await runtime.removeProfile(); } catch { return writeProfileSessionUnavailable("profile_remove_failed", io); }
+	return writeYaml(io.stdout, {
+		schema_version: "ceal.profile_logout.v1", command: "ceal", status: "logged_out",
+		server_session_revoked: Boolean(profile.refreshToken), local_profile_removed: true, raw_token_visible: false,
+		proof_level: profile.refreshToken ? "host_decision" : "local_state",
+		next_action: "Run 'ceal profiles enroll --help' to configure another profile.",
+	});
+}
+
+class CealProfileSessionError extends Error {
+	constructor(readonly code: string) { super("Ceal profile session unavailable."); }
+}
+
+async function ensureCurrentProfile(profile: CealStoredProfile, runtime: CealCommandRuntime, force = false): Promise<CealStoredProfile> {
+	const now = runtime.now?.() ?? Date.now();
+	if (!force && Date.parse(profile.expiresAt) > now + 60_000) return profile;
+	if (!profile.refreshToken || !runtime.saveProfile) throw new CealProfileSessionError("reenrollment_required");
+	if (profile.refreshTokenAbsoluteExpiresAt && Date.parse(profile.refreshTokenAbsoluteExpiresAt) <= now) {
+		throw new CealProfileSessionError("refresh_expired");
+	}
+	let response;
+	try {
+		response = await createCealPersonalClientSessionClient({ endpoint: profile.gatewayEndpoint }).refresh(profile.refreshToken);
+	} catch (error) {
+		throw new CealProfileSessionError(error instanceof CealPersonalClientSessionError ? error.code : "request_failed");
+	}
+	if (!response.ok) throw new CealProfileSessionError(response.error.code);
+	for (const [actual, expected] of [
+		[response.profile_ref, profile.profileRef], [response.registration_ref, profile.registrationRef],
+		[response.client_ref, profile.clientRef], [response.runner_ref, profile.runnerRef],
+		[response.subject_ref, profile.subjectRef], [response.instance_ref, profile.instanceRef],
+	] as const) {
+		if (actual !== expected) throw new CealProfileSessionError("binding_changed");
+	}
+	const rotated: CealStoredProfile = {
+		...profile,
+		accessToken: response.access_token,
+		expiresAt: response.expires_at,
+		refreshToken: response.refresh_token,
+		refreshTokenIdleExpiresAt: response.refresh_token_idle_expires_at,
+		refreshTokenAbsoluteExpiresAt: response.refresh_token_absolute_expires_at,
+	};
+	await runtime.saveProfile(rotated);
+	return rotated;
+}
+
+function gatewayFailureCode(error: unknown): string | null {
+	return error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string"
+		? (error as { code: string }).code : null;
+}
+
+function writeProfileSessionUnavailable(reason: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.profile_session.v1", command: "ceal", status: "unavailable",
+		credential_context: CREDENTIAL_CONTEXT, proof_level: "surface", raw_token_visible: false,
+		error: {
+			kind: reason,
+			message: "The stored Gateway session could not be renewed or revoked safely.",
+			next_action: "Run 'ceal profiles' to inspect expiry, then request a new enrollment code if renewal is unavailable.",
+		},
+	});
+	return 3;
 }
 
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string } | { ok: false } {

@@ -48,6 +48,26 @@ test("enrollment request and issued result decode exact bounded material", () =>
 	assert.equal(result.access_token, TOKEN);
 });
 
+test("enrollment accepts one all-or-nothing refresh-capable result", () => {
+	const result = decodeCealEnrollmentResponse({
+		schema_version: "ceal.enrollment_result.v1",
+		ok: true,
+		profile_ref: "profile:work",
+		registration_ref: "registration:narnia",
+		client_ref: "client:narnia",
+		runner_ref: "runner:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:ceal-dev",
+		access_token: `ceal_personal_${"A".repeat(43)}`,
+		expires_at: "2026-07-13T06:15:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
+	});
+	assert.equal(result.ok, true);
+	if (result.ok) assert.match(result.refresh_token, /^ceal_refresh_/u);
+});
+
 test("enrollment decoders reject extra fields, malformed codes, and token drift", () => {
 	for (const request of [
 		{ schema_version: "ceal.enrollment_exchange.v1", code: "short", client: { name: "ceal", version: "0.64.0" } },

@@ -18,6 +18,14 @@ export type {
 	CealEnrollmentClient,
 	CreateCealEnrollmentClientOptions,
 } from "./enrollment-client.js";
+export {
+	CealPersonalClientSessionError,
+	createCealPersonalClientSessionClient,
+} from "./personal-client-session-client.js";
+export type {
+	CealPersonalClientSessionClient,
+	CreateCealPersonalClientSessionClientOptions,
+} from "./personal-client-session-client.js";
 export type {
 	CealClientTransport,
 	CealHttpTransportErrorCode,

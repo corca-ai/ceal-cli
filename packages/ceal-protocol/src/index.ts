@@ -40,6 +40,25 @@ export type {
 	CealEnrollmentResponse,
 	CealEnrollmentResult,
 } from "./enrollment.js";
+export {
+	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
+	CEAL_CLIENT_REFRESH_RESULT_SCHEMA,
+	CEAL_CLIENT_REVOKE_REQUEST_SCHEMA,
+	CEAL_CLIENT_REVOKE_RESULT_SCHEMA,
+	decodeCealClientRefreshRequest,
+	decodeCealClientRefreshResponse,
+	decodeCealClientRevokeRequest,
+	decodeCealClientRevokeResponse,
+} from "./personal-client-session.js";
+export type {
+	CealClientRefreshRequest,
+	CealClientRefreshResponse,
+	CealClientRefreshResult,
+	CealClientRevokeRequest,
+	CealClientRevokeResponse,
+	CealClientRevokeResult,
+	CealClientSessionFailure,
+} from "./personal-client-session.js";
 export type {
 	CealGatewayAuditEvent,
 	CealGatewayAuditReadbackValue,

@@ -58,7 +58,8 @@ test("canonical registry is reachable through stable, read-only help", async () 
 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
-		const payload = await yamlRun([command.name]);
+		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"] : [command.name];
+		const payload = await yamlRun(args, command.name === "call" ? 3 : 0);
 		assert.equal(payload.schema_version, command.result_schema);
 		assert.equal(payload.command, "ceal");
 	}
@@ -78,7 +79,7 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "profiles", "capabilities"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "profiles", "capabilities", "call"]);
 });
 
 test("profiles enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
@@ -91,7 +92,66 @@ test("profiles enrollment exchanges stdin once, stores the credential, and never
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.raw_token_visible, false);
 		assert.equal(stored.accessToken, token);
+		assert.match(stored.refreshToken, /^ceal_refresh_/u);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+	});
+});
+
+test("capabilities renews an expiring stored session once and persists the rotation", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken, requests }) => {
+		let saved = null;
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadProfile: async () => storedProfile(endpoint, { accessToken: `ceal_personal_${"O".repeat(43)}`, expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+			saveProfile: async (profile) => { saved = profile; },
+			nextRequestId: () => "narnia:renewed:001",
+			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(saved.accessToken, newAccessToken);
+		assert.equal(saved.refreshToken, newRefreshToken);
+		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`]);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(oldRefreshToken, "u"));
+	});
+});
+
+test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
+		let saved = null;
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadProfile: async () => storedProfile(endpoint, { refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z" }),
+			saveProfile: async (profile) => { saved = profile; }, nextRequestId: () => "narnia:retry:001",
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(saved.accessToken, newAccessToken);
+		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`]);
+	}, { rejectFirstGateway: true });
+});
+
+test("profiles logout revokes the server session before removing the local profile", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, revoked }) => {
+		let removed = false;
+		const payload = await yamlRun(["profiles", "logout"], 0, {
+			loadProfile: async () => storedProfile(endpoint, { refreshToken: oldRefreshToken }),
+			removeProfile: async () => { removed = true; },
+		});
+		assert.equal(payload.status, "logged_out");
+		assert.equal(payload.server_session_revoked, true);
+		assert.equal(removed, true);
+		assert.deepEqual(revoked, [oldRefreshToken]);
+	});
+});
+
+test("call invokes one granted capability and independently reads back its audit event", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch", "limit=3"], 0, {
+			loadProfile: async () => storedProfile(endpoint),
+			nextRequestId: (() => { let id = 0; return () => `narnia:call:${++id}`; })(),
+		});
+		assert.equal(payload.status, "completed");
+		assert.equal(payload.audit.verified, true);
+		assert.equal(payload.data.result_count, 1);
+		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "readback"]);
+		assert.equal(requests[0].body.body.arguments.query, "launch");
 	});
 });
 
@@ -260,9 +320,10 @@ async function withGateway(callback, responseFactory = null) {
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		requests.push({ authorization: request.headers.authorization, body });
-		const value = responseFactory
-			? responseFactory(body)
-			: body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
+		const value = responseFactory ? responseFactory(body)
+			: body.operation === "handshake" ? handshakeResponse(body)
+				: body.operation === "discover" ? discoveryResponse(body)
+					: body.operation === "call" ? callResponse(body) : readbackResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
@@ -298,6 +359,7 @@ async function runBin(args, stdin, env = {}) {
 
 async function withEnrollmentGateway(callback) {
 	const token = `ceal_personal_${"T".repeat(43)}`;
+	const refreshToken = `ceal_refresh_${"R".repeat(43)}`;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
@@ -310,6 +372,9 @@ async function withEnrollmentGateway(callback) {
 			profile_ref: "profile:narnia", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			access_token: token, expires_at: "2099-07-14T00:00:00.000Z",
+			refresh_token: refreshToken,
+			refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+			refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
 		}));
 	});
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -317,6 +382,62 @@ async function withEnrollmentGateway(callback) {
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token }); }
 	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+}
+
+async function withRenewingGateway(callback, options = {}) {
+	const oldRefreshToken = `ceal_refresh_${"O".repeat(43)}`;
+	const newRefreshToken = `ceal_refresh_${"N".repeat(43)}`;
+	const newAccessToken = `ceal_personal_${"N".repeat(43)}`;
+	const requests = [];
+	const revoked = [];
+	let gatewayRejected = false;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		if (request.url === "/gateway/client/refresh") {
+			assert.equal(body.refresh_token, oldRefreshToken);
+			response.writeHead(200, { "content-type": "application/json" });
+			response.end(JSON.stringify({
+				schema_version: "ceal.client_refresh_result.v1", ok: true,
+				profile_ref: "profile:narnia", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+				subject_ref: "subject:hwidong", instance_ref: "instance:corca", access_token: newAccessToken,
+				expires_at: "2099-07-14T00:00:00.000Z", refresh_token: newRefreshToken,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			}));
+			return;
+		}
+		if (request.url === "/gateway/client/revoke") {
+			revoked.push(body.refresh_token);
+			response.writeHead(200, { "content-type": "application/json" });
+			response.end(JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }));
+			return;
+		}
+		requests.push({ authorization: request.headers.authorization, body });
+		if (options.rejectFirstGateway && !gatewayRejected) {
+			gatewayRejected = true;
+			response.writeHead(401, { "content-type": "application/json" });
+			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.0.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
+			return;
+		}
+		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify(value));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, oldRefreshToken, newAccessToken, newRefreshToken, requests, revoked }); }
+	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+}
+
+function storedProfile(endpoint, overrides = {}) {
+	return {
+		gatewayEndpoint: endpoint, profileRef: "profile:narnia", registrationRef: "registration:narnia",
+		clientRef: "client:narnia", runnerRef: "runner:narnia", subjectRef: "subject:hwidong", instanceRef: "instance:corca",
+		accessToken: `ceal_personal_${"P".repeat(43)}`, expiresAt: "2099-07-14T00:00:00.000Z",
+		...overrides,
+	};
 }
 
 function parseYaml(stdout) {
@@ -366,6 +487,33 @@ function discoveryResponse(request) {
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
+
+function callResponse(request) {
+	return success(request, {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search", target_ref: request.body.target_ref,
+		data: {
+			schema_version: "ceal.message_search_result.v1", query: { redacted: true, utf8_bytes: 6, empty: false },
+			result_count: 1,
+			results: [{ ref: "message:msg_001", target_ref: request.body.target_ref, created_at: "2026-07-10T00:00:00.000Z", source_label: "Team inbox", text_preview: "Launch readiness is green." }],
+			minimization: { raw_provider_ids_included: false, raw_messages_included: false, credential_material_included: false },
+		},
+		redaction: { state: "applied", omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"] },
+		host_decision: "accepted", proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
+
+function readbackResponse(request) {
+	return success(request, {
+		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
+		events: [{
+			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:001", request_id: request.body.request_id,
+			profile_ref: request.profile_ref, registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
+			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		}],
 	});
 }
 
