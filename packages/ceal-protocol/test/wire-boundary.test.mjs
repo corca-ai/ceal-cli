@@ -6,6 +6,8 @@ import {
 	CealProtocolValidationError,
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
+	isCealPublicSafeText,
+	redactCealPublicUnsafeText,
 } from "../dist/index.js";
 
 const envelope = (operation, body) => ({
@@ -14,6 +16,24 @@ const envelope = (operation, body) => ({
 	operation,
 	profile_ref: "profile:test",
 	body,
+});
+
+test("public safe-text policy redacts every credential, provider, opaque, and control class", () => {
+	const unsafe = [
+		["g", "hp_exampleCredential1234567890"].join(""),
+		["AI", "zaExampleGoogleCredential12"].join(""),
+		["AK", "IAEXAMPLECREDENTIAL1"].join(""),
+		["BEGIN ", "PRIVATE KEY"].join(""),
+		"1AbCdEfGhIjKlMnOpQrStUvWxYz",
+		"slack:C123456789",
+		"line\nbreak",
+	];
+	for (const value of unsafe) {
+		assert.equal(isCealPublicSafeText(value, 1024), false, value);
+		const redacted = redactCealPublicUnsafeText(`safe ${value} tail`);
+		assert.equal(isCealPublicSafeText(redacted, 1024), true, redacted);
+		assert.equal(redacted.includes(value), false, value);
+	}
 });
 
 test("Gateway request decoder accepts the four exact semantic operations", () => {

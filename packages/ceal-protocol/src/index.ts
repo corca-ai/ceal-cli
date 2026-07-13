@@ -246,7 +246,7 @@ const REQUEST_KEYS = ["body", "operation", "profile_ref", "protocol_version", "r
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const RAW_PROVIDER_REF = /(?:\b[CDGUW][A-Z0-9]{8,}\b|(?:slack|github|notion|google-workspace):[^\s"']+|[0-9]{10}[.][0-9]{4,})/u;
-const SECRET_MATERIAL = /(?:xox[baprs]-|gh[opusr]_|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA|Bearer\s+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY)/iu;
+const SECRET_MATERIAL = /(?:xox[baprs]-[A-Za-z0-9-]+|gh[opusr]_[A-Za-z0-9_-]+|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+\S+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+)/iu;
 const OPAQUE_TEXT_MATERIAL = /(?:\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b(?=[A-Za-z0-9_-]{24,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{24,}\b)/u;
 const FORBIDDEN_SECRET_KEY = /^(?:[a-z0-9_]*(?:token|secret|password|credential(?:s)?|private_?key)|api_?key|authorization|bearer|raw_?provider_?payload|provider_?payload)$/iu;
 const FORBIDDEN_AUTHORITY_KEY = /^(?:actor_?ref|owner_?ref|registration_?ref|runner_?ref|auth_?decision|policy_?decision|host_?decision)$/iu;
@@ -741,8 +741,23 @@ function requirePrefixedRef(value: unknown, prefix: string): asserts value is st
 }
 
 function requireSafeText(value: unknown, maxBytes: number): asserts value is string {
-	if (typeof value !== "string" || value.trim() === "" || byteLength(value) > maxBytes || hasControlCharacter(value)
-		|| SECRET_MATERIAL.test(value) || RAW_PROVIDER_REF.test(value) || OPAQUE_TEXT_MATERIAL.test(value)) invalidRequestOrResponse();
+	if (!isCealPublicSafeText(value, maxBytes)) invalidRequestOrResponse();
+}
+
+export function isCealPublicSafeText(value: unknown, maxBytes: number): value is string {
+	return typeof value === "string" && value.trim() !== "" && byteLength(value) <= maxBytes && !hasControlCharacter(value)
+		&& !SECRET_MATERIAL.test(value) && !RAW_PROVIDER_REF.test(value) && !OPAQUE_TEXT_MATERIAL.test(value);
+}
+
+export function redactCealPublicUnsafeText(value: string): string {
+	return replaceAll(value, SECRET_MATERIAL, "[redacted-secret]")
+		.replace(new RegExp(RAW_PROVIDER_REF.source, `${RAW_PROVIDER_REF.flags}g`), "[provider-ref]")
+		.replace(new RegExp(OPAQUE_TEXT_MATERIAL.source, `${OPAQUE_TEXT_MATERIAL.flags}g`), "[redacted-opaque]")
+		.split("").map((character) => hasControlCharacter(character) ? " " : character).join("").trim();
+}
+
+function replaceAll(value: string, pattern: RegExp, replacement: string): string {
+	return value.replace(new RegExp(pattern.source, `${pattern.flags}g`), replacement);
 }
 
 function requireJsonByteSize(value: unknown, maximum: number, fail: () => never): void {
