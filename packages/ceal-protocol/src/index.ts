@@ -3,6 +3,7 @@ import {
 	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
 } from "./gateway-response-types.js";
 import type {
+	CealGatewayMessageSearchCoverage,
 	CealGatewayPolicyDenial,
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
@@ -402,7 +403,7 @@ function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<C
 	if (!Array.isArray(result.results) || result.results.length > input.limit || result.result_count !== result.results.length) invalidResponse();
 	const seen = new Set<string>();
 	for (const item of result.results) validateMessageSearchResultItem(item, expectedRequest.body.target_ref, seen);
-	validateMessageSearchCoverage(result.coverage);
+	assertCealGatewayMessageSearchCoverage(result.coverage);
 	const minimization = requireRecord(result.minimization);
 	requireExactKeys(minimization, ["credential_material_included", "raw_messages_included", "raw_provider_ids_included"]);
 	if (minimization.credential_material_included !== false
@@ -427,7 +428,9 @@ function validateCapabilityBindings(value: unknown, expectedCapabilities: readon
 	}
 }
 
-function validateMessageSearchCoverage(value: unknown): void {
+export function assertCealGatewayMessageSearchCoverage(
+	value: unknown,
+): asserts value is CealGatewayMessageSearchCoverage {
 	const coverage = requireRecord(value);
 	requireExactKeys(coverage, ["completeness", "match_semantics", "reply_coverage", "schema_version", "source", "truncated"]);
 	if (!validMessageSearchCoverageVocabulary(coverage)) invalidResponse();
@@ -558,7 +561,7 @@ function validateAuditCallDetail(value: unknown, event: Record<string, unknown>)
 	requireIntegerRange(call.requested_limit, 1, 10);
 	requireIntegerRange(call.query_utf8_bytes, 1, 512);
 	requireIntegerRange(call.result_count, 0, call.requested_limit);
-	validateMessageSearchCoverage(call.coverage);
+	assertCealGatewayMessageSearchCoverage(call.coverage);
 }
 
 function requireIntegerRange(value: unknown, minimum: number, maximum: number): asserts value is number {
