@@ -10,6 +10,14 @@ export {
 	CealHttpTransportError,
 	createCealHttpTransport,
 } from "./http-transport.js";
+export {
+	CealEnrollmentClientError,
+	createCealEnrollmentClient,
+} from "./enrollment-client.js";
+export type {
+	CealEnrollmentClient,
+	CreateCealEnrollmentClientOptions,
+} from "./enrollment-client.js";
 export type {
 	CealClientTransport,
 	CealHttpTransportErrorCode,

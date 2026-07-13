@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
@@ -41,7 +43,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 			const result = await run(args);
 			assert.equal(result.code, 0);
 			assert.equal(result.stderr, "");
-			assert.match(result.stdout, new RegExp(`^Usage: ${command.usage}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(command.usage)}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Effect: ${command.effect}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Evidence: ${command.evidence}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Result schema: ${command.result_schema}$`, "mu"));
@@ -76,7 +78,51 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "capabilities"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "profiles", "capabilities"]);
+});
+
+test("profiles enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
+	await withEnrollmentGateway(async ({ endpoint, token }) => {
+		let stored = null;
+		const payload = await yamlRun(["profiles", "enroll", "--gateway", endpoint, "--code-stdin"], 0, {
+			readSecret: async () => "E".repeat(48),
+			saveProfile: async (profile) => { stored = profile; },
+		});
+		assert.equal(payload.status, "enrolled");
+		assert.equal(payload.raw_token_visible, false);
+		assert.equal(stored.accessToken, token);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+	});
+});
+
+test("capabilities uses an enrolled profile without endpoint or token options", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const token = `ceal_personal_${"P".repeat(43)}`;
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadProfile: async () => ({
+				gatewayEndpoint: endpoint, profileRef: "profile:narnia", registrationRef: "registration:narnia",
+				clientRef: "client:narnia", runnerRef: "runner:narnia", accessToken: token, expiresAt: "2099-07-14T00:00:00.000Z",
+			}),
+			nextRequestId: () => "narnia:stored:001",
+		});
+		assert.equal(payload.status, "available");
+		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${token}`, `Bearer ${token}`]);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+	});
+});
+
+test("packaged bin persists an enrolled profile with owner-only modes", async () => {
+	await withEnrollmentGateway(async ({ endpoint, token }) => {
+		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-home-"));
+		try {
+			const result = await runBin(["profiles", "enroll", "--gateway", endpoint, "--code-stdin"], `${"E".repeat(48)}\n`, { HOME: home });
+			assert.equal(result.code, 0, result.stdout);
+			assert.doesNotMatch(result.stdout, new RegExp(token, "u"));
+			assert.equal(statSync(path.join(home, ".ceal")).mode & 0o777, 0o700);
+			assert.equal(statSync(path.join(home, ".ceal", "client-profile.json")).mode & 0o777, 0o600);
+			assert.equal(readFileSync(path.join(home, ".ceal", "client-profile.json"), "utf8").includes(token), true);
+		} finally { rmSync(home, { recursive: true, force: true }); }
+	});
 });
 
 test("capabilities reports an honest Gateway-required unavailable surface without connection options", async () => {
@@ -232,9 +278,9 @@ async function withGateway(callback, responseFactory = null) {
 	}
 }
 
-async function runBin(args, stdin) {
+async function runBin(args, stdin, env = {}) {
 	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
-	const child = spawn(process.execPath, [bin, ...args], { stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawn(process.execPath, [bin, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
 	let stdout = "";
 	let stderr = "";
 	child.stdout.setEncoding("utf8");
@@ -249,11 +295,37 @@ async function runBin(args, stdin) {
 	return { code, stdout, stderr };
 }
 
+async function withEnrollmentGateway(callback) {
+	const token = `ceal_personal_${"T".repeat(43)}`;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		assert.equal(request.url, "/gateway/client/enroll");
+		assert.equal(body.code, "E".repeat(48));
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify({
+			schema_version: "ceal.enrollment_result.v1", ok: true,
+			profile_ref: "profile:narnia", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			access_token: token, expires_at: "2099-07-14T00:00:00.000Z",
+		}));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token }); }
+	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+}
+
 function parseYaml(stdout) {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
 	assert.deepEqual(documents[0].errors, []);
 	return documents[0].toJS();
+}
+
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function handshakeResponse(request) {

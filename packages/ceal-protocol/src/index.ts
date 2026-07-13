@@ -22,6 +22,18 @@ export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
 	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
 } from "./gateway-response-types.js";
+export {
+	CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
+	CEAL_ENROLLMENT_RESULT_SCHEMA,
+	decodeCealEnrollmentExchangeRequest,
+	decodeCealEnrollmentResponse,
+} from "./enrollment.js";
+export type {
+	CealEnrollmentExchangeRequest,
+	CealEnrollmentFailure,
+	CealEnrollmentResponse,
+	CealEnrollmentResult,
+} from "./enrollment.js";
 export type {
 	CealGatewayAuditEvent,
 	CealGatewayAuditReadbackValue,

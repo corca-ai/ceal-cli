@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
+import { createCealProfileStore } from "./profile-store.js";
+
+let profileStore: ReturnType<typeof createCealProfileStore> | undefined;
+try { profileStore = createCealProfileStore(process.env.HOME); } catch { profileStore = undefined; }
 
 void runCealCommand(process.argv.slice(2), {
 	stdout: process.stdout,
 	stderr: process.stderr,
 }, {
 	readSecret: readStdinSecret,
+	loadProfile: profileStore ? () => profileStore.load() : undefined,
+	saveProfile: profileStore ? (profile) => profileStore.save(profile) : undefined,
+	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
 	process.exitCode = code;
 }, () => {
