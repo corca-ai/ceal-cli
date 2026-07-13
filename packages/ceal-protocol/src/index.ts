@@ -470,14 +470,10 @@ function validateMessageSearchBackendDescriptor(value: unknown): void {
 	const backend = requireRecord(value);
 	requireExactKeys(backend, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "schema_version", "scope", "thread_replies"]);
 	const fieldsAreValid = [
-		backend.schema_version === "ceal.message_search_backend.v1",
-		["mature_search", "degraded_fallback"].includes(String(backend.mode)),
-		["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class)),
-		backend.scope === "granted_target",
-		["provider_search", "recent_channel_history"].includes(String(backend.provenance)),
-		["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode)),
-		["included", "excluded"].includes(String(backend.thread_replies)),
-		["bounded", "incomplete"].includes(String(backend.completeness)),
+		backend.schema_version === "ceal.message_search_backend.v1", ["mature_search", "degraded_fallback"].includes(String(backend.mode)),
+		["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class)), backend.scope === "granted_target",
+		["provider_search", "recent_channel_history"].includes(String(backend.provenance)), ["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode)),
+		["included", "excluded"].includes(String(backend.thread_replies)), ["bounded", "incomplete"].includes(String(backend.completeness)),
 	].every(Boolean);
 	if (!fieldsAreValid) invalidResponse();
 	if (backend.mode === "mature_search") requireBackendFields(backend, "provider_search", "included", backend.completeness);
@@ -761,8 +757,7 @@ export function isCealPublicSafeText(value: unknown, maxBytes: number): value is
 }
 
 export function redactCealPublicUnsafeText(value: string): string {
-	return replaceAll(value, SECRET_MATERIAL, "[redacted-secret]")
-		.replace(new RegExp(RAW_PROVIDER_REF.source, `${RAW_PROVIDER_REF.flags}g`), "[provider-ref]")
+	return replaceAll(value, SECRET_MATERIAL, "[redacted-secret]").replace(new RegExp(RAW_PROVIDER_REF.source, `${RAW_PROVIDER_REF.flags}g`), "[provider-ref]")
 		.replace(new RegExp(OPAQUE_TEXT_MATERIAL.source, `${OPAQUE_TEXT_MATERIAL.flags}g`), "[redacted-opaque]")
 		.split("").map((character) => hasControlCharacter(character) ? " " : character).join("").trim();
 }
