@@ -508,7 +508,7 @@ function discoveryResponse(request) {
 			},
 			evidence_requirement: "gateway_audit",
 		}],
-		targets: [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"] }],
+		targets: [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], search_backend: matureSearchBackend() }],
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -522,6 +522,7 @@ function callResponse(request) {
 			schema_version: "ceal.message_search_result.v1", query: { redacted: true, utf8_bytes: 6, empty: false },
 			result_count: 1,
 			results: [{ ref: "message:msg_001", target_ref: request.body.target_ref, created_at: "2026-07-10T00:00:00.000Z", source_label: "Team inbox", text_preview: "Launch readiness is green." }],
+			coverage: { ...matureSearchBackend(), provider_truncated: false },
 			minimization: { raw_provider_ids_included: false, raw_messages_included: false, credential_material_included: false },
 		},
 		redaction: { state: "applied", omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"] },
@@ -536,10 +537,29 @@ function readbackResponse(request) {
 		events: [{
 			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:001", request_id: request.body.request_id,
 			profile_ref: request.profile_ref, registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			occurred_at: "2026-07-13T21:00:00.000Z",
 			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
+			call: {
+				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search", target_ref: "target:team-inbox",
+				requested_limit: 5, query_utf8_bytes: 6, result_count: 1,
+				coverage: { ...matureSearchBackend(), provider_truncated: false },
+			},
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		}],
 	});
+}
+
+function matureSearchBackend() {
+	return {
+		schema_version: "ceal.message_search_backend.v1",
+		mode: "mature_search",
+		credential_identity_class: "delegated_user",
+		scope: "granted_target",
+		provenance: "provider_search",
+		match_mode: "provider_ranked",
+		thread_replies: "included",
+		completeness: "bounded",
+	};
 }
 
 function success(request, value) {

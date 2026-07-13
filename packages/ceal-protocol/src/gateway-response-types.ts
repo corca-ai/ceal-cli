@@ -84,12 +84,38 @@ export interface CealGatewayDiscoveryCapability {
 	evidence_requirement: "gateway_audit";
 }
 
-export interface CealGatewayDiscoveryTarget {
+export type CealMessageSearchBackendMode = "mature_search" | "degraded_fallback";
+export type CealMessageSearchCredentialIdentityClass = "delegated_user" | "organization_service" | "bot";
+export type CealMessageSearchProvenance = "provider_search" | "recent_channel_history";
+export type CealMessageSearchMatchMode = "provider_ranked" | "literal_case_insensitive_substring";
+
+export interface CealMessageSearchBackendDescriptor {
+	schema_version: "ceal.message_search_backend.v1";
+	mode: CealMessageSearchBackendMode;
+	credential_identity_class: CealMessageSearchCredentialIdentityClass;
+	scope: "granted_target";
+	provenance: CealMessageSearchProvenance;
+	match_mode: CealMessageSearchMatchMode;
+	thread_replies: "included" | "excluded";
+	completeness: "bounded" | "incomplete";
+}
+
+export interface CealGatewayGrantedDiscoveryTarget {
 	target_ref: string;
 	label: string;
-	access: "granted" | "request_required";
-	capability_ids: Array<"message.search">;
+	access: "granted";
+	capability_ids: ["message.search"];
+	search_backend: CealMessageSearchBackendDescriptor;
 }
+
+export interface CealGatewayRequestRequiredDiscoveryTarget {
+	target_ref: string;
+	label: string;
+	access: "request_required";
+	capability_ids: [];
+}
+
+export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | CealGatewayRequestRequiredDiscoveryTarget;
 
 export interface CealGatewayCallValue {
 	schema_version: "ceal.gateway_call_result.v1";
@@ -110,11 +136,16 @@ export interface CealGatewayMessageSearchResult {
 	query: { redacted: true; utf8_bytes: number; empty: false };
 	result_count: number;
 	results: CealGatewayMessageSearchResultItem[];
+	coverage: CealGatewayMessageSearchCoverage;
 	minimization: {
 		raw_provider_ids_included: false;
 		raw_messages_included: false;
 		credential_material_included: false;
 	};
+}
+
+export interface CealGatewayMessageSearchCoverage extends CealMessageSearchBackendDescriptor {
+	provider_truncated: boolean;
 }
 
 export interface CealGatewayMessageSearchResultItem {
@@ -159,13 +190,25 @@ export interface CealGatewayAuditEvent {
 	registration_ref: string;
 	client_ref: string;
 	runner_ref: string;
+	occurred_at: string;
 	operation: CealGatewayRequest["operation"];
 	auth_decision: "allowed" | "denied";
 	policy_decision: "allowed" | "denied" | "not_evaluated";
 	outcome: "succeeded" | "denied" | "failed";
 	error_code: string | null;
+	call?: CealGatewayAuditCallDetail;
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+}
+
+export interface CealGatewayAuditCallDetail {
+	schema_version: "ceal.gateway_audit_call_detail.v1";
+	capability_id: "message.search";
+	target_ref: string;
+	requested_limit: number;
+	query_utf8_bytes: number;
+	result_count: number;
+	coverage: CealGatewayMessageSearchCoverage;
 }
 
 export interface CealGatewayAuditReadbackValue {

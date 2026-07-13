@@ -271,6 +271,7 @@ function discoveryResponse(input) {
 				label: "Approved workspace",
 				access: "granted",
 				capability_ids: ["message.search"],
+				search_backend: matureSearchBackend(),
 			}],
 			host_decision: "accepted",
 			proof_level: "host_decision",
@@ -300,6 +301,7 @@ function allowedCallResponse(input) {
 					source_label: "Approved workspace",
 					text_preview: "Quarterly plan review is scheduled.",
 				}],
+				coverage: { ...matureSearchBackend(), provider_truncated: false },
 				minimization: {
 					raw_provider_ids_included: false,
 					raw_messages_included: false,
@@ -314,6 +316,19 @@ function allowedCallResponse(input) {
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		},
+	};
+}
+
+function matureSearchBackend() {
+	return {
+		schema_version: "ceal.message_search_backend.v1",
+		mode: "mature_search",
+		credential_identity_class: "delegated_user",
+		scope: "granted_target",
+		provenance: "provider_search",
+		match_mode: "provider_ranked",
+		thread_replies: "included",
+		completeness: "bounded",
 	};
 }
 

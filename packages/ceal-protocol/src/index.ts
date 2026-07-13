@@ -61,6 +61,7 @@ export type {
 } from "./personal-client-session.js";
 export type {
 	CealGatewayAuditEvent,
+	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
 	CealGatewayCallValue,
 	CealGatewayDiscoveryCapability,
@@ -70,7 +71,13 @@ export type {
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
 	CealGatewayMessageSearchResult,
+	CealGatewayMessageSearchCoverage,
 	CealGatewayMessageSearchResultItem,
+	CealMessageSearchBackendDescriptor,
+	CealMessageSearchBackendMode,
+	CealMessageSearchCredentialIdentityClass,
+	CealMessageSearchMatchMode,
+	CealMessageSearchProvenance,
 	CealGatewayPolicyDenial,
 	CealGatewayPolicyDenialDecision,
 	CealGatewayRequestForInput,
@@ -416,7 +423,7 @@ function validateDiscoveryTargets(value: unknown): void {
 
 function validateDiscoveryTarget(value: unknown, seen: Set<string>): void {
 	const target = requireRecord(value);
-	requireExactKeys(target, ["access", "capability_ids", "label", "target_ref"]);
+	requireExactKeys(target, ["access", "capability_ids", "label", "search_backend", "target_ref"], ["search_backend"]);
 	requirePrefixedRef(target.target_ref, "target:");
 	if (seen.has(target.target_ref)) invalidResponse();
 	seen.add(target.target_ref);
@@ -424,6 +431,8 @@ function validateDiscoveryTarget(value: unknown, seen: Set<string>): void {
 	if (target.access !== "granted" && target.access !== "request_required") invalidResponse();
 	const expectedCapabilities = target.access === "granted" ? ["message.search"] : [];
 	if (JSON.stringify(target.capability_ids) !== JSON.stringify(expectedCapabilities)) invalidResponse();
+	if (target.access === "granted") validateMessageSearchBackendDescriptor(target.search_backend);
+	else if ("search_backend" in target) invalidResponse();
 }
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
@@ -442,18 +451,43 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 
 function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const result = requireRecord(value);
-	requireExactKeys(result, ["minimization", "query", "result_count", "results", "schema_version"]);
+	requireExactKeys(result, ["coverage", "minimization", "query", "result_count", "results", "schema_version"]);
 	if (result.schema_version !== "ceal.message_search_result.v1") invalidResponse();
 	const input = requireMessageSearchInput(expectedRequest.body.arguments);
 	validateRedactedQuery(result.query, input.queryUtf8Bytes);
 	if (!Array.isArray(result.results) || result.results.length > input.limit || result.result_count !== result.results.length) invalidResponse();
 	const seen = new Set<string>();
 	for (const item of result.results) validateMessageSearchResultItem(item, expectedRequest.body.target_ref, seen);
+	validateMessageSearchCoverage(result.coverage);
 	const minimization = requireRecord(result.minimization);
 	requireExactKeys(minimization, ["credential_material_included", "raw_messages_included", "raw_provider_ids_included"]);
 	if (minimization.credential_material_included !== false
 		|| minimization.raw_messages_included !== false
 		|| minimization.raw_provider_ids_included !== false) invalidResponse();
+}
+
+function validateMessageSearchBackendDescriptor(value: unknown): void {
+	const backend = requireRecord(value);
+	requireExactKeys(backend, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "schema_version", "scope", "thread_replies"]);
+	if (backend.schema_version !== "ceal.message_search_backend.v1"
+		|| !["mature_search", "degraded_fallback"].includes(String(backend.mode))
+		|| !["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class))
+		|| backend.scope !== "granted_target"
+		|| !["provider_search", "recent_channel_history"].includes(String(backend.provenance))
+		|| !["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode))
+		|| !["included", "excluded"].includes(String(backend.thread_replies))
+		|| !["bounded", "incomplete"].includes(String(backend.completeness))) invalidResponse();
+	if (backend.mode === "mature_search" && (backend.provenance !== "provider_search" || backend.thread_replies !== "included")) invalidResponse();
+	if (backend.mode === "degraded_fallback" && (backend.provenance !== "recent_channel_history" || backend.completeness !== "incomplete")) invalidResponse();
+}
+
+function validateMessageSearchCoverage(value: unknown): void {
+	const coverage = requireRecord(value);
+	requireExactKeys(coverage, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "provider_truncated", "schema_version", "scope", "thread_replies"]);
+	if (typeof coverage.provider_truncated !== "boolean") invalidResponse();
+	const { provider_truncated: _providerTruncated, ...backend } = coverage;
+	validateMessageSearchBackendDescriptor(backend);
+	if (coverage.provider_truncated && coverage.completeness !== "incomplete") invalidResponse();
 }
 
 function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number } {
@@ -508,10 +542,12 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	const event = requireRecord(value);
 	requireExactKeys(event, [
 		"auth_decision",
+		"call",
 		"client_ref",
 		"error_code",
 		"event_ref",
 		"non_claims",
+		"occurred_at",
 		"operation",
 		"outcome",
 		"policy_decision",
@@ -521,12 +557,14 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"request_id",
 		"runner_ref",
 		"schema_version",
-	]);
+	], ["call"]);
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
 	for (const field of ["event_ref", "registration_ref", "client_ref", "runner_ref"] as const) requireSafeRef(event[field]);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
+	if ("call" in event) validateAuditCallDetail(event.call, event);
+	else if (event.operation === "call" && event.outcome === "succeeded") invalidResponse();
 	const providerMayBeReached = event.operation === "call"
 		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable");
 	validateHostNonClaims(event.non_claims, providerMayBeReached);
@@ -538,6 +576,21 @@ function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequ
 		|| event.profile_ref !== expectedRequest.profile_ref
 		|| event.proof_level !== "host_decision"
 		|| !isOperation(event.operation)) invalidResponse();
+	if (typeof event.occurred_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(event.occurred_at)) invalidResponse();
+}
+
+function validateAuditCallDetail(value: unknown, event: Record<string, unknown>): void {
+	const call = requireRecord(value);
+	requireExactKeys(call, ["capability_id", "coverage", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
+	if (call.schema_version !== "ceal.gateway_audit_call_detail.v1"
+		|| call.capability_id !== "message.search"
+		|| event.operation !== "call"
+		|| event.outcome !== "succeeded") invalidResponse();
+	requirePrefixedRef(call.target_ref, "target:");
+	if (!Number.isInteger(call.requested_limit) || (call.requested_limit as number) < 1 || (call.requested_limit as number) > 10
+		|| !Number.isInteger(call.query_utf8_bytes) || (call.query_utf8_bytes as number) < 1 || (call.query_utf8_bytes as number) > 512
+		|| !Number.isInteger(call.result_count) || (call.result_count as number) < 0 || (call.result_count as number) > (call.requested_limit as number)) invalidResponse();
+	validateMessageSearchCoverage(call.coverage);
 }
 
 function validateAuditEventDecisions(event: Record<string, unknown>): void {

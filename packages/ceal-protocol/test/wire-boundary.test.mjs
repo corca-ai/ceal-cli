@@ -118,6 +118,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	ambiguousProviderFailure.value.events[0].outcome = "failed";
 	ambiguousProviderFailure.value.events[0].error_code = "connector_unavailable";
 	ambiguousProviderFailure.value.events[0].non_claims = ["production_audit_not_reached"];
+	delete ambiguousProviderFailure.value.events[0].call;
 	assert.deepEqual(decodeCealClientResponse(ambiguousProviderFailure, readbackRequest), ambiguousProviderFailure);
 	const preProviderFailure = structuredClone(ambiguousProviderFailure);
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
@@ -152,6 +153,18 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	const ambiguousGrant = structuredClone(exact);
 	ambiguousGrant.value.targets[1].capability_ids = ["message.search"];
 	cases.push(ambiguousGrant);
+
+	const missingBackend = structuredClone(exact);
+	delete missingBackend.value.targets[0].search_backend;
+	cases.push(missingBackend);
+
+	const contradictoryBackend = structuredClone(exact);
+	contradictoryBackend.value.targets[0].search_backend.mode = "degraded_fallback";
+	cases.push(contradictoryBackend);
+
+	const deniedBackend = structuredClone(exact);
+	deniedBackend.value.targets[1].search_backend = matureSearchBackend();
+	cases.push(deniedBackend);
 
 	const authorityPromotion = structuredClone(exact);
 	authorityPromotion.value.registration_ref = "registration:test";
@@ -221,6 +234,18 @@ test("call decoder rejects mismatches, unsafe results, and false minimization cl
 	const unsafeCredentialClaim = structuredClone(exact);
 	unsafeCredentialClaim.value.data.minimization.credential_material_included = true;
 	cases.push(unsafeCredentialClaim);
+
+	const missingCoverage = structuredClone(exact);
+	delete missingCoverage.value.data.coverage;
+	cases.push(missingCoverage);
+
+	const falseCompleteness = structuredClone(exact);
+	falseCompleteness.value.data.coverage.provider_truncated = true;
+	cases.push(falseCompleteness);
+
+	const rawCoverageScope = structuredClone(exact);
+	rawCoverageScope.value.data.coverage.provider_channel_id = "C123456789";
+	cases.push(rawCoverageScope);
 
 	const authorityPromotion = structuredClone(exact);
 	authorityPromotion.value.policy_ref = "policy:test";
@@ -307,6 +332,18 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 		{ ...readback, value: { ...readback.value, events: [{ ...readback.value.events[0], error_code: "denied" }] } },
 	]) assert.throws(() => decodeCealClientResponse(value, readbackRequest), hasCode("invalid_client_response"));
 
+	const missingCallDetail = structuredClone(readback);
+	delete missingCallDetail.value.events[0].call;
+	assert.throws(() => decodeCealClientResponse(missingCallDetail, readbackRequest), hasCode("invalid_client_response"));
+
+	const rawQueryLeak = structuredClone(readback);
+	rawQueryLeak.value.events[0].call.query = "quarterly plan";
+	assert.throws(() => decodeCealClientResponse(rawQueryLeak, readbackRequest), hasCode("invalid_client_response"));
+
+	const oversizedQueryShape = structuredClone(readback);
+	oversizedQueryShape.value.events[0].call.query_utf8_bytes = 513;
+	assert.throws(() => decodeCealClientResponse(oversizedQueryShape, readbackRequest), hasCode("invalid_client_response"));
+
 	for (const decision of [
 		{ auth_decision: "denied", policy_decision: "allowed", outcome: "succeeded", error_code: null },
 		{ auth_decision: "allowed", policy_decision: "denied", outcome: "succeeded", error_code: null },
@@ -324,6 +361,7 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 		outcome: "denied",
 		error_code: "authentication_failed",
 	});
+	delete authenticationDenial.value.events[0].call;
 	assert.deepEqual(decodeCealClientResponse(authenticationDenial, readbackRequest), authenticationDenial);
 });
 
@@ -347,7 +385,7 @@ function discoveryResponse(request) {
 				evidence_requirement: "gateway_audit",
 			}],
 			targets: [
-				{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"] },
+				{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], search_backend: matureSearchBackend() },
 				{ target_ref: "target:customer-health", label: "Customer health", access: "request_required", capability_ids: [] },
 			],
 			host_decision: "accepted",
@@ -376,6 +414,7 @@ function callResponse(request) {
 					source_label: "Team inbox",
 					text_preview: "Launch readiness is green.",
 				}],
+				coverage: { ...matureSearchBackend(), provider_truncated: false },
 				minimization: {
 					raw_provider_ids_included: false,
 					raw_messages_included: false,
@@ -441,16 +480,39 @@ function readbackResponse(request, targetRequestId) {
 				registration_ref: "registration:test",
 				client_ref: "client:test",
 				runner_ref: "runner:test",
+				occurred_at: "2026-07-13T21:00:00.000Z",
 				operation: "call",
 				auth_decision: "allowed",
 				policy_decision: "allowed",
 				outcome: "succeeded",
 				error_code: null,
+				call: {
+					schema_version: "ceal.gateway_audit_call_detail.v1",
+					capability_id: "message.search",
+					target_ref: "target:workspace",
+					requested_limit: 5,
+					query_utf8_bytes: 14,
+					result_count: 1,
+					coverage: { ...matureSearchBackend(), provider_truncated: false },
+				},
 				proof_level: "host_decision",
 				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 			}],
 		},
 	});
+}
+
+function matureSearchBackend() {
+	return {
+		schema_version: "ceal.message_search_backend.v1",
+		mode: "mature_search",
+		credential_identity_class: "delegated_user",
+		scope: "granted_target",
+		provenance: "provider_search",
+		match_mode: "provider_ranked",
+		thread_replies: "included",
+		completeness: "bounded",
+	};
 }
 
 function responseEnvelope(request, body) {
