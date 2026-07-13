@@ -6,6 +6,8 @@
 - Add native unsigned `linux-amd64` dual-binary builds for independent worker
   client acceptance while keeping the first signed release lane on
   `linux-arm64`.
+- Add stdin-token, outbound-only Gateway handshake and capability discovery to
+  the worker `ceal` command without adding admin authority or inbound reachability.
 - Add one protocol/client compatibility and release contract.
 - Replace the inherited `cealctl`-only installer and signer with one
   source-built, OIDC-signed `linux-arm64` lane that installs both commands.

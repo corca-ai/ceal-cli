@@ -201,7 +201,13 @@ function smokeBinary({ artifactPath, command, expectedVersion }) {
 	const version = parse(execFileSync(artifactPath, ["version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 	const help = execFileSync(artifactPath, ["--help"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 	if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help)) fail("smoke_failed", "Built command identity or help did not match.");
-	return { ok: true, command: version.command, version: version.version, help: true };
+	let unconfiguredCapabilities = false;
+	if (command.id === "ceal") {
+		const capabilities = parse(execFileSync(artifactPath, ["capabilities"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+		unconfiguredCapabilities = capabilities?.status === "unavailable" && capabilities?.live_gateway_checked === false;
+		if (!unconfiguredCapabilities) fail("smoke_failed", "Built ceal command did not complete its async unconfigured capability readback.");
+	}
+	return { ok: true, command: version.command, version: version.version, help: true, unconfigured_capabilities: unconfiguredCapabilities };
 }
 
 function buildManifest(normalized, artifacts, notices) {

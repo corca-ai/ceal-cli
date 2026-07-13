@@ -147,6 +147,7 @@ test("HTTP transport keeps discovery, allowed call, and policy denial responses 
 test("HTTP transport rejects unsafe endpoints and invalid outbound requests before fetch", async () => {
 	for (const endpoint of [
 		"http://gateway.example.test/client",
+		"http://localhost:19390/client",
 		"https://user:pass@gateway.example.test/client",
 		"https://gateway.example.test/client?deployment=secret",
 		"https://gateway.example.test/client#fragment",
@@ -159,7 +160,7 @@ test("HTTP transport rejects unsafe endpoints and invalid outbound requests befo
 	}
 	let fetched = false;
 	const client = createCealClient(createCealHttpTransport({
-		endpoint: "http://localhost:19390/client",
+		endpoint: "http://127.0.0.1:19390/client",
 		accessToken: "safe-token",
 		fetchFn: async () => { fetched = true; throw new Error("must not fetch"); },
 	}));

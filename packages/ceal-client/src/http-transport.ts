@@ -170,7 +170,7 @@ function validateEndpoint(value: string | URL): URL {
 
 function isLoopbackHost(hostname: string): boolean {
 	const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-	return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+	return normalized === "127.0.0.1" || normalized === "::1";
 }
 
 function validateAccessToken(value: string): string {

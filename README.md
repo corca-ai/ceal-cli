@@ -41,6 +41,29 @@ scans the archives for private paths and cross-command implementation. Its
 cold-start guide test receives only each guide and the built matching binary,
 then discovers a read-only route through help and parses its YAML result.
 
+## Outbound Gateway discovery
+
+`ceal capabilities` remains a local unavailable-state readback when no Gateway
+connection options are supplied. For the first remote acceptance path, it can
+perform an outbound-only authenticated handshake and capability discovery:
+
+```sh
+read -r -s CEAL_TOKEN
+printf '%s\n' "$CEAL_TOKEN" | ceal capabilities \
+  --endpoint https://gateway.example.test/api/ceal/v1 \
+  --profile profile:narnia \
+  --request-id narnia:acceptance:001 \
+  --token-stdin
+unset CEAL_TOKEN
+```
+
+The token is accepted only through stdin and is never rendered in YAML. Remote
+plain HTTP is rejected; HTTP is allowed only for loopback tests. The command
+opens the request from the client to Gateway and requires no listening port on
+the worker machine. This surface proves handshake/discovery only: it does not
+yet import a persistent local profile, pull runner jobs, execute a provider
+action, or reach production audit custody.
+
 ## Native platform builds and first release lane
 
 Native local builds support `linux-arm64` and `linux-amd64`; each build must run
