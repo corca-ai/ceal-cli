@@ -10,7 +10,7 @@ import {
 
 const envelope = (operation, body) => ({
 	request_id: `request:${operation}:001`,
-	protocol_version: "1.0.0",
+	protocol_version: "1.1.0",
 	operation,
 	profile_ref: "profile:test",
 	body,
@@ -102,7 +102,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const failure = {
 		ok: false,
 		request_id: handshakeRequest.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: { state: "unavailable", reason: "Audit is pending", owner_surface: "Gateway audit" },
 		error: { code: "incompatible_protocol", message: "The protocol is incompatible.", next_action: "Upgrade the client." },
 	};
@@ -311,8 +311,8 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	});
 	const exact = callResponse(callRequest);
 	for (const value of [
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.0.0", error: { code: "bad-code", message: "No." } },
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.0.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.1.0", error: { code: "bad-code", message: "No." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.1.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
 	]) assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
 
 	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
@@ -453,8 +453,8 @@ function handshakeResponse(request) {
 		ok: true,
 		value: {
 			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.0.0",
-			supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+			negotiated_protocol_version: "1.1.0",
+			supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
 			profile_ref: request.profile_ref,
 			registration_ref: "registration:test",
 			client_ref: "client:test",
@@ -519,7 +519,7 @@ function responseEnvelope(request, body) {
 	return {
 		...body,
 		request_id: request.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `proof:${request.request_id}`,
 	};
 }

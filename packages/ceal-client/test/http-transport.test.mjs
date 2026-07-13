@@ -43,7 +43,7 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 		assert.deepEqual(observed, {
 			method: "POST",
 			authorization: "Bearer gateway-issued-token",
-			body: { ...request, protocol_version: "1.0.0" },
+			body: { ...request, protocol_version: "1.1.0" },
 		});
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -87,7 +87,7 @@ test("HTTP transport returns a valid failure envelope on non-2xx", async () => {
 	const failure = {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
 	};
 	const transport = createCealHttpTransport({
@@ -180,11 +180,15 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "invalid_response",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.0.0", value: {} }),
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.1.0", value: {} }),
+		},
+		{
+			code: "invalid_response",
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.0.0", value: {} }),
 		},
 		{
 			code: "response_too_large",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.0.0", value: { payload: token.repeat(20) } }),
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.1.0", value: { payload: token.repeat(20) } }),
 			maxResponseBytes: 64,
 		},
 		{
@@ -227,12 +231,12 @@ function handshakeResponse(input) {
 	return {
 		ok: true,
 		request_id: input.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		value: {
 			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.0.0",
-			supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+			negotiated_protocol_version: "1.1.0",
+			supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
 			profile_ref: input.profile_ref,
 			registration_ref: "registration:test",
 			client_ref: "client:test",
@@ -248,7 +252,7 @@ function discoveryResponse(input) {
 	return {
 		ok: true,
 		request_id: input.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		value: {
 			schema_version: "ceal.gateway_discovery.v1",
@@ -284,7 +288,7 @@ function allowedCallResponse(input) {
 	return {
 		ok: true,
 		request_id: input.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		value: {
 			schema_version: "ceal.gateway_call_result.v1",
@@ -336,7 +340,7 @@ function policyDenialResponse(input) {
 	return {
 		ok: false,
 		request_id: input.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		error: {
 			code: "policy_denied",

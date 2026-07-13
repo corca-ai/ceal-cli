@@ -99,10 +99,10 @@ verify_version_output() {
     "schema_version: $schema" \
     "command: $command" \
     "version: ${VERSION#v}" \
-    "protocol_version: 1.0.0" \
+    "protocol_version: 1.1.0" \
     "supported_gateway_protocol_range:" \
-    "  minimum: 1.0.0" \
-    "  maximum: 1.0.0" \
+    "  minimum: 1.1.0" \
+    "  maximum: 1.1.0" \
     "credential_context: $credential_context" >"$expected_path"
   cmp -s "$stdout_path" "$expected_path" \
     || fail "$command reported an invalid version YAML document for $VERSION"

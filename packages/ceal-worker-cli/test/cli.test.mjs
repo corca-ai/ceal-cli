@@ -71,8 +71,8 @@ test("version identifies the package, protocol, range, and credential context", 
 		schema_version: "ceal.version.v1",
 		command: "ceal",
 		version: "0.64.0",
-		protocol_version: "1.0.0",
-		supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+		protocol_version: "1.1.0",
+		supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
 		credential_context: "gateway_issued_client_profile",
 	});
 });
@@ -285,7 +285,7 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 	}, (request) => ({
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		error: { code: "internal_error", message: token, next_action: token },
 	}));
 });
@@ -440,7 +440,7 @@ async function withRenewingGateway(callback, options = {}) {
 		if (options.rejectFirstGateway && !gatewayRejected) {
 			gatewayRejected = true;
 			response.writeHead(401, { "content-type": "application/json" });
-			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.0.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
+			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.1.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
 			return;
 		}
 		const value = body.operation === "handshake" ? handshakeResponse(body)
@@ -479,8 +479,8 @@ function escapeRegExp(value) {
 function handshakeResponse(request) {
 	return success(request, {
 		schema_version: "ceal.gateway_handshake.v1",
-		negotiated_protocol_version: "1.0.0",
-		supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+		negotiated_protocol_version: "1.1.0",
+		supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
 		profile_ref: request.profile_ref,
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
@@ -566,7 +566,7 @@ function success(request, value) {
 	return {
 		ok: true,
 		request_id: request.request_id,
-		protocol_version: "1.0.0",
+		protocol_version: "1.1.0",
 		proof_ref_or_unavailable: `audit:${request.request_id}`,
 		value,
 	};

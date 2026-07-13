@@ -1,4 +1,4 @@
-export const CEAL_PROTOCOL_VERSION = "1.0.0" as const;
+export const CEAL_PROTOCOL_VERSION = "1.1.0" as const;
 
 export interface CealProtocolRange { minimum: string; maximum: string }
 export type CealClientOperation = "handshake" | "discover" | "call" | "readback";

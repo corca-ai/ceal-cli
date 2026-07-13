@@ -48,8 +48,8 @@ test("version reports package, protocol, range, and operator credential context"
 		schema_version: "cealctl.version.v1",
 		command: "cealctl",
 		version: "0.64.0",
-		protocol_version: "1.0.0",
-		supported_gateway_protocol_range: { minimum: "1.0.0", maximum: "1.0.0" },
+		protocol_version: "1.1.0",
+		supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
 		credential_context: "cealctl_operator_admin_profile",
 	});
 });
