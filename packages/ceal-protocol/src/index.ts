@@ -527,7 +527,9 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	for (const field of ["event_ref", "registration_ref", "client_ref", "runner_ref"] as const) requireSafeRef(event[field]);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
-	validateHostNonClaims(event.non_claims, event.operation === "call" && event.outcome === "succeeded");
+	const providerMayBeReached = event.operation === "call"
+		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable");
+	validateHostNonClaims(event.non_claims, providerMayBeReached);
 }
 
 function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequest: Readonly<CealGatewayReadbackRequest>, targetRequestId: string): void {

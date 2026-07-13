@@ -114,6 +114,14 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const liveReadback = structuredClone(readback);
 	liveReadback.value.events[0].non_claims = ["production_audit_not_reached"];
 	assert.deepEqual(decodeCealClientResponse(liveReadback, readbackRequest), liveReadback);
+	const ambiguousProviderFailure = structuredClone(readback);
+	ambiguousProviderFailure.value.events[0].outcome = "failed";
+	ambiguousProviderFailure.value.events[0].error_code = "connector_unavailable";
+	ambiguousProviderFailure.value.events[0].non_claims = ["production_audit_not_reached"];
+	assert.deepEqual(decodeCealClientResponse(ambiguousProviderFailure, readbackRequest), ambiguousProviderFailure);
+	const preProviderFailure = structuredClone(ambiguousProviderFailure);
+	preProviderFailure.value.events[0].error_code = "invalid_arguments";
+	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 });
 
 test("discovery decoder rejects drift, authority promotion, and target visibility ambiguity", () => {
