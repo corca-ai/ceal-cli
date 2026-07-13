@@ -7,6 +7,10 @@ import type {
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+import {
+	negotiateCealProtocol,
+	parseProtocolVersion,
+} from "./protocol-negotiation.js";
 import type {
 	CealClientFailure,
 	CealClientOperation,
@@ -84,6 +88,12 @@ export type {
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
 export { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.js";
+export type {
+	CealProtocolNegotiation,
+	CealProtocolNegotiationFailure,
+	CealProtocolNegotiationSuccess,
+} from "./protocol-negotiation.js";
 export type {
 	CealClientFailure,
 	CealClientOperation,
@@ -101,96 +111,6 @@ export type {
 
 export const GOVERNED_RUNNER_CORPUS_SCHEMA = "ceal.governed_runner_conformance_corpus.v1" as const;
 export const GOVERNED_RUNNER_CORPUS_VERSION = "1.0.0" as const;
-export const CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE = Object.freeze({
-	minimum: CEAL_PROTOCOL_VERSION,
-	maximum: CEAL_PROTOCOL_VERSION,
-});
-
-export interface CealProtocolNegotiationSuccess {
-	schema_version: "ceal.protocol_negotiation.v1";
-	ok: true;
-	protocol_version: typeof CEAL_PROTOCOL_VERSION;
-}
-
-export interface CealProtocolNegotiationFailure {
-	schema_version: "ceal.protocol_negotiation.v1";
-	ok: false;
-	error: {
-		code: "invalid_gateway_protocol_range" | "incompatible_protocol";
-		message: string;
-		next_action: string;
-	};
-}
-
-export type CealProtocolNegotiation = CealProtocolNegotiationSuccess | CealProtocolNegotiationFailure;
-
-/**
- * Select the one wire version this release actually implements.
- *
- * A broad Gateway range never promotes an unimplemented future version: the
- * current protocol must itself fall inside the advertised range.
- */
-export function negotiateCealProtocol(gatewayRange: unknown): CealProtocolNegotiation {
-	const parsedRange = parseProtocolRange(gatewayRange);
-	if (!parsedRange || compareProtocolVersions(parsedRange.minimum, parsedRange.maximum) > 0) {
-		return protocolNegotiationFailure(
-			"invalid_gateway_protocol_range",
-			"The Gateway advertised an invalid Ceal protocol range.",
-			"Inspect the Gateway release metadata and retry with a valid minimum and maximum protocol version.",
-		);
-	}
-	const current = parseProtocolVersion(CEAL_PROTOCOL_VERSION);
-	if (!current || compareProtocolVersions(parsedRange.minimum, current) > 0 || compareProtocolVersions(current, parsedRange.maximum) > 0) {
-		return protocolNegotiationFailure(
-			"incompatible_protocol",
-			"The Ceal client and Gateway do not share an implemented protocol version.",
-			"Upgrade the Ceal client or Gateway to releases with overlapping protocol support.",
-		);
-	}
-	return {
-		schema_version: "ceal.protocol_negotiation.v1",
-		ok: true,
-		protocol_version: CEAL_PROTOCOL_VERSION,
-	};
-}
-
-type ParsedProtocolVersion = readonly [number, number, number];
-
-function parseProtocolRange(value: unknown): { minimum: ParsedProtocolVersion; maximum: ParsedProtocolVersion } | null {
-	if (!value || typeof value !== "object") return null;
-	const range = value as Record<string, unknown>;
-	const minimum = parseProtocolVersion(range.minimum);
-	const maximum = parseProtocolVersion(range.maximum);
-	return minimum && maximum ? { minimum, maximum } : null;
-}
-
-function parseProtocolVersion(value: unknown): ParsedProtocolVersion | null {
-	if (typeof value !== "string") return null;
-	const match = /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u.exec(value);
-	if (!match) return null;
-	const parsed = match.slice(1).map(Number);
-	if (parsed.some((part) => !Number.isSafeInteger(part))) return null;
-	return parsed as unknown as ParsedProtocolVersion;
-}
-
-function compareProtocolVersions(left: ParsedProtocolVersion, right: ParsedProtocolVersion): number {
-	for (let index = 0; index < left.length; index += 1) {
-		if (left[index] !== right[index]) return left[index] - right[index];
-	}
-	return 0;
-}
-
-function protocolNegotiationFailure(
-	code: CealProtocolNegotiationFailure["error"]["code"],
-	message: string,
-	nextAction: string,
-): CealProtocolNegotiationFailure {
-	return {
-		schema_version: "ceal.protocol_negotiation.v1",
-		ok: false,
-		error: { code, message, next_action: nextAction },
-	};
-}
 
 export type CealClientResponse<TValue = unknown> = CealClientSuccess<TValue> | CealGatewayPolicyDenial | CealClientFailure;
 
@@ -438,14 +358,17 @@ function validateDiscoveryTarget(value: unknown, seen: Set<string>, availableCap
 	seen.add(target.target_ref);
 	requireSafeText(target.label, 128);
 	if (target.access !== "granted" && target.access !== "request_required") invalidResponse();
-	if (!Array.isArray(target.capability_ids) || target.capability_ids.length > availableCapabilities.size) invalidResponse();
-	const expectedCapabilities = target.capability_ids.map(String);
-	if (new Set(expectedCapabilities).size !== expectedCapabilities.length
-		|| expectedCapabilities.some((id) => !availableCapabilities.has(id))) invalidResponse();
-	if (target.access === "granted" && expectedCapabilities.length === 0) invalidResponse();
-	if (target.access === "request_required" && expectedCapabilities.length !== 0) invalidResponse();
+	const expectedCapabilities = validateTargetCapabilityIds(target, availableCapabilities);
 	if (target.access === "granted") validateCapabilityBindings(target.capability_bindings, expectedCapabilities);
 	else if ("capability_bindings" in target) invalidResponse();
+}
+
+function validateTargetCapabilityIds(target: Record<string, unknown>, availableCapabilities: ReadonlySet<string>): string[] {
+	if (!Array.isArray(target.capability_ids) || target.capability_ids.length > availableCapabilities.size) invalidResponse();
+	const expected = target.capability_ids.map(String);
+	if (new Set(expected).size !== expected.length || expected.some((id) => !availableCapabilities.has(id))) invalidResponse();
+	if ((target.access === "granted") !== (expected.length > 0)) invalidResponse();
+	return expected;
 }
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
@@ -507,15 +430,19 @@ function validateCapabilityBindings(value: unknown, expectedCapabilities: readon
 function validateMessageSearchCoverage(value: unknown): void {
 	const coverage = requireRecord(value);
 	requireExactKeys(coverage, ["completeness", "match_semantics", "reply_coverage", "schema_version", "source", "truncated"]);
-	if (coverage.schema_version !== "ceal.message_search_coverage.v1"
-		|| !["authoritative_index", "bounded_projection"].includes(String(coverage.source))
-		|| !["backend_ranked", "literal_case_insensitive"].includes(String(coverage.match_semantics))
-		|| !["included", "excluded"].includes(String(coverage.reply_coverage))
-		|| !["bounded", "incomplete"].includes(String(coverage.completeness))
-		|| typeof coverage.truncated !== "boolean") invalidResponse();
+	if (!validMessageSearchCoverageVocabulary(coverage)) invalidResponse();
 	if (coverage.source === "authoritative_index" && coverage.reply_coverage !== "included") invalidResponse();
 	if (coverage.source === "bounded_projection" && coverage.completeness !== "incomplete") invalidResponse();
 	if (coverage.truncated && coverage.completeness !== "incomplete") invalidResponse();
+}
+
+function validMessageSearchCoverageVocabulary(coverage: Record<string, unknown>): boolean {
+	return coverage.schema_version === "ceal.message_search_coverage.v1"
+		&& ["authoritative_index", "bounded_projection"].includes(String(coverage.source))
+		&& ["backend_ranked", "literal_case_insensitive"].includes(String(coverage.match_semantics))
+		&& ["included", "excluded"].includes(String(coverage.reply_coverage))
+		&& ["bounded", "incomplete"].includes(String(coverage.completeness))
+		&& typeof coverage.truncated === "boolean";
 }
 
 function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number } {
