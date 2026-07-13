@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,7 +24,7 @@ test("canonical registry is reachable through stable, read-only help", () => {
 			const result = run(args);
 			assert.equal(result.code, 0);
 			assert.equal(result.stderr, "");
-			assert.match(result.stdout, new RegExp(`^Usage: ${command.usage}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(command.usage)}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Effect: ${command.effect}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Evidence: ${command.evidence}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Result schema: ${command.result_schema}$`, "mu"));
@@ -54,7 +55,7 @@ test("version reports package, protocol, range, and operator credential context"
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "enrollments", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_profile");
 });
@@ -68,6 +69,40 @@ test("doctor reports surface health without setup, runtime, writes, or network c
 	assert.equal(payload.writes_local_state, false);
 	assert.equal(payload.writes_external, false);
 	assert.equal(payload.network_accessed, false);
+});
+
+test("enrollments create uses only the administrator session and emits transferable one-time material", async () => {
+	const adminToken = `ceal_admin_${"A".repeat(43)}`;
+	let observed = null;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		observed = { authorization: request.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+		response.writeHead(201, { "content-type": "application/json" });
+		response.end(JSON.stringify({ schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43), expires_at: "2099-07-14T00:00:00.000Z" }));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	try {
+		const payload = await asyncYamlRun([
+			"enrollments", "create",
+			"--admin-endpoint", `http://127.0.0.1:${address.port}/api/cealctl/v1/enrollments`,
+			"--gateway", "https://gateway.example.test/api/ceal/v1",
+			"--name", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
+			"--admin-token-stdin",
+		], 0, { readSecret: async () => adminToken });
+		assert.equal(payload.status, "created");
+		assert.equal(payload.enrollment_code, "C".repeat(43));
+		assert.equal(payload.one_time, true);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(adminToken, "u"));
+		assert.equal(observed.authorization, `Bearer ${adminToken}`);
+		assert.deepEqual(observed.body, {
+			schema_version: "ceal.enrollment_create.v1",
+			profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+		});
+	} finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 
 test("worker commands, JSON modes, and unsafe operands fail as redacted YAML", () => {
@@ -104,7 +139,8 @@ test("runtime surface performs no HOME, filesystem, or network access", () => {
 test("packaged bin delegates once and preserves process exit codes", () => {
 	const binSource = readFileSync(new URL("../src/bin.ts", import.meta.url), "utf8");
 	assert.match(binSource, /^#!\/usr\/bin\/env node/u);
-	assert.match(binSource, /process[.]exitCode = runCealctlCommand/u);
+	assert.match(binSource, /Promise[.]resolve\(runCealctlCommand/u);
+	assert.match(binSource, /process[.]exitCode = code/u);
 	assert.doesNotMatch(binSource, /process[.]exit\s*\(/u);
 	const binPath = new URL("../dist/bin.js", import.meta.url);
 	const version = spawnSync(process.execPath, [binPath.pathname, "version"], { encoding: "utf8" });
@@ -159,4 +195,20 @@ function yamlRun(args, expectedCode = 0) {
 	assert.equal(result.code, expectedCode, result.stderr);
 	assert.equal(result.stderr, "");
 	return parseYaml(result.stdout);
+}
+
+async function asyncYamlRun(args, expectedCode = 0, runtime = {}) {
+	let stdout = "";
+	let stderr = "";
+	const code = await runCealctlCommand(args, {
+		stdout: { write(chunk) { stdout += String(chunk); } },
+		stderr: { write(chunk) { stderr += String(chunk); } },
+	}, runtime);
+	assert.equal(code, expectedCode, `${stderr}\n${stdout}`);
+	assert.equal(stderr, "");
+	return parseYaml(stdout);
+}
+
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
