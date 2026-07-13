@@ -4,6 +4,21 @@ import {
 } from "@corca-ai/ceal-protocol";
 import { stringify } from "yaml";
 import { CealEnrollmentAdminClientError, createCealEnrollment } from "./enrollment-admin-client.js";
+import {
+	currentOperatorSession,
+	operatorProfilesPayload,
+	OperatorSessionStoreError,
+	redactSession,
+	removeOperatorSession,
+	saveOperatorSession,
+	selectOperatorSession,
+} from "./operator-session-store.js";
+import {
+	loginOperator,
+	OperatorSessionClientError,
+	refreshOperatorSession,
+	revokeOperatorSession,
+} from "./operator-session-client.js";
 
 export const CEAL_OPERATOR_CLI_VERSION = "0.64.0" as const;
 export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_profile" as const;
@@ -14,11 +29,13 @@ export interface CealctlIo {
 }
 
 export interface CealctlRuntime {
-	readSecret?: () => Promise<string>;
+	homeDir?: string;
+	fetchFn?: typeof globalThis.fetch;
+	sleepFn?: (milliseconds: number) => Promise<void>;
 }
 
 export interface CealctlCommandDefinition {
-	name: "version" | "commands" | "doctor" | "enrollments";
+	name: "version" | "commands" | "login" | "profiles" | "logout" | "enrollments" | "doctor";
 	description: string;
 	usage: string;
 	effect: "read_only" | "control_write";
@@ -47,9 +64,36 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 		recovery: "Descend with 'cealctl <command> --help' before invoking a command.",
 	},
 	{
+		name: "login",
+		description: "Authenticate this operator through the Gateway Admin API.",
+		usage: "cealctl login <admin-url> [--profile <name>]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.login.v1",
+		recovery: "Approve the displayed code in the same-origin browser page, then retry if it expires.",
+	},
+	{
+		name: "profiles",
+		description: "Inspect or select stored operator profiles without exposing tokens.",
+		usage: "cealctl profiles [use <name>]",
+		effect: "control_write",
+		evidence: "surface",
+		result_schema: "cealctl.profiles.v1",
+		recovery: "Run 'cealctl login <admin-url> --profile <name>' when no profile exists.",
+	},
+	{
+		name: "logout",
+		description: "Revoke one operator session before removing its local profile.",
+		usage: "cealctl logout [--profile <name>]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.logout.v1",
+		recovery: "If revoke fails, preserve local state and retry after checking Gateway reachability.",
+	},
+	{
 		name: "enrollments",
 		description: "Create one-time personal-client enrollment material.",
-		usage: "cealctl enrollments create [options]",
+		usage: "cealctl enrollments create --name <name> --profile <name> --subject <name> --instance <name> [--operator-profile <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.enrollments.v1",
@@ -87,14 +131,17 @@ export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtim
 	if (!command) return writeError("unknown_command", "Unknown cealctl command.", io);
 	const options = args.slice(1);
 	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
-	if (options.length !== 0 && command.name !== "enrollments") return writeError("invalid_argument", "Invalid cealctl command options.", io);
 	return runKnownCommand(command.name, options, io, runtime);
 }
 
 function runKnownCommand(command: CealctlCommandDefinition["name"], options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
-	if (command === "version") return writeVersion(io);
-	if (command === "commands") return writeCommands(io);
+	if (command === "version") return options.length === 0 ? writeVersion(io) : writeError("invalid_argument", "Invalid cealctl version options.", io);
+	if (command === "commands") return options.length === 0 ? writeCommands(io) : writeError("invalid_argument", "Invalid cealctl commands options.", io);
+	if (command === "login") return runLogin(options, io, runtime);
+	if (command === "profiles") return runProfiles(options, io, runtime);
+	if (command === "logout") return runLogout(options, io, runtime);
 	if (command === "enrollments") return runEnrollments(options, io, runtime);
+	if (options.length !== 0) return writeError("invalid_argument", "Invalid cealctl command options.", io);
 	return writeDoctor(io);
 }
 
@@ -105,14 +152,20 @@ function writeRequestedHelp(args: readonly string[], io: CealctlIo): number {
 }
 
 function commandHelp(command: CealctlCommandDefinition): string {
-	const options = command.name === "enrollments" ? [
+	const options = command.name === "login" ? [
+		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
+		"  --profile <safe-name>         Local operator profile name (default: default).",
+	] : command.name === "profiles" ? [
+		"  use <safe-name>               Select one stored operator profile.",
+	] : command.name === "logout" ? [
+		"  --profile <safe-name>         Revoke a named profile instead of the current profile.",
+	] : command.name === "enrollments" ? [
 		"  create                         Create one short-lived, one-time enrollment code.",
-		"  --admin-endpoint <https-url>  Gateway administrator API endpoint.",
 		"  --name <safe-name>            Registration, client, and runner name.",
 		"  --profile <safe-name>         Profile name bound by the Gateway.",
 		"  --subject <safe-name>         User identity bound by the Gateway.",
 		"  --instance <safe-name>        Customer instance bound by the Gateway.",
-		"  --admin-token-stdin           Read the administrator session from stdin.",
+		"  --operator-profile <name>     Use a named stored admin profile.",
 	] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -130,6 +183,70 @@ function commandHelp(command: CealctlCommandDefinition): string {
 	].join("\n");
 }
 
+async function runLogin(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): Promise<number> {
+	if (options.length === 0) {
+		return writeYaml(io.stdout, {
+			schema_version: "cealctl.login.v1", command: "cealctl", status: "ready", proof_level: "surface",
+			credential_context: CEALCTL_CREDENTIAL_CONTEXT, authenticated: false,
+			next_action: "Run 'cealctl login <admin-url> --profile <name>'.",
+		});
+	}
+	const parsed = parseLoginOptions(options);
+	if (!parsed) return writeError("invalid_argument", "Invalid cealctl login options.", io);
+	try {
+		const session = await loginOperator({
+			adminOrigin: parsed.adminOrigin,
+			profile: parsed.profile,
+			fetchFn: runtime.fetchFn,
+			sleepFn: runtime.sleepFn,
+			onChallenge: (challenge) => {
+				io.stderr.write(`Open ${challenge.verification_url}\nEnter code: ${challenge.user_code}\nWaiting for approval...\n`);
+			},
+		});
+		saveOperatorSession(session, runtime.homeDir);
+		return writeYaml(io.stdout, {
+			schema_version: "cealctl.login.v1", command: "cealctl", status: "authenticated",
+			profile: redactSession(session), raw_token_visible: false, proof_level: "host_decision",
+			next_action: "Run 'cealctl enrollments --help' to issue a personal-client enrollment.",
+		});
+	} catch (error) {
+		return writeSessionFailure("cealctl.login.v1", sessionErrorCode(error), "The operator login could not be completed.", io);
+	}
+}
+
+function runProfiles(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number {
+	try {
+		if (options.length === 0) return writeYaml(io.stdout, operatorProfilesPayload(runtime.homeDir));
+		if (options.length === 2 && options[0] === "use" && options[1]) {
+			const session = selectOperatorSession(options[1], runtime.homeDir);
+			return writeYaml(io.stdout, {
+				schema_version: "cealctl.profiles.v1", command: "cealctl", status: "selected",
+				current_profile: session.name, profile: redactSession(session), raw_token_visible: false, proof_level: "local_state",
+			});
+		}
+		return writeError("invalid_argument", "Invalid cealctl profiles options.", io);
+	} catch (error) {
+		return writeSessionFailure("cealctl.profiles.v1", sessionErrorCode(error), "The operator profile could not be read.", io);
+	}
+}
+
+async function runLogout(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): Promise<number> {
+	const profile = parseOptionalProfile(options);
+	if (profile === null) return writeError("invalid_argument", "Invalid cealctl logout options.", io);
+	try {
+		const session = currentOperatorSession(runtime.homeDir, profile || undefined);
+		await revokeOperatorSession({ session, fetchFn: runtime.fetchFn });
+		removeOperatorSession(runtime.homeDir, session.name);
+		return writeYaml(io.stdout, {
+			schema_version: "cealctl.logout.v1", command: "cealctl", status: "revoked",
+			profile: session.name, server_revoked: true, local_profile_removed: true,
+			raw_token_visible: false, proof_level: "host_decision",
+		});
+	} catch (error) {
+		return writeSessionFailure("cealctl.logout.v1", sessionErrorCode(error), "The operator session could not be revoked.", io);
+	}
+}
+
 function runEnrollments(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
 	if (options.length === 0) {
 		return writeYaml(io.stdout, {
@@ -144,13 +261,12 @@ function runEnrollments(options: readonly string[], io: CealctlIo, runtime: Ceal
 async function createEnrollmentCommand(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): Promise<number> {
 	const parsed = parseEnrollmentCreateOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid enrollment creation options.", io);
-	if (!runtime.readSecret) return writeEnrollmentFailure("credential_input_unavailable", io);
-	let adminToken: string;
-	try { adminToken = await runtime.readSecret(); } catch { return writeEnrollmentFailure("credential_input_failed", io); }
 	try {
+		const current = currentOperatorSession(runtime.homeDir, parsed.operatorProfile);
+		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
 		const result = await createCealEnrollment({
-			adminEndpoint: parsed.adminEndpoint,
-			adminToken,
+			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/enrollments`,
+			adminToken: refreshed.accessToken,
 			profileRef: `profile:${parsed.profile}`,
 			registrationRef: `registration:${parsed.name}`,
 			clientRef: `client:${parsed.name}`,
@@ -173,40 +289,70 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			next_action: `On the user machine, send this code through stdin to 'ceal profiles enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
 		});
 	} catch (error) {
-		return writeEnrollmentFailure(error instanceof CealEnrollmentAdminClientError ? error.code : "request_failed", io);
+		const code = error instanceof CealEnrollmentAdminClientError ? error.code : sessionErrorCode(error);
+		return writeEnrollmentFailure(code, io);
 	}
 }
 
 interface ParsedEnrollmentCreateOptions {
-	adminEndpoint: string;
 	name: string;
 	profile: string;
 	subject: string;
 	instance: string;
+	operatorProfile?: string;
 }
 
 function parseEnrollmentCreateOptions(options: readonly string[]): ParsedEnrollmentCreateOptions | null {
 	if (options[0] !== "create") return null;
 	const values = new Map<string, string>();
-	let tokenStdin = false;
 	for (let index = 1; index < options.length; index += 1) {
 		const option = options[index];
-		if (option === "--admin-token-stdin") { if (tokenStdin) return null; tokenStdin = true; continue; }
-		if (!option || !new Set(["--admin-endpoint", "--name", "--profile", "--subject", "--instance"]).has(option) || values.has(option)) return null;
+		if (!option || !new Set(["--name", "--profile", "--subject", "--instance", "--operator-profile"]).has(option) || values.has(option)) return null;
 		const value = options[++index];
 		if (!value) return null;
 		values.set(option, value);
 	}
-	if (!tokenStdin || values.size !== 5) return null;
+	if (!["--name", "--profile", "--subject", "--instance"].every((option) => values.has(option))) return null;
 	const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-	for (const option of ["--name", "--profile", "--subject", "--instance"]) if (!safeName.test(values.get(option) ?? "")) return null;
+	for (const value of values.values()) if (!safeName.test(value)) return null;
 	return {
-		adminEndpoint: values.get("--admin-endpoint") ?? "",
 		name: values.get("--name") ?? "",
 		profile: values.get("--profile") ?? "",
 		subject: values.get("--subject") ?? "",
 		instance: values.get("--instance") ?? "",
+		operatorProfile: values.get("--operator-profile"),
 	};
+}
+
+function parseLoginOptions(options: readonly string[]): { adminOrigin: string; profile: string } | null {
+	if (options.length < 1 || !options[0] || options[0].startsWith("-")) return null;
+	let profile = "default";
+	for (let index = 1; index < options.length; index += 1) {
+		if (options[index] !== "--profile" || !options[index + 1] || index + 2 !== options.length) return null;
+		profile = options[index + 1] ?? "";
+		index += 1;
+	}
+	return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(profile) ? { adminOrigin: options[0], profile } : null;
+}
+
+function parseOptionalProfile(options: readonly string[]): string | null {
+	if (options.length === 0) return "";
+	if (options.length !== 2 || options[0] !== "--profile" || !options[1]) return null;
+	return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(options[1]) ? options[1] : null;
+}
+
+function sessionErrorCode(error: unknown): string {
+	if (error instanceof OperatorSessionClientError || error instanceof OperatorSessionStoreError) return error.code;
+	return "request_failed";
+}
+
+function writeSessionFailure(schemaVersion: string, kind: string, message: string, io: CealctlIo): number {
+	writeYaml(io.stdout, {
+		schema_version: schemaVersion, command: "cealctl", status: "unavailable", proof_level: "surface",
+		credential_context: CEALCTL_CREDENTIAL_CONTEXT, raw_token_visible: false,
+		error: { kind, message, next_action: "Check the Admin API URL, operator approval, stored profile, and Gateway status, then retry." },
+	});
+	return 3;
 }
 
 function writeEnrollmentFailure(kind: string, io: CealctlIo): number {

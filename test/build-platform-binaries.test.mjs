@@ -25,7 +25,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
 			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
 				["profiles", "capabilities"],
-				["enrollments"],
+				["login", "profiles", "logout", "enrollments"],
 			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
 				"bundle", "blob", "runtime", "inject", "smoke",
@@ -77,6 +77,14 @@ test("rejects platform artifacts that omit required enrollment workflow commands
 	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "profiles", "capabilities"], ["profiles", "capabilities"]));
 	assert.throws(
 		() => assertRequiredCommandDiscovery(["version", "capabilities"], ["profiles", "capabilities"]),
+		hasCode("smoke_failed"),
+	);
+	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
+		["version", "login", "profiles", "logout", "enrollments"],
+		["login", "profiles", "logout", "enrollments"],
+	));
+	assert.throws(
+		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "profiles", "logout", "enrollments"]),
 		hasCode("smoke_failed"),
 	);
 });

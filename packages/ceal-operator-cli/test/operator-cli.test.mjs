@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -33,9 +33,10 @@ test("canonical registry is reachable through stable, read-only help", () => {
 	}
 });
 
-test("every public command emits one YAML document without a format flag", () => {
+test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEALCTL_COMMANDS) {
-		const payload = yamlRun([command.name]);
+		const result = await asyncRun([command.name]);
+		const payload = parseYaml(result.stdout);
 		assert.equal(payload.schema_version, command.result_schema);
 		assert.equal(payload.command, "cealctl");
 	}
@@ -55,7 +56,7 @@ test("version reports package, protocol, range, and operator credential context"
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "enrollments", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "profiles", "logout", "enrollments", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_profile");
 });
@@ -71,45 +72,92 @@ test("doctor reports surface health without setup, runtime, writes, or network c
 	assert.equal(payload.network_accessed, false);
 });
 
-test("enrollments create uses only the administrator session and emits transferable one-time material", async () => {
+test("login stores a bound renewable session and enrollment refreshes it without token flags", async () => {
 	const adminToken = `ceal_admin_${"A".repeat(43)}`;
-	let observed = null;
+	const refreshToken = `ceal_refresh_${"R".repeat(43)}`;
+	const rotatedRefreshToken = `ceal_refresh_${"S".repeat(43)}`;
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-session-test-"));
+	const observed = [];
+	let origin = null;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
-		observed = { authorization: request.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
-		response.writeHead(201, { "content-type": "application/json" });
-		response.end(JSON.stringify({ schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43), gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2099-07-14T00:00:00.000Z" }));
+		const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null;
+		observed.push({ url: request.url, authorization: request.headers.authorization, body });
+		const common = { profile: "operator", admin_api_origin: origin, deployment_id: "instance:test", auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test" };
+		if (request.url === "/api/cealctl/login/start") return json(response, 200, {
+			schema_version: "cealctl.login_start.v1", deployment_id: "instance:test", login_id: "login:test",
+			user_code: "ABCD-1234", verification_url: `${origin}/verify?user-code=ABCD-1234`, expires_at: "2099-07-14T00:00:00.000Z", poll_interval_seconds: 1,
+		});
+		if (request.url === "/api/cealctl/login/poll") return json(response, 200, {
+			schema_version: "cealctl.login_poll.v1", status: "complete", ...common,
+			access_token_expires_at: "2099-07-13T01:00:00.000Z", refresh_token: refreshToken,
+			refresh_token_idle_expires_at: "2099-08-13T00:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-13T00:00:00.000Z",
+		});
+		if (request.url === "/api/cealctl/token/refresh") return json(response, 200, {
+			schema_version: "cealctl.token_refresh.v1", ...common, access_token: adminToken,
+			access_token_expires_at: "2099-07-13T02:00:00.000Z", refresh_token: rotatedRefreshToken,
+			refresh_token_idle_expires_at: "2099-08-13T01:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-13T00:00:00.000Z",
+		});
+		if (request.url === "/api/cealctl/token/revoke") return json(response, 200, {
+			schema_version: "cealctl.token_revoke.v1", ...common, revoked: true,
+		});
+		if (request.url === "/api/cealctl/v1/enrollments") return json(response, 201, {
+			schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43),
+			gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2099-07-14T00:00:00.000Z",
+		});
+		return json(response, 404, { error_code: "not_found" });
 	});
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	origin = `http://127.0.0.1:${address.port}`;
 	try {
+		const login = await asyncRun(["login", origin, "--profile", "operator"], { homeDir, sleepFn: async () => {} });
+		assert.equal(login.code, 0);
+		assert.match(login.stderr, /ABCD-1234/u);
+		assert.equal(parseYaml(login.stdout).status, "authenticated");
+		const sessionsPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
+		assert.equal(statSync(sessionsPath).mode & 0o077, 0);
+		assert.doesNotMatch(login.stdout, new RegExp(refreshToken, "u"));
+		const profiles = await asyncYamlRun(["profiles"], 0, { homeDir });
+		assert.equal(profiles.current_profile, "operator");
+		assert.equal(profiles.raw_token_visible, false);
+
 		const payload = await asyncYamlRun([
 			"enrollments", "create",
-			"--admin-endpoint", `http://127.0.0.1:${address.port}/api/cealctl/v1/enrollments`,
 			"--name", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
-			"--admin-token-stdin",
-		], 0, { readSecret: async () => adminToken });
+		], 0, { homeDir });
 		assert.equal(payload.status, "created");
 		assert.equal(payload.enrollment_code, "C".repeat(43));
 		assert.equal(payload.gateway_endpoint, "https://gateway.example.test/api/ceal/v1");
 		assert.equal(payload.one_time, true);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(adminToken, "u"));
-		assert.equal(observed.authorization, `Bearer ${adminToken}`);
-		assert.deepEqual(observed.body, {
+		const enrollment = observed.find((entry) => entry.url === "/api/cealctl/v1/enrollments");
+		assert.equal(enrollment.authorization, `Bearer ${adminToken}`);
+		assert.deepEqual(enrollment.body, {
 			schema_version: "ceal.enrollment_create.v1",
 			profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 		});
-	} finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+		const stored = readFileSync(sessionsPath, "utf8");
+		assert.match(stored, new RegExp(rotatedRefreshToken, "u"));
+		assert.doesNotMatch(stored, new RegExp(refreshToken, "u"));
+		const logout = await asyncYamlRun(["logout"], 0, { homeDir });
+		assert.equal(logout.server_revoked, true);
+		assert.equal(logout.local_profile_removed, true);
+		assert.equal((await asyncYamlRun(["profiles"], 0, { homeDir })).status, "unconfigured");
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(homeDir, { recursive: true, force: true });
+	}
 });
 
 test("worker commands, JSON modes, and unsafe operands fail as redacted YAML", () => {
 	for (const args of [["version", "--json"], ["version", "--format", "json"]]) {
 		assert.equal(yamlRun(args, 2).error.kind, "invalid_argument");
 	}
-	for (const command of ["targets", "integrations", "objects", "profiles", "call"]) {
+	for (const command of ["targets", "integrations", "objects", "call"]) {
 		assert.equal(yamlRun([command], 2).error.kind, "unknown_command");
 	}
 	const secret = ["xoxb", "unsafe", "secret", "material"].join("-");
@@ -198,15 +246,25 @@ function yamlRun(args, expectedCode = 0) {
 }
 
 async function asyncYamlRun(args, expectedCode = 0, runtime = {}) {
+	const result = await asyncRun(args, runtime);
+	assert.equal(result.code, expectedCode, `${result.stderr}\n${result.stdout}`);
+	assert.equal(result.stderr, "");
+	return parseYaml(result.stdout);
+}
+
+async function asyncRun(args, runtime = {}) {
 	let stdout = "";
 	let stderr = "";
 	const code = await runCealctlCommand(args, {
 		stdout: { write(chunk) { stdout += String(chunk); } },
 		stderr: { write(chunk) { stderr += String(chunk); } },
 	}, runtime);
-	assert.equal(code, expectedCode, `${stderr}\n${stdout}`);
-	assert.equal(stderr, "");
-	return parseYaml(stdout);
+	return { code, stdout, stderr };
+}
+
+function json(response, status, body) {
+	response.writeHead(status, { "content-type": "application/json" });
+	response.end(JSON.stringify(body));
 }
 
 function escapeRegExp(value) {

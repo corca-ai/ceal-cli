@@ -41,28 +41,46 @@ scans the archives for private paths and cross-command implementation. Its
 cold-start guide test receives only each guide and the built matching binary,
 then discovers a read-only route through help and parses its YAML result.
 
-## Outbound Gateway discovery
+## Operator login and outbound Gateway use
 
-`ceal capabilities` remains a local unavailable-state readback when no Gateway
-connection options are supplied. For the first remote acceptance path, it can
-perform an outbound-only authenticated handshake and capability discovery:
+An operator authenticates through the customer Gateway's same-origin browser
+approval page. `cealctl` prints the verification URL and short-lived user code
+to stderr while it waits, then stores only the resulting renewable operator
+session in an owner-only local file. Enrollment creation refreshes that session
+automatically; raw Admin API tokens are not CLI operands or stdin inputs.
 
 ```sh
-read -r -s CEAL_TOKEN
-printf '%s\n' "$CEAL_TOKEN" | ceal capabilities \
-  --endpoint https://gateway.example.test/api/ceal/v1 \
-  --profile profile:narnia \
-  --request-id narnia:acceptance:001 \
-  --token-stdin
-unset CEAL_TOKEN
+cealctl login https://ceal.example.test/acme/production --profile production
+cealctl profiles
+cealctl enrollments create \
+  --name developer-laptop \
+  --profile work \
+  --subject developer \
+  --instance production
 ```
 
-The token is accepted only through stdin and is never rendered in YAML. Remote
-plain HTTP is rejected; HTTP is allowed only for loopback tests. The command
-opens the request from the client to Gateway and requires no listening port on
-the worker machine. This surface proves handshake/discovery only: it does not
-yet import a persistent local profile, pull runner jobs, execute a provider
-action, or reach production audit custody.
+The resulting one-time code is transferred privately to the worker machine and
+exchanged through stdin using the exact Gateway endpoint printed by `cealctl`.
+The worker profile then discovers and calls its granted capabilities without
+endpoint or token flags:
+
+```sh
+read -rs CEAL_ENROLLMENT_CODE
+printf '%s\n' "$CEAL_ENROLLMENT_CODE" | ceal profiles enroll \
+  --gateway https://ceal.example.test/acme/production/api/ceal/v1 \
+  --code-stdin
+unset CEAL_ENROLLMENT_CODE
+ceal capabilities
+ceal call message.search --target target:team-inbox query=incident limit=3
+```
+
+Both operator and worker sessions rotate automatically and revoke server-side
+before local logout. Every network request is client-initiated HTTPS, so a
+worker behind a VPN or firewall needs outbound reachability to the Gateway but
+no SSH access, listening port, or Gateway-initiated push. A successful call is
+reported as completed only after matching Gateway audit readback; whether it
+reached a real provider depends on the Gateway's configured connector and is
+reported explicitly in the result's proof and non-claims.
 
 ## Native platform builds and first release lane
 
@@ -82,7 +100,8 @@ npm run release:binaries -- \
 The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
 manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success, including discovery of the
-worker `profiles`/`capabilities` and operator `enrollments` workflow commands.
+worker `profiles`/`capabilities` and operator
+`login`/`profiles`/`logout`/`enrollments` workflow commands.
 Before calling transferred artifacts ready, compare both installed checksums to
 the exact platform build output and run both `ceal commands` and `cealctl
 commands`; a version string alone does not distinguish two unpublished

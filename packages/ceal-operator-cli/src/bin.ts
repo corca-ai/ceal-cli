@@ -5,7 +5,7 @@ import { renderPlainYamlDocument, runCealctlCommand } from "./index.js";
 void Promise.resolve(runCealctlCommand(process.argv.slice(2), {
 	stdout: process.stdout,
 	stderr: process.stderr,
-}, { readSecret: readStdinSecret })).then((code) => { process.exitCode = code; }, () => {
+})).then((code) => { process.exitCode = code; }, () => {
 	process.stdout.write(renderPlainYamlDocument({
 		schema_version: "cealctl.error.v1", command: "cealctl", ok: false, status: "error",
 		credential_context: "cealctl_operator_admin_profile",
@@ -13,12 +13,3 @@ void Promise.resolve(runCealctlCommand(process.argv.slice(2), {
 	}));
 	process.exitCode = 3;
 });
-
-async function readStdinSecret(): Promise<string> {
-	let value = "";
-	for await (const chunk of process.stdin) {
-		value += String(chunk);
-		if (value.length > 4097) throw new Error("stdin_secret_too_large");
-	}
-	return value.replace(/\r?\n$/u, "");
-}

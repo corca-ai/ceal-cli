@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -9,10 +10,13 @@ import { parseAllDocuments } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
+const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-guide-contract-home-"));
 const CASES = [
 	{ skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-cli" },
 	{ skill: "cealctl-guide", binary: "cealctl", packageDir: "ceal-operator-cli" },
 ];
+
+test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
 test("guide packages teach help-driven discovery without command snapshots", () => {
 	for (const item of CASES) {
@@ -94,7 +98,10 @@ function exerciseCustomerScenario(scenario) {
 
 function runBinary(item, args) {
 	const bin = path.join(BINARY_ROOT, "packages", item.packageDir, "dist", "bin.js");
-	const result = spawnSync(process.execPath, [bin, ...args], { encoding: "utf8" });
+	const result = spawnSync(process.execPath, [bin, ...args], {
+		encoding: "utf8",
+		env: { ...process.env, HOME: ISOLATED_HOME },
+	});
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(result.stderr, "");
 	return result;
