@@ -122,15 +122,22 @@ export function decodeCealEnrollmentResponse(value: unknown): CealEnrollmentResp
 	const baseOnly = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys].sort());
 	const refreshCapable = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys, ...refreshKeys].sort());
 	if (!baseOnly && !refreshCapable) invalidResponse();
-	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
-		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalidResponse();
-	}
-	if (typeof record.access_token !== "string" || !ACCESS_TOKEN.test(record.access_token)
-		|| typeof record.expires_at !== "string" || !validFutureTimestampShape(record.expires_at)) invalidResponse();
-	if (refreshCapable && (typeof record.refresh_token !== "string" || !REFRESH_TOKEN.test(record.refresh_token)
-		|| typeof record.refresh_token_idle_expires_at !== "string" || !validFutureTimestampShape(record.refresh_token_idle_expires_at)
-		|| typeof record.refresh_token_absolute_expires_at !== "string" || !validFutureTimestampShape(record.refresh_token_absolute_expires_at))) invalidResponse();
+	if (!validEnrollmentBinding(record) || !validAccessMaterial(record) || (refreshCapable && !validRefreshMaterial(record))) invalidResponse();
 	return record as unknown as CealEnrollmentResult;
+}
+
+function validEnrollmentBinding(record: Record<string, unknown>): boolean {
+	return ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"]
+		.every((key) => typeof record[key] === "string" && SAFE_REF.test(record[key]));
+}
+function validAccessMaterial(record: Record<string, unknown>): boolean {
+	return typeof record.access_token === "string" && ACCESS_TOKEN.test(record.access_token)
+		&& typeof record.expires_at === "string" && validFutureTimestampShape(record.expires_at);
+}
+function validRefreshMaterial(record: Record<string, unknown>): boolean {
+	return typeof record.refresh_token === "string" && REFRESH_TOKEN.test(record.refresh_token)
+		&& ["refresh_token_idle_expires_at", "refresh_token_absolute_expires_at"]
+			.every((key) => typeof record[key] === "string" && validFutureTimestampShape(record[key]));
 }
 
 function decodeFailure(record: Record<string, unknown>): CealEnrollmentFailure {

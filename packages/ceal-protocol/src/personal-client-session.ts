@@ -75,15 +75,21 @@ export function decodeCealClientRefreshResponse(value: unknown): CealClientRefre
 		"refresh_token_absolute_expires_at", "refresh_token_idle_expires_at", "registration_ref", "runner_ref",
 		"schema_version", "subject_ref",
 	]);
-	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
-		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalid();
-	}
-	if (typeof record.access_token !== "string" || !ACCESS_TOKEN.test(record.access_token)
-		|| typeof record.refresh_token !== "string" || !REFRESH_TOKEN.test(record.refresh_token)) invalid();
-	for (const key of ["expires_at", "refresh_token_idle_expires_at", "refresh_token_absolute_expires_at"] as const) {
-		if (typeof record[key] !== "string" || !validTimestamp(record[key])) invalid();
-	}
+	if (!validRefreshBinding(record) || !validRefreshTokens(record) || !validRefreshTimestamps(record)) invalid();
 	return record as unknown as CealClientRefreshResult;
+}
+
+function validRefreshBinding(record: Record<string, unknown>): boolean {
+	return ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"]
+		.every((key) => typeof record[key] === "string" && SAFE_REF.test(record[key]));
+}
+function validRefreshTokens(record: Record<string, unknown>): boolean {
+	return typeof record.access_token === "string" && ACCESS_TOKEN.test(record.access_token)
+		&& typeof record.refresh_token === "string" && REFRESH_TOKEN.test(record.refresh_token);
+}
+function validRefreshTimestamps(record: Record<string, unknown>): boolean {
+	return ["expires_at", "refresh_token_idle_expires_at", "refresh_token_absolute_expires_at"]
+		.every((key) => typeof record[key] === "string" && validTimestamp(record[key]));
 }
 
 export function decodeCealClientRevokeRequest(value: unknown): CealClientRevokeRequest {
