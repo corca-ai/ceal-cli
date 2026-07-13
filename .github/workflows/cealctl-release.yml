@@ -34,7 +34,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build and test source
         run: npm run check
-      - name: Package the checked compiled candidate twice
+      - name: Rebuild and package the checked candidate twice
         env:
           TAG: ${{ github.ref_name }}
           PLATFORM: ${{ matrix.platform }}

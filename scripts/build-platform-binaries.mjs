@@ -25,6 +25,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
 const MARKER = ".ceal-cli-platform-binaries";
 const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
+const BUILD_PACKAGE_DIRS = Object.freeze(["ceal-protocol", "ceal-client", "ceal-worker-cli", "ceal-operator-cli"]);
 const COMMANDS = Object.freeze([
 	{
 		id: "ceal",
@@ -50,6 +51,11 @@ export class CealCliPlatformBuildError extends Error {
 
 export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 	const normalized = normalizeOptions(options, deps);
+	try {
+		await (deps.buildSource ?? buildCurrentSource)();
+	} catch (error) {
+		throw normalizeError(error);
+	}
 	prepareOutput(normalized.outputDir, normalized.force);
 	const work = mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-build-"));
 	try {
@@ -116,6 +122,7 @@ function normalizeOptions(options, deps) {
 	assertPackageIdentities(deps, version);
 	const platform = requireTargetPlatform(contract, options.platform ?? currentPlatform(), deps);
 	const outputDir = path.resolve(requireString(options.outputDir ?? options.out, "output directory"));
+	assertOutputOutsideBuildTrees(outputDir);
 	return {
 		contract,
 		force: options.force === true,
@@ -124,6 +131,33 @@ function normalizeOptions(options, deps) {
 		postjectCli: (deps.resolvePostjectCli ?? resolvePostjectCli)(),
 		version,
 	};
+}
+
+function assertOutputOutsideBuildTrees(outputDir) {
+	assertNoSymlinkComponents(outputDir);
+	for (const packageDir of BUILD_PACKAGE_DIRS) {
+		const buildDir = path.join(ROOT, "packages", packageDir, "dist");
+		if (pathsOverlap(outputDir, buildDir)) fail("unsafe_output", "Release output must not overlap package build input.");
+	}
+}
+
+function assertNoSymlinkComponents(outputDir) {
+	const parsed = path.parse(outputDir);
+	let current = parsed.root;
+	for (const component of outputDir.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+		current = path.join(current, component);
+		try {
+			if (lstatSync(current).isSymbolicLink()) fail("unsafe_output", "Release output path must not contain symbolic links.");
+		} catch (error) {
+			if (error instanceof CealCliPlatformBuildError) throw error;
+			if (error?.code === "ENOENT") return;
+			fail("unsafe_output", "Could not safely inspect release output path.");
+		}
+	}
+}
+
+function pathsOverlap(left, right) {
+	return left === right || left.startsWith(`${right}${path.sep}`) || right.startsWith(`${left}${path.sep}`);
 }
 
 function assertReleaseVersion(contract, version) {
@@ -181,8 +215,23 @@ function safeMarker(outputDir) {
 
 async function bundleCommand({ command, bundlePath }) {
 	const entry = path.join(ROOT, "packages", command.packageDir, "dist", "bin.js");
-	if (!existsSync(entry)) fail("missing_build", "Run npm run build before building platform binaries.");
+	if (!existsSync(entry)) fail("build_failed", "Current source build did not produce a required CLI entrypoint.");
 	await esbuild.build({ bundle: true, entryPoints: [entry], format: "cjs", logLevel: "silent", outfile: bundlePath, platform: "node", target: "node22" });
+}
+
+export function buildCurrentSource(options = {}) {
+	const root = options.root ?? ROOT;
+	const runBuild = options.runBuild ?? runRootBuild;
+	try {
+		for (const packageDir of BUILD_PACKAGE_DIRS) rmSync(path.join(root, "packages", packageDir, "dist"), { recursive: true, force: true });
+		runBuild(root);
+	} catch {
+		fail("build_failed", "Could not compile current source for platform binaries.");
+	}
+}
+
+function runRootBuild(root) {
+	execFileSync("npm", ["run", "build"], { cwd: root, stdio: "pipe" });
 }
 
 function createBlob({ bundlePath, blobPath, work, command }) {
@@ -222,7 +271,7 @@ function smokeBinary({ artifactPath, command, expectedVersion }) {
 		const discoveredCommands = Array.isArray(discovery?.commands)
 			? discovery.commands.map((item) => item?.name).filter((name) => typeof name === "string")
 			: [];
-		assertRequiredCommandDiscovery(discoveredCommands, command.requiredCommands);
+		assertRequiredCommandDiscovery(discoveredCommands, command.requiredCommands, command.id);
 		let unconfiguredCapabilities = false;
 		if (command.id === "ceal") {
 			const capabilities = parse(run(["capabilities"]));
@@ -242,11 +291,11 @@ function smokeBinary({ artifactPath, command, expectedVersion }) {
 	}
 }
 
-export function assertRequiredCommandDiscovery(discoveredCommands, requiredCommands) {
-	if (!Array.isArray(discoveredCommands) || !Array.isArray(requiredCommands)
-		|| !requiredCommands.every((name) => discoveredCommands.includes(name))) {
-		fail("smoke_failed", "Built command discovery omitted a required enrollment workflow command.");
-	}
+export function assertRequiredCommandDiscovery(discoveredCommands, requiredCommands, command = "CLI") {
+	const missing = Array.isArray(discoveredCommands) && Array.isArray(requiredCommands)
+		? requiredCommands.filter((name) => !discoveredCommands.includes(name))
+		: ["invalid discovery document"];
+	if (missing.length > 0) fail("smoke_failed", `Built ${command} command discovery omitted required commands: ${missing.join(", ")}.`);
 }
 
 function buildManifest(normalized, artifacts, notices) {
@@ -327,7 +376,7 @@ function parseArgs(argv) {
 	return { help: false, json, options };
 }
 
-export async function runCli(argv, io = console) {
+export async function runCli(argv, io = console, deps = {}) {
 	let json = argv.includes("--json");
 	try {
 		const parsed = parseArgs(argv);
@@ -336,7 +385,7 @@ export async function runCli(argv, io = console) {
 			io.log("usage: node scripts/build-platform-binaries.mjs --version <semver> --out <dir> [--platform <platform>] [--force] [--json]");
 			return 0;
 		}
-		const result = await buildCealCliPlatformBinaries(parsed.options);
+		const result = await buildCealCliPlatformBinaries(parsed.options, deps);
 		io.log(json ? JSON.stringify(result, null, 2) : `Built ceal and cealctl ${result.version} for ${result.platform}.`);
 		return 0;
 	} catch (error) {

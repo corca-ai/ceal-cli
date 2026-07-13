@@ -119,8 +119,9 @@ reported explicitly in the result's proof and non-claims.
 
 Native local builds support `linux-arm64` and `linux-amd64`; each build must run
 on its target architecture and cross-architecture output is refused. After
-`npm ci` and `npm run check`, build both standalone Node SEA commands from the
-same source tree, selecting the current host platform:
+`npm ci`, run `npm run check` as the full source-quality gate, then build both
+standalone Node SEA commands from the same source tree, selecting the current
+host platform:
 
 ```sh
 npm run release:binaries -- \
@@ -130,6 +131,9 @@ npm run release:binaries -- \
   --json
 ```
 
+The release command removes ignored package build output and then compiles the
+current checkout itself, so `dist/` state left by an earlier checkout cannot
+enter the artifact.
 The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
 manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success, including discovery of the

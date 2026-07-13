@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
 	assertRequiredCommandDiscovery,
 	buildCealCliPlatformBinaries,
+	buildCurrentSource,
 	CealCliPlatformBuildError,
+	runCli,
 } from "../scripts/build-platform-binaries.mjs";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 for (const platform of ["linux-arm64", "linux-amd64"]) {
 	test(`builds one smoke-checked ceal and cealctl ${platform} set`, async () => {
@@ -28,6 +33,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 				["login", "profiles", "logout", "enrollments"],
 			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
+				"source",
 				"bundle", "blob", "runtime", "inject", "smoke",
 				"bundle", "blob", "runtime", "inject", "smoke",
 			]);
@@ -73,6 +79,100 @@ test("rejects cross-platform builds, version drift, and unsafe replacement", asy
 	});
 });
 
+test("builds current source once before bundling either command", async () => {
+	await withTempDir(async (root) => {
+		const calls = [];
+		await buildCealCliPlatformBinaries({
+			version: "0.64.0",
+			platform: "linux-arm64",
+			outputDir: path.join(root, "release"),
+		}, fakeDeps(calls));
+		assert.equal(calls.filter((item) => item.kind === "source").length, 1);
+		assert.equal(calls[0].kind, "source");
+		assert.equal(calls[1].kind, "bundle");
+	});
+});
+
+test("rejects release output that overlaps a package build tree before source cleanup", async () => {
+	await withTempDir(async (root) => {
+		const linkedOutput = path.join(root, "linked-output");
+		symlinkSync(path.join(REPO_ROOT, "packages", "ceal-worker-cli", "dist"), linkedOutput, "dir");
+		for (const outputDir of [
+			path.join(REPO_ROOT, "packages"),
+			path.join(REPO_ROOT, "packages", "ceal-worker-cli", "dist"),
+			path.join(REPO_ROOT, "packages", "ceal-worker-cli", "dist", "release"),
+			linkedOutput,
+			path.join(linkedOutput, "release"),
+		]) {
+			const calls = [];
+			await assert.rejects(
+				() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir }, fakeDeps(calls)),
+				hasCode("unsafe_output"),
+			);
+			assert.deepEqual(calls, []);
+		}
+	});
+});
+
+test("current source build evicts every stale package output before compilation", async () => {
+	await withTempDir(async (root) => {
+		const packageDirs = ["ceal-protocol", "ceal-client", "ceal-worker-cli", "ceal-operator-cli"];
+		for (const packageDir of packageDirs) {
+			const dist = path.join(root, "packages", packageDir, "dist");
+			mkdirSync(dist, { recursive: true });
+			writeFileSync(path.join(dist, "bin.js"), "stale checkout output\n");
+		}
+		let compiled = false;
+		buildCurrentSource({
+			root,
+			runBuild: () => {
+				for (const packageDir of packageDirs) assert.equal(existsSync(path.join(root, "packages", packageDir, "dist")), false);
+				compiled = true;
+			},
+		});
+		assert.equal(compiled, true);
+	});
+});
+
+test("source build failure precedes release output mutation", async () => {
+	await withTempDir(async (root) => {
+		const outputDir = path.join(root, "release");
+		const workingDeps = fakeDeps([]);
+		await buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir }, workingDeps);
+		const existingArtifact = readFileSync(path.join(outputDir, "ceal-linux-arm64"));
+		const deps = fakeDeps([]);
+		deps.buildSource = () => { throw new Error("compiler details stay private"); };
+		await assert.rejects(
+			() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir, force: true }, deps),
+			hasCode("build_failed"),
+		);
+		assert.deepEqual(readFileSync(path.join(outputDir, "ceal-linux-arm64")), existingArtifact);
+	});
+});
+
+test("CLI reports source build failure as one bounded JSON document", async () => {
+	await withTempDir(async (root) => {
+		const deps = fakeDeps([]);
+		deps.buildSource = () => { throw new Error("sensitive compiler details"); };
+		const lines = [];
+		const status = await runCli([
+			"--version", "0.64.0",
+			"--platform", "linux-arm64",
+			"--out", path.join(root, "release"),
+			"--json",
+		], { log: (line) => lines.push(line), error: (line) => lines.push(line) }, deps);
+		assert.equal(status, 2);
+		assert.equal(lines.length, 1);
+		assert.deepEqual(JSON.parse(lines[0]), {
+			schema_version: "ceal.cli_platform_binary_build_error.v1",
+			ok: false,
+			error_code: "build_failed",
+			message: "Could not build Ceal CLI platform binaries.",
+		});
+		assert.doesNotMatch(lines[0], /sensitive/u);
+	});
+});
+
 test("rejects platform artifacts that omit required enrollment workflow commands", () => {
 	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "profiles", "capabilities"], ["profiles", "capabilities"]));
 	assert.throws(
@@ -84,13 +184,17 @@ test("rejects platform artifacts that omit required enrollment workflow commands
 		["login", "profiles", "logout", "enrollments"],
 	));
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "profiles", "logout", "enrollments"]),
-		hasCode("smoke_failed"),
+		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "profiles", "logout", "enrollments"], "cealctl"),
+		(error) => hasCode("smoke_failed")(error)
+			&& error.message === "Built cealctl command discovery omitted required commands: login, profiles, logout.",
 	);
 });
 
 function fakeDeps(calls, currentPlatform = "linux-arm64") {
 	return {
+		buildSource: () => {
+			calls.push({ kind: "source" });
+		},
 		currentPlatform: () => currentPlatform,
 		resolvePostjectCli: () => "postject.js",
 		readContract: () => ({
