@@ -469,16 +469,25 @@ function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<C
 function validateMessageSearchBackendDescriptor(value: unknown): void {
 	const backend = requireRecord(value);
 	requireExactKeys(backend, ["completeness", "credential_identity_class", "match_mode", "mode", "provenance", "schema_version", "scope", "thread_replies"]);
-	if (backend.schema_version !== "ceal.message_search_backend.v1"
-		|| !["mature_search", "degraded_fallback"].includes(String(backend.mode))
-		|| !["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class))
-		|| backend.scope !== "granted_target"
-		|| !["provider_search", "recent_channel_history"].includes(String(backend.provenance))
-		|| !["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode))
-		|| !["included", "excluded"].includes(String(backend.thread_replies))
-		|| !["bounded", "incomplete"].includes(String(backend.completeness))) invalidResponse();
-	if (backend.mode === "mature_search" && (backend.provenance !== "provider_search" || backend.thread_replies !== "included")) invalidResponse();
-	if (backend.mode === "degraded_fallback" && (backend.provenance !== "recent_channel_history" || backend.completeness !== "incomplete")) invalidResponse();
+	const fieldsAreValid = [
+		backend.schema_version === "ceal.message_search_backend.v1",
+		["mature_search", "degraded_fallback"].includes(String(backend.mode)),
+		["delegated_user", "organization_service", "bot"].includes(String(backend.credential_identity_class)),
+		backend.scope === "granted_target",
+		["provider_search", "recent_channel_history"].includes(String(backend.provenance)),
+		["provider_ranked", "literal_case_insensitive_substring"].includes(String(backend.match_mode)),
+		["included", "excluded"].includes(String(backend.thread_replies)),
+		["bounded", "incomplete"].includes(String(backend.completeness)),
+	].every(Boolean);
+	if (!fieldsAreValid) invalidResponse();
+	if (backend.mode === "mature_search") requireBackendFields(backend, "provider_search", "included", backend.completeness);
+	if (backend.mode === "degraded_fallback") requireBackendFields(backend, "recent_channel_history", backend.thread_replies, "incomplete");
+}
+
+function requireBackendFields(
+	backend: Record<string, unknown>, provenance: unknown, threadReplies: unknown, completeness: unknown,
+): void {
+	if (![backend.provenance === provenance, backend.thread_replies === threadReplies, backend.completeness === completeness].every(Boolean)) invalidResponse();
 }
 
 function validateMessageSearchCoverage(value: unknown): void {
@@ -582,15 +591,17 @@ function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequ
 function validateAuditCallDetail(value: unknown, event: Record<string, unknown>): void {
 	const call = requireRecord(value);
 	requireExactKeys(call, ["capability_id", "coverage", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
-	if (call.schema_version !== "ceal.gateway_audit_call_detail.v1"
-		|| call.capability_id !== "message.search"
-		|| event.operation !== "call"
-		|| event.outcome !== "succeeded") invalidResponse();
+	if (![call.schema_version === "ceal.gateway_audit_call_detail.v1", call.capability_id === "message.search",
+		event.operation === "call", event.outcome === "succeeded"].every(Boolean)) invalidResponse();
 	requirePrefixedRef(call.target_ref, "target:");
-	if (!Number.isInteger(call.requested_limit) || (call.requested_limit as number) < 1 || (call.requested_limit as number) > 10
-		|| !Number.isInteger(call.query_utf8_bytes) || (call.query_utf8_bytes as number) < 1 || (call.query_utf8_bytes as number) > 512
-		|| !Number.isInteger(call.result_count) || (call.result_count as number) < 0 || (call.result_count as number) > (call.requested_limit as number)) invalidResponse();
+	requireIntegerRange(call.requested_limit, 1, 10);
+	requireIntegerRange(call.query_utf8_bytes, 1, 512);
+	requireIntegerRange(call.result_count, 0, call.requested_limit);
 	validateMessageSearchCoverage(call.coverage);
+}
+
+function requireIntegerRange(value: unknown, minimum: number, maximum: number): asserts value is number {
+	if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) invalidResponse();
 }
 
 function validateAuditEventDecisions(event: Record<string, unknown>): void {
