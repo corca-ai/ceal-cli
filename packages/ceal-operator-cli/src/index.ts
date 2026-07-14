@@ -138,6 +138,29 @@ const TOP_LEVEL_HELP = [
 	"Run: cealctl <command> --help",
 ].join("\n");
 
+const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], readonly string[]>> = {
+	login: [
+		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
+		"  --session <safe-name>         Local operator session name (default: default).",
+	],
+	sessions: ["  use <safe-name>               Select one stored operator session."],
+	logout: ["  --session <safe-name>         Revoke a named session instead of the current session."],
+	access: [
+		"  show                           Read the current Gateway access registry.",
+		"  apply --stdin                  Read one complete ceal.gateway_access_registry.v1 YAML document from stdin.",
+		"  --dry-run                      Validate the replacement without changing Gateway state.",
+		"  --operator-session <name>      Use a named stored admin session.",
+	],
+	enrollments: [
+		"  create                         Create one short-lived, one-time enrollment code.",
+		"  --client <safe-name>          Pre-registered client invitation name.",
+		"  --profile <safe-name>         Profile name bound by the Gateway.",
+		"  --subject <safe-name>         User identity bound by the Gateway.",
+		"  --instance <safe-name>        Customer instance bound by the Gateway.",
+		"  --operator-session <name>     Use a named stored admin session.",
+	],
+};
+
 export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtime: CealctlRuntime = {}): number | Promise<number> {
 	if (args.length === 0 || (args.length === 1 && (isHelpToken(args[0]) || args[0] === "help"))) {
 		return writeHelp(TOP_LEVEL_HELP, io);
@@ -169,26 +192,7 @@ function writeRequestedHelp(args: readonly string[], io: CealctlIo): number {
 }
 
 function commandHelp(command: CealctlCommandDefinition): string {
-	const options = command.name === "login" ? [
-		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
-		"  --session <safe-name>         Local operator session name (default: default).",
-	] : command.name === "sessions" ? [
-		"  use <safe-name>               Select one stored operator session.",
-	] : command.name === "logout" ? [
-		"  --session <safe-name>         Revoke a named session instead of the current session.",
-	] : command.name === "access" ? [
-		"  show                           Read the current Gateway access registry.",
-		"  apply --stdin                  Read one complete ceal.gateway_access_registry.v1 YAML document from stdin.",
-		"  --dry-run                      Validate the replacement without changing Gateway state.",
-		"  --operator-session <name>      Use a named stored admin session.",
-	] : command.name === "enrollments" ? [
-		"  create                         Create one short-lived, one-time enrollment code.",
-		"  --client <safe-name>          Pre-registered client invitation name.",
-		"  --profile <safe-name>         Profile name bound by the Gateway.",
-		"  --subject <safe-name>         User identity bound by the Gateway.",
-		"  --instance <safe-name>        Customer instance bound by the Gateway.",
-		"  --operator-session <name>     Use a named stored admin session.",
-	] : [];
+	const options = COMMAND_HELP_OPTIONS[command.name] ?? [];
 	return [
 		`Usage: ${command.usage}`,
 		"",
@@ -350,25 +354,32 @@ async function readAccessRegistryFromStdin(runtime: CealctlRuntime) {
 }
 
 function parseAccessOptions(options: readonly string[]): { action: "show" | "apply"; dryRun: boolean; operatorSession?: string } | null {
-	if (options[0] === "show") {
-		if (options.length === 1) return { action: "show", dryRun: false };
-		if (options.length === 3 && options[1] === "--operator-session" && SAFE_LOCAL_NAME.test(options[2] ?? "")) {
-			return { action: "show", dryRun: false, operatorSession: options[2] };
-		}
-		return null;
-	}
-	if (options[0] !== "apply") return null;
-	let stdin = false;
-	let dryRun = false;
-	let operatorSession: string | undefined;
-	for (let index = 1; index < options.length; index += 1) {
-		const option = options[index];
-		if (option === "--stdin" && !stdin) stdin = true;
-		else if (option === "--dry-run" && !dryRun) dryRun = true;
-		else if (option === "--operator-session" && operatorSession === undefined && SAFE_LOCAL_NAME.test(options[index + 1] ?? "")) operatorSession = options[++index];
-		else return null;
-	}
-	return stdin ? { action: "apply", dryRun, ...(operatorSession ? { operatorSession } : {}) } : null;
+	if (options[0] === "show") return parseAccessShowOptions(options.slice(1));
+	return options[0] === "apply" ? parseAccessApplyOptions(options.slice(1)) : null;
+}
+
+function parseAccessShowOptions(options: readonly string[]): { action: "show"; dryRun: false; operatorSession?: string } | null {
+	if (options.length === 0) return { action: "show", dryRun: false };
+	const operatorSession = options[1];
+	return options.length === 2 && options[0] === "--operator-session" && SAFE_LOCAL_NAME.test(operatorSession ?? "")
+		? { action: "show", dryRun: false, operatorSession }
+		: null;
+}
+
+function parseAccessApplyOptions(options: readonly string[]): { action: "apply"; dryRun: boolean; operatorSession?: string } | null {
+	const stdinCount = countToken(options, "--stdin");
+	const dryRunCount = countToken(options, "--dry-run");
+	const sessionCount = countToken(options, "--operator-session");
+	const sessionIndex = options.indexOf("--operator-session");
+	const operatorSession = sessionIndex < 0 ? undefined : options[sessionIndex + 1];
+	const expectedLength = 1 + dryRunCount + (sessionCount * 2);
+	if (stdinCount !== 1 || dryRunCount > 1 || sessionCount > 1 || options.length !== expectedLength) return null;
+	if (operatorSession !== undefined && !SAFE_LOCAL_NAME.test(operatorSession)) return null;
+	return { action: "apply", dryRun: dryRunCount === 1, ...(operatorSession ? { operatorSession } : {}) };
+}
+
+function countToken(options: readonly string[], token: string): number {
+	return options.filter((option) => option === token).length;
 }
 
 function runEnrollments(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {

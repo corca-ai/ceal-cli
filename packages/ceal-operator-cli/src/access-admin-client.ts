@@ -51,30 +51,42 @@ async function requestAccess(
 	registry?: CealAccessRegistry,
 	dryRun = false,
 ): Promise<CealAccessState> {
-	const endpoint = safeEndpoint(input.adminEndpoint);
-	if (!/^[A-Za-z0-9._~+/-]+=*$/u.test(input.adminToken) || input.adminToken.length < 16 || input.adminToken.length > 8192) invalidConfiguration();
-	const fetchFn = input.fetchFn ?? globalThis.fetch;
-	const timeoutMs = input.timeoutMs ?? 10_000;
-	if (typeof fetchFn !== "function" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) invalidConfiguration();
+	const { endpoint, fetchFn, timeoutMs } = prepareRequest(input);
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		const response = await fetchFn(endpoint, {
-			method,
-			headers: { accept: "application/json", authorization: `Bearer ${input.adminToken}`, ...(method === "PUT" ? { "content-type": "application/json" } : {}) },
-			...(method === "PUT" ? { body: JSON.stringify({ schema_version: "ceal.access_apply.v1", dry_run: dryRun, registry: decodeCealAccessRegistry(registry) }) } : {}),
-			redirect: "error",
-			signal: controller.signal,
-		});
+		const response = await fetchFn(endpoint, requestInit(input.adminToken, method, controller.signal, registry, dryRun));
 		const bytes = await readBounded(response);
 		if (!response.ok) throw new CealAccessAdminClientError("request_denied");
 		if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
 		return decodeState(parseJson(bytes));
 	} catch (error) {
-		if (error instanceof CealAccessAdminClientError) throw error;
-		if (controller.signal.aborted) throw new CealAccessAdminClientError("request_timeout");
-		throw new CealAccessAdminClientError("request_failed");
+		mapRequestError(error, controller.signal.aborted);
 	} finally { clearTimeout(timer); }
+}
+
+function prepareRequest(input: AdminRequestInput): { endpoint: URL; fetchFn: typeof globalThis.fetch; timeoutMs: number } {
+	const endpoint = safeEndpoint(input.adminEndpoint);
+	if (!/^[A-Za-z0-9._~+/-]+=*$/u.test(input.adminToken) || input.adminToken.length < 16 || input.adminToken.length > 8192) invalidConfiguration();
+	const fetchFn = input.fetchFn ?? globalThis.fetch;
+	const timeoutMs = input.timeoutMs ?? 10_000;
+	if (typeof fetchFn !== "function" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) invalidConfiguration();
+	return { endpoint, fetchFn, timeoutMs };
+}
+
+function requestInit(token: string, method: "GET" | "PUT", signal: AbortSignal, registry?: CealAccessRegistry, dryRun = false): RequestInit {
+	const common = { method, redirect: "error" as const, signal };
+	if (method === "GET") return { ...common, headers: { accept: "application/json", authorization: `Bearer ${token}` } };
+	return {
+		...common,
+		headers: { accept: "application/json", authorization: `Bearer ${token}`, "content-type": "application/json" },
+		body: JSON.stringify({ schema_version: "ceal.access_apply.v1", dry_run: dryRun, registry: decodeCealAccessRegistry(registry) }),
+	};
+}
+
+function mapRequestError(error: unknown, aborted: boolean): never {
+	if (error instanceof CealAccessAdminClientError) throw error;
+	throw new CealAccessAdminClientError(aborted ? "request_timeout" : "request_failed");
 }
 
 function decodeState(value: unknown): CealAccessState {
