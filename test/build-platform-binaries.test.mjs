@@ -30,7 +30,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
 			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
 				["session", "capabilities"],
-				["login", "sessions", "logout", "enrollments"],
+				["login", "sessions", "logout", "access", "enrollments"],
 			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
 				"source",
@@ -180,13 +180,13 @@ test("rejects platform artifacts that omit required enrollment workflow commands
 		hasCode("smoke_failed"),
 	);
 	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
-		["version", "login", "sessions", "logout", "enrollments"],
-		["login", "sessions", "logout", "enrollments"],
+		["version", "login", "sessions", "logout", "access", "enrollments"],
+		["login", "sessions", "logout", "access", "enrollments"],
 	));
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "sessions", "logout", "enrollments"], "cealctl"),
+		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "sessions", "logout", "access", "enrollments"], "cealctl"),
 		(error) => hasCode("smoke_failed")(error)
-			&& error.message === "Built cealctl command discovery omitted required commands: login, sessions, logout.",
+			&& error.message === "Built cealctl command discovery omitted required commands: login, sessions, logout, access.",
 	);
 });
 

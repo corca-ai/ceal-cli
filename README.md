@@ -171,7 +171,7 @@ The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
 manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success, including discovery of the
 worker `session`/`capabilities` and operator
-`login`/`sessions`/`logout`/`enrollments` workflow commands.
+`login`/`sessions`/`logout`/`access`/`enrollments` workflow commands.
 Before calling transferred artifacts ready, compare both installed checksums to
 the exact platform build output and run both `ceal commands` and `cealctl
 commands`; a version string alone does not distinguish two unpublished

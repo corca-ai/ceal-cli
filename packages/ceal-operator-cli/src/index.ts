@@ -90,7 +90,7 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	},
 	{
 		name: "logout",
-		description: "Revoke one operator session before removing its local profile.",
+		description: "Revoke one operator session before removing its local state.",
 		usage: "cealctl logout [--session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
