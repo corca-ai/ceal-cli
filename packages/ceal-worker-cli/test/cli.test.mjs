@@ -209,6 +209,11 @@ test("call forwards a discovered provider-neutral capability without a CLI comma
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			occurred_at: "2026-07-13T21:00:00.000Z", operation: "call", auth_decision: "allowed",
 			policy_decision: "allowed", outcome: "succeeded", error_code: null,
+			grant_snapshot: {
+				schema_version: "ceal.gateway_authorization_snapshot.v1",
+				capability_id: "file.search", target_ref: "target:workspace",
+				grant_ref: "grant:workspace-file-search", grant_revision: 7,
+			},
 			call: {
 				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
 				grant_ref: "grant:workspace-file-search", grant_revision: 7, target_ref: "target:workspace",
@@ -593,6 +598,11 @@ function readbackResponse(request) {
 			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			occurred_at: "2026-07-13T21:00:00.000Z",
 			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
+			grant_snapshot: {
+				schema_version: "ceal.gateway_authorization_snapshot.v1",
+				capability_id: "message.search", target_ref: "target:team-inbox",
+				grant_ref: "grant:team-inbox-message-search", grant_revision: 4,
+			},
 			call: {
 				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search",
 				grant_ref: "grant:team-inbox-message-search", grant_revision: 4, target_ref: "target:team-inbox",
