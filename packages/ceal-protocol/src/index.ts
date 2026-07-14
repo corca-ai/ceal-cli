@@ -221,7 +221,10 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>): void {
 	requireExactKeys(response, ["ok", "proof_ref_or_unavailable", "protocol_version", "request_id", "value"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
-	assertSafeJsonValue(response.value, { forbidAuthorityKeys: false });
+	assertSafeJsonValue(response.value, {
+		forbidAuthorityKeys: false,
+		allowAuthorizedMessageContent: expectedRequest.operation === "call" && expectedRequest.body.capability_id === "message.get",
+	});
 	requireJsonByteSize(response.value, MAX_RESPONSE_VALUE_BYTES, invalidResponse);
 	if ("proof_ref_or_unavailable" in response) validateProofReference(response.proof_ref_or_unavailable);
 	validateOperationSuccessResponse(response, expectedRequest);
@@ -316,7 +319,7 @@ function validateGenericInputContract(value: unknown): void {
 
 function validateMessageSearchInputContract(value: unknown): void {
 	const contract = requireRecord(value);
-	requireExactKeys(contract, ["limit", "query", "required", "schema_version"]);
+	requireExactKeys(contract, ["limit", "offset", "query", "required", "schema_version"], ["offset"]);
 	if (contract.schema_version !== "ceal.message_search_input.v1"
 		|| !Array.isArray(contract.required)
 		|| contract.required.length !== 1
@@ -327,6 +330,11 @@ function validateMessageSearchInputContract(value: unknown): void {
 	const limit = requireRecord(contract.limit);
 	requireExactKeys(limit, ["default", "maximum", "minimum", "type"]);
 	if (limit.type !== "integer" || limit.minimum !== 1 || limit.maximum !== 10 || limit.default !== 5) invalidResponse();
+	if (contract.offset !== undefined) {
+		const offset = requireRecord(contract.offset);
+		requireExactKeys(offset, ["default", "maximum", "minimum", "type"]);
+		if (offset.type !== "integer" || offset.minimum !== 0 || offset.maximum !== 1000 || offset.default !== 0) invalidResponse();
+	}
 }
 
 function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<string>): void {
@@ -367,6 +375,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 	requirePrefixedRef(call.grant_ref, "grant:");
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest);
+	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest);
 	else validateGenericCapabilityResult(call.data, call.capability_id);
 	validateCallRedaction(call.redaction, call.capability_id);
 	validateHostNonClaims(call.non_claims, true);
@@ -400,6 +409,22 @@ function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<C
 	if (minimization.credential_material_included !== false
 		|| minimization.raw_messages_included !== false
 		|| minimization.raw_provider_ids_included !== false) invalidResponse();
+}
+
+function validateMessageGetResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
+	const result = requireRecord(value);
+	requireExactKeys(result, ["offset", "ref", "schema_version", "source_label", "source_url", "text"], ["next_offset", "source_url"]);
+	if (result.schema_version !== "ceal.message_get_result.v1") invalidResponse();
+	const input = requireMessageGetInput(expectedRequest.body.arguments);
+	requirePrefixedRef(result.ref, "message:");
+	if (result.ref !== input.ref || result.offset !== input.offset || typeof result.text !== "string"
+		|| byteLength(result.text) > input.limitBytes || !Number.isInteger(result.offset)) invalidResponse();
+	requireSafeText(result.source_label, 128);
+	if (result.next_offset !== undefined) {
+		if (!Number.isInteger(result.next_offset) || typeof result.next_offset !== "number"
+			|| result.next_offset <= input.offset || result.next_offset > 40_000) invalidResponse();
+	}
+	if (result.source_url !== undefined) requireSafeSourceUrl(result.source_url);
 }
 
 function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly string[]): void {
@@ -449,6 +474,17 @@ function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; li
 	const offset = input.offset === undefined ? 0 : input.offset;
 	if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) > 1000) invalidResponse();
 	return { queryUtf8Bytes, limit: limit as number, offset: offset as number };
+}
+
+function requireMessageGetInput(value: unknown): { ref: string; offset: number; limitBytes: number } {
+	const input = requireRecord(value);
+	requireExactKeys(input, ["limit_bytes", "offset", "ref"], ["limit_bytes", "offset"]);
+	requirePrefixedRef(input.ref, "message:");
+	const offset = input.offset === undefined ? 0 : input.offset;
+	const limitBytes = input.limit_bytes === undefined ? 4096 : input.limit_bytes;
+	if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) > 40_000
+		|| !Number.isInteger(limitBytes) || (limitBytes as number) < 256 || (limitBytes as number) > 8192) invalidResponse();
+	return { ref: input.ref, offset: offset as number, limitBytes: limitBytes as number };
 }
 
 function validateRedactedQuery(value: unknown, expectedUtf8Bytes: number): void {
@@ -689,7 +725,7 @@ function validateProofReference(value: unknown): void {
 	requireSafeText(unavailable.owner_surface, 128);
 }
 
-function assertSafeJsonValue(value: unknown, options: { forbidAuthorityKeys: boolean }, depth = 0, count = { value: 0 }): void {
+function assertSafeJsonValue(value: unknown, options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }, depth = 0, count = { value: 0 }): void {
 	count.value += 1;
 	if (depth > 8 || count.value > 512) invalidByContext(options);
 	if (value === null || typeof value === "boolean") return;
@@ -701,25 +737,27 @@ function assertSafeJsonValue(value: unknown, options: { forbidAuthorityKeys: boo
 	assertSafeJsonRecord(requireRecord(value), options, depth, count);
 }
 
-function assertSafeJsonNumber(value: number, options: { forbidAuthorityKeys: boolean }): void {
+function assertSafeJsonNumber(value: number, options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }): void {
 	if (!Number.isFinite(value)) invalidByContext(options);
 }
 
-function assertSafeJsonString(value: string, options: { forbidAuthorityKeys: boolean }): void {
+function assertSafeJsonString(value: string, options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }): void {
 	if (byteLength(value) > 4096 || SECRET_MATERIAL.test(value) || RAW_PROVIDER_REF.test(value)) invalidByContext(options);
 }
 
-function assertSafeJsonArray(value: unknown[], options: { forbidAuthorityKeys: boolean }, depth: number, count: { value: number }): void {
+function assertSafeJsonArray(value: unknown[], options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }, depth: number, count: { value: number }): void {
 	if (value.length > 128) invalidByContext(options);
 	for (const item of value) assertSafeJsonValue(item, options, depth + 1, count);
 }
 
-function assertSafeJsonRecord(record: Record<string, unknown>, options: { forbidAuthorityKeys: boolean }, depth: number, count: { value: number }): void {
+function assertSafeJsonRecord(record: Record<string, unknown>, options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }, depth: number, count: { value: number }): void {
 	const entries = Object.entries(record);
 	if (entries.length > 128) invalidByContext(options);
 	for (const [key, child] of entries) {
 		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
-		assertSafeJsonValue(child, options, depth + 1, count);
+		if (options.allowAuthorizedMessageContent && (key === "text" || key === "source_url")) {
+			if (typeof child !== "string" || byteLength(child) > 8192) invalidByContext(options);
+		} else assertSafeJsonValue(child, options, depth + 1, count);
 	}
 }
 
@@ -727,7 +765,7 @@ function isSafeNegativeMaterialAssertion(key: string, value: unknown): boolean {
 	return key === "credential_material_included" && value === false;
 }
 
-function assertSafeJsonKey(key: string, options: { forbidAuthorityKeys: boolean }): void {
+function assertSafeJsonKey(key: string, options: { forbidAuthorityKeys: boolean; allowAuthorizedMessageContent?: boolean }): void {
 	const invalid = !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(key)
 		|| FORBIDDEN_SECRET_KEY.test(key)
 		|| (options.forbidAuthorityKeys && FORBIDDEN_AUTHORITY_KEY.test(key));

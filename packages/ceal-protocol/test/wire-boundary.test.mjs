@@ -204,6 +204,35 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 	assert.equal(decodeCealClientResponse(readback, readbackRequest).value.events[0].call.capability_id, "file.search");
 });
 
+test("message.get admits only its exact authorized text and source-link result", () => {
+	const request = envelope("call", {
+		capability_id: "message.get", target_ref: "target:workspace",
+		arguments: { ref: "message:approved_001", offset: 0, limit_bytes: 4096 }, purpose: "Read an approved message",
+	});
+	const response = responseEnvelope(request, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
+		grant_ref: "grant:workspace-message-get", grant_revision: 2, target_ref: "target:workspace",
+		data: {
+			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
+			text: "Approved source text may contain slack:C0123456789 without becoming audit data.", offset: 0,
+			source_url: "https://workspace.example.test/archives/C0123456789/p1720000000000100",
+		},
+		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+
+	const arbitraryLeak = structuredClone(response);
+	arbitraryLeak.value.data.extra = "xoxb-not-authorized-outside-message-text";
+	assert.throws(() => decodeCealClientResponse(arbitraryLeak, request), hasCode("invalid_client_response"));
+	const malformedOffset = structuredClone(response);
+	malformedOffset.value.data.offset = 1;
+	assert.throws(() => decodeCealClientResponse(malformedOffset, request), hasCode("invalid_client_response"));
+	const unsafeLink = structuredClone(response);
+	unsafeLink.value.data.source_url = "http://workspace.example.test/unsafe";
+	assert.throws(() => decodeCealClientResponse(unsafeLink, request), hasCode("invalid_client_response"));
+});
+
 test("discovery admits an authenticated Profile with no active grants", () => {
 	const request = envelope("discover", {});
 	const discovery = discoveryResponse(request);
