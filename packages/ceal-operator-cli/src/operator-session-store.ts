@@ -106,11 +106,11 @@ export function removeOperatorSession(home?: string, profileName?: string): { na
 export function operatorProfilesPayload(home?: string): Record<string, unknown> {
 	const state = readOperatorSessions(home);
 	return {
-		schema_version: "cealctl.profiles.v1",
+		schema_version: "cealctl.sessions.v1",
 		command: "cealctl",
 		status: state.current_profile ? "configured" : "unconfigured",
-		current_profile: state.current_profile,
-		profiles: Object.keys(state.profiles).sort().map((name) => redactSession(state.profiles[name])),
+		current_session: state.current_profile,
+		sessions: Object.keys(state.profiles).sort().map((name) => redactSession(state.profiles[name])),
 		raw_token_visible: false,
 		proof_level: "local_state",
 	};

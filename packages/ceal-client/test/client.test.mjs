@@ -12,7 +12,7 @@ test("client adds the public protocol version without assuming a Gateway transpo
 			return {
 				ok: true,
 				request_id: request.request_id,
-				protocol_version: "1.1.0",
+				protocol_version: "1.2.0",
 				value: { accepted: true },
 			};
 		},
@@ -26,12 +26,12 @@ test("client adds the public protocol version without assuming a Gateway transpo
 	});
 	assert.deepEqual(observed, {
 		request_id: "request:test-001",
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		operation: "call",
 		profile_ref: "profile:test",
 		body: { capability: "message.search" },
 	});
-	assert.deepEqual(response, { ok: true, request_id: "request:test-001", protocol_version: "1.1.0", value: { accepted: true } });
+	assert.deepEqual(response, { ok: true, request_id: "request:test-001", protocol_version: "1.2.0", value: { accepted: true } });
 });
 
 test("client rejects request identifiers that are unsafe to correlate", async () => {

@@ -79,9 +79,8 @@ export type {
 	CealGatewayMessageSearchCallValue,
 	CealGatewayMessageSearchCoverage,
 	CealGatewayMessageSearchResultItem,
-	CealCapabilityAvailability,
-	CealCapabilityBindingDescriptor,
-	CealCredentialIdentityClass,
+	CealCapabilityAccessDescriptor,
+	CealCapabilityReadiness,
 	CealGatewayPolicyDenial,
 	CealGatewayPolicyDenialDecision,
 	CealGatewayRequestForInput,
@@ -275,13 +274,15 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 	requireExactKeys(handshake, [
 		"client_ref",
 		"host_decision",
+		"instance_ref",
+		"membership_ref",
 		"negotiated_protocol_version",
 		"non_claims",
 		"profile_ref",
 		"proof_level",
 		"registration_ref",
-		"runner_ref",
 		"schema_version",
+		"subject_ref",
 		"supported_gateway_protocol_range",
 	]);
 	if (handshake.schema_version !== "ceal.gateway_handshake.v1"
@@ -289,7 +290,7 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 		|| handshake.profile_ref !== expectedRequest.profile_ref
 		|| handshake.host_decision !== "accepted"
 		|| handshake.proof_level !== "host_decision") invalidResponse();
-	for (const field of ["registration_ref", "client_ref", "runner_ref"] as const) requireSafeRef(handshake[field]);
+	for (const field of ["membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(handshake[field]);
 	const range = requireRecord(handshake.supported_gateway_protocol_range);
 	requireExactKeys(range, ["maximum", "minimum"]);
 	if (!negotiateCealProtocol(range).ok) invalidResponse();
@@ -298,11 +299,12 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 
 function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGatewayDiscoverRequest>): void {
 	const discovery = requireRecord(value);
-	requireExactKeys(discovery, ["capabilities", "host_decision", "non_claims", "profile_ref", "proof_level", "schema_version", "targets"]);
+	requireExactKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "targets"]);
 	if (discovery.schema_version !== "ceal.gateway_discovery.v1"
 		|| discovery.profile_ref !== expectedRequest.profile_ref
 		|| discovery.host_decision !== "accepted"
 		|| discovery.proof_level !== "host_decision") invalidResponse();
+	requirePrefixedRef(discovery.membership_ref, "membership:");
 	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length === 0 || discovery.capabilities.length > 128) invalidResponse();
 	const capabilityIds = new Set<string>();
 	for (const capability of discovery.capabilities) validateDiscoveryCapability(capability, capabilityIds);
@@ -353,15 +355,15 @@ function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<str
 
 function validateDiscoveryTarget(value: unknown, seen: Set<string>, availableCapabilities: ReadonlySet<string>): void {
 	const target = requireRecord(value);
-	requireExactKeys(target, ["access", "capability_bindings", "capability_ids", "label", "target_ref"], ["capability_bindings"]);
+	requireExactKeys(target, ["access", "capability_access", "capability_ids", "label", "target_ref"]);
 	requirePrefixedRef(target.target_ref, "target:");
 	if (seen.has(target.target_ref)) invalidResponse();
 	seen.add(target.target_ref);
 	requireSafeText(target.label, 128);
 	if (target.access !== "granted" && target.access !== "request_required") invalidResponse();
 	const expectedCapabilities = validateTargetCapabilityIds(target, availableCapabilities);
-	if (target.access === "granted") validateCapabilityBindings(target.capability_bindings, expectedCapabilities);
-	else if ("capability_bindings" in target) invalidResponse();
+	if (target.access === "granted") validateCapabilityAccess(target.capability_access, expectedCapabilities);
+	else if (!Array.isArray(target.capability_access) || target.capability_access.length !== 0) invalidResponse();
 }
 
 function validateTargetCapabilityIds(target: Record<string, unknown>, availableCapabilities: ReadonlySet<string>): string[] {
@@ -374,13 +376,14 @@ function validateTargetCapabilityIds(target: Record<string, unknown>, availableC
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const call = requireRecord(value);
-	requireExactKeys(call, ["capability_backend_ref", "capability_id", "data", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"]);
+	requireExactKeys(call, ["capability_id", "data", "grant_ref", "grant_revision", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"]);
 	if (call.schema_version !== "ceal.gateway_call_result.v1"
 		|| call.capability_id !== expectedRequest.body.capability_id
 		|| call.target_ref !== expectedRequest.body.target_ref
 		|| call.host_decision !== "accepted"
 		|| call.proof_level !== "host_decision") invalidResponse();
-	requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
+	requirePrefixedRef(call.grant_ref, "grant:");
+	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest);
 	else validateGenericCapabilityResult(call.data, call.capability_id);
 	validateCallRedaction(call.redaction, call.capability_id);
@@ -411,20 +414,19 @@ function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<C
 		|| minimization.raw_provider_ids_included !== false) invalidResponse();
 }
 
-function validateCapabilityBindings(value: unknown, expectedCapabilities: readonly string[]): void {
+function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly string[]): void {
 	if (!Array.isArray(value) || value.length !== expectedCapabilities.length) invalidResponse();
 	const seen = new Set<string>();
 	for (const item of value) {
-		const binding = requireRecord(item);
-		requireExactKeys(binding, ["availability", "capability_backend_ref", "capability_id", "credential_identity_class", "schema_version", "scope"]);
-		if (binding.schema_version !== "ceal.capability_binding.v1"
-			|| !expectedCapabilities.includes(String(binding.capability_id))
-			|| seen.has(String(binding.capability_id))
-			|| !["available", "degraded"].includes(String(binding.availability))
-			|| !["delegated_principal", "organization_service", "workload_identity"].includes(String(binding.credential_identity_class))
-			|| binding.scope !== "granted_target") invalidResponse();
-		requirePrefixedRef(binding.capability_backend_ref, "capability-backend:");
-		seen.add(String(binding.capability_id));
+		const access = requireRecord(item);
+		requireExactKeys(access, ["capability_id", "grant_ref", "grant_revision", "readiness", "schema_version"]);
+		if (access.schema_version !== "ceal.capability_access.v1"
+			|| !expectedCapabilities.includes(String(access.capability_id))
+			|| seen.has(String(access.capability_id))
+			|| !["ready", "degraded", "unavailable", "unknown"].includes(String(access.readiness))) invalidResponse();
+		requirePrefixedRef(access.grant_ref, "grant:");
+		requireIntegerRange(access.grant_revision, 1, Number.MAX_SAFE_INTEGER);
+		seen.add(String(access.capability_id));
 	}
 }
 
@@ -508,6 +510,8 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"client_ref",
 		"error_code",
 		"event_ref",
+		"instance_ref",
+		"membership_ref",
 		"non_claims",
 		"occurred_at",
 		"operation",
@@ -517,12 +521,12 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"proof_level",
 		"registration_ref",
 		"request_id",
-		"runner_ref",
 		"schema_version",
+		"subject_ref",
 	], ["call"]);
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
-	for (const field of ["event_ref", "registration_ref", "client_ref", "runner_ref"] as const) requireSafeRef(event[field]);
+	for (const field of ["event_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(event[field]);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
 	if ("call" in event) validateAuditCallDetail(event.call, event);
@@ -544,20 +548,22 @@ function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequ
 function validateAuditCallDetail(value: unknown, event: Record<string, unknown>): void {
 	const call = requireRecord(value);
 	if (call.capability_id !== "message.search") {
-		requireExactKeys(call, ["capability_backend_ref", "capability_id", "input_summary", "output_summary", "schema_version", "target_ref"]);
+		requireExactKeys(call, ["capability_id", "grant_ref", "grant_revision", "input_summary", "output_summary", "schema_version", "target_ref"]);
 		if (call.schema_version !== "ceal.gateway_audit_call_detail.v1") invalidResponse();
 		requireSafeRef(call.capability_id);
-		requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
+		requirePrefixedRef(call.grant_ref, "grant:");
+		requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 		requirePrefixedRef(call.target_ref, "target:");
 		requireRecord(call.input_summary);
 		requireRecord(call.output_summary);
 		return;
 	}
-	requireExactKeys(call, ["capability_backend_ref", "capability_id", "coverage", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
+	requireExactKeys(call, ["capability_id", "coverage", "grant_ref", "grant_revision", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
 	if (![call.schema_version === "ceal.gateway_audit_call_detail.v1", call.capability_id === "message.search",
 		event.operation === "call", event.outcome === "succeeded"].every(Boolean)) invalidResponse();
 	requirePrefixedRef(call.target_ref, "target:");
-	requirePrefixedRef(call.capability_backend_ref, "capability-backend:");
+	requirePrefixedRef(call.grant_ref, "grant:");
+	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 	requireIntegerRange(call.requested_limit, 1, 10);
 	requireIntegerRange(call.query_utf8_bytes, 1, 512);
 	requireIntegerRange(call.result_count, 0, call.requested_limit);

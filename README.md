@@ -14,7 +14,7 @@ Agent runner, Gateway server, or an umbrella SDK.
 The two commands deliberately have separate help, command registries,
 credential-context identifiers, and package archives. `ceal` does not contain
 operator or credential-management commands. `cealctl` does not contain worker
-capability calls or worker profile access.
+capability calls or worker Session material.
 
 Both commands use conventional text only for progressive `--help` discovery.
 Every non-help result, including parser failures, is exactly one compact YAML
@@ -23,9 +23,9 @@ use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 
 Capability discovery and invocation are provider-neutral contracts. `ceal
 capabilities` exposes stable capability/target references, input contracts,
-evidence requirements, and a redacted `credential_identity_class`; it does not
-expose Slack, GitHub, Notion, or another provider's credential kind, API mode,
-or internal connector binding. `ceal call <capability-id> --target <target-ref>
+the applied Profile Grant revision, and connector readiness; it does not expose
+Slack, GitHub, Notion, another provider's credential kind, API mode, or internal
+connector binding. `ceal call <capability-id> --target <target-ref>
 [key=value ...]` forwards that discovered vocabulary without requiring a new
 top-level CLI command. Known core capabilities receive stricter local and wire
 validation, while a bounded generic envelope admits future manifest-defined
@@ -35,12 +35,13 @@ evidence, claim, audit, redaction, usage, data, and error fields so agents do no
 infer completion from an exit code alone.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
-example, a Slack adapter may use indexed search, ranked results, thread replies,
-and a delegated Slack principal, but the public contract reports only neutral
-coverage semantics and `delegated_principal`. Another adapter can satisfy the
-same public identity class and capability contract with its own credential and
-API mechanism. A less capable fallback must advertise `degraded` availability
-and incomplete coverage rather than impersonating the richer path.
+example, a Slack adapter may use indexed search, ranked results, and thread
+replies, but the public contract reports only neutral coverage semantics. The
+Gateway authorizes the subject's active Profile membership and explicit target
+Grant before it reaches that private adapter; provider token kinds are execution
+details, never authorization concepts. A less capable connector must advertise
+`degraded` readiness and incomplete coverage rather than impersonating the
+richer path.
 
 The repository also owns two Agent Skill packages under `skills/`:
 `ceal-guide` for worker capability use and `cealctl-guide` for operator/control
@@ -105,22 +106,24 @@ automatically; raw Admin API tokens are not CLI operands or stdin inputs.
 
 ```sh
 cealctl login https://ceal.example.test/acme/production --profile production
-cealctl profiles
+cealctl sessions
 cealctl enrollments create \
-  --name developer-laptop \
+  --client developer-laptop \
   --profile work \
   --subject developer \
   --instance production
 ```
 
-The resulting one-time code is transferred privately to the worker machine and
+The client invitation, subject, Profile membership, and target Grants must
+already exist in the Gateway registry; enrollment cannot create authority. The
+resulting one-time code is transferred privately to the worker machine and
 exchanged through stdin using the exact Gateway endpoint printed by `cealctl`.
 The worker profile then discovers and calls its granted capabilities without
 endpoint or token flags:
 
 ```sh
 read -rs CEAL_ENROLLMENT_CODE
-printf '%s\n' "$CEAL_ENROLLMENT_CODE" | ceal profiles enroll \
+printf '%s\n' "$CEAL_ENROLLMENT_CODE" | ceal session enroll \
   --gateway https://ceal.example.test/acme/production/api/ceal/v1 \
   --code-stdin
 unset CEAL_ENROLLMENT_CODE
@@ -158,8 +161,8 @@ enter the artifact.
 The builder emits `ceal-<platform>`, `cealctl-<platform>`, one platform release
 manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success, including discovery of the
-worker `profiles`/`capabilities` and operator
-`login`/`profiles`/`logout`/`enrollments` workflow commands.
+worker `session`/`capabilities` and operator
+`login`/`sessions`/`logout`/`enrollments` workflow commands.
 Before calling transferred artifacts ready, compare both installed checksums to
 the exact platform build output and run both `ceal commands` and `cealctl
 commands`; a version string alone does not distinguish two unpublished

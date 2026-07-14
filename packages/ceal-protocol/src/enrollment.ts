@@ -6,9 +6,7 @@ export const CEAL_ENROLLMENT_CREATE_RESULT_SCHEMA = "ceal.enrollment_create_resu
 export interface CealEnrollmentCreateRequest {
 	schema_version: typeof CEAL_ENROLLMENT_CREATE_SCHEMA;
 	profile_ref: string;
-	registration_ref: string;
 	client_ref: string;
-	runner_ref: string;
 	subject_ref: string;
 	instance_ref: string;
 	enrollment_expires_at?: string;
@@ -33,16 +31,16 @@ export interface CealEnrollmentResult {
 	schema_version: typeof CEAL_ENROLLMENT_RESULT_SCHEMA;
 	ok: true;
 	profile_ref: string;
+	membership_ref: string;
 	registration_ref: string;
 	client_ref: string;
-	runner_ref: string;
 	subject_ref: string;
 	instance_ref: string;
 	access_token: string;
 	expires_at: string;
-	refresh_token?: string;
-	refresh_token_idle_expires_at?: string;
-	refresh_token_absolute_expires_at?: string;
+	refresh_token: string;
+	refresh_token_idle_expires_at: string;
+	refresh_token_absolute_expires_at: string;
 }
 
 export interface CealEnrollmentFailure {
@@ -64,12 +62,12 @@ const REFRESH_TOKEN = /^ceal_refresh_[A-Za-z0-9_-]{43}$/u;
 
 export function decodeCealEnrollmentCreateRequest(value: unknown): CealEnrollmentCreateRequest {
 	const record = requireRecord(value);
-	const required = ["client_ref", "instance_ref", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
+	const required = ["client_ref", "instance_ref", "profile_ref", "schema_version", "subject_ref"];
 	const optional = ["credential_expires_at", "enrollment_expires_at"];
 	const keys = Object.keys(record);
 	if (record.schema_version !== CEAL_ENROLLMENT_CREATE_SCHEMA || required.some((key) => !keys.includes(key))
 		|| keys.some((key) => !required.includes(key) && !optional.includes(key))) invalidResponse();
-	for (const key of ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"] as const) {
+	for (const key of ["profile_ref", "client_ref", "subject_ref", "instance_ref"] as const) {
 		if (typeof record[key] !== "string" || !SAFE_REF.test(record[key])) invalidResponse();
 	}
 	for (const key of optional) {
@@ -116,18 +114,17 @@ export function decodeCealEnrollmentResponse(value: unknown): CealEnrollmentResp
 	const record = requireRecord(value);
 	if (record.schema_version !== CEAL_ENROLLMENT_RESULT_SCHEMA || typeof record.ok !== "boolean") invalidResponse();
 	if (record.ok === false) return decodeFailure(record);
-	const baseKeys = ["access_token", "client_ref", "expires_at", "instance_ref", "ok", "profile_ref", "registration_ref", "runner_ref", "schema_version", "subject_ref"];
-	const refreshKeys = ["refresh_token", "refresh_token_absolute_expires_at", "refresh_token_idle_expires_at"];
-	const actualKeys = Object.keys(record).sort();
-	const baseOnly = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys].sort());
-	const refreshCapable = JSON.stringify(actualKeys) === JSON.stringify([...baseKeys, ...refreshKeys].sort());
-	if (!baseOnly && !refreshCapable) invalidResponse();
-	if (!validEnrollmentBinding(record) || !validAccessMaterial(record) || (refreshCapable && !validRefreshMaterial(record))) invalidResponse();
+	requireExactKeys(record, [
+		"access_token", "client_ref", "expires_at", "instance_ref", "membership_ref", "ok", "profile_ref",
+		"refresh_token", "refresh_token_absolute_expires_at", "refresh_token_idle_expires_at", "registration_ref",
+		"schema_version", "subject_ref",
+	]);
+	if (!validEnrollmentBinding(record) || !validAccessMaterial(record) || !validRefreshMaterial(record)) invalidResponse();
 	return record as unknown as CealEnrollmentResult;
 }
 
 function validEnrollmentBinding(record: Record<string, unknown>): boolean {
-	return ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"]
+	return ["profile_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"]
 		.every((key) => typeof record[key] === "string" && SAFE_REF.test(record[key]));
 }
 function validAccessMaterial(record: Record<string, unknown>): boolean {

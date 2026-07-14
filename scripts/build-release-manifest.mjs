@@ -73,13 +73,13 @@ function assertReleaseIdentity(contract) {
 
 function assertProtocolContract(protocol) {
 	const supportedRange = protocol?.supported_gateway_range;
-	if (protocol?.wire_version !== "1.1.0" || !isExactProtocolRange(supportedRange)) {
+	if (protocol?.wire_version !== "1.2.0" || !isExactProtocolRange(supportedRange)) {
 		throw new CealCliReleaseManifestError("invalid_contract", "Release contract protocol compatibility is invalid.");
 	}
 }
 
 function isExactProtocolRange(range) {
-	return range?.minimum === "1.1.0" && range.maximum === "1.1.0";
+	return range?.minimum === "1.2.0" && range.maximum === "1.2.0";
 }
 
 function assertRollbackContract(rollback) {

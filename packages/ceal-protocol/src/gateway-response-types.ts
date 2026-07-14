@@ -1,4 +1,4 @@
-export const CEAL_PROTOCOL_VERSION = "1.1.0" as const;
+export const CEAL_PROTOCOL_VERSION = "1.2.0" as const;
 
 export interface CealProtocolRange { minimum: string; maximum: string }
 export type CealClientOperation = "handshake" | "discover" | "call" | "readback";
@@ -52,9 +52,11 @@ export interface CealGatewayHandshakeValue {
 	negotiated_protocol_version: typeof CEAL_PROTOCOL_VERSION;
 	supported_gateway_protocol_range: CealProtocolRange;
 	profile_ref: string;
+	membership_ref: string;
 	registration_ref: string;
 	client_ref: string;
-	runner_ref: string;
+	subject_ref: string;
+	instance_ref: string;
 	host_decision: "accepted";
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
@@ -63,6 +65,7 @@ export interface CealGatewayHandshakeValue {
 export interface CealGatewayDiscoveryValue {
 	schema_version: "ceal.gateway_discovery.v1";
 	profile_ref: string;
+	membership_ref: string;
 	capabilities: CealGatewayDiscoveryCapability[];
 	targets: CealGatewayDiscoveryTarget[];
 	host_decision: "accepted";
@@ -79,16 +82,14 @@ export interface CealGatewayDiscoveryCapability {
 	evidence_requirement: string;
 }
 
-export type CealCapabilityAvailability = "available" | "degraded";
-export type CealCredentialIdentityClass = "delegated_principal" | "organization_service" | "workload_identity";
+export type CealCapabilityReadiness = "ready" | "degraded" | "unavailable" | "unknown";
 
-export interface CealCapabilityBindingDescriptor {
-	schema_version: "ceal.capability_binding.v1";
+export interface CealCapabilityAccessDescriptor {
+	schema_version: "ceal.capability_access.v1";
 	capability_id: string;
-	capability_backend_ref: string;
-	availability: CealCapabilityAvailability;
-	credential_identity_class: CealCredentialIdentityClass;
-	scope: "granted_target";
+	grant_ref: string;
+	grant_revision: number;
+	readiness: CealCapabilityReadiness;
 }
 
 export interface CealGatewayGrantedDiscoveryTarget {
@@ -96,7 +97,7 @@ export interface CealGatewayGrantedDiscoveryTarget {
 	label: string;
 	access: "granted";
 	capability_ids: string[];
-	capability_bindings: CealCapabilityBindingDescriptor[];
+	capability_access: CealCapabilityAccessDescriptor[];
 }
 
 export interface CealGatewayRequestRequiredDiscoveryTarget {
@@ -104,6 +105,7 @@ export interface CealGatewayRequestRequiredDiscoveryTarget {
 	label: string;
 	access: "request_required";
 	capability_ids: [];
+	capability_access: [];
 }
 
 export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | CealGatewayRequestRequiredDiscoveryTarget;
@@ -111,8 +113,9 @@ export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | Cea
 export interface CealGatewayCallValue {
 	schema_version: "ceal.gateway_call_result.v1";
 	capability_id: string;
-	capability_backend_ref: string;
 	target_ref: string;
+	grant_ref: string;
+	grant_revision: number;
 	data: Record<string, unknown>;
 	redaction: {
 		state: "applied";
@@ -189,9 +192,11 @@ export interface CealGatewayAuditEvent {
 	event_ref: string;
 	request_id: string;
 	profile_ref: string;
+	membership_ref: string;
 	registration_ref: string;
 	client_ref: string;
-	runner_ref: string;
+	subject_ref: string;
+	instance_ref: string;
 	occurred_at: string;
 	operation: CealGatewayRequest["operation"];
 	auth_decision: "allowed" | "denied";
@@ -206,8 +211,9 @@ export interface CealGatewayAuditEvent {
 export interface CealGatewayMessageSearchAuditCallDetail {
 	schema_version: "ceal.gateway_audit_call_detail.v1";
 	capability_id: "message.search";
-	capability_backend_ref: string;
 	target_ref: string;
+	grant_ref: string;
+	grant_revision: number;
 	requested_limit: number;
 	query_utf8_bytes: number;
 	result_count: number;
@@ -217,8 +223,9 @@ export interface CealGatewayMessageSearchAuditCallDetail {
 export interface CealGatewayGenericAuditCallDetail {
 	schema_version: "ceal.gateway_audit_call_detail.v1";
 	capability_id: string;
-	capability_backend_ref: string;
 	target_ref: string;
+	grant_ref: string;
+	grant_revision: number;
 	input_summary: Record<string, unknown>;
 	output_summary: Record<string, unknown>;
 }

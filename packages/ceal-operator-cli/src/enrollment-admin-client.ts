@@ -2,9 +2,7 @@ export interface CealEnrollmentCreateInput {
 	adminEndpoint: string;
 	adminToken: string;
 	profileRef: string;
-	registrationRef: string;
 	clientRef: string;
-	runnerRef: string;
 	subjectRef: string;
 	instanceRef: string;
 }
@@ -68,9 +66,7 @@ async function performEnrollmentRequest(
 		body: JSON.stringify({
 			schema_version: CEAL_ENROLLMENT_CREATE_SCHEMA,
 			profile_ref: input.profileRef,
-			registration_ref: input.registrationRef,
 			client_ref: input.clientRef,
-			runner_ref: input.runnerRef,
 			subject_ref: input.subjectRef,
 			instance_ref: input.instanceRef,
 		}),

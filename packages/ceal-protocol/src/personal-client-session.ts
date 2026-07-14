@@ -13,9 +13,9 @@ export interface CealClientRefreshResult {
 	schema_version: typeof CEAL_CLIENT_REFRESH_RESULT_SCHEMA;
 	ok: true;
 	profile_ref: string;
+	membership_ref: string;
 	registration_ref: string;
 	client_ref: string;
-	runner_ref: string;
 	subject_ref: string;
 	instance_ref: string;
 	access_token: string;
@@ -71,8 +71,8 @@ export function decodeCealClientRefreshResponse(value: unknown): CealClientRefre
 	if (record.schema_version !== CEAL_CLIENT_REFRESH_RESULT_SCHEMA || typeof record.ok !== "boolean") invalid();
 	if (record.ok === false) return decodeFailure(record, CEAL_CLIENT_REFRESH_RESULT_SCHEMA);
 	requireExactKeys(record, [
-		"access_token", "client_ref", "expires_at", "instance_ref", "ok", "profile_ref", "refresh_token",
-		"refresh_token_absolute_expires_at", "refresh_token_idle_expires_at", "registration_ref", "runner_ref",
+		"access_token", "client_ref", "expires_at", "instance_ref", "membership_ref", "ok", "profile_ref", "refresh_token",
+		"refresh_token_absolute_expires_at", "refresh_token_idle_expires_at", "registration_ref",
 		"schema_version", "subject_ref",
 	]);
 	if (!validRefreshBinding(record) || !validRefreshTokens(record) || !validRefreshTimestamps(record)) invalid();
@@ -80,7 +80,7 @@ export function decodeCealClientRefreshResponse(value: unknown): CealClientRefre
 }
 
 function validRefreshBinding(record: Record<string, unknown>): boolean {
-	return ["profile_ref", "registration_ref", "client_ref", "runner_ref", "subject_ref", "instance_ref"]
+	return ["profile_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"]
 		.every((key) => typeof record[key] === "string" && SAFE_REF.test(record[key]));
 }
 function validRefreshTokens(record: Record<string, unknown>): boolean {

@@ -12,7 +12,7 @@ import {
 
 const envelope = (operation, body) => ({
 	request_id: `request:${operation}:001`,
-	protocol_version: "1.1.0",
+	protocol_version: "1.2.0",
 	operation,
 	profile_ref: "profile:test",
 	body,
@@ -122,7 +122,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const failure = {
 		ok: false,
 		request_id: handshakeRequest.request_id,
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		proof_ref_or_unavailable: { state: "unavailable", reason: "Audit is pending", owner_surface: "Gateway audit" },
 		error: { code: "incompatible_protocol", message: "The protocol is incompatible.", next_action: "Upgrade the client." },
 	};
@@ -145,7 +145,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 });
 
-test("public capability evidence uses provider-neutral binding and coverage vocabulary", () => {
+test("public capability evidence exposes policy and readiness without private backend or credential vocabulary", () => {
 	const discoveryRequest = envelope("discover", {});
 	const callRequest = envelope("call", {
 		capability_id: "message.search",
@@ -159,9 +159,9 @@ test("public capability evidence uses provider-neutral binding and coverage voca
 		callResponse(callRequest),
 		readbackResponse(readbackRequest, callRequest.request_id),
 	]);
-	assert.match(rendered, /capability-backend:message-search-primary/u);
+	assert.match(rendered, /grant:workspace-message-search/u);
 	assert.match(rendered, /authoritative_index/u);
-	assert.doesNotMatch(rendered, /slack|mature_search|degraded_fallback|delegated_user|\bbot\b|provider_search|recent_channel_history|provider_ranked|provider_truncated/u);
+	assert.doesNotMatch(rendered, /capability_backend|credential_identity|delegated|slack|mature_search|degraded_fallback|\bbot\b|provider_search|recent_channel_history|provider_ranked|provider_truncated/u);
 });
 
 test("public discovery, call, and audit envelopes admit provider-neutral capability extensions", () => {
@@ -173,8 +173,8 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 		evidence_requirement: "gateway_audit",
 	});
 	discovery.value.targets[0].capability_ids.push("file.search");
-	discovery.value.targets[0].capability_bindings.push({
-		...matureCapabilityBinding(), capability_id: "file.search", capability_backend_ref: "capability-backend:file-search-primary",
+	discovery.value.targets[0].capability_access.push({
+		...matureCapabilityAccess(), capability_id: "file.search", grant_ref: "grant:workspace-file-search",
 	});
 	assert.equal(decodeCealClientResponse(discovery, discoveryRequest).value.capabilities.length, 2);
 
@@ -183,7 +183,7 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 	});
 	const call = responseEnvelope(callRequest, { ok: true, value: {
 		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
-		capability_backend_ref: "capability-backend:file-search-primary", target_ref: "target:workspace",
+		grant_ref: "grant:workspace-file-search", grant_revision: 1, target_ref: "target:workspace",
 		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
 		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
@@ -194,7 +194,7 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 	const readback = readbackResponse(readbackRequest, callRequest.request_id);
 	readback.value.events[0].call = {
 		schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
-		capability_backend_ref: "capability-backend:file-search-primary", target_ref: "target:workspace",
+		grant_ref: "grant:workspace-file-search", grant_revision: 1, target_ref: "target:workspace",
 		input_summary: { field_count: 1 }, output_summary: { result_count: 1 },
 	};
 	assert.equal(decodeCealClientResponse(readback, readbackRequest).value.events[0].call.capability_id, "file.search");
@@ -229,20 +229,20 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	ambiguousGrant.value.targets[1].capability_ids = ["message.search"];
 	cases.push(ambiguousGrant);
 
-	const missingBackend = structuredClone(exact);
-	delete missingBackend.value.targets[0].capability_bindings;
-	cases.push(missingBackend);
+	const missingAccess = structuredClone(exact);
+	delete missingAccess.value.targets[0].capability_access;
+	cases.push(missingAccess);
 
-	const contradictoryBackend = structuredClone(exact);
-	contradictoryBackend.value.targets[0].capability_bindings[0].availability = "unknown";
-	cases.push(contradictoryBackend);
+	const contradictoryAccess = structuredClone(exact);
+	contradictoryAccess.value.targets[0].capability_access[0].readiness = "broken";
+	cases.push(contradictoryAccess);
 
-	const deniedBackend = structuredClone(exact);
-	deniedBackend.value.targets[1].capability_bindings = [matureCapabilityBinding()];
-	cases.push(deniedBackend);
+	const deniedAccess = structuredClone(exact);
+	deniedAccess.value.targets[1].capability_access = [matureCapabilityAccess()];
+	cases.push(deniedAccess);
 
 	const authorityPromotion = structuredClone(exact);
-	authorityPromotion.value.registration_ref = "registration:test";
+		authorityPromotion.value.registration_ref = "registration:test";
 	cases.push(authorityPromotion);
 
 	for (const value of cases) {
@@ -386,8 +386,8 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	});
 	const exact = callResponse(callRequest);
 	for (const value of [
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.1.0", error: { code: "bad-code", message: "No." } },
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.1.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.2.0", error: { code: "bad-code", message: "No." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.2.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
 	]) assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
 
 	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
@@ -443,9 +443,10 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 function discoveryResponse(request) {
 	return responseEnvelope(request, {
 		ok: true,
-		value: {
-			schema_version: "ceal.gateway_discovery.v1",
-			profile_ref: request.profile_ref,
+			value: {
+				schema_version: "ceal.gateway_discovery.v1",
+				profile_ref: request.profile_ref,
+				membership_ref: "membership:test-work",
 			capabilities: [{
 				capability_id: "message.search",
 				label: "Search messages",
@@ -460,8 +461,8 @@ function discoveryResponse(request) {
 				evidence_requirement: "gateway_audit",
 			}],
 			targets: [
-				{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_bindings: [matureCapabilityBinding()] },
-				{ target_ref: "target:customer-health", label: "Customer health", access: "request_required", capability_ids: [] },
+					{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] },
+					{ target_ref: "target:customer-health", label: "Customer health", access: "request_required", capability_ids: [], capability_access: [] },
 			],
 			host_decision: "accepted",
 			proof_level: "host_decision",
@@ -476,7 +477,8 @@ function callResponse(request) {
 		value: {
 			schema_version: "ceal.gateway_call_result.v1",
 			capability_id: request.body.capability_id,
-			capability_backend_ref: "capability-backend:message-search-primary",
+				grant_ref: "grant:workspace-message-search",
+				grant_revision: 1,
 			target_ref: request.body.target_ref,
 			data: {
 				schema_version: "ceal.message_search_result.v1",
@@ -529,12 +531,14 @@ function handshakeResponse(request) {
 		ok: true,
 		value: {
 			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.1.0",
-			supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
-			profile_ref: request.profile_ref,
-			registration_ref: "registration:test",
-			client_ref: "client:test",
-			runner_ref: "runner:test",
+				negotiated_protocol_version: "1.2.0",
+				supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
+				profile_ref: request.profile_ref,
+				membership_ref: "membership:test-work",
+				registration_ref: "registration:test",
+				client_ref: "client:test",
+				subject_ref: "subject:test",
+				instance_ref: "instance:test",
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -552,10 +556,12 @@ function readbackResponse(request, targetRequestId) {
 				schema_version: "ceal.gateway_audit_event.v1",
 				event_ref: "gateway-audit:event:001",
 				request_id: targetRequestId,
-				profile_ref: request.profile_ref,
-				registration_ref: "registration:test",
-				client_ref: "client:test",
-				runner_ref: "runner:test",
+					profile_ref: request.profile_ref,
+					membership_ref: "membership:test-work",
+					registration_ref: "registration:test",
+					client_ref: "client:test",
+					subject_ref: "subject:test",
+					instance_ref: "instance:test",
 				occurred_at: "2026-07-13T21:00:00.000Z",
 				operation: "call",
 				auth_decision: "allowed",
@@ -565,7 +571,8 @@ function readbackResponse(request, targetRequestId) {
 				call: {
 					schema_version: "ceal.gateway_audit_call_detail.v1",
 					capability_id: "message.search",
-					capability_backend_ref: "capability-backend:message-search-primary",
+						grant_ref: "grant:workspace-message-search",
+						grant_revision: 1,
 					target_ref: "target:workspace",
 					requested_limit: 5,
 					query_utf8_bytes: 14,
@@ -579,14 +586,13 @@ function readbackResponse(request, targetRequestId) {
 	});
 }
 
-function matureCapabilityBinding() {
+function matureCapabilityAccess() {
 	return {
-		schema_version: "ceal.capability_binding.v1",
+		schema_version: "ceal.capability_access.v1",
 		capability_id: "message.search",
-		capability_backend_ref: "capability-backend:message-search-primary",
-		availability: "available",
-		credential_identity_class: "delegated_principal",
-		scope: "granted_target",
+		grant_ref: "grant:workspace-message-search",
+		grant_revision: 1,
+		readiness: "ready",
 	};
 }
 
@@ -605,7 +611,7 @@ function responseEnvelope(request, body) {
 	return {
 		...body,
 		request_id: request.request_id,
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		proof_ref_or_unavailable: `proof:${request.request_id}`,
 	};
 }

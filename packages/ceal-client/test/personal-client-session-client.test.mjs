@@ -16,8 +16,9 @@ test("personal-client session client rotates and revokes only through derived Ga
 		if (request.url?.endsWith("/refresh")) {
 			response.end(JSON.stringify({
 				schema_version: "ceal.client_refresh_result.v1", ok: true,
-				profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia",
-				runner_ref: "runner:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:ceal-dev",
+				profile_ref: "profile:work", membership_ref: "membership:narnia",
+				registration_ref: "registration:narnia", client_ref: "client:narnia",
+				subject_ref: "subject:hwidong", instance_ref: "instance:ceal-dev",
 				access_token: `ceal_personal_${"A".repeat(43)}`, expires_at: "2026-07-13T06:15:00.000Z",
 				refresh_token: `ceal_refresh_${"N".repeat(43)}`,
 				refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",

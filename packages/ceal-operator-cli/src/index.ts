@@ -35,7 +35,7 @@ export interface CealctlRuntime {
 }
 
 export interface CealctlCommandDefinition {
-	name: "version" | "commands" | "login" | "profiles" | "logout" | "enrollments" | "doctor";
+	name: "version" | "commands" | "login" | "sessions" | "logout" | "enrollments" | "doctor";
 	description: string;
 	usage: string;
 	effect: "read_only" | "control_write";
@@ -73,13 +73,13 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 		recovery: "Approve the displayed code in the same-origin browser page, then retry if it expires.",
 	},
 	{
-		name: "profiles",
-		description: "Inspect or select stored operator profiles without exposing tokens.",
-		usage: "cealctl profiles [use <name>]",
+		name: "sessions",
+		description: "Inspect or select stored operator sessions without exposing tokens.",
+		usage: "cealctl sessions [use <name>]",
 		effect: "control_write",
 		evidence: "surface",
-		result_schema: "cealctl.profiles.v1",
-		recovery: "Run 'cealctl login <admin-url> --profile <name>' when no profile exists.",
+		result_schema: "cealctl.sessions.v1",
+		recovery: "Run 'cealctl login <admin-url> --profile <name>' when no session exists.",
 	},
 	{
 		name: "logout",
@@ -93,7 +93,7 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	{
 		name: "enrollments",
 		description: "Create one-time personal-client enrollment material.",
-		usage: "cealctl enrollments create --name <name> --profile <name> --subject <name> --instance <name> [--operator-profile <name>]",
+		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-profile <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.enrollments.v1",
@@ -138,7 +138,7 @@ function runKnownCommand(command: CealctlCommandDefinition["name"], options: rea
 	if (command === "version") return options.length === 0 ? writeVersion(io) : writeError("invalid_argument", "Invalid cealctl version options.", io);
 	if (command === "commands") return options.length === 0 ? writeCommands(io) : writeError("invalid_argument", "Invalid cealctl commands options.", io);
 	if (command === "login") return runLogin(options, io, runtime);
-	if (command === "profiles") return runProfiles(options, io, runtime);
+	if (command === "sessions") return runSessions(options, io, runtime);
 	if (command === "logout") return runLogout(options, io, runtime);
 	if (command === "enrollments") return runEnrollments(options, io, runtime);
 	if (options.length !== 0) return writeError("invalid_argument", "Invalid cealctl command options.", io);
@@ -155,13 +155,13 @@ function commandHelp(command: CealctlCommandDefinition): string {
 	const options = command.name === "login" ? [
 		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
 		"  --profile <safe-name>         Local operator profile name (default: default).",
-	] : command.name === "profiles" ? [
-		"  use <safe-name>               Select one stored operator profile.",
+	] : command.name === "sessions" ? [
+		"  use <safe-name>               Select one stored operator session.",
 	] : command.name === "logout" ? [
 		"  --profile <safe-name>         Revoke a named profile instead of the current profile.",
 	] : command.name === "enrollments" ? [
 		"  create                         Create one short-lived, one-time enrollment code.",
-		"  --name <safe-name>            Registration, client, and runner name.",
+		"  --client <safe-name>          Pre-registered client invitation name.",
 		"  --profile <safe-name>         Profile name bound by the Gateway.",
 		"  --subject <safe-name>         User identity bound by the Gateway.",
 		"  --instance <safe-name>        Customer instance bound by the Gateway.",
@@ -214,19 +214,19 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 	}
 }
 
-function runProfiles(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number {
+function runSessions(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number {
 	try {
 		if (options.length === 0) return writeYaml(io.stdout, operatorProfilesPayload(runtime.homeDir));
 		if (options.length === 2 && options[0] === "use" && options[1]) {
 			const session = selectOperatorSession(options[1], runtime.homeDir);
 			return writeYaml(io.stdout, {
-				schema_version: "cealctl.profiles.v1", command: "cealctl", status: "selected",
-				current_profile: session.name, profile: redactSession(session), raw_token_visible: false, proof_level: "local_state",
+				schema_version: "cealctl.sessions.v1", command: "cealctl", status: "selected",
+				current_session: session.name, session: redactSession(session), raw_token_visible: false, proof_level: "local_state",
 			});
 		}
-		return writeError("invalid_argument", "Invalid cealctl profiles options.", io);
+		return writeError("invalid_argument", "Invalid cealctl sessions options.", io);
 	} catch (error) {
-		return writeSessionFailure("cealctl.profiles.v1", sessionErrorCode(error), "The operator profile could not be read.", io);
+		return writeSessionFailure("cealctl.sessions.v1", sessionErrorCode(error), "The operator session could not be read.", io);
 	}
 }
 
@@ -268,9 +268,7 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/enrollments`,
 			adminToken: refreshed.accessToken,
 			profileRef: `profile:${parsed.profile}`,
-			registrationRef: `registration:${parsed.name}`,
-			clientRef: `client:${parsed.name}`,
-			runnerRef: `runner:${parsed.name}`,
+			clientRef: `client:${parsed.client}`,
 			subjectRef: `subject:${parsed.subject}`,
 			instanceRef: `instance:${parsed.instance}`,
 		});
@@ -286,7 +284,7 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			transfer_warning: "Transfer privately. Do not place this code in logs, tickets, or shared chat.",
 			credential_context: CEALCTL_CREDENTIAL_CONTEXT,
 			proof_level: "host_decision",
-			next_action: `On the user machine, send this code through stdin to 'ceal profiles enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
+			next_action: `On the user machine, send this code through stdin to 'ceal session enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
 		});
 	} catch (error) {
 		const code = error instanceof CealEnrollmentAdminClientError ? error.code : sessionErrorCode(error);
@@ -295,15 +293,15 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 }
 
 interface ParsedEnrollmentCreateOptions {
-	name: string;
+	client: string;
 	profile: string;
 	subject: string;
 	instance: string;
 	operatorProfile?: string;
 }
 
-const ENROLLMENT_CREATE_FLAGS = new Set(["--name", "--profile", "--subject", "--instance", "--operator-profile"]);
-const REQUIRED_ENROLLMENT_CREATE_FLAGS = ["--name", "--profile", "--subject", "--instance"] as const;
+const ENROLLMENT_CREATE_FLAGS = new Set(["--client", "--profile", "--subject", "--instance", "--operator-profile"]);
+const REQUIRED_ENROLLMENT_CREATE_FLAGS = ["--client", "--profile", "--subject", "--instance"] as const;
 const SAFE_LOCAL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 function parseEnrollmentCreateOptions(options: readonly string[]): ParsedEnrollmentCreateOptions | null {
@@ -327,7 +325,7 @@ function parseNamedValues(options: readonly string[], allowed: ReadonlySet<strin
 
 function enrollmentOptionsFrom(values: ReadonlyMap<string, string>): ParsedEnrollmentCreateOptions {
 	return {
-		name: values.get("--name") ?? "",
+		client: values.get("--client") ?? "",
 		profile: values.get("--profile") ?? "",
 		subject: values.get("--subject") ?? "",
 		instance: values.get("--instance") ?? "",

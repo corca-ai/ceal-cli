@@ -12,7 +12,7 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
-		"./profile-store": {
+		"./session-store": {
 			"types": "./dist/profile-store.d.ts",
 			"import": "./dist/profile-store.js"
 		}

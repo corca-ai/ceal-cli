@@ -99,10 +99,10 @@ verify_version_output() {
     "schema_version: $schema" \
     "command: $command" \
     "version: ${VERSION#v}" \
-    "protocol_version: 1.1.0" \
+    "protocol_version: 1.2.0" \
     "supported_gateway_protocol_range:" \
-    "  minimum: 1.1.0" \
-    "  maximum: 1.1.0" \
+	"  minimum: 1.2.0" \
+	"  maximum: 1.2.0" \
     "credential_context: $credential_context" >"$expected_path"
   cmp -s "$stdout_path" "$expected_path" \
     || fail "$command reported an invalid version YAML document for $VERSION"
@@ -238,7 +238,7 @@ done
 verify_checksum_inventory
 
 chmod 755 "$TMP_DIR/$CEAL_ASSET" "$TMP_DIR/$CEALCTL_ASSET"
-verify_version_output "$TMP_DIR/$CEAL_ASSET" ceal ceal.version.v1 gateway_issued_client_profile
+verify_version_output "$TMP_DIR/$CEAL_ASSET" ceal ceal.version.v1 gateway_issued_client_session
 verify_version_output "$TMP_DIR/$CEALCTL_ASSET" cealctl cealctl.version.v1 cealctl_operator_admin_profile
 "$TMP_DIR/$CEAL_ASSET" --help >/dev/null
 "$TMP_DIR/$CEALCTL_ASSET" --help >/dev/null
@@ -295,7 +295,7 @@ if [ "$CEAL_TARGET_STATE" != managed_link ] || [ "$CEALCTL_TARGET_STATE" != mana
   fi
 fi
 
-verify_version_output "$CEAL_TARGET" ceal ceal.version.v1 gateway_issued_client_profile
+verify_version_output "$CEAL_TARGET" ceal ceal.version.v1 gateway_issued_client_session
 verify_version_output "$CEALCTL_TARGET" cealctl cealctl.version.v1 cealctl_operator_admin_profile
 COMMITTED=1
 printf 'Installed ceal and cealctl %s (%s) at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"

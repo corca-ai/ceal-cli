@@ -43,7 +43,7 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 		assert.deepEqual(observed, {
 			method: "POST",
 			authorization: "Bearer gateway-issued-token",
-			body: { ...request, protocol_version: "1.1.0" },
+			body: { ...request, protocol_version: "1.2.0" },
 		});
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -87,7 +87,7 @@ test("HTTP transport returns a valid failure envelope on non-2xx", async () => {
 	const failure = {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
 	};
 	const transport = createCealHttpTransport({
@@ -180,7 +180,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "invalid_response",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.1.0", value: {} }),
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.2.0", value: {} }),
 		},
 		{
 			code: "invalid_response",
@@ -188,7 +188,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "response_too_large",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.1.0", value: { payload: token.repeat(20) } }),
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.2.0", value: { payload: token.repeat(20) } }),
 			maxResponseBytes: 64,
 		},
 		{
@@ -230,12 +230,14 @@ function hasTransportCode(code) {
 function handshakeResponse(input) {
 	return successResponse(input, {
 			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.1.0",
-			supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
+			negotiated_protocol_version: "1.2.0",
+			supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
 			profile_ref: input.profile_ref,
+			membership_ref: "membership:test",
 			registration_ref: "registration:test",
 			client_ref: "client:test",
-			runner_ref: "runner:test",
+			subject_ref: "subject:test",
+			instance_ref: "instance:test",
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -246,6 +248,7 @@ function discoveryResponse(input) {
 	return successResponse(input, {
 			schema_version: "ceal.gateway_discovery.v1",
 			profile_ref: input.profile_ref,
+			membership_ref: "membership:test",
 			capabilities: [{
 				capability_id: "message.search",
 				label: "Search approved messages",
@@ -264,7 +267,7 @@ function discoveryResponse(input) {
 				label: "Approved workspace",
 				access: "granted",
 				capability_ids: ["message.search"],
-				capability_bindings: [matureCapabilityBinding()],
+				capability_access: [matureCapabilityAccess()],
 			}],
 			host_decision: "accepted",
 			proof_level: "host_decision",
@@ -276,7 +279,8 @@ function allowedCallResponse(input) {
 	return successResponse(input, {
 			schema_version: "ceal.gateway_call_result.v1",
 			capability_id: input.body.capability_id,
-			capability_backend_ref: "capability-backend:message-search-primary",
+			grant_ref: "grant:workspace-message-search",
+			grant_revision: 3,
 			target_ref: input.body.target_ref,
 			data: {
 				schema_version: "ceal.message_search_result.v1",
@@ -310,20 +314,19 @@ function successResponse(input, value) {
 	return {
 		ok: true,
 		request_id: input.request_id,
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		value,
 	};
 }
 
-function matureCapabilityBinding() {
+function matureCapabilityAccess() {
 	return {
-		schema_version: "ceal.capability_binding.v1",
+		schema_version: "ceal.capability_access.v1",
 		capability_id: "message.search",
-		capability_backend_ref: "capability-backend:message-search-primary",
-		availability: "available",
-		credential_identity_class: "delegated_principal",
-		scope: "granted_target",
+		grant_ref: "grant:workspace-message-search",
+		grant_revision: 3,
+		readiness: "ready",
 	};
 }
 
@@ -342,7 +345,7 @@ function policyDenialResponse(input) {
 	return {
 		ok: false,
 		request_id: input.request_id,
-		protocol_version: "1.1.0",
+		protocol_version: "1.2.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		error: {
 			code: "policy_denied",

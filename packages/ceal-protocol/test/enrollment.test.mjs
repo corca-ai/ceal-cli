@@ -13,10 +13,10 @@ const TOKEN = `ceal_personal_${"B".repeat(43)}`;
 test("administrator enrollment creation has one strict public wire contract", () => {
 	const request = decodeCealEnrollmentCreateRequest({
 		schema_version: "ceal.enrollment_create.v1",
-		profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia",
-		runner_ref: "runner:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+		profile_ref: "profile:work", client_ref: "client:narnia",
+		subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 	});
-	assert.equal(request.runner_ref, "runner:narnia");
+	assert.equal(request.client_ref, "client:narnia");
 	const result = decodeCealEnrollmentCreateResult({
 		schema_version: "ceal.enrollment_create_result.v1", ok: true, code: CODE,
 		gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2026-07-14T00:00:00.000Z",
@@ -36,13 +36,16 @@ test("enrollment request and issued result decode exact bounded material", () =>
 		schema_version: "ceal.enrollment_result.v1",
 		ok: true,
 		profile_ref: "profile:narnia",
+		membership_ref: "membership:narnia",
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
-		runner_ref: "runner:narnia",
 		subject_ref: "subject:hwidong",
 		instance_ref: "instance:corca",
 		access_token: TOKEN,
 		expires_at: "2026-07-14T00:00:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
 	});
 	assert.equal(result.ok, true);
 	assert.equal(result.access_token, TOKEN);
@@ -53,9 +56,9 @@ test("enrollment accepts one all-or-nothing refresh-capable result", () => {
 		schema_version: "ceal.enrollment_result.v1",
 		ok: true,
 		profile_ref: "profile:work",
+		membership_ref: "membership:narnia",
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
-		runner_ref: "runner:narnia",
 		subject_ref: "subject:hwidong",
 		instance_ref: "instance:ceal-dev",
 		access_token: `ceal_personal_${"A".repeat(43)}`,
@@ -77,13 +80,16 @@ test("enrollment decoders reject extra fields, malformed codes, and token drift"
 		schema_version: "ceal.enrollment_result.v1",
 		ok: true,
 		profile_ref: "profile:narnia",
+		membership_ref: "membership:narnia",
 		registration_ref: "registration:narnia",
 		client_ref: "client:narnia",
-		runner_ref: "runner:narnia",
 		subject_ref: "subject:hwidong",
 		instance_ref: "instance:corca",
 		access_token: "provider-token",
 		expires_at: "2026-07-14T00:00:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
 	}), TypeError);
 });
 

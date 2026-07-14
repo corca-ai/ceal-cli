@@ -29,8 +29,8 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.equal(result.writes_external, false);
 			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
 			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
-				["profiles", "capabilities"],
-				["login", "profiles", "logout", "enrollments"],
+				["session", "capabilities"],
+				["login", "sessions", "logout", "enrollments"],
 			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
 				"source",
@@ -174,19 +174,19 @@ test("CLI reports source build failure as one bounded JSON document", async () =
 });
 
 test("rejects platform artifacts that omit required enrollment workflow commands", () => {
-	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "profiles", "capabilities"], ["profiles", "capabilities"]));
+	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "session", "capabilities"], ["session", "capabilities"]));
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "capabilities"], ["profiles", "capabilities"]),
+		() => assertRequiredCommandDiscovery(["version", "capabilities"], ["session", "capabilities"]),
 		hasCode("smoke_failed"),
 	);
 	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
-		["version", "login", "profiles", "logout", "enrollments"],
-		["login", "profiles", "logout", "enrollments"],
+		["version", "login", "sessions", "logout", "enrollments"],
+		["login", "sessions", "logout", "enrollments"],
 	));
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "profiles", "logout", "enrollments"], "cealctl"),
+		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "sessions", "logout", "enrollments"], "cealctl"),
 		(error) => hasCode("smoke_failed")(error)
-			&& error.message === "Built cealctl command discovery omitted required commands: login, profiles, logout.",
+			&& error.message === "Built cealctl command discovery omitted required commands: login, sessions, logout.",
 	);
 });
 

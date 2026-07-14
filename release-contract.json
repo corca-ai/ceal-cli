@@ -16,10 +16,10 @@
 	"protocol": {
 		"package": "@corca-ai/ceal-protocol",
 		"package_version": "0.64.0",
-		"wire_version": "1.1.0",
+		"wire_version": "1.2.0",
 		"supported_gateway_range": {
-			"minimum": "1.1.0",
-			"maximum": "1.1.0"
+			"minimum": "1.2.0",
+			"maximum": "1.2.0"
 		}
 	},
 	"client": {
@@ -62,7 +62,7 @@
 			"package": "@corca-ai/ceal-worker-cli",
 			"package_version": "0.64.0",
 			"command": "ceal",
-			"credential_context": "gateway_issued_client_profile"
+			"credential_context": "gateway_issued_client_session"
 		},
 		"cealctl": {
 			"package": "@corca-ai/ceal-operator-cli",

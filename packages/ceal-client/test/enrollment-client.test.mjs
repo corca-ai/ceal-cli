@@ -15,13 +15,16 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 			schema_version: "ceal.enrollment_result.v1",
 			ok: true,
 			profile_ref: "profile:narnia",
+			membership_ref: "membership:narnia",
 			registration_ref: "registration:narnia",
 			client_ref: "client:narnia",
-			runner_ref: "runner:narnia",
 			subject_ref: "subject:hwidong",
 			instance_ref: "instance:corca",
 			access_token: `ceal_personal_${"B".repeat(43)}`,
 			expires_at: "2026-07-14T00:00:00.000Z",
+			refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+			refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+			refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
 		}));
 	});
 	await listen(server);

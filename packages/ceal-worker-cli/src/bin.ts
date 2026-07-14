@@ -2,19 +2,19 @@
 
 import { randomUUID } from "node:crypto";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
-import { createCealProfileStore } from "./profile-store.js";
+import { createCealSessionStore } from "./profile-store.js";
 
-let profileStore: ReturnType<typeof createCealProfileStore> | undefined;
-try { profileStore = createCealProfileStore(process.env.HOME); } catch { profileStore = undefined; }
+let sessionStore: ReturnType<typeof createCealSessionStore> | undefined;
+try { sessionStore = createCealSessionStore(process.env.HOME); } catch { sessionStore = undefined; }
 
 void runCealCommand(process.argv.slice(2), {
 	stdout: process.stdout,
 	stderr: process.stderr,
 }, {
 	readSecret: readStdinSecret,
-	loadProfile: profileStore ? () => profileStore.load() : undefined,
-	saveProfile: profileStore ? (profile) => profileStore.save(profile) : undefined,
-	removeProfile: profileStore ? () => profileStore.remove() : undefined,
+	loadSession: sessionStore ? () => sessionStore.load() : undefined,
+	saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
+	removeSession: sessionStore ? () => sessionStore.remove() : undefined,
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
 	process.exitCode = code;
@@ -24,7 +24,7 @@ void runCealCommand(process.argv.slice(2), {
 		command: "ceal",
 		ok: false,
 		status: "error",
-		credential_context: "gateway_issued_client_profile",
+		credential_context: "gateway_issued_client_session",
 		error: {
 			kind: "unexpected_failure",
 			message: "The Ceal command could not be completed.",

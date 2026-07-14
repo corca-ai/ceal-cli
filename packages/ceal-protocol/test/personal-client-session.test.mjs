@@ -11,9 +11,9 @@ const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
 const ACCESS = `ceal_personal_${"A".repeat(43)}`;
 const BINDING = {
 	profile_ref: "profile:work",
+	membership_ref: "membership:narnia",
 	registration_ref: "registration:narnia",
 	client_ref: "client:narnia",
-	runner_ref: "runner:narnia",
 	subject_ref: "subject:hwidong",
 	instance_ref: "instance:ceal-dev",
 };

@@ -48,8 +48,8 @@ test("version reports package, protocol, range, and operator credential context"
 		schema_version: "cealctl.version.v1",
 		command: "cealctl",
 		version: "0.64.0",
-		protocol_version: "1.1.0",
-		supported_gateway_protocol_range: { minimum: "1.1.0", maximum: "1.1.0" },
+		protocol_version: "1.2.0",
+		supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
 		credential_context: "cealctl_operator_admin_profile",
 	});
 });
@@ -57,7 +57,7 @@ test("version reports package, protocol, range, and operator credential context"
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "profiles", "logout", "enrollments", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "enrollments", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_profile");
 });
@@ -122,13 +122,13 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const sessionsPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
 		assert.equal(statSync(sessionsPath).mode & 0o077, 0);
 		assert.doesNotMatch(login.stdout, new RegExp(refreshToken, "u"));
-		const profiles = await asyncYamlRun(["profiles"], 0, { homeDir });
-		assert.equal(profiles.current_profile, "operator");
-		assert.equal(profiles.raw_token_visible, false);
+		const sessions = await asyncYamlRun(["sessions"], 0, { homeDir });
+		assert.equal(sessions.current_session, "operator");
+		assert.equal(sessions.raw_token_visible, false);
 
 		const payload = await asyncYamlRun([
 			"enrollments", "create",
-			"--name", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
+			"--client", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
 		], 0, { homeDir });
 		assert.equal(payload.status, "created");
 		assert.equal(payload.enrollment_code, "C".repeat(43));
@@ -139,7 +139,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		assert.equal(enrollment.authorization, `Bearer ${adminToken}`);
 		assert.deepEqual(enrollment.body, {
 			schema_version: "ceal.enrollment_create.v1",
-			profile_ref: "profile:work", registration_ref: "registration:narnia", client_ref: "client:narnia", runner_ref: "runner:narnia",
+			profile_ref: "profile:work", client_ref: "client:narnia",
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 		});
 		const stored = readFileSync(sessionsPath, "utf8");
@@ -148,7 +148,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const logout = await asyncYamlRun(["logout"], 0, { homeDir });
 		assert.equal(logout.server_revoked, true);
 		assert.equal(logout.local_profile_removed, true);
-		assert.equal((await asyncYamlRun(["profiles"], 0, { homeDir })).status, "unconfigured");
+		assert.equal((await asyncYamlRun(["sessions"], 0, { homeDir })).status, "unconfigured");
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 		rmSync(homeDir, { recursive: true, force: true });
