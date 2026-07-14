@@ -2,7 +2,13 @@ import {
 	CEAL_PROTOCOL_VERSION,
 	CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE,
 } from "@corca-ai/ceal-protocol";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
+import {
+	applyCealAccess,
+	CealAccessAdminClientError,
+	decodeCealAccessRegistry,
+	showCealAccess,
+} from "./access-admin-client.js";
 import { CealEnrollmentAdminClientError, createCealEnrollment } from "./enrollment-admin-client.js";
 import {
 	currentOperatorSession,
@@ -21,7 +27,7 @@ import {
 } from "./operator-session-client.js";
 
 export const CEAL_OPERATOR_CLI_VERSION = "0.64.0" as const;
-export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_profile" as const;
+export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_session" as const;
 
 export interface CealctlIo {
 	stdout: { write(chunk: string): unknown };
@@ -32,10 +38,11 @@ export interface CealctlRuntime {
 	homeDir?: string;
 	fetchFn?: typeof globalThis.fetch;
 	sleepFn?: (milliseconds: number) => Promise<void>;
+	readStdin?: () => Promise<string>;
 }
 
 export interface CealctlCommandDefinition {
-	name: "version" | "commands" | "login" | "sessions" | "logout" | "enrollments" | "doctor";
+	name: "version" | "commands" | "login" | "sessions" | "logout" | "access" | "enrollments" | "doctor";
 	description: string;
 	usage: string;
 	effect: "read_only" | "control_write";
@@ -66,7 +73,7 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	{
 		name: "login",
 		description: "Authenticate this operator through the Gateway Admin API.",
-		usage: "cealctl login <admin-url> [--profile <name>]",
+		usage: "cealctl login <admin-url> [--session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.login.v1",
@@ -79,21 +86,30 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 		effect: "control_write",
 		evidence: "surface",
 		result_schema: "cealctl.sessions.v1",
-		recovery: "Run 'cealctl login <admin-url> --profile <name>' when no session exists.",
+		recovery: "Run 'cealctl login <admin-url> --session <name>' when no session exists.",
 	},
 	{
 		name: "logout",
 		description: "Revoke one operator session before removing its local profile.",
-		usage: "cealctl logout [--profile <name>]",
+		usage: "cealctl logout [--session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.logout.v1",
 		recovery: "If revoke fails, preserve local state and retry after checking Gateway reachability.",
 	},
 	{
+		name: "access",
+		description: "Inspect or apply Profile memberships, client invitations, and grants.",
+		usage: "cealctl access [show | apply --stdin [--dry-run] [--operator-session <name>]]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.access.v1",
+		recovery: "Run 'cealctl access --help', inspect the current registry, then validate a complete replacement before applying it.",
+	},
+	{
 		name: "enrollments",
 		description: "Create one-time personal-client enrollment material.",
-		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-profile <name>]",
+		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.enrollments.v1",
@@ -140,6 +156,7 @@ function runKnownCommand(command: CealctlCommandDefinition["name"], options: rea
 	if (command === "login") return runLogin(options, io, runtime);
 	if (command === "sessions") return runSessions(options, io, runtime);
 	if (command === "logout") return runLogout(options, io, runtime);
+	if (command === "access") return runAccess(options, io, runtime);
 	if (command === "enrollments") return runEnrollments(options, io, runtime);
 	if (options.length !== 0) return writeError("invalid_argument", "Invalid cealctl command options.", io);
 	return writeDoctor(io);
@@ -154,18 +171,23 @@ function writeRequestedHelp(args: readonly string[], io: CealctlIo): number {
 function commandHelp(command: CealctlCommandDefinition): string {
 	const options = command.name === "login" ? [
 		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
-		"  --profile <safe-name>         Local operator profile name (default: default).",
+		"  --session <safe-name>         Local operator session name (default: default).",
 	] : command.name === "sessions" ? [
 		"  use <safe-name>               Select one stored operator session.",
 	] : command.name === "logout" ? [
-		"  --profile <safe-name>         Revoke a named profile instead of the current profile.",
+		"  --session <safe-name>         Revoke a named session instead of the current session.",
+	] : command.name === "access" ? [
+		"  show                           Read the current Gateway access registry.",
+		"  apply --stdin                  Read one complete ceal.gateway_access_registry.v1 YAML document from stdin.",
+		"  --dry-run                      Validate the replacement without changing Gateway state.",
+		"  --operator-session <name>      Use a named stored admin session.",
 	] : command.name === "enrollments" ? [
 		"  create                         Create one short-lived, one-time enrollment code.",
 		"  --client <safe-name>          Pre-registered client invitation name.",
 		"  --profile <safe-name>         Profile name bound by the Gateway.",
 		"  --subject <safe-name>         User identity bound by the Gateway.",
 		"  --instance <safe-name>        Customer instance bound by the Gateway.",
-		"  --operator-profile <name>     Use a named stored admin profile.",
+		"  --operator-session <name>     Use a named stored admin session.",
 	] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -188,7 +210,7 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 		return writeYaml(io.stdout, {
 			schema_version: "cealctl.login.v1", command: "cealctl", status: "ready", proof_level: "surface",
 			credential_context: CEALCTL_CREDENTIAL_CONTEXT, authenticated: false,
-			next_action: "Run 'cealctl login <admin-url> --profile <name>'.",
+			next_action: "Run 'cealctl login <admin-url> --session <name>'.",
 		});
 	}
 	const parsed = parseLoginOptions(options);
@@ -206,7 +228,7 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 		saveOperatorSession(session, runtime.homeDir);
 		return writeYaml(io.stdout, {
 			schema_version: "cealctl.login.v1", command: "cealctl", status: "authenticated",
-			profile: redactSession(session), raw_token_visible: false, proof_level: "host_decision",
+			session: redactSession(session), raw_token_visible: false, proof_level: "host_decision",
 			next_action: "Run 'cealctl enrollments --help' to issue a personal-client enrollment.",
 		});
 	} catch (error) {
@@ -239,12 +261,84 @@ async function runLogout(options: readonly string[], io: CealctlIo, runtime: Cea
 		removeOperatorSession(runtime.homeDir, session.name);
 		return writeYaml(io.stdout, {
 			schema_version: "cealctl.logout.v1", command: "cealctl", status: "revoked",
-			profile: session.name, server_revoked: true, local_profile_removed: true,
+			session: session.name, server_revoked: true, local_session_removed: true,
 			raw_token_visible: false, proof_level: "host_decision",
 		});
 	} catch (error) {
 		return writeSessionFailure("cealctl.logout.v1", sessionErrorCode(error), "The operator session could not be revoked.", io);
 	}
+}
+
+function runAccess(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
+	if (options.length === 0) return writeYaml(io.stdout, {
+		schema_version: "cealctl.access.v1", command: "cealctl", status: "ready", proof_level: "surface",
+		writes_external: false, next_action: "Run 'cealctl access show' or inspect 'cealctl access --help'.",
+	});
+	const parsed = parseAccessOptions(options);
+	if (!parsed) return writeError("invalid_argument", "Invalid access options.", io);
+	return executeAccess(parsed, io, runtime);
+}
+
+async function executeAccess(
+	parsed: { action: "show" | "apply"; dryRun: boolean; operatorSession?: string },
+	io: CealctlIo,
+	runtime: CealctlRuntime,
+): Promise<number> {
+	try {
+		const registry = parsed.action === "apply" ? await readAccessRegistryFromStdin(runtime) : null;
+		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
+		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
+		const common = {
+			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/access`,
+			adminToken: refreshed.accessToken,
+			fetchFn: runtime.fetchFn,
+		};
+		const result = parsed.action === "show"
+			? await showCealAccess(common)
+			: await applyCealAccess({ ...common, registry: registry!, dryRun: parsed.dryRun });
+		return writeYaml(io.stdout, {
+			schema_version: "cealctl.access.v1", command: "cealctl", status: result.status,
+			dry_run: result.dry_run, registry: result.registry, raw_token_visible: false,
+			proof_level: result.proof_level,
+			next_action: result.status === "validated" ? "Run the same command without --dry-run to apply this complete registry." : "Use 'cealctl enrollments create' only for a client declared active in this registry.",
+		});
+	} catch (error) {
+		const kind = error instanceof CealAccessAdminClientError ? error.code : sessionErrorCode(error);
+		return writeSessionFailure("cealctl.access.v1", kind, "The Gateway access registry could not be read or applied.", io);
+	}
+}
+
+async function readAccessRegistryFromStdin(runtime: CealctlRuntime) {
+	if (typeof runtime.readStdin !== "function") throw new CealAccessAdminClientError("invalid_configuration");
+	const input = await runtime.readStdin();
+	if (Buffer.byteLength(input, "utf8") > 64 * 1024) throw new CealAccessAdminClientError("invalid_configuration");
+	try { return decodeCealAccessRegistry(parse(input, { maxAliasCount: 0 })); }
+	catch (error) {
+		if (error instanceof CealAccessAdminClientError) throw error;
+		throw new CealAccessAdminClientError("invalid_configuration");
+	}
+}
+
+function parseAccessOptions(options: readonly string[]): { action: "show" | "apply"; dryRun: boolean; operatorSession?: string } | null {
+	if (options[0] === "show") {
+		if (options.length === 1) return { action: "show", dryRun: false };
+		if (options.length === 3 && options[1] === "--operator-session" && SAFE_LOCAL_NAME.test(options[2] ?? "")) {
+			return { action: "show", dryRun: false, operatorSession: options[2] };
+		}
+		return null;
+	}
+	if (options[0] !== "apply") return null;
+	let stdin = false;
+	let dryRun = false;
+	let operatorSession: string | undefined;
+	for (let index = 1; index < options.length; index += 1) {
+		const option = options[index];
+		if (option === "--stdin" && !stdin) stdin = true;
+		else if (option === "--dry-run" && !dryRun) dryRun = true;
+		else if (option === "--operator-session" && operatorSession === undefined && SAFE_LOCAL_NAME.test(options[index + 1] ?? "")) operatorSession = options[++index];
+		else return null;
+	}
+	return stdin ? { action: "apply", dryRun, ...(operatorSession ? { operatorSession } : {}) } : null;
 }
 
 function runEnrollments(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
@@ -262,7 +356,7 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 	const parsed = parseEnrollmentCreateOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid enrollment creation options.", io);
 	try {
-		const current = currentOperatorSession(runtime.homeDir, parsed.operatorProfile);
+		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
 		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
 		const result = await createCealEnrollment({
 			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/enrollments`,
@@ -297,10 +391,10 @@ interface ParsedEnrollmentCreateOptions {
 	profile: string;
 	subject: string;
 	instance: string;
-	operatorProfile?: string;
+	operatorSession?: string;
 }
 
-const ENROLLMENT_CREATE_FLAGS = new Set(["--client", "--profile", "--subject", "--instance", "--operator-profile"]);
+const ENROLLMENT_CREATE_FLAGS = new Set(["--client", "--profile", "--subject", "--instance", "--operator-session"]);
 const REQUIRED_ENROLLMENT_CREATE_FLAGS = ["--client", "--profile", "--subject", "--instance"] as const;
 const SAFE_LOCAL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
@@ -329,7 +423,7 @@ function enrollmentOptionsFrom(values: ReadonlyMap<string, string>): ParsedEnrol
 		profile: values.get("--profile") ?? "",
 		subject: values.get("--subject") ?? "",
 		instance: values.get("--instance") ?? "",
-		operatorProfile: values.get("--operator-profile"),
+		operatorSession: values.get("--operator-session"),
 	};
 }
 
@@ -337,7 +431,7 @@ function parseLoginOptions(options: readonly string[]): { adminOrigin: string; p
 	if (options.length < 1 || !options[0] || options[0].startsWith("-")) return null;
 	let profile = "default";
 	for (let index = 1; index < options.length; index += 1) {
-		if (options[index] !== "--profile" || !options[index + 1] || index + 2 !== options.length) return null;
+		if (options[index] !== "--session" || !options[index + 1] || index + 2 !== options.length) return null;
 		profile = options[index + 1] ?? "";
 		index += 1;
 	}
@@ -346,7 +440,7 @@ function parseLoginOptions(options: readonly string[]): { adminOrigin: string; p
 
 function parseOptionalProfile(options: readonly string[]): string | null {
 	if (options.length === 0) return "";
-	if (options.length !== 2 || options[0] !== "--profile" || !options[1]) return null;
+	if (options.length !== 2 || options[0] !== "--session" || !options[1]) return null;
 	return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(options[1]) ? options[1] : null;
 }
 

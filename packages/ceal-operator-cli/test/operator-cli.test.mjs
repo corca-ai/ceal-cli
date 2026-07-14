@@ -50,16 +50,16 @@ test("version reports package, protocol, range, and operator credential context"
 		version: "0.64.0",
 		protocol_version: "1.2.0",
 		supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
-		credential_context: "cealctl_operator_admin_profile",
+		credential_context: "cealctl_operator_admin_session",
 	});
 });
 
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "enrollments", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "enrollments", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
-	assert.equal(payload.credential_context, "cealctl_operator_admin_profile");
+	assert.equal(payload.credential_context, "cealctl_operator_admin_session");
 });
 
 test("doctor reports surface health without setup, runtime, writes, or network claims", () => {
@@ -80,6 +80,12 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-session-test-"));
 	const observed = [];
 	let origin = null;
+	const accessRegistry = {
+		schema_version: "ceal.gateway_access_registry.v1",
+		memberships: [{ membership_ref: "membership:hwidong-work", profile_ref: "profile:work", subject_ref: "subject:hwidong", revision: 1, status: "active" }],
+		clients: [{ client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca", revision: 1, status: "active" }],
+		grants: [{ grant_ref: "grant:work-team-inbox", profile_ref: "profile:work", capability_id: "message.search", target_ref: "target:team-inbox", revision: 1, status: "active" }],
+	};
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
@@ -107,6 +113,14 @@ test("login stores a bound renewable session and enrollment refreshes it without
 			schema_version: "ceal.enrollment_create_result.v1", ok: true, code: "C".repeat(43),
 			gateway_endpoint: "https://gateway.example.test/api/ceal/v1", expires_at: "2099-07-14T00:00:00.000Z",
 		});
+		if (request.url === "/api/cealctl/v1/access" && request.method === "GET") return json(response, 200, {
+			schema_version: "ceal.access_state.v1", ok: true, status: "configured", dry_run: false,
+			registry: accessRegistry, proof_level: "host_decision",
+		});
+		if (request.url === "/api/cealctl/v1/access" && request.method === "PUT") return json(response, 200, {
+			schema_version: "ceal.access_state.v1", ok: true, status: body.dry_run ? "validated" : "applied", dry_run: body.dry_run,
+			registry: body.registry, proof_level: "host_decision",
+		});
 		return json(response, 404, { error_code: "not_found" });
 	});
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -114,7 +128,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	origin = `http://127.0.0.1:${address.port}`;
 	try {
-		const login = await asyncRun(["login", origin, "--profile", "operator"], { homeDir, sleepFn: async () => {} });
+		const login = await asyncRun(["login", origin, "--session", "operator"], { homeDir, sleepFn: async () => {} });
 		assert.equal(login.code, 0);
 		assert.match(login.stderr, /ABCD-1234/u);
 		assert.match(login.stderr, /Expires at: 2099-07-14T00:00:00[.]000Z/u);
@@ -142,12 +156,30 @@ test("login stores a bound renewable session and enrollment refreshes it without
 			profile_ref: "profile:work", client_ref: "client:narnia",
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 		});
+		const shown = await asyncYamlRun(["access", "show"], 0, { homeDir });
+		assert.equal(shown.status, "configured");
+		assert.deepEqual(shown.registry, accessRegistry);
+		const accessYaml = renderPlainYamlDocument(accessRegistry);
+		const validated = await asyncYamlRun(["access", "apply", "--stdin", "--dry-run"], 0, {
+			homeDir, readStdin: async () => accessYaml,
+		});
+		assert.equal(validated.status, "validated");
+		assert.equal(validated.dry_run, true);
+		const applied = await asyncYamlRun(["access", "apply", "--stdin"], 0, {
+			homeDir, readStdin: async () => accessYaml,
+		});
+		assert.equal(applied.status, "applied");
+		assert.equal(applied.dry_run, false);
+		const accessRequests = observed.filter((entry) => entry.url === "/api/cealctl/v1/access");
+		assert.equal(accessRequests.length, 3);
+		for (const request of accessRequests) assert.equal(request.authorization, `Bearer ${adminToken}`);
+		assert.equal(accessRequests[1].body.schema_version, "ceal.access_apply.v1");
 		const stored = readFileSync(sessionsPath, "utf8");
 		assert.match(stored, new RegExp(rotatedRefreshToken, "u"));
 		assert.doesNotMatch(stored, new RegExp(refreshToken, "u"));
 		const logout = await asyncYamlRun(["logout"], 0, { homeDir });
 		assert.equal(logout.server_revoked, true);
-		assert.equal(logout.local_profile_removed, true);
+		assert.equal(logout.local_session_removed, true);
 		assert.equal((await asyncYamlRun(["sessions"], 0, { homeDir })).status, "unconfigured");
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

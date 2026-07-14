@@ -105,8 +105,11 @@ session in an owner-only local file. Enrollment creation refreshes that session
 automatically; raw Admin API tokens are not CLI operands or stdin inputs.
 
 ```sh
-cealctl login https://ceal.example.test/acme/production --profile production
+cealctl login https://ceal.example.test/acme/production --session production
 cealctl sessions
+cealctl access show
+cealctl access apply --stdin --dry-run < access.yaml
+cealctl access apply --stdin < access.yaml
 cealctl enrollments create \
   --client developer-laptop \
   --profile work \
@@ -114,8 +117,14 @@ cealctl enrollments create \
   --instance production
 ```
 
+`access.yaml` is one complete `ceal.gateway_access_registry.v1` document. It
+contains additive Profile Memberships, client invitations, and capability/
+target Grants, but no connector, backend, or provider credential fields. The
+dry run reaches the Gateway and validates the replacement without writing;
+the apply is atomic and rejects stale revisions or implicit record deletion.
+
 The client invitation, subject, Profile membership, and target Grants must
-already exist in the Gateway registry; enrollment cannot create authority. The
+already exist in that Gateway registry; enrollment cannot create authority. The
 resulting one-time code is transferred privately to the worker machine and
 exchanged through stdin using the exact Gateway endpoint printed by `cealctl`.
 The worker profile then discovers and calls its granted capabilities without
