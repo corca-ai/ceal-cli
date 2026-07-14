@@ -17,7 +17,7 @@ export interface CealAccessState {
 
 export class CealAccessAdminClientError extends Error {
 	override readonly name = "CealAccessAdminClientError";
-	constructor(readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response" | "request_denied") {
+	constructor(readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response" | "request_denied" | "stale_registry") {
 		super(`Ceal access administration ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -28,7 +28,7 @@ const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 export function decodeCealAccessRegistry(value: unknown): CealAccessRegistry {
 	if (!isRecord(value) || !hasExactKeys(value, ["clients", "generation", "grants", "memberships", "schema_version"])
 		|| value.schema_version !== "ceal.gateway_access_registry.v1"
-		|| !Number.isSafeInteger(value.generation) || Number(value.generation) < 1
+		|| !Number.isSafeInteger(value.generation) || Number(value.generation) < 0
 		|| !Array.isArray(value.memberships) || !Array.isArray(value.clients) || !Array.isArray(value.grants)) invalidConfiguration();
 	const registry = structuredClone(value) as unknown as CealAccessRegistry;
 	for (const membership of registry.memberships) assertRecord(membership, ["membership_ref", "profile_audience_revision", "profile_ref", "revision", "status", "subject_ref"], [membership.membership_ref, membership.profile_ref, membership.subject_ref], membership.profile_audience_revision);
@@ -59,7 +59,7 @@ async function requestAccess(
 	try {
 		const response = await fetchFn(endpoint, requestInit(input.adminToken, method, controller.signal, registry, dryRun));
 		const bytes = await readBounded(response);
-		if (!response.ok) throw new CealAccessAdminClientError("request_denied");
+		if (!response.ok) throw new CealAccessAdminClientError(response.status === 409 ? "stale_registry" : response.status >= 500 ? "request_failed" : "request_denied");
 		if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
 		return decodeState(parseJson(bytes));
 	} catch (error) {

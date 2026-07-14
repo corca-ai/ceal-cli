@@ -508,10 +508,12 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"auth_decision",
 		"call",
 		"client_ref",
+		"client_revision",
 		"error_code",
 		"event_ref",
 		"instance_ref",
 		"membership_ref",
+		"membership_revision",
 		"non_claims",
 		"occurred_at",
 		"operation",
@@ -527,6 +529,8 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
 	for (const field of ["event_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(event[field]);
+	requireIntegerRange(event.membership_revision, 1, Number.MAX_SAFE_INTEGER);
+	requireIntegerRange(event.client_revision, 1, Number.MAX_SAFE_INTEGER);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
 	if ("call" in event) validateAuditCallDetail(event.call, event);

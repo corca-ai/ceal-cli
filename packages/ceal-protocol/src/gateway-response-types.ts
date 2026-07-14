@@ -193,8 +193,10 @@ export interface CealGatewayAuditEvent {
 	request_id: string;
 	profile_ref: string;
 	membership_ref: string;
+	membership_revision: number;
 	registration_ref: string;
 	client_ref: string;
+	client_revision: number;
 	subject_ref: string;
 	instance_ref: string;
 	occurred_at: string;

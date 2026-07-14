@@ -205,7 +205,7 @@ test("call forwards a discovered provider-neutral capability without a CLI comma
 		events: [{
 			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:generic",
 			request_id: request.body.request_id, profile_ref: request.profile_ref,
-			membership_ref: "membership:narnia", registration_ref: "registration:narnia", client_ref: "client:narnia",
+			membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia", client_ref: "client:narnia", client_revision: 1,
 			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			occurred_at: "2026-07-13T21:00:00.000Z", operation: "call", auth_decision: "allowed",
 			policy_decision: "allowed", outcome: "succeeded", error_code: null,
@@ -589,8 +589,8 @@ function readbackResponse(request) {
 		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
 		events: [{
 			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:001", request_id: request.body.request_id,
-			profile_ref: request.profile_ref, membership_ref: "membership:narnia", registration_ref: "registration:narnia",
-			client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
+			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
 			occurred_at: "2026-07-13T21:00:00.000Z",
 			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
 			call: {
