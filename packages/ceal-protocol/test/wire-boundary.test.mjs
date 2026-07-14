@@ -200,6 +200,14 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 	assert.equal(decodeCealClientResponse(readback, readbackRequest).value.events[0].call.capability_id, "file.search");
 });
 
+test("discovery admits an authenticated Profile with no active grants", () => {
+	const request = envelope("discover", {});
+	const discovery = discoveryResponse(request);
+	discovery.value.capabilities = [];
+	discovery.value.targets = [];
+	assert.deepEqual(decodeCealClientResponse(discovery, request), discovery);
+});
+
 test("discovery decoder rejects drift, authority promotion, and target visibility ambiguity", () => {
 	const request = envelope("discover", {});
 	const exact = discoveryResponse(request);
@@ -208,10 +216,6 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	const wrongProfile = structuredClone(exact);
 	wrongProfile.value.profile_ref = "profile:other";
 	cases.push(wrongProfile);
-
-	const missingCapability = structuredClone(exact);
-	missingCapability.value.capabilities = [];
-	cases.push(missingCapability);
 
 	const changedContract = structuredClone(exact);
 	changedContract.value.capabilities[0].input_contract.limit.maximum = 20;

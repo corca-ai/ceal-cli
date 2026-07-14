@@ -305,7 +305,7 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 		|| discovery.host_decision !== "accepted"
 		|| discovery.proof_level !== "host_decision") invalidResponse();
 	requirePrefixedRef(discovery.membership_ref, "membership:");
-	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length === 0 || discovery.capabilities.length > 128) invalidResponse();
+	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length > 128) invalidResponse();
 	const capabilityIds = new Set<string>();
 	for (const capability of discovery.capabilities) validateDiscoveryCapability(capability, capabilityIds);
 	validateDiscoveryTargets(discovery.targets, capabilityIds);
@@ -348,7 +348,7 @@ function validateMessageSearchInputContract(value: unknown): void {
 }
 
 function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<string>): void {
-	if (!Array.isArray(value) || value.length === 0 || value.length > 64) invalidResponse();
+	if (!Array.isArray(value) || value.length > 64) invalidResponse();
 	const seen = new Set<string>();
 	for (const item of value) validateDiscoveryTarget(item, seen, capabilityIds);
 }
