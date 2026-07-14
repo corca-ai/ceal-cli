@@ -73,35 +73,59 @@ function decodeAndValidate(value: Record<string, unknown>, adminOrigin: string, 
 }
 
 function hasRequiredFeatures(value: unknown): boolean {
-	if (!Array.isArray(value)) return false;
-	const features = new Map<string, unknown>();
-	for (const feature of value) {
-		if (!isRecord(feature) || typeof feature.id !== "string" || features.has(feature.id)) return false;
-		features.set(feature.id, feature.routes);
-	}
+	const features = featureRoutesById(value);
+	if (!features) return false;
 	for (const [id, expectedRoutes] of REQUIRED_FEATURES) {
-		const routes = features.get(id);
-		if (!Array.isArray(routes) || routes.length !== expectedRoutes.length) return false;
-		const actual = new Set<string>();
-		for (const route of routes) {
-			if (!isRecord(route) || typeof route.method !== "string" || typeof route.path !== "string"
-				|| !(route.required_scope === null || typeof route.required_scope === "string")) return false;
-			const key = `${route.method}\u0000${route.path}\u0000${route.required_scope ?? ""}`;
-			if (actual.has(key)) return false;
-			actual.add(key);
-		}
-		for (const [method, path, scope] of expectedRoutes) {
-			if (!actual.has(`${method}\u0000${path}\u0000${scope ?? ""}`)) return false;
-		}
+		if (!hasExpectedRoutes(features.get(id), expectedRoutes)) return false;
 	}
 	return true;
 }
 
+function featureRoutesById(value: unknown): Map<string, unknown> | null {
+	if (!Array.isArray(value)) return null;
+	const features = new Map<string, unknown>();
+	for (const feature of value) {
+		if (!isRecord(feature) || typeof feature.id !== "string" || features.has(feature.id)) return null;
+		features.set(feature.id, feature.routes);
+	}
+	return features;
+}
+
+function hasExpectedRoutes(routes: unknown, expectedRoutes: readonly (readonly [string, string, string | null])[]): boolean {
+	if (!Array.isArray(routes) || routes.length !== expectedRoutes.length) return false;
+	const actual = routeKeys(routes);
+	return actual !== null && expectedRoutes.every(([method, path, scope]) => actual.has(routeKey(method, path, scope)));
+}
+
+function routeKeys(routes: readonly unknown[]): Set<string> | null {
+	const actual = new Set<string>();
+	for (const route of routes) {
+		if (!isRecord(route) || typeof route.method !== "string" || typeof route.path !== "string") return null;
+		if (!(route.required_scope === null || typeof route.required_scope === "string")) return null;
+		const key = routeKey(route.method, route.path, route.required_scope);
+		if (actual.has(key)) return null;
+		actual.add(key);
+	}
+	return actual;
+}
+
+function routeKey(method: string, path: string, scope: string | null): string {
+	return `${method}\u0000${path}\u0000${scope ?? ""}`;
+}
+
 async function readBoundedJson(response: Response): Promise<Record<string, unknown>> {
+	assertBoundedJsonResponse(response);
+	const bytes = await readResponseBytes(response.body.getReader());
+	return decodeJsonRecord(bytes);
+}
+
+function assertBoundedJsonResponse(response: Response): asserts response is Response & { body: ReadableStream<Uint8Array> } {
 	if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json") || !response.body) incompatible();
 	const declared = response.headers.get("content-length");
 	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) incompatible();
-	const reader = response.body.getReader();
+}
+
+async function readResponseBytes(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Uint8Array> {
 	const chunks: Uint8Array[] = [];
 	let total = 0;
 	while (true) {
@@ -115,6 +139,10 @@ async function readBoundedJson(response: Response): Promise<Record<string, unkno
 	const bytes = new Uint8Array(total);
 	let offset = 0;
 	for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+	return bytes;
+}
+
+function decodeJsonRecord(bytes: Uint8Array): Record<string, unknown> {
 	let value: unknown;
 	try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { incompatible(); }
 	if (!isRecord(value)) incompatible();

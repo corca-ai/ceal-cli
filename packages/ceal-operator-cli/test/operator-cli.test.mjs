@@ -214,9 +214,7 @@ test("an old Admin API is rejected before login creates an operator session", as
 		homeDir,
 		fetchFn: async (url) => {
 			assert.match(String(url), /\/api\/cealctl\/contract$/u);
-			return new Response(JSON.stringify({ ok: false, error_code: "not_found" }), {
-				status: 404, headers: { "content-type": "application/json" },
-			});
+			return { ok: false };
 		},
 	});
 	try {

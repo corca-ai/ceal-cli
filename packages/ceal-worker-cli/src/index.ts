@@ -497,18 +497,10 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeError("invalid_argument", "Invalid session enrollment options.", io);
 	if (!runtime.saveSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
-	let code: string;
-	if (parsed.input === "stdin") {
-		if (!runtime.readSecret) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
-		try { code = await runtime.readSecret(); } catch { return writeEnrollmentUnavailable("enrollment_code_input_failed", io); }
-	} else {
-		if (!runtime.isInteractiveTerminal?.() || !runtime.promptEnrollmentCode) {
-			return writeEnrollmentUnavailable("interactive_enrollment_required", io);
-		}
-		try { code = await runtime.promptEnrollmentCode(); } catch { return writeEnrollmentUnavailable("enrollment_code_input_failed", io); }
-	}
+	const code = await readEnrollmentCode(parsed.input, runtime);
+	if (!code.ok) return writeEnrollmentUnavailable(code.error, io);
 	try {
-		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code);
+		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code.value);
 		if (!response.ok) return writeEnrollmentRejected(response.error.code, io);
 		const stored = toStoredSession(parsed.gateway, response);
 		await runtime.saveSession(stored);
@@ -517,6 +509,18 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 		const reason = error instanceof CealEnrollmentClientError ? error.code : "session_save_failed";
 		return writeEnrollmentUnavailable(reason, io);
 	}
+}
+
+async function readEnrollmentCode(input: "stdin" | "interactive", runtime: CealCommandRuntime): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
+	const reader = enrollmentCodeReader(input, runtime);
+	if (!reader) return { ok: false, error: input === "interactive" ? "interactive_enrollment_required" : "session_runtime_unavailable" };
+	try { return { ok: true, value: await reader() }; }
+	catch { return { ok: false, error: "enrollment_code_input_failed" }; }
+}
+
+function enrollmentCodeReader(input: "stdin" | "interactive", runtime: CealCommandRuntime): (() => Promise<string>) | undefined {
+	if (input === "stdin") return runtime.readSecret;
+	return runtime.isInteractiveTerminal?.() ? runtime.promptEnrollmentCode : undefined;
 }
 
 function toStoredSession(gatewayEndpoint: string, response: {

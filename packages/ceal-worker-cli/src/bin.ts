@@ -54,40 +54,57 @@ async function readHiddenTerminalEnrollmentCode(): Promise<string> {
 	process.stdin.setRawMode(true);
 	process.stdin.resume();
 	return new Promise((resolve, reject) => {
-		const chunks: Buffer[] = [];
-		let bytes = 0;
-		const cleanup = () => {
+		const state = createHiddenInputState(resolve, reject);
+		const onData = (chunk: string | Buffer) => acceptHiddenInput(chunk, state);
+		const onEnd = () => state.fail(new Error("stdin_ended"));
+		state.cleanup = () => {
 			process.stdin.off("data", onData);
 			process.stdin.off("end", onEnd);
 			process.stdin.setRawMode(wasRaw);
 		};
-		const finish = () => {
-			cleanup();
-			process.stderr.write("[input hidden]\n");
-			resolve(Buffer.concat(chunks).toString("utf8"));
-		};
-		const fail = (error: Error) => {
-			cleanup();
-			process.stderr.write("[input hidden]\n");
-			reject(error);
-		};
-		const onEnd = () => fail(new Error("stdin_ended"));
-		const onData = (chunk: string | Buffer) => {
-			const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-			for (const byte of input) {
-				if (byte === 0x03) return fail(new Error("input_cancelled"));
-				if (byte === 0x0d || byte === 0x0a) return finish();
-				if (byte === 0x08 || byte === 0x7f) {
-					const previous = chunks.pop();
-					if (previous) bytes -= previous.length;
-					continue;
-				}
-				bytes += 1;
-				if (bytes > 4096) return fail(new Error("stdin_secret_too_large"));
-				chunks.push(Buffer.from([byte]));
-			}
-		};
 		process.stdin.on("data", onData);
 		process.stdin.once("end", onEnd);
 	});
+}
+
+interface HiddenInputState {
+	chunks: Buffer[];
+	bytes: number;
+	cleanup: () => void;
+	finish: () => void;
+	fail: (error: Error) => void;
+}
+
+function createHiddenInputState(resolve: (value: string) => void, reject: (reason?: unknown) => void): HiddenInputState {
+	const state = {} as HiddenInputState;
+	state.chunks = [];
+	state.bytes = 0;
+	state.cleanup = () => undefined;
+	state.finish = () => {
+		state.cleanup();
+		process.stderr.write("[input hidden]\n");
+		resolve(Buffer.concat(state.chunks).toString("utf8"));
+	};
+	state.fail = (error) => {
+		state.cleanup();
+		process.stderr.write("[input hidden]\n");
+		reject(error);
+	};
+	return state;
+}
+
+function acceptHiddenInput(chunk: string | Buffer, state: HiddenInputState): void {
+	const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+	for (const byte of input) {
+		if (byte === 0x03) return state.fail(new Error("input_cancelled"));
+		if (byte === 0x0d || byte === 0x0a) return state.finish();
+		if (byte === 0x08 || byte === 0x7f) {
+			const previous = state.chunks.pop();
+			if (previous) state.bytes -= previous.length;
+			continue;
+		}
+		state.bytes += 1;
+		if (state.bytes > 4096) return state.fail(new Error("stdin_secret_too_large"));
+		state.chunks.push(Buffer.from([byte]));
+	}
 }
