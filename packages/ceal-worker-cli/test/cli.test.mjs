@@ -98,6 +98,38 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 	});
 });
 
+test("rejected operator-activation-shaped material cannot create a worker session or appear in recovery output", async () => {
+	const code = `celn_${"A".repeat(40)}`;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		assert.equal(request.url, "/gateway/client/enroll");
+		assert.equal(body.code, code);
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify({
+			schema_version: "ceal.enrollment_result.v1", ok: false,
+			error: { code: "enrollment_invalid", message: "The supplied material is not a device enrollment.", next_action: "Request approved device enrollment." },
+		}));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	let saved = false;
+	try {
+		const payload = await yamlRun(["session", "enroll", "--gateway", `http://127.0.0.1:${address.port}/gateway/client`, "--code-stdin"], 3, {
+			readSecret: async () => code,
+			saveSession: async () => { saved = true; },
+		});
+		assert.equal(payload.status, "denied");
+		assert.equal(saved, false);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(code, "u"));
+		assert.match(payload.error.next_action, /organization administrator/u);
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+	}
+});
+
 test("capabilities renews an expiring stored session once and persists the rotation", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken, requests }) => {
 		let saved = null;

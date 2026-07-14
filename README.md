@@ -65,11 +65,13 @@ then discovers a read-only route through help and parses its YAML result.
 
 ## Install a signed release
 
-The installer supports Linux arm64 (`aarch64`/`arm64`) and amd64
-(`x86_64`/`amd64`) and selects the native pair automatically. It requires a
-POSIX shell, `cmp`, `curl`, `cosign`, `flock`, `sha256sum`, `mktemp`,
-`readlink`, `uname`, and standard Linux userland. Install and verify `cosign`
-using the [official Sigstore instructions](https://docs.sigstore.dev/cosign/system_config/installation/),
+The signed release contains both role-specific commands, but the installer
+supports Linux arm64 (`aarch64`/`arm64`) and amd64 (`x86_64`/`amd64`) and
+installs exactly one native command at a time. Its safe default is the personal
+worker command, `ceal`. It requires a POSIX shell, `cmp`, `curl`, `cosign`,
+`flock`, `sha256sum`, `mktemp`, `readlink`, `uname`, and standard Linux
+userland. Install and verify `cosign` using the [official Sigstore
+instructions](https://docs.sigstore.dev/cosign/system_config/installation/),
 then acquire the tag-bound installer as a signed release asset:
 
 ```sh
@@ -88,21 +90,36 @@ cosign verify-blob \
   install.sh
 CEAL_VERSION="$VERSION" sh ./install.sh
 ceal version
-cealctl version
-cealctl login --help
+ceal session --help
 ```
 
 An omitted `CEAL_VERSION` is rejected rather than resolving GitHub's mutable
 `latest` pointer. The default command directory is `$HOME/.local/bin`; it must
-be on `PATH`. Set `CEAL_INSTALL_DIR` for another user-owned directory.
+be on `PATH`. Set `CEAL_INSTALL_DIR` for another user-owned directory. This
+default never installs `cealctl`.
 
-## Operator login and outbound Gateway use
+`cealctl` is for an existing Gateway/control-plane operator only, never for a
+personal client machine. On that administrator host, select it explicitly:
 
-An operator authenticates through the customer Gateway's same-origin browser
-approval page. `cealctl` prints the verification URL and short-lived user code
-to stderr while it waits, then stores only the resulting renewable operator
-session in an owner-only local file. Enrollment creation refreshes that session
-automatically; raw Admin API tokens are not CLI operands or stdin inputs.
+```sh
+CEAL_VERSION="$VERSION" CEAL_INSTALL_ROLE=operator sh ./install.sh
+cealctl version
+cealctl login --help
+```
+
+Each role keeps an independent signed generation, lock, update pointer, and
+rollback history. An intentional co-located operator install does not create,
+update, or remove the worker command, and the converse is also true.
+
+## Administrator approval and outbound Gateway use
+
+An existing operator authenticates through the Gateway's same-origin browser
+approval page. This operator-only flow uses an **operator activation code**;
+it creates an operator Session and is never entered into `ceal session enroll`.
+`cealctl` prints the verification URL and short-lived user code to stderr while
+it waits, then stores only the resulting renewable operator session in an
+owner-only local file. Enrollment creation refreshes that session automatically;
+raw Admin API tokens are not CLI operands or stdin inputs.
 
 ```sh
 cealctl login https://ceal.example.test/acme/production --session production
@@ -119,26 +136,28 @@ cealctl enrollments create \
 
 `access.yaml` is one complete `ceal.gateway_access_registry.v1` document. It
 contains a monotonic registry generation plus additive Profile Memberships,
-client invitations, and capability/target Grants, but no connector, backend,
+pre-approved client-device records, and capability/target Grants, but no connector, backend,
 or provider credential fields. Active Memberships and Grants for one Profile
 share a `profile_audience_revision`, making every audience expansion explicit.
 The dry run reaches the Gateway and validates the replacement without writing;
 the apply is atomic and rejects stale generations, stale record revisions,
 revoked-record reactivation, or implicit record deletion.
 
-The client invitation, subject, Profile membership, and target Grants must
-already exist in that Gateway registry; enrollment cannot create authority. The
-resulting one-time code is transferred privately to the worker machine and
-exchanged through stdin using the exact Gateway endpoint printed by `cealctl`.
-The worker profile then discovers and calls its granted capabilities without
-endpoint or token flags:
+The approved client-device record, Subject, Profile Membership, and target
+Grants must already exist in that Gateway registry; enrollment cannot create
+authority. `cealctl enrollments create` then emits a short-lived, one-time
+**device-enrollment code**, bound to exactly those existing records. It is
+transferred privately to the approved personal client machine and exchanged
+through stdin using the exact Gateway endpoint printed by `cealctl`. The worker
+Session then discovers and calls its granted capabilities without endpoint or
+token flags:
 
 ```sh
-read -rs CEAL_ENROLLMENT_CODE
-printf '%s\n' "$CEAL_ENROLLMENT_CODE" | ceal session enroll \
+read -rs CEAL_DEVICE_ENROLLMENT_CODE
+printf '%s\n' "$CEAL_DEVICE_ENROLLMENT_CODE" | ceal session enroll \
   --gateway https://ceal.example.test/acme/production/api/ceal/v1 \
   --code-stdin
-unset CEAL_ENROLLMENT_CODE
+unset CEAL_DEVICE_ENROLLMENT_CODE
 ceal capabilities
 ceal call message.search --target target:team-inbox query=incident limit=3
 ```
@@ -146,7 +165,7 @@ ceal call message.search --target target:team-inbox query=incident limit=3
 Both operator and worker sessions rotate automatically and revoke server-side
 before local logout. Every network request is client-initiated HTTPS, so a
 worker behind a VPN or firewall needs outbound reachability to the Gateway but
-no SSH access, listening port, or Gateway-initiated push. A successful call sets
+no SSH access, listening port, browser, or Gateway-initiated push. A successful call sets
 `status: ok` and `claim.allowed: true` only after matching Gateway audit readback; whether it
 reached a real provider depends on the Gateway's configured connector and is
 reported explicitly in the result's proof and non-claims.
@@ -175,10 +194,10 @@ manifest, the bundled dependency notice, and `SHA256SUMS`. It
 smoke-runs both commands before returning success, including discovery of the
 worker `session`/`capabilities` and operator
 `login`/`sessions`/`logout`/`access`/`enrollments` workflow commands.
-Before calling transferred artifacts ready, compare both installed checksums to
-the exact platform build output and run both `ceal commands` and `cealctl
-commands`; a version string alone does not distinguish two unpublished
-candidate builds. Node 22.19 or newer is a
+Before calling a transferred worker artifact ready, compare its installed
+`ceal` checksum to the exact platform build output and run `ceal commands`; do
+the corresponding `cealctl` check only on the administrator host. A version
+string alone does not distinguish two unpublished candidate builds. Node 22.19 or newer is a
 build input; the installed SEA commands do not require Node. This local result
 is an unsigned acceptance artifact, not an approved release.
 The signed tag workflow builds both `linux-arm64` and `linux-amd64` on native
@@ -208,18 +227,18 @@ instead of overwriting assets.
 System-wide or privileged installation is not supported. The installer
 preserves an existing directory's mode and unrelated files.
 
-`install.sh` downloads the five signed primary files needed by the current
-platform plus sidecars, constrains
-the signing identity to this repository, workflow, issuer, and tag, validates
-the exact signed checksum inventory, checks both binary digests, and smoke-runs
-both commands. It installs the pair into one versioned generation and switches
-one shared `current` pointer under an exclusive lock. Rerunning with another
-approved `CEAL_VERSION` updates both commands together; a verification failure
-or interrupted pointer switch preserves the previous generation. A successful
-update retains the previous generation locally, but automatic rollback is not
-performed. Reinstall an explicitly approved earlier dual-binary tag to roll
-back. Legacy `v0.1.1` is not a dual-binary rollback. One-command and unsigned
-installation are unsupported.
+`install.sh` downloads the selected role's signed binary plus the manifest,
+notice, and signed checksum inventory and their sidecars, constrains the
+signing identity to this repository, workflow, issuer, and tag, validates the
+exact signed checksum inventory, checks the selected binary digest, and
+smoke-runs only that command. It installs the selected role into its own
+versioned generation and switches that role's `current` pointer under an
+exclusive lock. Rerunning with another approved `CEAL_VERSION` updates only
+the selected role; a verification failure or interrupted pointer switch
+preserves that role's previous generation and leaves the other command
+untouched. A successful update retains the previous generation locally, but
+automatic rollback is not performed. Reinstall an explicitly approved earlier
+tag with the same role to roll back. Unsigned installation is unsupported.
 
 ## Release boundary
 

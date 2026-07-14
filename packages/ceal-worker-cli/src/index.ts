@@ -77,12 +77,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "session",
-		description: "Enroll and inspect this client's renewable Gateway session.",
+		description: "Enroll an approved client device and inspect its renewable Gateway session.",
 		usage: "ceal session [enroll --gateway <https-url> --code-stdin | logout]",
 		effect: "local_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.client_session.v1",
-		recovery: "Ask a Gateway administrator for a new one-time enrollment code, then retry.",
+		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
 	},
 	{
 		name: "capabilities",
@@ -163,10 +163,10 @@ function commandHelp(command: CealCommandDefinition): string {
 			"  --token-stdin            Read the Gateway-issued client token from stdin.",
 		]
 		: command.name === "session" ? [
-			"  enroll                 Exchange a one-time code for a local session.",
+			"  enroll                 Exchange a pre-approved one-time device-enrollment code for a local session.",
 			"  logout                 Revoke and remove the local session.",
 			"  --gateway <https-url>  Gateway client endpoint.",
-			"  --code-stdin            Read the one-time enrollment code from stdin.",
+			"  --code-stdin            Read the device-enrollment code only from stdin.",
 		] : command.name === "call" ? [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
@@ -525,6 +525,7 @@ function toStoredSession(gatewayEndpoint: string, response: {
 function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toStoredSession>, io: CealCliIo): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1", command: "ceal", status: "enrolled",
+		enrollment_kind: "preapproved_client_device",
 		gateway_endpoint: gateway, profile_ref: response.profileRef, membership_ref: response.membershipRef,
 		registration_ref: response.registrationRef, client_ref: response.clientRef, subject_ref: response.subjectRef,
 		instance_ref: response.instanceRef, expires_at: response.expiresAt,
@@ -637,7 +638,7 @@ function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
 		error: {
 			kind: reason,
 			message: "The stored Gateway session could not be renewed or revoked safely.",
-			next_action: "Run 'ceal session' to inspect expiry, then request a new enrollment code if renewal is unavailable.",
+			next_action: "Run 'ceal session' to inspect expiry, then ask the organization administrator for a replacement device-enrollment code if renewal is unavailable.",
 		},
 	});
 	return 3;
@@ -654,7 +655,11 @@ function writeEnrollmentRejected(code: string, io: CealCliIo): number {
 		command: "ceal",
 		status: "denied",
 		proof_level: "host_decision",
-		error: { code, message: "The Gateway rejected the enrollment code.", next_action: "Ask a Gateway administrator for a new one-time enrollment code." },
+		error: {
+			code,
+			message: "The Gateway rejected the device-enrollment code.",
+			next_action: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code.",
+		},
 	});
 	return 3;
 }
@@ -665,7 +670,11 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
 		command: "ceal",
 		status: "unavailable",
 		proof_level: "surface",
-		error: { kind: reason, message: "The session enrollment could not be completed.", next_action: "Check the Gateway URL and request a new one-time enrollment code." },
+		error: {
+			kind: reason,
+			message: "The device enrollment could not be completed.",
+			next_action: "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.",
+		},
 	});
 	return 3;
 }

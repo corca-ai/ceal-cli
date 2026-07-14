@@ -163,7 +163,8 @@ test("login stores a bound renewable session and enrollment refreshes it without
 			"--client", "narnia", "--profile", "work", "--subject", "hwidong", "--instance", "corca",
 		], 0, { homeDir });
 		assert.equal(payload.status, "created");
-		assert.equal(payload.enrollment_code, "C".repeat(43));
+		assert.equal(payload.enrollment_kind, "preapproved_client_device");
+		assert.equal(payload.device_enrollment_code, "C".repeat(43));
 		assert.equal(payload.gateway_endpoint, "https://gateway.example.test/api/ceal/v1");
 		assert.equal(payload.one_time, true);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(adminToken, "u"));

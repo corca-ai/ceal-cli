@@ -99,7 +99,7 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	},
 	{
 		name: "access",
-		description: "Inspect or apply Profile memberships, client invitations, and grants.",
+		description: "Inspect or apply Profile memberships, approved client devices, and grants.",
 		usage: "cealctl access [show | apply --stdin [--dry-run] [--operator-session <name>]]",
 		effect: "control_write",
 		evidence: "host_decision",
@@ -108,7 +108,7 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	},
 	{
 		name: "enrollments",
-		description: "Create one-time personal-client enrollment material.",
+		description: "Create one-time pre-approved client-device enrollment material.",
 		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
@@ -152,10 +152,10 @@ const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], rea
 		"  --operator-session <name>      Use a named stored admin session.",
 	],
 	enrollments: [
-		"  create                         Create one short-lived, one-time enrollment code.",
-		"  --client <safe-name>          Pre-registered client invitation name.",
+		"  create                         Create one short-lived, one-time device-enrollment code.",
+		"  --client <safe-name>          Existing pre-approved client device name.",
 		"  --profile <safe-name>         Profile name bound by the Gateway.",
-		"  --subject <safe-name>         User identity bound by the Gateway.",
+		"  --subject <safe-name>         Existing Subject bound by the Gateway.",
 		"  --instance <safe-name>        Customer instance bound by the Gateway.",
 		"  --operator-session <name>     Use a named stored admin session.",
 	],
@@ -412,14 +412,15 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			command: "cealctl",
 			status: "created",
 			gateway_endpoint: result.gatewayEndpoint,
-			enrollment_code: result.code,
+			enrollment_kind: "preapproved_client_device",
+			device_enrollment_code: result.code,
 			expires_at: result.expiresAt,
 			one_time: true,
 			sensitive_material_visible: true,
 			transfer_warning: "Transfer privately. Do not place this code in logs, tickets, or shared chat.",
 			credential_context: CEALCTL_CREDENTIAL_CONTEXT,
 			proof_level: "host_decision",
-			next_action: `On the user machine, send this code through stdin to 'ceal session enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
+			next_action: `On the approved personal client machine, send this device-enrollment code through stdin to 'ceal session enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
 		});
 	} catch (error) {
 		const code = error instanceof CealEnrollmentAdminClientError ? error.code : sessionErrorCode(error);
@@ -503,7 +504,7 @@ function writeEnrollmentFailure(kind: string, io: CealctlIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "cealctl.enrollment_created.v1", command: "cealctl", status: "unavailable", proof_level: "surface",
 		credential_context: CEALCTL_CREDENTIAL_CONTEXT,
-		error: { kind, message: "The Gateway enrollment code could not be created.", next_action: "Check the administrator session and Gateway status, then retry." },
+		error: { kind, message: "The Gateway device-enrollment code could not be created.", next_action: "Check the administrator session, approved access registry, and Gateway status, then retry." },
 	});
 	return 3;
 }

@@ -3,6 +3,7 @@ set -eu
 
 REPO="corca-ai/ceal-cli"
 VERSION="${CEAL_VERSION:-}"
+ROLE="${CEAL_INSTALL_ROLE:-worker}"
 INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
 WORKFLOW_FILE="cealctl-release.yml"
 ISSUER="https://token.actions.githubusercontent.com"
@@ -12,11 +13,14 @@ LOCK_HELD=0
 COMMITTED=0
 GENERATION_CREATED=0
 CURRENT_SWITCHED=0
-TARGETS_MUTATED=0
+TARGET_MUTATED=0
 PREVIOUS_CURRENT=""
 STAGED_GENERATION=""
-CEAL_TARGET_STATE=absent
-CEALCTL_TARGET_STATE=absent
+CURRENT_LINK=""
+GENERATION_DIR=""
+TARGET_STATE=absent
+TARGET_PREVIOUS_LINK=""
+TARGET_NEEDS_LINK_UPDATE=0
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -34,6 +38,22 @@ detect_platform() {
     Linux:aarch64|Linux:arm64) printf '%s\n' linux-arm64 ;;
     Linux:x86_64|Linux:amd64) printf '%s\n' linux-amd64 ;;
     *) fail "Unsupported Ceal CLI platform: $os $arch (supported: linux-arm64, linux-amd64)" ;;
+  esac
+}
+
+select_role() {
+  case "$ROLE" in
+    worker)
+      COMMAND="ceal"
+      COMMAND_SCHEMA="ceal.version.v1"
+      COMMAND_CREDENTIAL_CONTEXT="gateway_issued_client_session"
+      ;;
+    operator)
+      COMMAND="cealctl"
+      COMMAND_SCHEMA="cealctl.version.v1"
+      COMMAND_CREDENTIAL_CONTEXT="cealctl_operator_admin_session"
+      ;;
+    *) fail "CEAL_INSTALL_ROLE must be worker (default) or operator" ;;
   esac
 }
 
@@ -64,48 +84,44 @@ verify_checksum() {
 }
 
 verify_checksum_inventory() {
-	[ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 8 ] \
-		|| fail "SHA256SUMS must contain exactly eight physical lines"
-	invalid_lines="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-cli-platform-release-manifest-linux-(amd64|arm64)[.]json|ceal-linux-(amd64|arm64)|cealctl-linux-(amd64|arm64)|install[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
-	[ "$invalid_lines" = 0 ] \
-		|| fail "SHA256SUMS contains a malformed or unexpected entry"
-	observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
-	expected="$(printf '%s\n' \
-		THIRD_PARTY_NOTICES.txt \
-		ceal-cli-platform-release-manifest-linux-amd64.json \
-		ceal-cli-platform-release-manifest-linux-arm64.json \
-		ceal-linux-amd64 ceal-linux-arm64 \
-		cealctl-linux-amd64 cealctl-linux-arm64 install.sh | sort)"
-	[ "$observed" = "$expected" ] \
-		|| fail "SHA256SUMS must contain exactly the eight dual-platform release entries"
-  verify_checksum "$CEAL_ASSET"
-  verify_checksum "$CEALCTL_ASSET"
+  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 8 ] \
+    || fail "SHA256SUMS must contain exactly eight physical lines"
+  invalid_lines="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-cli-platform-release-manifest-linux-(amd64|arm64)[.]json|ceal-linux-(amd64|arm64)|cealctl-linux-(amd64|arm64)|install[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
+  [ "$invalid_lines" = 0 ] \
+    || fail "SHA256SUMS contains a malformed or unexpected entry"
+  observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
+  expected="$(printf '%s\n' \
+    THIRD_PARTY_NOTICES.txt \
+    ceal-cli-platform-release-manifest-linux-amd64.json \
+    ceal-cli-platform-release-manifest-linux-arm64.json \
+    ceal-linux-amd64 ceal-linux-arm64 \
+    cealctl-linux-amd64 cealctl-linux-arm64 install.sh | sort)"
+  [ "$observed" = "$expected" ] \
+    || fail "SHA256SUMS must contain exactly the eight dual-platform release entries"
+  verify_checksum "$COMMAND_ASSET"
   verify_checksum "$MANIFEST_ASSET"
   verify_checksum "$NOTICE_ASSET"
 }
 
 verify_version_output() {
   binary="$1"
-  command="$2"
-  schema="$3"
-  credential_context="$4"
-  stdout_path="$TMP_DIR/$command-version.yaml"
-  stderr_path="$TMP_DIR/$command-version.stderr"
-  expected_path="$TMP_DIR/$command-version.expected.yaml"
+  stdout_path="$TMP_DIR/$COMMAND-version.yaml"
+  stderr_path="$TMP_DIR/$COMMAND-version.stderr"
+  expected_path="$TMP_DIR/$COMMAND-version.expected.yaml"
   "$binary" version >"$stdout_path" 2>"$stderr_path" \
-    || fail "$command version probe failed"
-  [ ! -s "$stderr_path" ] || fail "$command version probe wrote unexpected stderr"
+    || fail "$COMMAND version probe failed"
+  [ ! -s "$stderr_path" ] || fail "$COMMAND version probe wrote unexpected stderr"
   printf '%s\n' \
-    "schema_version: $schema" \
-    "command: $command" \
+    "schema_version: $COMMAND_SCHEMA" \
+    "command: $COMMAND" \
     "version: ${VERSION#v}" \
     "protocol_version: 1.2.0" \
     "supported_gateway_protocol_range:" \
-	"  minimum: 1.2.0" \
-	"  maximum: 1.2.0" \
-    "credential_context: $credential_context" >"$expected_path"
+    "  minimum: 1.2.0" \
+    "  maximum: 1.2.0" \
+    "credential_context: $COMMAND_CREDENTIAL_CONTEXT" >"$expected_path"
   cmp -s "$stdout_path" "$expected_path" \
-    || fail "$command reported an invalid version YAML document for $VERSION"
+    || fail "$COMMAND reported an invalid version YAML document for $VERSION"
 }
 
 download_signed_asset() {
@@ -118,28 +134,31 @@ download_signed_asset() {
 capture_target() {
   target="$1"
   expected_link="$2"
-  state_name="$3"
+  legacy_link="$3"
   backup_name="$4"
   if [ -L "$target" ]; then
-    [ "$(readlink "$target")" = "$expected_link" ] || fail "Existing command symlink is not managed by Ceal CLI"
-    eval "$state_name=managed_link"
+    TARGET_PREVIOUS_LINK="$(readlink "$target")"
+    case "$TARGET_PREVIOUS_LINK" in
+      "$expected_link") TARGET_STATE=managed_link ;;
+      "$legacy_link") TARGET_STATE=managed_link; TARGET_NEEDS_LINK_UPDATE=1 ;;
+      *) fail "Existing command symlink is not managed by the selected Ceal CLI role" ;;
+    esac
   elif [ -f "$target" ]; then
     cp -p "$target" "$TMP_DIR/$backup_name"
-    eval "$state_name=regular_file"
+    TARGET_STATE=regular_file
+    TARGET_NEEDS_LINK_UPDATE=1
   elif [ -e "$target" ]; then
     fail "Existing command target must be a regular file or managed symlink"
+  else
+    TARGET_NEEDS_LINK_UPDATE=1
   fi
 }
 
 restore_target() {
-  target="$1"
-  state="$2"
-  expected_link="$3"
-  backup_name="$4"
-  rm -f "$target"
-  case "$state" in
-    managed_link) ln -s "$expected_link" "$target" ;;
-    regular_file) cp -p "$TMP_DIR/$backup_name" "$target" ;;
+  rm -f "$COMMAND_TARGET"
+  case "$TARGET_STATE" in
+    managed_link) ln -s "$TARGET_PREVIOUS_LINK" "$COMMAND_TARGET" ;;
+    regular_file) cp -p "$TMP_DIR/previous-command" "$COMMAND_TARGET" ;;
     absent) ;;
   esac
 }
@@ -179,25 +198,25 @@ cleanup() {
         rm -f "$CURRENT_LINK"
       fi
     fi
-    if [ "$TARGETS_MUTATED" = 1 ]; then
-      restore_target "$CEAL_TARGET" "$CEAL_TARGET_STATE" "$CEAL_LINK_TARGET" previous-ceal
-      restore_target "$CEALCTL_TARGET" "$CEALCTL_TARGET_STATE" "$CEALCTL_LINK_TARGET" previous-cealctl
+    if [ "$TARGET_MUTATED" = 1 ]; then
+      restore_target
     fi
     if [ "$GENERATION_CREATED" = 1 ]; then
       rm -rf "$GENERATION_DIR"
     fi
     if [ -n "$STAGED_GENERATION" ]; then rm -rf "$STAGED_GENERATION"; fi
   fi
-  if [ -n "${CURRENT_LINK:-}" ]; then rm -f "$CURRENT_LINK.next.$$" 2>/dev/null || true; fi
+  if [ -n "$CURRENT_LINK" ]; then rm -f "$CURRENT_LINK.next.$$" 2>/dev/null || true; fi
   release_install_lock
   if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
   exit "$status"
 }
 
 [ -n "$VERSION" ] \
-  || fail "CEAL_VERSION is required until a compatible dual-binary release is approved; set an explicit tag such as v0.64.0."
+  || fail "CEAL_VERSION is required until a compatible signed release is approved; set an explicit tag such as v0.64.0."
 printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' \
   || fail "CEAL_VERSION must be an explicit tag such as v0.64.0."
+select_role
 
 PLATFORM="$(detect_platform)"
 for tool in cmp curl cosign flock sha256sum uname mktemp readlink; do need "$tool"; done
@@ -212,9 +231,15 @@ else
   if [ -L "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then fail "Install directory must be a regular directory"; fi
 fi
 
-STATE_DIR="$INSTALL_DIR/.ceal-cli"
+STATE_ROOT="$INSTALL_DIR/.ceal-cli"
+if [ -e "$STATE_ROOT" ]; then
+  if [ -L "$STATE_ROOT" ] || [ ! -d "$STATE_ROOT" ]; then fail "Ceal CLI state directory must be a regular directory"; fi
+else
+  (umask 077; mkdir "$STATE_ROOT")
+fi
+STATE_DIR="$STATE_ROOT/$ROLE"
 if [ -e "$STATE_DIR" ]; then
-  if [ -L "$STATE_DIR" ] || [ ! -d "$STATE_DIR" ]; then fail "Ceal CLI state directory must be a regular directory"; fi
+  if [ -L "$STATE_DIR" ] || [ ! -d "$STATE_DIR" ]; then fail "Selected Ceal CLI role state directory must be a regular directory"; fi
 else
   (umask 077; mkdir "$STATE_DIR")
 fi
@@ -226,30 +251,25 @@ fi
 LOCK_PATH="$STATE_DIR/install.lock"
 acquire_install_lock
 
-CEAL_ASSET="ceal-$PLATFORM"
-CEALCTL_ASSET="cealctl-$PLATFORM"
+COMMAND_ASSET="$COMMAND-$PLATFORM"
 MANIFEST_ASSET="ceal-cli-platform-release-manifest-$PLATFORM.json"
 NOTICE_ASSET="THIRD_PARTY_NOTICES.txt"
 
-for asset in "$CEAL_ASSET" "$CEALCTL_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "SHA256SUMS"; do
+for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "SHA256SUMS"; do
   download_signed_asset "$asset"
   verify_signature "$asset"
 done
 verify_checksum_inventory
 
-chmod 755 "$TMP_DIR/$CEAL_ASSET" "$TMP_DIR/$CEALCTL_ASSET"
-verify_version_output "$TMP_DIR/$CEAL_ASSET" ceal ceal.version.v1 gateway_issued_client_session
-verify_version_output "$TMP_DIR/$CEALCTL_ASSET" cealctl cealctl.version.v1 cealctl_operator_admin_session
-"$TMP_DIR/$CEAL_ASSET" --help >/dev/null
-"$TMP_DIR/$CEALCTL_ASSET" --help >/dev/null
+chmod 755 "$TMP_DIR/$COMMAND_ASSET"
+verify_version_output "$TMP_DIR/$COMMAND_ASSET"
+"$TMP_DIR/$COMMAND_ASSET" --help >/dev/null
 
-CEAL_TARGET="$INSTALL_DIR/ceal"
-CEALCTL_TARGET="$INSTALL_DIR/cealctl"
-CEAL_LINK_TARGET=".ceal-cli/current/$CEAL_ASSET"
-CEALCTL_LINK_TARGET=".ceal-cli/current/$CEALCTL_ASSET"
+COMMAND_TARGET="$INSTALL_DIR/$COMMAND"
+COMMAND_LINK_TARGET=".ceal-cli/$ROLE/current/$COMMAND_ASSET"
+LEGACY_COMMAND_LINK_TARGET=".ceal-cli/current/$COMMAND_ASSET"
 CURRENT_LINK="$STATE_DIR/current"
-capture_target "$CEAL_TARGET" "$CEAL_LINK_TARGET" CEAL_TARGET_STATE previous-ceal
-capture_target "$CEALCTL_TARGET" "$CEALCTL_LINK_TARGET" CEALCTL_TARGET_STATE previous-cealctl
+capture_target "$COMMAND_TARGET" "$COMMAND_LINK_TARGET" "$LEGACY_COMMAND_LINK_TARGET" previous-command
 
 if [ -L "$CURRENT_LINK" ]; then
   PREVIOUS_CURRENT="$(readlink "$CURRENT_LINK")"
@@ -263,39 +283,31 @@ GENERATION_DIR="$STATE_DIR/releases/$GENERATION_ID"
 if [ ! -e "$GENERATION_DIR" ]; then
   STAGED_GENERATION="$STATE_DIR/releases/.next-$GENERATION_ID-$$"
   mkdir "$STAGED_GENERATION"
-  cp "$TMP_DIR/$CEAL_ASSET" "$STAGED_GENERATION/$CEAL_ASSET"
-  cp "$TMP_DIR/$CEALCTL_ASSET" "$STAGED_GENERATION/$CEALCTL_ASSET"
+  cp "$TMP_DIR/$COMMAND_ASSET" "$STAGED_GENERATION/$COMMAND_ASSET"
   cp "$TMP_DIR/$MANIFEST_ASSET" "$STAGED_GENERATION/$MANIFEST_ASSET"
   cp "$TMP_DIR/$NOTICE_ASSET" "$STAGED_GENERATION/$NOTICE_ASSET"
   cp "$TMP_DIR/SHA256SUMS" "$STAGED_GENERATION/SHA256SUMS"
-  chmod 755 "$STAGED_GENERATION/$CEAL_ASSET" "$STAGED_GENERATION/$CEALCTL_ASSET"
+  chmod 755 "$STAGED_GENERATION/$COMMAND_ASSET"
   GENERATION_CREATED=1
   mv "$STAGED_GENERATION" "$GENERATION_DIR"
 else
   if [ ! -d "$GENERATION_DIR" ] || [ -L "$GENERATION_DIR" ]; then fail "Existing release generation is unsafe"; fi
-  for asset in "$CEAL_ASSET" "$CEALCTL_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" SHA256SUMS; do
+  for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" SHA256SUMS; do
     [ "$(sha256_of "$GENERATION_DIR/$asset")" = "$(sha256_of "$TMP_DIR/$asset")" ] \
       || fail "Existing release generation does not match the signed release"
   done
 fi
 
 ln -s "releases/$GENERATION_ID" "$CURRENT_LINK.next.$$"
-CURRENT_SWITCHED=1
 mv -Tf "$CURRENT_LINK.next.$$" "$CURRENT_LINK"
+CURRENT_SWITCHED=1
 
-if [ "$CEAL_TARGET_STATE" != managed_link ] || [ "$CEALCTL_TARGET_STATE" != managed_link ]; then
-  TARGETS_MUTATED=1
-  if [ "$CEAL_TARGET_STATE" != managed_link ]; then
-    rm -f "$CEAL_TARGET"
-    ln -s "$CEAL_LINK_TARGET" "$CEAL_TARGET"
-  fi
-  if [ "$CEALCTL_TARGET_STATE" != managed_link ]; then
-    rm -f "$CEALCTL_TARGET"
-    ln -s "$CEALCTL_LINK_TARGET" "$CEALCTL_TARGET"
-  fi
+if [ "$TARGET_NEEDS_LINK_UPDATE" = 1 ]; then
+  TARGET_MUTATED=1
+  rm -f "$COMMAND_TARGET"
+  ln -s "$COMMAND_LINK_TARGET" "$COMMAND_TARGET"
 fi
 
-verify_version_output "$CEAL_TARGET" ceal ceal.version.v1 gateway_issued_client_session
-verify_version_output "$CEALCTL_TARGET" cealctl cealctl.version.v1 cealctl_operator_admin_session
+verify_version_output "$COMMAND_TARGET"
 COMMITTED=1
-printf 'Installed ceal and cealctl %s (%s) at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"
+printf 'Installed %s %s (%s) as %s at %s\n' "$COMMAND" "$VERSION" "$PLATFORM" "$ROLE" "$INSTALL_DIR"

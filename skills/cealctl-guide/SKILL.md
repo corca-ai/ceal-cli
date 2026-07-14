@@ -5,9 +5,10 @@ description: Use when an operator or agent needs to discover, inspect, plan, or 
 
 # Cealctl Guide
 
-Use the installed binary as the source of truth. This guide owns safe operator
-sequencing; it does not own a command registry, instance inventory, deployment
-route, or release catalog.
+Use the installed binary as the source of truth. This guide is only for an
+existing Gateway/control-plane operator, never a personal `ceal` client host.
+It owns safe operator sequencing; it does not own a command registry, instance
+inventory, deployment route, or release catalog.
 
 ## Bootstrap
 
@@ -44,8 +45,10 @@ YAML document; do not add an output-format flag and do not scrape prose.
 
 ## Boundaries
 
-- Never ask a user to paste secrets. Use the operator credential store and the
-  setup/import flow discovered from installed help.
+- Never ask a user to paste secrets. An operator activation code is only for
+  this operator approval flow; it is never worker enrollment material. Use the
+  operator credential store and the setup/import flow discovered from installed
+  help.
 - Do not read or reuse worker turn/provider credentials from this surface.
 - If the task requires worker capability execution, use `ceal-guide` and its
   matching binary only when both are installed. Otherwise stop and report that

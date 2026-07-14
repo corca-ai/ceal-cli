@@ -12,61 +12,99 @@ import { parse } from "yaml";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install.sh");
 
-test("installer requires an explicit approved dual-binary tag", () => {
+test("installer requires an explicit signed tag before creating either role", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, version: "" });
 		assert.equal(result.status, 1);
-		assert.match(result.stderr, /CEAL_VERSION is required until a compatible dual-binary release is approved/u);
+		assert.match(result.stderr, /CEAL_VERSION is required until a compatible signed release is approved/u);
 		assert.equal(existsSync(cosignLog), false);
 		assert.equal(existsSync(install), false);
 	});
 });
 
-test("installer verifies and installs both commands as one release", () => {
+test("default worker installation creates only ceal and worker-owned state", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
-		assert.match(result.stdout, /Installed ceal and cealctl v0[.]64[.]0/u);
+		assert.match(result.stdout, /Installed ceal v0[.]64[.]0 .* as worker/u);
 		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /command=ceal/u);
-		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /command=cealctl/u);
-		assert.equal(lstatSync(path.join(install, "ceal")).isSymbolicLink(), true);
-		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/current/ceal-linux-arm64");
-		assert.equal(lstatSync(path.join(install, ".ceal-cli/current")).isSymbolicLink(), true);
-		assert.match(readFileSync(path.join(install, ".ceal-cli/current/THIRD_PARTY_NOTICES.txt"), "utf8"), /yaml 2[.]9[.]0 \(ISC\)/u);
-		assert.equal(readdirSync(path.join(install, ".ceal-cli/releases")).length, 1);
-		assert.equal(lstatSync(path.join(install, ".ceal-cli/install.lock")).isFile(), true);
+		assert.equal(existsSync(path.join(install, "cealctl")), false);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
+		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "current")).isSymbolicLink(), true);
+		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
+		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "THIRD_PARTY_NOTICES.txt"), "utf8"), /yaml 2[.]9[.]0 \(ISC\)/u);
+		assert.equal(readdirSync(path.join(install, ".ceal-cli", "worker", "releases")).length, 1);
+		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "install.lock")).isFile(), true);
 		const log = readFileSync(cosignLog, "utf8");
-		assert.equal(log.match(/verify-blob/gu)?.length, 5);
+		assert.equal(log.match(/verify-blob/gu)?.length, 4);
 		assert.match(log, /corca-ai\/ceal-cli/u);
 		assert.match(log, /refs\/tags\/v0[.]64[.]0/u);
 		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]64[.]0/u);
 	});
 });
 
-test("installer selects the signed amd64 pair on x86_64", () => {
+test("explicit operator installation creates only cealctl and operator-owned state", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		const result = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Installed cealctl v0[.]64[.]0 .* as operator/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /command=cealctl/u);
+		assert.equal(readlinkSync(path.join(install, "cealctl")), ".ceal-cli/operator/current/cealctl-linux-arm64");
+		assert.equal(lstatSync(path.join(install, ".ceal-cli", "operator", "current")).isSymbolicLink(), true);
+		assert.equal(existsSync(path.join(install, ".ceal-cli", "worker")), false);
+	});
+});
+
+test("worker installation safely migrates only its legacy dual-installer command link", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		mkdirSync(path.join(install, ".ceal-cli", "releases", "legacy"), { recursive: true });
+		symlinkSync("releases/legacy", path.join(install, ".ceal-cli", "current"));
+		symlinkSync(".ceal-cli/current/ceal-linux-arm64", path.join(install, "ceal"));
+		symlinkSync(".ceal-cli/current/cealctl-linux-arm64", path.join(install, "cealctl"));
+		const result = runInstaller({ root, release, tools, install, cosignLog });
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
+		assert.equal(readlinkSync(path.join(install, "cealctl")), ".ceal-cli/current/cealctl-linux-arm64");
+		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
+	});
+});
+
+test("installer rejects an unrecognized role without downloading or modifying commands", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		mkdirSync(install, { recursive: true });
+		writeFileSync(path.join(install, "ceal"), "existing-worker\n");
+		writeFileSync(path.join(install, "cealctl"), "existing-operator\n");
+		const result = runInstaller({ root, release, tools, install, cosignLog, role: "both" });
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /CEAL_INSTALL_ROLE must be worker \(default\) or operator/u);
+		assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "existing-worker\n");
+		assert.equal(readFileSync(path.join(install, "cealctl"), "utf8"), "existing-operator\n");
+		assert.equal(existsSync(cosignLog), false);
+	});
+});
+
+test("installer selects the signed amd64 worker artifact on x86_64", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
-		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/current/ceal-linux-amd64");
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /architecture-amd64/u);
-		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /architecture-amd64/u);
+		assert.equal(existsSync(path.join(install, "cealctl")), false);
 	});
 });
 
-test("installer rejects malformed or misidentified version YAML", () => {
-	for (const variant of ["wrong-command", "extra-document"]) {
+test("installer rejects malformed or misidentified selected-command version YAML", () => {
+	for (const [role, asset, command] of [["worker", "ceal-linux-arm64", "cealctl"], ["operator", "cealctl-linux-arm64", "ceal"]]) {
 		withFixture(({ root, release, tools, install, cosignLog }) => {
-			writeBinary(
-				path.join(release, "ceal-linux-arm64"),
-				variant === "wrong-command" ? "cealctl" : "ceal",
-				"generation-1",
-				variant === "extra-document" ? "---\nextra: true\n" : "",
-			);
+			writeBinary(path.join(release, asset), command, "generation-1");
 			writeChecksums(release);
-			const result = runInstaller({ root, release, tools, install, cosignLog });
+			const result = runInstaller({ root, release, tools, install, cosignLog, role });
 			assert.equal(result.status, 1);
-			assert.match(result.stderr, /invalid version YAML document/u);
+			assert.match(result.stderr, /reported an invalid version YAML document/u);
+			assert.equal(existsSync(path.join(install, "ceal")), false);
+			assert.equal(existsSync(path.join(install, "cealctl")), false);
 		});
 	}
 });
@@ -83,21 +121,21 @@ test("installer preserves an existing directory mode and unrelated files", () =>
 	});
 });
 
-test("installer refuses a concurrent install without changing commands", () => {
+test("installer refuses a concurrent worker install without changing either command", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
-		mkdirSync(path.join(install, ".ceal-cli", "releases"), { recursive: true });
-		const lockPath = path.join(install, ".ceal-cli", "install.lock");
+		mkdirSync(path.join(install, ".ceal-cli", "worker", "releases"), { recursive: true });
+		const lockPath = path.join(install, ".ceal-cli", "worker", "install.lock");
 		writeFileSync(lockPath, "");
 		const holder = spawn("flock", ["-F", "-x", lockPath, "sleep", "30"], { stdio: "ignore" });
 		waitForLock(holder, lockPath);
 		writeFileSync(path.join(install, "ceal"), "old-ceal\n");
-		writeFileSync(path.join(install, "cealctl"), "old-cealctl\n");
+		writeFileSync(path.join(install, "cealctl"), "operator-untouched\n");
 		try {
 			const result = runInstaller({ root, release, tools, install, cosignLog });
 			assert.notEqual(result.status, 0);
 			assert.match(result.stderr, /Another Ceal CLI installation is active/u);
 			assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "old-ceal\n");
-			assert.equal(readFileSync(path.join(install, "cealctl"), "utf8"), "old-cealctl\n");
+			assert.equal(readFileSync(path.join(install, "cealctl"), "utf8"), "operator-untouched\n");
 			assert.equal(existsSync(cosignLog), false);
 		} finally {
 			holder.kill("SIGKILL");
@@ -105,20 +143,17 @@ test("installer refuses a concurrent install without changing commands", () => {
 	});
 });
 
-test("installer reuses an unlocked persistent lock after its owner exits", () => {
+test("installer reuses an unlocked persistent role lock and rejects unsafe locks", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
-		mkdirSync(path.join(install, ".ceal-cli", "releases"), { recursive: true });
-		writeFileSync(path.join(install, ".ceal-cli", "install.lock"), "");
+		mkdirSync(path.join(install, ".ceal-cli", "worker", "releases"), { recursive: true });
+		writeFileSync(path.join(install, ".ceal-cli", "worker", "install.lock"), "");
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
-		assert.equal(lstatSync(path.join(install, ".ceal-cli", "install.lock")).isFile(), true);
+		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "install.lock")).isFile(), true);
 		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /command=ceal/u);
 	});
-});
-
-test("installer refuses an unsafe non-symlink lock without downloading assets", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
-		mkdirSync(path.join(install, ".ceal-cli", "install.lock"), { recursive: true });
+		mkdirSync(path.join(install, ".ceal-cli", "worker", "install.lock"), { recursive: true });
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /install lock is unsafe/u);
@@ -126,53 +161,53 @@ test("installer refuses an unsafe non-symlink lock without downloading assets", 
 	});
 });
 
-test("installer refuses a dangling lock symlink without creating its target", () => {
+test("worker and operator updates use independent state and do not modify the other command", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
-		mkdirSync(path.join(install, ".ceal-cli"), { recursive: true });
-		const escapedTarget = path.join(root, "escaped-lock-target");
-		symlinkSync(escapedTarget, path.join(install, ".ceal-cli", "install.lock"));
-		const result = runInstaller({ root, release, tools, install, cosignLog });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /install lock is unsafe/u);
-		assert.equal(existsSync(escapedTarget), false);
-		assert.equal(existsSync(cosignLog), false);
-	});
-});
-
-test("installer updates both commands through one current generation", () => {
-	withFixture(({ root, release, tools, install, cosignLog }) => {
-		const first = runInstaller({ root, release, tools, install, cosignLog });
-		assert.equal(first.status, 0, first.stderr);
-		const current = path.join(install, ".ceal-cli", "current");
-		const firstGeneration = readlinkSync(current);
-		const cealLinkInode = lstatSync(path.join(install, "ceal")).ino;
-		const cealctlLinkInode = lstatSync(path.join(install, "cealctl")).ino;
-		writeBinary(path.join(release, "ceal-linux-arm64"), "ceal", "generation-2");
-		writeBinary(path.join(release, "cealctl-linux-arm64"), "cealctl", "generation-2");
+		const workerFirst = runInstaller({ root, release, tools, install, cosignLog });
+		assert.equal(workerFirst.status, 0, workerFirst.stderr);
+		const operatorFirst = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
+		assert.equal(operatorFirst.status, 0, operatorFirst.stderr);
+		const workerCurrent = path.join(install, ".ceal-cli", "worker", "current");
+		const operatorCurrent = path.join(install, ".ceal-cli", "operator", "current");
+		const operatorLinkInode = lstatSync(path.join(install, "cealctl")).ino;
+		const operatorBytes = readFileSync(path.join(install, "cealctl"));
+		const initialOperatorCurrent = readlinkSync(operatorCurrent);
+		writeBinary(path.join(release, "ceal-linux-arm64"), "ceal", "worker-generation-2");
 		writeChecksums(release);
-		const second = runInstaller({ root, release, tools, install, cosignLog });
-		assert.equal(second.status, 0, second.stderr);
-		assert.notEqual(readlinkSync(current), firstGeneration);
-		assert.equal(lstatSync(path.join(install, "ceal")).ino, cealLinkInode);
-		assert.equal(lstatSync(path.join(install, "cealctl")).ino, cealctlLinkInode);
-		assert.equal(readdirSync(path.join(install, ".ceal-cli", "releases")).length, 2);
-		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /generation-2/u);
-		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /generation-2/u);
+		const workerSecond = runInstaller({ root, release, tools, install, cosignLog });
+		assert.equal(workerSecond.status, 0, workerSecond.stderr);
+		assert.notEqual(readlinkSync(workerCurrent), "");
+		assert.equal(readlinkSync(operatorCurrent), initialOperatorCurrent);
+		assert.equal(lstatSync(path.join(install, "cealctl")).ino, operatorLinkInode);
+		assert.deepEqual(readFileSync(path.join(install, "cealctl")), operatorBytes);
+		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /worker-generation-2/u);
+		const workerLinkInode = lstatSync(path.join(install, "ceal")).ino;
+		const workerBytes = readFileSync(path.join(install, "ceal"));
+		const initialWorkerCurrent = readlinkSync(workerCurrent);
+		writeBinary(path.join(release, "cealctl-linux-arm64"), "cealctl", "operator-generation-2");
+		writeChecksums(release);
+		const operatorSecond = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
+		assert.equal(operatorSecond.status, 0, operatorSecond.stderr);
+		assert.notEqual(readlinkSync(operatorCurrent), initialOperatorCurrent);
+		assert.equal(readlinkSync(workerCurrent), initialWorkerCurrent);
+		assert.equal(lstatSync(path.join(install, "ceal")).ino, workerLinkInode);
+		assert.deepEqual(readFileSync(path.join(install, "ceal")), workerBytes);
+		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /operator-generation-2/u);
 	});
 });
 
-test("checksum failure preserves both existing commands", () => {
+test("checksum failure preserves the selected command and leaves the other role untouched", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(install, { recursive: true });
 		writeFileSync(path.join(install, "ceal"), "old-ceal\n");
-		writeFileSync(path.join(install, "cealctl"), "old-cealctl\n");
+		writeFileSync(path.join(install, "cealctl"), "operator-untouched\n");
 		const sums = readFileSync(path.join(release, "SHA256SUMS"), "utf8");
 		writeFileSync(path.join(release, "SHA256SUMS"), sums.replace(/^[a-f0-9]{64}( {2}ceal-linux-arm64)$/mu, `${"0".repeat(64)}$1`));
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /Checksum mismatch for ceal-linux-arm64/u);
 		assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "old-ceal\n");
-		assert.equal(readFileSync(path.join(install, "cealctl"), "utf8"), "old-cealctl\n");
+		assert.equal(readFileSync(path.join(install, "cealctl"), "utf8"), "operator-untouched\n");
 	});
 });
 
@@ -218,13 +253,14 @@ test("workflow builds from public source and never downloads injected draft bina
 	for (const action of workflow.matchAll(/uses:\s+([^\s]+)/gu)) assert.match(action[1], /@[a-f0-9]{40}$/u);
 });
 
-function runInstaller({ root, release, tools, install, cosignLog, version = "v0.64.0" }) {
+function runInstaller({ root, release, tools, install, cosignLog, version = "v0.64.0", role = "worker" }) {
 	return spawnSync(INSTALLER, [], {
 		cwd: root,
 		encoding: "utf8",
 		env: {
 			...process.env,
 			CEAL_VERSION: version,
+			CEAL_INSTALL_ROLE: role,
 			CEAL_INSTALL_DIR: install,
 			COSIGN_LOG: cosignLog,
 			FAKE_RELEASE_DIR: release,
