@@ -66,6 +66,7 @@ export type {
 } from "./personal-client-session.js";
 export type {
 	CealGatewayAuditEvent,
+	CealGatewayAuthorizationSnapshot,
 	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
 	CealGatewayCallValue,
@@ -511,6 +512,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"client_revision",
 		"error_code",
 		"event_ref",
+		"grant_snapshot",
 		"instance_ref",
 		"membership_ref",
 		"membership_revision",
@@ -525,7 +527,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"request_id",
 		"schema_version",
 		"subject_ref",
-	], ["call"]);
+	], ["call", "grant_snapshot"]);
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
 	for (const field of ["event_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(event[field]);
@@ -533,11 +535,25 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	requireIntegerRange(event.client_revision, 1, Number.MAX_SAFE_INTEGER);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
+	validateAuthorizationSnapshot(event.grant_snapshot, event);
 	if ("call" in event) validateAuditCallDetail(event.call, event);
 	else if (event.operation === "call" && event.outcome === "succeeded") invalidResponse();
 	const providerMayBeReached = event.operation === "call"
 		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable");
 	validateHostNonClaims(event.non_claims, providerMayBeReached);
+}
+
+function validateAuthorizationSnapshot(value: unknown, event: Record<string, unknown>): void {
+	const required = event.operation === "call" && event.policy_decision === "allowed";
+	if (value === undefined) { if (required) invalidResponse(); return; }
+	if (!required) invalidResponse();
+	const snapshot = requireRecord(value);
+	requireExactKeys(snapshot, ["capability_id", "grant_ref", "grant_revision", "schema_version", "target_ref"]);
+	if (snapshot.schema_version !== "ceal.gateway_authorization_snapshot.v1") invalidResponse();
+	requireSafeRef(snapshot.capability_id);
+	requirePrefixedRef(snapshot.target_ref, "target:");
+	requirePrefixedRef(snapshot.grant_ref, "grant:");
+	requireIntegerRange(snapshot.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 }
 
 function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequest: Readonly<CealGatewayReadbackRequest>, targetRequestId: string): void {
@@ -551,6 +567,9 @@ function validateAuditEventIdentity(event: Record<string, unknown>, expectedRequ
 
 function validateAuditCallDetail(value: unknown, event: Record<string, unknown>): void {
 	const call = requireRecord(value);
+	const authorization = requireRecord(event.grant_snapshot);
+	if (call.capability_id !== authorization.capability_id || call.target_ref !== authorization.target_ref
+		|| call.grant_ref !== authorization.grant_ref || call.grant_revision !== authorization.grant_revision) invalidResponse();
 	if (call.capability_id !== "message.search") {
 		requireExactKeys(call, ["capability_id", "grant_ref", "grant_revision", "input_summary", "output_summary", "schema_version", "target_ref"]);
 		if (call.schema_version !== "ceal.gateway_audit_call_detail.v1") invalidResponse();

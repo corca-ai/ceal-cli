@@ -192,6 +192,10 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 
 	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
 	const readback = readbackResponse(readbackRequest, callRequest.request_id);
+	readback.value.events[0].grant_snapshot = {
+		schema_version: "ceal.gateway_authorization_snapshot.v1", capability_id: "file.search",
+		grant_ref: "grant:workspace-file-search", grant_revision: 1, target_ref: "target:workspace",
+	};
 	readback.value.events[0].call = {
 		schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
 		grant_ref: "grant:workspace-file-search", grant_revision: 1, target_ref: "target:workspace",
@@ -441,6 +445,7 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 		error_code: "authentication_failed",
 	});
 	delete authenticationDenial.value.events[0].call;
+	delete authenticationDenial.value.events[0].grant_snapshot;
 	assert.deepEqual(decodeCealClientResponse(authenticationDenial, readbackRequest), authenticationDenial);
 });
 
@@ -574,6 +579,13 @@ function readbackResponse(request, targetRequestId) {
 				policy_decision: "allowed",
 				outcome: "succeeded",
 				error_code: null,
+				grant_snapshot: {
+					schema_version: "ceal.gateway_authorization_snapshot.v1",
+					capability_id: "message.search",
+					target_ref: "target:workspace",
+					grant_ref: "grant:workspace-message-search",
+					grant_revision: 1,
+				},
 				call: {
 					schema_version: "ceal.gateway_audit_call_detail.v1",
 					capability_id: "message.search",

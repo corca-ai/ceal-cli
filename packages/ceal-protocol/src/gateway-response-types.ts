@@ -205,9 +205,18 @@ export interface CealGatewayAuditEvent {
 	policy_decision: "allowed" | "denied" | "not_evaluated";
 	outcome: "succeeded" | "denied" | "failed";
 	error_code: string | null;
+	grant_snapshot?: CealGatewayAuthorizationSnapshot;
 	call?: CealGatewayAuditCallDetail;
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+}
+
+export interface CealGatewayAuthorizationSnapshot {
+	schema_version: "ceal.gateway_authorization_snapshot.v1";
+	capability_id: string;
+	target_ref: string;
+	grant_ref: string;
+	grant_revision: number;
 }
 
 export interface CealGatewayMessageSearchAuditCallDetail {
