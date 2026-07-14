@@ -239,7 +239,7 @@ verify_checksum_inventory
 
 chmod 755 "$TMP_DIR/$CEAL_ASSET" "$TMP_DIR/$CEALCTL_ASSET"
 verify_version_output "$TMP_DIR/$CEAL_ASSET" ceal ceal.version.v1 gateway_issued_client_session
-verify_version_output "$TMP_DIR/$CEALCTL_ASSET" cealctl cealctl.version.v1 cealctl_operator_admin_profile
+verify_version_output "$TMP_DIR/$CEALCTL_ASSET" cealctl cealctl.version.v1 cealctl_operator_admin_session
 "$TMP_DIR/$CEAL_ASSET" --help >/dev/null
 "$TMP_DIR/$CEALCTL_ASSET" --help >/dev/null
 
@@ -296,6 +296,6 @@ if [ "$CEAL_TARGET_STATE" != managed_link ] || [ "$CEALCTL_TARGET_STATE" != mana
 fi
 
 verify_version_output "$CEAL_TARGET" ceal ceal.version.v1 gateway_issued_client_session
-verify_version_output "$CEALCTL_TARGET" cealctl cealctl.version.v1 cealctl_operator_admin_profile
+verify_version_output "$CEALCTL_TARGET" cealctl cealctl.version.v1 cealctl_operator_admin_session
 COMMITTED=1
 printf 'Installed ceal and cealctl %s (%s) at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"

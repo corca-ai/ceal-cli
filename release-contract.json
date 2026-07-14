@@ -68,7 +68,7 @@
 			"package": "@corca-ai/ceal-operator-cli",
 			"package_version": "0.64.0",
 			"command": "cealctl",
-			"credential_context": "cealctl_operator_admin_profile"
+			"credential_context": "cealctl_operator_admin_session"
 		}
 	},
 	"guides": {
