@@ -39,6 +39,8 @@ export interface CealCliIo {
 
 export interface CealCommandRuntime {
 	readSecret?: () => Promise<string>;
+	promptEnrollmentCode?: () => Promise<string>;
+	isInteractiveTerminal?: () => boolean;
 	loadSession?: () => Promise<CealStoredSession | null>;
 	saveSession?: (session: CealStoredSession) => Promise<void>;
 	removeSession?: () => Promise<void>;
@@ -78,7 +80,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "session",
 		description: "Enroll an approved client device and inspect its renewable Gateway session.",
-		usage: "ceal session [enroll --gateway <https-url> --code-stdin | logout]",
+		usage: "ceal session [enroll --gateway <https-url> [--code-stdin] | logout]",
 		effect: "local_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.client_session.v1",
@@ -166,7 +168,8 @@ function commandHelp(command: CealCommandDefinition): string {
 			"  enroll                 Exchange a pre-approved one-time device-enrollment code for a local session.",
 			"  logout                 Revoke and remove the local session.",
 			"  --gateway <https-url>  Gateway client endpoint.",
-			"  --code-stdin            Read the device-enrollment code only from stdin.",
+			"  (default)               On a safe terminal, prompt for the device-enrollment code with hidden input.",
+			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
 		] : command.name === "call" ? [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
@@ -493,9 +496,17 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeError("invalid_argument", "Invalid session enrollment options.", io);
-	if (!runtime.readSecret || !runtime.saveSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	if (!runtime.saveSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
 	let code: string;
-	try { code = await runtime.readSecret(); } catch { return writeEnrollmentUnavailable("enrollment_code_input_failed", io); }
+	if (parsed.input === "stdin") {
+		if (!runtime.readSecret) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+		try { code = await runtime.readSecret(); } catch { return writeEnrollmentUnavailable("enrollment_code_input_failed", io); }
+	} else {
+		if (!runtime.isInteractiveTerminal?.() || !runtime.promptEnrollmentCode) {
+			return writeEnrollmentUnavailable("interactive_enrollment_required", io);
+		}
+		try { code = await runtime.promptEnrollmentCode(); } catch { return writeEnrollmentUnavailable("enrollment_code_input_failed", io); }
+	}
 	try {
 		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code);
 		if (!response.ok) return writeEnrollmentRejected(response.error.code, io);
@@ -644,9 +655,11 @@ function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
 	return 3;
 }
 
-function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string } | { ok: false } {
-	if (options.length !== 4 || options[0] !== "enroll" || options[1] !== "--gateway" || options[3] !== "--code-stdin") return { ok: false };
-	return options[2] ? { ok: true, gateway: options[2] } : { ok: false };
+function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
+	if (options[0] !== "enroll" || options[1] !== "--gateway" || !options[2]) return { ok: false };
+	if (options.length === 3) return { ok: true, gateway: options[2], input: "interactive" };
+	if (options.length === 4 && options[3] === "--code-stdin") return { ok: true, gateway: options[2], input: "stdin" };
+	return { ok: false };
 }
 
 function writeEnrollmentRejected(code: string, io: CealCliIo): number {
@@ -673,7 +686,9 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
 		error: {
 			kind: reason,
 			message: "The device enrollment could not be completed.",
-			next_action: "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.",
+			next_action: reason === "interactive_enrollment_required"
+				? "Run this command from a terminal that supports hidden input, or use --code-stdin only from approved non-interactive automation."
+				: "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.",
 		},
 	});
 	return 3;

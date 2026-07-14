@@ -110,6 +110,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null;
 		observed.push({ url: request.url, authorization: request.headers.authorization, body });
 		const common = { profile: "operator", admin_api_origin: origin, deployment_id: "instance:test", auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test" };
+		if (request.url === "/api/cealctl/contract") return json(response, 200, compatibleContract(origin));
 		if (request.url === "/api/cealctl/login/start") return json(response, 200, {
 			schema_version: "cealctl.login_start.v1", deployment_id: "instance:test", login_id: "login:test",
 			user_code: "ABCD-1234", verification_url: `${origin}/verify?user-code=ABCD-1234`, expires_at: "2099-07-14T00:00:00.000Z", poll_interval_seconds: 1,
@@ -202,6 +203,30 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		assert.equal((await asyncYamlRun(["sessions"], 0, { homeDir })).status, "unconfigured");
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(homeDir, { recursive: true, force: true });
+	}
+});
+
+test("an old Admin API is rejected before login creates an operator session", async () => {
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-stale-contract-"));
+	let startCalls = 0;
+	const result = await asyncRun(["login", "https://ceal.example.test/corca-ai/ceal-dev"], {
+		homeDir,
+		fetchFn: async (url) => {
+			assert.match(String(url), /\/api\/cealctl\/contract$/u);
+			return new Response(JSON.stringify({ ok: false, error_code: "not_found" }), {
+				status: 404, headers: { "content-type": "application/json" },
+			});
+		},
+	});
+	try {
+		assert.equal(result.code, 3);
+		assert.equal(startCalls, 0);
+		const payload = parseYaml(result.stdout);
+		assert.equal(payload.error.kind, "control_plane_upgrade_required");
+		assert.match(payload.error.next_action, /control-plane release/u);
+		assert.equal(existsSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json")), false);
+	} finally {
 		rmSync(homeDir, { recursive: true, force: true });
 	}
 });
@@ -318,6 +343,30 @@ async function asyncRun(args, runtime = {}) {
 function json(response, status, body) {
 	response.writeHead(status, { "content-type": "application/json" });
 	response.end(JSON.stringify(body));
+}
+
+function compatibleContract(origin) {
+	return {
+		schema_version: "ceal.admin_api_contract.v1",
+		contract_revision: 1,
+		deployment_id: "instance:test",
+		admin_api_origin: origin,
+		features: [
+			{ id: "operator_session.v1", routes: [
+				{ method: "POST", path: "/api/cealctl/login/start", required_scope: null },
+				{ method: "POST", path: "/api/cealctl/login/poll", required_scope: null },
+				{ method: "POST", path: "/api/cealctl/token/refresh", required_scope: null },
+				{ method: "POST", path: "/api/cealctl/token/revoke", required_scope: null },
+			] },
+			{ id: "personal_client_access.v1", routes: [
+				{ method: "GET", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
+				{ method: "PUT", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
+			] },
+			{ id: "personal_client_enrollment.v1", routes: [
+				{ method: "POST", path: "/api/cealctl/v1/enrollments", required_scope: "ceal.client.enroll" },
+			] },
+		],
+	};
 }
 
 function escapeRegExp(value) {

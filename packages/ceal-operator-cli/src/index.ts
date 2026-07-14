@@ -25,6 +25,7 @@ import {
 	refreshOperatorSession,
 	revokeOperatorSession,
 } from "./operator-session-client.js";
+import { AdminApiContractClientError, requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
 
 export const CEAL_OPERATOR_CLI_VERSION = "0.64.0" as const;
 export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_session" as const;
@@ -322,6 +323,11 @@ async function executeAccess(
 		const registry = parsed.action === "apply" ? await readAccessRegistryFromStdin(runtime) : null;
 		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
 		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
+		await requireCompatibleAdminApiContract({
+			adminOrigin: refreshed.session.admin_api_origin,
+			expectedDeploymentId: refreshed.session.deployment_id,
+			fetchFn: runtime.fetchFn,
+		});
 		const common = {
 			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/access`,
 			adminToken: refreshed.accessToken,
@@ -399,6 +405,11 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 	try {
 		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
 		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
+		await requireCompatibleAdminApiContract({
+			adminOrigin: refreshed.session.admin_api_origin,
+			expectedDeploymentId: refreshed.session.deployment_id,
+			fetchFn: runtime.fetchFn,
+		});
 		const result = await createCealEnrollment({
 			adminEndpoint: `${refreshed.session.admin_api_origin}/api/cealctl/v1/enrollments`,
 			adminToken: refreshed.accessToken,
@@ -420,7 +431,7 @@ async function createEnrollmentCommand(options: readonly string[], io: CealctlIo
 			transfer_warning: "Transfer privately. Do not place this code in logs, tickets, or shared chat.",
 			credential_context: CEALCTL_CREDENTIAL_CONTEXT,
 			proof_level: "host_decision",
-			next_action: `On the approved personal client machine, send this device-enrollment code through stdin to 'ceal session enroll --gateway ${result.gatewayEndpoint} --code-stdin'.`,
+			next_action: `On the approved personal client machine, run 'ceal session enroll --gateway ${result.gatewayEndpoint}' in a terminal; it will prompt for this code with hidden input. Use --code-stdin only for approved automation.`,
 		});
 	} catch (error) {
 		const code = error instanceof CealEnrollmentAdminClientError ? error.code : sessionErrorCode(error);
@@ -487,7 +498,7 @@ function parseOptionalProfile(options: readonly string[]): string | null {
 }
 
 function sessionErrorCode(error: unknown): string {
-	if (error instanceof OperatorSessionClientError || error instanceof OperatorSessionStoreError) return error.code;
+	if (error instanceof OperatorSessionClientError || error instanceof OperatorSessionStoreError || error instanceof AdminApiContractClientError) return error.code;
 	return "request_failed";
 }
 
@@ -495,7 +506,13 @@ function writeSessionFailure(schemaVersion: string, kind: string, message: strin
 	writeYaml(io.stdout, {
 		schema_version: schemaVersion, command: "cealctl", status: "unavailable", proof_level: "surface",
 		credential_context: CEALCTL_CREDENTIAL_CONTEXT, raw_token_visible: false,
-		error: { kind, message, next_action: "Check the Admin API URL, operator approval, stored profile, and Gateway status, then retry." },
+		error: {
+			kind,
+			message,
+			next_action: kind === "control_plane_upgrade_required"
+				? "The running Gateway Admin API is older than this CLI. Apply the matching control-plane release, verify 'ceal-ops admin-api status', then retry."
+				: "Check the Admin API URL, operator approval, stored profile, and Gateway status, then retry.",
+		},
 	});
 	return 3;
 }

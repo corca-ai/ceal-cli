@@ -4,6 +4,7 @@ import {
 	replaceOperatorSession,
 } from "./operator-session-store.js";
 import type { OperatorSession } from "./operator-session-store.js";
+import { requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -46,7 +47,9 @@ export async function loginOperator(input: {
 	if (!SAFE_NAME.test(input.profile)) throw new OperatorSessionClientError("invalid_profile");
 	const fetchFn = input.fetchFn ?? globalThis.fetch;
 	if (typeof fetchFn !== "function") throw new OperatorSessionClientError("fetch_unavailable");
-	const start = await startLogin(normalizeAdminOrigin(input.adminOrigin), input.profile, fetchFn);
+	const adminOrigin = normalizeAdminOrigin(input.adminOrigin);
+	const contract = await requireCompatibleAdminApiContract({ adminOrigin, fetchFn });
+	const start = await startLogin(adminOrigin, input.profile, fetchFn, contract.deploymentId);
 	input.onChallenge?.({
 		profile: start.profile,
 		verification_url: start.verificationUrl,
@@ -61,6 +64,11 @@ export async function refreshOperatorSession(input: {
 	homeDir?: string;
 	fetchFn?: typeof globalThis.fetch;
 }): Promise<{ session: OperatorSession; accessToken: string }> {
+	await requireCompatibleAdminApiContract({
+		adminOrigin: input.session.admin_api_origin,
+		expectedDeploymentId: input.session.deployment_id,
+		fetchFn: input.fetchFn,
+	});
 	const body = await postJson(
 		adminRequestUrl(input.session.admin_api_origin, "/api/cealctl/token/refresh"),
 		{
@@ -82,6 +90,11 @@ export async function revokeOperatorSession(input: {
 	session: OperatorSession;
 	fetchFn?: typeof globalThis.fetch;
 }): Promise<void> {
+	await requireCompatibleAdminApiContract({
+		adminOrigin: input.session.admin_api_origin,
+		expectedDeploymentId: input.session.deployment_id,
+		fetchFn: input.fetchFn,
+	});
 	const body = await postJson(
 		adminRequestUrl(input.session.admin_api_origin, "/api/cealctl/token/revoke"),
 		{
@@ -98,7 +111,7 @@ export async function revokeOperatorSession(input: {
 	assertBinding(body, input.session);
 }
 
-async function startLogin(adminOrigin: string, profile: string, fetchFn: typeof globalThis.fetch): Promise<LoginStart> {
+async function startLogin(adminOrigin: string, profile: string, fetchFn: typeof globalThis.fetch, expectedDeploymentId: string): Promise<LoginStart> {
 	const body = await postJson(adminRequestUrl(adminOrigin, "/api/cealctl/login/start"), {
 		schema_version: "cealctl.login_start_request.v1",
 		profile,
@@ -106,10 +119,12 @@ async function startLogin(adminOrigin: string, profile: string, fetchFn: typeof 
 	if (body.schema_version !== "cealctl.login_start.v1") throw new OperatorSessionClientError("invalid_login_start_response");
 	const userCode = requirePattern(body.user_code, SAFE_CODE, 64);
 	const verificationUrl = requireVerificationUrl(body.verification_url, adminOrigin, userCode);
+	const deploymentId = requirePattern(body.deployment_id, SAFE_ID);
+	if (deploymentId !== expectedDeploymentId) throw new OperatorSessionClientError("control_plane_upgrade_required");
 	return {
 		profile,
 		adminOrigin,
-		deploymentId: requirePattern(body.deployment_id, SAFE_ID),
+		deploymentId,
 		loginId: requirePattern(body.login_id, SAFE_ID),
 		verificationUrl,
 		userCode,

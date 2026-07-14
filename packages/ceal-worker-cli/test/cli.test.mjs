@@ -98,6 +98,36 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 	});
 });
 
+test("terminal enrollment uses a hidden prompt by default and pipe input requires an explicit flag", async () => {
+	await withEnrollmentGateway(async ({ endpoint, token }) => {
+		let prompted = 0;
+		let readStdin = 0;
+		let stored = null;
+		const result = await run(["session", "enroll", "--gateway", endpoint], {
+			isInteractiveTerminal: () => true,
+			promptEnrollmentCode: async () => { prompted += 1; return "E".repeat(48); },
+			readSecret: async () => { readStdin += 1; return "must-not-be-read"; },
+			saveSession: async (session) => { stored = session; },
+		});
+		assert.equal(result.code, 0);
+		assert.equal(prompted, 1);
+		assert.equal(readStdin, 0);
+		assert.equal(stored.accessToken, token);
+		assert.doesNotMatch(`${result.stdout}${result.stderr}`, /E{48}|must-not-be-read/u);
+
+		let consumed = false;
+		const nonInteractive = await yamlRun(["session", "enroll", "--gateway", endpoint], 3, {
+			isInteractiveTerminal: () => false,
+			promptEnrollmentCode: async () => { consumed = true; return "E".repeat(48); },
+			readSecret: async () => { consumed = true; return "E".repeat(48); },
+			saveSession: async () => assert.fail("must not save"),
+		});
+		assert.equal(nonInteractive.error.kind, "interactive_enrollment_required");
+		assert.equal(consumed, false);
+		assert.match(nonInteractive.error.next_action, /--code-stdin/u);
+	});
+});
+
 test("rejected operator-activation-shaped material cannot create a worker session or appear in recovery output", async () => {
 	const code = `celn_${"A".repeat(40)}`;
 	const server = createServer(async (request, response) => {

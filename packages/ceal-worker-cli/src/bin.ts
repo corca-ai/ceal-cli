@@ -12,6 +12,8 @@ void runCealCommand(process.argv.slice(2), {
 	stderr: process.stderr,
 }, {
 	readSecret: readStdinSecret,
+	promptEnrollmentCode: readHiddenTerminalEnrollmentCode,
+	isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
 	loadSession: sessionStore ? () => sessionStore.load() : undefined,
 	saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
 	removeSession: sessionStore ? () => sessionStore.remove() : undefined,
@@ -41,4 +43,51 @@ async function readStdinSecret(): Promise<string> {
 		if (value.length > 4097) throw new Error("stdin_secret_too_large");
 	}
 	return value.replace(/\r?\n$/u, "");
+}
+
+async function readHiddenTerminalEnrollmentCode(): Promise<string> {
+	if (!process.stdin.isTTY || !process.stderr.isTTY || typeof process.stdin.setRawMode !== "function") {
+		throw new Error("interactive_enrollment_required");
+	}
+	const wasRaw = process.stdin.isRaw;
+	process.stderr.write("Device enrollment code (input hidden): ");
+	process.stdin.setRawMode(true);
+	process.stdin.resume();
+	return new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		let bytes = 0;
+		const cleanup = () => {
+			process.stdin.off("data", onData);
+			process.stdin.off("end", onEnd);
+			process.stdin.setRawMode(wasRaw);
+		};
+		const finish = () => {
+			cleanup();
+			process.stderr.write("[input hidden]\n");
+			resolve(Buffer.concat(chunks).toString("utf8"));
+		};
+		const fail = (error: Error) => {
+			cleanup();
+			process.stderr.write("[input hidden]\n");
+			reject(error);
+		};
+		const onEnd = () => fail(new Error("stdin_ended"));
+		const onData = (chunk: string | Buffer) => {
+			const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+			for (const byte of input) {
+				if (byte === 0x03) return fail(new Error("input_cancelled"));
+				if (byte === 0x0d || byte === 0x0a) return finish();
+				if (byte === 0x08 || byte === 0x7f) {
+					const previous = chunks.pop();
+					if (previous) bytes -= previous.length;
+					continue;
+				}
+				bytes += 1;
+				if (bytes > 4096) return fail(new Error("stdin_secret_too_large"));
+				chunks.push(Buffer.from([byte]));
+			}
+		};
+		process.stdin.on("data", onData);
+		process.stdin.once("end", onEnd);
+	});
 }
