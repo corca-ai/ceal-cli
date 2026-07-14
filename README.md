@@ -118,10 +118,13 @@ cealctl enrollments create \
 ```
 
 `access.yaml` is one complete `ceal.gateway_access_registry.v1` document. It
-contains additive Profile Memberships, client invitations, and capability/
-target Grants, but no connector, backend, or provider credential fields. The
-dry run reaches the Gateway and validates the replacement without writing;
-the apply is atomic and rejects stale revisions or implicit record deletion.
+contains a monotonic registry generation plus additive Profile Memberships,
+client invitations, and capability/target Grants, but no connector, backend,
+or provider credential fields. Active Memberships and Grants for one Profile
+share a `profile_audience_revision`, making every audience expansion explicit.
+The dry run reaches the Gateway and validates the replacement without writing;
+the apply is atomic and rejects stale generations, stale record revisions,
+revoked-record reactivation, or implicit record deletion.
 
 The client invitation, subject, Profile membership, and target Grants must
 already exist in that Gateway registry; enrollment cannot create authority. The

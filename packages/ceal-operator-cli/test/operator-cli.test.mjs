@@ -99,9 +99,10 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	let origin = null;
 	const accessRegistry = {
 		schema_version: "ceal.gateway_access_registry.v1",
-		memberships: [{ membership_ref: "membership:hwidong-work", profile_ref: "profile:work", subject_ref: "subject:hwidong", revision: 1, status: "active" }],
+		generation: 1,
+		memberships: [{ membership_ref: "membership:hwidong-work", profile_ref: "profile:work", subject_ref: "subject:hwidong", profile_audience_revision: 1, revision: 1, status: "active" }],
 		clients: [{ client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca", revision: 1, status: "active" }],
-		grants: [{ grant_ref: "grant:work-team-inbox", profile_ref: "profile:work", capability_id: "message.search", target_ref: "target:team-inbox", revision: 1, status: "active" }],
+		grants: [{ grant_ref: "grant:work-team-inbox", profile_ref: "profile:work", capability_id: "message.search", target_ref: "target:team-inbox", profile_audience_revision: 1, revision: 1, status: "active" }],
 	};
 	const server = createServer(async (request, response) => {
 		const chunks = [];

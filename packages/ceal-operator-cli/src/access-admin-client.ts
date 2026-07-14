@@ -2,9 +2,10 @@ export type CealAccessStatus = "active" | "revoked";
 
 export interface CealAccessRegistry {
 	schema_version: "ceal.gateway_access_registry.v1";
-	memberships: Array<{ membership_ref: string; profile_ref: string; subject_ref: string; revision: number; status: CealAccessStatus }>;
+	generation: number;
+	memberships: Array<{ membership_ref: string; profile_ref: string; subject_ref: string; profile_audience_revision: number; revision: number; status: CealAccessStatus }>;
 	clients: Array<{ client_ref: string; subject_ref: string; instance_ref: string; revision: number; status: CealAccessStatus }>;
-	grants: Array<{ grant_ref: string; profile_ref: string; capability_id: string; target_ref: string; revision: number; status: CealAccessStatus }>;
+	grants: Array<{ grant_ref: string; profile_ref: string; capability_id: string; target_ref: string; profile_audience_revision: number; revision: number; status: CealAccessStatus }>;
 }
 
 export interface CealAccessState {
@@ -25,13 +26,14 @@ const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export function decodeCealAccessRegistry(value: unknown): CealAccessRegistry {
-	if (!isRecord(value) || !hasExactKeys(value, ["clients", "grants", "memberships", "schema_version"])
+	if (!isRecord(value) || !hasExactKeys(value, ["clients", "generation", "grants", "memberships", "schema_version"])
 		|| value.schema_version !== "ceal.gateway_access_registry.v1"
+		|| !Number.isSafeInteger(value.generation) || Number(value.generation) < 1
 		|| !Array.isArray(value.memberships) || !Array.isArray(value.clients) || !Array.isArray(value.grants)) invalidConfiguration();
 	const registry = structuredClone(value) as unknown as CealAccessRegistry;
-	for (const membership of registry.memberships) assertRecord(membership, ["membership_ref", "profile_ref", "revision", "status", "subject_ref"], [membership.membership_ref, membership.profile_ref, membership.subject_ref]);
+	for (const membership of registry.memberships) assertRecord(membership, ["membership_ref", "profile_audience_revision", "profile_ref", "revision", "status", "subject_ref"], [membership.membership_ref, membership.profile_ref, membership.subject_ref], membership.profile_audience_revision);
 	for (const client of registry.clients) assertRecord(client, ["client_ref", "instance_ref", "revision", "status", "subject_ref"], [client.client_ref, client.instance_ref, client.subject_ref]);
-	for (const grant of registry.grants) assertRecord(grant, ["capability_id", "grant_ref", "profile_ref", "revision", "status", "target_ref"], [grant.grant_ref, grant.profile_ref, grant.capability_id, grant.target_ref]);
+	for (const grant of registry.grants) assertRecord(grant, ["capability_id", "grant_ref", "profile_audience_revision", "profile_ref", "revision", "status", "target_ref"], [grant.grant_ref, grant.profile_ref, grant.capability_id, grant.target_ref], grant.profile_audience_revision);
 	return registry;
 }
 
@@ -97,9 +99,10 @@ function decodeState(value: unknown): CealAccessState {
 	return { status: value.status as CealAccessState["status"], dry_run: value.dry_run, registry: decodeCealAccessRegistry(value.registry), proof_level: "host_decision" };
 }
 
-function assertRecord(value: unknown, keys: readonly string[], refs: unknown[]): void {
+function assertRecord(value: unknown, keys: readonly string[], refs: unknown[], audienceRevision?: unknown): void {
 	if (!isRecord(value) || !hasExactKeys(value, keys) || refs.some((ref) => typeof ref !== "string" || !SAFE_REF.test(ref))
-		|| !Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || !new Set(["active", "revoked"]).has(String(value.status))) invalidConfiguration();
+		|| !Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || !new Set(["active", "revoked"]).has(String(value.status))
+		|| (audienceRevision !== undefined && (!Number.isSafeInteger(audienceRevision) || Number(audienceRevision) < 1))) invalidConfiguration();
 }
 
 function safeEndpoint(value: string): URL {
