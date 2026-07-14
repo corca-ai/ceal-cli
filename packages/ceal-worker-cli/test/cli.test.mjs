@@ -217,6 +217,7 @@ test("call invokes one granted capability and independently reads back its audit
 		assert.equal(payload.capability, "message.search");
 		assert.equal(payload.target, "target:team-inbox");
 		assert.equal(payload.data.matches.length, 1);
+		assert.equal(payload.receipt.evidence, "readback_verified");
 		assert.equal(payload.receipt.request_ref, "narnia:call:1:call");
 		assert.equal("usage" in payload, false);
 		assert.equal("profile" in payload, false);
@@ -247,14 +248,33 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 	});
 });
 
-test("message.get keeps only retrieval data and its receipt in the default result", () => {
+test("call refuses to claim completion when audit readback has no verified event", () => {
+	let stdout = "";
+	const code = writeCallCompleted({
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
+		grant_ref: "grant:workspace-file-search", grant_revision: 7, target_ref: "target:workspace",
+		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
+		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	}, [], "request:missing-readback", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
+		capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search",
+	});
+	assert.equal(code, 3);
+	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	assert.equal(payload.status, "error");
+	assert.equal(payload.receipt.evidence, "readback_unavailable");
+	assert.deepEqual(payload.receipt.audit_refs, []);
+	assert.equal(payload.error.kind, "audit_readback_missing");
+});
+
+test("message.get keeps only retrieval data and verified receipt state in the default result", () => {
 	let stdout = "";
 	const code = writeCallCompleted({
 		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
 		grant_ref: "grant:team-inbox-message-get", grant_revision: 4, target_ref: "target:team-inbox",
 		data: {
 			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
-			text: "Full authorized message text.", offset: 0, source_url: "https://workspace.example.test/archives/C0123456789/p1720000000000100",
+			text: "Full authorized message text.", offset: 0,
 		},
 		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
@@ -267,9 +287,8 @@ test("message.get keeps only retrieval data and its receipt in the default resul
 		schema_version: "ceal.result.v2", status: "completed", capability: "message.get", target: "target:team-inbox",
 		data: {
 			ref: "message:approved_001", source: "Team inbox", text: "Full authorized message text.",
-			source_url: "https://workspace.example.test/archives/C0123456789/p1720000000000100",
 		},
-		receipt: { request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
+		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
 });
 

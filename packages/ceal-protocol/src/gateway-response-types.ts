@@ -158,7 +158,6 @@ export interface CealGatewayMessageSearchCoverage {
 export interface CealGatewayMessageSearchResultItem {
 	ref: string;
 	thread_ref?: string;
-	source_url?: string;
 	target_ref: string;
 	created_at: string;
 	source_label: string;

@@ -657,7 +657,7 @@ function assertSafeJsonRecord(record: Record<string, unknown>, options: { forbid
 	if (entries.length > 128) invalidByContext(options);
 	for (const [key, child] of entries) {
 		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
-		if (options.allowAuthorizedMessageContent && (key === "text" || key === "source_url")) {
+		if (options.allowAuthorizedMessageContent && key === "text") {
 			if (typeof child !== "string" || byteLength(child) > 8192) invalidByContext(options);
 		} else assertSafeJsonValue(child, options, depth + 1, count);
 	}

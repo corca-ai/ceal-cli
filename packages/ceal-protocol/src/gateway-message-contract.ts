@@ -40,14 +40,13 @@ export function validateMessageGetResult(
 	context: GatewayMessageContractContext,
 ): void {
 	const result = context.record(value);
-	context.exact(result, ["offset", "ref", "schema_version", "source_label", "source_url", "text"], ["next_offset", "source_url"]);
+	context.exact(result, ["offset", "ref", "schema_version", "source_label", "text"], ["next_offset"]);
 	if (result.schema_version !== "ceal.message_get_result.v1") context.invalid();
 	const input = decodeMessageGetInput(expectedRequest.body.arguments, context);
 	context.prefixed(result.ref, "message:");
 	assertMessageGetMatch(result, input, context);
 	context.safeText(result.source_label, 128);
 	assertMessageGetPage(result, input, context);
-	if (result.source_url !== undefined) assertSafeSourceUrl(result.source_url, context);
 }
 
 function assertSearchContractIdentity(contract: Record<string, unknown>, context: GatewayMessageContractContext): void {
@@ -127,12 +126,11 @@ function assertNextOffset(value: unknown, offset: number, maximum: number, conte
 
 function assertSearchResultItem(value: unknown, targetRef: string, seen: Set<string>, context: GatewayMessageContractContext): void {
 	const item = context.record(value);
-	context.exact(item, ["created_at", "ref", "source_label", "source_url", "target_ref", "text_preview", "thread_ref"], ["source_url", "thread_ref"]);
+	context.exact(item, ["created_at", "ref", "source_label", "target_ref", "text_preview", "thread_ref"], ["thread_ref"]);
 	context.prefixed(item.ref, "message:");
 	if (seen.has(item.ref as string) || item.target_ref !== targetRef) context.invalid();
 	seen.add(item.ref as string);
 	if (item.thread_ref !== undefined) context.prefixed(item.thread_ref, "thread:");
-	if (item.source_url !== undefined) assertSafeSourceUrl(item.source_url, context);
 	if (typeof item.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(item.created_at)) context.invalid();
 	context.safeText(item.source_label, 128);
 	context.safeText(item.text_preview, 1024);
@@ -151,12 +149,4 @@ function assertMessageGetMatch(result: Record<string, unknown>, input: { ref: st
 
 function assertMessageGetPage(result: Record<string, unknown>, input: { offset: number }, context: GatewayMessageContractContext): void {
 	if (result.next_offset !== undefined) assertNextOffset(result.next_offset, input.offset, 40_000, context);
-}
-
-function assertSafeSourceUrl(value: unknown, context: GatewayMessageContractContext): void {
-	if (typeof value !== "string" || value.length === 0 || value.length > 2048) context.invalid();
-	try {
-		const url = new URL(value as string);
-		if (url.protocol !== "https:" || url.username || url.password || url.hash) context.invalid();
-	} catch { context.invalid(); }
 }

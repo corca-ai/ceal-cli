@@ -21,10 +21,11 @@ export function writeCallCompleted(
 	session: CealStoredSession, parsed: CealParsedCapabilityCall,
 ): number {
 	const eventRefs = Array.isArray(events) ? events.flatMap((event) => event && typeof event === "object" && "event_ref" in event ? [String(event.event_ref)] : []) : [];
+	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed);
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
 		target: parsed.targetRef, data: projectCapabilityData(value.data),
-		receipt: { request_ref: requestId, audit_refs: eventRefs },
+		receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
 	});
 }
 
@@ -37,7 +38,7 @@ export function writeCallGatewayFailure(
 	writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
 		capability: parsed.capabilityId, target: parsed.targetRef,
-		...(proofRefs.length ? { receipt: { request_ref: requestId, audit_refs: proofRefs } } : {}),
+		...(proofRefs.length ? { receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs } } : {}),
 		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
 	});
 	return 3;
@@ -49,7 +50,7 @@ export function writeCallIncomplete(
 ): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
-		data: projectCapabilityData(value.data), receipt: { request_ref: requestId, audit_refs: [] },
+		data: projectCapabilityData(value.data), receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
 	});
 	return 3;
@@ -81,7 +82,6 @@ function projectCapabilityData(value: Record<string, unknown>): Record<string, u
 			|| typeof item.text_preview !== "string" || typeof item.created_at !== "string") return [];
 		return [{
 			ref: item.ref, source: item.source_label, preview: item.text_preview, created_at: item.created_at,
-			...(typeof item.source_url === "string" ? { source_url: item.source_url } : {}),
 		}];
 	});
 	const offset = typeof value.offset === "number" ? value.offset : 0;
@@ -101,7 +101,6 @@ function projectMessageGetData(value: Record<string, unknown>): Record<string, u
 		ref: value.ref,
 		source: value.source_label,
 		text: value.text,
-		...(typeof value.source_url === "string" ? { source_url: value.source_url } : {}),
 		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
 		...(offset > 0 ? { offset } : {}),
 	};
