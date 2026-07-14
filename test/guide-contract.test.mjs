@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,8 +20,10 @@ const CASES = [
 test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
 test("guide packages teach help-driven discovery without command snapshots", () => {
+	const releaseContract = JSON.parse(readFileSync(path.join(ROOT, "release-contract.json"), "utf8"));
 	for (const item of CASES) {
 		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
+		assert.equal(releaseContract.guides?.[item.skill]?.sha256, createHash("sha256").update(guide).digest("hex"));
 		assert.match(guide, new RegExp(`^name: ${item.skill}$`, "mu"));
 		assert.match(guide, new RegExp(`\\b${item.binary} --help\\b`, "u"));
 		assert.match(guide, new RegExp(`${item.binary} <command> --help`, "u"));
