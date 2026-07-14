@@ -26,15 +26,19 @@ const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export function decodeCealAccessRegistry(value: unknown): CealAccessRegistry {
-	if (!isRecord(value) || !hasExactKeys(value, ["clients", "generation", "grants", "memberships", "schema_version"])
-		|| value.schema_version !== "ceal.gateway_access_registry.v1"
-		|| !Number.isSafeInteger(value.generation) || Number(value.generation) < 0
-		|| !Array.isArray(value.memberships) || !Array.isArray(value.clients) || !Array.isArray(value.grants)) invalidConfiguration();
+	if (!isAccessRegistryEnvelope(value)) invalidConfiguration();
 	const registry = structuredClone(value) as unknown as CealAccessRegistry;
 	for (const membership of registry.memberships) assertRecord(membership, ["membership_ref", "profile_audience_revision", "profile_ref", "revision", "status", "subject_ref"], [membership.membership_ref, membership.profile_ref, membership.subject_ref], membership.profile_audience_revision);
 	for (const client of registry.clients) assertRecord(client, ["client_ref", "instance_ref", "revision", "status", "subject_ref"], [client.client_ref, client.instance_ref, client.subject_ref]);
 	for (const grant of registry.grants) assertRecord(grant, ["capability_id", "grant_ref", "profile_audience_revision", "profile_ref", "revision", "status", "target_ref"], [grant.grant_ref, grant.profile_ref, grant.capability_id, grant.target_ref], grant.profile_audience_revision);
 	return registry;
+}
+
+function isAccessRegistryEnvelope(value: unknown): value is Record<string, unknown> {
+	return isRecord(value) && hasExactKeys(value, ["clients", "generation", "grants", "memberships", "schema_version"])
+		&& value.schema_version === "ceal.gateway_access_registry.v1"
+		&& Number.isSafeInteger(value.generation) && Number(value.generation) >= 0
+		&& Array.isArray(value.memberships) && Array.isArray(value.clients) && Array.isArray(value.grants);
 }
 
 export async function showCealAccess(input: AdminRequestInput): Promise<CealAccessState> {
