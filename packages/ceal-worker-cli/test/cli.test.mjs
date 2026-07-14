@@ -10,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEAL_COMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
+import { writeCallCompleted } from "../dist/call-result-output.js";
 
 async function run(args, runtime = {}) {
 	let stdout = "";
@@ -243,6 +244,32 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 			}],
 		});
 		assert.deepEqual(requests.map((item) => item.body.operation), ["readback"]);
+	});
+});
+
+test("message.get keeps only retrieval data and its receipt in the default result", () => {
+	let stdout = "";
+	const code = writeCallCompleted({
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
+		grant_ref: "grant:team-inbox-message-get", grant_revision: 4, target_ref: "target:team-inbox",
+		data: {
+			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
+			text: "Full authorized message text.", offset: 0, source_url: "https://workspace.example.test/archives/C0123456789/p1720000000000100",
+		},
+		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	}, [{ event_ref: "gateway-audit:get:001" }], "request:get:001", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
+		capabilityId: "message.get", targetRef: "target:team-inbox", arguments: {}, purpose: "Read",
+	});
+	assert.equal(code, 0);
+	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	assert.deepEqual(payload, {
+		schema_version: "ceal.result.v2", status: "completed", capability: "message.get", target: "target:team-inbox",
+		data: {
+			ref: "message:approved_001", source: "Team inbox", text: "Full authorized message text.",
+			source_url: "https://workspace.example.test/archives/C0123456789/p1720000000000100",
+		},
+		receipt: { request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
 });
 

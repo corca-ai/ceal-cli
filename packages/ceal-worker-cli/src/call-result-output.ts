@@ -72,6 +72,7 @@ export function gatewayFailureCode(error: unknown): string | null {
 }
 
 function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
+	if (value.schema_version === "ceal.message_get_result.v1") return projectMessageGetData(value);
 	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
 	const matches = value.results.flatMap((result) => {
 		if (!result || typeof result !== "object" || Array.isArray(result)) return [];
@@ -89,6 +90,19 @@ function projectCapabilityData(value: Record<string, unknown>): Record<string, u
 		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
 		...(value.coverage && typeof value.coverage === "object"
 			&& (value.coverage as Record<string, unknown>).completeness === "incomplete" ? { coverage: "partial" } : {}),
+		...(offset > 0 ? { offset } : {}),
+	};
+}
+
+function projectMessageGetData(value: Record<string, unknown>): Record<string, unknown> {
+	if (typeof value.ref !== "string" || typeof value.source_label !== "string" || typeof value.text !== "string") return {};
+	const offset = typeof value.offset === "number" ? value.offset : 0;
+	return {
+		ref: value.ref,
+		source: value.source_label,
+		text: value.text,
+		...(typeof value.source_url === "string" ? { source_url: value.source_url } : {}),
+		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
 		...(offset > 0 ? { offset } : {}),
 	};
 }
