@@ -3,6 +3,11 @@ import type { CealGatewayMessageSearchCoverage, CealGatewayPolicyDenial, CealGat
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
+import {
+	validateMessageGetResult,
+	validateMessageSearchInputContract,
+	validateMessageSearchResult,
+} from "./gateway-message-contract.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -155,6 +160,15 @@ const MAX_REQUEST_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 16 * 1024;
 const MAX_RESPONSE_VALUE_BYTES = 64 * 1024;
 const TEXT_ENCODER = new TextEncoder();
+const MESSAGE_CONTRACT_CONTEXT = {
+	invalid: invalidResponse,
+	record: requireRecord,
+	exact: requireExactKeys,
+	prefixed: requirePrefixedRef,
+	safeText: requireSafeText,
+	byteLength,
+	assertCoverage: assertCealGatewayMessageSearchCoverage,
+};
 
 export function decodeCealGatewayRequest(value: unknown): CealGatewayRequest {
 	try {
@@ -307,7 +321,7 @@ function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	seen.add(String(capability.capability_id));
 	requireSafeText(capability.label, 128);
 	requireSafeRef(capability.evidence_requirement);
-	if (capability.capability_id === "message.search") validateMessageSearchInputContract(capability.input_contract);
+	if (capability.capability_id === "message.search") validateMessageSearchInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
 	else validateGenericInputContract(capability.input_contract);
 }
 
@@ -315,26 +329,6 @@ function validateGenericInputContract(value: unknown): void {
 	const contract = requireRecord(value);
 	requireSafeRef(contract.schema_version);
 	if (!String(contract.schema_version).startsWith("ceal.")) invalidResponse();
-}
-
-function validateMessageSearchInputContract(value: unknown): void {
-	const contract = requireRecord(value);
-	requireExactKeys(contract, ["limit", "offset", "query", "required", "schema_version"], ["offset"]);
-	if (contract.schema_version !== "ceal.message_search_input.v1"
-		|| !Array.isArray(contract.required)
-		|| contract.required.length !== 1
-		|| contract.required[0] !== "query") invalidResponse();
-	const query = requireRecord(contract.query);
-	requireExactKeys(query, ["max_bytes", "type"]);
-	if (query.type !== "string" || query.max_bytes !== 512) invalidResponse();
-	const limit = requireRecord(contract.limit);
-	requireExactKeys(limit, ["default", "maximum", "minimum", "type"]);
-	if (limit.type !== "integer" || limit.minimum !== 1 || limit.maximum !== 10 || limit.default !== 5) invalidResponse();
-	if (contract.offset !== undefined) {
-		const offset = requireRecord(contract.offset);
-		requireExactKeys(offset, ["default", "maximum", "minimum", "type"]);
-		if (offset.type !== "integer" || offset.minimum !== 0 || offset.maximum !== 1000 || offset.default !== 0) invalidResponse();
-	}
 }
 
 function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<string>): void {
@@ -374,8 +368,8 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 		|| call.proof_level !== "host_decision") invalidResponse();
 	requirePrefixedRef(call.grant_ref, "grant:");
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
-	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest);
-	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest);
+	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
+	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else validateGenericCapabilityResult(call.data, call.capability_id);
 	validateCallRedaction(call.redaction, call.capability_id);
 	validateHostNonClaims(call.non_claims, true);
@@ -386,45 +380,6 @@ function validateGenericCapabilityResult(value: unknown, capabilityId: unknown):
 	requireSafeRef(result.schema_version);
 	const expectedPrefix = `ceal.${String(capabilityId).replaceAll(".", "_")}_result.`;
 	if (!String(result.schema_version).startsWith(expectedPrefix)) invalidResponse();
-}
-
-function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
-	const result = requireRecord(value);
-	requireExactKeys(result, ["coverage", "minimization", "offset", "query", "result_count", "results", "schema_version"], ["next_offset", "offset"]);
-	if (result.schema_version !== "ceal.message_search_result.v1") invalidResponse();
-	const input = requireMessageSearchInput(expectedRequest.body.arguments);
-	validateRedactedQuery(result.query, input.queryUtf8Bytes);
-	const resultOffset = result.offset === undefined ? 0 : result.offset;
-	if (!Number.isInteger(resultOffset) || resultOffset !== input.offset || resultOffset < 0 || resultOffset > 1000) invalidResponse();
-	if (result.next_offset !== undefined) {
-		const nextOffset = result.next_offset;
-		if (!Number.isInteger(nextOffset) || typeof nextOffset !== "number" || nextOffset <= resultOffset || nextOffset > 1000) invalidResponse();
-	}
-	if (!Array.isArray(result.results) || result.results.length > input.limit || result.result_count !== result.results.length) invalidResponse();
-	const seen = new Set<string>();
-	for (const item of result.results) validateMessageSearchResultItem(item, expectedRequest.body.target_ref, seen);
-	assertCealGatewayMessageSearchCoverage(result.coverage);
-	const minimization = requireRecord(result.minimization);
-	requireExactKeys(minimization, ["credential_material_included", "raw_messages_included", "raw_provider_ids_included"]);
-	if (minimization.credential_material_included !== false
-		|| minimization.raw_messages_included !== false
-		|| minimization.raw_provider_ids_included !== false) invalidResponse();
-}
-
-function validateMessageGetResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
-	const result = requireRecord(value);
-	requireExactKeys(result, ["offset", "ref", "schema_version", "source_label", "source_url", "text"], ["next_offset", "source_url"]);
-	if (result.schema_version !== "ceal.message_get_result.v1") invalidResponse();
-	const input = requireMessageGetInput(expectedRequest.body.arguments);
-	requirePrefixedRef(result.ref, "message:");
-	if (result.ref !== input.ref || result.offset !== input.offset || typeof result.text !== "string"
-		|| byteLength(result.text) > input.limitBytes || !Number.isInteger(result.offset)) invalidResponse();
-	requireSafeText(result.source_label, 128);
-	if (result.next_offset !== undefined) {
-		if (!Number.isInteger(result.next_offset) || typeof result.next_offset !== "number"
-			|| result.next_offset <= input.offset || result.next_offset > 40_000) invalidResponse();
-	}
-	if (result.source_url !== undefined) requireSafeSourceUrl(result.source_url);
 }
 
 function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly string[]): void {
@@ -461,59 +416,6 @@ function validMessageSearchCoverageVocabulary(coverage: Record<string, unknown>)
 		&& ["included", "excluded"].includes(String(coverage.reply_coverage))
 		&& ["bounded", "incomplete"].includes(String(coverage.completeness))
 		&& typeof coverage.truncated === "boolean";
-}
-
-function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number; offset: number } {
-	const input = requireRecord(value);
-	requireExactKeys(input, ["limit", "offset", "query"], ["limit", "offset"]);
-	if (typeof input.query !== "string" || input.query.trim() === "") invalidResponse();
-	const queryUtf8Bytes = byteLength(input.query);
-	if (queryUtf8Bytes > 512) invalidResponse();
-	const limit = input.limit === undefined ? 5 : input.limit;
-	if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 10) invalidResponse();
-	const offset = input.offset === undefined ? 0 : input.offset;
-	if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) > 1000) invalidResponse();
-	return { queryUtf8Bytes, limit: limit as number, offset: offset as number };
-}
-
-function requireMessageGetInput(value: unknown): { ref: string; offset: number; limitBytes: number } {
-	const input = requireRecord(value);
-	requireExactKeys(input, ["limit_bytes", "offset", "ref"], ["limit_bytes", "offset"]);
-	requirePrefixedRef(input.ref, "message:");
-	const offset = input.offset === undefined ? 0 : input.offset;
-	const limitBytes = input.limit_bytes === undefined ? 4096 : input.limit_bytes;
-	if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) > 40_000
-		|| !Number.isInteger(limitBytes) || (limitBytes as number) < 256 || (limitBytes as number) > 8192) invalidResponse();
-	return { ref: input.ref, offset: offset as number, limitBytes: limitBytes as number };
-}
-
-function validateRedactedQuery(value: unknown, expectedUtf8Bytes: number): void {
-	const query = requireRecord(value);
-	requireExactKeys(query, ["empty", "redacted", "utf8_bytes"]);
-	if (query.redacted !== true
-		|| query.utf8_bytes !== expectedUtf8Bytes
-		|| query.empty !== false) invalidResponse();
-}
-
-function validateMessageSearchResultItem(value: unknown, expectedTargetRef: string, seen: Set<string>): void {
-	const item = requireRecord(value);
-	requireExactKeys(item, ["created_at", "ref", "source_label", "source_url", "target_ref", "text_preview", "thread_ref"], ["source_url", "thread_ref"]);
-	requirePrefixedRef(item.ref, "message:");
-	if (seen.has(item.ref as string) || item.target_ref !== expectedTargetRef) invalidResponse();
-	seen.add(item.ref as string);
-	if ("thread_ref" in item) requirePrefixedRef(item.thread_ref, "thread:");
-	if ("source_url" in item) requireSafeSourceUrl(item.source_url);
-	if (typeof item.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(item.created_at)) invalidResponse();
-	requireSafeText(item.source_label, 128);
-	requireSafeText(item.text_preview, 1024);
-}
-
-function requireSafeSourceUrl(value: unknown): void {
-	if (typeof value !== "string" || value.length === 0 || value.length > 2048) invalidResponse();
-	try {
-		const url = new URL(value);
-		if (url.protocol !== "https:" || url.username || url.password || url.hash) invalidResponse();
-	} catch { invalidResponse(); }
 }
 
 function validateCallRedaction(value: unknown, capabilityId: unknown): void {

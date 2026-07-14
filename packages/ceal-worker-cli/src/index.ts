@@ -16,6 +16,7 @@ import {
 	createCealPersonalClientSessionClient,
 } from "@corca-ai/ceal";
 import type { CealStoredSession } from "./profile-store.js";
+import { normalizeCapabilitySpecificArguments } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
 import {
 	classifyGatewayFailure,
@@ -490,8 +491,7 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	const operands = parseKeyValueOperands(options.slice(3));
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
-	if (capabilityId === "message.search" && !normalizeMessageSearchArguments(arguments_)) return { ok: false };
-	if (capabilityId === "message.get" && !normalizeMessageGetArguments(arguments_)) return { ok: false };
+	if (!normalizeCapabilitySpecificArguments(capabilityId, arguments_)) return { ok: false };
 	return {
 		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_,
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
@@ -512,31 +512,6 @@ function validTargetRef(value: string | undefined): boolean {
 
 function isSafeRequestRef(value: string | undefined): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
-}
-
-function normalizeMessageSearchArguments(arguments_: Record<string, string | number>): boolean {
-	if (!Object.keys(arguments_).every((key) => key === "query" || key === "limit" || key === "offset")) return false;
-	const query = arguments_.query;
-	if (typeof query !== "string" || query.trim() === "" || new TextEncoder().encode(query).byteLength > 512) return false;
-	const limit = arguments_.limit === undefined ? 5 : Number(arguments_.limit);
-	if (!Number.isInteger(limit) || limit < 1 || limit > 10) return false;
-	const offset = arguments_.offset === undefined ? 0 : Number(arguments_.offset);
-	if (!Number.isInteger(offset) || offset < 0 || offset > 1000) return false;
-	arguments_.limit = limit;
-	arguments_.offset = offset;
-	return true;
-}
-
-function normalizeMessageGetArguments(arguments_: Record<string, string | number>): boolean {
-	if (!Object.keys(arguments_).every((key) => key === "ref" || key === "offset" || key === "limit_bytes")) return false;
-	if (typeof arguments_.ref !== "string" || !/^message:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(arguments_.ref)) return false;
-	const offset = arguments_.offset === undefined ? 0 : Number(arguments_.offset);
-	const limitBytes = arguments_.limit_bytes === undefined ? 4096 : Number(arguments_.limit_bytes);
-	if (!Number.isInteger(offset) || offset < 0 || offset > 40_000
-		|| !Number.isInteger(limitBytes) || limitBytes < 256 || limitBytes > 8192) return false;
-	arguments_.offset = offset;
-	arguments_.limit_bytes = limitBytes;
-	return true;
 }
 
 function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {
