@@ -381,10 +381,16 @@ function validateGenericCapabilityResult(value: unknown, capabilityId: unknown):
 
 function validateMessageSearchResult(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const result = requireRecord(value);
-	requireExactKeys(result, ["coverage", "minimization", "query", "result_count", "results", "schema_version"]);
+	requireExactKeys(result, ["coverage", "minimization", "offset", "query", "result_count", "results", "schema_version"], ["next_offset", "offset"]);
 	if (result.schema_version !== "ceal.message_search_result.v1") invalidResponse();
 	const input = requireMessageSearchInput(expectedRequest.body.arguments);
 	validateRedactedQuery(result.query, input.queryUtf8Bytes);
+	const resultOffset = result.offset === undefined ? 0 : result.offset;
+	if (!Number.isInteger(resultOffset) || resultOffset !== input.offset || resultOffset < 0 || resultOffset > 1000) invalidResponse();
+	if (result.next_offset !== undefined) {
+		const nextOffset = result.next_offset;
+		if (!Number.isInteger(nextOffset) || typeof nextOffset !== "number" || nextOffset <= resultOffset || nextOffset > 1000) invalidResponse();
+	}
 	if (!Array.isArray(result.results) || result.results.length > input.limit || result.result_count !== result.results.length) invalidResponse();
 	const seen = new Set<string>();
 	for (const item of result.results) validateMessageSearchResultItem(item, expectedRequest.body.target_ref, seen);
@@ -426,21 +432,23 @@ export function assertCealGatewayMessageSearchCoverage(
 function validMessageSearchCoverageVocabulary(coverage: Record<string, unknown>): boolean {
 	return coverage.schema_version === "ceal.message_search_coverage.v1"
 		&& ["authoritative_index", "bounded_projection"].includes(String(coverage.source))
-		&& ["backend_ranked", "literal_case_insensitive"].includes(String(coverage.match_semantics))
+		&& ["backend_ranked", "literal_case_insensitive", "token_and_case_insensitive"].includes(String(coverage.match_semantics))
 		&& ["included", "excluded"].includes(String(coverage.reply_coverage))
 		&& ["bounded", "incomplete"].includes(String(coverage.completeness))
 		&& typeof coverage.truncated === "boolean";
 }
 
-function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number } {
+function requireMessageSearchInput(value: unknown): { queryUtf8Bytes: number; limit: number; offset: number } {
 	const input = requireRecord(value);
-	requireExactKeys(input, ["limit", "query"], ["limit"]);
+	requireExactKeys(input, ["limit", "offset", "query"], ["limit", "offset"]);
 	if (typeof input.query !== "string" || input.query.trim() === "") invalidResponse();
 	const queryUtf8Bytes = byteLength(input.query);
 	if (queryUtf8Bytes > 512) invalidResponse();
 	const limit = input.limit === undefined ? 5 : input.limit;
 	if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 10) invalidResponse();
-	return { queryUtf8Bytes, limit: limit as number };
+	const offset = input.offset === undefined ? 0 : input.offset;
+	if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) > 1000) invalidResponse();
+	return { queryUtf8Bytes, limit: limit as number, offset: offset as number };
 }
 
 function validateRedactedQuery(value: unknown, expectedUtf8Bytes: number): void {
@@ -453,14 +461,23 @@ function validateRedactedQuery(value: unknown, expectedUtf8Bytes: number): void 
 
 function validateMessageSearchResultItem(value: unknown, expectedTargetRef: string, seen: Set<string>): void {
 	const item = requireRecord(value);
-	requireExactKeys(item, ["created_at", "ref", "source_label", "target_ref", "text_preview", "thread_ref"], ["thread_ref"]);
+	requireExactKeys(item, ["created_at", "ref", "source_label", "source_url", "target_ref", "text_preview", "thread_ref"], ["source_url", "thread_ref"]);
 	requirePrefixedRef(item.ref, "message:");
 	if (seen.has(item.ref as string) || item.target_ref !== expectedTargetRef) invalidResponse();
 	seen.add(item.ref as string);
 	if ("thread_ref" in item) requirePrefixedRef(item.thread_ref, "thread:");
+	if ("source_url" in item) requireSafeSourceUrl(item.source_url);
 	if (typeof item.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(item.created_at)) invalidResponse();
 	requireSafeText(item.source_label, 128);
 	requireSafeText(item.text_preview, 1024);
+}
+
+function requireSafeSourceUrl(value: unknown): void {
+	if (typeof value !== "string" || value.length === 0 || value.length > 2048) invalidResponse();
+	try {
+		const url = new URL(value);
+		if (url.protocol !== "https:" || url.username || url.password || url.hash) invalidResponse();
+	} catch { invalidResponse(); }
 }
 
 function validateCallRedaction(value: unknown, capabilityId: unknown): void {
@@ -562,13 +579,14 @@ function validateAuditCallDetail(value: unknown, event: Record<string, unknown>)
 		requireRecord(call.output_summary);
 		return;
 	}
-	requireExactKeys(call, ["capability_id", "coverage", "grant_ref", "grant_revision", "query_utf8_bytes", "requested_limit", "result_count", "schema_version", "target_ref"]);
+	requireExactKeys(call, ["capability_id", "coverage", "grant_ref", "grant_revision", "query_utf8_bytes", "requested_limit", "requested_offset", "result_count", "schema_version", "target_ref"], ["requested_offset"]);
 	if (![call.schema_version === "ceal.gateway_audit_call_detail.v1", call.capability_id === "message.search",
 		event.operation === "call", event.outcome === "succeeded"].every(Boolean)) invalidResponse();
 	requirePrefixedRef(call.target_ref, "target:");
 	requirePrefixedRef(call.grant_ref, "grant:");
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 	requireIntegerRange(call.requested_limit, 1, 10);
+	if (call.requested_offset !== undefined) requireIntegerRange(call.requested_offset, 0, 1000);
 	requireIntegerRange(call.query_utf8_bytes, 1, 512);
 	requireIntegerRange(call.result_count, 0, call.requested_limit);
 	assertCealGatewayMessageSearchCoverage(call.coverage);

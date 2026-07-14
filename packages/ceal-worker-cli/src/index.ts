@@ -1,6 +1,7 @@
 import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
 import type {
 	CealClientRefreshResult,
+	CealGatewayAuditEvent,
 	CealGatewayCallValue,
 	CealGatewayDiscoveryValue,
 	CealGatewayHandshakeValue,
@@ -49,7 +50,7 @@ export interface CealCommandRuntime {
 }
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "capabilities" | "session" | "call";
+	name: "version" | "commands" | "capabilities" | "session" | "call" | "receipt";
 	description: string;
 	usage: string;
 	effect: "read_only" | "local_write";
@@ -101,8 +102,17 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		usage: "ceal call <capability-id> --target <target-ref> [key=value ...]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
-		result_schema: "ceal.result.v1",
+		result_schema: "ceal.result.v2",
 		recovery: "Run 'ceal capabilities', then use one granted capability and target exactly as discovered.",
+	},
+	{
+		name: "receipt",
+		description: "Inspect safe Gateway evidence for one completed capability call.",
+		usage: "ceal receipt show <request-ref>",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.receipt.v1",
+		recovery: "Use the receipt reference returned by a completed call, then retry after renewing the client session if needed.",
 	},
 ];
 
@@ -134,7 +144,7 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 }
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
-	return options.length === 0 || command === "capabilities" || command === "session" || command === "call";
+	return options.length === 0 || command === "capabilities" || command === "session" || command === "call" || command === "receipt";
 }
 
 async function runKnownCommand(
@@ -147,6 +157,7 @@ async function runKnownCommand(
 	if (command === "commands") return writeCommands(io);
 	if (command === "session") return runSession(options, io, runtime);
 	if (command === "call") return runCall(options, io, runtime);
+	if (command === "receipt") return runReceipt(options, io, runtime);
 	return runCapabilities(options, io, runtime);
 }
 
@@ -174,7 +185,10 @@ function commandHelp(command: CealCommandDefinition): string {
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
 			"  key=value               Capability input; repeat for each discovered field.",
-			"  message.search          Requires query=<text>; optional limit=<1-10>.",
+			"  message.search          Requires query=<text>; optional limit=<1-10>, offset=<0-1000>.",
+			"  message.get             Requires ref=<message-ref>; optional offset=<0-40000>, limit_bytes=<256-8192>.",
+		] : command.name === "receipt" ? [
+			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
 		] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -329,6 +343,72 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 	return executeCall(resolved.session, parsed, requestId, io, runtime);
 }
 
+async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const requestRef = options[0] === "show" && options.length === 2 && isSafeRequestRef(options[1]) ? options[1] : null;
+	if (!requestRef) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
+	const resolved = await resolveCallSession(runtime);
+	if (!resolved.ok) return writeReceiptError(resolved.reason, "The Gateway receipt could not be read.", io);
+	try {
+		const { readback } = await requestReceiptReadback(resolved.session, requestRef, runtime);
+		if (!readback.ok) return writeReceiptError(classifyGatewayFailure(readback.error).code, "The Gateway receipt could not be read.", io);
+		return writeYaml(io.stdout, {
+			schema_version: "ceal.receipt.v1", status: "verified", request_ref: requestRef,
+			events: readback.value.events.map(projectReceiptEvent),
+		});
+	} catch (error) {
+		const reason = error instanceof CealClientSessionError ? error.code
+			: error instanceof CealHttpTransportError ? error.code : "request_failed";
+		return writeReceiptError(reason, "The Gateway receipt could not be read.", io);
+	}
+}
+
+async function requestReceiptReadback(initialSession: CealStoredSession, requestRef: string, runtime: CealCommandRuntime) {
+	let session = initialSession;
+	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
+	let readback = await client.request({
+		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
+		profile_ref: session.profileRef, body: { request_id: requestRef },
+	});
+	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
+	session = await ensureCurrentSession(session, runtime, true);
+	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
+	readback = await client.request({
+		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
+		profile_ref: session.profileRef, body: { request_id: requestRef },
+	});
+	return { readback, session };
+}
+
+function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
+	const call = event.call;
+	const searchCall = call && call.capability_id === "message.search"
+		? call as unknown as { requested_limit: number; requested_offset?: number; result_count: number; coverage: { completeness: string } } : null;
+	return {
+		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
+		authorization: event.policy_decision,
+		...(event.grant_snapshot ? {
+			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
+			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
+		} : {}),
+		...(searchCall ? {
+			search: {
+				requested_limit: searchCall.requested_limit,
+				...(searchCall.requested_offset === undefined ? {} : { requested_offset: searchCall.requested_offset }),
+				result_count: searchCall.result_count,
+				coverage: searchCall.coverage.completeness === "incomplete" ? "partial" : "bounded",
+			},
+		} : {}),
+	};
+}
+
+function writeReceiptError(kind: string, message: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.receipt.v1", status: "error",
+		error: { kind, message, next_action: "Use a receipt reference from a completed call after confirming the client session." },
+	});
+	return 3;
+}
+
 async function executeCall(
 	initialSession: CealStoredSession,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
@@ -411,6 +491,7 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
 	if (capabilityId === "message.search" && !normalizeMessageSearchArguments(arguments_)) return { ok: false };
+	if (capabilityId === "message.get" && !normalizeMessageGetArguments(arguments_)) return { ok: false };
 	return {
 		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_,
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
@@ -429,13 +510,32 @@ function validTargetRef(value: string | undefined): boolean {
 	return typeof value === "string" && /^target:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(value);
 }
 
+function isSafeRequestRef(value: string | undefined): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
+}
+
 function normalizeMessageSearchArguments(arguments_: Record<string, string | number>): boolean {
-	if (!Object.keys(arguments_).every((key) => key === "query" || key === "limit")) return false;
+	if (!Object.keys(arguments_).every((key) => key === "query" || key === "limit" || key === "offset")) return false;
 	const query = arguments_.query;
 	if (typeof query !== "string" || query.trim() === "" || new TextEncoder().encode(query).byteLength > 512) return false;
 	const limit = arguments_.limit === undefined ? 5 : Number(arguments_.limit);
 	if (!Number.isInteger(limit) || limit < 1 || limit > 10) return false;
+	const offset = arguments_.offset === undefined ? 0 : Number(arguments_.offset);
+	if (!Number.isInteger(offset) || offset < 0 || offset > 1000) return false;
 	arguments_.limit = limit;
+	arguments_.offset = offset;
+	return true;
+}
+
+function normalizeMessageGetArguments(arguments_: Record<string, string | number>): boolean {
+	if (!Object.keys(arguments_).every((key) => key === "ref" || key === "offset" || key === "limit_bytes")) return false;
+	if (typeof arguments_.ref !== "string" || !/^message:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(arguments_.ref)) return false;
+	const offset = arguments_.offset === undefined ? 0 : Number(arguments_.offset);
+	const limitBytes = arguments_.limit_bytes === undefined ? 4096 : Number(arguments_.limit_bytes);
+	if (!Number.isInteger(offset) || offset < 0 || offset > 40_000
+		|| !Number.isInteger(limitBytes) || limitBytes < 256 || limitBytes > 8192) return false;
+	arguments_.offset = offset;
+	arguments_.limit_bytes = limitBytes;
 	return true;
 }
 

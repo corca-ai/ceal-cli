@@ -59,10 +59,11 @@ test("canonical registry is reachable through stable, read-only help", async () 
 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
-		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"] : [command.name];
-		const payload = await yamlRun(args, command.name === "call" ? 3 : 0);
+		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
+			: command.name === "receipt" ? ["receipt", "show", "request:test"] : [command.name];
+		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" ? 3 : 0);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
-		assert.equal(payload.command, "ceal");
+		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
 	}
 });
 
@@ -80,7 +81,7 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "session", "capabilities", "call"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "session", "capabilities", "call", "receipt"]);
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
@@ -210,15 +211,38 @@ test("call invokes one granted capability and independently reads back its audit
 			loadSession: async () => storedSession(endpoint),
 			nextRequestId: (() => { let id = 0; return () => `narnia:call:${++id}`; })(),
 		});
-		assert.equal(payload.schema, "ceal.result.v1");
-		assert.equal(payload.status, "ok");
-		assert.equal(payload.ok, true);
-		assert.equal(payload.claim.allowed, true);
-		assert.equal(payload.audit.state, "journaled");
-		assert.equal(payload.profile, "profile:narnia");
-		assert.equal(payload.data.result_count, 1);
+		assert.equal(payload.schema_version, "ceal.result.v2");
+		assert.equal(payload.status, "completed");
+		assert.equal(payload.capability, "message.search");
+		assert.equal(payload.target, "target:team-inbox");
+		assert.equal(payload.data.matches.length, 1);
+		assert.equal(payload.receipt.request_ref, "narnia:call:1:call");
+		assert.equal("usage" in payload, false);
+		assert.equal("profile" in payload, false);
+		assert.equal("audit" in payload, false);
 		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "readback"]);
 		assert.equal(requests[0].body.body.arguments.query, "launch");
+	});
+});
+
+test("receipt keeps audit metadata out of normal results and retrieves a safe projection on demand", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(["receipt", "show", "narnia:call:1:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:receipt:1",
+		});
+		assert.deepEqual(payload, {
+			schema_version: "ceal.receipt.v1",
+			status: "verified",
+			request_ref: "narnia:call:1:call",
+			events: [{
+				ref: "gateway-audit:event:001", operation: "call", outcome: "succeeded", authorization: "allowed",
+				capability: "message.search", target: "target:team-inbox",
+				grant: { ref: "grant:team-inbox-message-search", revision: 4 },
+				search: { requested_limit: 5, result_count: 1, coverage: "bounded" },
+			}],
+		});
+		assert.deepEqual(requests.map((item) => item.body.operation), ["readback"]);
 	});
 });
 
@@ -232,9 +256,8 @@ test("call preserves one request identity across authentication refresh and fina
 			saveSession: async (session) => { saved = session; },
 			nextRequestId: (() => { let id = 0; return () => `narnia:retry-call:${++id}`; })(),
 		});
-		assert.equal(payload.status, "ok");
-		assert.equal(payload.claim.allowed, true);
-		assert.equal(payload.audit.state, "journaled");
+		assert.equal(payload.status, "completed");
+		assert.equal(payload.capability, "message.search");
 		assert.equal(saved.accessToken, newAccessToken);
 		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "call", "readback"]);
 		assert.deepEqual(requests.map((item) => item.authorization), [
@@ -251,10 +274,10 @@ test("call forwards a discovered provider-neutral capability without a CLI comma
 			loadSession: async () => storedSession(endpoint),
 			nextRequestId: (() => { let id = 0; return () => `narnia:generic:${++id}`; })(),
 		});
-		assert.equal(payload.schema, "ceal.result.v1");
-		assert.equal(payload.status, "ok");
-		assert.equal(payload.request.capability_id, "file.search");
-		assert.deepEqual(payload.grant, { ref: "grant:workspace-file-search", revision: 7 });
+		assert.equal(payload.schema_version, "ceal.result.v2");
+		assert.equal(payload.status, "completed");
+		assert.equal(payload.capability, "file.search");
+		assert.equal(payload.target, "target:workspace");
 		assert.deepEqual(requests[0].body.body.arguments, { query: "roadmap", kind: "document" });
 	}, (request) => request.operation === "call" ? success(request, {
 		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",

@@ -129,6 +129,8 @@ export interface CealGatewayCallValue {
 export interface CealGatewayMessageSearchResult {
 	schema_version: "ceal.message_search_result.v1";
 	query: { redacted: true; utf8_bytes: number; empty: false };
+	offset: number;
+	next_offset?: number;
 	result_count: number;
 	results: CealGatewayMessageSearchResultItem[];
 	coverage: CealGatewayMessageSearchCoverage;
@@ -147,7 +149,7 @@ export type CealGatewayMessageSearchCallValue = Omit<CealGatewayCallValue, "capa
 export interface CealGatewayMessageSearchCoverage {
 	schema_version: "ceal.message_search_coverage.v1";
 	source: "authoritative_index" | "bounded_projection";
-	match_semantics: "backend_ranked" | "literal_case_insensitive";
+	match_semantics: "backend_ranked" | "literal_case_insensitive" | "token_and_case_insensitive";
 	reply_coverage: "included" | "excluded";
 	completeness: "bounded" | "incomplete";
 	truncated: boolean;
@@ -156,6 +158,7 @@ export interface CealGatewayMessageSearchCoverage {
 export interface CealGatewayMessageSearchResultItem {
 	ref: string;
 	thread_ref?: string;
+	source_url?: string;
 	target_ref: string;
 	created_at: string;
 	source_label: string;
@@ -226,6 +229,7 @@ export interface CealGatewayMessageSearchAuditCallDetail {
 	grant_ref: string;
 	grant_revision: number;
 	requested_limit: number;
+	requested_offset?: number;
 	query_utf8_bytes: number;
 	result_count: number;
 	coverage: CealGatewayMessageSearchCoverage;

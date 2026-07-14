@@ -22,14 +22,9 @@ export function writeCallCompleted(
 ): number {
 	const eventRefs = Array.isArray(events) ? events.flatMap((event) => event && typeof event === "object" && "event_ref" in event ? [String(event.event_ref)] : []) : [];
 	return writeYaml(io.stdout, {
-		schema: "ceal.result.v1", command: "ceal", ok: true, status: "ok", ...resultIdentity(session),
-		request: resultRequest(parsed, requestId), authorization: { result: "allowed" },
-		grant: { ref: value.grant_ref, revision: value.grant_revision },
-		evidence: { requirement: "gateway_audit", reached: "gateway_journal_readback", refs: [...eventRefs] },
-		claim: { allowed: true, scope: "gateway_result_and_journal_readback" }, warnings: [], data: value.data,
-		audit: { state: "journaled", refs: [...eventRefs] }, redaction: value.redaction,
-		usage: { state: "not_applicable", reason: "no_model_or_metered_component" },
-		error: null, proof_level: "host_decision", non_claims: value.non_claims,
+		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
+		target: parsed.targetRef, data: projectCapabilityData(value.data),
+		receipt: { request_ref: requestId, audit_refs: eventRefs },
 	});
 }
 
@@ -40,16 +35,10 @@ export function writeCallGatewayFailure(
 	const failure = classifyGatewayFailure(response.error);
 	const proofRefs = typeof response.proof_ref_or_unavailable === "string" ? [response.proof_ref_or_unavailable] : [];
 	writeYaml(io.stdout, {
-		schema: "ceal.result.v1", command: "ceal", ok: false, status: failure.denial ? "blocked" : "error",
-		...resultIdentity(session), request: resultRequest(parsed, requestId),
-		authorization: { result: failure.denial ? "denied" : "not_evaluated" },
-		evidence: { requirement: "gateway_audit", reached: "host_decision", refs: proofRefs },
-		claim: { allowed: false }, warnings: [], data: null,
-		audit: proofRefs.length ? { state: "journaled", refs: proofRefs } : { state: "unavailable", reason: "readback_not_reached", scope: "runtime" },
-		redaction: { state: "unavailable", reason: "capability_did_not_complete", scope: "runtime" },
-		usage: { state: "unavailable", reason: "capability_did_not_complete", scope: "runtime" },
+		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
+		capability: parsed.capabilityId, target: parsed.targetRef,
+		...(proofRefs.length ? { receipt: { request_ref: requestId, audit_refs: proofRefs } } : {}),
 		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
-		proof_level: "host_decision", non_claims: ["No successful capability result or audit completion readback was reached."],
 	});
 	return 3;
 }
@@ -59,12 +48,8 @@ export function writeCallIncomplete(
 	session: CealStoredSession, parsed: CealParsedCapabilityCall,
 ): number {
 	writeYaml(io.stdout, {
-		schema: "ceal.result.v1", command: "ceal", ok: false, status: "error", ...resultIdentity(session),
-		request: resultRequest(parsed, requestId), authorization: { result: "allowed" },
-		grant: { ref: value.grant_ref, revision: value.grant_revision },
-		evidence: { requirement: "gateway_audit", reached: "host_decision", refs: [] }, claim: { allowed: false }, warnings: [],
-		data: value.data, audit: { state: "unavailable", reason, scope: "runtime" }, redaction: value.redaction,
-		usage: { state: "unavailable", reason: "completion_unverified", scope: "runtime" }, proof_level: "host_decision",
+		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
+		data: projectCapabilityData(value.data), receipt: { request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
 	});
 	return 3;
@@ -74,12 +59,8 @@ export function writeCallUnavailable(
 	reason: string, io: ResultIo, session: CealStoredSession | null, parsed: CealParsedCapabilityCall | null,
 ): number {
 	writeYaml(io.stdout, {
-		schema: "ceal.result.v1", command: "ceal", ok: false, status: "error", ...resultIdentity(session),
-		request: parsed ? resultRequest(parsed, null) : null, authorization: { result: "not_evaluated" },
-		evidence: { requirement: "gateway_audit", reached: "surface", refs: [] }, claim: { allowed: false }, warnings: [], data: null,
-		audit: { state: "unavailable", reason: "pre_instance", scope: "local_cli" },
-		redaction: { state: "not_applicable", reason: "no_instance_data_handling" },
-		usage: { state: "not_applicable", reason: "no_model_or_metered_component" }, proof_level: "surface",
+		schema_version: "ceal.result.v2", status: "error",
+		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
 		error: { kind: reason, message: "The capability call could not be completed.", next_action: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant." },
 	});
 	return 3;
@@ -90,20 +71,25 @@ export function gatewayFailureCode(error: unknown): string | null {
 		? (error as { code: string }).code : null;
 }
 
-function resultIdentity(session: CealStoredSession | null): Record<string, string | null> {
+function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
+	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
+	const matches = value.results.flatMap((result) => {
+		if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+		const item = result as Record<string, unknown>;
+		if (typeof item.ref !== "string" || typeof item.source_label !== "string"
+			|| typeof item.text_preview !== "string" || typeof item.created_at !== "string") return [];
+		return [{
+			ref: item.ref, source: item.source_label, preview: item.text_preview, created_at: item.created_at,
+			...(typeof item.source_url === "string" ? { source_url: item.source_url } : {}),
+		}];
+	});
+	const offset = typeof value.offset === "number" ? value.offset : 0;
 	return {
-		profile: session?.profileRef ?? null,
-		membership: session?.membershipRef ?? null,
-		instance: session?.instanceRef ?? null,
-		subject: session?.subjectRef ?? null,
-		client: session?.clientRef ?? null,
-	};
-}
-
-function resultRequest(parsed: CealParsedCapabilityCall, requestId: string | null): Record<string, string | null> {
-	return {
-		request_id: requestId, command_family: "capability.call", capability_id: parsed.capabilityId,
-		target_ref: parsed.targetRef, purpose: parsed.purpose,
+		matches,
+		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
+		...(value.coverage && typeof value.coverage === "object"
+			&& (value.coverage as Record<string, unknown>).completeness === "incomplete" ? { coverage: "partial" } : {}),
+		...(offset > 0 ? { offset } : {}),
 	};
 }
 
