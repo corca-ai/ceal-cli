@@ -95,16 +95,19 @@ function createHiddenInputState(resolve: (value: string) => void, reject: (reaso
 
 function acceptHiddenInput(chunk: string | Buffer, state: HiddenInputState): void {
 	const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-	for (const byte of input) {
-		if (byte === 0x03) return state.fail(new Error("input_cancelled"));
-		if (byte === 0x0d || byte === 0x0a) return state.finish();
-		if (byte === 0x08 || byte === 0x7f) {
-			const previous = state.chunks.pop();
-			if (previous) state.bytes -= previous.length;
-			continue;
-		}
-		state.bytes += 1;
-		if (state.bytes > 4096) return state.fail(new Error("stdin_secret_too_large"));
-		state.chunks.push(Buffer.from([byte]));
+	for (const byte of input) if (handleHiddenInputByte(byte, state)) return;
+}
+
+function handleHiddenInputByte(byte: number, state: HiddenInputState): boolean {
+	if (byte === 0x03) { state.fail(new Error("input_cancelled")); return true; }
+	if (byte === 0x0d || byte === 0x0a) { state.finish(); return true; }
+	if (byte === 0x08 || byte === 0x7f) {
+		const previous = state.chunks.pop();
+		if (previous) state.bytes -= previous.length;
+		return false;
 	}
+	state.bytes += 1;
+	if (state.bytes > 4096) { state.fail(new Error("stdin_secret_too_large")); return true; }
+	state.chunks.push(Buffer.from([byte]));
+	return false;
 }
