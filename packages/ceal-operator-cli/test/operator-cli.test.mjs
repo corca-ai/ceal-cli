@@ -32,6 +32,23 @@ test("canonical registry is reachable through stable, read-only help", () => {
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
+	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"]]) {
+		const result = run(args);
+		assert.equal(result.code, 0);
+		assert.equal(result.stderr, "");
+		assert.match(result.stdout, /^Usage: cealctl access (?:show|apply)/u);
+	}
+});
+
+test("access apply rejects invalid stdin before session or network access", async () => {
+	let fetchCalls = 0;
+	const result = await asyncRun(["access", "apply", "--stdin", "--dry-run"], {
+		readStdin: async () => "schema_version: wrong.v1\n",
+		fetchFn: async () => { fetchCalls += 1; throw new Error("network must not run"); },
+	});
+	assert.equal(result.code, 3);
+	assert.equal(fetchCalls, 0);
+	assert.equal(parseYaml(result.stdout).error.kind, "invalid_configuration");
 });
 
 test("every public command emits one YAML document without a format flag", async () => {

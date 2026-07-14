@@ -274,9 +274,39 @@ function runAccess(options: readonly string[], io: CealctlIo, runtime: CealctlRu
 		schema_version: "cealctl.access.v1", command: "cealctl", status: "ready", proof_level: "surface",
 		writes_external: false, next_action: "Run 'cealctl access show' or inspect 'cealctl access --help'.",
 	});
+	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "apply")) {
+		return writeHelp(accessActionHelp(options[0]), io);
+	}
 	const parsed = parseAccessOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid access options.", io);
 	return executeAccess(parsed, io, runtime);
+}
+
+function accessActionHelp(action: "show" | "apply"): string {
+	if (action === "show") return [
+		"Usage: cealctl access show [--operator-session <name>]",
+		"",
+		"Read the current Gateway access registry without changing it.",
+		"",
+		"Effect: read_only",
+		"Evidence: host_decision",
+		"Result schema: cealctl.access.v1",
+		"  --operator-session <name>  Use a named stored admin session.",
+		"  -h, --help                 Show this help without performing work.",
+	].join("\n");
+	return [
+		"Usage: cealctl access apply --stdin [--dry-run] [--operator-session <name>]",
+		"",
+		"Validate or atomically replace the complete Gateway access registry from stdin.",
+		"",
+		"Effect: control_write",
+		"Evidence: host_decision",
+		"Result schema: cealctl.access.v1",
+		"  --stdin                    Read one ceal.gateway_access_registry.v1 YAML document.",
+		"  --dry-run                  Validate without changing Gateway state.",
+		"  --operator-session <name>  Use a named stored admin session.",
+		"  -h, --help                 Show this help without performing work.",
+	].join("\n");
 }
 
 async function executeAccess(
