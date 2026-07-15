@@ -52,6 +52,10 @@ test("canonical registry is reachable through stable, read-only help", async () 
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
+	const sessionEnrollmentHelp = await run(["session", "enroll", "--help"]);
+	assert.equal(sessionEnrollmentHelp.code, 0);
+	assert.match(sessionEnrollmentHelp.stdout, /^Usage: ceal session \[enroll --gateway <https-url> \[--code-stdin\] \| logout\]$/mu);
+	assert.equal(sessionEnrollmentHelp.stderr, "");
 	const capabilitiesHelp = await run(["capabilities", "--help"]);
 	for (const option of ["--endpoint", "--profile", "--request-id", "--token-stdin"]) {
 		assert.match(capabilitiesHelp.stdout, new RegExp(option, "u"));
@@ -127,6 +131,16 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		assert.equal(nonInteractive.error.kind, "interactive_enrollment_required");
 		assert.equal(consumed, false);
 		assert.match(nonInteractive.error.next_action, /--code-stdin/u);
+
+		let stdinRead = false;
+		const ttyStdin = await yamlRun(["session", "enroll", "--gateway", endpoint, "--code-stdin"], 3, {
+			isInputTerminal: () => true,
+			readSecret: async () => { stdinRead = true; return "E".repeat(48); },
+			saveSession: async () => assert.fail("must not save"),
+		});
+		assert.equal(ttyStdin.error.kind, "stdin_enrollment_requires_pipe");
+		assert.equal(stdinRead, false);
+		assert.match(ttyStdin.error.next_action, /hidden prompt/u);
 	});
 });
 

@@ -39,6 +39,7 @@ export interface CealCommandRuntime {
 	readSecret?: () => Promise<string>;
 	promptEnrollmentCode?: () => Promise<string>;
 	isInteractiveTerminal?: () => boolean;
+	isInputTerminal?: () => boolean;
 	loadSession?: () => Promise<CealStoredSession | null>;
 	saveSession?: (session: CealStoredSession) => Promise<void>;
 	removeSession?: () => Promise<void>;
@@ -132,6 +133,7 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
 	const options = args.slice(1);
 	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
+	if (command.name === "session" && isSessionEnrollmentHelp(options)) return writeHelp(commandHelp(command), io);
 	if (!commandAcceptsOptions(command.name, options)) return writeError("invalid_argument", "Invalid ceal command options.", io);
 	return runKnownCommand(command.name, options, io, runtime);
 }
@@ -142,6 +144,10 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
 	return options.length === 0 || command === "capabilities" || command === "session" || command === "call" || command === "receipt";
+}
+
+function isSessionEnrollmentHelp(options: readonly string[]): boolean {
+	return options.length === 2 && options[0] === "enroll" && isHelpToken(options[1]);
 }
 
 async function runKnownCommand(

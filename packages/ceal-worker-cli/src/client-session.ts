@@ -69,6 +69,7 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 }
 
 async function readEnrollmentCode(input: "stdin" | "interactive", runtime: CealCommandRuntime): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
+	if (input === "stdin" && runtime.isInputTerminal?.()) return { ok: false, error: "stdin_enrollment_requires_pipe" };
 	const reader = enrollmentCodeReader(input, runtime);
 	if (!reader) return { ok: false, error: input === "interactive" ? "interactive_enrollment_required" : "session_runtime_unavailable" };
 	try { return { ok: true, value: await reader() }; }
@@ -255,10 +256,18 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
 		error: {
 			kind: reason,
 			message: "The device enrollment could not be completed.",
-			next_action: reason === "interactive_enrollment_required"
-				? "Run this command from a terminal that supports hidden input, or use --code-stdin only from approved non-interactive automation."
-				: "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.",
+			next_action: enrollmentRecoveryAction(reason),
 		},
 	});
 	return 3;
+}
+
+function enrollmentRecoveryAction(reason: string): string {
+	if (reason === "interactive_enrollment_required") {
+		return "Run this command from a terminal that supports hidden input, or use --code-stdin only from approved non-interactive automation.";
+	}
+	if (reason === "stdin_enrollment_requires_pipe") {
+		return "Omit '--code-stdin' and enter the code at the hidden prompt, or pipe it only from approved non-interactive automation.";
+	}
+	return "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.";
 }

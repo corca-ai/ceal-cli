@@ -14,6 +14,7 @@ void runCealCommand(process.argv.slice(2), {
 	readSecret: readStdinSecret,
 	promptEnrollmentCode: readHiddenTerminalEnrollmentCode,
 	isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
+	isInputTerminal: () => Boolean(process.stdin.isTTY),
 	loadSession: sessionStore ? () => sessionStore.load() : undefined,
 	saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
 	removeSession: sessionStore ? () => sessionStore.remove() : undefined,
