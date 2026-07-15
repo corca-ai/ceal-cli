@@ -143,17 +143,22 @@ function decodeCheckResult(value: unknown): CealProfileConnectorCheckResult {
 	return { status: "completed", checks: value.checks.map(decodeCheck), proof_level: "host_decision" };
 }
 function decodeCheck(value: unknown): CealProfileConnectorCheck {
-	if (!isRecord(value) || !hasKeys(value, ["checked_at", "connector_binding_ref", "diagnostic_code", "expires_at", "operation", "profile_ref", "readiness", "recovery", "scope_revision"])
-		|| !hasSafeRefs(value.connector_binding_ref, value.profile_ref) || typeof value.operation !== "string" || !SAFE_REF.test(value.operation)
-		|| !["ready", "degraded", "unavailable", "unknown"].includes(String(value.readiness))
-		|| typeof value.diagnostic_code !== "string" || !SAFE_REF.test(value.diagnostic_code)
-		|| typeof value.recovery !== "string" || value.recovery.length < 1 || value.recovery.length > 512
-		|| !(value.scope_revision === null || (Number.isSafeInteger(value.scope_revision) && Number(value.scope_revision) >= 1))
-		|| !isIsoTimestamp(value.checked_at) || !isIsoTimestamp(value.expires_at)) invalidResponse();
+	if (!isRecord(value) || !hasKeys(value, ["checked_at", "connector_binding_ref", "diagnostic_code", "expires_at", "operation", "profile_ref", "readiness", "recovery", "scope_revision"])) invalidResponse();
+	if (!hasSafeRefs(value.connector_binding_ref, value.profile_ref)) invalidResponse();
+	if (!isSafeOperation(value.operation) || !isReadiness(value.readiness)) invalidResponse();
+	if (!isSafeDiagnostic(value.diagnostic_code) || !isSafeRecovery(value.recovery)) invalidResponse();
+	if (!isScopeRevision(value.scope_revision)) invalidResponse();
+	if (!isIsoTimestamp(value.checked_at) || !isIsoTimestamp(value.expires_at)) invalidResponse();
+	if (Date.parse(value.expires_at) <= Date.parse(value.checked_at)) invalidResponse();
 	return structuredClone(value) as unknown as CealProfileConnectorCheck;
 }
 function hasKeys(value: Record<string, unknown>, keys: readonly string[]) { return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()); }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function isSafeOperation(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
+function isReadiness(value: unknown): value is CealProfileConnectorReadiness { return ["ready", "degraded", "unavailable", "unknown"].includes(String(value)); }
+function isSafeDiagnostic(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
+function isSafeRecovery(value: unknown): value is string { return typeof value === "string" && value.length >= 1 && value.length <= 512; }
+function isScopeRevision(value: unknown): boolean { return value === null || (Number.isSafeInteger(value) && Number(value) >= 1); }
 function isIsoTimestamp(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function parseJson(bytes: Uint8Array): unknown {
 	try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }

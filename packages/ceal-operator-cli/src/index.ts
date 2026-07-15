@@ -383,43 +383,62 @@ async function executeProfileConnectors(
 ): Promise<number> {
 	try {
 		const registry = parsed.action === "apply" ? await readProfileConnectorRegistryFromStdin(runtime) : null;
-		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
-		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
-		await requireCompatibleAdminApiContract({
-			adminOrigin: refreshed.session.admin_api_origin,
-			expectedDeploymentId: refreshed.session.deployment_id,
-			fetchFn: runtime.fetchFn,
-		});
-		const common = {
-			adminEndpoint: refreshed.session.admin_api_origin,
-			adminToken: refreshed.accessToken,
-			fetchFn: runtime.fetchFn,
-		};
-		if (parsed.action === "check") {
-			const result = await checkCealProfileConnectors(common);
-			return writeYaml(io.stdout, {
-				schema_version: "cealctl.profile_connector_check.v1", command: "cealctl", status: result.status,
-				checks: result.checks, raw_token_visible: false, proof_level: result.proof_level,
-				next_action: result.checks.some((check) => check.readiness !== "ready")
-					? "Resolve the reported connector condition, then run 'cealctl connectors check' again."
-					: "Use 'ceal capabilities' from an approved client to discover the current Gateway catalog.",
-			});
-		}
-		const result = parsed.action === "show"
-			? await showCealProfileConnectors(common)
-			: await applyCealProfileConnectors({ ...common, registry: registry!, dryRun: parsed.dryRun });
-		return writeYaml(io.stdout, {
-			schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: result.status,
-			dry_run: result.dry_run, registry: result.registry, raw_token_visible: false,
-			proof_level: result.proof_level,
-			next_action: result.status === "validated"
-				? "Run the same command without --dry-run to apply these complete Profile connector bindings."
-				: "Connector-native scope is derived from the current Profile principal, not a resource list.",
-		});
+		const common = await currentProfileConnectorRequest(runtime, parsed.operatorSession);
+		if (parsed.action === "check") return executeProfileConnectorCheck(common, io);
+		if (parsed.action === "show") return executeProfileConnectorRegistryAction({ action: "show", dryRun: false }, common, registry!, io);
+		return executeProfileConnectorRegistryAction({ action: "apply", dryRun: parsed.dryRun }, common, registry!, io);
 	} catch (error) {
-		const kind = error instanceof CealProfileConnectorAdminClientError ? error.code : sessionErrorCode(error);
-		return writeSessionFailure(parsed.action === "check" ? "cealctl.profile_connector_check.v1" : "cealctl.profile_connectors.v1", kind, parsed.action === "check" ? "The Gateway Profile connector readiness check could not be completed." : "The Gateway Profile connector registry could not be read or applied.", io);
+		return writeProfileConnectorFailure(parsed.action, error, io);
 	}
+}
+
+type ProfileConnectorRequest = { adminEndpoint: string; adminToken: string; fetchFn: CealctlRuntime["fetchFn"] };
+
+async function currentProfileConnectorRequest(runtime: CealctlRuntime, operatorSession?: string): Promise<ProfileConnectorRequest> {
+	const current = currentOperatorSession(runtime.homeDir, operatorSession);
+	const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
+	await requireCompatibleAdminApiContract({
+		adminOrigin: refreshed.session.admin_api_origin,
+		expectedDeploymentId: refreshed.session.deployment_id,
+		fetchFn: runtime.fetchFn,
+	});
+	return { adminEndpoint: refreshed.session.admin_api_origin, adminToken: refreshed.accessToken, fetchFn: runtime.fetchFn };
+}
+
+async function executeProfileConnectorCheck(common: ProfileConnectorRequest, io: CealctlIo): Promise<number> {
+	const result = await checkCealProfileConnectors(common);
+	return writeYaml(io.stdout, {
+		schema_version: "cealctl.profile_connector_check.v1", command: "cealctl", status: result.status,
+		checks: result.checks, raw_token_visible: false, proof_level: result.proof_level,
+		next_action: result.checks.some((check) => check.readiness !== "ready")
+			? "Resolve the reported connector condition, then run 'cealctl connectors check' again."
+			: "Use 'ceal capabilities' from an approved client to discover the current Gateway catalog.",
+	});
+}
+
+async function executeProfileConnectorRegistryAction(
+	parsed: { action: "show" | "apply"; dryRun: boolean },
+	common: ProfileConnectorRequest,
+	registry: ReturnType<typeof decodeCealProfileConnectorRegistry>,
+	io: CealctlIo,
+): Promise<number> {
+	const result = parsed.action === "show"
+		? await showCealProfileConnectors(common)
+		: await applyCealProfileConnectors({ ...common, registry, dryRun: parsed.dryRun });
+	return writeYaml(io.stdout, {
+		schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: result.status,
+		dry_run: result.dry_run, registry: result.registry, raw_token_visible: false,
+		proof_level: result.proof_level,
+		next_action: result.status === "validated"
+			? "Run the same command without --dry-run to apply these complete Profile connector bindings."
+			: "Connector-native scope is derived from the current Profile principal, not a resource list.",
+	});
+}
+
+function writeProfileConnectorFailure(action: "show" | "check" | "apply", error: unknown, io: CealctlIo): number {
+	const kind = error instanceof CealProfileConnectorAdminClientError ? error.code : sessionErrorCode(error);
+	if (action === "check") return writeSessionFailure("cealctl.profile_connector_check.v1", kind, "The Gateway Profile connector readiness check could not be completed.", io);
+	return writeSessionFailure("cealctl.profile_connectors.v1", kind, "The Gateway Profile connector registry could not be read or applied.", io);
 }
 
 function parseProfileConnectorOptions(options: readonly string[]): { action: "show" | "check" | "apply"; dryRun: boolean; operatorSession?: string } | null {
