@@ -232,7 +232,7 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 			requireSafeText(body.purpose, 512);
 			assertSafeJsonValue(body.arguments, {
 				forbidAuthorityKeys: true,
-			allowAuthorizedSourceUrl: body.capability_id === "resource.resolve" ? "input" : undefined,
+				allowAuthorizedSourceUrl: body.capability_id === "resource.resolve" ? "input" : undefined,
 			});
 			requireJsonByteSize(body.arguments, MAX_ARGUMENT_BYTES, invalidRequest);
 			return;
