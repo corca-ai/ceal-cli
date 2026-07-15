@@ -1,4 +1,5 @@
 import type { CealGatewayCallRequest, CealGatewayMessageSearchCoverage } from "./gateway-response-types.js";
+import { isCealSlackPermalinkInput, isCealSlackPermalinkSource } from "./slack-permalink.js";
 
 export interface GatewayMessageContractContext {
 	invalid(): never;
@@ -40,13 +41,42 @@ export function validateMessageGetResult(
 	context: GatewayMessageContractContext,
 ): void {
 	const result = context.record(value);
-	context.exact(result, ["offset", "ref", "schema_version", "source_label", "text"], ["next_offset"]);
+	context.exact(result, ["offset", "ref", "schema_version", "source", "source_label", "text"], ["next_offset", "source"]);
 	if (result.schema_version !== "ceal.message_get_result.v1") context.invalid();
 	const input = decodeMessageGetInput(expectedRequest.body.arguments, context);
 	context.prefixed(result.ref, "message:");
 	assertMessageGetMatch(result, input, context);
 	context.safeText(result.source_label, 128);
+	if (result.source !== undefined) assertSlackSource(result.source, context);
 	assertMessageGetPage(result, input, context);
+}
+
+export function validateResourceResolveInputContract(value: unknown, context: GatewayMessageContractContext): void {
+	const contract = context.record(value);
+	context.exact(contract, ["required", "schema_version", "url"]);
+	if (contract.schema_version !== "ceal.resource_resolve_input.v1" || !Array.isArray(contract.required)
+		|| contract.required.length !== 1 || contract.required[0] !== "url") context.invalid();
+	const url = context.record(contract.url);
+	context.exact(url, ["format", "max_bytes", "type"]);
+	if (url.type !== "string" || url.format !== "https_url" || url.max_bytes !== 2048) context.invalid();
+}
+
+export function validateResourceResolveResult(
+	value: unknown,
+	expectedRequest: Readonly<CealGatewayCallRequest>,
+	context: GatewayMessageContractContext,
+): void {
+	const result = context.record(value);
+	context.exact(result, ["resource", "schema_version"]);
+	if (result.schema_version !== "ceal.resource_resolve_result.v1") context.invalid();
+	const input = context.record(expectedRequest.body.arguments);
+	context.exact(input, ["url"]);
+	if (!isCealSlackPermalinkInput(input.url)) context.invalid();
+	const resource = context.record(result.resource);
+	context.exact(resource, ["kind", "ref", "source"]);
+	if (resource.kind !== "message") context.invalid();
+	context.prefixed(resource.ref, "message:");
+	assertSlackSource(resource.source, context);
 }
 
 function assertSearchContractIdentity(contract: Record<string, unknown>, context: GatewayMessageContractContext): void {
@@ -126,7 +156,7 @@ function assertNextOffset(value: unknown, offset: number, maximum: number, conte
 
 function assertSearchResultItem(value: unknown, targetRef: string, seen: Set<string>, context: GatewayMessageContractContext): void {
 	const item = context.record(value);
-	context.exact(item, ["created_at", "ref", "source_label", "target_ref", "text_preview", "thread_ref"], ["thread_ref"]);
+	context.exact(item, ["created_at", "ref", "source", "source_label", "target_ref", "text_preview", "thread_ref"], ["source", "thread_ref"]);
 	context.prefixed(item.ref, "message:");
 	if (seen.has(item.ref as string) || item.target_ref !== targetRef) context.invalid();
 	seen.add(item.ref as string);
@@ -134,6 +164,7 @@ function assertSearchResultItem(value: unknown, targetRef: string, seen: Set<str
 	if (typeof item.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(item.created_at)) context.invalid();
 	context.safeText(item.source_label, 128);
 	context.safeText(item.text_preview, 1024);
+	if (item.source !== undefined) assertSlackSource(item.source, context);
 }
 
 function assertSearchMinimization(value: unknown, context: GatewayMessageContractContext): void {
@@ -149,4 +180,10 @@ function assertMessageGetMatch(result: Record<string, unknown>, input: { ref: st
 
 function assertMessageGetPage(result: Record<string, unknown>, input: { offset: number }, context: GatewayMessageContractContext): void {
 	if (result.next_offset !== undefined) assertNextOffset(result.next_offset, input.offset, 40_000, context);
+}
+
+function assertSlackSource(value: unknown, context: GatewayMessageContractContext): void {
+	const source = context.record(value);
+	context.exact(source, ["provider", "url"]);
+	if (source.provider !== "slack" || !isCealSlackPermalinkSource(source.url)) context.invalid();
 }

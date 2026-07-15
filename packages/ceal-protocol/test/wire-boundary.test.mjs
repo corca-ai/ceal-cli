@@ -214,6 +214,7 @@ test("message.get admits only its exact authorized text result", () => {
 		grant_ref: "grant:workspace-message-get", grant_revision: 2, target_ref: "target:workspace",
 		data: {
 			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
+			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
 			text: "Approved source text may contain slack:C0123456789 without becoming audit data.", offset: 0,
 		},
 		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
@@ -227,9 +228,36 @@ test("message.get admits only its exact authorized text result", () => {
 	const malformedOffset = structuredClone(response);
 	malformedOffset.value.data.offset = 1;
 	assert.throws(() => decodeCealClientResponse(malformedOffset, request), hasCode("invalid_client_response"));
-	const providerLocator = structuredClone(response);
-	providerLocator.value.data.source_url = "https://workspace.example.test/archives/C0123456789/p1720000000000100";
-	assert.throws(() => decodeCealClientResponse(providerLocator, request), hasCode("invalid_client_response"));
+	const unsafeSource = structuredClone(response);
+	unsafeSource.value.data.source.url += "?token=forbidden";
+	assert.throws(() => decodeCealClientResponse(unsafeSource, request), hasCode("invalid_client_response"));
+});
+
+test("resource.resolve admits only the exact safe Slack message resource projection", () => {
+	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
+	const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
+	const request = envelope("call", {
+		capability_id: "resource.resolve", target_ref: "target:workspace", arguments: { url }, purpose: "Read the linked approved message",
+	});
+	const response = responseEnvelope(request, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "resource.resolve",
+		grant_ref: "grant:workspace-resource-resolve", grant_revision: 2, target_ref: "target:workspace",
+		data: { schema_version: "ceal.resource_resolve_result.v1", resource: {
+			ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
+		} },
+		redaction: { state: "applied", omitted_classes: ["provider_locator"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	for (const mutate of [
+		(value) => { value.value.data.resource.source.url += "?token=forbidden"; },
+		(value) => { value.value.data.resource.ref = "slack:C0123456789"; },
+		(value) => { value.value.data.resource.kind = "thread"; },
+	]) {
+		const malformed = structuredClone(response);
+		mutate(malformed);
+		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
+	}
 });
 
 test("discovery admits an authenticated Profile with no active grants", () => {

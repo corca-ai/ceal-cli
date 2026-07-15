@@ -274,6 +274,7 @@ test("message.get keeps only retrieval data and verified receipt state in the de
 		grant_ref: "grant:team-inbox-message-get", grant_revision: 4, target_ref: "target:team-inbox",
 		data: {
 			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
+			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
 			text: "Full authorized message text.", offset: 0,
 		},
 		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
@@ -286,10 +287,40 @@ test("message.get keeps only retrieval data and verified receipt state in the de
 	assert.deepEqual(payload, {
 		schema_version: "ceal.result.v2", status: "completed", capability: "message.get", target: "target:team-inbox",
 		data: {
-			ref: "message:approved_001", source: "Team inbox", text: "Full authorized message text.",
+			ref: "message:approved_001",
+			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
+			text: "Full authorized message text.",
 		},
 		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
+});
+
+test("resource.resolve preserves one safe source citation and rejects unsafe Slack URL grammar before Gateway work", async () => {
+	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
+	await withGateway(async ({ endpoint, requests }) => {
+		const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
+		const payload = await yamlRun(["call", "resource.resolve", "--target", "target:team-inbox", `url=${url}`], 0, {
+			loadSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:resolve:1",
+		});
+		assert.deepEqual(payload.data, {
+			ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
+		});
+		assert.deepEqual(requests[0].body.body.arguments, { url });
+	}, (request) => request.operation === "call" ? success(request, {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "resource.resolve",
+		grant_ref: "grant:team-inbox-resource-resolve", grant_revision: 4, target_ref: request.body.target_ref,
+		data: { schema_version: "ceal.resource_resolve_result.v1", resource: {
+			ref: "message:approved_001", kind: "message",
+			source: { provider: "slack", url: sourceUrl },
+		} },
+		redaction: { state: "applied", omitted_classes: ["provider_locator"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	}) : readbackResponse(request));
+	const invalid = await yamlRun([
+		"call", "resource.resolve", "--target", "target:team-inbox",
+		"url=https://workspace.slack.com/archives/C0123456789/p1720000000000100?token=forbidden",
+	], 3, { loadSession: async () => storedSession("http://unused") });
+	assert.equal(invalid.error.kind, "validation_error");
 });
 
 test("call preserves one request identity across authentication refresh and final audit readback", async () => {

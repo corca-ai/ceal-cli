@@ -64,3 +64,18 @@ YAML document; do not add an output-format flag and do not scrape prose.
 Previously returned refs may shorten navigation, but re-open leaf help when the
 binary version, requested effect, target, or evidence requirement changes. A
 cached command tree is never a substitute for installed help.
+
+## Linked Private Context
+
+When a user supplies a private-source link such as a Slack permalink, treat it
+as an explicit source constraint, not as permission to use a provider CLI or
+browser automation. Discover the granted target first, then inspect the
+generic capability help and use the resolved opaque Ceal ref for bounded
+retrieval. The normal sequence is discovery → resource resolution → bounded
+read → the separately discovered follow-up capability.
+
+The returned `source` object is an ordinary citation. Do not open it
+automatically, treat it as a bearer credential, or infer that its presence
+authorizes another Ceal action. If resolution is unavailable or denied, report
+that the organization's Gateway binding does not permit the requested source;
+do not fall back to raw Slack APIs, copied IDs, or a broader credential.

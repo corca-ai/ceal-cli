@@ -1,9 +1,12 @@
+import { isCealSlackPermalinkInput } from "@corca-ai/ceal-protocol";
+
 export function normalizeCapabilitySpecificArguments(
 	capabilityId: string,
 	arguments_: Record<string, string | number>,
 ): boolean {
 	if (capabilityId === "message.search") return normalizeMessageSearchArguments(arguments_);
 	if (capabilityId === "message.get") return normalizeMessageGetArguments(arguments_);
+	if (capabilityId === "resource.resolve") return normalizeResourceResolveArguments(arguments_);
 	return true;
 }
 
@@ -39,6 +42,10 @@ function normalizeMessageGetArguments(arguments_: Record<string, string | number
 	arguments_.offset = offset;
 	arguments_.limit_bytes = limitBytes;
 	return true;
+}
+
+function normalizeResourceResolveArguments(arguments_: Record<string, string | number>): boolean {
+	return allowsOnly(arguments_, ["url"]) && isCealSlackPermalinkInput(arguments_.url);
 }
 
 function allowsOnly(value: Record<string, string | number>, allowed: readonly string[]): boolean {

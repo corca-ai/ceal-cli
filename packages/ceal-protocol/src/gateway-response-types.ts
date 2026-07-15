@@ -162,6 +162,32 @@ export interface CealGatewayMessageSearchResultItem {
 	created_at: string;
 	source_label: string;
 	text_preview: string;
+	source?: CealGatewaySourceReference;
+}
+
+/** A safe provider-origin citation; never a bearer credential or Ceal action. */
+export interface CealGatewaySourceReference {
+	provider: "slack";
+	url: string;
+}
+
+export interface CealGatewayMessageGetResult {
+	schema_version: "ceal.message_get_result.v1";
+	ref: string;
+	source_label: string;
+	source?: CealGatewaySourceReference;
+	text: string;
+	offset: number;
+	next_offset?: number;
+}
+
+export interface CealGatewayResourceResolveResult {
+	schema_version: "ceal.resource_resolve_result.v1";
+	resource: {
+		ref: string;
+		kind: "message";
+		source: CealGatewaySourceReference;
+	};
 }
 
 export const CEAL_GATEWAY_POLICY_DENIAL_MESSAGE = "The authenticated profile is not granted this capability for the requested target." as const;

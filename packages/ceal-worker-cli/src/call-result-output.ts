@@ -74,14 +74,17 @@ export function gatewayFailureCode(error: unknown): string | null {
 
 function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
 	if (value.schema_version === "ceal.message_get_result.v1") return projectMessageGetData(value);
+	if (value.schema_version === "ceal.resource_resolve_result.v1") return projectResourceResolveData(value);
 	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
 	const matches = value.results.flatMap((result) => {
 		if (!result || typeof result !== "object" || Array.isArray(result)) return [];
 		const item = result as Record<string, unknown>;
 		if (typeof item.ref !== "string" || typeof item.source_label !== "string"
 			|| typeof item.text_preview !== "string" || typeof item.created_at !== "string") return [];
+		const source = projectSource(item.source);
 		return [{
-			ref: item.ref, source: item.source_label, preview: item.text_preview, created_at: item.created_at,
+			ref: item.ref, preview: item.text_preview, created_at: item.created_at,
+			...(source ? { source } : {}),
 		}];
 	});
 	const offset = typeof value.offset === "number" ? value.offset : 0;
@@ -95,15 +98,29 @@ function projectCapabilityData(value: Record<string, unknown>): Record<string, u
 }
 
 function projectMessageGetData(value: Record<string, unknown>): Record<string, unknown> {
-	if (typeof value.ref !== "string" || typeof value.source_label !== "string" || typeof value.text !== "string") return {};
+	if (typeof value.ref !== "string" || typeof value.text !== "string") return {};
 	const offset = typeof value.offset === "number" ? value.offset : 0;
 	return {
 		ref: value.ref,
-		source: value.source_label,
 		text: value.text,
+		...(projectSource(value.source) ? { source: projectSource(value.source) } : {}),
 		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
 		...(offset > 0 ? { offset } : {}),
 	};
+}
+
+function projectResourceResolveData(value: Record<string, unknown>): Record<string, unknown> {
+	if (!value.resource || typeof value.resource !== "object" || Array.isArray(value.resource)) return {};
+	const resource = value.resource as Record<string, unknown>;
+	const source = projectSource(resource.source);
+	return typeof resource.ref === "string" && resource.kind === "message" && source
+		? { ref: resource.ref, kind: resource.kind, source } : {};
+}
+
+function projectSource(value: unknown): { provider: "slack"; url: string } | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const source = value as Record<string, unknown>;
+	return source.provider === "slack" && typeof source.url === "string" ? { provider: "slack", url: source.url } : null;
 }
 
 interface SafeGatewayFailure { code: string; message: string; nextAction: string; denial: boolean }
