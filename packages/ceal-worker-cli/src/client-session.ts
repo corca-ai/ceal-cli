@@ -7,6 +7,7 @@ import {
 } from "@corca-ai/ceal";
 import type { CealCliIo, CealCommandRuntime } from "./index.js";
 import { writeYaml } from "./output.js";
+import { CealSessionStoreError } from "./profile-store.js";
 import type { CealStoredSession } from "./profile-store.js";
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
@@ -112,6 +113,14 @@ function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toS
 
 async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	if (!runtime.loadSession || !runtime.removeSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	if (runtime.withSessionStateLock) return runtime.withSessionStateLock(async (store) => {
+		const session = await store.load();
+		if (!session) return writeAlreadyLoggedOut(io);
+		const revokeFailure = await revokeClientSession(session);
+		if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
+		await store.remove();
+		return writeLoggedOut(io);
+	}).catch((error) => writeClientSessionUnavailable(sessionStoreFailureCode(error), io));
 	let session: CealStoredSession | null;
 	try { session = await runtime.loadSession(); } catch { return writeEnrollmentUnavailable("session_load_failed", io); }
 	if (!session) return writeAlreadyLoggedOut(io);
@@ -154,12 +163,37 @@ export class CealClientSessionError extends Error {
 export async function ensureCurrentSession(session: CealStoredSession, runtime: CealCommandRuntime, force = false): Promise<CealStoredSession> {
 	const now = runtime.now?.() ?? Date.now();
 	if (!force && sessionIsCurrent(session, now)) return session;
-	const refresh = requireRefreshContext(session, runtime, now);
-	const response = await refreshSession(session, refresh.token);
+	if (runtime.withSessionStateLock && runtime.loadSession) {
+		try {
+			return await runtime.withSessionStateLock(async (store) => {
+				const current = await store.load();
+				if (!current) throw new CealClientSessionError("reenrollment_required");
+				assertSessionIdentity(current, session);
+				const refreshForced = force && current.refreshToken === session.refreshToken;
+				return renewSession(current, now, refreshForced, async (rotated) => store.replace(current.refreshToken, rotated));
+			});
+		} catch (error) {
+			if (error instanceof CealClientSessionError) throw error;
+			throw new CealClientSessionError(sessionStoreFailureCode(error));
+		}
+	}
+	if (!runtime.saveSession) throw new CealClientSessionError("reenrollment_required");
+	return renewSession(session, now, force, runtime.saveSession);
+}
+
+async function renewSession(
+	session: CealStoredSession,
+	now: number,
+	force: boolean,
+	save: (session: CealStoredSession) => Promise<void>,
+): Promise<CealStoredSession> {
+	if (!force && sessionIsCurrent(session, now)) return session;
+	const refresh = requireRefreshContext(session, now);
+	const response = await refreshSession(session, refresh);
 	if (!response.ok) throw new CealClientSessionError(response.error.code);
 	assertSessionBindings(session, response);
 	const rotated = rotatedSession(session, response);
-	await refresh.save(rotated);
+	await save(rotated);
 	return rotated;
 }
 
@@ -167,14 +201,11 @@ function sessionIsCurrent(session: CealStoredSession, now: number): boolean {
 	return Date.parse(session.expiresAt) > now + 60_000;
 }
 
-function requireRefreshContext(
-	session: CealStoredSession, runtime: CealCommandRuntime, now: number,
-): { token: string; save: NonNullable<CealCommandRuntime["saveSession"]> } {
-	if (!runtime.saveSession) throw new CealClientSessionError("reenrollment_required");
+function requireRefreshContext(session: CealStoredSession, now: number): string {
 	if (Date.parse(session.refreshTokenAbsoluteExpiresAt) <= now) {
 		throw new CealClientSessionError("refresh_expired");
 	}
-	return { token: session.refreshToken, save: runtime.saveSession };
+	return session.refreshToken;
 }
 
 async function refreshSession(session: CealStoredSession, refreshToken: string) {
@@ -194,6 +225,19 @@ function assertSessionBindings(session: CealStoredSession, response: CealClientR
 	if (bindings.some(([actual, expected]) => actual !== expected)) throw new CealClientSessionError("binding_changed");
 }
 
+function assertSessionIdentity(current: CealStoredSession, expected: CealStoredSession): void {
+	const bindings = [
+		[current.gatewayEndpoint, expected.gatewayEndpoint], [current.profileRef, expected.profileRef],
+		[current.membershipRef, expected.membershipRef], [current.registrationRef, expected.registrationRef],
+		[current.clientRef, expected.clientRef], [current.subjectRef, expected.subjectRef], [current.instanceRef, expected.instanceRef],
+	];
+	if (bindings.some(([actual, expectedValue]) => actual !== expectedValue)) throw new CealClientSessionError("binding_changed");
+}
+
+function sessionStoreFailureCode(error: unknown): string {
+	return error instanceof CealSessionStoreError ? error.code : "session_save_failed";
+}
+
 function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult): CealStoredSession {
 	return {
 		...session, accessToken: response.access_token, expiresAt: response.expires_at,
@@ -210,7 +254,9 @@ export function writeClientSessionUnavailable(reason: string, io: CealCliIo): nu
 		error: {
 			kind: reason,
 			message: "The stored Gateway session could not be renewed or revoked safely.",
-			next_action: "Run 'ceal session' to inspect expiry, then ask the organization administrator for a replacement device-enrollment code if renewal is unavailable.",
+			next_action: reason === "refresh_busy"
+				? "Another local Ceal process is changing this session. Wait briefly, then retry the same command."
+				: "Run 'ceal session' to inspect expiry, then ask the organization administrator for a replacement device-enrollment code if renewal is unavailable.",
 		},
 	});
 	return 3;

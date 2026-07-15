@@ -2,6 +2,12 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+const STATE_LOCK_DIRECTORY = "client-session.lock";
+const STATE_LOCK_OWNER = "owner.json";
+const STATE_LOCK_MAX_WAIT_MS = 30_000;
+const STATE_LOCK_POLL_MS = 25;
+const STATE_LOCK_INITIALIZATION_GRACE_MS = 1_000;
+
 export interface CealStoredSession {
 	gatewayEndpoint: string;
 	profileRef: string;
@@ -19,49 +25,161 @@ export interface CealStoredSession {
 
 export class CealSessionStoreError extends Error {
 	override readonly name = "CealSessionStoreError";
-	constructor(readonly code: "home_unavailable" | "unsafe_store" | "invalid_store") {
+	constructor(readonly code: "home_unavailable" | "refresh_busy" | "unsafe_store" | "invalid_store") {
 		super(`Ceal session store ${code.replaceAll("_", " ")}.`);
 	}
+}
+
+export interface CealLockedSessionStore {
+	load(): Promise<CealStoredSession | null>;
+	replace(expectedRefreshToken: string, session: CealStoredSession): Promise<void>;
+	remove(): Promise<void>;
 }
 
 export function createCealSessionStore(home: string | undefined): {
 	load(): Promise<CealStoredSession | null>;
 	save(session: CealStoredSession): Promise<void>;
 	remove(): Promise<void>;
+	withStateLock<T>(action: (store: CealLockedSessionStore) => Promise<T>): Promise<T>;
 } {
 	if (!home || !path.isAbsolute(home)) throw new CealSessionStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, "client-session.json");
 	return {
 		async load() {
-			if (!existsSync(file)) return null;
-			assertDirectory(directory);
-			assertFile(file);
-			let parsed: unknown;
-			try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { throw new CealSessionStoreError("invalid_store"); }
-			return parseSession(parsed);
+			return readSessionFile(directory, file);
 		},
 		async save(session) {
-			validateSession(session);
-			prepareDirectory(directory);
-			if (existsSync(file)) assertFile(file);
-			const temporary = path.join(directory, `.client-session.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
-			try {
-				writeFileSync(temporary, `${JSON.stringify(serializeSession(session), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-				renameSync(temporary, file);
-				chmodSync(file, 0o600);
-			} finally {
-				rmSync(temporary, { force: true });
-			}
+			return withStateLock(directory, async () => { writeSessionFile(directory, file, session); });
 		},
 		async remove() {
-			if (!existsSync(file)) return;
-			assertDirectory(directory);
-			assertFile(file);
-			rmSync(file);
+			return withStateLock(directory, async () => { removeSessionFile(directory, file); });
+		},
+		async withStateLock(action) {
+			return withStateLock(directory, async () => action({
+				load: async () => readSessionFile(directory, file),
+				replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
+				remove: async () => removeSessionFile(directory, file),
+			}));
 		},
 	};
 }
+
+function readSessionFile(directory: string, file: string): CealStoredSession | null {
+	if (!existsSync(file)) return null;
+	assertDirectory(directory);
+	assertFile(file);
+	let parsed: unknown;
+	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { throw new CealSessionStoreError("invalid_store"); }
+	return parseSession(parsed);
+}
+
+function writeSessionFile(directory: string, file: string, session: CealStoredSession): void {
+	validateSession(session);
+	prepareDirectory(directory);
+	if (existsSync(file)) assertFile(file);
+	const temporary = path.join(directory, `.client-session.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+	try {
+		writeFileSync(temporary, `${JSON.stringify(serializeSession(session), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+		renameSync(temporary, file);
+		chmodSync(file, 0o600);
+	} finally {
+		rmSync(temporary, { force: true });
+	}
+}
+
+function replaceSessionFile(directory: string, file: string, expectedRefreshToken: string, session: CealStoredSession): void {
+	const current = readSessionFile(directory, file);
+	if (!current || current.refreshToken !== expectedRefreshToken) throw new CealSessionStoreError("invalid_store");
+	writeSessionFile(directory, file, session);
+}
+
+function removeSessionFile(directory: string, file: string): void {
+	if (!existsSync(file)) return;
+	assertDirectory(directory);
+	assertFile(file);
+	rmSync(file);
+}
+
+async function withStateLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
+	prepareDirectory(directory);
+	const release = await acquireStateLock(path.join(directory, STATE_LOCK_DIRECTORY));
+	try {
+		return await action();
+	} finally {
+		try { release(); } catch { /* A stale lock fails closed and expires within the bounded wait. */ }
+	}
+}
+
+async function acquireStateLock(lockPath: string): Promise<() => void> {
+	const deadline = Date.now() + STATE_LOCK_MAX_WAIT_MS;
+	while (true) {
+		try {
+			mkdirSync(lockPath, { mode: 0o700 });
+			const nonce = randomBytes(16).toString("hex");
+			try {
+				writeFileSync(path.join(lockPath, STATE_LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+			} catch (error) {
+				rmSync(lockPath, { recursive: true, force: true });
+				throw error;
+			}
+			return () => { releaseStateLock(lockPath, nonce); };
+		} catch (error) {
+			if (nodeErrorCode(error) !== "EEXIST") throw new CealSessionStoreError("unsafe_store");
+			if (removeStaleStateLock(lockPath)) continue;
+			if (Date.now() >= deadline) throw new CealSessionStoreError("refresh_busy");
+			await sleep(STATE_LOCK_POLL_MS);
+		}
+	}
+}
+
+function releaseStateLock(lockPath: string, nonce: string): void {
+	const owner = readStateLockOwner(lockPath);
+	if (!owner || owner.nonce !== nonce) return;
+	rmSync(lockPath, { recursive: true, force: true });
+}
+
+function removeStaleStateLock(lockPath: string): boolean {
+	let lock;
+	try { lock = lstatSync(lockPath); } catch { return true; }
+	if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) throw new CealSessionStoreError("unsafe_store");
+	const ownerPath = path.join(lockPath, STATE_LOCK_OWNER);
+	let owner;
+	try { owner = lstatSync(ownerPath); } catch {
+		if (Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS) return false;
+		rmSync(lockPath, { recursive: true, force: true });
+		return true;
+	}
+	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) throw new CealSessionStoreError("unsafe_store");
+	const parsed = readStateLockOwner(lockPath);
+	if (!parsed) throw new CealSessionStoreError("unsafe_store");
+	try {
+		process.kill(parsed.pid, 0);
+		return false;
+	} catch (error) {
+		if (nodeErrorCode(error) !== "ESRCH") throw new CealSessionStoreError("unsafe_store");
+		rmSync(lockPath, { recursive: true, force: true });
+		return true;
+	}
+}
+
+function readStateLockOwner(lockPath: string): { pid: number; nonce: string } | null {
+	try {
+		const value = JSON.parse(readFileSync(path.join(lockPath, STATE_LOCK_OWNER), "utf8"));
+		if (!value || typeof value !== "object" || Array.isArray(value)
+			|| typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0
+			|| typeof value.nonce !== "string" || !/^[a-f0-9]{32}$/iu.test(value.nonce)) return null;
+		return { pid: value.pid, nonce: value.nonce };
+	} catch {
+		return null;
+	}
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+
+function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 function prepareDirectory(directory: string): void {
 	if (!existsSync(directory)) {

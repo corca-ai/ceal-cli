@@ -10,7 +10,7 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
-import type { CealStoredSession } from "./profile-store.js";
+import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
@@ -43,6 +43,7 @@ export interface CealCommandRuntime {
 	loadSession?: () => Promise<CealStoredSession | null>;
 	saveSession?: (session: CealStoredSession) => Promise<void>;
 	removeSession?: () => Promise<void>;
+	withSessionStateLock?: <T>(action: (store: CealLockedSessionStore) => Promise<T>) => Promise<T>;
 	nextRequestId?: () => string;
 	now?: () => number;
 }

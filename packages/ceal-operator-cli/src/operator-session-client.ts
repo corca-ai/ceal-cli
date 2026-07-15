@@ -1,7 +1,10 @@
 import {
 	adminRequestUrl,
+	currentOperatorSession,
 	normalizeAdminOrigin,
-	replaceOperatorSession,
+	removeOperatorSessionWhileLocked,
+	replaceOperatorSessionWhileLocked,
+	withOperatorSessionStateLock,
 } from "./operator-session-store.js";
 import type { OperatorSession } from "./operator-session-store.js";
 import { requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
@@ -64,51 +67,62 @@ export async function refreshOperatorSession(input: {
 	homeDir?: string;
 	fetchFn?: typeof globalThis.fetch;
 }): Promise<{ session: OperatorSession; accessToken: string }> {
-	await requireCompatibleAdminApiContract({
-		adminOrigin: input.session.admin_api_origin,
-		expectedDeploymentId: input.session.deployment_id,
-		fetchFn: input.fetchFn,
+	return withOperatorSessionStateLock(input.homeDir, async () => {
+		const session = currentOperatorSession(input.homeDir, input.session.name);
+		assertStableSessionIdentity(session, input.session);
+		await requireCompatibleAdminApiContract({
+			adminOrigin: session.admin_api_origin,
+			expectedDeploymentId: session.deployment_id,
+			fetchFn: input.fetchFn,
+		});
+		const body = await postJson(
+			adminRequestUrl(session.admin_api_origin, "/api/cealctl/token/refresh"),
+			{
+				schema_version: "cealctl.token_refresh_request.v1",
+				profile: session.name,
+				deployment_id: session.deployment_id,
+				refresh_token: session.refresh_token,
+			},
+			input.fetchFn ?? globalThis.fetch,
+		);
+		if (body.schema_version !== "cealctl.token_refresh.v1") throw new OperatorSessionClientError("invalid_refresh_response");
+		const next = decodeBoundSession(body, session);
+		const accessToken = requireSecret(body.access_token);
+		replaceOperatorSessionWhileLocked(session.refresh_token, next, input.homeDir);
+		return { session: next, accessToken };
 	});
-	const body = await postJson(
-		adminRequestUrl(input.session.admin_api_origin, "/api/cealctl/token/refresh"),
-		{
-			schema_version: "cealctl.token_refresh_request.v1",
-			profile: input.session.name,
-			deployment_id: input.session.deployment_id,
-			refresh_token: input.session.refresh_token,
-		},
-		input.fetchFn ?? globalThis.fetch,
-	);
-	if (body.schema_version !== "cealctl.token_refresh.v1") throw new OperatorSessionClientError("invalid_refresh_response");
-	const next = decodeBoundSession(body, input.session);
-	const accessToken = requireSecret(body.access_token);
-	replaceOperatorSession(input.session.refresh_token, next, input.homeDir);
-	return { session: next, accessToken };
 }
 
-export async function revokeOperatorSession(input: {
+export async function revokeAndRemoveOperatorSession(input: {
 	session: OperatorSession;
+	homeDir?: string;
 	fetchFn?: typeof globalThis.fetch;
-}): Promise<void> {
-	await requireCompatibleAdminApiContract({
-		adminOrigin: input.session.admin_api_origin,
-		expectedDeploymentId: input.session.deployment_id,
-		fetchFn: input.fetchFn,
+}): Promise<OperatorSession> {
+	return withOperatorSessionStateLock(input.homeDir, async () => {
+		const session = currentOperatorSession(input.homeDir, input.session.name);
+		assertStableSessionIdentity(session, input.session);
+		await requireCompatibleAdminApiContract({
+			adminOrigin: session.admin_api_origin,
+			expectedDeploymentId: session.deployment_id,
+			fetchFn: input.fetchFn,
+		});
+		const body = await postJson(
+			adminRequestUrl(session.admin_api_origin, "/api/cealctl/token/revoke"),
+			{
+				schema_version: "cealctl.token_revoke_request.v1",
+				profile: session.name,
+				deployment_id: session.deployment_id,
+				refresh_token: session.refresh_token,
+			},
+			input.fetchFn ?? globalThis.fetch,
+		);
+		if (body.schema_version !== "cealctl.token_revoke.v1" || body.revoked !== true) {
+			throw new OperatorSessionClientError("invalid_revoke_response");
+		}
+		assertBinding(body, session);
+		removeOperatorSessionWhileLocked(input.homeDir, session.name);
+		return session;
 	});
-	const body = await postJson(
-		adminRequestUrl(input.session.admin_api_origin, "/api/cealctl/token/revoke"),
-		{
-			schema_version: "cealctl.token_revoke_request.v1",
-			profile: input.session.name,
-			deployment_id: input.session.deployment_id,
-			refresh_token: input.session.refresh_token,
-		},
-		input.fetchFn ?? globalThis.fetch,
-	);
-	if (body.schema_version !== "cealctl.token_revoke.v1" || body.revoked !== true) {
-		throw new OperatorSessionClientError("invalid_revoke_response");
-	}
-	assertBinding(body, input.session);
 }
 
 async function startLogin(adminOrigin: string, profile: string, fetchFn: typeof globalThis.fetch, expectedDeploymentId: string): Promise<LoginStart> {
@@ -197,6 +211,14 @@ function assertBinding(value: Record<string, unknown>, expected: OperatorSession
 		? expected.auth_issuing_deployment_id : requirePattern(value.auth_issuing_deployment_id, SAFE_ID);
 	if (origin !== expected.admin_api_origin || deployment !== expected.deployment_id
 		|| issuer !== expected.auth_issuer_origin || issuingDeployment !== expected.auth_issuing_deployment_id) {
+		throw new OperatorSessionClientError("origin_mismatch");
+	}
+}
+
+function assertStableSessionIdentity(current: OperatorSession, expected: OperatorSession): void {
+	if (current.name !== expected.name || current.admin_api_origin !== expected.admin_api_origin
+		|| current.deployment_id !== expected.deployment_id || current.auth_issuer_origin !== expected.auth_issuer_origin
+		|| current.auth_issuing_deployment_id !== expected.auth_issuing_deployment_id) {
 		throw new OperatorSessionClientError("origin_mismatch");
 	}
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -493,6 +493,54 @@ test("packaged bin persists an enrolled session with owner-only modes", async ()
 	});
 });
 
+test("separate ceal processes serialize an in-flight single-use client refresh", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-refresh-lock-"));
+	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
+	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
+	const refreshRequests = [];
+	let currentRefresh = firstRefresh;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		if (request.url === "/gateway/client/refresh") {
+			refreshRequests.push(body.refresh_token);
+			if (body.refresh_token !== currentRefresh) return response.end(JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }));
+			if (refreshRequests.length === 1) await delay(100);
+			currentRefresh = secondRefresh;
+			response.writeHead(200, { "content-type": "application/json" });
+			return response.end(JSON.stringify(rotatedClientSession(currentRefresh)));
+		}
+		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
+		response.writeHead(200, { "content-type": "application/json" });
+		return response.end(JSON.stringify(value));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	const endpoint = `http://127.0.0.1:${address.port}/gateway/client`;
+	const sessionPath = path.join(home, ".ceal", "client-session.json");
+	try {
+		mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
+		writeFileSync(sessionPath, `${JSON.stringify(serializeStoredSession(storedSession(endpoint, {
+			expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: firstRefresh,
+		})), null, 2)}\n`, { mode: 0o600 });
+		const [first, second] = await Promise.all([
+			runBin(["capabilities"], "", { HOME: home }),
+			runBin(["capabilities"], "", { HOME: home }),
+		]);
+		assert.equal(first.code, 0, first.stderr);
+		assert.equal(second.code, 0, second.stderr);
+		assert.equal(parseYaml(first.stdout).status, "available");
+		assert.equal(parseYaml(second.stdout).status, "available");
+		assert.deepEqual(refreshRequests, [firstRefresh]);
+		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
 test("capabilities reports an honest Gateway-required unavailable surface without connection options", async () => {
 	const payload = await yamlRun(["capabilities"]);
 	assert.equal(payload.status, "unavailable");
@@ -753,6 +801,30 @@ function storedSession(endpoint, overrides = {}) {
 		...overrides,
 	};
 }
+
+function serializeStoredSession(session) {
+	return {
+		schema_version: "ceal.client_session_store.v1", gateway_endpoint: session.gatewayEndpoint,
+		profile_ref: session.profileRef, membership_ref: session.membershipRef, registration_ref: session.registrationRef,
+		client_ref: session.clientRef, subject_ref: session.subjectRef, instance_ref: session.instanceRef,
+		access_token: session.accessToken, expires_at: session.expiresAt, refresh_token: session.refreshToken,
+		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
+		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
+	};
+}
+
+function rotatedClientSession(refreshToken) {
+	return {
+		schema_version: "ceal.client_refresh_result.v1", ok: true,
+		profile_ref: "profile:narnia", membership_ref: "membership:narnia", registration_ref: "registration:narnia",
+		client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+		access_token: `ceal_personal_${"N".repeat(43)}`, expires_at: "2099-07-14T00:00:00.000Z",
+		refresh_token: refreshToken, refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+	};
+}
+
+function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 function parseYaml(stdout) {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });

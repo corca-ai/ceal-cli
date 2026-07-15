@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -255,6 +255,130 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	}
 });
 
+test("concurrent operator reads serialize single-use refresh rotation before the Admin API", async () => {
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-refresh-lock-"));
+	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
+	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
+	const thirdRefresh = `ceal_refresh_${"T".repeat(43)}`;
+	let currentRefresh = firstRefresh;
+	const refreshRequests = [];
+	const origin = "https://gateway.example.test";
+	const common = {
+		profile: "operator", admin_api_origin: origin, deployment_id: "instance:test",
+		auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test",
+	};
+	const fetchFn = async (url, init = {}) => {
+		const pathname = new URL(String(url)).pathname;
+		if (pathname === "/api/cealctl/contract") return response(200, compatibleContract(origin));
+		if (pathname === "/api/cealctl/token/refresh") {
+			const body = JSON.parse(String(init.body));
+			refreshRequests.push(body.refresh_token);
+			if (body.refresh_token !== currentRefresh) return response(409, { error_code: "refresh_replayed" });
+			currentRefresh = currentRefresh === firstRefresh ? secondRefresh : thirdRefresh;
+			return response(200, {
+				schema_version: "cealctl.token_refresh.v1", ...common,
+				access_token: `ceal_admin_${"A".repeat(43)}`,
+				access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: currentRefresh,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			});
+		}
+		if (pathname === "/api/cealctl/v1/access") return response(200, {
+			schema_version: "ceal.access_state.v1", ok: true, status: "configured", dry_run: false,
+			registry: emptyAccessRegistry(), proof_level: "host_decision",
+		});
+		if (pathname === "/api/cealctl/v1/profile-connectors") return response(200, {
+			schema_version: "ceal.profile_connector_state.v1", ok: true, status: "configured", dry_run: false,
+			registry: emptyConnectorRegistry(), proof_level: "host_decision",
+		});
+		throw new Error(`Unexpected request: ${pathname}`);
+	};
+	try {
+		await asyncRun(["login", origin, "--session", "operator"], {
+			homeDir,
+			fetchFn: async (url) => {
+				const pathname = new URL(String(url)).pathname;
+				if (pathname === "/api/cealctl/contract") return response(200, compatibleContract(origin));
+				if (pathname === "/api/cealctl/login/start") return response(200, {
+					schema_version: "cealctl.login_start.v1", deployment_id: "instance:test", login_id: "login:test",
+					user_code: "ABCD-1234", verification_url: `${origin}/verify?user-code=ABCD-1234`,
+					expires_at: "2099-07-14T00:00:00.000Z", poll_interval_seconds: 1,
+				});
+				if (pathname === "/api/cealctl/login/poll") return response(200, {
+					schema_version: "cealctl.login_poll.v1", status: "complete", ...common,
+					access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: firstRefresh,
+					refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+					refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+				});
+				throw new Error(`Unexpected login request: ${pathname}`);
+			},
+			sleepFn: async () => {},
+		});
+		const [access, connectors] = await Promise.all([
+			asyncRun(["access", "show"], { homeDir, fetchFn }),
+			asyncRun(["connectors", "show"], { homeDir, fetchFn }),
+		]);
+		assert.equal(access.code, 0, access.stdout);
+		assert.equal(connectors.code, 0, connectors.stdout);
+		assert.deepEqual(refreshRequests, [firstRefresh, secondRefresh]);
+	} finally {
+		rmSync(homeDir, { recursive: true, force: true });
+	}
+});
+
+test("separate cealctl processes serialize an in-flight single-use refresh rotation", async () => {
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-refresh-process-lock-"));
+	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
+	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
+	const thirdRefresh = `ceal_refresh_${"T".repeat(43)}`;
+	const refreshRequests = [];
+	let currentRefresh = firstRefresh;
+	let origin = null;
+	const server = createServer(async (request, reply) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null;
+		if (request.url === "/api/cealctl/contract") return json(reply, 200, compatibleContract(origin));
+		if (request.url === "/api/cealctl/token/refresh") {
+			refreshRequests.push(body.refresh_token);
+			if (body.refresh_token !== currentRefresh) return json(reply, 409, { error_code: "refresh_replayed" });
+			if (refreshRequests.length === 1) await delay(100);
+			currentRefresh = currentRefresh === firstRefresh ? secondRefresh : thirdRefresh;
+			return json(reply, 200, rotatedOperatorSession(origin, currentRefresh));
+		}
+		if (request.url === "/api/cealctl/v1/access") return json(reply, 200, {
+			schema_version: "ceal.access_state.v1", ok: true, status: "configured", dry_run: false,
+			registry: emptyAccessRegistry(), proof_level: "host_decision",
+		});
+		return json(reply, 404, { error_code: "not_found" });
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	origin = `http://127.0.0.1:${address.port}`;
+	const sessionPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
+	try {
+		mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
+		writeFileSync(sessionPath, `${JSON.stringify({
+			schema_version: "cealctl.operator_sessions.v1", current_profile: "operator",
+			profiles: { operator: { ...rotatedOperatorSession(origin, firstRefresh), name: undefined } },
+		}, null, 2)}\n`, { mode: 0o600 });
+		const [access, secondAccess] = await Promise.all([
+			runPackagedCealctl(["access", "show"], homeDir),
+			runPackagedCealctl(["access", "show"], homeDir),
+		]);
+		assert.equal(access.code, 0, access.stderr);
+		assert.equal(secondAccess.code, 0, secondAccess.stderr);
+		assert.equal(parseYaml(access.stdout).status, "configured");
+		assert.equal(parseYaml(secondAccess.stdout).status, "configured");
+		assert.deepEqual(refreshRequests, [firstRefresh, secondRefresh]);
+		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(thirdRefresh, "u"));
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(homeDir, { recursive: true, force: true });
+	}
+});
+
 test("an old Admin API is rejected before login creates an operator session", async () => {
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-stale-contract-"));
 	let startCalls = 0;
@@ -389,6 +513,45 @@ async function asyncRun(args, runtime = {}) {
 function json(response, status, body) {
 	response.writeHead(status, { "content-type": "application/json" });
 	response.end(JSON.stringify(body));
+}
+
+function response(status, body) {
+	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+function rotatedOperatorSession(origin, refreshToken) {
+	return {
+		schema_version: "cealctl.token_refresh.v1", profile: "operator", admin_api_origin: origin,
+		deployment_id: "instance:test", auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test",
+		access_token: `ceal_admin_${"A".repeat(43)}`,
+		access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: refreshToken,
+		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+	};
+}
+
+function runPackagedCealctl(args, homeDir) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [new URL("../dist/bin.js", import.meta.url).pathname, ...args], {
+			env: { ...process.env, HOME: homeDir }, stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+		child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+		child.once("error", reject);
+		child.once("close", (code) => resolve({ code, stdout, stderr }));
+	});
+}
+
+function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+function emptyAccessRegistry() {
+	return { schema_version: "ceal.gateway_access_registry.v1", generation: 1, memberships: [], clients: [], grants: [] };
+}
+
+function emptyConnectorRegistry() {
+	return { schema_version: "ceal.gateway_profile_connector_registry.v1", generation: 1, bindings: [] };
 }
 
 function compatibleContract(origin) {

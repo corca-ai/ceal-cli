@@ -18,6 +18,7 @@ void runCealCommand(process.argv.slice(2), {
 	loadSession: sessionStore ? () => sessionStore.load() : undefined,
 	saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
 	removeSession: sessionStore ? () => sessionStore.remove() : undefined,
+	withSessionStateLock: sessionStore ? (action) => sessionStore.withStateLock(action) : undefined,
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
 	process.exitCode = code;

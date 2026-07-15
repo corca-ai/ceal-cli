@@ -22,7 +22,6 @@ import {
 	operatorProfilesPayload,
 	OperatorSessionStoreError,
 	redactSession,
-	removeOperatorSession,
 	saveOperatorSession,
 	selectOperatorSession,
 } from "./operator-session-store.js";
@@ -30,7 +29,7 @@ import {
 	loginOperator,
 	OperatorSessionClientError,
 	refreshOperatorSession,
-	revokeOperatorSession,
+	revokeAndRemoveOperatorSession,
 } from "./operator-session-client.js";
 import { AdminApiContractClientError, requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
 
@@ -268,7 +267,7 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 				io.stderr.write(`Open ${challenge.verification_url}\nEnter code: ${challenge.user_code}\nExpires at: ${challenge.expires_at}\nWaiting for approval...\n`);
 			},
 		});
-		saveOperatorSession(session, runtime.homeDir);
+		await saveOperatorSession(session, runtime.homeDir);
 		return writeYaml(io.stdout, {
 			schema_version: "cealctl.login.v1", command: "cealctl", status: "authenticated",
 			session: redactSession(session), raw_token_visible: false, proof_level: "host_decision",
@@ -279,11 +278,11 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 	}
 }
 
-function runSessions(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number {
+async function runSessions(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): Promise<number> {
 	try {
 		if (options.length === 0) return writeYaml(io.stdout, operatorProfilesPayload(runtime.homeDir));
 		if (options.length === 2 && options[0] === "use" && options[1]) {
-			const session = selectOperatorSession(options[1], runtime.homeDir);
+			const session = await selectOperatorSession(options[1], runtime.homeDir);
 			return writeYaml(io.stdout, {
 				schema_version: "cealctl.sessions.v1", command: "cealctl", status: "selected",
 				current_session: session.name, session: redactSession(session), raw_token_visible: false, proof_level: "local_state",
@@ -299,9 +298,8 @@ async function runLogout(options: readonly string[], io: CealctlIo, runtime: Cea
 	const profile = parseOptionalProfile(options);
 	if (profile === null) return writeError("invalid_argument", "Invalid cealctl logout options.", io);
 	try {
-		const session = currentOperatorSession(runtime.homeDir, profile || undefined);
-		await revokeOperatorSession({ session, fetchFn: runtime.fetchFn });
-		removeOperatorSession(runtime.homeDir, session.name);
+		const selected = currentOperatorSession(runtime.homeDir, profile || undefined);
+		const session = await revokeAndRemoveOperatorSession({ session: selected, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
 		return writeYaml(io.stdout, {
 			schema_version: "cealctl.logout.v1", command: "cealctl", status: "revoked",
 			session: session.name, server_revoked: true, local_session_removed: true,
@@ -684,7 +682,9 @@ function writeSessionFailure(schemaVersion: string, kind: string, message: strin
 		error: {
 			kind,
 			message,
-			next_action: kind === "control_plane_upgrade_required"
+			next_action: kind === "refresh_busy"
+				? "Another local Ceal process is changing this operator session. Wait briefly, then retry the same command."
+				: kind === "control_plane_upgrade_required"
 				? "The running Gateway Admin API is older than this CLI. Apply the matching control-plane release, verify 'ceal-ops admin-api status', then retry."
 				: "Check the Admin API URL, operator approval, stored profile, and Gateway status, then retry.",
 		},

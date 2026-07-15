@@ -6,6 +6,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -14,6 +15,11 @@ import { dirname, join } from "node:path";
 const STATE_SCHEMA = "cealctl.operator_sessions.v1";
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const STATE_LOCK_DIRECTORY = "state.lock";
+const STATE_LOCK_OWNER = "owner.json";
+const STATE_LOCK_MAX_WAIT_MS = 30_000;
+const STATE_LOCK_POLL_MS = 25;
+const STATE_LOCK_INITIALIZATION_GRACE_MS = 1_000;
 
 export interface OperatorSession {
 	name: string;
@@ -35,7 +41,7 @@ interface OperatorSessionState {
 
 export class OperatorSessionStoreError extends Error {
 	override readonly name = "OperatorSessionStoreError";
-	constructor(readonly code: "home_unavailable" | "invalid_profile" | "profile_missing" | "state_invalid" | "unsafe_state_path") {
+	constructor(readonly code: "home_unavailable" | "invalid_profile" | "profile_missing" | "refresh_busy" | "state_invalid" | "unsafe_state_path") {
 		super(`Ceal operator session ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -58,20 +64,40 @@ export function readOperatorSessions(home?: string): OperatorSessionState {
 	}
 }
 
-export function saveOperatorSession(session: OperatorSession, home?: string): void {
+export async function saveOperatorSession(session: OperatorSession, home?: string): Promise<void> {
 	const normalized = decodeSession(session, session.name);
-	const state = readOperatorSessions(home);
-	state.profiles[normalized.name] = normalized;
-	state.current_profile = normalized.name;
-	writeState(state, home);
+	return withOperatorSessionStateLock(home, async () => {
+		const state = readOperatorSessions(home);
+		state.profiles[normalized.name] = normalized;
+		state.current_profile = normalized.name;
+		writeState(state, home);
+	});
 }
 
-export function replaceOperatorSession(expectedRefreshToken: string, session: OperatorSession, home?: string): void {
+export function replaceOperatorSessionWhileLocked(expectedRefreshToken: string, session: OperatorSession, home?: string): void {
 	const state = readOperatorSessions(home);
 	const current = state.profiles[session.name];
 	if (!current || current.refresh_token !== expectedRefreshToken) throw new OperatorSessionStoreError("state_invalid");
 	state.profiles[session.name] = decodeSession(session, session.name);
 	writeState(state, home);
+}
+
+/**
+ * Serializes mutations to an owner-only operator session store. A refresh keeps
+ * this lock over its remote request and local replacement: atomic persistence
+ * after the request alone cannot prevent another process from replaying a
+ * single-use refresh token first.
+ */
+export async function withOperatorSessionStateLock<T>(home: string | undefined, action: () => Promise<T>): Promise<T> {
+	const sessionPath = operatorSessionPath(home);
+	ensureSafeStateDirectories(sessionPath);
+	const lockPath = join(dirname(sessionPath), STATE_LOCK_DIRECTORY);
+	const release = await acquireStateLock(lockPath);
+	try {
+		return await action();
+	} finally {
+		try { release(); } catch { /* A stale lock fails closed and expires within the bounded wait. */ }
+	}
 }
 
 export function currentOperatorSession(home?: string, profileName?: string): OperatorSession {
@@ -83,17 +109,23 @@ export function currentOperatorSession(home?: string, profileName?: string): Ope
 	return session;
 }
 
-export function selectOperatorSession(name: string, home?: string): OperatorSession {
+export async function selectOperatorSession(name: string, home?: string): Promise<OperatorSession> {
 	if (!SAFE_NAME.test(name)) throw new OperatorSessionStoreError("invalid_profile");
-	const state = readOperatorSessions(home);
-	const session = state.profiles[name];
-	if (!session) throw new OperatorSessionStoreError("profile_missing");
-	state.current_profile = name;
-	writeState(state, home);
-	return session;
+	return withOperatorSessionStateLock(home, async () => {
+		const state = readOperatorSessions(home);
+		const session = state.profiles[name];
+		if (!session) throw new OperatorSessionStoreError("profile_missing");
+		state.current_profile = name;
+		writeState(state, home);
+		return session;
+	});
 }
 
-export function removeOperatorSession(home?: string, profileName?: string): { name: string; removed: boolean } {
+export async function removeOperatorSession(home?: string, profileName?: string): Promise<{ name: string; removed: boolean }> {
+	return withOperatorSessionStateLock(home, async () => removeOperatorSessionWhileLocked(home, profileName));
+}
+
+export function removeOperatorSessionWhileLocked(home?: string, profileName?: string): { name: string; removed: boolean } {
 	const state = readOperatorSessions(home);
 	const name = profileName ?? state.current_profile;
 	if (!name || !SAFE_NAME.test(name) || !state.profiles[name]) throw new OperatorSessionStoreError("profile_missing");
@@ -190,6 +222,81 @@ function writeState(state: OperatorSessionState, home?: string): void {
 	writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { flag: "wx", mode: 0o600 });
 	renameSync(temporary, path);
 }
+
+async function acquireStateLock(lockPath: string): Promise<() => void> {
+	const deadline = Date.now() + STATE_LOCK_MAX_WAIT_MS;
+	while (true) {
+		try {
+			mkdirSync(lockPath, { mode: 0o700 });
+			const nonce = randomUUID();
+			try {
+				writeFileSync(join(lockPath, STATE_LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+			} catch (error) {
+				rmSync(lockPath, { recursive: true, force: true });
+				throw error;
+			}
+			return () => { releaseStateLock(lockPath, nonce); };
+		} catch (error) {
+			if (!isAlreadyExists(error)) throw new OperatorSessionStoreError("unsafe_state_path");
+			if (removeStaleStateLock(lockPath)) continue;
+			if (Date.now() >= deadline) throw new OperatorSessionStoreError("refresh_busy");
+			await sleep(STATE_LOCK_POLL_MS);
+		}
+	}
+}
+
+function releaseStateLock(lockPath: string, nonce: string): void {
+	const owner = readStateLockOwner(lockPath);
+	if (!owner || owner.nonce !== nonce) return;
+	rmSync(lockPath, { recursive: true, force: true });
+}
+
+function removeStaleStateLock(lockPath: string): boolean {
+	let lock;
+	try { lock = lstatSync(lockPath); } catch { return true; }
+	if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) {
+		throw new OperatorSessionStoreError("unsafe_state_path");
+	}
+	const ownerPath = join(lockPath, STATE_LOCK_OWNER);
+	let owner;
+	try { owner = lstatSync(ownerPath); } catch {
+		if (Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS) return false;
+		rmSync(lockPath, { recursive: true, force: true });
+		return true;
+	}
+	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) {
+		throw new OperatorSessionStoreError("unsafe_state_path");
+	}
+	const parsed = readStateLockOwner(lockPath);
+	if (!parsed) throw new OperatorSessionStoreError("unsafe_state_path");
+	try {
+		process.kill(parsed.pid, 0);
+		return false;
+	} catch (error) {
+		if (nodeErrorCode(error) !== "ESRCH") throw new OperatorSessionStoreError("unsafe_state_path");
+		rmSync(lockPath, { recursive: true, force: true });
+		return true;
+	}
+}
+
+function readStateLockOwner(lockPath: string): { pid: number; nonce: string } | null {
+	const ownerPath = join(lockPath, STATE_LOCK_OWNER);
+	try {
+		const value = JSON.parse(readFileSync(ownerPath, "utf8"));
+		if (!value || typeof value !== "object" || Array.isArray(value)
+			|| typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0
+			|| typeof value.nonce !== "string" || !/^[0-9a-f-]{36}$/iu.test(value.nonce)) return null;
+		return { pid: value.pid, nonce: value.nonce };
+	} catch {
+		return null;
+	}
+}
+
+function isAlreadyExists(error: unknown): boolean { return nodeErrorCode(error) === "EEXIST"; }
+function nodeErrorCode(error: unknown): string | undefined {
+	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 function ensureSafeStateDirectories(statePath: string): void {
 	const cealctlDir = dirname(statePath);
