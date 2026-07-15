@@ -79,7 +79,9 @@ export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
 	if (code === "policy_denied") return { code, message: CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, nextAction: CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, denial: true };
 	if (code === "authentication_failed") return { code, message: "The Gateway rejected the client credential.", nextAction: "Obtain a current Gateway-issued client session and retry.", denial: true };
-	if (code === "profile_binding_denied") return { code, message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true };
+	if (code === "profile_binding_denied" || code === "profile_access_denied") {
+		return { code, message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true };
+	}
 	if (code === "connector_unavailable") return { code, message: "The granted connector is currently unavailable.", nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.", denial: false };
 	if (code === "idempotency_conflict") return { code, message: "The idempotency key names a different governed write.", nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.", denial: false };
 	if (code === "incompatible_protocol") return { code, message: "The Ceal client and Gateway protocol versions are incompatible.", nextAction: "Upgrade the Ceal client or Gateway to compatible releases.", denial: false };
