@@ -385,7 +385,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else if (call.capability_id === "resource.resolve") validateResourceResolveResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else validateGenericCapabilityResult(call.data, call.capability_id);
-	validateCallRedaction(call.redaction, call.capability_id);
+	validateCallRedaction(call.redaction, call.capability_id, call.data);
 	validateHostNonClaims(call.non_claims, true);
 }
 
@@ -432,7 +432,7 @@ function validMessageSearchCoverageVocabulary(coverage: Record<string, unknown>)
 		&& typeof coverage.truncated === "boolean";
 }
 
-function validateCallRedaction(value: unknown, capabilityId: unknown): void {
+function validateCallRedaction(value: unknown, capabilityId: unknown, data: unknown): void {
 	const redaction = requireRecord(value);
 	requireExactKeys(redaction, ["omitted_classes", "state"]);
 	if (redaction.state !== "applied"
@@ -440,8 +440,18 @@ function validateCallRedaction(value: unknown, capabilityId: unknown): void {
 		|| redaction.omitted_classes.length === 0
 		|| redaction.omitted_classes.length > 32) invalidResponse();
 	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
-	if (capabilityId === "message.search"
-		&& JSON.stringify(redaction.omitted_classes) !== JSON.stringify(["query_text", "raw_provider_ids", "raw_messages"])) invalidResponse();
+	if (capabilityId === "message.search") {
+		const sourceReturned = isMessageSearchSourceReturned(data);
+		const expected = sourceReturned ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
+		if (JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
+	}
+}
+
+function isMessageSearchSourceReturned(value: unknown): boolean {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const results = (value as Record<string, unknown>).results;
+	return Array.isArray(results) && results.some((item) => item !== null && typeof item === "object" && !Array.isArray(item)
+		&& "source" in item && (item as Record<string, unknown>).source !== undefined);
 }
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {

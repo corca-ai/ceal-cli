@@ -135,7 +135,8 @@ export interface CealGatewayMessageSearchResult {
 	results: CealGatewayMessageSearchResultItem[];
 	coverage: CealGatewayMessageSearchCoverage;
 	minimization: {
-		raw_provider_ids_included: false;
+		/** True only when an approved provider-origin source citation is returned. */
+		raw_provider_ids_included: boolean;
 		raw_messages_included: false;
 		credential_material_included: false;
 	};

@@ -260,6 +260,32 @@ test("resource.resolve admits only the exact safe Slack message resource project
 	}
 });
 
+test("search minimization names the intentional provider citation and rejects a false claim", () => {
+	const request = envelope("call", {
+		capability_id: "message.search", target_ref: "target:workspace", arguments: { query: "launch" }, purpose: "Find approved messages",
+	});
+	const response = responseEnvelope(request, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search",
+		grant_ref: "grant:workspace-message-search", grant_revision: 2, target_ref: "target:workspace",
+		data: {
+			schema_version: "ceal.message_search_result.v1", query: { redacted: true, utf8_bytes: 6, empty: false },
+			offset: 0, result_count: 1, results: [{
+				ref: "message:approved_001", target_ref: "target:workspace", created_at: "2026-07-15T00:00:00.000Z",
+				source_label: "Team inbox", text_preview: "Approved launch note.",
+				source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
+			}],
+			coverage: { schema_version: "ceal.message_search_coverage.v1", source: "bounded_projection", match_semantics: "token_and_case_insensitive", reply_coverage: "included", completeness: "incomplete", truncated: false },
+			minimization: { raw_provider_ids_included: true, raw_messages_included: false, credential_material_included: false },
+		},
+		redaction: { state: "applied", omitted_classes: ["query_text", "raw_messages"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	const falseMinimization = structuredClone(response);
+	falseMinimization.value.data.minimization.raw_provider_ids_included = false;
+	assert.throws(() => decodeCealClientResponse(falseMinimization, request), hasCode("invalid_client_response"));
+});
+
 test("discovery admits an authenticated Profile with no active grants", () => {
 	const request = envelope("discover", {});
 	const discovery = discoveryResponse(request);

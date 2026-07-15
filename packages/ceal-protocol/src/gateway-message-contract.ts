@@ -32,7 +32,7 @@ export function validateMessageSearchResult(
 	assertRedactedQuery(result.query, input.queryUtf8Bytes, context);
 	assertSearchResultPage(result, input, expectedRequest.body.target_ref, context);
 	context.assertCoverage(result.coverage);
-	assertSearchMinimization(result.minimization, context);
+	assertSearchMinimization(result.minimization, result.results, context);
 }
 
 export function validateMessageGetResult(
@@ -167,10 +167,17 @@ function assertSearchResultItem(value: unknown, targetRef: string, seen: Set<str
 	if (item.source !== undefined) assertSlackSource(item.source, context);
 }
 
-function assertSearchMinimization(value: unknown, context: GatewayMessageContractContext): void {
+function assertSearchMinimization(value: unknown, results: unknown, context: GatewayMessageContractContext): void {
 	const minimization = context.record(value);
 	context.exact(minimization, ["credential_material_included", "raw_messages_included", "raw_provider_ids_included"]);
-	if (minimization.credential_material_included !== false || minimization.raw_messages_included !== false || minimization.raw_provider_ids_included !== false) context.invalid();
+	const sourceReturned = Array.isArray(results) && results.some((item) => isSourceBearingSearchItem(item));
+	if (minimization.credential_material_included !== false || minimization.raw_messages_included !== false
+		|| minimization.raw_provider_ids_included !== sourceReturned) context.invalid();
+}
+
+function isSourceBearingSearchItem(value: unknown): boolean {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
 }
 
 function assertMessageGetMatch(result: Record<string, unknown>, input: { ref: string; offset: number; limitBytes: number }, context: GatewayMessageContractContext): void {
