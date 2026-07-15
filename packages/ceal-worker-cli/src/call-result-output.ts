@@ -73,11 +73,19 @@ export function gatewayFailureCode(error: unknown): string | null {
 }
 
 function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
-	if (value.schema_version === "ceal.message_get_result.v1") return projectMessageGetData(value);
-	if (value.schema_version === "ceal.message_create_result.v1") return projectMessageCreateData(value);
-	if (value.schema_version === "ceal.resource_resolve_result.v1") return projectResourceResolveData(value);
+	const specialized = {
+		"ceal.message_get_result.v1": projectMessageGetData,
+		"ceal.message_create_result.v1": projectMessageCreateData,
+		"ceal.resource_resolve_result.v1": projectResourceResolveData,
+	}[String(value.schema_version)];
+	if (specialized) return specialized(value);
 	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
-	const matches = value.results.flatMap((result) => {
+	return projectMessageSearchData(value);
+}
+
+function projectMessageSearchData(value: Record<string, unknown>): Record<string, unknown> {
+	if (!Array.isArray(value.results)) return value;
+	const matches = value.results.flatMap((result: unknown) => {
 		if (!result || typeof result !== "object" || Array.isArray(result)) return [];
 		const item = result as Record<string, unknown>;
 		if (typeof item.ref !== "string" || typeof item.source_label !== "string"
