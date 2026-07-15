@@ -21,6 +21,7 @@ const envelope = (operation, body) => ({
 test("public safe-text policy redacts every credential, provider, opaque, and control class", () => {
 	const unsafe = [
 		["g", "hp_exampleCredential1234567890"].join(""),
+		["ntn", "_exampleCredential1234567890"].join(""),
 		["AI", "zaExampleGoogleCredential12"].join(""),
 		["AK", "IAEXAMPLECREDENTIAL1"].join(""),
 		["BEGIN ", "PRIVATE KEY"].join(""),
