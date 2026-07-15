@@ -10,6 +10,7 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
+import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
@@ -30,23 +31,7 @@ const CEAL_PACKAGE_VERSION = "0.64.0" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 
-export interface CealCliIo {
-	stdout: { write(chunk: string): unknown };
-	stderr: { write(chunk: string): unknown };
-}
-
-export interface CealCommandRuntime {
-	readSecret?: () => Promise<string>;
-	promptEnrollmentCode?: () => Promise<string>;
-	isInteractiveTerminal?: () => boolean;
-	isInputTerminal?: () => boolean;
-	loadSession?: () => Promise<CealStoredSession | null>;
-	saveSession?: (session: CealStoredSession) => Promise<void>;
-	removeSession?: () => Promise<void>;
-	withSessionStateLock?: <T>(action: (store: CealLockedSessionStore) => Promise<T>) => Promise<T>;
-	nextRequestId?: () => string;
-	now?: () => number;
-}
+export type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
 	name: "version" | "commands" | "capabilities" | "session" | "call" | "receipt";

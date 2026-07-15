@@ -5,7 +5,7 @@ import {
 	createCealEnrollmentClient,
 	createCealPersonalClientSessionClient,
 } from "@corca-ai/ceal";
-import type { CealCliIo, CealCommandRuntime } from "./index.js";
+import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 import { writeYaml } from "./output.js";
 import { CealSessionStoreError } from "./profile-store.js";
 import type { CealStoredSession } from "./profile-store.js";
