@@ -100,10 +100,11 @@ function projectCapabilityData(value: Record<string, unknown>): Record<string, u
 function projectMessageGetData(value: Record<string, unknown>): Record<string, unknown> {
 	if (typeof value.ref !== "string" || typeof value.text !== "string") return {};
 	const offset = typeof value.offset === "number" ? value.offset : 0;
+	const source = projectSource(value.source);
 	return {
 		ref: value.ref,
 		text: value.text,
-		...(projectSource(value.source) ? { source: projectSource(value.source) } : {}),
+		...(source ? { source } : {}),
 		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
 		...(offset > 0 ? { offset } : {}),
 	};
