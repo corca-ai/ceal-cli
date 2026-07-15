@@ -220,6 +220,14 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const connectorChecked = await asyncYamlRun(["connectors", "check"], 0, { homeDir });
 		assert.equal(connectorChecked.status, "completed");
 		assert.equal(connectorChecked.checks[0].readiness, "ready");
+		assert.match(connectorChecked.next_action, /ceal capabilities/u);
+		connectorCheck.checks[0] = { ...connectorCheck.checks[0], readiness: "degraded", diagnostic_code: "bounded_projection" };
+		const boundedConnectorChecked = await asyncYamlRun(["connectors", "check"], 0, { homeDir });
+		assert.equal(boundedConnectorChecked.checks[0].readiness, "degraded");
+		assert.match(boundedConnectorChecked.next_action, /ceal capabilities/u);
+		connectorCheck.checks[0] = { ...connectorCheck.checks[0], readiness: "unavailable", diagnostic_code: "provider_unavailable" };
+		const unavailableConnectorChecked = await asyncYamlRun(["connectors", "check"], 0, { homeDir });
+		assert.match(unavailableConnectorChecked.next_action, /Resolve the reported connector condition/u);
 		const connectorYaml = renderPlainYamlDocument(connectorRegistry);
 		const connectorValidated = await asyncYamlRun(["connectors", "apply", "--stdin", "--dry-run"], 0, {
 			homeDir, readStdin: async () => connectorYaml,

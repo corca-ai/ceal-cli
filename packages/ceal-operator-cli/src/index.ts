@@ -407,10 +407,12 @@ async function currentProfileConnectorRequest(runtime: CealctlRuntime, operatorS
 
 async function executeProfileConnectorCheck(common: ProfileConnectorRequest, io: CealctlIo): Promise<number> {
 	const result = await checkCealProfileConnectors(common);
+	const requiresRepair = result.checks.some((check) => check.readiness !== "ready"
+		&& !(check.readiness === "degraded" && check.diagnostic_code === "bounded_projection"));
 	return writeYaml(io.stdout, {
 		schema_version: "cealctl.profile_connector_check.v1", command: "cealctl", status: result.status,
 		checks: result.checks, raw_token_visible: false, proof_level: result.proof_level,
-		next_action: result.checks.some((check) => check.readiness !== "ready")
+		next_action: requiresRepair
 			? "Resolve the reported connector condition, then run 'cealctl connectors check' again."
 			: "Use 'ceal capabilities' from an approved client to discover the current Gateway catalog.",
 	});
