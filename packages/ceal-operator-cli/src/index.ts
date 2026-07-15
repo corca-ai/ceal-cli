@@ -9,6 +9,12 @@ import {
 	decodeCealAccessRegistry,
 	showCealAccess,
 } from "./access-admin-client.js";
+import {
+	applyCealProfileConnectors,
+	CealProfileConnectorAdminClientError,
+	decodeCealProfileConnectorRegistry,
+	showCealProfileConnectors,
+} from "./profile-connector-admin-client.js";
 import { CealEnrollmentAdminClientError, createCealEnrollment } from "./enrollment-admin-client.js";
 import {
 	currentOperatorSession,
@@ -43,7 +49,7 @@ export interface CealctlRuntime {
 }
 
 export interface CealctlCommandDefinition {
-	name: "version" | "commands" | "login" | "sessions" | "logout" | "access" | "enrollments" | "doctor";
+	name: "version" | "commands" | "login" | "sessions" | "logout" | "access" | "connectors" | "enrollments" | "doctor";
 	description: string;
 	usage: string;
 	effect: "read_only" | "control_write";
@@ -108,6 +114,15 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 		recovery: "Run 'cealctl access --help', inspect the current registry, then validate a complete replacement before applying it.",
 	},
 	{
+		name: "connectors",
+		description: "Inspect or apply Profile connector-principal bindings without resource lists.",
+		usage: "cealctl connectors [show | apply --stdin [--dry-run] [--operator-session <name>]]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.profile_connectors.v1",
+		recovery: "Run 'cealctl connectors --help', inspect the current binding registry, then validate a complete replacement before applying it.",
+	},
+	{
 		name: "enrollments",
 		description: "Create one-time pre-approved client-device enrollment material.",
 		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-session <name>]",
@@ -152,6 +167,12 @@ const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], rea
 		"  --dry-run                      Validate the replacement without changing Gateway state.",
 		"  --operator-session <name>      Use a named stored admin session.",
 	],
+	connectors: [
+		"  show                           Read current Profile connector-principal bindings.",
+		"  apply --stdin                  Read one complete ceal.gateway_profile_connector_registry.v1 YAML document.",
+		"  --dry-run                      Validate the replacement without changing Gateway state.",
+		"  --operator-session <name>      Use a named stored admin session.",
+	],
 	enrollments: [
 		"  create                         Create one short-lived, one-time device-enrollment code.",
 		"  --client <safe-name>          Existing pre-approved client device name.",
@@ -181,6 +202,7 @@ function runKnownCommand(command: CealctlCommandDefinition["name"], options: rea
 	if (command === "sessions") return runSessions(options, io, runtime);
 	if (command === "logout") return runLogout(options, io, runtime);
 	if (command === "access") return runAccess(options, io, runtime);
+	if (command === "connectors") return runProfileConnectors(options, io, runtime);
 	if (command === "enrollments") return runEnrollments(options, io, runtime);
 	if (options.length !== 0) return writeError("invalid_argument", "Invalid cealctl command options.", io);
 	return writeDoctor(io);
@@ -285,6 +307,93 @@ function runAccess(options: readonly string[], io: CealctlIo, runtime: CealctlRu
 	const parsed = parseAccessOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid access options.", io);
 	return executeAccess(parsed, io, runtime);
+}
+
+function runProfileConnectors(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
+	if (options.length === 0) return writeYaml(io.stdout, {
+		schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: "ready", proof_level: "surface",
+		writes_external: false, next_action: "Run 'cealctl connectors show' or inspect 'cealctl connectors --help'.",
+	});
+	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "apply")) {
+		return writeHelp(profileConnectorActionHelp(options[0]), io);
+	}
+	const parsed = parseAccessOptions(options);
+	if (!parsed) return writeError("invalid_argument", "Invalid connector options.", io);
+	return executeProfileConnectors(parsed, io, runtime);
+}
+
+function profileConnectorActionHelp(action: "show" | "apply"): string {
+	if (action === "show") return [
+		"Usage: cealctl connectors show [--operator-session <name>]",
+		"",
+		"Read the current Profile connector-principal binding registry without changing it.",
+		"",
+		"Effect: read_only",
+		"Evidence: host_decision",
+		"Result schema: cealctl.profile_connectors.v1",
+		"  --operator-session <name>  Use a named stored admin session.",
+		"  -h, --help                 Show this help without performing work.",
+	].join("\n");
+	return [
+		"Usage: cealctl connectors apply --stdin [--dry-run] [--operator-session <name>]",
+		"",
+		"Validate or atomically replace complete Profile connector-principal bindings from stdin.",
+		"",
+		"Effect: control_write",
+		"Evidence: host_decision",
+		"Result schema: cealctl.profile_connectors.v1",
+		"  --stdin                    Read one ceal.gateway_profile_connector_registry.v1 YAML document.",
+		"  --dry-run                  Validate without changing Gateway state.",
+		"  --operator-session <name>  Use a named stored admin session.",
+		"  -h, --help                 Show this help without performing work.",
+	].join("\n");
+}
+
+async function executeProfileConnectors(
+	parsed: { action: "show" | "apply"; dryRun: boolean; operatorSession?: string },
+	io: CealctlIo,
+	runtime: CealctlRuntime,
+): Promise<number> {
+	try {
+		const registry = parsed.action === "apply" ? await readProfileConnectorRegistryFromStdin(runtime) : null;
+		const current = currentOperatorSession(runtime.homeDir, parsed.operatorSession);
+		const refreshed = await refreshOperatorSession({ session: current, homeDir: runtime.homeDir, fetchFn: runtime.fetchFn });
+		await requireCompatibleAdminApiContract({
+			adminOrigin: refreshed.session.admin_api_origin,
+			expectedDeploymentId: refreshed.session.deployment_id,
+			fetchFn: runtime.fetchFn,
+		});
+		const common = {
+			adminEndpoint: refreshed.session.admin_api_origin,
+			adminToken: refreshed.accessToken,
+			fetchFn: runtime.fetchFn,
+		};
+		const result = parsed.action === "show"
+			? await showCealProfileConnectors(common)
+			: await applyCealProfileConnectors({ ...common, registry: registry!, dryRun: parsed.dryRun });
+		return writeYaml(io.stdout, {
+			schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: result.status,
+			dry_run: result.dry_run, registry: result.registry, raw_token_visible: false,
+			proof_level: result.proof_level,
+			next_action: result.status === "validated"
+				? "Run the same command without --dry-run to apply these complete Profile connector bindings."
+				: "Connector-native scope is derived from the current Profile principal, not a resource list.",
+		});
+	} catch (error) {
+		const kind = error instanceof CealProfileConnectorAdminClientError ? error.code : sessionErrorCode(error);
+		return writeSessionFailure("cealctl.profile_connectors.v1", kind, "The Gateway Profile connector registry could not be read or applied.", io);
+	}
+}
+
+async function readProfileConnectorRegistryFromStdin(runtime: CealctlRuntime) {
+	if (typeof runtime.readStdin !== "function") throw new CealProfileConnectorAdminClientError("invalid_configuration");
+	const input = await runtime.readStdin();
+	if (Buffer.byteLength(input, "utf8") > 64 * 1024) throw new CealProfileConnectorAdminClientError("invalid_configuration");
+	try { return decodeCealProfileConnectorRegistry(parse(input, { maxAliasCount: 0 })); }
+	catch (error) {
+		if (error instanceof CealProfileConnectorAdminClientError) throw error;
+		throw new CealProfileConnectorAdminClientError("invalid_configuration");
+	}
 }
 
 function accessActionHelp(action: "show" | "apply"): string {

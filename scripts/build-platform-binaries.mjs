@@ -37,7 +37,7 @@ const COMMANDS = Object.freeze([
 		id: "cealctl",
 		packageDir: "ceal-operator-cli",
 		help: "Usage: cealctl <command> [options]",
-		requiredCommands: ["login", "sessions", "logout", "access", "enrollments"],
+		requiredCommands: ["login", "sessions", "logout", "access", "connectors", "enrollments"],
 	},
 ]);
 

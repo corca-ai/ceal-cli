@@ -16,6 +16,10 @@ const REQUIRED_FEATURES = new Map([
 		["GET", "/api/cealctl/v1/access", "ceal.access.manage"],
 		["PUT", "/api/cealctl/v1/access", "ceal.access.manage"],
 	]],
+	["profile_connector_control.v1", [
+		["GET", "/api/cealctl/v1/profile-connectors", "ceal.profile_connector.manage"],
+		["PUT", "/api/cealctl/v1/profile-connectors", "ceal.profile_connector.manage"],
+	]],
 	["personal_client_enrollment.v1", [
 		["POST", "/api/cealctl/v1/enrollments", "ceal.client.enroll"],
 	]],

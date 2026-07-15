@@ -32,23 +32,25 @@ test("canonical registry is reachable through stable, read-only help", () => {
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
-	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"]]) {
+	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"], ["connectors", "show", "--help"], ["connectors", "apply", "--help"]]) {
 		const result = run(args);
 		assert.equal(result.code, 0);
 		assert.equal(result.stderr, "");
-		assert.match(result.stdout, /^Usage: cealctl access (?:show|apply)/u);
+		assert.match(result.stdout, /^Usage: cealctl (?:access|connectors) (?:show|apply)/u);
 	}
 });
 
-test("access apply rejects invalid stdin before session or network access", async () => {
+test("registry apply rejects invalid stdin before session or network access", async () => {
 	let fetchCalls = 0;
-	const result = await asyncRun(["access", "apply", "--stdin", "--dry-run"], {
-		readStdin: async () => "schema_version: wrong.v1\n",
-		fetchFn: async () => { fetchCalls += 1; throw new Error("network must not run"); },
-	});
-	assert.equal(result.code, 3);
+	for (const command of ["access", "connectors"]) {
+		const result = await asyncRun([command, "apply", "--stdin", "--dry-run"], {
+			readStdin: async () => "schema_version: wrong.v1\n",
+			fetchFn: async () => { fetchCalls += 1; throw new Error("network must not run"); },
+		});
+		assert.equal(result.code, 3);
+		assert.equal(parseYaml(result.stdout).error.kind, "invalid_configuration");
+	}
 	assert.equal(fetchCalls, 0);
-	assert.equal(parseYaml(result.stdout).error.kind, "invalid_configuration");
 });
 
 test("every public command emits one YAML document without a format flag", async () => {
@@ -74,7 +76,7 @@ test("version reports package, protocol, range, and operator credential context"
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "enrollments", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "connectors", "enrollments", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_session");
 });
@@ -103,6 +105,11 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		memberships: [{ membership_ref: "membership:hwidong-work", profile_ref: "profile:work", subject_ref: "subject:hwidong", profile_audience_revision: 1, revision: 1, status: "active" }],
 		clients: [{ client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca", revision: 1, status: "active" }],
 		grants: [{ grant_ref: "grant:work-team-inbox", profile_ref: "profile:work", capability_id: "message.search", target_ref: "target:team-inbox", profile_audience_revision: 1, revision: 1, status: "active" }],
+	};
+	const connectorRegistry = {
+		schema_version: "ceal.gateway_profile_connector_registry.v1",
+		generation: 1,
+		bindings: [{ connector_binding_ref: "binding:work-slack", profile_ref: "profile:work", connector_kind: "slack", connector_principal_ref: "principal:slack-work", revision: 1, status: "active" }],
 	};
 	const server = createServer(async (request, response) => {
 		const chunks = [];
@@ -138,6 +145,14 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		});
 		if (request.url === "/api/cealctl/v1/access" && request.method === "PUT") return json(response, 200, {
 			schema_version: "ceal.access_state.v1", ok: true, status: body.dry_run ? "validated" : "applied", dry_run: body.dry_run,
+			registry: body.registry, proof_level: "host_decision",
+		});
+		if (request.url === "/api/cealctl/v1/profile-connectors" && request.method === "GET") return json(response, 200, {
+			schema_version: "ceal.profile_connector_state.v1", ok: true, status: "configured", dry_run: false,
+			registry: connectorRegistry, proof_level: "host_decision",
+		});
+		if (request.url === "/api/cealctl/v1/profile-connectors" && request.method === "PUT") return json(response, 200, {
+			schema_version: "ceal.profile_connector_state.v1", ok: true, status: body.dry_run ? "validated" : "applied", dry_run: body.dry_run,
 			registry: body.registry, proof_level: "host_decision",
 		});
 		return json(response, 404, { error_code: "not_found" });
@@ -194,6 +209,20 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		assert.equal(accessRequests.length, 3);
 		for (const request of accessRequests) assert.equal(request.authorization, `Bearer ${adminToken}`);
 		assert.equal(accessRequests[1].body.schema_version, "ceal.access_apply.v1");
+		const connectorShown = await asyncYamlRun(["connectors", "show"], 0, { homeDir });
+		assert.equal(connectorShown.status, "configured");
+		assert.deepEqual(connectorShown.registry, connectorRegistry);
+		const connectorYaml = renderPlainYamlDocument(connectorRegistry);
+		const connectorValidated = await asyncYamlRun(["connectors", "apply", "--stdin", "--dry-run"], 0, {
+			homeDir, readStdin: async () => connectorYaml,
+		});
+		assert.equal(connectorValidated.status, "validated");
+		assert.equal(connectorValidated.dry_run, true);
+		const connectorRequests = observed.filter((entry) => entry.url === "/api/cealctl/v1/profile-connectors");
+		assert.equal(connectorRequests.length, 2);
+		for (const request of connectorRequests) assert.equal(request.authorization, `Bearer ${adminToken}`);
+		assert.equal(connectorRequests[1].body.schema_version, "ceal.profile_connector_apply.v1");
+		assert.doesNotMatch(JSON.stringify(connectorRequests), /channel|resource|xox[ab]/u);
 		const stored = readFileSync(sessionsPath, "utf8");
 		assert.match(stored, new RegExp(rotatedRefreshToken, "u"));
 		assert.doesNotMatch(stored, new RegExp(refreshToken, "u"));
@@ -356,10 +385,14 @@ function compatibleContract(origin) {
 				{ method: "POST", path: "/api/cealctl/token/refresh", required_scope: null },
 				{ method: "POST", path: "/api/cealctl/token/revoke", required_scope: null },
 			] },
-			{ id: "personal_client_access.v1", routes: [
-				{ method: "GET", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
-				{ method: "PUT", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
-			] },
+		{ id: "personal_client_access.v1", routes: [
+			{ method: "GET", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
+			{ method: "PUT", path: "/api/cealctl/v1/access", required_scope: "ceal.access.manage" },
+		] },
+		{ id: "profile_connector_control.v1", routes: [
+			{ method: "GET", path: "/api/cealctl/v1/profile-connectors", required_scope: "ceal.profile_connector.manage" },
+			{ method: "PUT", path: "/api/cealctl/v1/profile-connectors", required_scope: "ceal.profile_connector.manage" },
+		] },
 			{ id: "personal_client_enrollment.v1", routes: [
 				{ method: "POST", path: "/api/cealctl/v1/enrollments", required_scope: "ceal.client.enroll" },
 			] },
