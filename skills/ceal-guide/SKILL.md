@@ -37,6 +37,10 @@ YAML document; do not add an output-format flag and do not scrape prose.
 5. Read any returned artifact before answering. For a write, report completion
    only when the result permits the claim and the required authoritative
    readback or audit evidence is present.
+   A discovered write must explicitly declare `effect: write` and its write
+   contract. Keep one stable idempotency key for one intended effect; if the
+   result is unverified or unknown, inspect its receipt rather than retrying
+   with a new key or claiming delivery.
 6. On a structured error, follow its recovery or next action, then rediscover
    help if installation or runtime drift may have changed the surface.
 
@@ -72,7 +76,15 @@ as an explicit source constraint, not as permission to use a provider CLI or
 browser automation. Discover the granted target first, then inspect the
 generic capability help and use the resolved opaque Ceal ref for bounded
 retrieval. The normal sequence is discovery → resource resolution → bounded
-read → the separately discovered follow-up capability.
+read → the separately discovered follow-up capability. If that follow-up is a
+write, require that its discovered target, effect, input contract, and
+readback requirement all fit the requested action. A resolved source ref is
+context for that one bounded action, never permission for a broader post,
+recipient, provider identifier, or follow-up mutation.
+
+If the active discovery does not expose a permitted resolution and bounded-read
+route for the supplied link, stop before any write. Do not substitute a search
+guess, raw provider identifier, or another integration.
 
 The returned `source` object is an ordinary citation. Do not open it
 automatically, treat it as a bearer credential, or infer that its presence

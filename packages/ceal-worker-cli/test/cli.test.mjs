@@ -10,7 +10,7 @@ import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEAL_COMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
-import { writeCallCompleted } from "../dist/call-result-output.js";
+import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 
 async function run(args, runtime = {}) {
 	let stdout = "";
@@ -324,6 +324,15 @@ test("message.create keeps a verified opaque delivery result and rejects unsafe 
 		});
 		assert.equal(invalid.error.kind, "validation_error");
 	}
+});
+
+test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "idempotency_conflict", message: "server-controlled" }), {
+		code: "idempotency_conflict",
+		message: "The idempotency key names a different governed write.",
+		nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.",
+		denial: false,
+	});
 });
 
 test("resource.resolve preserves one safe source citation and rejects unsafe Slack URL grammar before Gateway work", async () => {
