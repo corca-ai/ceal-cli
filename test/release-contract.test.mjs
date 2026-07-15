@@ -40,6 +40,13 @@ test("one release contract binds package, protocol, binary, and rollback identit
 	assert.equal(packages["ceal-worker-cli"].bin.ceal, "./dist/bin.js");
 	assert.equal(packages["ceal-operator-cli"].name, contract.artifacts.cealctl.package);
 	assert.equal(packages["ceal-operator-cli"].bin.cealctl, "./dist/bin.js");
+	assert.deepEqual(Object.fromEntries(Object.entries(contract.guides).map(([name, guide]) => [name, {
+		asset: guide.asset,
+		binary: guide.binary,
+	}])), {
+		"ceal-guide": { asset: "ceal-guide-SKILL.md", binary: "ceal" },
+		"cealctl-guide": { asset: "cealctl-guide-SKILL.md", binary: "cealctl" },
+	});
 	assert.deepEqual(contract.rollback.source, {
 		strategy: "normal_additive_revert",
 		immutable_commit: "f458a0bce291123644c84efdbeb48d5255a74c64",

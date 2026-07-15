@@ -47,11 +47,17 @@ select_role() {
       COMMAND="ceal"
       COMMAND_SCHEMA="ceal.version.v1"
       COMMAND_CREDENTIAL_CONTEXT="gateway_issued_client_session"
+      GUIDE_ID="ceal-guide"
+      GUIDE_ASSET="ceal-guide-SKILL.md"
+      GUIDE_BINARY="ceal"
       ;;
     operator)
       COMMAND="cealctl"
       COMMAND_SCHEMA="cealctl.version.v1"
       COMMAND_CREDENTIAL_CONTEXT="cealctl_operator_admin_session"
+      GUIDE_ID="cealctl-guide"
+      GUIDE_ASSET="cealctl-guide-SKILL.md"
+      GUIDE_BINARY="cealctl"
       ;;
     *) fail "CEAL_INSTALL_ROLE must be worker (default) or operator" ;;
   esac
@@ -84,9 +90,9 @@ verify_checksum() {
 }
 
 verify_checksum_inventory() {
-  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 8 ] \
-    || fail "SHA256SUMS must contain exactly eight physical lines"
-  invalid_lines="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-cli-platform-release-manifest-linux-(amd64|arm64)[.]json|ceal-linux-(amd64|arm64)|cealctl-linux-(amd64|arm64)|install[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
+  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 10 ] \
+	|| fail "SHA256SUMS must contain exactly ten physical lines"
+  invalid_lines="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-cli-platform-release-manifest-linux-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|cealctl-guide-SKILL[.]md|ceal-linux-(amd64|arm64)|cealctl-linux-(amd64|arm64)|install[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
   [ "$invalid_lines" = 0 ] \
     || fail "SHA256SUMS contains a malformed or unexpected entry"
   observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
@@ -94,13 +100,43 @@ verify_checksum_inventory() {
     THIRD_PARTY_NOTICES.txt \
     ceal-cli-platform-release-manifest-linux-amd64.json \
     ceal-cli-platform-release-manifest-linux-arm64.json \
+    ceal-guide-SKILL.md cealctl-guide-SKILL.md \
     ceal-linux-amd64 ceal-linux-arm64 \
     cealctl-linux-amd64 cealctl-linux-arm64 install.sh | sort)"
   [ "$observed" = "$expected" ] \
-    || fail "SHA256SUMS must contain exactly the eight dual-platform release entries"
+	|| fail "SHA256SUMS must contain exactly the ten dual-platform release entries"
   verify_checksum "$COMMAND_ASSET"
   verify_checksum "$MANIFEST_ASSET"
   verify_checksum "$NOTICE_ASSET"
+  verify_checksum "$GUIDE_ASSET"
+}
+
+verify_manifest_guide() {
+  expected="$(grep -E "^[a-f0-9]{64}  $GUIDE_ASSET$" "$TMP_DIR/SHA256SUMS" | cut -d' ' -f1)"
+  awk \
+    -v guide_id="$GUIDE_ID" \
+    -v guide_name="$GUIDE_ASSET" \
+    -v guide_binary="$GUIDE_BINARY" \
+    -v guide_sha256="$expected" '
+      $0 == "    \"" guide_id "\": {" { inside = 1; found = 1; next }
+      inside && $0 ~ /^    }[,]?$/ {
+        valid = name && binary && sha256
+        exit
+      }
+      inside && index($0, "\"name\": \"" guide_name "\"") { name = 1 }
+      inside && index($0, "\"binary\": \"" guide_binary "\"") { binary = 1 }
+      inside && index($0, "\"sha256\": \"" guide_sha256 "\"") { sha256 = 1 }
+      END { exit (found && valid) ? 0 : 1 }
+    ' "$TMP_DIR/$MANIFEST_ASSET" \
+    || fail "Selected guide does not match the signed platform manifest"
+}
+
+require_regular_directory() {
+  [ -d "$1" ] && [ ! -L "$1" ] || fail "Existing release generation is unsafe"
+}
+
+require_regular_file() {
+  [ -f "$1" ] && [ ! -L "$1" ] || fail "Existing release generation is unsafe"
 }
 
 verify_version_output() {
@@ -255,11 +291,12 @@ COMMAND_ASSET="$COMMAND-$PLATFORM"
 MANIFEST_ASSET="ceal-cli-platform-release-manifest-$PLATFORM.json"
 NOTICE_ASSET="THIRD_PARTY_NOTICES.txt"
 
-for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "SHA256SUMS"; do
+for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "$GUIDE_ASSET" "SHA256SUMS"; do
   download_signed_asset "$asset"
   verify_signature "$asset"
 done
 verify_checksum_inventory
+verify_manifest_guide
 
 chmod 755 "$TMP_DIR/$COMMAND_ASSET"
 verify_version_output "$TMP_DIR/$COMMAND_ASSET"
@@ -286,16 +323,23 @@ if [ ! -e "$GENERATION_DIR" ]; then
   cp "$TMP_DIR/$COMMAND_ASSET" "$STAGED_GENERATION/$COMMAND_ASSET"
   cp "$TMP_DIR/$MANIFEST_ASSET" "$STAGED_GENERATION/$MANIFEST_ASSET"
   cp "$TMP_DIR/$NOTICE_ASSET" "$STAGED_GENERATION/$NOTICE_ASSET"
+  mkdir "$STAGED_GENERATION/guide"
+  cp "$TMP_DIR/$GUIDE_ASSET" "$STAGED_GENERATION/guide/SKILL.md"
   cp "$TMP_DIR/SHA256SUMS" "$STAGED_GENERATION/SHA256SUMS"
   chmod 755 "$STAGED_GENERATION/$COMMAND_ASSET"
   GENERATION_CREATED=1
   mv "$STAGED_GENERATION" "$GENERATION_DIR"
 else
-  if [ ! -d "$GENERATION_DIR" ] || [ -L "$GENERATION_DIR" ]; then fail "Existing release generation is unsafe"; fi
+  require_regular_directory "$GENERATION_DIR"
+  require_regular_directory "$GENERATION_DIR/guide"
   for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" SHA256SUMS; do
+    require_regular_file "$GENERATION_DIR/$asset"
     [ "$(sha256_of "$GENERATION_DIR/$asset")" = "$(sha256_of "$TMP_DIR/$asset")" ] \
       || fail "Existing release generation does not match the signed release"
   done
+  require_regular_file "$GENERATION_DIR/guide/SKILL.md"
+  [ "$(sha256_of "$GENERATION_DIR/guide/SKILL.md")" = "$(sha256_of "$TMP_DIR/$GUIDE_ASSET")" ] \
+    || fail "Existing release generation does not match the signed guide"
 fi
 
 ln -s "releases/$GENERATION_ID" "$CURRENT_LINK.next.$$"
@@ -311,3 +355,4 @@ fi
 verify_version_output "$COMMAND_TARGET"
 COMMITTED=1
 printf 'Installed %s %s (%s) as %s at %s\n' "$COMMAND" "$VERSION" "$PLATFORM" "$ROLE" "$INSTALL_DIR"
+printf 'Signed guide staged at %s; register it through the selected agent runtime (it is not auto-loaded).\n' "$GENERATION_DIR/guide/SKILL.md"

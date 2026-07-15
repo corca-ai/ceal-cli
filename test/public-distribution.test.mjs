@@ -27,16 +27,18 @@ test("default worker installation creates only ceal and worker-owned state", () 
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Installed ceal v0[.]64[.]0 .* as worker/u);
+		assert.match(result.stdout, /Signed guide staged at .*[/]guide[/]SKILL[.]md; register it through the selected agent runtime/u);
 		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /command=ceal/u);
 		assert.equal(existsSync(path.join(install, "cealctl")), false);
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "current")).isSymbolicLink(), true);
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
 		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "THIRD_PARTY_NOTICES.txt"), "utf8"), /yaml 2[.]9[.]0 \(ISC\)/u);
+		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "guide", "SKILL.md"), "utf8"), /ceal-guide/u);
 		assert.equal(readdirSync(path.join(install, ".ceal-cli", "worker", "releases")).length, 1);
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "install.lock")).isFile(), true);
 		const log = readFileSync(cosignLog, "utf8");
-		assert.equal(log.match(/verify-blob/gu)?.length, 4);
+		assert.equal(log.match(/verify-blob/gu)?.length, 5);
 		assert.match(log, /corca-ai\/ceal-cli/u);
 		assert.match(log, /refs\/tags\/v0[.]64[.]0/u);
 		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]64[.]0/u);
@@ -48,11 +50,13 @@ test("explicit operator installation creates only cealctl and operator-owned sta
 		const result = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Installed cealctl v0[.]64[.]0 .* as operator/u);
+		assert.match(result.stdout, /Signed guide staged at .*[/]guide[/]SKILL[.]md; register it through the selected agent runtime/u);
 		assert.equal(existsSync(path.join(install, "ceal")), false);
 		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /command=cealctl/u);
 		assert.equal(readlinkSync(path.join(install, "cealctl")), ".ceal-cli/operator/current/cealctl-linux-arm64");
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "operator", "current")).isSymbolicLink(), true);
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "worker")), false);
+		assert.match(readFileSync(path.join(install, ".ceal-cli", "operator", "current", "guide", "SKILL.md"), "utf8"), /cealctl-guide/u);
 	});
 });
 
@@ -211,13 +215,64 @@ test("checksum failure preserves the selected command and leaves the other role 
 	});
 });
 
+test("guide checksum failure preserves the selected command before staging a generation", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		mkdirSync(install, { recursive: true });
+		writeFileSync(path.join(install, "ceal"), "old-ceal\n");
+		const sums = readFileSync(path.join(release, "SHA256SUMS"), "utf8");
+		writeFileSync(path.join(release, "SHA256SUMS"), sums.replace(/^[a-f0-9]{64}( {2}ceal-guide-SKILL[.]md)$/mu, `${"0".repeat(64)}$1`));
+		const result = runInstaller({ root, release, tools, install, cosignLog });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /Checksum mismatch for ceal-guide-SKILL[.]md/u);
+		assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "old-ceal\n");
+	});
+});
+
+test("installer rejects a selected guide that does not match its signed platform manifest", () => {
+	for (const [field, value] of [
+		["name", "cealctl-guide-SKILL.md"],
+		["binary", "cealctl"],
+		["sha256", "0".repeat(64)],
+	]) {
+		withFixture(({ root, release, tools, install, cosignLog }) => {
+			mkdirSync(install, { recursive: true });
+			writeFileSync(path.join(install, "ceal"), "old-ceal\n");
+			const manifestPath = path.join(release, "ceal-cli-platform-release-manifest-linux-arm64.json");
+			const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+			manifest.guides["ceal-guide"][field] = value;
+			writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+			writeChecksums(release);
+			const result = runInstaller({ root, release, tools, install, cosignLog });
+			assert.notEqual(result.status, 0, field);
+			assert.match(result.stderr, /Selected guide does not match the signed platform manifest/u);
+			assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "old-ceal\n");
+		});
+	}
+});
+
+test("installer rejects an unsafe existing staged guide without moving current", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		const first = runInstaller({ root, release, tools, install, cosignLog });
+		assert.equal(first.status, 0, first.stderr);
+		const current = path.join(install, ".ceal-cli", "worker", "current");
+		const before = readlinkSync(current);
+		const guidePath = path.join(install, ".ceal-cli", "worker", "current", "guide", "SKILL.md");
+		rmSync(guidePath);
+		symlinkSync(path.join(install, "ceal"), guidePath);
+		const result = runInstaller({ root, release, tools, install, cosignLog });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /Existing release generation is unsafe/u);
+		assert.equal(readlinkSync(current), before);
+	});
+});
+
 test("installer rejects signed checksum files with malformed extra lines", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const sums = readFileSync(path.join(release, "SHA256SUMS"), "utf8");
 		writeFileSync(path.join(release, "SHA256SUMS"), `${sums}not-a-checksum-line\n`);
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /exactly eight physical lines|malformed or unexpected entry/u);
+		assert.match(result.stderr, /exactly ten physical lines|malformed or unexpected entry/u);
 		assert.equal(existsSync(path.join(install, "ceal")), false);
 		assert.equal(existsSync(path.join(install, "cealctl")), false);
 	});
@@ -244,6 +299,7 @@ test("workflow builds from public source and never downloads injected draft bina
 	assert.match(workflow, /CEAL_CLI_APPROVED_SHA256SUMS_SHA256/u);
 	assert.match(workflow, /Unprivileged dual-platform release handoff/u);
 	assert.match(workflow, /THIRD_PARTY_NOTICES[.]txt SHA256SUMS install[.]sh/u);
+	assert.match(workflow, /ceal-guide-SKILL[.]md cealctl-guide-SKILL[.]md/u);
 	assert.match(workflow, /permissions:\n\s+contents: read/u);
 	assert.match(workflow, /environment: ceal-cli-release[\s\S]+contents: write[\s\S]+id-token: write/u);
 	assert.match(workflow, /gh release download/u);
@@ -292,8 +348,10 @@ function withFixture(callback) {
 		writeBinary(path.join(release, "cealctl-linux-arm64"), "cealctl");
 		writeBinary(path.join(release, "ceal-linux-amd64"), "ceal", "architecture-amd64");
 		writeBinary(path.join(release, "cealctl-linux-amd64"), "cealctl", "architecture-amd64");
-		writeFileSync(path.join(release, "ceal-cli-platform-release-manifest-linux-arm64.json"), "{\"release_version\":\"0.64.0\",\"platform\":\"linux-arm64\"}\n");
-		writeFileSync(path.join(release, "ceal-cli-platform-release-manifest-linux-amd64.json"), "{\"release_version\":\"0.64.0\",\"platform\":\"linux-amd64\"}\n");
+		writeFileSync(path.join(release, "ceal-guide-SKILL.md"), "name: ceal-guide\n");
+		writeFileSync(path.join(release, "cealctl-guide-SKILL.md"), "name: cealctl-guide\n");
+		writePlatformManifest(release, "linux-arm64");
+		writePlatformManifest(release, "linux-amd64");
 		writeFileSync(path.join(release, "THIRD_PARTY_NOTICES.txt"), "yaml 2.9.0 (ISC)\n");
 		writeFileSync(path.join(release, "install.sh"), "signed installer asset\n");
 		const checksummed = writeChecksums(release);
@@ -319,11 +377,29 @@ function withFixture(callback) {
 	}
 }
 
+function writePlatformManifest(release, platform) {
+	const guide = (name, binary) => ({
+		name,
+		binary,
+		sha256: digest(readFileSync(path.join(release, name))),
+	});
+	writeFileSync(path.join(release, `ceal-cli-platform-release-manifest-${platform}.json`), `${JSON.stringify({
+		release_version: "0.64.0",
+		platform,
+		guides: {
+			"ceal-guide": guide("ceal-guide-SKILL.md", "ceal"),
+			"cealctl-guide": guide("cealctl-guide-SKILL.md", "cealctl"),
+		},
+	}, null, 2)}\n`);
+}
+
 function writeChecksums(release) {
 	const checksummed = [
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-cli-platform-release-manifest-linux-amd64.json",
 		"ceal-cli-platform-release-manifest-linux-arm64.json",
+		"ceal-guide-SKILL.md",
+		"cealctl-guide-SKILL.md",
 		"ceal-linux-amd64",
 		"ceal-linux-arm64",
 		"cealctl-linux-amd64",

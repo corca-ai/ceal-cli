@@ -209,7 +209,7 @@ and hands both exact sets to an unprivileged assembly job. That job creates one
 dual-platform checksum set, includes the tag-bound installer, uploads the exact
 handoff, and reports its digest for review. The protected release job only
 accepts that handoff, verifies the operator-approved commit and digest, signs
-each of the nine primary assets with GitHub Actions OIDC, and uploads them with
+each of the ten primary assets with GitHub Actions OIDC, and uploads them with
 their signature and certificate sidecars to a draft release. The legacy
 `cealctl-release.yml` filename is retained because it is part of the signing
 identity verified by the installer.
@@ -220,7 +220,7 @@ The privileged job is gated by the `ceal-cli-release` environment. Its
 unprivileged assembly artifact's `SHA256SUMS`. The operator order is: inspect
 the assembly job summary and exact downloadable handoff, set both environment
 variables, then approve the protected job. A non-empty draft is reused only
-when its full 27-file primary/sidecar inventory and remote bytes/signatures verify. A
+when its full 30-file primary/sidecar inventory and remote bytes/signatures verify. A
 partial or unexpected draft fails with an explicit delete/recreate instruction
 instead of overwriting assets.
 
@@ -229,8 +229,9 @@ instead of overwriting assets.
 System-wide or privileged installation is not supported. The installer
 preserves an existing directory's mode and unrelated files.
 
-`install.sh` downloads the selected role's signed binary plus the manifest,
-notice, and signed checksum inventory and their sidecars, constrains the
+`install.sh` downloads the selected role's signed binary plus its matching
+signed guide, the manifest, notice, and signed checksum inventory and their
+sidecars, constrains the
 signing identity to this repository, workflow, issuer, and tag, validates the
 exact signed checksum inventory, checks the selected binary digest, and
 smoke-runs only that command. It installs the selected role into its own
@@ -241,6 +242,27 @@ preserves that role's previous generation and leaves the other command
 untouched. A successful update retains the previous generation locally, but
 automatic rollback is not performed. Reinstall an explicitly approved earlier
 tag with the same role to roll back. Unsigned installation is unsupported.
+The matching guide is staged as `guide/SKILL.md` inside that role's signed
+generation; the installer deliberately does not inject it into a particular
+agent runtime. Its final line reports the exact resolved path. Register that
+file through the selected agent's normal skill mechanism. For example, a Codex
+user who installed the worker role can link its update-safe `current` guide
+directory into Codex's skill directory:
+
+```sh
+CEAL_INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -sfnT "$CEAL_INSTALL_DIR/.ceal-cli/worker/current/guide" \
+  "${CODEX_HOME:-$HOME/.codex}/skills/ceal-guide"
+```
+
+An operator uses the same pattern with `operator/current/guide` and
+`cealctl-guide`. The link deliberately follows the role-owned `current`
+generation, so a verified update changes the guide and binary together. This
+registration is a local agent-host choice; the installer neither modifies an
+agent configuration nor claims that a staged guide has already been loaded.
+The `-T` form refuses an existing real directory instead of nesting a link
+inside it; inspect and replace a previous local registration deliberately.
 
 ## Release boundary
 

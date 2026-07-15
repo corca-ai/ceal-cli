@@ -63,15 +63,16 @@ export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 		for (const command of COMMANDS) {
 			artifacts.push(await buildOne({ command, normalized, work, deps }));
 		}
+		const guides = buildGuideAssets(normalized, deps);
 		const noticeName = "THIRD_PARTY_NOTICES.txt";
 		const noticeBytes = readFileSync(path.join(ROOT, noticeName));
 		const notices = { name: noticeName, sha256: digest(noticeBytes), bytes: noticeBytes.length };
-		const manifest = buildManifest(normalized, artifacts, notices);
+		const manifest = buildManifest(normalized, artifacts, guides, notices);
 		const manifestName = "ceal-cli-platform-release-manifest.json";
 		const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
 		writeFileSync(path.join(normalized.outputDir, manifestName), manifestBytes, { mode: 0o644 });
 		writeFileSync(path.join(normalized.outputDir, noticeName), noticeBytes, { mode: 0o644 });
-		const checksummed = [...artifacts.map((item) => ({ name: item.name, sha256: item.sha256 })), {
+		const checksummed = [...artifacts.map((item) => ({ name: item.name, sha256: item.sha256 })), ...guides.map((item) => ({ name: item.name, sha256: item.sha256 })), {
 			name: manifestName,
 			sha256: digest(manifestBytes),
 		}, {
@@ -88,6 +89,7 @@ export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 			platform: normalized.platform,
 			output_dir: normalized.outputDir,
 			artifacts,
+			guides,
 			manifest: { name: manifestName, sha256: digest(manifestBytes) },
 			notices,
 			checksums: { name: "SHA256SUMS", entry_count: checksummed.length },
@@ -98,6 +100,31 @@ export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 	} finally {
 		rmSync(work, { recursive: true, force: true });
 	}
+}
+
+function buildGuideAssets(normalized, deps) {
+	const guides = normalized.contract.guides;
+	if (!guides || typeof guides !== "object" || Array.isArray(guides)) fail("guide_contract_invalid", "Release contract must declare signed guide assets.");
+	return Object.entries(guides).map(([id, candidate]) => {
+		if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) fail("guide_contract_invalid", "Release contract guide entry is invalid.");
+		const guide = candidate;
+		const sourcePath = resolveGuideSource(guide.path);
+		const name = requirePattern(guide.asset, "guide asset", /^[a-z][a-z0-9-]{0,63}-SKILL[.]md$/u);
+		const binary = requirePattern(guide.binary, "guide binary", /^(ceal|cealctl)$/u);
+		const bytes = (deps.readGuide ?? readFileSync)(sourcePath);
+		const sha256 = digest(bytes);
+		if (guide.sha256 !== sha256) fail("guide_drift", "Release contract guide digest does not match source.");
+		writeFileSync(path.join(normalized.outputDir, name), bytes, { mode: 0o644 });
+		return { id, name, binary, bytes: bytes.length, sha256 };
+	});
+}
+
+function resolveGuideSource(value) {
+	const relative = requirePattern(value, "guide path", /^skills\/[a-z][a-z0-9-]{0,63}\/SKILL[.]md$/u);
+	const sourcePath = path.resolve(ROOT, relative);
+	const stat = lstatSync(sourcePath);
+	if (stat.isSymbolicLink() || !stat.isFile()) fail("guide_contract_invalid", "Release guide source must be a regular file.");
+	return sourcePath;
 }
 
 async function buildOne({ command, normalized, work, deps }) {
@@ -298,7 +325,7 @@ export function assertRequiredCommandDiscovery(discoveredCommands, requiredComma
 	if (missing.length > 0) fail("smoke_failed", `Built ${command} command discovery omitted required commands: ${missing.join(", ")}.`);
 }
 
-function buildManifest(normalized, artifacts, notices) {
+function buildManifest(normalized, artifacts, guides, notices) {
 	return {
 		schema_version: "ceal.cli_platform_release_manifest.v1",
 		artifact_state: "unsigned_build_output",
@@ -307,6 +334,7 @@ function buildManifest(normalized, artifacts, notices) {
 		platform: normalized.platform,
 		protocol: normalized.contract.protocol,
 		artifacts: Object.fromEntries(artifacts.map((item) => [item.id, { name: item.name, bytes: item.bytes, sha256: item.sha256 }])),
+		guides: Object.fromEntries(guides.map((item) => [item.id, { name: item.name, binary: item.binary, bytes: item.bytes, sha256: item.sha256 }])),
 		third_party_notices: notices,
 		signature_policy: {
 			method: "cosign_keyless_blob",

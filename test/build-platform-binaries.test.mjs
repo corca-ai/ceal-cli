@@ -28,6 +28,8 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.equal(result.ok, true);
 			assert.equal(result.writes_external, false);
 			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
+			assert.deepEqual(result.guides.map((item) => item.id), ["ceal-guide", "cealctl-guide"]);
+			assert.deepEqual(result.guides.map((item) => item.binary), ["ceal", "cealctl"]);
 			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
 				["session", "capabilities"],
 				["login", "sessions", "logout", "access", "connectors", "enrollments"],
@@ -43,10 +45,19 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.equal(manifest.release_version, "0.64.0");
 			assert.equal(manifest.platform, platform);
 			assert.deepEqual(Object.keys(manifest.artifacts), ["ceal", "cealctl"]);
+			assert.deepEqual(Object.keys(manifest.guides), ["ceal-guide", "cealctl-guide"]);
+			assert.deepEqual(Object.fromEntries(Object.entries(manifest.guides).map(([id, guide]) => [id, guide.binary])), {
+				"ceal-guide": "ceal",
+				"cealctl-guide": "cealctl",
+			});
 			assert.deepEqual(manifest.third_party_notices, result.notices);
 			const sums = readFileSync(path.join(outputDir, "SHA256SUMS"), "utf8").trim().split("\n");
-			assert.equal(sums.length, 4);
+			assert.equal(sums.length, 6);
 			for (const item of result.artifacts) {
+				assert.ok(sums.includes(`${item.sha256}  ${item.name}`));
+				assert.equal(item.sha256, digest(readFileSync(path.join(outputDir, item.name))));
+			}
+			for (const item of result.guides) {
 				assert.ok(sums.includes(`${item.sha256}  ${item.name}`));
 				assert.equal(item.sha256, digest(readFileSync(path.join(outputDir, item.name))));
 			}
@@ -201,12 +212,14 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 			repository: "corca-ai/ceal-cli",
 			release_version: "0.64.0",
 			protocol: {},
+			guides: fakeGuideContract(),
 			first_proof_matrix: { platform: "linux-arm64" },
 			native_build_matrix: { platforms: ["linux-arm64", "linux-amd64"], signed_release_platforms: ["linux-arm64", "linux-amd64"] },
 			publication_blockers: [],
 			non_claims: [],
 		}),
 		readPackageManifest: (command) => ({ version: "0.64.0", bin: { [command.id]: "./dist/bin.js" } }),
+		readGuide: () => Buffer.from("fake signed guide\n"),
 		bundle: async ({ command, bundlePath }) => {
 			calls.push({ kind: "bundle", command: command.id });
 			writeFileSync(bundlePath, `bundle:${command.id}\n`);
@@ -233,6 +246,14 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 				required_commands: command.requiredCommands,
 			};
 		},
+	};
+}
+
+function fakeGuideContract() {
+	const sha256 = digest(Buffer.from("fake signed guide\n"));
+	return {
+		"ceal-guide": { path: "skills/ceal-guide/SKILL.md", asset: "ceal-guide-SKILL.md", binary: "ceal", sha256 },
+		"cealctl-guide": { path: "skills/cealctl-guide/SKILL.md", asset: "cealctl-guide-SKILL.md", binary: "cealctl", sha256 },
 	};
 }
 

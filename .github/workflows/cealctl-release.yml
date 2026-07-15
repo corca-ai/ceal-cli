@@ -52,6 +52,7 @@ jobs:
             "ceal-$PLATFORM" \
             "cealctl-$PLATFORM" \
             ceal-cli-platform-release-manifest.json \
+            ceal-guide-SKILL.md cealctl-guide-SKILL.md \
             THIRD_PARTY_NOTICES.txt \
             SHA256SUMS
           do
@@ -67,6 +68,8 @@ jobs:
             dist-a/ceal-${{ matrix.platform }}
             dist-a/cealctl-${{ matrix.platform }}
             dist-a/ceal-cli-platform-release-manifest.json
+            dist-a/ceal-guide-SKILL.md
+            dist-a/cealctl-guide-SKILL.md
             dist-a/THIRD_PARTY_NOTICES.txt
             dist-a/SHA256SUMS
 
@@ -100,7 +103,7 @@ jobs:
           for platform in linux-arm64 linux-amd64; do
             source="handoff/$platform"
             [ "$(find "$source" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
-              "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-$platform cealctl-$platform " ] \
+              "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-guide-SKILL.md cealctl-guide-SKILL.md ceal-$platform cealctl-$platform " ] \
               || { echo "Unexpected $platform build handoff inventory" >&2; exit 1; }
             (cd "$source" && sha256sum -c SHA256SUMS)
             cp "$source/ceal-$platform" "$source/cealctl-$platform" dist/
@@ -109,11 +112,16 @@ jobs:
           done
           cmp handoff/linux-arm64/THIRD_PARTY_NOTICES.txt handoff/linux-amd64/THIRD_PARTY_NOTICES.txt
           cp handoff/linux-arm64/THIRD_PARTY_NOTICES.txt dist/
+          for guide in ceal-guide-SKILL.md cealctl-guide-SKILL.md; do
+            cmp "handoff/linux-arm64/$guide" "handoff/linux-amd64/$guide"
+            cp "handoff/linux-arm64/$guide" dist/
+          done
           cp install.sh dist/
           (cd dist && sha256sum \
             THIRD_PARTY_NOTICES.txt \
             ceal-cli-platform-release-manifest-linux-amd64.json \
             ceal-cli-platform-release-manifest-linux-arm64.json \
+            ceal-guide-SKILL.md cealctl-guide-SKILL.md \
             ceal-linux-amd64 ceal-linux-arm64 \
             cealctl-linux-amd64 cealctl-linux-arm64 \
             install.sh > SHA256SUMS)
@@ -163,7 +171,7 @@ jobs:
           [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "The ceal-cli-release environment has not approved SHA256SUMS $observed" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
-            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest-linux-amd64.json ceal-cli-platform-release-manifest-linux-arm64.json ceal-linux-amd64 ceal-linux-arm64 cealctl-linux-amd64 cealctl-linux-arm64 install.sh " ] \
+            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest-linux-amd64.json ceal-cli-platform-release-manifest-linux-arm64.json ceal-guide-SKILL.md cealctl-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 cealctl-linux-amd64 cealctl-linux-arm64 install.sh " ] \
             || { echo "Unexpected build handoff inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)
           for platform in linux-arm64 linux-amd64; do
@@ -185,6 +193,7 @@ jobs:
             ceal-linux-amd64 cealctl-linux-amd64
             ceal-cli-platform-release-manifest-linux-arm64.json
             ceal-cli-platform-release-manifest-linux-amd64.json
+            ceal-guide-SKILL.md cealctl-guide-SKILL.md
             THIRD_PARTY_NOTICES.txt SHA256SUMS install.sh
           )
           expected=()
