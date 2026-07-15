@@ -11,6 +11,7 @@ import {
 } from "./access-admin-client.js";
 import {
 	applyCealProfileConnectors,
+	checkCealProfileConnectors,
 	CealProfileConnectorAdminClientError,
 	decodeCealProfileConnectorRegistry,
 	showCealProfileConnectors,
@@ -116,11 +117,11 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	{
 		name: "connectors",
 		description: "Inspect or apply Profile connector-principal bindings without resource lists.",
-		usage: "cealctl connectors [show | apply --stdin [--dry-run] [--operator-session <name>]]",
+		usage: "cealctl connectors [show | check | apply --stdin [--dry-run] [--operator-session <name>]]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.profile_connectors.v1",
-		recovery: "Run 'cealctl connectors --help', inspect the current binding registry, then validate a complete replacement before applying it.",
+		recovery: "Run 'cealctl connectors --help', inspect connector readiness or the current binding registry, then validate a complete replacement before applying it.",
 	},
 	{
 		name: "enrollments",
@@ -169,6 +170,7 @@ const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], rea
 	],
 	connectors: [
 		"  show                           Read current Profile connector-principal bindings.",
+		"  check                          Run one bounded, read-only operation check for each active Profile binding.",
 		"  apply --stdin                  Read one complete ceal.gateway_profile_connector_registry.v1 YAML document.",
 		"  --dry-run                      Validate the replacement without changing Gateway state.",
 		"  --operator-session <name>      Use a named stored admin session.",
@@ -328,15 +330,15 @@ function runProfileConnectors(options: readonly string[], io: CealctlIo, runtime
 		schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: "ready", proof_level: "surface",
 		writes_external: false, next_action: "Run 'cealctl connectors show' or inspect 'cealctl connectors --help'.",
 	});
-	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "apply")) {
+	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "check" || options[0] === "apply")) {
 		return writeHelp(profileConnectorActionHelp(options[0]), io);
 	}
-	const parsed = parseAccessOptions(options);
+	const parsed = parseProfileConnectorOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid connector options.", io);
 	return executeProfileConnectors(parsed, io, runtime);
 }
 
-function profileConnectorActionHelp(action: "show" | "apply"): string {
+function profileConnectorActionHelp(action: "show" | "check" | "apply"): string {
 	if (action === "show") return [
 		"Usage: cealctl connectors show [--operator-session <name>]",
 		"",
@@ -345,6 +347,17 @@ function profileConnectorActionHelp(action: "show" | "apply"): string {
 		"Effect: read_only",
 		"Evidence: host_decision",
 		"Result schema: cealctl.profile_connectors.v1",
+		"  --operator-session <name>  Use a named stored admin session.",
+		"  -h, --help                 Show this help without performing work.",
+	].join("\n");
+	if (action === "check") return [
+		"Usage: cealctl connectors check [--operator-session <name>]",
+		"",
+		"Run one bounded, read-only connector operation check for every active Profile binding.",
+		"",
+		"Effect: read_only",
+		"Evidence: host_decision",
+		"Result schema: cealctl.profile_connector_check.v1",
 		"  --operator-session <name>  Use a named stored admin session.",
 		"  -h, --help                 Show this help without performing work.",
 	].join("\n");
@@ -364,7 +377,7 @@ function profileConnectorActionHelp(action: "show" | "apply"): string {
 }
 
 async function executeProfileConnectors(
-	parsed: { action: "show" | "apply"; dryRun: boolean; operatorSession?: string },
+	parsed: { action: "show" | "check" | "apply"; dryRun: boolean; operatorSession?: string },
 	io: CealctlIo,
 	runtime: CealctlRuntime,
 ): Promise<number> {
@@ -382,6 +395,16 @@ async function executeProfileConnectors(
 			adminToken: refreshed.accessToken,
 			fetchFn: runtime.fetchFn,
 		};
+		if (parsed.action === "check") {
+			const result = await checkCealProfileConnectors(common);
+			return writeYaml(io.stdout, {
+				schema_version: "cealctl.profile_connector_check.v1", command: "cealctl", status: result.status,
+				checks: result.checks, raw_token_visible: false, proof_level: result.proof_level,
+				next_action: result.checks.some((check) => check.readiness !== "ready")
+					? "Resolve the reported connector condition, then run 'cealctl connectors check' again."
+					: "Use 'ceal capabilities' from an approved client to discover the current Gateway catalog.",
+			});
+		}
 		const result = parsed.action === "show"
 			? await showCealProfileConnectors(common)
 			: await applyCealProfileConnectors({ ...common, registry: registry!, dryRun: parsed.dryRun });
@@ -395,8 +418,16 @@ async function executeProfileConnectors(
 		});
 	} catch (error) {
 		const kind = error instanceof CealProfileConnectorAdminClientError ? error.code : sessionErrorCode(error);
-		return writeSessionFailure("cealctl.profile_connectors.v1", kind, "The Gateway Profile connector registry could not be read or applied.", io);
+		return writeSessionFailure(parsed.action === "check" ? "cealctl.profile_connector_check.v1" : "cealctl.profile_connectors.v1", kind, parsed.action === "check" ? "The Gateway Profile connector readiness check could not be completed." : "The Gateway Profile connector registry could not be read or applied.", io);
 	}
+}
+
+function parseProfileConnectorOptions(options: readonly string[]): { action: "show" | "check" | "apply"; dryRun: boolean; operatorSession?: string } | null {
+	if (options[0] === "check") {
+		const parsed = parseAccessShowOptions(options.slice(1));
+		return parsed ? { action: "check", dryRun: false, ...(parsed.operatorSession ? { operatorSession: parsed.operatorSession } : {}) } : null;
+	}
+	return parseAccessOptions(options);
 }
 
 async function readProfileConnectorRegistryFromStdin(runtime: CealctlRuntime) {

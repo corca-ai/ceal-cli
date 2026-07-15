@@ -32,11 +32,11 @@ test("canonical registry is reachable through stable, read-only help", () => {
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
-	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"], ["connectors", "show", "--help"], ["connectors", "apply", "--help"]]) {
+	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"], ["connectors", "show", "--help"], ["connectors", "check", "--help"], ["connectors", "apply", "--help"]]) {
 		const result = run(args);
 		assert.equal(result.code, 0);
 		assert.equal(result.stderr, "");
-		assert.match(result.stdout, /^Usage: cealctl (?:access|connectors) (?:show|apply)/u);
+		assert.match(result.stdout, /^Usage: cealctl (?:access|connectors) (?:show|check|apply)/u);
 	}
 });
 
@@ -111,6 +111,10 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		generation: 1,
 		bindings: [{ connector_binding_ref: "binding:work-slack", profile_ref: "profile:work", connector_kind: "slack", connector_principal_ref: "principal:slack-work", revision: 1, status: "active" }],
 	};
+	const connectorCheck = {
+		schema_version: "ceal.profile_connector_check.v1", ok: true, status: "completed", proof_level: "host_decision",
+		checks: [{ connector_binding_ref: "binding:work-slack", profile_ref: "profile:work", operation: "message.search", readiness: "ready", diagnostic_code: "ready", recovery: "No action is required.", scope_revision: 1, checked_at: "2099-07-13T00:00:00.000Z", expires_at: "2099-07-13T00:05:00.000Z" }],
+	};
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
@@ -155,6 +159,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 			schema_version: "ceal.profile_connector_state.v1", ok: true, status: body.dry_run ? "validated" : "applied", dry_run: body.dry_run,
 			registry: body.registry, proof_level: "host_decision",
 		});
+		if (request.url === "/api/cealctl/v1/profile-connectors/check" && request.method === "POST") return json(response, 200, connectorCheck);
 		return json(response, 404, { error_code: "not_found" });
 	});
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -212,6 +217,9 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		const connectorShown = await asyncYamlRun(["connectors", "show"], 0, { homeDir });
 		assert.equal(connectorShown.status, "configured");
 		assert.deepEqual(connectorShown.registry, connectorRegistry);
+		const connectorChecked = await asyncYamlRun(["connectors", "check"], 0, { homeDir });
+		assert.equal(connectorChecked.status, "completed");
+		assert.equal(connectorChecked.checks[0].readiness, "ready");
 		const connectorYaml = renderPlainYamlDocument(connectorRegistry);
 		const connectorValidated = await asyncYamlRun(["connectors", "apply", "--stdin", "--dry-run"], 0, {
 			homeDir, readStdin: async () => connectorYaml,
@@ -223,6 +231,9 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		for (const request of connectorRequests) assert.equal(request.authorization, `Bearer ${adminToken}`);
 		assert.equal(connectorRequests[1].body.schema_version, "ceal.profile_connector_apply.v1");
 		assert.doesNotMatch(JSON.stringify(connectorRequests), /channel|resource|xox[ab]/u);
+		const readinessRequest = observed.find((entry) => entry.url === "/api/cealctl/v1/profile-connectors/check");
+		assert.equal(readinessRequest.authorization, `Bearer ${adminToken}`);
+		assert.equal(readinessRequest.body, null);
 		const stored = readFileSync(sessionsPath, "utf8");
 		assert.match(stored, new RegExp(rotatedRefreshToken, "u"));
 		assert.doesNotMatch(stored, new RegExp(refreshToken, "u"));
@@ -392,6 +403,9 @@ function compatibleContract(origin) {
 		{ id: "profile_connector_control.v1", routes: [
 			{ method: "GET", path: "/api/cealctl/v1/profile-connectors", required_scope: "ceal.profile_connector.manage" },
 			{ method: "PUT", path: "/api/cealctl/v1/profile-connectors", required_scope: "ceal.profile_connector.manage" },
+		] },
+		{ id: "profile_connector_readiness.v1", routes: [
+			{ method: "POST", path: "/api/cealctl/v1/profile-connectors/check", required_scope: "ceal.profile_connector.inspect" },
 		] },
 			{ id: "personal_client_enrollment.v1", routes: [
 				{ method: "POST", path: "/api/cealctl/v1/enrollments", required_scope: "ceal.client.enroll" },
