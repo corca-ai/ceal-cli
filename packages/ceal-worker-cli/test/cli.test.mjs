@@ -277,7 +277,7 @@ test("message.get keeps only retrieval data and verified receipt state in the de
 			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
 			text: "Full authorized message text.", offset: 0,
 		},
-		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
+		redaction: { state: "applied", omitted_classes: ["credential_material"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	}, [{ event_ref: "gateway-audit:get:001" }], "request:get:001", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
 		capabilityId: "message.get", targetRef: "target:team-inbox", arguments: {}, purpose: "Read",
@@ -313,7 +313,7 @@ test("resource.resolve preserves one safe source citation and rejects unsafe Sla
 			ref: "message:approved_001", kind: "message",
 			source: { provider: "slack", url: sourceUrl },
 		} },
-		redaction: { state: "applied", omitted_classes: ["provider_locator"] },
+		redaction: { state: "applied", omitted_classes: ["credential_material"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	}) : readbackResponse(request));
 	const invalid = await yamlRun([

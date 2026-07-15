@@ -217,7 +217,7 @@ test("message.get admits only its exact authorized text result", () => {
 			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
 			text: "Approved source text may contain slack:C0123456789 without becoming audit data.", offset: 0,
 		},
-		redaction: { state: "applied", omitted_classes: ["credential_material", "provider_locator"] },
+		redaction: { state: "applied", omitted_classes: ["credential_material"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
@@ -231,6 +231,13 @@ test("message.get admits only its exact authorized text result", () => {
 	const unsafeSource = structuredClone(response);
 	unsafeSource.value.data.source.url += "?token=forbidden";
 	assert.throws(() => decodeCealClientResponse(unsafeSource, request), hasCode("invalid_client_response"));
+	const falseLocatorOmission = structuredClone(response);
+	falseLocatorOmission.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
+	assert.throws(() => decodeCealClientResponse(falseLocatorOmission, request), hasCode("invalid_client_response"));
+	const noCitation = structuredClone(response);
+	delete noCitation.value.data.source;
+	noCitation.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
+	assert.deepEqual(decodeCealClientResponse(noCitation, request), noCitation);
 });
 
 test("resource.resolve admits only the exact safe Slack message resource projection", () => {
@@ -245,7 +252,7 @@ test("resource.resolve admits only the exact safe Slack message resource project
 		data: { schema_version: "ceal.resource_resolve_result.v1", resource: {
 			ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
 		} },
-		redaction: { state: "applied", omitted_classes: ["provider_locator"] },
+		redaction: { state: "applied", omitted_classes: ["credential_material"] },
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
@@ -258,6 +265,9 @@ test("resource.resolve admits only the exact safe Slack message resource project
 		mutate(malformed);
 		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
 	}
+	const falseLocatorOmission = structuredClone(response);
+	falseLocatorOmission.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
+	assert.throws(() => decodeCealClientResponse(falseLocatorOmission, request), hasCode("invalid_client_response"));
 });
 
 test("search minimization names the intentional provider citation and rejects a false claim", () => {

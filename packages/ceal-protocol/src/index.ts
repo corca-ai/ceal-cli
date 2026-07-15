@@ -445,13 +445,30 @@ function validateCallRedaction(value: unknown, capabilityId: unknown, data: unkn
 		const expected = sourceReturned ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
 		if (JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
 	}
+	if (capabilityId === "message.get") {
+		const sourceReturned = isMessageGetSourceReturned(data);
+		const expected = sourceReturned ? ["credential_material"] : ["credential_material", "provider_locator"];
+		if (JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
+	}
+	if (capabilityId === "resource.resolve" && JSON.stringify(redaction.omitted_classes) !== JSON.stringify(["credential_material"])) {
+		invalidResponse();
+	}
 }
 
 function isMessageSearchSourceReturned(value: unknown): boolean {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const results = (value as Record<string, unknown>).results;
-	return Array.isArray(results) && results.some((item) => item !== null && typeof item === "object" && !Array.isArray(item)
-		&& "source" in item && (item as Record<string, unknown>).source !== undefined);
+	return Array.isArray(results) && results.some(isSourceBearingSearchResult);
+}
+
+function isSourceBearingSearchResult(value: unknown): boolean {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
+}
+
+function isMessageGetSourceReturned(value: unknown): boolean {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
 }
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {
@@ -687,12 +704,17 @@ function assertSafeJsonRecord(record: Record<string, unknown>, options: SafeJson
 	if (entries.length > 128) invalidByContext(options);
 	for (const [key, child] of entries) {
 		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
-		if (options.allowAuthorizedMessageContent && key === "text") {
-			if (typeof child !== "string" || byteLength(child) > 8192) invalidByContext(options);
-		} else if (key === "url" && isAuthorizedSlackUrl(child, options.allowAuthorizedSourceUrl)) {
-			continue;
-		} else assertSafeJsonValue(child, options, depth + 1, count);
+		assertSafeJsonRecordChild(key, child, options, depth, count);
 	}
+}
+
+function assertSafeJsonRecordChild(key: string, child: unknown, options: SafeJsonOptions, depth: number, count: { value: number }): void {
+	if (options.allowAuthorizedMessageContent && key === "text") {
+		if (typeof child !== "string" || byteLength(child) > 8192) invalidByContext(options);
+		return;
+	}
+	if (key === "url" && isAuthorizedSlackUrl(child, options.allowAuthorizedSourceUrl)) return;
+	assertSafeJsonValue(child, options, depth + 1, count);
 }
 
 function isSafeNegativeMaterialAssertion(key: string, value: unknown): boolean {
