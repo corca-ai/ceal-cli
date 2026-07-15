@@ -86,6 +86,13 @@ If the active discovery does not expose a permitted resolution and bounded-read
 route for the supplied link, stop before any write. Do not substitute a search
 guess, raw provider identifier, or another integration.
 
+For a discovered write, keep one stable `idempotency_key` for one intended
+side effect. If the Gateway says the provider may have been reached, or its
+receipt is not independently verified, preserve that key, inspect the receipt,
+and ask the Gateway operator to resolve the unknown outcome. Never create a
+new key, claim delivery, or make a second post merely because the first call
+returned an error.
+
 The returned `source` object is an ordinary citation. Do not open it
 automatically, treat it as a bearer credential, or infer that its presence
 authorizes another Ceal action. If resolution is unavailable or denied, report
