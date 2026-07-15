@@ -148,8 +148,7 @@ function decodeCheck(value: unknown): CealProfileConnectorCheck {
 	if (!isSafeOperation(value.operation) || !isReadiness(value.readiness)) invalidResponse();
 	if (!isSafeDiagnostic(value.diagnostic_code) || !isSafeRecovery(value.recovery)) invalidResponse();
 	if (!isScopeRevision(value.scope_revision)) invalidResponse();
-	if (!isIsoTimestamp(value.checked_at) || !isIsoTimestamp(value.expires_at)) invalidResponse();
-	if (Date.parse(value.expires_at) <= Date.parse(value.checked_at)) invalidResponse();
+	if (!hasOrderedCheckTimes(value.checked_at, value.expires_at)) invalidResponse();
 	return structuredClone(value) as unknown as CealProfileConnectorCheck;
 }
 function hasKeys(value: Record<string, unknown>, keys: readonly string[]) { return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()); }
@@ -159,6 +158,9 @@ function isReadiness(value: unknown): value is CealProfileConnectorReadiness { r
 function isSafeDiagnostic(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
 function isSafeRecovery(value: unknown): value is string { return typeof value === "string" && value.length >= 1 && value.length <= 512; }
 function isScopeRevision(value: unknown): boolean { return value === null || (Number.isSafeInteger(value) && Number(value) >= 1); }
+function hasOrderedCheckTimes(checkedAt: unknown, expiresAt: unknown): boolean {
+	return isIsoTimestamp(checkedAt) && isIsoTimestamp(expiresAt) && Date.parse(expiresAt) > Date.parse(checkedAt);
+}
 function isIsoTimestamp(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function parseJson(bytes: Uint8Array): unknown {
 	try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
