@@ -440,19 +440,18 @@ function validateCallRedaction(value: unknown, capabilityId: unknown, data: unkn
 		|| redaction.omitted_classes.length === 0
 		|| redaction.omitted_classes.length > 32) invalidResponse();
 	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
+	const expected = expectedCallRedactionOmissions(capabilityId, data);
+	if (expected && JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
+}
+
+function expectedCallRedactionOmissions(capabilityId: unknown, data: unknown): readonly string[] | null {
 	if (capabilityId === "message.search") {
-		const sourceReturned = isMessageSearchSourceReturned(data);
-		const expected = sourceReturned ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
-		if (JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
+		return isMessageSearchSourceReturned(data) ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
 	}
 	if (capabilityId === "message.get") {
-		const sourceReturned = isMessageGetSourceReturned(data);
-		const expected = sourceReturned ? ["credential_material"] : ["credential_material", "provider_locator"];
-		if (JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
+		return isMessageGetSourceReturned(data) ? ["credential_material"] : ["credential_material", "provider_locator"];
 	}
-	if (capabilityId === "resource.resolve" && JSON.stringify(redaction.omitted_classes) !== JSON.stringify(["credential_material"])) {
-		invalidResponse();
-	}
+	return capabilityId === "resource.resolve" ? ["credential_material"] : null;
 }
 
 function isMessageSearchSourceReturned(value: unknown): boolean {
