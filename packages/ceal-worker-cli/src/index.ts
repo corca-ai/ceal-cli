@@ -187,8 +187,7 @@ function commandHelp(command: CealCommandDefinition): string {
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
 			"  key=value               Capability input; repeat for each discovered field.",
 			"  message.search          Requires query=<text>; optional limit=<1-10>, offset=<0-1000>.",
-			"  message.get             Requires ref=<message-ref>; optional offset=<0-40000>, limit_bytes=<256-8192>.",
-			"  message.create          Requires reply_to=<message-ref>, text=<plain-text>, idempotency_key=<safe-key>.",
+			"  message.get             Requires ref=<message-ref>; optional offset=<0-40000>, limit_bytes=<256-8192>. message.create requires reply_to=<message-ref>, text=<plain-text>, idempotency_key=<safe-key>.",
 			"  resource.resolve        Requires url=<safe Slack permalink>; returns an opaque message ref.",
 		] : command.name === "receipt" ? [
 			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
