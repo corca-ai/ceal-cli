@@ -226,23 +226,32 @@ function writeState(state: OperatorSessionState, home?: string): void {
 async function acquireStateLock(lockPath: string): Promise<() => void> {
 	const deadline = Date.now() + STATE_LOCK_MAX_WAIT_MS;
 	while (true) {
-		try {
-			mkdirSync(lockPath, { mode: 0o700 });
-			const nonce = randomUUID();
-			try {
-				writeFileSync(join(lockPath, STATE_LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
-			} catch (error) {
-				rmSync(lockPath, { recursive: true, force: true });
-				throw error;
-			}
-			return () => { releaseStateLock(lockPath, nonce); };
-		} catch (error) {
-			if (!isAlreadyExists(error)) throw new OperatorSessionStoreError("unsafe_state_path");
-			if (removeStaleStateLock(lockPath)) continue;
-			if (Date.now() >= deadline) throw new OperatorSessionStoreError("refresh_busy");
-			await sleep(STATE_LOCK_POLL_MS);
-		}
+		const nonce = createStateLock(lockPath);
+		if (nonce) return () => { releaseStateLock(lockPath, nonce); };
+		await waitForStateLock(lockPath, deadline);
 	}
+}
+
+function createStateLock(lockPath: string): string | null {
+	try { mkdirSync(lockPath, { mode: 0o700 }); }
+	catch (error) {
+		if (isAlreadyExists(error)) return null;
+		throw new OperatorSessionStoreError("unsafe_state_path");
+	}
+	const nonce = randomUUID();
+	try {
+		writeFileSync(join(lockPath, STATE_LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+		return nonce;
+	} catch {
+		rmSync(lockPath, { recursive: true, force: true });
+		throw new OperatorSessionStoreError("unsafe_state_path");
+	}
+}
+
+async function waitForStateLock(lockPath: string, deadline: number): Promise<void> {
+	if (removeStaleStateLock(lockPath)) return;
+	if (Date.now() >= deadline) throw new OperatorSessionStoreError("refresh_busy");
+	await sleep(STATE_LOCK_POLL_MS);
 }
 
 function releaseStateLock(lockPath: string, nonce: string): void {
@@ -252,31 +261,49 @@ function releaseStateLock(lockPath: string, nonce: string): void {
 }
 
 function removeStaleStateLock(lockPath: string): boolean {
-	let lock;
-	try { lock = lstatSync(lockPath); } catch { return true; }
-	if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) {
-		throw new OperatorSessionStoreError("unsafe_state_path");
-	}
+	const owner = staleStateLockOwner(lockPath);
+	if (owner === "initializing") return false;
+	if (owner === null || processMissing(owner.pid)) return removeStateLock(lockPath);
+	return false;
+}
+
+function staleStateLockOwner(lockPath: string): { pid: number; nonce: string } | "initializing" | null {
+	const lock = readSafeStateLockDirectory(lockPath);
+	if (!lock) return null;
 	const ownerPath = join(lockPath, STATE_LOCK_OWNER);
 	let owner;
 	try { owner = lstatSync(ownerPath); } catch {
-		if (Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS) return false;
-		rmSync(lockPath, { recursive: true, force: true });
-		return true;
+		return Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
 	}
-	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) {
-		throw new OperatorSessionStoreError("unsafe_state_path");
-	}
+	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) throw new OperatorSessionStoreError("unsafe_state_path");
 	const parsed = readStateLockOwner(lockPath);
 	if (!parsed) throw new OperatorSessionStoreError("unsafe_state_path");
+	return parsed;
+}
+
+function readSafeStateLockDirectory(lockPath: string) {
 	try {
-		process.kill(parsed.pid, 0);
-		return false;
+		const lock = lstatSync(lockPath);
+		if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) throw new OperatorSessionStoreError("unsafe_state_path");
+		return lock;
 	} catch (error) {
-		if (nodeErrorCode(error) !== "ESRCH") throw new OperatorSessionStoreError("unsafe_state_path");
-		rmSync(lockPath, { recursive: true, force: true });
-		return true;
+		if (error instanceof OperatorSessionStoreError) throw error;
+		if (nodeErrorCode(error) === "ENOENT") return null;
+		throw new OperatorSessionStoreError("unsafe_state_path");
 	}
+}
+
+function processMissing(pid: number): boolean {
+	try { process.kill(pid, 0); return false; }
+	catch (error) {
+		if (nodeErrorCode(error) === "ESRCH") return true;
+		throw new OperatorSessionStoreError("unsafe_state_path");
+	}
+}
+
+function removeStateLock(lockPath: string): boolean {
+	rmSync(lockPath, { recursive: true, force: true });
+	return true;
 }
 
 function readStateLockOwner(lockPath: string): { pid: number; nonce: string } | null {
@@ -296,7 +323,7 @@ function isAlreadyExists(error: unknown): boolean { return nodeErrorCode(error) 
 function nodeErrorCode(error: unknown): string | undefined {
 	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
-function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
 
 function ensureSafeStateDirectories(statePath: string): void {
 	const cealctlDir = dirname(statePath);

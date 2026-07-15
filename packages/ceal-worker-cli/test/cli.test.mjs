@@ -824,7 +824,7 @@ function rotatedClientSession(refreshToken) {
 	};
 }
 
-function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+function delay(milliseconds) { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
 
 function parseYaml(stdout) {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });

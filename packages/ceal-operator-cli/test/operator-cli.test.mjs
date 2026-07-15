@@ -516,7 +516,7 @@ function json(response, status, body) {
 }
 
 function response(status, body) {
-	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+	return new globalThis.Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
 function rotatedOperatorSession(origin, refreshToken) {
@@ -544,7 +544,7 @@ function runPackagedCealctl(args, homeDir) {
 	});
 }
 
-function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+function delay(milliseconds) { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
 
 function emptyAccessRegistry() {
 	return { schema_version: "ceal.gateway_access_registry.v1", generation: 1, memberships: [], clients: [], grants: [] };

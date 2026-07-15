@@ -11,7 +11,7 @@ import {
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
-import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
+import type { CealStoredSession } from "./profile-store.js";
 import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
