@@ -91,7 +91,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "capabilities",
 		description: "Discover Gateway-issued capabilities.",
-		usage: "ceal capabilities",
+		usage: "ceal capabilities [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -100,7 +100,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "call",
 		description: "Invoke an approved capability and read back its Gateway audit event.",
-		usage: "ceal call <capability-id> --target <target-ref> [key=value ...]",
+		usage: "ceal call <capability-id> --target <target-ref> [--profile <profile-ref>] [key=value ...]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.result.v2",
@@ -109,7 +109,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "receipt",
 		description: "Inspect safe Gateway evidence for one completed capability call.",
-		usage: "ceal receipt show <request-ref>",
+		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
@@ -171,8 +171,8 @@ function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
 function commandHelp(command: CealCommandDefinition): string {
 	const options = command.name === "capabilities"
 		? [
+			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --endpoint <https-url>  Gateway client endpoint.",
-			"  --profile <profile-ref> Gateway-issued profile reference.",
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
 			"  --token-stdin            Read the Gateway-issued client token from stdin.",
 		]
@@ -185,10 +185,12 @@ function commandHelp(command: CealCommandDefinition): string {
 		] : command.name === "call" ? [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
+			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
 			"  key=value               Capability input; repeat only fields in the discovered input contract.",
 			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		] : command.name === "receipt" ? [
 			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
+			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
 		] : [];
 	return [
 		`Usage: ${command.usage}`,
@@ -258,17 +260,19 @@ interface GatewayAccess {
 type GatewayAccessResolution = { ok: true; value: GatewayAccess } | { ok: false; exitCode: number };
 
 async function resolveGatewayAccess(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<GatewayAccessResolution> {
-	return options.length === 0 ? resolveStoredGatewayAccess(io, runtime) : resolveExplicitGatewayAccess(options, io, runtime);
+	const selectedProfile = storedProfileOption(options);
+	return selectedProfile ? resolveStoredGatewayAccess(io, runtime, selectedProfile)
+		: options.length === 0 ? resolveStoredGatewayAccess(io, runtime) : resolveExplicitGatewayAccess(options, io, runtime);
 }
 
-async function resolveStoredGatewayAccess(io: CealCliIo, runtime: CealCommandRuntime): Promise<GatewayAccessResolution> {
+async function resolveStoredGatewayAccess(io: CealCliIo, runtime: CealCommandRuntime, selectedProfile?: string): Promise<GatewayAccessResolution> {
 	if (!runtime.loadSession) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
 	try {
 		const loaded = await runtime.loadSession();
 		const session = loaded ? await ensureCurrentSession(loaded, runtime) : null;
 		if (!session) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
 		return { ok: true, value: {
-			endpoint: session.gatewayEndpoint, profileRef: session.profileRef, accessToken: session.accessToken,
+			endpoint: session.gatewayEndpoint, profileRef: selectedProfile ?? session.profileRef, accessToken: session.accessToken,
 			storedSession: session, requestId: runtime.nextRequestId?.() ?? "ceal:capabilities",
 		} };
 	} catch (error) {
@@ -340,19 +344,19 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
-	return executeCall(resolved.session, parsed, requestId, io, runtime);
+	return executeCall(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed, requestId, io, runtime);
 }
 
 async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	const requestRef = options[0] === "show" && options.length === 2 && isSafeRequestRef(options[1]) ? options[1] : null;
-	if (!requestRef) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
+	const parsed = parseReceiptOptions(options);
+	if (!parsed) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok) return writeReceiptError(resolved.reason, "The Gateway receipt could not be read.", io);
 	try {
-		const { readback } = await requestReceiptReadback(resolved.session, requestRef, runtime);
+		const { readback } = await requestReceiptReadback(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed.requestRef, runtime);
 		if (!readback.ok) return writeReceiptError(classifyGatewayFailure(readback.error).code, "The Gateway receipt could not be read.", io);
 		return writeYaml(io.stdout, {
-			schema_version: "ceal.receipt.v1", status: "verified", request_ref: requestRef,
+			schema_version: "ceal.receipt.v1", status: "verified", request_ref: parsed.requestRef,
 			events: readback.value.events.map(projectReceiptEvent),
 		});
 	} catch (error) {
@@ -362,19 +366,19 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 	}
 }
 
-async function requestReceiptReadback(initialSession: CealStoredSession, requestRef: string, runtime: CealCommandRuntime) {
+async function requestReceiptReadback(initialSession: CealStoredSession, profileRef: string, requestRef: string, runtime: CealCommandRuntime) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let readback = await client.request({
 		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
-		profile_ref: session.profileRef, body: { request_id: requestRef },
+		profile_ref: profileRef, body: { request_id: requestRef },
 	});
 	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	readback = await client.request({
 		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
-		profile_ref: session.profileRef, body: { request_id: requestRef },
+		profile_ref: profileRef, body: { request_id: requestRef },
 	});
 	return { readback, session };
 }
@@ -400,6 +404,7 @@ function writeReceiptError(kind: string, message: string, io: CealCliIo): number
 
 async function executeCall(
 	initialSession: CealStoredSession,
+	profileRef: string,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
 	io: CealCliIo,
@@ -407,12 +412,12 @@ async function executeCall(
 ): Promise<number> {
 	let completed: { value: CealGatewayCallValue; events: unknown; session: CealStoredSession } | null = null;
 	try {
-		const { call, client, session } = await requestCapabilityCall(initialSession, parsed, requestId, runtime);
+		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);
 		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId);
 		const readback = await client.request({
 			request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
 			operation: "readback",
-			profile_ref: session.profileRef,
+			profile_ref: profileRef,
 			body: { request_id: requestId },
 		});
 		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed);
@@ -454,17 +459,18 @@ function requestCapability(
 
 async function requestCapabilityCall(
 	initialSession: CealStoredSession,
+	profileRef: string,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
 	runtime: CealCommandRuntime,
 ) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	let call = await requestCapability(client, session.profileRef, parsed, requestId);
+	let call = await requestCapability(client, profileRef, parsed, requestId);
 	if (!shouldRetryAuthentication(call, session)) return { call, client, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	call = await requestCapability(client, session.profileRef, parsed, requestId);
+	call = await requestCapability(client, profileRef, parsed, requestId);
 	return { call, client, session };
 }
 
@@ -476,17 +482,48 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	const targetRef = options[2];
 	if (!validCapabilityId(capabilityId)) return { ok: false };
 	if (!validTargetRef(targetRef)) return { ok: false };
-	const operands = parseKeyValueOperands(options.slice(3));
+	const profile = extractProfileOption(options.slice(3));
+	if (!profile) return { ok: false };
+	const operands = parseKeyValueOperands(profile.remaining);
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
 	return {
-		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_,
+		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_, ...(profile.value ? { profileRef: profile.value } : {}),
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
 	};
 }
 
 function isSafeRequestRef(value: string | undefined): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
+}
+
+function parseReceiptOptions(options: readonly string[]): { requestRef: string; profileRef?: string } | null {
+	if (options[0] !== "show" || !isSafeRequestRef(options[1])) return null;
+	const profile = extractProfileOption(options.slice(2));
+	return profile && profile.remaining.length === 0 ? { requestRef: options[1]!, ...(profile.value ? { profileRef: profile.value } : {}) } : null;
+}
+
+function storedProfileOption(options: readonly string[]): string | null {
+	const profile = extractProfileOption(options);
+	return profile && profile.remaining.length === 0 ? profile.value ?? null : null;
+}
+
+function extractProfileOption(options: readonly string[]): { value?: string; remaining: string[] } | null {
+	const remaining: string[] = [];
+	let value: string | undefined;
+	for (let index = 0; index < options.length; index += 1) {
+		const option = options[index];
+		if (option !== "--profile") { remaining.push(option!); continue; }
+		const candidate = options[index + 1];
+		if (value !== undefined || !isSafeProfileRef(candidate)) return null;
+		value = candidate;
+		index += 1;
+	}
+	return { ...(value ? { value } : {}), remaining };
+}
+
+function isSafeProfileRef(value: string | undefined): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
 }
 
 function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {

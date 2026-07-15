@@ -247,6 +247,26 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 	});
 });
 
+test("stored client Session selects an assigned Profile per request without another login", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const runtime = {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: (() => { let index = 0; return () => `narnia:profile:${++index}`; })(),
+		};
+		const capabilities = await yamlRun(["capabilities", "--profile", "profile:ax"], 0, runtime);
+		assert.equal(capabilities.gateway.profile_ref, "profile:ax");
+		const call = await yamlRun([
+			"call", "message.search", "--target", "target:team-inbox", "--profile", "profile:ax", "query=launch",
+		], 0, runtime);
+		assert.equal(call.status, "completed");
+		const receipt = await yamlRun(["receipt", "show", "narnia:profile:3:call", "--profile", "profile:ax"], 0, runtime);
+		assert.equal(receipt.status, "verified");
+		assert.deepEqual(requests.map((item) => item.body.profile_ref), [
+			"profile:ax", "profile:ax", "profile:ax", "profile:ax", "profile:ax",
+		]);
+	});
+});
+
 test("call refuses to claim completion when audit readback has no verified event", () => {
 	let stdout = "";
 	const code = writeCallCompleted({

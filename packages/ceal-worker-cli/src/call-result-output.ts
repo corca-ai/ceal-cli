@@ -14,6 +14,7 @@ export interface CealParsedCapabilityCall {
 	targetRef: string;
 	arguments: Record<string, string | number>;
 	purpose: string;
+	profileRef?: string;
 }
 
 export function writeCallCompleted(
