@@ -9,6 +9,7 @@ import {
 	validateResourceResolveResult,
 	validateMessageSearchInputContract,
 	validateMessageSearchResult,
+	expectedCealGatewayCallRedactionOmissions,
 } from "./gateway-message-contract.js";
 import { isCealSlackPermalinkInput, isCealSlackPermalinkSource } from "./slack-permalink.js";
 
@@ -440,34 +441,8 @@ function validateCallRedaction(value: unknown, capabilityId: unknown, data: unkn
 		|| redaction.omitted_classes.length === 0
 		|| redaction.omitted_classes.length > 32) invalidResponse();
 	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
-	const expected = expectedCallRedactionOmissions(capabilityId, data);
+	const expected = expectedCealGatewayCallRedactionOmissions(capabilityId, data);
 	if (expected && JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
-}
-
-function expectedCallRedactionOmissions(capabilityId: unknown, data: unknown): readonly string[] | null {
-	if (capabilityId === "message.search") {
-		return isMessageSearchSourceReturned(data) ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
-	}
-	if (capabilityId === "message.get") {
-		return isMessageGetSourceReturned(data) ? ["credential_material"] : ["credential_material", "provider_locator"];
-	}
-	return capabilityId === "resource.resolve" ? ["credential_material"] : null;
-}
-
-function isMessageSearchSourceReturned(value: unknown): boolean {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const results = (value as Record<string, unknown>).results;
-	return Array.isArray(results) && results.some(isSourceBearingSearchResult);
-}
-
-function isSourceBearingSearchResult(value: unknown): boolean {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
-}
-
-function isMessageGetSourceReturned(value: unknown): boolean {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
 }
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {

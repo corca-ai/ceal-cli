@@ -79,6 +79,16 @@ export function validateResourceResolveResult(
 	assertSlackSource(resource.source, context);
 }
 
+export function expectedCealGatewayCallRedactionOmissions(capabilityId: unknown, data: unknown): readonly string[] | null {
+	if (capabilityId === "message.search") {
+		return messageSearchSourceReturned(data) ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
+	}
+	if (capabilityId === "message.get") {
+		return sourceReturned(data) ? ["credential_material"] : ["credential_material", "provider_locator"];
+	}
+	return capabilityId === "resource.resolve" ? ["credential_material"] : null;
+}
+
 function assertSearchContractIdentity(contract: Record<string, unknown>, context: GatewayMessageContractContext): void {
 	if (contract.schema_version !== "ceal.message_search_input.v1" || !Array.isArray(contract.required)
 		|| contract.required.length !== 1 || contract.required[0] !== "query") context.invalid();
@@ -176,6 +186,16 @@ function assertSearchMinimization(value: unknown, results: unknown, context: Gat
 }
 
 function isSourceBearingSearchItem(value: unknown): boolean {
+	return sourceReturned(value);
+}
+
+function messageSearchSourceReturned(value: unknown): boolean {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+	const results = (value as Record<string, unknown>).results;
+	return Array.isArray(results) && results.some(isSourceBearingSearchItem);
+}
+
+function sourceReturned(value: unknown): boolean {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		&& "source" in value && (value as Record<string, unknown>).source !== undefined;
 }
