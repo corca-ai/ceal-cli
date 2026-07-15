@@ -1,0 +1,264 @@
+import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
+import {
+	CealEnrollmentClientError,
+	CealPersonalClientSessionError,
+	createCealEnrollmentClient,
+	createCealPersonalClientSessionClient,
+} from "@corca-ai/ceal";
+import type { CealCliIo, CealCommandRuntime } from "./index.js";
+import { writeYaml } from "./output.js";
+import type { CealStoredSession } from "./profile-store.js";
+
+const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
+
+export async function runSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	if (options.length === 0) return showSession(io, runtime);
+	if (options.length === 1 && options[0] === "logout") return runSessionLogout(io, runtime);
+	return enrollSession(options, io, runtime);
+}
+
+async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	let session: CealStoredSession | null;
+	try { session = runtime.loadSession ? await runtime.loadSession() : null; }
+	catch { return writeEnrollmentUnavailable("session_load_failed", io); }
+	const now = runtime.now?.() ?? Date.now();
+	return writeYaml(io.stdout, session ? configuredSessionSummary(session, now) : unconfiguredSessionSummary());
+}
+
+function configuredSessionSummary(session: CealStoredSession, now: number): Record<string, unknown> {
+	return {
+		schema_version: "ceal.client_session.v1", command: "ceal", status: "configured",
+		gateway_endpoint: session.gatewayEndpoint, profile_ref: session.profileRef,
+		membership_ref: session.membershipRef, registration_ref: session.registrationRef, client_ref: session.clientRef,
+		subject_ref: session.subjectRef, instance_ref: session.instanceRef, expires_at: session.expiresAt,
+		access_status: Date.parse(session.expiresAt) > now ? "current" : "expired",
+		renewal_available: true,
+		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
+		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
+		raw_token_visible: false, proof_level: "local_state",
+		next_action: "Run 'ceal capabilities' to verify live Gateway access.",
+	};
+}
+
+function unconfiguredSessionSummary(): Record<string, unknown> {
+	return {
+		schema_version: "ceal.client_session.v1", command: "ceal", status: "unconfigured",
+		gateway_endpoint: null, profile_ref: null, membership_ref: null, registration_ref: null, client_ref: null,
+		subject_ref: null, instance_ref: null, expires_at: null, access_status: null,
+		renewal_available: false, refresh_token_idle_expires_at: null, refresh_token_absolute_expires_at: null,
+		raw_token_visible: false, proof_level: "local_state", next_action: "Run 'ceal session enroll --help'.",
+	};
+}
+
+async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const parsed = parseEnrollmentOptions(options);
+	if (!parsed.ok) return writeEnrollmentInvalidArgument(io);
+	if (!runtime.saveSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	const code = await readEnrollmentCode(parsed.input, runtime);
+	if (!code.ok) return writeEnrollmentUnavailable(code.error, io);
+	try {
+		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code.value);
+		if (!response.ok) return writeEnrollmentRejected(response.error.code, io);
+		const stored = toStoredSession(parsed.gateway, response);
+		await runtime.saveSession(stored);
+		return writeEnrollmentSuccess(parsed.gateway, stored, io);
+	} catch (error) {
+		const reason = error instanceof CealEnrollmentClientError ? error.code : "session_save_failed";
+		return writeEnrollmentUnavailable(reason, io);
+	}
+}
+
+async function readEnrollmentCode(input: "stdin" | "interactive", runtime: CealCommandRuntime): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
+	const reader = enrollmentCodeReader(input, runtime);
+	if (!reader) return { ok: false, error: input === "interactive" ? "interactive_enrollment_required" : "session_runtime_unavailable" };
+	try { return { ok: true, value: await reader() }; }
+	catch { return { ok: false, error: "enrollment_code_input_failed" }; }
+}
+
+function enrollmentCodeReader(input: "stdin" | "interactive", runtime: CealCommandRuntime): (() => Promise<string>) | undefined {
+	if (input === "stdin") return runtime.readSecret;
+	return runtime.isInteractiveTerminal?.() ? runtime.promptEnrollmentCode : undefined;
+}
+
+function toStoredSession(gatewayEndpoint: string, response: {
+	profile_ref: string; membership_ref: string; registration_ref: string; client_ref: string; subject_ref: string;
+	instance_ref: string; access_token: string; expires_at: string; refresh_token: string;
+	refresh_token_idle_expires_at: string; refresh_token_absolute_expires_at: string;
+}): CealStoredSession {
+	return {
+		gatewayEndpoint, profileRef: response.profile_ref, membershipRef: response.membership_ref,
+		registrationRef: response.registration_ref, clientRef: response.client_ref, subjectRef: response.subject_ref,
+		instanceRef: response.instance_ref, accessToken: response.access_token, expiresAt: response.expires_at,
+		refreshToken: response.refresh_token, refreshTokenIdleExpiresAt: response.refresh_token_idle_expires_at,
+		refreshTokenAbsoluteExpiresAt: response.refresh_token_absolute_expires_at,
+	};
+}
+
+function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toStoredSession>, io: CealCliIo): number {
+	return writeYaml(io.stdout, {
+		schema_version: "ceal.session_enrollment.v1", command: "ceal", status: "enrolled",
+		enrollment_kind: "preapproved_client_device",
+		gateway_endpoint: gateway, profile_ref: response.profileRef, membership_ref: response.membershipRef,
+		registration_ref: response.registrationRef, client_ref: response.clientRef, subject_ref: response.subjectRef,
+		instance_ref: response.instanceRef, expires_at: response.expiresAt,
+		renewal_available: true,
+		refresh_token_idle_expires_at: response.refreshTokenIdleExpiresAt,
+		refresh_token_absolute_expires_at: response.refreshTokenAbsoluteExpiresAt,
+		raw_token_visible: false, proof_level: "host_decision",
+		next_action: "Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
+	});
+}
+
+async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	if (!runtime.loadSession || !runtime.removeSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	let session: CealStoredSession | null;
+	try { session = await runtime.loadSession(); } catch { return writeEnrollmentUnavailable("session_load_failed", io); }
+	if (!session) return writeAlreadyLoggedOut(io);
+	const revokeFailure = await revokeClientSession(session);
+	if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
+	try { await runtime.removeSession(); } catch { return writeClientSessionUnavailable("session_remove_failed", io); }
+	return writeLoggedOut(io);
+}
+
+function writeAlreadyLoggedOut(io: CealCliIo): number {
+	return writeYaml(io.stdout, {
+		schema_version: "ceal.session_logout.v1", command: "ceal", status: "already_logged_out",
+		server_session_revoked: false, local_session_removed: false, raw_token_visible: false,
+		proof_level: "local_state", next_action: "Run 'ceal session enroll --help' to configure a session.",
+	});
+}
+
+async function revokeClientSession(session: CealStoredSession): Promise<string | null> {
+	try {
+		const response = await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
+		return !response.ok && response.error.code !== "refresh_revoked" ? response.error.code : null;
+	} catch (error) {
+		return error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
+	}
+}
+
+function writeLoggedOut(io: CealCliIo): number {
+	return writeYaml(io.stdout, {
+		schema_version: "ceal.session_logout.v1", command: "ceal", status: "logged_out",
+		server_session_revoked: true, local_session_removed: true, raw_token_visible: false,
+		proof_level: "host_decision",
+		next_action: "Run 'ceal session enroll --help' to configure another session.",
+	});
+}
+
+export class CealClientSessionError extends Error {
+	constructor(readonly code: string) { super("Ceal client session unavailable."); }
+}
+
+export async function ensureCurrentSession(session: CealStoredSession, runtime: CealCommandRuntime, force = false): Promise<CealStoredSession> {
+	const now = runtime.now?.() ?? Date.now();
+	if (!force && sessionIsCurrent(session, now)) return session;
+	const refresh = requireRefreshContext(session, runtime, now);
+	const response = await refreshSession(session, refresh.token);
+	if (!response.ok) throw new CealClientSessionError(response.error.code);
+	assertSessionBindings(session, response);
+	const rotated = rotatedSession(session, response);
+	await refresh.save(rotated);
+	return rotated;
+}
+
+function sessionIsCurrent(session: CealStoredSession, now: number): boolean {
+	return Date.parse(session.expiresAt) > now + 60_000;
+}
+
+function requireRefreshContext(
+	session: CealStoredSession, runtime: CealCommandRuntime, now: number,
+): { token: string; save: NonNullable<CealCommandRuntime["saveSession"]> } {
+	if (!runtime.saveSession) throw new CealClientSessionError("reenrollment_required");
+	if (Date.parse(session.refreshTokenAbsoluteExpiresAt) <= now) {
+		throw new CealClientSessionError("refresh_expired");
+	}
+	return { token: session.refreshToken, save: runtime.saveSession };
+}
+
+async function refreshSession(session: CealStoredSession, refreshToken: string) {
+	try {
+		return await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).refresh(refreshToken);
+	} catch (error) {
+		throw new CealClientSessionError(error instanceof CealPersonalClientSessionError ? error.code : "request_failed");
+	}
+}
+
+function assertSessionBindings(session: CealStoredSession, response: CealClientRefreshResult): void {
+	const bindings = [
+		[response.profile_ref, session.profileRef], [response.membership_ref, session.membershipRef],
+		[response.registration_ref, session.registrationRef], [response.client_ref, session.clientRef],
+		[response.subject_ref, session.subjectRef], [response.instance_ref, session.instanceRef],
+	];
+	if (bindings.some(([actual, expected]) => actual !== expected)) throw new CealClientSessionError("binding_changed");
+}
+
+function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult): CealStoredSession {
+	return {
+		...session, accessToken: response.access_token, expiresAt: response.expires_at,
+		refreshToken: response.refresh_token,
+		refreshTokenIdleExpiresAt: response.refresh_token_idle_expires_at,
+		refreshTokenAbsoluteExpiresAt: response.refresh_token_absolute_expires_at,
+	};
+}
+
+export function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.client_session.v1", command: "ceal", status: "unavailable",
+		credential_context: CREDENTIAL_CONTEXT, proof_level: "surface", raw_token_visible: false,
+		error: {
+			kind: reason,
+			message: "The stored Gateway session could not be renewed or revoked safely.",
+			next_action: "Run 'ceal session' to inspect expiry, then ask the organization administrator for a replacement device-enrollment code if renewal is unavailable.",
+		},
+	});
+	return 3;
+}
+
+function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
+	if (options[0] !== "enroll" || options[1] !== "--gateway" || !options[2]) return { ok: false };
+	if (options.length === 3) return { ok: true, gateway: options[2], input: "interactive" };
+	if (options.length === 4 && options[3] === "--code-stdin") return { ok: true, gateway: options[2], input: "stdin" };
+	return { ok: false };
+}
+
+function writeEnrollmentInvalidArgument(io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.error.v1", command: "ceal", ok: false, status: "error",
+		credential_context: CREDENTIAL_CONTEXT,
+		error: { kind: "invalid_argument", message: "Invalid session enrollment options.", next_action: "Run 'ceal --help'." },
+	});
+	return 2;
+}
+
+function writeEnrollmentRejected(code: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_enrollment.v1",
+		command: "ceal",
+		status: "denied",
+		proof_level: "host_decision",
+		error: {
+			code,
+			message: "The Gateway rejected the device-enrollment code.",
+			next_action: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code.",
+		},
+	});
+	return 3;
+}
+
+function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_enrollment.v1",
+		command: "ceal",
+		status: "unavailable",
+		proof_level: "surface",
+		error: {
+			kind: reason,
+			message: "The device enrollment could not be completed.",
+			next_action: reason === "interactive_enrollment_required"
+				? "Run this command from a terminal that supports hidden input, or use --code-stdin only from approved non-interactive automation."
+				: "Check the Gateway URL, then ask the organization administrator for a replacement device-enrollment code.",
+		},
+	});
+	return 3;
+}
