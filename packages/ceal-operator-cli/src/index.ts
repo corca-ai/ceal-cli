@@ -196,16 +196,30 @@ export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtim
 }
 
 function runKnownCommand(command: CealctlCommandDefinition["name"], options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
-	if (command === "version") return options.length === 0 ? writeVersion(io) : writeError("invalid_argument", "Invalid cealctl version options.", io);
-	if (command === "commands") return options.length === 0 ? writeCommands(io) : writeError("invalid_argument", "Invalid cealctl commands options.", io);
-	if (command === "login") return runLogin(options, io, runtime);
-	if (command === "sessions") return runSessions(options, io, runtime);
-	if (command === "logout") return runLogout(options, io, runtime);
-	if (command === "access") return runAccess(options, io, runtime);
-	if (command === "connectors") return runProfileConnectors(options, io, runtime);
-	if (command === "enrollments") return runEnrollments(options, io, runtime);
-	if (options.length !== 0) return writeError("invalid_argument", "Invalid cealctl command options.", io);
-	return writeDoctor(io);
+	return COMMAND_RUNNERS[command](options, io, runtime);
+}
+
+type CealctlCommandRunner = (options: readonly string[], io: CealctlIo, runtime: CealctlRuntime) => number | Promise<number>;
+
+const COMMAND_RUNNERS: Record<CealctlCommandDefinition["name"], CealctlCommandRunner> = {
+	version: (options, io) => writeReadOnlyCommand(options, io, writeVersion, "version"),
+	commands: (options, io) => writeReadOnlyCommand(options, io, writeCommands, "commands"),
+	login: runLogin,
+	sessions: runSessions,
+	logout: runLogout,
+	access: runAccess,
+	connectors: runProfileConnectors,
+	enrollments: runEnrollments,
+	doctor: (options, io) => writeReadOnlyCommand(options, io, writeDoctor, "doctor"),
+};
+
+function writeReadOnlyCommand(
+	options: readonly string[],
+	io: CealctlIo,
+	writeCommand: (io: CealctlIo) => number,
+	name: "version" | "commands" | "doctor",
+): number {
+	return options.length === 0 ? writeCommand(io) : writeError("invalid_argument", `Invalid cealctl ${name} options.`, io);
 }
 
 function writeRequestedHelp(args: readonly string[], io: CealctlIo): number {

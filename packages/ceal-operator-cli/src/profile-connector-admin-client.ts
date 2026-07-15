@@ -17,36 +17,80 @@ const MAX_BYTES = 64 * 1024;
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export function decodeCealProfileConnectorRegistry(value: unknown): CealProfileConnectorRegistry {
-	if (!isRecord(value) || value.schema_version !== "ceal.gateway_profile_connector_registry.v1" || !Number.isSafeInteger(value.generation) || Number(value.generation) < 0 || !Array.isArray(value.bindings)
-		|| !hasKeys(value, ["bindings", "generation", "schema_version"])) invalid();
+	if (!isProfileConnectorRegistryEnvelope(value)) invalid();
 	const registry = structuredClone(value) as unknown as CealProfileConnectorRegistry;
-	for (const binding of registry.bindings) {
-		if (!isRecord(binding) || !hasKeys(binding, ["connector_binding_ref", "connector_kind", "connector_principal_ref", "profile_ref", "revision", "status"])
-			|| ![binding.connector_binding_ref, binding.connector_kind, binding.connector_principal_ref, binding.profile_ref].every((item) => typeof item === "string" && SAFE_REF.test(item))
-			|| !/^[a-z][a-z0-9-]{0,63}$/u.test(binding.connector_kind) || !Number.isSafeInteger(binding.revision) || binding.revision < 1 || !["active", "revoked"].includes(binding.status)) invalid();
-	}
+	for (const binding of registry.bindings) assertBinding(binding);
 	return registry;
 }
 
-export async function showCealProfileConnectors(input: AdminInput): Promise<CealProfileConnectorState> { return request(input, "GET"); }
-export async function applyCealProfileConnectors(input: AdminInput & { registry: CealProfileConnectorRegistry; dryRun: boolean }): Promise<CealProfileConnectorState> { return request(input, "PUT", input.registry, input.dryRun); }
+function isProfileConnectorRegistryEnvelope(value: unknown): value is Record<string, unknown> {
+	return isRecord(value) && hasKeys(value, ["bindings", "generation", "schema_version"])
+		&& value.schema_version === "ceal.gateway_profile_connector_registry.v1"
+		&& Number.isSafeInteger(value.generation) && Number(value.generation) >= 0 && Array.isArray(value.bindings);
+}
+
+function assertBinding(value: unknown): void {
+	if (!isBinding(value)) invalid();
+}
+
+function isBinding(value: unknown): boolean {
+	return isRecord(value)
+		&& hasKeys(value, ["connector_binding_ref", "connector_kind", "connector_principal_ref", "profile_ref", "revision", "status"])
+		&& hasSafeRefs(value.connector_binding_ref, value.connector_principal_ref, value.profile_ref)
+		&& typeof value.connector_kind === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value.connector_kind)
+		&& Number.isSafeInteger(value.revision) && Number(value.revision) >= 1
+		&& (value.status === "active" || value.status === "revoked");
+}
+
+function hasSafeRefs(...refs: unknown[]): boolean {
+	return refs.every((ref) => typeof ref === "string" && SAFE_REF.test(ref));
+}
+
+export async function showCealProfileConnectors(input: AdminInput): Promise<CealProfileConnectorState> { return requestProfileConnectors(input, "GET"); }
+export async function applyCealProfileConnectors(input: AdminInput & { registry: CealProfileConnectorRegistry; dryRun: boolean }): Promise<CealProfileConnectorState> { return requestProfileConnectors(input, "PUT", input.registry, input.dryRun); }
 interface AdminInput { adminEndpoint: string; adminToken: string; fetchFn?: typeof globalThis.fetch; timeoutMs?: number }
 
-async function request(input: AdminInput, method: "GET" | "PUT", registry?: CealProfileConnectorRegistry, dryRun = false): Promise<CealProfileConnectorState> {
-	if (!/^[A-Za-z0-9._~+/-]+=*$/u.test(input.adminToken) || input.adminToken.length < 16 || input.adminToken.length > 8192) invalid();
-	const fetchFn = input.fetchFn ?? globalThis.fetch;
-	if (typeof fetchFn !== "function") invalid();
-	const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 10_000);
+async function requestProfileConnectors(input: AdminInput, method: "GET" | "PUT", registry?: CealProfileConnectorRegistry, dryRun = false): Promise<CealProfileConnectorState> {
+	const prepared = prepareRequest(input);
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), prepared.timeoutMs);
 	try {
-		const response = await fetchFn(adminRequestUrl(input.adminEndpoint, PATH), method === "GET"
-			? { headers: { accept: "application/json", authorization: `Bearer ${input.adminToken}` }, redirect: "error", signal: controller.signal }
-			: { method, headers: { accept: "application/json", authorization: `Bearer ${input.adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ schema_version: "ceal.profile_connector_apply.v1", dry_run: dryRun, registry: decodeCealProfileConnectorRegistry(registry) }), redirect: "error", signal: controller.signal });
+		const response = await prepared.fetchFn(prepared.endpoint, requestInit(input.adminToken, method, controller.signal, registry, dryRun));
 		const bytes = await readBytes(response);
 		if (!response.ok) throw new CealProfileConnectorAdminClientError(response.status === 409 ? "stale_registry" : response.status >= 500 ? "request_failed" : "request_denied");
 		if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
-		return decodeState(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
-	} catch (error) { if (error instanceof CealProfileConnectorAdminClientError) throw error; throw new CealProfileConnectorAdminClientError(controller.signal.aborted ? "request_timeout" : "request_failed"); }
-	finally { clearTimeout(timer); }
+		return decodeState(parseJson(bytes));
+	} catch (error) {
+		mapRequestError(error, controller.signal.aborted);
+	} finally { clearTimeout(timer); }
+}
+
+function prepareRequest(input: AdminInput): { endpoint: string; fetchFn: typeof globalThis.fetch; timeoutMs: number } {
+	if (!isSafeToken(input.adminToken)) invalid();
+	const fetchFn = input.fetchFn ?? globalThis.fetch;
+	const timeoutMs = input.timeoutMs ?? 10_000;
+	if (typeof fetchFn !== "function" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) invalid();
+	try { return { endpoint: adminRequestUrl(input.adminEndpoint, PATH), fetchFn, timeoutMs }; }
+	catch { invalid(); }
+}
+
+function isSafeToken(value: string): boolean {
+	return /^[A-Za-z0-9._~+/-]+=*$/u.test(value) && value.length >= 16 && value.length <= 8192;
+}
+
+function requestInit(token: string, method: "GET" | "PUT", signal: AbortSignal, registry?: CealProfileConnectorRegistry, dryRun = false): RequestInit {
+	const common = { method, redirect: "error" as const, signal };
+	if (method === "GET") return { ...common, headers: { accept: "application/json", authorization: `Bearer ${token}` } };
+	return {
+		...common,
+		headers: { accept: "application/json", authorization: `Bearer ${token}`, "content-type": "application/json" },
+		body: JSON.stringify({ schema_version: "ceal.profile_connector_apply.v1", dry_run: dryRun, registry: decodeCealProfileConnectorRegistry(registry) }),
+	};
+}
+
+function mapRequestError(error: unknown, aborted: boolean): never {
+	if (error instanceof CealProfileConnectorAdminClientError) throw error;
+	throw new CealProfileConnectorAdminClientError(aborted ? "request_timeout" : "request_failed");
 }
 
 async function readBytes(response: Response): Promise<Uint8Array> {
@@ -62,5 +106,9 @@ function decodeState(value: unknown): CealProfileConnectorState {
 }
 function hasKeys(value: Record<string, unknown>, keys: readonly string[]) { return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()); }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function parseJson(bytes: Uint8Array): unknown {
+	try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+	catch { invalidResponse(); }
+}
 function invalid(): never { throw new CealProfileConnectorAdminClientError("invalid_configuration"); }
 function invalidResponse(): never { throw new CealProfileConnectorAdminClientError("invalid_response"); }
