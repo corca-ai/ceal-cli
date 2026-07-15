@@ -5,6 +5,8 @@ import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiat
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
 import {
 	validateMessageGetResult,
+	validateMessageCreateInputContract,
+	validateMessageCreateResult,
 	validateResourceResolveInputContract,
 	validateResourceResolveResult,
 	validateMessageSearchInputContract,
@@ -71,8 +73,10 @@ export type {
 	CealGatewayMessageSearchCoverage,
 	CealGatewayMessageSearchResultItem,
 	CealGatewayMessageGetResult,
+	CealGatewayMessageCreateResult,
 	CealGatewayResourceResolveResult,
 	CealGatewaySourceReference,
+	CealGatewayWriteContract,
 	CealCapabilityAccessDescriptor,
 	CealCapabilityReadiness,
 	CealGatewayPolicyDenial,
@@ -326,17 +330,28 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	const capability = requireRecord(value);
-	requireExactKeys(capability, ["capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement"]);
+	requireExactKeys(capability, ["capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["write_contract"]);
 	requireSafeRef(capability.capability_id);
 	if (seen.has(String(capability.capability_id))
 		|| !["read", "write"].includes(String(capability.effect))
 		|| !["required", "optional", "none"].includes(String(capability.target_requirement))) invalidResponse();
+	if (capability.effect === "write") validateWriteContract(capability.write_contract);
+	else if (capability.write_contract !== undefined) invalidResponse();
 	seen.add(String(capability.capability_id));
 	requireSafeText(capability.label, 128);
 	requireSafeRef(capability.evidence_requirement);
 	if (capability.capability_id === "message.search") validateMessageSearchInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
+	else if (capability.capability_id === "message.create") validateMessageCreateInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
 	else if (capability.capability_id === "resource.resolve") validateResourceResolveInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
 	else validateGenericInputContract(capability.input_contract);
+}
+
+function validateWriteContract(value: unknown): void {
+	const contract = requireRecord(value);
+	requireExactKeys(contract, ["attribution", "compensation", "dry_run", "idempotency", "provider_readback", "side_effect_class"]);
+	if (contract.side_effect_class !== "append_reply" || contract.idempotency !== "required"
+		|| contract.dry_run !== "unsupported" || contract.attribution !== "subject"
+		|| contract.compensation !== "irreversible" || contract.provider_readback !== "required") invalidResponse();
 }
 
 function validateGenericInputContract(value: unknown): void {
@@ -384,6 +399,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
 	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
+	else if (call.capability_id === "message.create") validateMessageCreateResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else if (call.capability_id === "resource.resolve") validateResourceResolveResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
 	else validateGenericCapabilityResult(call.data, call.capability_id);
 	validateCallRedaction(call.redaction, call.capability_id, call.data);

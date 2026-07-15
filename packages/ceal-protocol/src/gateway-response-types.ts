@@ -80,6 +80,18 @@ export interface CealGatewayDiscoveryCapability {
 	target_requirement: "required" | "optional" | "none";
 	input_contract: Record<string, unknown>;
 	evidence_requirement: string;
+	/** Required for a discovered write capability; absent for a read capability. */
+	write_contract?: CealGatewayWriteContract;
+}
+
+/** Provider-neutral declaration of a governed mutation's operational boundary. */
+export interface CealGatewayWriteContract {
+	side_effect_class: "append_reply";
+	idempotency: "required";
+	dry_run: "unsupported";
+	attribution: "subject";
+	compensation: "irreversible";
+	provider_readback: "required";
 }
 
 export type CealCapabilityReadiness = "ready" | "degraded" | "unavailable" | "unknown";
@@ -189,6 +201,13 @@ export interface CealGatewayResourceResolveResult {
 		kind: "message";
 		source: CealGatewaySourceReference;
 	};
+}
+
+export interface CealGatewayMessageCreateResult {
+	schema_version: "ceal.message_create_result.v1";
+	delivery: "verified" | "replayed";
+	message_ref: string;
+	reply_to: string;
 }
 
 export const CEAL_GATEWAY_POLICY_DENIAL_MESSAGE = "The authenticated profile is not granted this capability for the requested target." as const;

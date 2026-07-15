@@ -270,6 +270,59 @@ test("resource.resolve admits only the exact safe Slack message resource project
 	assert.throws(() => decodeCealClientResponse(falseLocatorOmission, request), hasCode("invalid_client_response"));
 });
 
+test("message.create admits only a verified opaque reply result and a declared write boundary", () => {
+	const request = envelope("call", {
+		capability_id: "message.create", target_ref: "target:workspace",
+		arguments: { reply_to: "message:approved_001", text: "Acknowledged.", idempotency_key: "reply-001" },
+		purpose: "Reply to the approved message",
+	});
+	const response = responseEnvelope(request, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.create",
+		grant_ref: "grant:workspace-message-create", grant_revision: 2, target_ref: "target:workspace",
+		data: {
+			schema_version: "ceal.message_create_result.v1", delivery: "verified",
+			message_ref: "message:created_001", reply_to: "message:approved_001",
+		},
+		redaction: { state: "applied", omitted_classes: ["message_text", "idempotency_key", "provider_locator", "provider_identity"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	for (const mutate of [
+		(value) => { value.value.data.delivery = "unknown"; },
+		(value) => { value.value.data.message_ref = "message:approved_001"; },
+		(value) => { value.value.data.text = "leaked"; },
+		(value) => { value.value.redaction.omitted_classes = ["message_text"]; },
+	]) {
+		const malformed = structuredClone(response);
+		mutate(malformed);
+		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
+	}
+
+	const discoverRequest = envelope("discover", {});
+	const discovery = discoveryResponse(discoverRequest);
+	discovery.value.capabilities.push({
+		capability_id: "message.create", label: "Reply to one approved message", effect: "write", target_requirement: "required",
+		input_contract: {
+			schema_version: "ceal.message_create_input.v1", required: ["reply_to", "text", "idempotency_key"],
+			reply_to: { type: "string", format: "message_ref" },
+			text: { type: "string", min_bytes: 1, max_bytes: 8192 },
+			idempotency_key: { type: "string", format: "safe_idempotency_key", min_bytes: 1, max_bytes: 128 },
+		},
+		evidence_requirement: "gateway_audit",
+		write_contract: {
+			side_effect_class: "append_reply", idempotency: "required", dry_run: "unsupported",
+			attribution: "subject", compensation: "irreversible", provider_readback: "required",
+		},
+	});
+	discovery.value.targets[0].capability_ids.push("message.create");
+	discovery.value.targets[0].capability_access.push({
+		...matureCapabilityAccess(), capability_id: "message.create", grant_ref: "grant:workspace-message-create",
+	});
+	assert.equal(decodeCealClientResponse(discovery, discoverRequest).value.capabilities.at(-1).write_contract.idempotency, "required");
+	delete discovery.value.capabilities.at(-1).write_contract;
+	assert.throws(() => decodeCealClientResponse(discovery, discoverRequest), hasCode("invalid_client_response"));
+});
+
 test("search minimization names the intentional provider citation and rejects a false claim", () => {
 	const request = envelope("call", {
 		capability_id: "message.search", target_ref: "target:workspace", arguments: { query: "launch" }, purpose: "Find approved messages",

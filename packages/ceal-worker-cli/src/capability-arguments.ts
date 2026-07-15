@@ -6,6 +6,7 @@ export function normalizeCapabilitySpecificArguments(
 ): boolean {
 	if (capabilityId === "message.search") return normalizeMessageSearchArguments(arguments_);
 	if (capabilityId === "message.get") return normalizeMessageGetArguments(arguments_);
+	if (capabilityId === "message.create") return normalizeMessageCreateArguments(arguments_);
 	if (capabilityId === "resource.resolve") return normalizeResourceResolveArguments(arguments_);
 	return true;
 }
@@ -44,6 +45,13 @@ function normalizeMessageGetArguments(arguments_: Record<string, string | number
 	return true;
 }
 
+function normalizeMessageCreateArguments(arguments_: Record<string, string | number>): boolean {
+	return allowsOnly(arguments_, ["reply_to", "text", "idempotency_key"])
+		&& isMessageRef(arguments_.reply_to)
+		&& isBoundedText(arguments_.text, 8192)
+		&& isSafeIdempotencyKey(arguments_.idempotency_key);
+}
+
 function normalizeResourceResolveArguments(arguments_: Record<string, string | number>): boolean {
 	return allowsOnly(arguments_, ["url"]) && isCealSlackPermalinkInput(arguments_.url);
 }
@@ -53,11 +61,19 @@ function allowsOnly(value: Record<string, string | number>, allowed: readonly st
 }
 
 function isNonemptyQuery(value: unknown): value is string {
-	return typeof value === "string" && value.trim() !== "" && new TextEncoder().encode(value).byteLength <= 512;
+	return isBoundedText(value, 512);
+}
+
+function isBoundedText(value: unknown, maxBytes: number): value is string {
+	return typeof value === "string" && value.trim() !== "" && new TextEncoder().encode(value).byteLength <= maxBytes;
 }
 
 function isMessageRef(value: unknown): value is string {
 	return typeof value === "string" && /^message:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
+}
+
+function isSafeIdempotencyKey(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
 }
 
 function boundedInteger(value: unknown, defaultValue: number, minimum: number, maximum: number): number | null {

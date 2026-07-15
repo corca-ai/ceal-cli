@@ -79,6 +79,29 @@ export function validateResourceResolveResult(
 	assertSlackSource(resource.source, context);
 }
 
+export function validateMessageCreateInputContract(value: unknown, context: GatewayMessageContractContext): void {
+	const contract = context.record(value);
+	context.exact(contract, ["idempotency_key", "reply_to", "required", "schema_version", "text"]);
+	if (contract.schema_version !== "ceal.message_create_input.v1" || !Array.isArray(contract.required)
+		|| JSON.stringify(contract.required) !== JSON.stringify(["reply_to", "text", "idempotency_key"])) context.invalid();
+	assertMessageReferenceContract(contract.reply_to, context);
+	assertPlainTextContract(contract.text, context);
+	assertIdempotencyKeyContract(contract.idempotency_key, context);
+}
+
+export function validateMessageCreateResult(
+	value: unknown,
+	expectedRequest: Readonly<CealGatewayCallRequest>,
+	context: GatewayMessageContractContext,
+): void {
+	const result = context.record(value);
+	context.exact(result, ["delivery", "message_ref", "reply_to", "schema_version"]);
+	if (result.schema_version !== "ceal.message_create_result.v1" || !["verified", "replayed"].includes(String(result.delivery))) context.invalid();
+	const input = decodeMessageCreateInput(expectedRequest.body.arguments, context);
+	context.prefixed(result.message_ref, "message:");
+	if (result.message_ref === input.replyTo || result.reply_to !== input.replyTo) context.invalid();
+}
+
 export function expectedCealGatewayCallRedactionOmissions(capabilityId: unknown, data: unknown): readonly string[] | null {
 	if (capabilityId === "message.search") {
 		return messageSearchSourceReturned(data) ? ["query_text", "raw_messages"] : ["query_text", "raw_provider_ids", "raw_messages"];
@@ -86,6 +109,7 @@ export function expectedCealGatewayCallRedactionOmissions(capabilityId: unknown,
 	if (capabilityId === "message.get") {
 		return sourceReturned(data) ? ["credential_material"] : ["credential_material", "provider_locator"];
 	}
+	if (capabilityId === "message.create") return ["message_text", "idempotency_key", "provider_locator", "provider_identity"];
 	return capabilityId === "resource.resolve" ? ["credential_material"] : null;
 }
 
@@ -114,6 +138,24 @@ function assertIntegerContract(value: unknown, minimum: number, maximum: number,
 	if (field.type !== "integer" || field.minimum !== minimum || field.maximum !== maximum || field.default !== defaultValue) context.invalid();
 }
 
+function assertMessageReferenceContract(value: unknown, context: GatewayMessageContractContext): void {
+	const field = context.record(value);
+	context.exact(field, ["format", "type"]);
+	if (field.type !== "string" || field.format !== "message_ref") context.invalid();
+}
+
+function assertPlainTextContract(value: unknown, context: GatewayMessageContractContext): void {
+	const field = context.record(value);
+	context.exact(field, ["max_bytes", "min_bytes", "type"]);
+	if (field.type !== "string" || field.min_bytes !== 1 || field.max_bytes !== 8192) context.invalid();
+}
+
+function assertIdempotencyKeyContract(value: unknown, context: GatewayMessageContractContext): void {
+	const field = context.record(value);
+	context.exact(field, ["format", "max_bytes", "min_bytes", "type"]);
+	if (field.type !== "string" || field.format !== "safe_idempotency_key" || field.min_bytes !== 1 || field.max_bytes !== 128) context.invalid();
+}
+
 function decodeMessageSearchInput(value: unknown, context: GatewayMessageContractContext): { queryUtf8Bytes: number; limit: number; offset: number } {
 	const input = context.record(value);
 	context.exact(input, ["limit", "offset", "query"], ["limit", "offset"]);
@@ -132,6 +174,15 @@ function decodeMessageGetInput(value: unknown, context: GatewayMessageContractCo
 		offset: optionalInteger(input.offset, 0, 0, 40_000, context),
 		limitBytes: optionalInteger(input.limit_bytes, 4096, 256, 8192, context),
 	};
+}
+
+function decodeMessageCreateInput(value: unknown, context: GatewayMessageContractContext): { replyTo: string } {
+	const input = context.record(value);
+	context.exact(input, ["idempotency_key", "reply_to", "text"]);
+	context.prefixed(input.reply_to, "message:");
+	if (typeof input.text !== "string" || context.byteLength(input.text) < 1 || context.byteLength(input.text) > 8192
+		|| !isSafeIdempotencyKey(input.idempotency_key)) context.invalid();
+	return { replyTo: input.reply_to as string };
 }
 
 function optionalInteger(value: unknown, defaultValue: number, minimum: number, maximum: number, context: GatewayMessageContractContext): number {
@@ -213,4 +264,8 @@ function assertSlackSource(value: unknown, context: GatewayMessageContractContex
 	const source = context.record(value);
 	context.exact(source, ["provider", "url"]);
 	if (source.provider !== "slack" || !isCealSlackPermalinkSource(source.url)) context.invalid();
+}
+
+function isSafeIdempotencyKey(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
 }

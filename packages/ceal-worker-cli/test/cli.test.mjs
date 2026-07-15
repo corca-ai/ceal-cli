@@ -295,6 +295,37 @@ test("message.get keeps only retrieval data and verified receipt state in the de
 	});
 });
 
+test("message.create keeps a verified opaque delivery result and rejects unsafe write grammar locally", async () => {
+	let stdout = "";
+	const code = writeCallCompleted({
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.create",
+		grant_ref: "grant:team-inbox-message-create", grant_revision: 4, target_ref: "target:team-inbox",
+		data: {
+			schema_version: "ceal.message_create_result.v1", delivery: "verified",
+			message_ref: "message:created_001", reply_to: "message:approved_001",
+		},
+		redaction: { state: "applied", omitted_classes: ["message_text", "idempotency_key", "provider_locator", "provider_identity"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	}, [{ event_ref: "gateway-audit:create:001" }], "request:create:001", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
+		capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Reply",
+	});
+	assert.equal(code, 0);
+	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	assert.deepEqual(payload.data, {
+		delivery: "verified", message_ref: "message:created_001", reply_to: "message:approved_001",
+	});
+	for (const arguments_ of [
+		["reply_to=message:approved_001", "text=Approved", "idempotency_key=retry-001", "channel=C0123456789"],
+		["reply_to=message:approved_001", "text=Approved", "idempotency_key=unsafe key"],
+		["reply_to=message:approved_001", "text=", "idempotency_key=retry-001"],
+	]) {
+		const invalid = await yamlRun(["call", "message.create", "--target", "target:team-inbox", ...arguments_], 3, {
+			loadSession: async () => assert.fail("invalid writes must not load a session"),
+		});
+		assert.equal(invalid.error.kind, "validation_error");
+	}
+});
+
 test("resource.resolve preserves one safe source citation and rejects unsafe Slack URL grammar before Gateway work", async () => {
 	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
 	await withGateway(async ({ endpoint, requests }) => {

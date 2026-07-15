@@ -74,6 +74,7 @@ export function gatewayFailureCode(error: unknown): string | null {
 
 function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
 	if (value.schema_version === "ceal.message_get_result.v1") return projectMessageGetData(value);
+	if (value.schema_version === "ceal.message_create_result.v1") return projectMessageCreateData(value);
 	if (value.schema_version === "ceal.resource_resolve_result.v1") return projectResourceResolveData(value);
 	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
 	const matches = value.results.flatMap((result) => {
@@ -95,6 +96,13 @@ function projectCapabilityData(value: Record<string, unknown>): Record<string, u
 			&& (value.coverage as Record<string, unknown>).completeness === "incomplete" ? { coverage: "partial" } : {}),
 		...(offset > 0 ? { offset } : {}),
 	};
+}
+
+function projectMessageCreateData(value: Record<string, unknown>): Record<string, unknown> {
+	return (typeof value.message_ref === "string" && typeof value.reply_to === "string"
+		&& (value.delivery === "verified" || value.delivery === "replayed"))
+		? { delivery: value.delivery, message_ref: value.message_ref, reply_to: value.reply_to }
+		: {};
 }
 
 function projectMessageGetData(value: Record<string, unknown>): Record<string, unknown> {
