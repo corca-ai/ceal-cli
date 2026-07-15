@@ -23,8 +23,9 @@ YAML document; do not add an output-format flag and do not scrape prose.
 ## Workflow
 
 1. Prefer a read-only discovery route learned from help before attempting an
-   operation. Discover capability and target refs instead of inventing
-   provider-specific commands.
+   operation. The selected Profile's live capability discovery is the source
+   of truth for current data areas, target refs, input contracts, and
+   readiness; do not invent provider-specific commands or a static catalog.
    The command registry is navigation only: for a question about what Ceal can
    do, select a leaf whose purpose and result schema describe Gateway-issued
    capability state. Do not answer a capability question from command discovery
@@ -47,9 +48,11 @@ YAML document; do not add an output-format flag and do not scrape prose.
 ## Boundaries
 
 - Never ask a user to paste a credential, token, or secret into chat or a CLI
-  operand. Worker authority comes from a Gateway-issued client Session. A
-  pre-approved device-enrollment code, when needed, is read only from stdin;
-  it is not an operator activation code.
+  operand. Worker authority comes from a Gateway-issued client Session. The
+  normal customer path is the private Gateway's browser/device login route.
+  If an installed legacy surface exposes a device-enrollment code, treat it as
+  a pilot fallback, read it only through its documented protected input path,
+  and never confuse it with an operator activation code.
 - Do not infer that exit code zero proves an external action.
 - Do not mutate policy, credentials, registration, release state, or other
   operator control surfaces. Personal client hosts should not install or invoke
@@ -73,25 +76,22 @@ cached command tree is never a substitute for installed help.
 
 When a user supplies a private-source link such as a Slack permalink, treat it
 as an explicit source constraint, not as permission to use a provider CLI or
-browser automation. Discover the granted target first, then inspect the
-generic capability help and use the resolved opaque Ceal ref for bounded
-retrieval. The normal sequence is discovery → resource resolution → bounded
-read → the separately discovered follow-up capability. If that follow-up is a
-write, require that its discovered target, effect, input contract, and
-readback requirement all fit the requested action. A resolved source ref is
-context for that one bounded action, never permission for a broader post,
-recipient, provider identifier, or follow-up mutation.
+browser automation. Inspect the active Profile's discovered capability contract
+first. A Gateway may accept the link directly, may return an opaque resource
+ref for a separate bounded read, or may not expose a permitted route at all.
+Do not assume a capability name, resolution sequence, connector, or raw
+provider identifier from the link.
 
-If the active discovery does not expose a permitted resolution and bounded-read
-route for the supplied link, stop before any write. Do not substitute a search
-guess, raw provider identifier, or another integration.
+If the active discovery does not expose a permitted route for the supplied
+link, stop before any write. Do not substitute a search guess, raw provider
+identifier, another integration, or browser automation.
 
-For a discovered write, keep one stable `idempotency_key` for one intended
-side effect. If the Gateway says the provider may have been reached, or its
-receipt is not independently verified, preserve that key, inspect the receipt,
-and ask the Gateway operator to resolve the unknown outcome. Never create a
-new key, claim delivery, or make a second post merely because the first call
-returned an error.
+For a discovered write, follow its declared input and evidence contract. Keep
+one stable idempotency value only when that contract requires one. If the
+Gateway says the provider may have been reached, or its receipt is not
+independently verified, preserve the declared replay identity, inspect the
+receipt, and ask the Gateway operator to resolve the unknown outcome. Never
+invent a second write, claim delivery, or make a retry look like a new request.
 
 The returned `source` object is an ordinary citation. Do not open it
 automatically, treat it as a bearer credential, or infer that its presence

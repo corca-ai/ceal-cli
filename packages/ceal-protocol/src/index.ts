@@ -1,19 +1,8 @@
 import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION } from "./gateway-response-types.js";
-import type { CealGatewayMessageSearchCoverage, CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
+import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
-import {
-	validateMessageGetResult,
-	validateMessageCreateInputContract,
-	validateMessageCreateResult,
-	validateResourceResolveInputContract,
-	validateResourceResolveResult,
-	validateMessageSearchInputContract,
-	validateMessageSearchResult,
-	expectedCealGatewayCallRedactionOmissions,
-} from "./gateway-message-contract.js";
-import { isCealSlackPermalinkInput, isCealSlackPermalinkSource } from "./slack-permalink.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -68,14 +57,6 @@ export type {
 	CealGatewayHandshakeValue,
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
-	CealGatewayMessageSearchResult,
-	CealGatewayMessageSearchCallValue,
-	CealGatewayMessageSearchCoverage,
-	CealGatewayMessageSearchResultItem,
-	CealGatewayMessageGetResult,
-	CealGatewayMessageCreateResult,
-	CealGatewayResourceResolveResult,
-	CealGatewaySourceReference,
 	CealGatewayWriteContract,
 	CealCapabilityAccessDescriptor,
 	CealCapabilityReadiness,
@@ -85,7 +66,6 @@ export type {
 	CealGatewayRequestInput,
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
-export { isCealSlackPermalinkInput, isCealSlackPermalinkSource } from "./slack-permalink.js";
 export { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.js";
 export type {
@@ -168,20 +148,11 @@ const SECRET_MATERIAL = /(?:xox[baprs]-[A-Za-z0-9-]+|gh[opusr]_[A-Za-z0-9_-]+|sk
 const OPAQUE_TEXT_MATERIAL = /(?:\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b(?=[A-Za-z0-9_-]{24,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{24,}\b)/u;
 const FORBIDDEN_SECRET_KEY = /^(?:[a-z0-9_]*(?:token|secret|password|credential(?:s)?|private_?key)|api_?key|authorization|bearer|raw_?provider_?payload|provider_?payload)$/iu;
 const FORBIDDEN_AUTHORITY_KEY = /^(?:actor_?ref|owner_?ref|registration_?ref|runner_?ref|auth_?decision|policy_?decision|host_?decision)$/iu;
+const FORBIDDEN_AUDIT_DETAIL_KEY = /^(?:arguments|body|content|input|payload|query|text|text_preview|url)$/iu;
 const MAX_REQUEST_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 16 * 1024;
 const MAX_RESPONSE_VALUE_BYTES = 64 * 1024;
 const TEXT_ENCODER = new TextEncoder();
-const MESSAGE_CONTRACT_CONTEXT = {
-	invalid: invalidResponse,
-	record: requireRecord,
-	exact: requireExactKeys,
-	prefixed: requirePrefixedRef,
-	safeText: requireSafeText,
-	byteLength,
-	assertCoverage: assertCealGatewayMessageSearchCoverage,
-};
-
 export function decodeCealGatewayRequest(value: unknown): CealGatewayRequest {
 	try {
 		const envelope = requireRecord(value);
@@ -235,10 +206,7 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 			requireSafeRef(body.capability_id);
 			requireSafeRef(body.target_ref);
 			requireSafeText(body.purpose, 512);
-			assertSafeJsonValue(body.arguments, {
-				forbidAuthorityKeys: true,
-				allowAuthorizedSourceUrl: body.capability_id === "resource.resolve" ? "input" : undefined,
-			});
+			assertSafeJsonValue(body.arguments, { forbidAuthorityKeys: true, allowHttpsUrl: true });
 			requireJsonByteSize(body.arguments, MAX_ARGUMENT_BYTES, invalidRequest);
 			return;
 		case "readback":
@@ -252,9 +220,8 @@ function validateSuccessResponse(response: Record<string, unknown>, expectedRequ
 	validateResponseIdentity(response, expectedRequest.request_id);
 	assertSafeJsonValue(response.value, {
 		forbidAuthorityKeys: false,
-		allowAuthorizedMessageContent: expectedRequest.operation === "call" && expectedRequest.body.capability_id === "message.get",
-		allowAuthorizedSourceUrl: expectedRequest.operation === "call"
-			&& ["message.search", "message.get", "resource.resolve"].includes(expectedRequest.body.capability_id) ? "source" : undefined,
+		allowHttpsUrl: true,
+		allowResultContent: expectedRequest.operation === "call",
 	});
 	requireJsonByteSize(response.value, MAX_RESPONSE_VALUE_BYTES, invalidResponse);
 	if ("proof_ref_or_unavailable" in response) validateProofReference(response.proof_ref_or_unavailable);
@@ -340,24 +307,24 @@ function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	seen.add(String(capability.capability_id));
 	requireSafeText(capability.label, 128);
 	requireSafeRef(capability.evidence_requirement);
-	if (capability.capability_id === "message.search") validateMessageSearchInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
-	else if (capability.capability_id === "message.create") validateMessageCreateInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
-	else if (capability.capability_id === "resource.resolve") validateResourceResolveInputContract(capability.input_contract, MESSAGE_CONTRACT_CONTEXT);
-	else validateGenericInputContract(capability.input_contract);
+	validateGenericInputContract(capability.input_contract);
 }
 
 function validateWriteContract(value: unknown): void {
 	const contract = requireRecord(value);
-	requireExactKeys(contract, ["attribution", "compensation", "dry_run", "idempotency", "provider_readback", "side_effect_class"]);
-	if (contract.side_effect_class !== "append_reply" || contract.idempotency !== "required"
-		|| contract.dry_run !== "unsupported" || contract.attribution !== "subject"
-		|| contract.compensation !== "irreversible" || contract.provider_readback !== "required") invalidResponse();
+	assertSafeJsonValue(contract, { forbidAuthorityKeys: false });
+	if (!Object.hasOwn(contract, "side_effect_class") || !Object.hasOwn(contract, "idempotency")
+		|| !Object.hasOwn(contract, "provider_readback")) invalidResponse();
+	requireSafeRef(contract.side_effect_class);
+	if (!["required", "optional", "not_required"].includes(String(contract.idempotency))) invalidResponse();
+	if (!["required", "best_effort", "not_available"].includes(String(contract.provider_readback))) invalidResponse();
 }
 
 function validateGenericInputContract(value: unknown): void {
 	const contract = requireRecord(value);
 	requireSafeRef(contract.schema_version);
 	if (!String(contract.schema_version).startsWith("ceal.")) invalidResponse();
+	assertSafeJsonValue(contract, { forbidAuthorityKeys: false, allowHttpsUrl: true });
 }
 
 function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<string>): void {
@@ -397,12 +364,8 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 		|| call.proof_level !== "host_decision") invalidResponse();
 	requirePrefixedRef(call.grant_ref, "grant:");
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
-	if (call.capability_id === "message.search") validateMessageSearchResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
-	else if (call.capability_id === "message.get") validateMessageGetResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
-	else if (call.capability_id === "message.create") validateMessageCreateResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
-	else if (call.capability_id === "resource.resolve") validateResourceResolveResult(call.data, expectedRequest, MESSAGE_CONTRACT_CONTEXT);
-	else validateGenericCapabilityResult(call.data, call.capability_id);
-	validateCallRedaction(call.redaction, call.capability_id, call.data);
+	validateGenericCapabilityResult(call.data, call.capability_id);
+	validateCallRedaction(call.redaction);
 	validateHostNonClaims(call.non_claims, true);
 }
 
@@ -429,27 +392,7 @@ function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly
 	}
 }
 
-export function assertCealGatewayMessageSearchCoverage(
-	value: unknown,
-): asserts value is CealGatewayMessageSearchCoverage {
-	const coverage = requireRecord(value);
-	requireExactKeys(coverage, ["completeness", "match_semantics", "reply_coverage", "schema_version", "source", "truncated"]);
-	if (!validMessageSearchCoverageVocabulary(coverage)) invalidResponse();
-	if (coverage.source === "authoritative_index" && coverage.reply_coverage !== "included") invalidResponse();
-	if (coverage.source === "bounded_projection" && coverage.completeness !== "incomplete") invalidResponse();
-	if (coverage.truncated && coverage.completeness !== "incomplete") invalidResponse();
-}
-
-function validMessageSearchCoverageVocabulary(coverage: Record<string, unknown>): boolean {
-	return coverage.schema_version === "ceal.message_search_coverage.v1"
-		&& ["authoritative_index", "bounded_projection"].includes(String(coverage.source))
-		&& ["backend_ranked", "literal_case_insensitive", "token_and_case_insensitive"].includes(String(coverage.match_semantics))
-		&& ["included", "excluded"].includes(String(coverage.reply_coverage))
-		&& ["bounded", "incomplete"].includes(String(coverage.completeness))
-		&& typeof coverage.truncated === "boolean";
-}
-
-function validateCallRedaction(value: unknown, capabilityId: unknown, data: unknown): void {
+function validateCallRedaction(value: unknown): void {
 	const redaction = requireRecord(value);
 	requireExactKeys(redaction, ["omitted_classes", "state"]);
 	if (redaction.state !== "applied"
@@ -457,8 +400,6 @@ function validateCallRedaction(value: unknown, capabilityId: unknown, data: unkn
 		|| redaction.omitted_classes.length === 0
 		|| redaction.omitted_classes.length > 32) invalidResponse();
 	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
-	const expected = expectedCealGatewayCallRedactionOmissions(capabilityId, data);
-	if (expected && JSON.stringify(redaction.omitted_classes) !== JSON.stringify(expected)) invalidResponse();
 }
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {
@@ -537,28 +478,14 @@ function validateAuditCallDetail(value: unknown, event: Record<string, unknown>)
 	const authorization = requireRecord(event.grant_snapshot);
 	if (call.capability_id !== authorization.capability_id || call.target_ref !== authorization.target_ref
 		|| call.grant_ref !== authorization.grant_ref || call.grant_revision !== authorization.grant_revision) invalidResponse();
-	if (call.capability_id !== "message.search") {
-		requireExactKeys(call, ["capability_id", "grant_ref", "grant_revision", "input_summary", "output_summary", "schema_version", "target_ref"]);
-		if (call.schema_version !== "ceal.gateway_audit_call_detail.v1") invalidResponse();
-		requireSafeRef(call.capability_id);
-		requirePrefixedRef(call.grant_ref, "grant:");
-		requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
-		requirePrefixedRef(call.target_ref, "target:");
-		requireRecord(call.input_summary);
-		requireRecord(call.output_summary);
-		return;
-	}
-	requireExactKeys(call, ["capability_id", "coverage", "grant_ref", "grant_revision", "query_utf8_bytes", "requested_limit", "requested_offset", "result_count", "schema_version", "target_ref"], ["requested_offset"]);
-	if (![call.schema_version === "ceal.gateway_audit_call_detail.v1", call.capability_id === "message.search",
-		event.operation === "call", event.outcome === "succeeded"].every(Boolean)) invalidResponse();
+	if (call.schema_version !== "ceal.gateway_audit_call_detail.v1"
+		|| event.operation !== "call" || event.outcome !== "succeeded") invalidResponse();
+	if (Object.keys(call).some((key) => FORBIDDEN_AUDIT_DETAIL_KEY.test(key))) invalidResponse();
+	assertSafeJsonValue(call, { forbidAuthorityKeys: true, allowHttpsUrl: true });
+	requireSafeRef(call.capability_id);
 	requirePrefixedRef(call.target_ref, "target:");
 	requirePrefixedRef(call.grant_ref, "grant:");
 	requireIntegerRange(call.grant_revision, 1, Number.MAX_SAFE_INTEGER);
-	requireIntegerRange(call.requested_limit, 1, 10);
-	if (call.requested_offset !== undefined) requireIntegerRange(call.requested_offset, 0, 1000);
-	requireIntegerRange(call.query_utf8_bytes, 1, 512);
-	requireIntegerRange(call.result_count, 0, call.requested_limit);
-	assertCealGatewayMessageSearchCoverage(call.coverage);
 }
 
 function requireIntegerRange(value: unknown, minimum: number, maximum: number): asserts value is number {
@@ -660,8 +587,8 @@ function validateProofReference(value: unknown): void {
 
 interface SafeJsonOptions {
 	forbidAuthorityKeys: boolean;
-	allowAuthorizedMessageContent?: boolean;
-	allowAuthorizedSourceUrl?: "input" | "source";
+	allowHttpsUrl?: boolean;
+	allowResultContent?: boolean;
 }
 
 function assertSafeJsonValue(value: unknown, options: SafeJsonOptions, depth = 0, count = { value: 0 }): void {
@@ -693,17 +620,18 @@ function assertSafeJsonRecord(record: Record<string, unknown>, options: SafeJson
 	const entries = Object.entries(record);
 	if (entries.length > 128) invalidByContext(options);
 	for (const [key, child] of entries) {
+		if (key === "credential_material_included" && child !== false) invalidByContext(options);
 		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
 		assertSafeJsonRecordChild(key, child, options, depth, count);
 	}
 }
 
 function assertSafeJsonRecordChild(key: string, child: unknown, options: SafeJsonOptions, depth: number, count: { value: number }): void {
-	if (options.allowAuthorizedMessageContent && key === "text") {
-		if (typeof child !== "string" || byteLength(child) > 8192) invalidByContext(options);
+	if (options.allowResultContent && (key === "text" || key === "text_preview")) {
+		if (!isSafeResultContent(child, key)) invalidByContext(options);
 		return;
 	}
-	if (key === "url" && isAuthorizedSlackUrl(child, options.allowAuthorizedSourceUrl)) return;
+	if (key === "url" && options.allowHttpsUrl && isSafeExternalHttpsUrl(child)) return;
 	assertSafeJsonValue(child, options, depth + 1, count);
 }
 
@@ -718,8 +646,35 @@ function assertSafeJsonKey(key: string, options: SafeJsonOptions): void {
 	if (invalid) invalidByContext(options);
 }
 
-function isAuthorizedSlackUrl(value: unknown, mode: SafeJsonOptions["allowAuthorizedSourceUrl"]): boolean {
-	return mode === "input" ? isCealSlackPermalinkInput(value) : mode === "source" && isCealSlackPermalinkSource(value);
+function isSafeExternalHttpsUrl(value: unknown): boolean {
+	if (!isSafeExternalHttpsUrlInput(value)) return false;
+	try {
+		const url = new URL(value);
+		return isSafeExternalHttpsUrlShape(url) && hasSafeExternalHttpsQuery(url);
+	} catch {
+		return false;
+	}
+}
+
+function isSafeExternalHttpsUrlInput(value: unknown): value is string {
+	return typeof value === "string" && byteLength(value) <= 2048 && !SECRET_MATERIAL.test(value);
+}
+
+function isSafeExternalHttpsUrlShape(url: URL): boolean {
+	return url.protocol === "https:" && url.username === "" && url.password === "" && url.hash === "";
+}
+
+function hasSafeExternalHttpsQuery(url: URL): boolean {
+	for (const [key, parameter] of url.searchParams) {
+		if (FORBIDDEN_SECRET_KEY.test(key) || SECRET_MATERIAL.test(parameter)) return false;
+	}
+	return true;
+}
+
+function isSafeResultContent(value: unknown, key: "text" | "text_preview"): boolean {
+	const maximum = key === "text" ? 8192 : 1024;
+	return typeof value === "string" && byteLength(value) <= maximum
+		&& !SECRET_MATERIAL.test(value) && !hasControlCharacter(value);
 }
 
 function requireSafeRef(value: unknown): asserts value is string {

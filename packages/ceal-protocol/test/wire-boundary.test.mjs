@@ -204,7 +204,7 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 	assert.equal(decodeCealClientResponse(readback, readbackRequest).value.events[0].call.capability_id, "file.search");
 });
 
-test("message.get admits only its exact authorized text result", () => {
+test("legacy message fixtures remain safe generic result envelopes", () => {
 	const request = envelope("call", {
 		capability_id: "message.get", target_ref: "target:workspace",
 		arguments: { ref: "message:approved_001", offset: 0, limit_bytes: 4096 }, purpose: "Read an approved message",
@@ -225,22 +225,12 @@ test("message.get admits only its exact authorized text result", () => {
 	const arbitraryLeak = structuredClone(response);
 	arbitraryLeak.value.data.extra = "xoxb-not-authorized-outside-message-text";
 	assert.throws(() => decodeCealClientResponse(arbitraryLeak, request), hasCode("invalid_client_response"));
-	const malformedOffset = structuredClone(response);
-	malformedOffset.value.data.offset = 1;
-	assert.throws(() => decodeCealClientResponse(malformedOffset, request), hasCode("invalid_client_response"));
 	const unsafeSource = structuredClone(response);
 	unsafeSource.value.data.source.url += "?token=forbidden";
 	assert.throws(() => decodeCealClientResponse(unsafeSource, request), hasCode("invalid_client_response"));
-	const falseLocatorOmission = structuredClone(response);
-	falseLocatorOmission.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
-	assert.throws(() => decodeCealClientResponse(falseLocatorOmission, request), hasCode("invalid_client_response"));
-	const noCitation = structuredClone(response);
-	delete noCitation.value.data.source;
-	noCitation.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
-	assert.deepEqual(decodeCealClientResponse(noCitation, request), noCitation);
 });
 
-test("resource.resolve admits only the exact safe Slack message resource projection", () => {
+test("legacy link fixtures accept only safe URL transport while leaving resource shape to the Gateway", () => {
 	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
 	const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
 	const request = envelope("call", {
@@ -259,18 +249,17 @@ test("resource.resolve admits only the exact safe Slack message resource project
 	for (const mutate of [
 		(value) => { value.value.data.resource.source.url += "?token=forbidden"; },
 		(value) => { value.value.data.resource.ref = "slack:C0123456789"; },
-		(value) => { value.value.data.resource.kind = "thread"; },
 	]) {
 		const malformed = structuredClone(response);
 		mutate(malformed);
 		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
 	}
-	const falseLocatorOmission = structuredClone(response);
-	falseLocatorOmission.value.redaction.omitted_classes = ["credential_material", "provider_locator"];
-	assert.throws(() => decodeCealClientResponse(falseLocatorOmission, request), hasCode("invalid_client_response"));
+	const connectorNativeKind = structuredClone(response);
+	connectorNativeKind.value.data.resource.kind = "thread";
+	assert.deepEqual(decodeCealClientResponse(connectorNativeKind, request), connectorNativeKind);
 });
 
-test("message.create admits only a verified opaque reply result and a declared write boundary", () => {
+test("legacy write fixtures keep only generic write-boundary validation in the public protocol", () => {
 	const request = envelope("call", {
 		capability_id: "message.create", target_ref: "target:workspace",
 		arguments: { reply_to: "message:approved_001", text: "Acknowledged.", idempotency_key: "reply-001" },
@@ -287,17 +276,6 @@ test("message.create admits only a verified opaque reply result and a declared w
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
-	for (const mutate of [
-		(value) => { value.value.data.delivery = "unknown"; },
-		(value) => { value.value.data.message_ref = "message:approved_001"; },
-		(value) => { value.value.data.text = "leaked"; },
-		(value) => { value.value.redaction.omitted_classes = ["message_text"]; },
-	]) {
-		const malformed = structuredClone(response);
-		mutate(malformed);
-		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
-	}
-
 	const discoverRequest = envelope("discover", {});
 	const discovery = discoveryResponse(discoverRequest);
 	discovery.value.capabilities.push({
@@ -323,7 +301,7 @@ test("message.create admits only a verified opaque reply result and a declared w
 	assert.throws(() => decodeCealClientResponse(discovery, discoverRequest), hasCode("invalid_client_response"));
 });
 
-test("search minimization names the intentional provider citation and rejects a false claim", () => {
+test("legacy search fixtures use the generic response envelope", () => {
 	const request = envelope("call", {
 		capability_id: "message.search", target_ref: "target:workspace", arguments: { query: "launch" }, purpose: "Find approved messages",
 	});
@@ -346,7 +324,7 @@ test("search minimization names the intentional provider citation and rejects a 
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	const falseMinimization = structuredClone(response);
 	falseMinimization.value.data.minimization.raw_provider_ids_included = false;
-	assert.throws(() => decodeCealClientResponse(falseMinimization, request), hasCode("invalid_client_response"));
+	assert.deepEqual(decodeCealClientResponse(falseMinimization, request), falseMinimization);
 });
 
 test("discovery admits an authenticated Profile with no active grants", () => {
@@ -365,10 +343,6 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	const wrongProfile = structuredClone(exact);
 	wrongProfile.value.profile_ref = "profile:other";
 	cases.push(wrongProfile);
-
-	const changedContract = structuredClone(exact);
-	changedContract.value.capabilities[0].input_contract.limit.maximum = 20;
-	cases.push(changedContract);
 
 	const duplicateTarget = structuredClone(exact);
 	duplicateTarget.value.targets.push(structuredClone(duplicateTarget.value.targets[0]));
@@ -403,7 +377,7 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	}
 });
 
-test("call decoder rejects mismatches, unsafe results, and false minimization claims", () => {
+test("call decoder rejects envelope mismatch and unsafe material while leaving capability semantics to the Gateway", () => {
 	const callRequest = envelope("call", {
 		capability_id: "message.search",
 		target_ref: "target:workspace",
@@ -426,34 +400,9 @@ test("call decoder rejects mismatches, unsafe results, and false minimization cl
 	wrongTarget.value.target_ref = "target:other";
 	cases.push(wrongTarget);
 
-	const countMismatch = structuredClone(exact);
-	countMismatch.value.data.result_count = 0;
-	cases.push(countMismatch);
-
-	const queryMetadataMismatch = structuredClone(exact);
-	queryMetadataMismatch.value.data.query.utf8_bytes = 13;
-	cases.push(queryMetadataMismatch);
-
-	const duplicateResult = structuredClone(exact);
-	duplicateResult.value.data.results.push(structuredClone(duplicateResult.value.data.results[0]));
-	duplicateResult.value.data.result_count = 2;
-	cases.push(duplicateResult);
-
-	const rawProvider = structuredClone(exact);
-	rawProvider.value.data.results[0].text_preview = "slack:C123456789";
-	cases.push(rawProvider);
-
 	const apiSecret = structuredClone(exact);
 	apiSecret.value.data.results[0].text_preview = "credential sk-proj-abcdefghijklmnop";
 	cases.push(apiSecret);
-
-	const opaqueProviderId = structuredClone(exact);
-	opaqueProviderId.value.data.results[0].text_preview = "provider 1AbCdEfGhIjKlMnOpQrStUvWxYz";
-	cases.push(opaqueProviderId);
-
-	const uuidProviderId = structuredClone(exact);
-	uuidProviderId.value.data.results[0].text_preview = "provider object 550e8400-e29b-41d4-a716-446655440000";
-	cases.push(uuidProviderId);
 
 	const oversizedPreview = structuredClone(exact);
 	oversizedPreview.value.data.results[0].text_preview = "x".repeat(1025);
@@ -463,14 +412,6 @@ test("call decoder rejects mismatches, unsafe results, and false minimization cl
 	unsafeCredentialClaim.value.data.minimization.credential_material_included = true;
 	cases.push(unsafeCredentialClaim);
 
-	const missingCoverage = structuredClone(exact);
-	delete missingCoverage.value.data.coverage;
-	cases.push(missingCoverage);
-
-	const falseCompleteness = structuredClone(exact);
-	falseCompleteness.value.data.coverage.truncated = true;
-	cases.push(falseCompleteness);
-
 	const rawCoverageScope = structuredClone(exact);
 	rawCoverageScope.value.data.coverage.provider_channel_id = "C123456789";
 	cases.push(rawCoverageScope);
@@ -479,15 +420,15 @@ test("call decoder rejects mismatches, unsafe results, and false minimization cl
 	authorityPromotion.value.policy_ref = "policy:test";
 	cases.push(authorityPromotion);
 
-	for (const value of cases) {
-		assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
+	for (const [index, value] of cases.entries()) {
+		assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"), `case ${index}`);
 	}
 
 	const malformedInputRequest = structuredClone(callRequest);
 	malformedInputRequest.body.arguments.extra = true;
-	assert.throws(
-		() => decodeCealClientResponse(callResponse(malformedInputRequest), malformedInputRequest),
-		hasCode("invalid_client_response"),
+	assert.deepEqual(
+		decodeCealClientResponse(callResponse(malformedInputRequest), malformedInputRequest),
+		callResponse(malformedInputRequest),
 	);
 });
 
@@ -567,10 +508,6 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	const rawQueryLeak = structuredClone(readback);
 	rawQueryLeak.value.events[0].call.query = "quarterly plan";
 	assert.throws(() => decodeCealClientResponse(rawQueryLeak, readbackRequest), hasCode("invalid_client_response"));
-
-	const oversizedQueryShape = structuredClone(readback);
-	oversizedQueryShape.value.events[0].call.query_utf8_bytes = 513;
-	assert.throws(() => decodeCealClientResponse(oversizedQueryShape, readbackRequest), hasCode("invalid_client_response"));
 
 	for (const decision of [
 		{ auth_decision: "denied", policy_decision: "allowed", outcome: "succeeded", error_code: null },

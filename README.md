@@ -22,26 +22,26 @@ document. The public commands reject `--json` and `--format json`; typed callers
 use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 
 Capability discovery and invocation are provider-neutral contracts. `ceal
-capabilities` exposes stable capability/target references, input contracts,
-the applied Profile Grant revision, and connector readiness; it does not expose
-Slack, GitHub, Notion, another provider's credential kind, API mode, or internal
-connector binding. `ceal call <capability-id> --target <target-ref>
-[key=value ...]` forwards that discovered vocabulary without requiring a new
-top-level CLI command. Known core capabilities receive stricter local and wire
-validation, while a bounded generic envelope admits future manifest-defined
-capabilities without weakening secret and raw-provider-reference rejection.
-Successful calls use `ceal.result.v1`, including identity, authorization,
-evidence, claim, audit, redaction, usage, data, and error fields so agents do not
-infer completion from an exit code alone.
+capabilities` exposes the active Profile's current capability/target references,
+input contracts, readiness, and recovery; it does not expose Slack, GitHub,
+Notion, another provider's credential kind, API mode, or internal connector
+binding. `ceal call <capability-id> --target <target-ref> [key=value ...]`
+forwards only that discovered vocabulary without requiring a new top-level CLI
+command or client-side provider grammar. The Gateway validates capability input,
+Profile scope, and connector execution; the client preserves a bounded generic
+wire envelope and rejects secret or authority material. Successful calls use a
+compact result envelope with primary data and verified readback identity. Rich
+audit evidence is read only on demand so agents do not infer completion from an
+exit code alone.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread
-replies, but the public contract reports only neutral coverage semantics. The
-Gateway authorizes the subject's active Profile membership and explicit target
-Grant before it reaches that private adapter; provider token kinds are execution
-details, never authorization concepts. A less capable connector must advertise
-`degraded` readiness and incomplete coverage rather than impersonating the
-richer path.
+replies, but the public client neither reimplements that behavior nor turns it
+into a Slack command. The Gateway authorizes active Profile membership and the
+Profile-owned connector scope before it reaches that private adapter; provider
+token kinds are execution details, never authorization concepts. A less capable
+connector must advertise `degraded` readiness rather than impersonating a richer
+path.
 
 The repository also owns two Agent Skill packages under `skills/`:
 `ceal-guide` for worker capability use and `cealctl-guide` for operator/control
@@ -145,12 +145,14 @@ revoked-record reactivation, or implicit record deletion.
 
 The approved client-device record, Subject, Profile Membership, and target
 Grants must already exist in that Gateway registry; enrollment cannot create
-authority. `cealctl enrollments create` then emits a short-lived, one-time
-**device-enrollment code**, bound to exactly those existing records. It is
-transferred privately to the approved personal client machine and exchanged
-through stdin using the exact Gateway endpoint printed by `cealctl`. The worker
-Session then discovers and calls its granted capabilities without endpoint or
-token flags:
+authority. The following is the current **pilot fallback**, not the intended
+employee login UX: `cealctl enrollments create` emits a short-lived, one-time
+device-enrollment code bound to those existing records. It is transferred
+privately to the approved personal client machine and exchanged through stdin
+using the exact Gateway endpoint printed by `cealctl`. The target customer flow
+is private-Gateway browser/device login through the organization's IdP; it is
+not claimed as implemented by this release. The worker Session then discovers
+and calls its granted capabilities without endpoint or token flags:
 
 ```sh
 read -rs CEAL_DEVICE_ENROLLMENT_CODE
@@ -159,7 +161,7 @@ printf '%s\n' "$CEAL_DEVICE_ENROLLMENT_CODE" | ceal session enroll \
   --code-stdin
 unset CEAL_DEVICE_ENROLLMENT_CODE
 ceal capabilities
-ceal call message.search --target target:team-inbox query=incident limit=3
+ceal call <capability-id> --target <target-ref> key=value
 ```
 
 Both operator and worker sessions rotate automatically and revoke server-side

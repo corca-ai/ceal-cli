@@ -76,7 +76,7 @@
 			"path": "skills/ceal-guide/SKILL.md",
 			"binary": "ceal",
 			"discovery": "installed_help",
-			"sha256": "990d7fcc40073a3811a53fa99a9cafa94e79885ca7b18a502ccf889af4a6f2f6"
+			"sha256": "fed8a9516c81c2971b1539e745c73f10e46e4456caca6eb4a96e6043e2dd1713"
 		},
 		"cealctl-guide": {
 			"path": "skills/cealctl-guide/SKILL.md",

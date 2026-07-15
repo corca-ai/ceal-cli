@@ -86,12 +86,10 @@ export interface CealGatewayDiscoveryCapability {
 
 /** Provider-neutral declaration of a governed mutation's operational boundary. */
 export interface CealGatewayWriteContract {
-	side_effect_class: "append_reply";
-	idempotency: "required";
-	dry_run: "unsupported";
-	attribution: "subject";
-	compensation: "irreversible";
-	provider_readback: "required";
+	side_effect_class: string;
+	idempotency: "required" | "optional" | "not_required";
+	provider_readback: "required" | "best_effort" | "not_available";
+	[key: string]: unknown;
 }
 
 export type CealCapabilityReadiness = "ready" | "degraded" | "unavailable" | "unknown";
@@ -136,78 +134,6 @@ export interface CealGatewayCallValue {
 	host_decision: "accepted";
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
-}
-
-export interface CealGatewayMessageSearchResult {
-	schema_version: "ceal.message_search_result.v1";
-	query: { redacted: true; utf8_bytes: number; empty: false };
-	offset: number;
-	next_offset?: number;
-	result_count: number;
-	results: CealGatewayMessageSearchResultItem[];
-	coverage: CealGatewayMessageSearchCoverage;
-	minimization: {
-		/** True only when an approved provider-origin source citation is returned. */
-		raw_provider_ids_included: boolean;
-		raw_messages_included: false;
-		credential_material_included: false;
-	};
-}
-
-export type CealGatewayMessageSearchCallValue = Omit<CealGatewayCallValue, "capability_id" | "data"> & {
-	capability_id: "message.search";
-	data: CealGatewayMessageSearchResult;
-};
-
-export interface CealGatewayMessageSearchCoverage {
-	schema_version: "ceal.message_search_coverage.v1";
-	source: "authoritative_index" | "bounded_projection";
-	match_semantics: "backend_ranked" | "literal_case_insensitive" | "token_and_case_insensitive";
-	reply_coverage: "included" | "excluded";
-	completeness: "bounded" | "incomplete";
-	truncated: boolean;
-}
-
-export interface CealGatewayMessageSearchResultItem {
-	ref: string;
-	thread_ref?: string;
-	target_ref: string;
-	created_at: string;
-	source_label: string;
-	text_preview: string;
-	source?: CealGatewaySourceReference;
-}
-
-/** A safe provider-origin citation; never a bearer credential or Ceal action. */
-export interface CealGatewaySourceReference {
-	provider: "slack";
-	url: string;
-}
-
-export interface CealGatewayMessageGetResult {
-	schema_version: "ceal.message_get_result.v1";
-	ref: string;
-	source_label: string;
-	source?: CealGatewaySourceReference;
-	text: string;
-	offset: number;
-	next_offset?: number;
-}
-
-export interface CealGatewayResourceResolveResult {
-	schema_version: "ceal.resource_resolve_result.v1";
-	resource: {
-		ref: string;
-		kind: "message";
-		source: CealGatewaySourceReference;
-	};
-}
-
-export interface CealGatewayMessageCreateResult {
-	schema_version: "ceal.message_create_result.v1";
-	delivery: "verified" | "replayed";
-	message_ref: string;
-	reply_to: string;
 }
 
 export const CEAL_GATEWAY_POLICY_DENIAL_MESSAGE = "The authenticated profile is not granted this capability for the requested target." as const;
@@ -267,30 +193,14 @@ export interface CealGatewayAuthorizationSnapshot {
 	grant_revision: number;
 }
 
-export interface CealGatewayMessageSearchAuditCallDetail {
-	schema_version: "ceal.gateway_audit_call_detail.v1";
-	capability_id: "message.search";
-	target_ref: string;
-	grant_ref: string;
-	grant_revision: number;
-	requested_limit: number;
-	requested_offset?: number;
-	query_utf8_bytes: number;
-	result_count: number;
-	coverage: CealGatewayMessageSearchCoverage;
-}
-
-export interface CealGatewayGenericAuditCallDetail {
+export interface CealGatewayAuditCallDetail {
 	schema_version: "ceal.gateway_audit_call_detail.v1";
 	capability_id: string;
 	target_ref: string;
 	grant_ref: string;
 	grant_revision: number;
-	input_summary: Record<string, unknown>;
-	output_summary: Record<string, unknown>;
+	[key: string]: unknown;
 }
-
-export type CealGatewayAuditCallDetail = CealGatewayMessageSearchAuditCallDetail | CealGatewayGenericAuditCallDetail;
 
 export interface CealGatewayAuditReadbackValue {
 	schema_version: "ceal.gateway_audit_readback.v1";

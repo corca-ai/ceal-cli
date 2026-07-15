@@ -216,7 +216,7 @@ test("call invokes one granted capability and independently reads back its audit
 		assert.equal(payload.status, "completed");
 		assert.equal(payload.capability, "message.search");
 		assert.equal(payload.target, "target:team-inbox");
-		assert.equal(payload.data.matches.length, 1);
+		assert.equal(payload.data.results.length, 1);
 		assert.equal(payload.receipt.evidence, "readback_verified");
 		assert.equal(payload.receipt.request_ref, "narnia:call:1:call");
 		assert.equal("usage" in payload, false);
@@ -241,7 +241,6 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 				ref: "gateway-audit:event:001", operation: "call", outcome: "succeeded", authorization: "allowed",
 				capability: "message.search", target: "target:team-inbox",
 				grant: { ref: "grant:team-inbox-message-search", revision: 4 },
-				search: { requested_limit: 5, result_count: 1, coverage: "bounded" },
 			}],
 		});
 		assert.deepEqual(requests.map((item) => item.body.operation), ["readback"]);
@@ -267,7 +266,7 @@ test("call refuses to claim completion when audit readback has no verified event
 	assert.equal(payload.error.kind, "audit_readback_missing");
 });
 
-test("message.get keeps only retrieval data and verified receipt state in the default result", () => {
+test("compatibility result data passes through without a client-side message projection", () => {
 	let stdout = "";
 	const code = writeCallCompleted({
 		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
@@ -287,15 +286,15 @@ test("message.get keeps only retrieval data and verified receipt state in the de
 	assert.deepEqual(payload, {
 		schema_version: "ceal.result.v2", status: "completed", capability: "message.get", target: "target:team-inbox",
 		data: {
-			ref: "message:approved_001",
+			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
 			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
-			text: "Full authorized message text.",
+			text: "Full authorized message text.", offset: 0,
 		},
 		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
 });
 
-test("message.create keeps a verified opaque delivery result and rejects unsafe write grammar locally", async () => {
+test("compatibility result data passes through without a client-side write projection", async () => {
 	let stdout = "";
 	const code = writeCallCompleted({
 		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.create",
@@ -312,18 +311,16 @@ test("message.create keeps a verified opaque delivery result and rejects unsafe 
 	assert.equal(code, 0);
 	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.deepEqual(payload.data, {
-		delivery: "verified", message_ref: "message:created_001", reply_to: "message:approved_001",
+		schema_version: "ceal.message_create_result.v1", delivery: "verified", message_ref: "message:created_001", reply_to: "message:approved_001",
 	});
-	for (const arguments_ of [
-		["reply_to=message:approved_001", "text=Approved", "idempotency_key=retry-001", "channel=C0123456789"],
-		["reply_to=message:approved_001", "text=Approved", "idempotency_key=unsafe key"],
-		["reply_to=message:approved_001", "text=", "idempotency_key=retry-001"],
-	]) {
-		const invalid = await yamlRun(["call", "message.create", "--target", "target:team-inbox", ...arguments_], 3, {
-			loadSession: async () => assert.fail("invalid writes must not load a session"),
-		});
-		assert.equal(invalid.error.kind, "validation_error");
-	}
+});
+
+test("call does not impose a legacy capability-specific operand allowlist", async () => {
+	const payload = await yamlRun([
+		"call", "message.create", "--target", "target:team-inbox",
+		"reply_to=message:approved_001", "text=Approved", "idempotency_key=retry-001", "format=compact",
+	], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") });
+	assert.equal(payload.error.kind, "request_failed");
 });
 
 test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
@@ -335,7 +332,7 @@ test("write idempotency conflicts explain safe recovery without exposing the ori
 	});
 });
 
-test("resource.resolve preserves one safe source citation and rejects unsafe Slack URL grammar before Gateway work", async () => {
+test("compatibility link data passes through and unsafe input is left to the Gateway contract", async () => {
 	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
 	await withGateway(async ({ endpoint, requests }) => {
 		const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
@@ -343,7 +340,9 @@ test("resource.resolve preserves one safe source citation and rejects unsafe Sla
 			loadSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:resolve:1",
 		});
 		assert.deepEqual(payload.data, {
-			ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
+			schema_version: "ceal.resource_resolve_result.v1", resource: {
+				ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
+			},
 		});
 		assert.deepEqual(requests[0].body.body.arguments, { url });
 	}, (request) => request.operation === "call" ? success(request, {
@@ -359,8 +358,8 @@ test("resource.resolve preserves one safe source citation and rejects unsafe Sla
 	const invalid = await yamlRun([
 		"call", "resource.resolve", "--target", "target:team-inbox",
 		"url=https://workspace.slack.com/archives/C0123456789/p1720000000000100?token=forbidden",
-	], 3, { loadSession: async () => storedSession("http://unused") });
-	assert.equal(invalid.error.kind, "validation_error");
+	], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") });
+	assert.equal(invalid.error.kind, "invalid_request");
 });
 
 test("call preserves one request identity across authentication refresh and final audit readback", async () => {

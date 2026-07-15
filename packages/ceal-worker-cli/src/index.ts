@@ -16,7 +16,7 @@ import {
 	createCealPersonalClientSessionClient,
 } from "@corca-ai/ceal";
 import type { CealStoredSession } from "./profile-store.js";
-import { normalizeCapabilitySpecificArguments, validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
+import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
 import {
 	classifyGatewayFailure,
@@ -185,10 +185,8 @@ function commandHelp(command: CealCommandDefinition): string {
 		] : command.name === "call" ? [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
-			"  key=value               Capability input; repeat for each discovered field.",
-			"  message.search          Requires query=<text>; optional limit=<1-10>, offset=<0-1000>.",
-			"  message.get             Requires ref=<message-ref>; optional offset=<0-40000>, limit_bytes=<256-8192>. message.create requires reply_to=<message-ref>, text=<plain-text>, idempotency_key=<safe-key>.",
-			"  resource.resolve        Requires url=<safe Slack permalink>; returns an opaque message ref.",
+			"  key=value               Capability input; repeat only fields in the discovered input contract.",
+			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		] : command.name === "receipt" ? [
 			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
 		] : [];
@@ -382,23 +380,12 @@ async function requestReceiptReadback(initialSession: CealStoredSession, request
 }
 
 function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
-	const call = event.call;
-	const searchCall = call && call.capability_id === "message.search"
-		? call as unknown as { requested_limit: number; requested_offset?: number; result_count: number; coverage: { completeness: string } } : null;
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
 		authorization: event.policy_decision,
 		...(event.grant_snapshot ? {
 			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
 			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
-		} : {}),
-		...(searchCall ? {
-			search: {
-				requested_limit: searchCall.requested_limit,
-				...(searchCall.requested_offset === undefined ? {} : { requested_offset: searchCall.requested_offset }),
-				result_count: searchCall.result_count,
-				coverage: searchCall.coverage.completeness === "incomplete" ? "partial" : "bounded",
-			},
 		} : {}),
 	};
 }
@@ -492,7 +479,6 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	const operands = parseKeyValueOperands(options.slice(3));
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
-	if (!normalizeCapabilitySpecificArguments(capabilityId, arguments_)) return { ok: false };
 	return {
 		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_,
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,

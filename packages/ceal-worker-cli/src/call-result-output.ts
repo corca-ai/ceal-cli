@@ -24,7 +24,7 @@ export function writeCallCompleted(
 	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed);
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
-		target: parsed.targetRef, data: projectCapabilityData(value.data),
+		target: parsed.targetRef, data: value.data,
 		receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
 	});
 }
@@ -50,7 +50,7 @@ export function writeCallIncomplete(
 ): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
-		data: projectCapabilityData(value.data), receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
+		data: value.data, receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
 	});
 	return 3;
@@ -70,74 +70,6 @@ export function writeCallUnavailable(
 export function gatewayFailureCode(error: unknown): string | null {
 	return error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string"
 		? (error as { code: string }).code : null;
-}
-
-function projectCapabilityData(value: Record<string, unknown>): Record<string, unknown> {
-	const specialized = {
-		"ceal.message_get_result.v1": projectMessageGetData,
-		"ceal.message_create_result.v1": projectMessageCreateData,
-		"ceal.resource_resolve_result.v1": projectResourceResolveData,
-	}[String(value.schema_version)];
-	if (specialized) return specialized(value);
-	if (value.schema_version !== "ceal.message_search_result.v1" || !Array.isArray(value.results)) return value;
-	return projectMessageSearchData(value);
-}
-
-function projectMessageSearchData(value: Record<string, unknown>): Record<string, unknown> {
-	if (!Array.isArray(value.results)) return value;
-	const matches = value.results.flatMap((result: unknown) => {
-		if (!result || typeof result !== "object" || Array.isArray(result)) return [];
-		const item = result as Record<string, unknown>;
-		if (typeof item.ref !== "string" || typeof item.source_label !== "string"
-			|| typeof item.text_preview !== "string" || typeof item.created_at !== "string") return [];
-		const source = projectSource(item.source);
-		return [{
-			ref: item.ref, preview: item.text_preview, created_at: item.created_at,
-			...(source ? { source } : {}),
-		}];
-	});
-	const offset = typeof value.offset === "number" ? value.offset : 0;
-	return {
-		matches,
-		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
-		...(value.coverage && typeof value.coverage === "object"
-			&& (value.coverage as Record<string, unknown>).completeness === "incomplete" ? { coverage: "partial" } : {}),
-		...(offset > 0 ? { offset } : {}),
-	};
-}
-
-function projectMessageCreateData(value: Record<string, unknown>): Record<string, unknown> {
-	return (typeof value.message_ref === "string" && typeof value.reply_to === "string"
-		&& (value.delivery === "verified" || value.delivery === "replayed"))
-		? { delivery: value.delivery, message_ref: value.message_ref, reply_to: value.reply_to }
-		: {};
-}
-
-function projectMessageGetData(value: Record<string, unknown>): Record<string, unknown> {
-	if (typeof value.ref !== "string" || typeof value.text !== "string") return {};
-	const offset = typeof value.offset === "number" ? value.offset : 0;
-	const source = projectSource(value.source);
-	return {
-		ref: value.ref,
-		text: value.text,
-		...(source ? { source } : {}),
-		...(typeof value.next_offset === "number" ? { next_offset: value.next_offset } : {}),
-		...(offset > 0 ? { offset } : {}),
-	};
-}
-
-function projectResourceResolveData(value: Record<string, unknown>): Record<string, unknown> {
-	if (!value.resource || typeof value.resource !== "object" || Array.isArray(value.resource)) return {};
-	const resource = value.resource as Record<string, unknown>;
-	const source = projectSource(resource.source);
-	return typeof resource.ref === "string" && resource.kind === "message" && source
-		? { ref: resource.ref, kind: resource.kind, source } : {};
-}
-
-function projectSource(value: unknown): { provider: "slack"; url: string } | null {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-	const source = value as Record<string, unknown>;
-	return source.provider === "slack" && typeof source.url === "string" ? { provider: "slack", url: source.url } : null;
 }
 
 interface SafeGatewayFailure { code: string; message: string; nextAction: string; denial: boolean }
