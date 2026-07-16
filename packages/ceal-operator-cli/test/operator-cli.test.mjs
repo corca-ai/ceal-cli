@@ -11,6 +11,7 @@ import test from "node:test";
 import { URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEALCTL_COMMANDS, renderPlainYamlDocument, runCealctlCommand } from "../dist/index.js";
+import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "../dist/local-gateway-owner-login-client.js";
 
 test("canonical registry is reachable through stable, read-only help", () => {
 	for (const args of [[], ["-h"], ["--help"], ["help"]]) {
@@ -98,6 +99,7 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	const rotatedRefreshToken = `ceal_refresh_${"S".repeat(43)}`;
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-session-test-"));
 	const observed = [];
+	let localLogins = 0;
 	let origin = null;
 	const accessRegistry = {
 		schema_version: "ceal.gateway_access_registry.v1",
@@ -122,15 +124,6 @@ test("login stores a bound renewable session and enrollment refreshes it without
 		observed.push({ url: request.url, authorization: request.headers.authorization, body });
 		const common = { profile: "operator", admin_api_origin: origin, deployment_id: "instance:test", auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test" };
 		if (request.url === "/api/cealctl/contract") return json(response, 200, compatibleContract(origin));
-		if (request.url === "/api/cealctl/login/start") return json(response, 200, {
-			schema_version: "cealctl.login_start.v1", deployment_id: "instance:test", login_id: "login:test",
-			user_code: "ABCD-1234", verification_url: `${origin}/verify?user-code=ABCD-1234`, expires_at: "2099-07-14T00:00:00.000Z", poll_interval_seconds: 1,
-		});
-		if (request.url === "/api/cealctl/login/poll") return json(response, 200, {
-			schema_version: "cealctl.login_poll.v1", status: "complete", ...common,
-			access_token_expires_at: "2099-07-13T01:00:00.000Z", refresh_token: refreshToken,
-			refresh_token_idle_expires_at: "2099-08-13T00:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-13T00:00:00.000Z",
-		});
 		if (request.url === "/api/cealctl/token/refresh") return json(response, 200, {
 			schema_version: "cealctl.token_refresh.v1", ...common, access_token: adminToken,
 			access_token_expires_at: "2099-07-13T02:00:00.000Z", refresh_token: rotatedRefreshToken,
@@ -167,10 +160,21 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	origin = `http://127.0.0.1:${address.port}`;
 	try {
-		const login = await asyncRun(["login", origin, "--session", "operator"], { homeDir, sleepFn: async () => {} });
-		assert.equal(login.code, 0);
-		assert.match(login.stderr, /ABCD-1234/u);
-		assert.match(login.stderr, /Expires at: 2099-07-14T00:00:00[.]000Z/u);
+		const login = await asyncRun(["login", origin, "--session", "operator"], {
+			homeDir,
+			localGatewayOwnerLogin: async ({ adminOrigin, profile }) => {
+				localLogins += 1;
+				return {
+					name: profile, admin_api_origin: adminOrigin, deployment_id: "instance:test",
+					auth_issuer_origin: adminOrigin, auth_issuing_deployment_id: "instance:test",
+					access_token_expires_at: "2099-07-13T01:00:00.000Z", refresh_token: refreshToken,
+					refresh_token_idle_expires_at: "2099-08-13T00:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-13T00:00:00.000Z",
+				};
+			},
+		});
+		assert.equal(localLogins, 1, login.stdout);
+		assert.equal(login.code, 0, login.stdout);
+		assert.equal(login.stderr, "");
 		assert.equal(parseYaml(login.stdout).status, "authenticated");
 		const sessionsPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
 		assert.equal(statSync(sessionsPath).mode & 0o077, 0);
@@ -255,6 +259,75 @@ test("login stores a bound renewable session and enrollment refreshes it without
 	}
 });
 
+test("login transports one redaction-safe session over the real local Gateway socket", async () => {
+	const root = mkdtempSync(path.join(tmpdir(), "cealctl-local-owner-socket-"));
+	const homeDir = path.join(root, "home");
+	const socketPath = path.join(root, "admin-gateway.sock");
+	mkdirSync(homeDir, { mode: 0o700 });
+	const origin = "http://localhost:3777/corca-ai/ceal-prod";
+	const refreshToken = `cealr_${"R".repeat(48)}`;
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		assert.equal(request.method, "POST");
+		assert.equal(request.url, "/v1/operator/login");
+		assert.deepEqual(body, {
+			schema_version: "cealctl.local_owner_login_request.v1",
+			admin_api_origin: origin,
+			profile: "operator",
+		});
+		json(response, 200, {
+			schema_version: "cealctl.local_owner_login.v1",
+			status: "authenticated",
+			contract_revision: 2,
+			profile: "operator",
+			admin_api_origin: origin,
+			deployment_id: "dep_0123456789abcdef01234567",
+			auth_issuer_origin: origin,
+			auth_issuing_deployment_id: "dep_0123456789abcdef01234567",
+			access_token_expires_at: "2099-07-13T01:00:00.000Z",
+			refresh_token: refreshToken,
+			refresh_token_idle_expires_at: "2099-08-13T00:00:00.000Z",
+			refresh_token_absolute_expires_at: "2099-10-13T00:00:00.000Z",
+		});
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+	try {
+		const login = await asyncRun(["login", origin, "--session", "operator"], { homeDir, localGatewayOwnerSocketPath: socketPath });
+		assert.equal(login.code, 0, login.stdout);
+		assert.equal(login.stderr, "");
+		assert.equal(parseYaml(login.stdout).status, "authenticated");
+		assert.doesNotMatch(login.stdout, new RegExp(refreshToken, "u"));
+		const sessionPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
+		assert.equal(statSync(sessionPath).mode & 0o077, 0);
+		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(refreshToken, "u"));
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("local Gateway login reports an incompatible local contract without storing a session", async () => {
+	const root = mkdtempSync(path.join(tmpdir(), "cealctl-local-owner-contract-"));
+	const socketPath = path.join(root, "admin-gateway.sock");
+	const server = createServer((_request, response) => json(response, 200, {
+		schema_version: "cealctl.local_owner_login.v1",
+		status: "authenticated",
+		contract_revision: 1,
+	}));
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+	try {
+		await assert.rejects(
+			() => loginLocalGatewayOwner({ adminOrigin: "http://localhost:3777/corca-ai/ceal-prod", profile: "operator", socketPath }),
+			(error) => error instanceof LocalGatewayOwnerLoginError && error.code === "control_plane_upgrade_required",
+		);
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("concurrent operator reads serialize single-use refresh rotation before the Admin API", async () => {
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-refresh-lock-"));
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
@@ -296,23 +369,12 @@ test("concurrent operator reads serialize single-use refresh rotation before the
 	try {
 		await asyncRun(["login", origin, "--session", "operator"], {
 			homeDir,
-			fetchFn: async (url) => {
-				const pathname = new URL(String(url)).pathname;
-				if (pathname === "/api/cealctl/contract") return response(200, compatibleContract(origin));
-				if (pathname === "/api/cealctl/login/start") return response(200, {
-					schema_version: "cealctl.login_start.v1", deployment_id: "instance:test", login_id: "login:test",
-					user_code: "ABCD-1234", verification_url: `${origin}/verify?user-code=ABCD-1234`,
-					expires_at: "2099-07-14T00:00:00.000Z", poll_interval_seconds: 1,
-				});
-				if (pathname === "/api/cealctl/login/poll") return response(200, {
-					schema_version: "cealctl.login_poll.v1", status: "complete", ...common,
-					access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: firstRefresh,
-					refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-					refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-				});
-				throw new Error(`Unexpected login request: ${pathname}`);
-			},
-			sleepFn: async () => {},
+			localGatewayOwnerLogin: async ({ adminOrigin, profile }) => ({
+				...common, name: profile, admin_api_origin: adminOrigin, auth_issuer_origin: adminOrigin,
+				access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: firstRefresh,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			}),
 		});
 		const [access, connectors] = await Promise.all([
 			asyncRun(["access", "show"], { homeDir, fetchFn }),
@@ -379,25 +441,61 @@ test("separate cealctl processes serialize an in-flight single-use refresh rotat
 	}
 });
 
-test("an old Admin API is rejected before login creates an operator session", async () => {
+test("a missing local Gateway authorization channel is rejected before login creates an operator session", async () => {
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-stale-contract-"));
-	let startCalls = 0;
 	const result = await asyncRun(["login", "https://ceal.example.test/corca-ai/ceal-dev"], {
 		homeDir,
-		fetchFn: async (url) => {
-			assert.match(String(url), /\/api\/cealctl\/contract$/u);
-			return { ok: false };
-		},
+		localGatewayOwnerSocketPath: "/tmp/cealctl-missing-local-owner.sock",
 	});
 	try {
 		assert.equal(result.code, 3);
-		assert.equal(startCalls, 0);
 		const payload = parseYaml(result.stdout);
-		assert.equal(payload.error.kind, "control_plane_upgrade_required");
-		assert.match(payload.error.next_action, /control-plane release/u);
+		assert.equal(payload.error.kind, "local_authorization_unavailable");
+		assert.match(payload.error.next_action, /Gateway admin host/u);
 		assert.equal(existsSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json")), false);
 	} finally {
 		rmSync(homeDir, { recursive: true, force: true });
+	}
+});
+
+test("login uses one local Gateway socket response and never projects its session secret", async () => {
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-local-owner-home-"));
+	const socketDir = mkdtempSync(path.join(tmpdir(), "cealctl-local-owner-socket-"));
+	const socketPath = path.join(socketDir, "gateway.sock");
+	const origin = "https://ceal.example.test/corca-ai/ceal-prod";
+	const refreshToken = `ceal_refresh_${"Q".repeat(43)}`;
+	let observed = null;
+	const server = createServer(async (request, reply) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		observed = { url: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+		return json(reply, 200, {
+			schema_version: "cealctl.local_owner_login.v1", status: "authenticated", contract_revision: 2, profile: "operator",
+			admin_api_origin: origin, deployment_id: "instance:prod",
+			auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:prod",
+			access_token_expires_at: "2099-07-14T00:00:00.000Z", refresh_token: refreshToken,
+			refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+			refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+		});
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+	try {
+		const result = await asyncRun(["login", origin, "--session", "operator"], { homeDir, localGatewayOwnerSocketPath: socketPath });
+		assert.equal(result.code, 0, result.stdout);
+		assert.equal(result.stderr, "");
+		assert.deepEqual(observed, {
+			url: "/v1/operator/login",
+			body: { schema_version: "cealctl.local_owner_login_request.v1", admin_api_origin: origin, profile: "operator" },
+		});
+		assert.doesNotMatch(result.stdout, new RegExp(refreshToken, "u"));
+		assert.equal(parseYaml(result.stdout).session.name, "operator");
+		const stored = readFileSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json"), "utf8");
+		assert.match(stored, new RegExp(refreshToken, "u"));
+		assert.equal(statSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json")).mode & 0o077, 0);
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(homeDir, { recursive: true, force: true });
+		rmSync(socketDir, { recursive: true, force: true });
 	}
 });
 
@@ -557,13 +655,11 @@ function emptyConnectorRegistry() {
 function compatibleContract(origin) {
 	return {
 		schema_version: "ceal.admin_api_contract.v1",
-		contract_revision: 1,
+		contract_revision: 2,
 		deployment_id: "instance:test",
 		admin_api_origin: origin,
 		features: [
-			{ id: "operator_session.v1", routes: [
-				{ method: "POST", path: "/api/cealctl/login/start", required_scope: null },
-				{ method: "POST", path: "/api/cealctl/login/poll", required_scope: null },
+			{ id: "operator_session.v2", routes: [
 				{ method: "POST", path: "/api/cealctl/token/refresh", required_scope: null },
 				{ method: "POST", path: "/api/cealctl/token/revoke", required_scope: null },
 			] },

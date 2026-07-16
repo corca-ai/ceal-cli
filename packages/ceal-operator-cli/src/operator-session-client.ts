@@ -11,7 +11,6 @@ import { requireCompatibleAdminApiContract } from "./admin-api-contract-client.j
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-const SAFE_CODE = /^[A-Z0-9][A-Z0-9-]{2,63}$/u;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
 export class OperatorSessionClientError extends Error {
@@ -19,47 +18,6 @@ export class OperatorSessionClientError extends Error {
 	constructor(readonly code: string) {
 		super(`Ceal operator session ${code.replaceAll("_", " ")}.`);
 	}
-}
-
-export interface LoginChallenge {
-	profile: string;
-	verification_url: string;
-	user_code: string;
-	expires_at: string;
-}
-
-interface LoginStart {
-	profile: string;
-	adminOrigin: string;
-	deploymentId: string;
-	loginId: string;
-	verificationUrl: string;
-	userCode: string;
-	expiresAt: string;
-	pollIntervalMs: number;
-}
-
-export async function loginOperator(input: {
-	adminOrigin: string;
-	profile: string;
-	fetchFn?: typeof globalThis.fetch;
-	sleepFn?: (milliseconds: number) => Promise<void>;
-	onChallenge?: (challenge: LoginChallenge) => void;
-	now?: () => number;
-}): Promise<OperatorSession> {
-	if (!SAFE_NAME.test(input.profile)) throw new OperatorSessionClientError("invalid_profile");
-	const fetchFn = input.fetchFn ?? globalThis.fetch;
-	if (typeof fetchFn !== "function") throw new OperatorSessionClientError("fetch_unavailable");
-	const adminOrigin = normalizeAdminOrigin(input.adminOrigin);
-	const contract = await requireCompatibleAdminApiContract({ adminOrigin, fetchFn });
-	const start = await startLogin(adminOrigin, input.profile, fetchFn, contract.deploymentId);
-	input.onChallenge?.({
-		profile: start.profile,
-		verification_url: start.verificationUrl,
-		user_code: start.userCode,
-		expires_at: start.expiresAt,
-	});
-	return pollLogin(start, fetchFn, input.sleepFn ?? sleep, input.now ?? Date.now);
 }
 
 export async function refreshOperatorSession(input: {
@@ -123,67 +81,6 @@ export async function revokeAndRemoveOperatorSession(input: {
 		removeOperatorSessionWhileLocked(input.homeDir, session.name);
 		return session;
 	});
-}
-
-async function startLogin(adminOrigin: string, profile: string, fetchFn: typeof globalThis.fetch, expectedDeploymentId: string): Promise<LoginStart> {
-	const body = await postJson(adminRequestUrl(adminOrigin, "/api/cealctl/login/start"), {
-		schema_version: "cealctl.login_start_request.v1",
-		profile,
-	}, fetchFn);
-	if (body.schema_version !== "cealctl.login_start.v1") throw new OperatorSessionClientError("invalid_login_start_response");
-	const userCode = requirePattern(body.user_code, SAFE_CODE, 64);
-	const verificationUrl = requireVerificationUrl(body.verification_url, adminOrigin, userCode);
-	const deploymentId = requirePattern(body.deployment_id, SAFE_ID);
-	if (deploymentId !== expectedDeploymentId) throw new OperatorSessionClientError("control_plane_upgrade_required");
-	return {
-		profile,
-		adminOrigin,
-		deploymentId,
-		loginId: requirePattern(body.login_id, SAFE_ID),
-		verificationUrl,
-		userCode,
-		expiresAt: requireDate(body.expires_at),
-		pollIntervalMs: normalizePollInterval(body.poll_interval_seconds),
-	};
-}
-
-async function pollLogin(
-	start: LoginStart,
-	fetchFn: typeof globalThis.fetch,
-	sleepFn: (milliseconds: number) => Promise<void>,
-	now: () => number,
-): Promise<OperatorSession> {
-	while (now() < Date.parse(start.expiresAt)) {
-		const body = await postJson(adminRequestUrl(start.adminOrigin, "/api/cealctl/login/poll"), {
-			schema_version: "cealctl.login_poll_request.v1",
-			profile: start.profile,
-			login_id: start.loginId,
-		}, fetchFn);
-		if (body.schema_version !== "cealctl.login_poll.v1") throw new OperatorSessionClientError("invalid_login_poll_response");
-		if (body.status === "complete") return decodeLoginComplete(body, start);
-		if (body.status !== "pending") throw new OperatorSessionClientError("invalid_login_poll_response");
-		await sleepFn(normalizePollInterval(body.poll_interval_seconds, start.pollIntervalMs));
-	}
-	throw new OperatorSessionClientError("login_expired");
-}
-
-function decodeLoginComplete(body: Record<string, unknown>, start: LoginStart): OperatorSession {
-	const session: OperatorSession = {
-		name: requirePattern(body.profile, SAFE_NAME, 64),
-		admin_api_origin: normalizeAdminOrigin(requireString(body.admin_api_origin, 2048)),
-		deployment_id: requirePattern(body.deployment_id, SAFE_ID),
-		auth_issuer_origin: normalizeAdminOrigin(requireString(body.auth_issuer_origin, 2048)),
-		auth_issuing_deployment_id: requirePattern(body.auth_issuing_deployment_id, SAFE_ID),
-		access_token_expires_at: requireDate(body.access_token_expires_at),
-		refresh_token: requireSecret(body.refresh_token),
-		refresh_token_idle_expires_at: requireDate(body.refresh_token_idle_expires_at),
-		refresh_token_absolute_expires_at: requireDate(body.refresh_token_absolute_expires_at),
-	};
-	if (session.name !== start.profile || session.admin_api_origin !== start.adminOrigin || session.deployment_id !== start.deploymentId
-		|| session.auth_issuer_origin !== start.adminOrigin || session.auth_issuing_deployment_id !== start.deploymentId) {
-		throw new OperatorSessionClientError("origin_mismatch");
-	}
-	return session;
 }
 
 function decodeBoundSession(body: Record<string, unknown>, expected: OperatorSession): OperatorSession {
@@ -304,28 +201,6 @@ function invalidResponse(): never {
 	throw new OperatorSessionClientError("invalid_response");
 }
 
-function requireVerificationUrl(value: unknown, adminOrigin: string, userCode: string): string {
-	const raw = requireString(value, 2048);
-	let url: URL;
-	try { url = new URL(raw); } catch { throw new OperatorSessionClientError("invalid_login_start_response"); }
-	const base = new URL(adminOrigin);
-	const basePath = base.pathname.replace(/\/$/u, "");
-	if (url.origin !== base.origin || (basePath && !url.pathname.startsWith(`${basePath}/`))) {
-		throw new OperatorSessionClientError("origin_mismatch");
-	}
-	if (url.searchParams.has("user-code") && url.searchParams.get("user-code") !== userCode) {
-		throw new OperatorSessionClientError("origin_mismatch");
-	}
-	for (const key of url.searchParams.keys()) if (key !== "user-code") throw new OperatorSessionClientError("invalid_login_start_response");
-	return url.toString();
-}
-
-function normalizePollInterval(value: unknown, fallback = 5000): number {
-	if (value === undefined) return fallback;
-	if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 30) throw new OperatorSessionClientError("invalid_response");
-	return Math.min(value as number, 5) * 1000;
-}
-
 function requireString(value: unknown, max: number): string {
 	if (typeof value !== "string" || value.length === 0 || value.length > max || /[\r\n]/u.test(value)) throw new OperatorSessionClientError("invalid_response");
 	return value;
@@ -345,8 +220,4 @@ function requireDate(value: unknown): string {
 
 function requireSecret(value: unknown): string {
 	return requireString(value, 8192);
-}
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

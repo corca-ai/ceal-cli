@@ -45,10 +45,11 @@ YAML document; do not add an output-format flag and do not scrape prose.
 
 ## Boundaries
 
-- Never ask a user to paste secrets. An operator activation code is only for
-  this operator approval flow; it is never worker enrollment material. Use the
-  operator credential store and the setup/import flow discovered from installed
-  help.
+- Never ask a user to paste secrets. Use the installed authentication leaf only
+  on the Gateway/admin host as the Unix account that owns its Gateway service;
+  the owner-only local control channel creates the operator session. It is
+  never worker enrollment material. Use the operator credential store and the
+  setup/import flow discovered from installed help.
 - Do not read or reuse worker turn/provider credentials from this surface.
 - If the task requires worker capability execution, use `ceal-guide` and its
   matching binary only when both are installed. Otherwise stop and report that

@@ -25,12 +25,13 @@ import {
 	saveOperatorSession,
 	selectOperatorSession,
 } from "./operator-session-store.js";
+import type { OperatorSession } from "./operator-session-store.js";
 import {
-	loginOperator,
 	OperatorSessionClientError,
 	refreshOperatorSession,
 	revokeAndRemoveOperatorSession,
 } from "./operator-session-client.js";
+import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "./local-gateway-owner-login-client.js";
 import { AdminApiContractClientError, requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
 
 export const CEAL_OPERATOR_CLI_VERSION = "0.64.0" as const;
@@ -46,6 +47,8 @@ export interface CealctlRuntime {
 	fetchFn?: typeof globalThis.fetch;
 	sleepFn?: (milliseconds: number) => Promise<void>;
 	readStdin?: () => Promise<string>;
+	localGatewayOwnerSocketPath?: string;
+	localGatewayOwnerLogin?: (input: { adminOrigin: string; profile: string; socketPath?: string }) => Promise<OperatorSession>;
 }
 
 export interface CealctlCommandDefinition {
@@ -79,12 +82,12 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	},
 	{
 		name: "login",
-		description: "Authenticate this operator through the Gateway Admin API.",
+		description: "Authenticate this Gateway-host operator through its local control channel.",
 		usage: "cealctl login <admin-url> [--session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
 		result_schema: "cealctl.login.v1",
-		recovery: "Approve the displayed code in the same-origin browser page, then retry if it expires.",
+		recovery: "Run this on the Gateway admin host as its service-owning Unix account, then retry after checking Gateway readiness.",
 	},
 	{
 		name: "sessions",
@@ -147,6 +150,7 @@ const TOP_LEVEL_HELP = [
 	"Usage: cealctl <command> [options]",
 	"",
 	"Operator-facing Ceal control client. Worker credentials are outside this command surface.",
+	"Non-help command results are one YAML document; --json is not supported.",
 	"",
 	"Commands:",
 	...CEALCTL_COMMANDS.map((command) => `  ${command.name.padEnd(14)} ${command.description}`),
@@ -156,7 +160,7 @@ const TOP_LEVEL_HELP = [
 
 const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], readonly string[]>> = {
 	login: [
-		"  <admin-url>                   Canonical HTTPS organization or instance Admin API base.",
+		"  <admin-url>                   Canonical private Gateway Admin API base configured on this host.",
 		"  --session <safe-name>         Local operator session name (default: default).",
 	],
 	sessions: ["  use <safe-name>               Select one stored operator session."],
@@ -258,14 +262,10 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 	const parsed = parseLoginOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid cealctl login options.", io);
 	try {
-		const session = await loginOperator({
+		const session = await (runtime.localGatewayOwnerLogin ?? loginLocalGatewayOwner)({
 			adminOrigin: parsed.adminOrigin,
 			profile: parsed.profile,
-			fetchFn: runtime.fetchFn,
-			sleepFn: runtime.sleepFn,
-			onChallenge: (challenge) => {
-				io.stderr.write(`Open ${challenge.verification_url}\nEnter code: ${challenge.user_code}\nExpires at: ${challenge.expires_at}\nWaiting for approval...\n`);
-			},
+			socketPath: runtime.localGatewayOwnerSocketPath,
 		});
 		await saveOperatorSession(session, runtime.homeDir);
 		return writeYaml(io.stdout, {
@@ -671,7 +671,7 @@ function parseOptionalProfile(options: readonly string[]): string | null {
 }
 
 function sessionErrorCode(error: unknown): string {
-	if (error instanceof OperatorSessionClientError || error instanceof OperatorSessionStoreError || error instanceof AdminApiContractClientError) return error.code;
+	if (error instanceof LocalGatewayOwnerLoginError || error instanceof OperatorSessionClientError || error instanceof OperatorSessionStoreError || error instanceof AdminApiContractClientError) return error.code;
 	return "request_failed";
 }
 
@@ -685,8 +685,10 @@ function writeSessionFailure(schemaVersion: string, kind: string, message: strin
 			next_action: kind === "refresh_busy"
 				? "Another local Ceal process is changing this operator session. Wait briefly, then retry the same command."
 				: kind === "control_plane_upgrade_required"
-				? "The running Gateway Admin API is older than this CLI. Apply the matching control-plane release, verify 'ceal-ops admin-api status', then retry."
-				: "Check the Admin API URL, operator approval, stored profile, and Gateway status, then retry.",
+				? "The running Gateway is older than this CLI. Install/apply the matching Gateway release on the Gateway admin host, verify its local control channel, then retry."
+				: kind === "local_authorization_unavailable"
+				? "Run this command on the Gateway admin host as the Unix account that owns the Gateway service, then verify the local control channel is ready."
+				: "Check the private Gateway URL, local operator authority, stored profile, and Gateway status, then retry.",
 		},
 	});
 	return 3;

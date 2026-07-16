@@ -59,8 +59,8 @@ YAML document; do not add an output-format flag and do not scrape prose.
   operand. Worker authority comes from a Gateway-issued client Session. The
   normal customer path is the private Gateway's browser/device login route.
   If an installed legacy surface exposes a device-enrollment code, treat it as
-  a pilot fallback, read it only through its documented protected input path,
-  and never confuse it with an operator activation code.
+  a pilot fallback and read it only through its documented protected input
+  path. It never grants operator authority.
 - Do not infer that exit code zero proves an external action.
 - Do not mutate policy, credentials, registration, release state, or other
   operator control surfaces. Personal client hosts should not install or invoke

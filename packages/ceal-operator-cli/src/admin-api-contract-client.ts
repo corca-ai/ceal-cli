@@ -2,13 +2,11 @@ import { adminRequestUrl, normalizeAdminOrigin } from "./operator-session-store.
 
 const CONTRACT_PATH = "/api/cealctl/contract";
 const CONTRACT_SCHEMA = "ceal.admin_api_contract.v1";
-const MINIMUM_CONTRACT_REVISION = 1;
+const MINIMUM_CONTRACT_REVISION = 2;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
 const REQUIRED_FEATURES = new Map([
-	["operator_session.v1", [
-		["POST", "/api/cealctl/login/start", null],
-		["POST", "/api/cealctl/login/poll", null],
+	["operator_session.v2", [
 		["POST", "/api/cealctl/token/refresh", null],
 		["POST", "/api/cealctl/token/revoke", null],
 	]],

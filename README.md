@@ -113,15 +113,15 @@ Each role keeps an independent signed generation, lock, update pointer, and
 rollback history. An intentional co-located operator install does not create,
 update, or remove the worker command, and the converse is also true.
 
-## Administrator approval and outbound Gateway use
+## Administrator login and outbound Gateway use
 
-An existing operator authenticates through the Gateway's same-origin browser
-approval page. This operator-only flow uses an **operator activation code**;
-it creates an operator Session and is never entered into `ceal session enroll`.
-`cealctl` prints the verification URL and short-lived user code to stderr while
-it waits, then stores only the resulting renewable operator session in an
-owner-only local file. Enrollment creation refreshes that session automatically;
-raw Admin API tokens are not CLI operands or stdin inputs.
+An existing operator runs `cealctl` only on the Gateway/admin host, as the same
+Unix account that owns the Gateway user service. `cealctl login` asks that
+Gateway through its owner-only local control socket to create a renewable
+operator Session. It does not open a browser, print a device/activation code,
+or accept an operator secret through stdin. The resulting session is stored in
+an owner-only local file. Enrollment creation refreshes that session
+automatically; raw Admin API tokens are not CLI operands or stdin inputs.
 
 ```sh
 cealctl login https://ceal.example.test/acme/production --session production

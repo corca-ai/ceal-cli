@@ -77,14 +77,14 @@
 			"asset": "ceal-guide-SKILL.md",
 			"binary": "ceal",
 			"discovery": "installed_help",
-			"sha256": "f26466da4b78194df77c3eceec45e27bd2a8f2771d6a642220d14c3f1d696dd7"
+			"sha256": "71a55854968130555a4d89d22dcc8092f965e7c0ae3e9f0b9800b37b1db560dd"
 		},
 		"cealctl-guide": {
 			"path": "skills/cealctl-guide/SKILL.md",
 			"asset": "cealctl-guide-SKILL.md",
 			"binary": "cealctl",
 			"discovery": "installed_help",
-			"sha256": "2a31ab9df8c2c4c26f23a11b6ddaacbc0052798b325e3b7e7c1fa7d060bccd15"
+			"sha256": "24a2e523366f3971be1ac86e8e5475f0a9f3fc0560d0f72fcde418f451b0545e"
 		}
 	},
 	"first_proof_matrix": {
