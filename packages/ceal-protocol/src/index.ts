@@ -2,7 +2,7 @@ import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACT
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
-import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
+import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest, CealGatewayTargetCatalog } from "./gateway-response-types.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -51,9 +51,11 @@ export type {
 	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
 	CealGatewayCallValue,
+	CealGatewayDiscoverBody,
 	CealGatewayDiscoveryCapability,
 	CealGatewayDiscoveryTarget,
 	CealGatewayDiscoveryValue,
+	CealGatewayTargetCatalog,
 	CealGatewayHandshakeValue,
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
@@ -199,7 +201,7 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 			return;
 		}
 		case "discover":
-			requireExactKeys(body, []);
+			validateDiscoveryRequestBody(body);
 			return;
 		case "call":
 			requireExactKeys(body, ["arguments", "capability_id", "purpose", "target_ref"]);
@@ -213,6 +215,25 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 			requireExactKeys(body, ["request_id"]);
 			requireSafeRef(body.request_id);
 	}
+}
+
+function validateDiscoveryRequestBody(body: Record<string, unknown>): void {
+	requireExactKeys(body, ["capability_id", "cursor", "limit", "match"], ["capability_id", "cursor", "limit", "match"]);
+	const capabilityId = body.capability_id;
+	const cursor = body.cursor;
+	const match = body.match;
+	const limit = body.limit;
+	if (capabilityId !== undefined) requireSafeRef(capabilityId);
+	if (cursor !== undefined) requirePrefixedRef(cursor, "cursor:");
+	if (match !== undefined) requireTargetSelector(match);
+	if (limit !== undefined && (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > 64)) invalidRequest();
+	if ((cursor !== undefined || match !== undefined || limit !== undefined) && capabilityId === undefined) invalidRequest();
+	if (cursor !== undefined && match !== undefined) invalidRequest();
+}
+
+function requireTargetSelector(value: unknown): void {
+	if (isCealPublicSafeText(value, 512) || isSafeExternalHttpsUrl(value)) return;
+	invalidRequest();
 }
 
 function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>): void {
@@ -282,8 +303,8 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 
 function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGatewayDiscoverRequest>): void {
 	const discovery = requireRecord(value);
-	requireExactKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "targets"]);
-	if (discovery.schema_version !== "ceal.gateway_discovery.v1"
+	requireExactKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "target_catalog", "targets"]);
+	if (discovery.schema_version !== "ceal.gateway_discovery.v2"
 		|| discovery.profile_ref !== expectedRequest.profile_ref
 		|| discovery.host_decision !== "accepted"
 		|| discovery.proof_level !== "host_decision") invalidResponse();
@@ -292,7 +313,41 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 	const capabilityIds = new Set<string>();
 	for (const capability of discovery.capabilities) validateDiscoveryCapability(capability, capabilityIds);
 	validateDiscoveryTargets(discovery.targets, capabilityIds);
+	validateTargetCatalog(discovery.target_catalog, discovery.targets, capabilityIds, expectedRequest.body);
 	validateHostNonClaims(discovery.non_claims);
+}
+
+function validateTargetCatalog(
+	value: unknown,
+	targets: unknown,
+	capabilityIds: ReadonlySet<string>,
+	request: Readonly<CealGatewayDiscoverBody>,
+): void {
+	const catalog = requireRecord(value);
+	requireExactKeys(catalog, ["complete", "next_cursor", "returned_count", "selection_required", "target_count"], ["next_cursor"]);
+	const typed = catalog as unknown as CealGatewayTargetCatalog;
+	if (!Number.isSafeInteger(typed.target_count) || typed.target_count < 0
+		|| !Number.isSafeInteger(typed.returned_count) || typed.returned_count < 0
+		|| typeof typed.complete !== "boolean" || typeof typed.selection_required !== "boolean") invalidResponse();
+	if (!Array.isArray(targets) || typed.returned_count !== targets.length || typed.returned_count > typed.target_count) invalidResponse();
+	if (typed.next_cursor !== undefined) requirePrefixedRef(typed.next_cursor, "cursor:");
+	if (typed.complete && (typed.returned_count !== typed.target_count || typed.next_cursor !== undefined)) invalidResponse();
+	if (!typed.complete && !typed.selection_required && typed.next_cursor === undefined) invalidResponse();
+	if (typed.selection_required && (typed.returned_count !== 0 || typed.next_cursor !== undefined || typed.complete)) invalidResponse();
+	const capabilityId = request.capability_id;
+	if (!capabilityId) {
+		if (targets.length !== 0 || typed.selection_required !== (typed.target_count > 0)
+			|| typed.complete !== (typed.target_count === 0) || typed.next_cursor !== undefined) invalidResponse();
+		return;
+	}
+	if (typed.selection_required) {
+		if (!capabilityIds.has(capabilityId)) invalidResponse();
+		return;
+	}
+	if (!capabilityIds.has(capabilityId)) invalidResponse();
+	for (const target of targets as Record<string, unknown>[]) {
+		if (!Array.isArray(target.capability_ids) || !target.capability_ids.includes(capabilityId)) invalidResponse();
+	}
 }
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {

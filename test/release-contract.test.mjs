@@ -96,7 +96,7 @@ test("release manifest builder verifies package identities, records separate dig
 	assert.equal(result.ok, true);
 	assert.equal(result.proof_level, "local_state");
 	assert.notEqual(result.manifest.artifacts.ceal.sha256, result.manifest.artifacts.cealctl.sha256);
-	assert.equal(result.manifest.protocol.wire_version, "1.2.0");
+	assert.equal(result.manifest.protocol.wire_version, "1.3.0");
 	assert.ok(result.manifest.publication_blockers.length > 0);
 	assert.equal(result.manifest.status, "local_candidate_not_published");
 

@@ -73,12 +73,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "capabilities",
-		description: "Discover Gateway-issued capabilities.",
-		usage: "ceal capabilities [--profile <profile-ref>]",
+		description: "Discover Gateway-issued capabilities and select bounded targets.",
+		usage: "ceal capabilities [--profile <profile-ref>] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
-		recovery: "Configure a Gateway-issued client session, then run 'ceal capabilities' again.",
+		recovery: "Configure a Gateway-issued client session, then run 'ceal capabilities' and descend to a bounded target selection.",
 	},
 	{
 		name: "call",
@@ -160,6 +160,11 @@ function commandHelp(command: CealCommandDefinition): string {
 	const options = command.name === "capabilities"
 		? [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
+			"  targets                 Select bounded targets for one discovered capability.",
+			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
+			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
+			"  targets --cursor <opaque> Continue one Gateway-issued selected target page.",
+			"  targets --limit <1-64>   Bound one selected target page (default: Gateway choice).",
 			"  --endpoint <https-url>  Gateway client endpoint.",
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
 			"  --token-stdin            Read the Gateway-issued client token from stdin.",
@@ -217,7 +222,11 @@ function writeCommands(io: CealCliIo): number {
 }
 
 async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	const resolved = await resolveGatewayAccess(options, io, runtime);
+	const selection = parseTargetCatalogOptions(options);
+	if (selection === null) return writeError("invalid_argument", "Invalid capabilities target selection.", io);
+	const resolved = selection.kind === "targets"
+		? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
+		: await resolveGatewayAccess(options, io, runtime);
 	if (!resolved.ok) return resolved.exitCode;
 	try {
 		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime);
@@ -226,15 +235,49 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			request_id: `${resolved.value.requestId}:discover`,
 			operation: "discover",
 			profile_ref: resolved.value.profileRef,
-			body: {},
+			body: selection.kind === "targets" ? selection.body : {},
 		});
 		if (!discovery.ok) return writeGatewayFailure(discovery, io);
-		return writeCapabilitiesAvailable(handshake, discovery, io);
+		return writeCapabilitiesAvailable(handshake, discovery, selection, io);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
 		return writeGatewayUnavailable(reason, io);
 	}
+}
+
+type ParsedTargetCatalogOptions =
+	| { kind: "catalog" }
+	| { kind: "targets"; profileRef?: string; body: { capability_id: string; match?: string; cursor?: string; limit?: number } }
+	| null;
+
+function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
+	if (options[0] !== "targets") return options.length === 0 || storedProfileOption(options) !== null || parseGatewayOptions(options).ok ? { kind: "catalog" } : null;
+	const parsed = parseNamedOptions(options.slice(1), new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]), new Set());
+	if (!parsed) return null;
+	const capabilityId = parsed.values.get("--capability");
+	const cursor = parsed.values.get("--cursor");
+	const match = parsed.values.get("--match");
+	const profileRef = parsed.values.get("--profile");
+	const limitText = parsed.values.get("--limit");
+	if (!validCapabilityId(capabilityId) || (cursor && match) || (cursor && !isSafeCursor(cursor)) || (match && !isSafeTargetMatch(match))
+		|| (profileRef && !isSafeProfileRef(profileRef))) return null;
+	const limit = limitText === undefined ? undefined : parseTargetPageLimit(limitText);
+	if (limitText !== undefined && limit === undefined) return null;
+	return {
+		kind: "targets",
+		...(profileRef ? { profileRef } : {}),
+		body: { capability_id: capabilityId, ...(match ? { match } : {}), ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+	};
+}
+
+function isSafeCursor(value: string): boolean { return /^cursor:[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u.test(value); }
+function isSafeTargetMatch(value: string): boolean {
+	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048
+		&& !/[\u0000-\u001f\u007f]/u.test(value);
+}
+function parseTargetPageLimit(value: string): number | undefined {
+	return /^(?:[1-9]|[1-5][0-9]|6[0-4])$/u.test(value) ? Number(value) : undefined;
 }
 
 interface GatewayAccess {
@@ -308,6 +351,7 @@ function shouldRetryAuthentication(
 function writeCapabilitiesAvailable(
 	handshake: { request_id: string; value: CealGatewayHandshakeValue },
 	discovery: { request_id: string; value: CealGatewayDiscoveryValue },
+	selection: Exclude<ParsedTargetCatalogOptions, null>,
 	io: CealCliIo,
 ): number {
 	return writeYaml(io.stdout, {
@@ -320,10 +364,22 @@ function writeCapabilitiesAvailable(
 			negotiated_protocol_version: handshake.value.negotiated_protocol_version, host_decision: handshake.value.host_decision,
 		},
 		capabilities: discovery.value.capabilities, targets: discovery.value.targets,
+		target_catalog: discovery.value.target_catalog,
 		proof_level: discovery.value.proof_level, live_gateway_checked: true,
 		claims_allowed: ["gateway_handshake", "gateway_discovery"], non_claims: discovery.value.non_claims,
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
+		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection) ? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) } : {}),
 	});
+}
+
+function capabilityCatalogNextAction(
+	catalog: CealGatewayDiscoveryValue["target_catalog"], selection: Exclude<ParsedTargetCatalogOptions, null>,
+): string | null {
+	if (catalog.selection_required) return "Run 'ceal capabilities targets --capability <capability-id> --match <name-or-url>'.";
+	if (catalog.next_cursor && selection.kind === "targets") {
+		return `Run 'ceal capabilities targets --capability ${selection.body.capability_id} --cursor ${catalog.next_cursor}'.`;
+	}
+	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
 }
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {

@@ -413,7 +413,7 @@ function writeChecksums(release) {
 function writeBinary(file, command, marker = "generation-1", versionSuffix = "") {
 	const schema = command === "ceal" ? "ceal.version.v1" : "cealctl.version.v1";
 	const credentialContext = command === "ceal" ? "gateway_issued_client_session" : "cealctl_operator_admin_session";
-	writeFileSync(file, `#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.64.0\\nprotocol_version: 1.2.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.2.0\\n  maximum: 1.2.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`);
+	writeFileSync(file, `#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.64.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`);
 	chmodSync(file, 0o755);
 }
 

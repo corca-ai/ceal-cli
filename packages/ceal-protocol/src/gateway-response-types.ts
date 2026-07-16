@@ -1,4 +1,4 @@
-export const CEAL_PROTOCOL_VERSION = "1.2.0" as const;
+export const CEAL_PROTOCOL_VERSION = "1.3.0" as const;
 
 export interface CealProtocolRange { minimum: string; maximum: string }
 export type CealClientOperation = "handshake" | "discover" | "call" | "readback";
@@ -39,7 +39,19 @@ interface CealGatewayRequestEnvelope<TOperation extends CealClientOperation, TBo
 }
 
 export type CealGatewayHandshakeRequest = CealGatewayRequestEnvelope<"handshake", { client: { name: string; version: string } }>;
-export type CealGatewayDiscoverRequest = CealGatewayRequestEnvelope<"discover", Record<string, never>>;
+/**
+ * A target catalog is intentionally selected in the Gateway rather than
+ * mirrored into a worker. Empty discovery returns only the small capability
+ * catalog; a capability plus match selects a bounded target page.
+ */
+export interface CealGatewayDiscoverBody {
+	capability_id?: string;
+	match?: string;
+	cursor?: string;
+	limit?: number;
+}
+
+export type CealGatewayDiscoverRequest = CealGatewayRequestEnvelope<"discover", CealGatewayDiscoverBody>;
 export type CealGatewayCallRequest = CealGatewayRequestEnvelope<"call", { capability_id: string; target_ref: string; arguments: unknown; purpose: string }>;
 export type CealGatewayReadbackRequest = CealGatewayRequestEnvelope<"readback", { request_id: string }>;
 export type CealGatewayRequest = CealGatewayHandshakeRequest | CealGatewayDiscoverRequest | CealGatewayCallRequest | CealGatewayReadbackRequest;
@@ -63,14 +75,24 @@ export interface CealGatewayHandshakeValue {
 }
 
 export interface CealGatewayDiscoveryValue {
-	schema_version: "ceal.gateway_discovery.v1";
+	schema_version: "ceal.gateway_discovery.v2";
 	profile_ref: string;
 	membership_ref: string;
 	capabilities: CealGatewayDiscoveryCapability[];
 	targets: CealGatewayDiscoveryTarget[];
+	target_catalog: CealGatewayTargetCatalog;
 	host_decision: "accepted";
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+}
+
+/** Bounded metadata for a current Profile target selection. */
+export interface CealGatewayTargetCatalog {
+	target_count: number;
+	returned_count: number;
+	complete: boolean;
+	selection_required: boolean;
+	next_cursor?: string;
 }
 
 export interface CealGatewayDiscoveryCapability {

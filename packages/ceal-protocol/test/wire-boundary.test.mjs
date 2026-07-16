@@ -12,7 +12,7 @@ import {
 
 const envelope = (operation, body) => ({
 	request_id: `request:${operation}:001`,
-	protocol_version: "1.2.0",
+	protocol_version: "1.3.0",
 	operation,
 	profile_ref: "profile:test",
 	body,
@@ -41,6 +41,8 @@ test("Gateway request decoder accepts the four exact semantic operations", () =>
 	const requests = [
 		envelope("handshake", { client: { name: "ceal", version: "0.64.0" } }),
 		envelope("discover", {}),
+		envelope("discover", { capability_id: "message.search", match: "Team inbox", limit: 1 }),
+		envelope("discover", { capability_id: "message.search", cursor: "cursor:continuation_001" }),
 		envelope("call", {
 			capability_id: "message.search",
 			target_ref: "target:workspace",
@@ -59,6 +61,11 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 	const invalid = [
 		{ ...envelope("discover", {}), extra: true },
 		envelope("discover", { unexpected: true }),
+		envelope("discover", { match: "Team inbox" }),
+		envelope("discover", { capability_id: "message.search", match: "Team inbox", cursor: "cursor:continuation_001" }),
+		envelope("discover", { capability_id: "message.search", cursor: "not-a-cursor" }),
+		envelope("discover", { capability_id: "message.search", limit: 65 }),
+		envelope("discover", { capability_id: "message.search", match: "https://workspace.example.test/path?token=forbidden" }),
 		envelope("handshake", { client: { name: "ceal", version: "0.64.0", token: secret } }),
 		envelope("call", { capability_id: "message.search", target_ref: "slack:C123456789", arguments: {}, purpose: "Search" }),
 		envelope("call", { capability_id: "message.search", target_ref: "target:test", arguments: { access_token: secret }, purpose: "Search" }),
@@ -89,6 +96,30 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 		})),
 		hasCode("invalid_gateway_request"),
 	);
+});
+
+test("discovery target catalogs make bounded selection and continuation explicit", () => {
+	const request = envelope("discover", { capability_id: "message.search", match: "Team", limit: 1 });
+	const paged = discoveryResponse(request);
+	paged.value.target_catalog = {
+		target_count: 333,
+		returned_count: 1,
+		complete: false,
+		selection_required: false,
+		next_cursor: "cursor:continuation_001",
+	};
+	assert.deepEqual(decodeCealClientResponse(paged, request), paged);
+
+	for (const mutate of [
+		(value) => { value.value.target_catalog.returned_count = 2; },
+		(value) => { value.value.target_catalog.complete = true; },
+		(value) => { value.value.target_catalog.next_cursor = "cursor:unsafe secret=material"; },
+		(value) => { value.value.targets[0].capability_ids = []; },
+	]) {
+		const invalid = structuredClone(paged);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
 });
 
 test("client response decoder accepts exact operation-correlated Gateway results", () => {
@@ -123,7 +154,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const failure = {
 		ok: false,
 		request_id: handshakeRequest.request_id,
-		protocol_version: "1.2.0",
+		protocol_version: "1.3.0",
 		proof_ref_or_unavailable: { state: "unavailable", reason: "Audit is pending", owner_surface: "Gateway audit" },
 		error: { code: "incompatible_protocol", message: "The protocol is incompatible.", next_action: "Upgrade the client." },
 	};
@@ -166,7 +197,7 @@ test("public capability evidence exposes policy and readiness without private ba
 });
 
 test("public discovery, call, and audit envelopes admit provider-neutral capability extensions", () => {
-	const discoveryRequest = envelope("discover", {});
+	const discoveryRequest = envelope("discover", { capability_id: "message.search" });
 	const discovery = discoveryResponse(discoveryRequest);
 	discovery.value.capabilities.push({
 		capability_id: "file.search", label: "Search files", effect: "read", target_requirement: "required",
@@ -277,7 +308,7 @@ test("legacy write fixtures keep only generic write-boundary validation in the p
 		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
-	const discoverRequest = envelope("discover", {});
+	const discoverRequest = envelope("discover", { capability_id: "message.search" });
 	const discovery = discoveryResponse(discoverRequest);
 	discovery.value.capabilities.push({
 		capability_id: "message.create", label: "Reply to one approved message", effect: "write", target_requirement: "required",
@@ -333,11 +364,12 @@ test("discovery admits an authenticated Profile with no active grants", () => {
 	const discovery = discoveryResponse(request);
 	discovery.value.capabilities = [];
 	discovery.value.targets = [];
+	discovery.value.target_catalog = { target_count: 0, returned_count: 0, complete: true, selection_required: false };
 	assert.deepEqual(decodeCealClientResponse(discovery, request), discovery);
 });
 
 test("discovery decoder rejects drift, authority promotion, and target visibility ambiguity", () => {
-	const request = envelope("discover", {});
+	const request = envelope("discover", { capability_id: "message.search" });
 	const exact = discoveryResponse(request);
 	const cases = [];
 
@@ -353,10 +385,6 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	rawTarget.value.targets[0].target_ref = "slack:C123456789";
 	cases.push(rawTarget);
 
-	const ambiguousGrant = structuredClone(exact);
-	ambiguousGrant.value.targets[1].capability_ids = ["message.search"];
-	cases.push(ambiguousGrant);
-
 	const missingAccess = structuredClone(exact);
 	delete missingAccess.value.targets[0].capability_access;
 	cases.push(missingAccess);
@@ -364,10 +392,6 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	const contradictoryAccess = structuredClone(exact);
 	contradictoryAccess.value.targets[0].capability_access[0].readiness = "broken";
 	cases.push(contradictoryAccess);
-
-	const deniedAccess = structuredClone(exact);
-	deniedAccess.value.targets[1].capability_access = [matureCapabilityAccess()];
-	cases.push(deniedAccess);
 
 	const authorityPromotion = structuredClone(exact);
 		authorityPromotion.value.registration_ref = "registration:test";
@@ -481,8 +505,8 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	});
 	const exact = callResponse(callRequest);
 	for (const value of [
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.2.0", error: { code: "bad-code", message: "No." } },
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.2.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "bad-code", message: "No." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
 	]) assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
 
 	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
@@ -533,10 +557,11 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 });
 
 function discoveryResponse(request) {
+	const selected = request.body.capability_id === "message.search";
 	return responseEnvelope(request, {
 		ok: true,
 			value: {
-				schema_version: "ceal.gateway_discovery.v1",
+				schema_version: "ceal.gateway_discovery.v2",
 				profile_ref: request.profile_ref,
 				membership_ref: "membership:test-work",
 			capabilities: [{
@@ -552,10 +577,12 @@ function discoveryResponse(request) {
 				},
 				evidence_requirement: "gateway_audit",
 			}],
-			targets: [
+			targets: selected ? [
 					{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] },
-					{ target_ref: "target:customer-health", label: "Customer health", access: "request_required", capability_ids: [], capability_access: [] },
-			],
+			] : [],
+			target_catalog: selected
+				? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
+				: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -623,8 +650,8 @@ function handshakeResponse(request) {
 		ok: true,
 		value: {
 			schema_version: "ceal.gateway_handshake.v1",
-				negotiated_protocol_version: "1.2.0",
-				supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
+				negotiated_protocol_version: "1.3.0",
+				supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 				profile_ref: request.profile_ref,
 				membership_ref: "membership:test-work",
 				registration_ref: "registration:test",
@@ -712,7 +739,7 @@ function responseEnvelope(request, body) {
 	return {
 		...body,
 		request_id: request.request_id,
-		protocol_version: "1.2.0",
+		protocol_version: "1.3.0",
 		proof_ref_or_unavailable: `proof:${request.request_id}`,
 	};
 }

@@ -77,8 +77,8 @@ test("version identifies the package, protocol, range, and credential context", 
 		schema_version: "ceal.version.v1",
 		command: "ceal",
 		version: "0.64.0",
-		protocol_version: "1.2.0",
-		supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
+		protocol_version: "1.3.0",
+		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
 	});
 });
@@ -568,10 +568,31 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 		assert.equal(payload.gateway.profile_ref, "profile:narnia");
 		assert.equal(payload.gateway.membership_ref, "membership:narnia");
 		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
-		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
+		assert.deepEqual(payload.targets, []);
+		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 0, complete: false, selection_required: true });
+		assert.match(payload.next_action, /capabilities targets/u);
 		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
 		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${token}`, `Bearer ${token}`]);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+	});
+});
+
+test("capabilities selects a bounded target page through the stored client session", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const token = `ceal_personal_${"S".repeat(43)}`;
+		const payload = await yamlRun([
+			"capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1",
+		], 0, {
+			loadSession: async () => storedSession(endpoint, { accessToken: token }),
+			nextRequestId: () => "narnia:target-catalog:001",
+		});
+		assert.equal(payload.status, "available");
+		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
+		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
+		assert.deepEqual(requests.map((item) => item.body.body), [
+			{ client: { name: "ceal", version: "0.64.0" } },
+			{ capability_id: "message.search", match: "team", limit: 1 },
+		]);
 	});
 });
 
@@ -617,7 +638,7 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 	}, (request) => ({
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.2.0",
+		protocol_version: "1.3.0",
 		error: { code: "internal_error", message: token, next_action: token },
 	}));
 });
@@ -774,7 +795,7 @@ async function withRenewingGateway(callback, options = {}) {
 		if (options.rejectFirstGateway && !gatewayRejected) {
 			gatewayRejected = true;
 			response.writeHead(401, { "content-type": "application/json" });
-			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.2.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
+			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.3.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
 			return;
 		}
 		const value = body.operation === "handshake" ? handshakeResponse(body)
@@ -840,8 +861,8 @@ function escapeRegExp(value) {
 function handshakeResponse(request) {
 	return success(request, {
 		schema_version: "ceal.gateway_handshake.v1",
-		negotiated_protocol_version: "1.2.0",
-		supported_gateway_protocol_range: { minimum: "1.2.0", maximum: "1.2.0" },
+		negotiated_protocol_version: "1.3.0",
+		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
 		registration_ref: "registration:narnia",
@@ -855,8 +876,9 @@ function handshakeResponse(request) {
 }
 
 function discoveryResponse(request) {
+	const selected = request.body.capability_id === "message.search";
 	return success(request, {
-		schema_version: "ceal.gateway_discovery.v1",
+		schema_version: "ceal.gateway_discovery.v2",
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
 		capabilities: [{
@@ -872,7 +894,10 @@ function discoveryResponse(request) {
 			},
 			evidence_requirement: "gateway_audit",
 		}],
-		targets: [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] }],
+		targets: selected ? [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] }] : [],
+		target_catalog: selected
+			? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
+			: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -946,7 +971,7 @@ function success(request, value) {
 	return {
 		ok: true,
 		request_id: request.request_id,
-		protocol_version: "1.2.0",
+		protocol_version: "1.3.0",
 		proof_ref_or_unavailable: `audit:${request.request_id}`,
 		value,
 	};
