@@ -328,6 +328,68 @@ test("local Gateway login reports an incompatible local contract without storing
 	}
 });
 
+test("local Gateway login classifies a missing contract revision as an old Gateway", async () => {
+	const root = mkdtempSync(path.join(tmpdir(), "cealctl-local-owner-old-"));
+	const socketPath = path.join(root, "admin-gateway.sock");
+	const server = createServer((_request, response) => json(response, 200, {
+		schema_version: "cealctl.local_owner_login.v1",
+		status: "authenticated",
+	}));
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+	try {
+		await assert.rejects(
+			() => loginLocalGatewayOwner({ adminOrigin: "http://localhost:3777/corca-ai/ceal-prod", profile: "operator", socketPath }),
+			(error) => error instanceof LocalGatewayOwnerLoginError && error.code === "control_plane_upgrade_required",
+		);
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("login without the local control channel probes Gateway age for the right recovery", async () => {
+	const root = mkdtempSync(path.join(tmpdir(), "cealctl-login-recovery-"));
+	const homeDir = path.join(root, "home");
+	mkdirSync(homeDir, { mode: 0o700 });
+	const origin = "http://localhost:3777/corca-ai/ceal-prod";
+	const missingSocket = path.join(root, "missing.sock");
+	try {
+		// An old Gateway cannot serve the public contract endpoint: the failure
+		// must carry the explicit upgrade-required recovery, not a locality hint.
+		const oldGateway = await asyncRun(["login", origin], {
+			homeDir, localGatewayOwnerSocketPath: missingSocket,
+			fetchFn: async () => response(404, { ok: false }),
+		});
+		assert.equal(oldGateway.code, 3);
+		const oldPayload = parseYaml(oldGateway.stdout);
+		assert.equal(oldPayload.error.kind, "control_plane_upgrade_required");
+		assert.match(oldPayload.error.next_action, /Install\/apply the matching Gateway release/u);
+
+		// A compatible Gateway proves the problem is local: keep the locality recovery.
+		const newGateway = await asyncRun(["login", origin], {
+			homeDir, localGatewayOwnerSocketPath: missingSocket,
+			fetchFn: async () => response(200, compatibleContract(origin)),
+		});
+		assert.equal(parseYaml(newGateway.stdout).error.kind, "local_authorization_unavailable");
+
+		// An unreachable probe proves nothing about Gateway age: keep the locality recovery.
+		const unreachable = await asyncRun(["login", origin], {
+			homeDir, localGatewayOwnerSocketPath: missingSocket,
+			fetchFn: async () => { throw new Error("network unreachable"); },
+		});
+		assert.equal(parseYaml(unreachable.stdout).error.kind, "local_authorization_unavailable");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("per-command help states the YAML-only output contract", () => {
+	for (const command of CEALCTL_COMMANDS) {
+		const result = run([command.name, "--help"]);
+		assert.match(result.stdout, /^Output: one YAML document on stdout; --json is not supported\.$/mu);
+	}
+});
+
 test("concurrent operator reads serialize single-use refresh rotation before the Admin API", async () => {
 	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-refresh-lock-"));
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;

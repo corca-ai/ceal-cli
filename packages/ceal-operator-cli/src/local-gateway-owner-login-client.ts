@@ -110,6 +110,11 @@ async function postLocalJson(socketPath: string, body: Record<string, unknown>):
 }
 
 function decodeSession(body: Record<string, unknown>, expected: { adminOrigin: string; profile: string }): OperatorSession {
+	// A Gateway that authenticates but never states its local-owner contract
+	// revision predates the revision field: that is an OLD Gateway, so the
+	// operator must get the explicit upgrade-required recovery, not a generic
+	// invalid-response failure. A present-but-malformed revision stays invalid.
+	if (body.contract_revision === undefined) throw new LocalGatewayOwnerLoginError("control_plane_upgrade_required");
 	if (!Number.isSafeInteger(body.contract_revision)) throw new LocalGatewayOwnerLoginError("invalid_response");
 	if (Number(body.contract_revision) < MINIMUM_LOCAL_OWNER_CONTRACT_REVISION) throw new LocalGatewayOwnerLoginError("control_plane_upgrade_required");
 	const session: OperatorSession = {

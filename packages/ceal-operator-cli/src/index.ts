@@ -243,6 +243,7 @@ function commandHelp(command: CealctlCommandDefinition): string {
 		`Effect: ${command.effect}`,
 		`Evidence: ${command.evidence}`,
 		`Result schema: ${command.result_schema}`,
+		"Output: one YAML document on stdout; --json is not supported.",
 		`Recovery/readback: ${command.recovery}`,
 		"",
 		"Options:",
@@ -274,7 +275,25 @@ async function runLogin(options: readonly string[], io: CealctlIo, runtime: Ceal
 			next_action: "Run 'cealctl enrollments --help' to issue a personal-client enrollment.",
 		});
 	} catch (error) {
-		return writeSessionFailure("cealctl.login.v1", sessionErrorCode(error), "The operator login could not be completed.", io);
+		const kind = await classifyLoginFailure(sessionErrorCode(error), parsed.adminOrigin, runtime);
+		return writeSessionFailure("cealctl.login.v1", kind, "The operator login could not be completed.", io);
+	}
+}
+
+// Gateway-version recovery: a missing local-owner socket looks identical for
+// "old Gateway without the local control channel" and "wrong host/account".
+// One bounded read-only probe of the public contract endpoint separates them —
+// a Gateway that cannot state a compatible contract is old, so the operator
+// gets the explicit upgrade-required recovery instead of a host-locality hint.
+async function classifyLoginFailure(kind: string, adminOrigin: string, runtime: CealctlRuntime): Promise<string> {
+	if (kind !== "local_authorization_unavailable") return kind;
+	try {
+		await requireCompatibleAdminApiContract({ adminOrigin, fetchFn: runtime.fetchFn });
+		return kind;
+	} catch (probeError) {
+		return probeError instanceof AdminApiContractClientError && probeError.code === "control_plane_upgrade_required"
+			? "control_plane_upgrade_required"
+			: kind;
 	}
 }
 
