@@ -219,16 +219,29 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 
 function validateDiscoveryRequestBody(body: Record<string, unknown>): void {
 	requireExactKeys(body, ["capability_id", "cursor", "limit", "match"], ["capability_id", "cursor", "limit", "match"]);
-	const capabilityId = body.capability_id;
-	const cursor = body.cursor;
-	const match = body.match;
-	const limit = body.limit;
-	if (capabilityId !== undefined) requireSafeRef(capabilityId);
-	if (cursor !== undefined) requirePrefixedRef(cursor, "cursor:");
-	if (match !== undefined) requireTargetSelector(match);
-	if (limit !== undefined && (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > 64)) invalidRequest();
-	if ((cursor !== undefined || match !== undefined || limit !== undefined) && capabilityId === undefined) invalidRequest();
-	if (cursor !== undefined && match !== undefined) invalidRequest();
+	const selection = {
+		capabilityId: body.capability_id,
+		cursor: body.cursor,
+		match: body.match,
+		limit: body.limit,
+	};
+	validateDiscoverySelectorValues(selection);
+	validateDiscoverySelectorDependencies(selection);
+}
+
+function validateDiscoverySelectorValues(selection: Readonly<{ capabilityId: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
+	if (selection.capabilityId !== undefined) requireSafeRef(selection.capabilityId);
+	if (selection.cursor !== undefined) requirePrefixedRef(selection.cursor, "cursor:");
+	if (selection.match !== undefined) requireTargetSelector(selection.match);
+	if (selection.limit === undefined) return;
+	if (typeof selection.limit !== "number" || !Number.isSafeInteger(selection.limit) || selection.limit < 1 || selection.limit > 64) invalidRequest();
+}
+
+function validateDiscoverySelectorDependencies(selection: Readonly<{ capabilityId: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
+	if (selection.cursor !== undefined || selection.match !== undefined || selection.limit !== undefined) {
+		if (selection.capabilityId === undefined) invalidRequest();
+	}
+	if (selection.cursor !== undefined && selection.match !== undefined) invalidRequest();
 }
 
 function requireTargetSelector(value: unknown): void {
@@ -323,31 +336,59 @@ function validateTargetCatalog(
 	capabilityIds: ReadonlySet<string>,
 	request: Readonly<CealGatewayDiscoverBody>,
 ): void {
+	const catalog = requireTargetCatalog(value);
+	validateTargetCatalogCounts(catalog, targets);
+	validateTargetCatalogPaging(catalog);
+	validateTargetCatalogRequest(catalog, targets, capabilityIds, request.capability_id);
+}
+
+function requireTargetCatalog(value: unknown): CealGatewayTargetCatalog {
 	const catalog = requireRecord(value);
 	requireExactKeys(catalog, ["complete", "next_cursor", "returned_count", "selection_required", "target_count"], ["next_cursor"]);
 	const typed = catalog as unknown as CealGatewayTargetCatalog;
-	if (!Number.isSafeInteger(typed.target_count) || typed.target_count < 0
-		|| !Number.isSafeInteger(typed.returned_count) || typed.returned_count < 0
-		|| typeof typed.complete !== "boolean" || typeof typed.selection_required !== "boolean") invalidResponse();
-	if (!Array.isArray(targets) || typed.returned_count !== targets.length || typed.returned_count > typed.target_count) invalidResponse();
+	if (!Number.isSafeInteger(typed.target_count) || typed.target_count < 0) invalidResponse();
+	if (!Number.isSafeInteger(typed.returned_count) || typed.returned_count < 0) invalidResponse();
+	if (typeof typed.complete !== "boolean" || typeof typed.selection_required !== "boolean") invalidResponse();
 	if (typed.next_cursor !== undefined) requirePrefixedRef(typed.next_cursor, "cursor:");
-	if (typed.complete && (typed.returned_count !== typed.target_count || typed.next_cursor !== undefined)) invalidResponse();
-	if (!typed.complete && !typed.selection_required && typed.next_cursor === undefined) invalidResponse();
-	if (typed.selection_required && (typed.returned_count !== 0 || typed.next_cursor !== undefined || typed.complete)) invalidResponse();
-	const capabilityId = request.capability_id;
-	if (!capabilityId) {
-		if (targets.length !== 0 || typed.selection_required !== (typed.target_count > 0)
-			|| typed.complete !== (typed.target_count === 0) || typed.next_cursor !== undefined) invalidResponse();
+	return typed;
+}
+
+function validateTargetCatalogCounts(catalog: CealGatewayTargetCatalog, targets: unknown): asserts targets is Record<string, unknown>[] {
+	if (!Array.isArray(targets)) invalidResponse();
+	if (catalog.returned_count !== targets.length || catalog.returned_count > catalog.target_count) invalidResponse();
+}
+
+function validateTargetCatalogPaging(catalog: CealGatewayTargetCatalog): void {
+	if (catalog.complete) {
+		if (catalog.returned_count !== catalog.target_count || catalog.next_cursor !== undefined) invalidResponse();
 		return;
 	}
-	if (typed.selection_required) {
-		if (!capabilityIds.has(capabilityId)) invalidResponse();
+	if (catalog.selection_required) {
+		if (catalog.returned_count !== 0 || catalog.next_cursor !== undefined) invalidResponse();
 		return;
 	}
+	if (catalog.next_cursor === undefined) invalidResponse();
+}
+
+function validateTargetCatalogRequest(
+	catalog: CealGatewayTargetCatalog,
+	targets: readonly Record<string, unknown>[],
+	capabilityIds: ReadonlySet<string>,
+	capabilityId: string | undefined,
+): void {
+	if (!capabilityId) return validateUnselectedTargetCatalog(catalog, targets);
 	if (!capabilityIds.has(capabilityId)) invalidResponse();
-	for (const target of targets as Record<string, unknown>[]) {
+	if (catalog.selection_required) return;
+	for (const target of targets) {
 		if (!Array.isArray(target.capability_ids) || !target.capability_ids.includes(capabilityId)) invalidResponse();
 	}
+}
+
+function validateUnselectedTargetCatalog(catalog: CealGatewayTargetCatalog, targets: readonly unknown[]): void {
+	if (targets.length !== 0) invalidResponse();
+	if (catalog.selection_required !== (catalog.target_count > 0)) invalidResponse();
+	if (catalog.complete !== (catalog.target_count === 0)) invalidResponse();
+	if (catalog.next_cursor !== undefined) invalidResponse();
 }
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {

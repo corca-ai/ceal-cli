@@ -252,30 +252,51 @@ type ParsedTargetCatalogOptions =
 	| null;
 
 function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
-	if (options[0] !== "targets") return options.length === 0 || storedProfileOption(options) !== null || parseGatewayOptions(options).ok ? { kind: "catalog" } : null;
-	const parsed = parseNamedOptions(options.slice(1), new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]), new Set());
+	if (options[0] !== "targets") return parseCapabilityCatalogOptions(options);
+	return parseTargetCatalogSelection(options.slice(1));
+}
+
+function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
+	if (options.length === 0) return { kind: "catalog" };
+	if (storedProfileOption(options) !== null) return { kind: "catalog" };
+	return parseGatewayOptions(options).ok ? { kind: "catalog" } : null;
+}
+
+function parseTargetCatalogSelection(options: readonly string[]): ParsedTargetCatalogOptions {
+	const parsed = parseNamedOptions(options, new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]), new Set());
 	if (!parsed) return null;
-	const capabilityId = parsed.values.get("--capability");
-	const cursor = parsed.values.get("--cursor");
-	const match = parsed.values.get("--match");
-	const profileRef = parsed.values.get("--profile");
-	const limitText = parsed.values.get("--limit");
-	if (!validCapabilityId(capabilityId) || (cursor && match) || (cursor && !isSafeCursor(cursor)) || (match && !isSafeTargetMatch(match))
-		|| (profileRef && !isSafeProfileRef(profileRef))) return null;
-	const limit = limitText === undefined ? undefined : parseTargetPageLimit(limitText);
-	if (limitText !== undefined && limit === undefined) return null;
+	const selection = {
+		capabilityId: parsed.values.get("--capability"),
+		cursor: parsed.values.get("--cursor"),
+		match: parsed.values.get("--match"),
+		profileRef: parsed.values.get("--profile"),
+		limitText: parsed.values.get("--limit"),
+	};
+	if (!isValidTargetCatalogSelection(selection)) return null;
+	const limit = selection.limitText === undefined ? undefined : parseTargetPageLimit(selection.limitText);
+	if (selection.limitText !== undefined && limit === undefined) return null;
 	return {
 		kind: "targets",
-		...(profileRef ? { profileRef } : {}),
-		body: { capability_id: capabilityId, ...(match ? { match } : {}), ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+		...(selection.profileRef ? { profileRef: selection.profileRef } : {}),
+		body: { capability_id: selection.capabilityId, ...(selection.match ? { match: selection.match } : {}), ...(selection.cursor ? { cursor: selection.cursor } : {}), ...(limit ? { limit } : {}) },
 	};
+}
+
+function isValidTargetCatalogSelection(selection: Readonly<{ capabilityId: string | undefined; cursor: string | undefined; match: string | undefined; profileRef: string | undefined; limitText: string | undefined }>): selection is Readonly<{ capabilityId: string; cursor: string | undefined; match: string | undefined; profileRef: string | undefined; limitText: string | undefined }> {
+	if (!validCapabilityId(selection.capabilityId)) return false;
+	if (selection.cursor !== undefined && !isSafeCursor(selection.cursor)) return false;
+	if (selection.match !== undefined && !isSafeTargetMatch(selection.match)) return false;
+	if (selection.profileRef !== undefined && !isSafeProfileRef(selection.profileRef)) return false;
+	if (selection.cursor !== undefined && selection.match !== undefined) return false;
+	return true;
 }
 
 function isSafeCursor(value: string): boolean { return /^cursor:[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u.test(value); }
 function isSafeTargetMatch(value: string): boolean {
 	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048
-		&& !/[\u0000-\u001f\u007f]/u.test(value);
+		&& !hasControlCharacter(value);
 }
+function hasControlCharacter(value: string): boolean { return [...value].some((character) => character.codePointAt(0)! <= 0x1f || character.codePointAt(0) === 0x7f); }
 function parseTargetPageLimit(value: string): number | undefined {
 	return /^(?:[1-9]|[1-5][0-9]|6[0-4])$/u.test(value) ? Number(value) : undefined;
 }
