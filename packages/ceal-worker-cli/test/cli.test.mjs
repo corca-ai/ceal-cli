@@ -357,6 +357,15 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 	assert.equal(payload.error.kind, "request_failed");
 });
 
+test("rate-limited calls explain a retryable recovery instead of operator restoration", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "rate_limited", message: "server-controlled" }), {
+		code: "rate_limited",
+		message: "The Gateway rate quota for this client is temporarily exhausted.",
+		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+		denial: false,
+	});
+});
+
 test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
 	assert.deepEqual(classifyGatewayFailure({ code: "idempotency_conflict", message: "server-controlled" }), {
 		code: "idempotency_conflict",
