@@ -24,25 +24,33 @@ YAML document; do not add an output-format flag and do not scrape prose.
 
 1. Prefer a read-only discovery route learned from help before attempting an
    operation. The selected Profile's live capability discovery is the source
-   of truth for current data areas, target refs, input contracts, and
-   readiness; do not invent provider-specific commands or a static catalog.
+   of truth for current capabilities, input contracts, readiness, and the
+   size of its target catalog; do not invent provider-specific commands or a
+   static catalog.
    The command registry is navigation only: for a question about what Ceal can
    do, select a leaf whose purpose and result schema describe Gateway-issued
    capability state. Do not answer a capability question from command discovery
    alone.
-2. Use Ceal refs or aliases returned by discovery. Do not substitute raw
-   provider ids, local paths, or remembered deployment names.
-3. Execute only the route and options exposed by the installed leaf help.
-4. Parse the complete stdout YAML document. Inspect status, evidence, claim,
+2. Start with the installed capability-discovery leaf. Its first response
+   intentionally contains no target inventory: it says whether target selection
+   is required and how many currently authorized targets exist. When it is
+   required, re-read that leaf's help and descend through its target-selection
+   child with one discovered capability and a precise text or URL match. Select
+   a small page before calling. Follow an opaque `next_cursor` only with the
+   same discovered capability; never construct, decode, or reuse a cursor.
+3. Use Ceal refs returned by the selected page. Do not substitute raw provider
+   ids, local paths, or remembered deployment names.
+4. Execute only the route and options exposed by the installed leaf help.
+5. Parse the complete stdout YAML document. Inspect status, evidence, claim,
    error, next-action, artifact, and readback fields that are actually present.
-5. Read any returned artifact before answering. For a write, report completion
+6. Read any returned artifact before answering. For a write, report completion
    only when the result permits the claim and the required authoritative
    readback or audit evidence is present.
    A discovered write must explicitly declare `effect: write` and its write
    contract. Keep one stable idempotency key for one intended effect; if the
    result is unverified or unknown, inspect its receipt rather than retrying
    with a new key or claiming delivery.
-6. On a structured error, follow its recovery or next action, then rediscover
+7. On a structured error, follow its recovery or next action, then rediscover
    help if installation or runtime drift may have changed the surface.
 
 ## Boundaries
@@ -82,9 +90,10 @@ ref for a separate bounded read, or may not expose a permitted route at all.
 Do not assume a capability name, resolution sequence, connector, or raw
 provider identifier from the link.
 
-If the active discovery does not expose a permitted route for the supplied
-link, stop before any write. Do not substitute a search guess, raw provider
-identifier, another integration, or browser automation.
+If target selection accepts the supplied link, use only the opaque target ref
+it returns and the capability contract it exposes. If it does not expose a
+permitted route, stop before any write. Do not substitute a search guess, raw
+provider identifier, another integration, or browser automation.
 
 For a discovered write, follow its declared input and evidence contract. Keep
 one stable idempotency value only when that contract requires one. If the

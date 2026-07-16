@@ -22,10 +22,12 @@ document. The public commands reject `--json` and `--format json`; typed callers
 use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 
 Capability discovery and invocation are provider-neutral contracts. `ceal
-capabilities` exposes the active Profile's current capability/target references,
-input contracts, readiness, and recovery; it does not expose Slack, GitHub,
-Notion, another provider's credential kind, API mode, or internal connector
-binding. `ceal call <capability-id> --target <target-ref> [key=value ...]`
+capabilities` exposes the active Profile's current capability contracts,
+readiness, recovery, and a bounded target-catalog summary; it intentionally
+does not dump a target inventory. `ceal capabilities targets --capability
+<capability-id> --match <text-or-url>` returns a bounded, current selection of
+opaque target references. Neither surface exposes Slack, GitHub, Notion, another
+provider's credential kind, API mode, or internal connector binding. `ceal call <capability-id> --target <target-ref> [key=value ...]`
 forwards only that discovered vocabulary without requiring a new top-level CLI
 command or client-side provider grammar. The Gateway validates capability input,
 Profile scope, and connector execution; the client preserves a bounded generic
@@ -161,6 +163,7 @@ printf '%s\n' "$CEAL_DEVICE_ENROLLMENT_CODE" | ceal session enroll \
   --code-stdin
 unset CEAL_DEVICE_ENROLLMENT_CODE
 ceal capabilities
+ceal capabilities targets --capability <capability-id> --match <text-or-url>
 ceal call <capability-id> --target <target-ref> key=value
 ```
 
