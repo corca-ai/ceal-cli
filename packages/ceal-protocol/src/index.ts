@@ -1,8 +1,9 @@
 import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION } from "./gateway-response-types.js";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
-import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest, CealGatewayTargetCatalog } from "./gateway-response-types.js";
+import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -336,59 +337,7 @@ function validateTargetCatalog(
 	capabilityIds: ReadonlySet<string>,
 	request: Readonly<CealGatewayDiscoverBody>,
 ): void {
-	const catalog = requireTargetCatalog(value);
-	validateTargetCatalogCounts(catalog, targets);
-	validateTargetCatalogPaging(catalog);
-	validateTargetCatalogRequest(catalog, targets, capabilityIds, request.capability_id);
-}
-
-function requireTargetCatalog(value: unknown): CealGatewayTargetCatalog {
-	const catalog = requireRecord(value);
-	requireExactKeys(catalog, ["complete", "next_cursor", "returned_count", "selection_required", "target_count"], ["next_cursor"]);
-	const typed = catalog as unknown as CealGatewayTargetCatalog;
-	if (!Number.isSafeInteger(typed.target_count) || typed.target_count < 0) invalidResponse();
-	if (!Number.isSafeInteger(typed.returned_count) || typed.returned_count < 0) invalidResponse();
-	if (typeof typed.complete !== "boolean" || typeof typed.selection_required !== "boolean") invalidResponse();
-	if (typed.next_cursor !== undefined) requirePrefixedRef(typed.next_cursor, "cursor:");
-	return typed;
-}
-
-function validateTargetCatalogCounts(catalog: CealGatewayTargetCatalog, targets: unknown): asserts targets is Record<string, unknown>[] {
-	if (!Array.isArray(targets)) invalidResponse();
-	if (catalog.returned_count !== targets.length || catalog.returned_count > catalog.target_count) invalidResponse();
-}
-
-function validateTargetCatalogPaging(catalog: CealGatewayTargetCatalog): void {
-	if (catalog.complete) {
-		if (catalog.returned_count !== catalog.target_count || catalog.next_cursor !== undefined) invalidResponse();
-		return;
-	}
-	if (catalog.selection_required) {
-		if (catalog.returned_count !== 0 || catalog.next_cursor !== undefined) invalidResponse();
-		return;
-	}
-	if (catalog.next_cursor === undefined) invalidResponse();
-}
-
-function validateTargetCatalogRequest(
-	catalog: CealGatewayTargetCatalog,
-	targets: readonly Record<string, unknown>[],
-	capabilityIds: ReadonlySet<string>,
-	capabilityId: string | undefined,
-): void {
-	if (!capabilityId) return validateUnselectedTargetCatalog(catalog, targets);
-	if (!capabilityIds.has(capabilityId)) invalidResponse();
-	if (catalog.selection_required) return;
-	for (const target of targets) {
-		if (!Array.isArray(target.capability_ids) || !target.capability_ids.includes(capabilityId)) invalidResponse();
-	}
-}
-
-function validateUnselectedTargetCatalog(catalog: CealGatewayTargetCatalog, targets: readonly unknown[]): void {
-	if (targets.length !== 0) invalidResponse();
-	if (catalog.selection_required !== (catalog.target_count > 0)) invalidResponse();
-	if (catalog.complete !== (catalog.target_count === 0)) invalidResponse();
-	if (catalog.next_cursor !== undefined) invalidResponse();
+	validateGatewayTargetCatalog({ requireRecord, requireExactKeys, requirePrefixedRef, invalidResponse }, value, targets, capabilityIds, request);
 }
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
