@@ -383,6 +383,11 @@ function writeCapabilitiesAvailable(
 			registration_ref: handshake.value.registration_ref, client_ref: handshake.value.client_ref,
 			subject_ref: handshake.value.subject_ref, instance_ref: handshake.value.instance_ref,
 			negotiated_protocol_version: handshake.value.negotiated_protocol_version, host_decision: handshake.value.host_decision,
+			// Surface the negotiated eligible-Profile catalog so an agent can see
+			// which `--profile <profile_ref>` selections this session may pass
+			// without re-login. Present only when the Gateway negotiated it; the
+			// current selection is `gateway.profile_ref` above.
+			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
 		capabilities: discovery.value.capabilities, targets: discovery.value.targets,
 		target_catalog: discovery.value.target_catalog,

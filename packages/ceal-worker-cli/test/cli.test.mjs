@@ -620,6 +620,51 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 	});
 });
 
+test("capabilities negotiates and surfaces the eligible-Profile catalog for --profile selection", async () => {
+	const eligible = [
+		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
+		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
+	];
+	const responseFactory = (body) => {
+		if (body.operation !== "handshake") return discoveryResponse(body);
+		const base = handshakeResponse(body);
+		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
+	};
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun([
+			"capabilities",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:profiles:001",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		// The transport declared the negotiation on the handshake request.
+		assert.equal(requests[0].body.operation, "handshake");
+		assert.equal(requests[0].profiles, "accept");
+		// The currently selected Profile and the catalog of alternatives an agent
+		// may pass to `--profile` are both operator-visible.
+		assert.equal(payload.gateway.profile_ref, "profile:narnia");
+		assert.deepEqual(payload.gateway.eligible_profiles, eligible);
+	}, responseFactory);
+});
+
+test("capabilities omits eligible_profiles when the Gateway does not negotiate the catalog", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun([
+			"capabilities",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:profiles:absent",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		// Older Gateway / non-negotiated response carries no catalog, so the
+		// surface stays absent rather than an empty list.
+		assert.equal(Object.hasOwn(payload.gateway, "eligible_profiles"), false);
+	});
+});
+
 test("capabilities selects a bounded target page through the stored client session", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
@@ -738,7 +783,7 @@ async function withGateway(callback, responseFactory = null) {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		requests.push({ authorization: request.headers.authorization, body });
+		requests.push({ authorization: request.headers.authorization, profiles: request.headers["x-ceal-profiles"], body });
 		const value = responseFactory ? responseFactory(body)
 			: body.operation === "handshake" ? handshakeResponse(body)
 				: body.operation === "discover" ? discoveryResponse(body)
