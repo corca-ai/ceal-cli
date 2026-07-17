@@ -266,19 +266,9 @@ function validateHostProofReference(response: Record<string, unknown>): void {
 function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGatewayHandshakeRequest>): void {
 	const handshake = requireRecord(value);
 	requireExactKeys(handshake, [
-		"client_ref",
-		"eligible_profiles",
-		"host_decision",
-		"instance_ref",
-		"membership_ref",
-		"negotiated_protocol_version",
-		"non_claims",
-		"profile_ref",
-		"proof_level",
-		"registration_ref",
-		"schema_version",
-		"subject_ref",
-		"supported_gateway_protocol_range",
+		"client_ref", "eligible_profiles", "host_decision", "instance_ref", "membership_ref",
+		"negotiated_protocol_version", "non_claims", "profile_ref", "proof_level",
+		"registration_ref", "schema_version", "subject_ref", "supported_gateway_protocol_range",
 	], ["eligible_profiles"]);
 	if (handshake.schema_version !== "ceal.gateway_handshake.v1"
 		|| handshake.negotiated_protocol_version !== CEAL_PROTOCOL_VERSION
