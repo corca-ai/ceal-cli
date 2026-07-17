@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CealHttpTransportError,
 	createCealClient,
 	createCealHttpTransport,
@@ -48,6 +49,28 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 	}
+});
+
+test("HTTP transport negotiates for the eligible-Profile catalog with the exact server header literal", async () => {
+	// Golden value: the client cannot import the server's literal, so pin the
+	// negotiation constant to the exact string the Gateway matches. A drift here
+	// silently disables the catalog without a wire-visible error.
+	assert.equal(CEAL_GATEWAY_PROFILES_ACCEPT_HEADER, "x-ceal-profiles");
+
+	let observedHeaders;
+	const client = createCealClient(createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "gateway-issued-token",
+		fetchFn: async (_endpoint, init) => {
+			observedHeaders = init.headers;
+			return globalThis.Response.json(handshakeResponse(request));
+		},
+	}));
+	const response = await client.request(request);
+	assert.equal(response.ok, true);
+	// Sent unconditionally alongside the recovery negotiation, mirroring it.
+	assert.equal(observedHeaders["x-ceal-recovery"], "accept");
+	assert.equal(observedHeaders[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER], "accept");
 });
 
 test("HTTP transport refuses redirects before the request body can reach another endpoint", async () => {

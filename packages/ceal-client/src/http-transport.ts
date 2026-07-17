@@ -33,6 +33,15 @@ export interface CealClientTransport {
 	send<R extends CealGatewayRequest>(request: Readonly<R>): Promise<CealGatewayResponseFor<R>>;
 }
 
+/**
+ * Negotiation header declaring that this client tolerates the optional
+ * eligible-Profile catalog on the handshake. The Gateway emits the catalog only
+ * when it reads exactly `accept` here, because the 1.3.0 handshake decoder is
+ * exact-keys strict. The literal is the wire contract owned by the server; a
+ * client cannot import it, so a golden-value test pins this constant to it.
+ */
+export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = "x-ceal-profiles";
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_TIMEOUT_MS = 120_000;
@@ -74,6 +83,10 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						// `error.recovery`; the Gateway never sends the field to a
 						// client that does not.
 						"x-ceal-recovery": "accept",
+						// The handshake decoder now tolerates the optional
+						// eligible-Profile catalog, so negotiate for it here; the
+						// Gateway omits the field for a client that does not.
+						[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER]: "accept",
 					},
 					body: JSON.stringify(wireRequest),
 					redirect: "error",

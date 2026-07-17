@@ -7,6 +7,7 @@ import type {
 import type { CealClientTransport } from "./http-transport.js";
 
 export {
+	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CealHttpTransportError,
 	createCealHttpTransport,
 } from "./http-transport.js";
