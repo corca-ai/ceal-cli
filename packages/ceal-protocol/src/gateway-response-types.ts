@@ -82,6 +82,12 @@ export type CealGatewayRequest = CealGatewayHandshakeRequest | CealGatewayDiscov
 export type CealGatewayHostNonClaim = "provider_execution_not_reached" | "production_audit_not_reached";
 export type CealGatewayHostNonClaims = readonly CealGatewayHostNonClaim[];
 
+/** One Profile the authenticated subject/client may currently select. */
+export interface CealGatewayEligibleProfile {
+	profile_ref: string;
+	membership_ref: string;
+}
+
 export interface CealGatewayHandshakeValue {
 	schema_version: "ceal.gateway_handshake.v1";
 	negotiated_protocol_version: typeof CEAL_PROTOCOL_VERSION;
@@ -95,6 +101,12 @@ export interface CealGatewayHandshakeValue {
 	host_decision: "accepted";
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+	/**
+	 * Optional eligible-Profile catalog: present only when the client negotiated
+	 * for it (`x-ceal-profiles: accept`). Refs-only, may be empty, and is not
+	 * emitted by an older Gateway or a non-negotiating client.
+	 */
+	eligible_profiles?: readonly CealGatewayEligibleProfile[];
 }
 
 export interface CealGatewayDiscoveryValue {

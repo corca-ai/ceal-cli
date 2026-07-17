@@ -197,6 +197,41 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 });
 
+test("handshake decoder tolerates the optional negotiated eligible-Profile catalog without weakening the unchanged shape", () => {
+	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
+
+	// Unchanged shape (field absent, e.g. non-negotiating client / older Gateway)
+	// must still decode as before.
+	const absent = handshakeResponse(handshakeRequest);
+	assert.deepEqual(decodeCealClientResponse(absent, handshakeRequest), absent);
+
+	// A refs-only catalog is accepted and round-trips unchanged.
+	const negotiated = structuredClone(absent);
+	negotiated.value.eligible_profiles = [
+		{ profile_ref: "profile:ax-team", membership_ref: "membership:local-alice-ax" },
+		{ profile_ref: handshakeRequest.profile_ref, membership_ref: "membership:test-work" },
+	];
+	assert.deepEqual(decodeCealClientResponse(negotiated, handshakeRequest), negotiated);
+
+	// An empty catalog (subject with no other eligible Profile) is tolerated.
+	const empty = structuredClone(absent);
+	empty.value.eligible_profiles = [];
+	assert.deepEqual(decodeCealClientResponse(empty, handshakeRequest), empty);
+
+	// A malformed catalog is rejected without echoing the payload.
+	for (const eligible of [
+		"profile:ax-team",
+		[{ profile_ref: "profile:ax-team" }],
+		[{ profile_ref: "profile:ax-team", membership_ref: "membership:x", extra: "leak" }],
+		[{ profile_ref: 42, membership_ref: "membership:x" }],
+		[{ profile_ref: "profile:ax-team", membership_ref: "not a safe ref!" }],
+	]) {
+		const malformed = structuredClone(absent);
+		malformed.value.eligible_profiles = eligible;
+		assert.throws(() => decodeCealClientResponse(malformed, handshakeRequest), hasCode("invalid_client_response"));
+	}
+});
+
 test("public capability evidence exposes policy and readiness without private backend or credential vocabulary", () => {
 	const discoveryRequest = envelope("discover", {});
 	const callRequest = envelope("call", {

@@ -57,6 +57,7 @@ export type {
 	CealGatewayDiscoveryTarget,
 	CealGatewayDiscoveryValue,
 	CealGatewayTargetCatalog,
+	CealGatewayEligibleProfile,
 	CealGatewayHandshakeValue,
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
@@ -266,6 +267,7 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 	const handshake = requireRecord(value);
 	requireExactKeys(handshake, [
 		"client_ref",
+		"eligible_profiles",
 		"host_decision",
 		"instance_ref",
 		"membership_ref",
@@ -277,7 +279,7 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 		"schema_version",
 		"subject_ref",
 		"supported_gateway_protocol_range",
-	]);
+	], ["eligible_profiles"]);
 	if (handshake.schema_version !== "ceal.gateway_handshake.v1"
 		|| handshake.negotiated_protocol_version !== CEAL_PROTOCOL_VERSION
 		|| handshake.profile_ref !== expectedRequest.profile_ref
@@ -287,7 +289,21 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 	const range = requireRecord(handshake.supported_gateway_protocol_range);
 	requireExactKeys(range, ["maximum", "minimum"]);
 	if (!negotiateCealProtocol(range).ok) invalidResponse();
+	if ("eligible_profiles" in handshake) validateEligibleProfiles(handshake.eligible_profiles);
 	validateHostNonClaims(handshake.non_claims);
+}
+
+// The negotiated eligible-Profile catalog is refs-only and may be empty. Order
+// and uniqueness are the Gateway's contract, not re-asserted here; the generic
+// safe-JSON pass already caps array length upstream of this decode.
+function validateEligibleProfiles(value: unknown): void {
+	if (!Array.isArray(value)) invalidResponse();
+	for (const entry of value) {
+		const profile = requireRecord(entry);
+		requireExactKeys(profile, ["membership_ref", "profile_ref"]);
+		requireSafeRef(profile.profile_ref);
+		requireSafeRef(profile.membership_ref);
+	}
 }
 
 function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGatewayDiscoverRequest>): void {
