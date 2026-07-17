@@ -395,7 +395,35 @@ function writeCapabilitiesAvailable(
 		claims_allowed: ["gateway_handshake", "gateway_discovery"], non_claims: discovery.value.non_claims,
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
 		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection) ? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) } : {}),
+		...(profileSelectionHint(handshake.value) ? { profile_selection: profileSelectionHint(handshake.value) } : {}),
 	});
+}
+
+// Client-local selection code named by the Profile contract: a session with
+// more than one eligible Profile has not pinned a single one, so an agent is
+// told the affordance rather than left to guess. This is a thin advisory on the
+// successful handshake — not a re-architecture of default selection, and not a
+// Gateway recovery kind. The hard-failure form (multiple eligible Profiles with
+// no active selection at all) needs the still-unimplemented multi-select model
+// or a live Gateway Profile denial to reach; see the goal's closeout non-claim.
+const CEAL_PROFILE_SELECTION_REQUIRED_CODE = "profile_selection_required" as const;
+
+function profileSelectionHint(handshake: CealGatewayHandshakeValue): {
+	code: typeof CEAL_PROFILE_SELECTION_REQUIRED_CODE;
+	active_profile_ref: string;
+	next_action: string;
+} | null {
+	const eligible = handshake.eligible_profiles;
+	// A single (or absent) eligible Profile becomes active automatically, so the
+	// affordance only matters when more than one Profile is selectable. The
+	// alternatives themselves are the `gateway.eligible_profiles` catalog; this
+	// hint names the recovery code and points at it rather than repeating it.
+	if (!eligible || eligible.length < 2) return null;
+	return {
+		code: CEAL_PROFILE_SELECTION_REQUIRED_CODE,
+		active_profile_ref: handshake.profile_ref,
+		next_action: "Re-run with '--profile <profile_ref>' to select one of the gateway.eligible_profiles listed above.",
+	};
 }
 
 function capabilityCatalogNextAction(

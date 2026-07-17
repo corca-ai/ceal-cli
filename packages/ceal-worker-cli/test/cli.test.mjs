@@ -649,6 +649,55 @@ test("capabilities negotiates and surfaces the eligible-Profile catalog for --pr
 	}, responseFactory);
 });
 
+test("capabilities names profile_selection_required with the catalog when more than one Profile is eligible", async () => {
+	const eligible = [
+		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
+		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
+	];
+	const responseFactory = (body) => {
+		if (body.operation !== "handshake") return discoveryResponse(body);
+		const base = handshakeResponse(body);
+		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
+	};
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun([
+			"capabilities",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:selection:001",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		assert.equal(payload.profile_selection.code, "profile_selection_required");
+		assert.equal(payload.profile_selection.active_profile_ref, "profile:narnia");
+		assert.match(payload.profile_selection.next_action, /--profile/u);
+		// The hint points at the catalog surfaced on the gateway block.
+		assert.deepEqual(payload.gateway.eligible_profiles, eligible);
+	}, responseFactory);
+});
+
+test("capabilities omits profile_selection when a single eligible Profile becomes active automatically", async () => {
+	const eligible = [{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" }];
+	const responseFactory = (body) => {
+		if (body.operation !== "handshake") return discoveryResponse(body);
+		const base = handshakeResponse(body);
+		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
+	};
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun([
+			"capabilities",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:selection:single",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		// One selectable Profile activates automatically; no selection hint.
+		assert.deepEqual(payload.gateway.eligible_profiles, eligible);
+		assert.equal(Object.hasOwn(payload, "profile_selection"), false);
+	}, responseFactory);
+});
+
 test("capabilities omits eligible_profiles when the Gateway does not negotiate the catalog", async () => {
 	await withGateway(async ({ endpoint }) => {
 		const payload = await yamlRun([
