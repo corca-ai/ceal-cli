@@ -1,4 +1,4 @@
-import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION } from "./gateway-response-types.js";
+import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS } from "./gateway-response-types.js";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
@@ -65,11 +65,13 @@ export type {
 	CealCapabilityReadiness,
 	CealGatewayPolicyDenial,
 	CealGatewayPolicyDenialDecision,
+	CealGatewayRecovery,
+	CealGatewayRecoveryKind,
 	CealGatewayRequestForInput,
 	CealGatewayRequestInput,
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
-export { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+export { CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.js";
 export type {
 	CealProtocolNegotiation,
@@ -91,45 +93,18 @@ export type {
 	CealProtocolRange,
 } from "./gateway-response-types.js";
 
-export const GOVERNED_RUNNER_CORPUS_SCHEMA = "ceal.governed_runner_conformance_corpus.v1" as const;
-export const GOVERNED_RUNNER_CORPUS_VERSION = "1.0.0" as const;
+export {
+	GOVERNED_RUNNER_CORPUS_SCHEMA,
+	GOVERNED_RUNNER_CORPUS_VERSION,
+} from "./governed-runner-conformance.js";
+export type {
+	GovernedRunnerConformanceCase,
+	GovernedRunnerConformanceCorpus,
+	GovernedRunnerConformanceKind,
+	GovernedRunnerProofContract,
+} from "./governed-runner-conformance.js";
 
 export type CealClientResponse<TValue = unknown> = CealClientSuccess<TValue> | CealGatewayPolicyDenial | CealClientFailure;
-
-export type GovernedRunnerConformanceKind =
-	| "runner_context"
-	| "denial"
-	| "ledger"
-	| "dispatch"
-	| "egress"
-	| "wake";
-
-export interface GovernedRunnerProofContract {
-	requirement: "local_state";
-	reached: "local_state";
-	fixture: "local_projection_fixture";
-	claims_allowed: string[];
-	non_claims: string[];
-	production_gateway_handshake_checked: false;
-	production_gateway_audit_reached: false;
-	live_provider_dispatch_checked: false;
-	connector_completion_readback_checked: false;
-}
-
-export interface GovernedRunnerConformanceCase {
-	id: string;
-	kind: GovernedRunnerConformanceKind;
-	input: unknown;
-	expected: unknown;
-	proof_contract: GovernedRunnerProofContract;
-}
-
-export interface GovernedRunnerConformanceCorpus {
-	schema_version: typeof GOVERNED_RUNNER_CORPUS_SCHEMA;
-	corpus_version: typeof GOVERNED_RUNNER_CORPUS_VERSION;
-	protocol_version: typeof CEAL_PROTOCOL_VERSION;
-	cases: GovernedRunnerConformanceCase[];
-}
 
 export type CealProtocolValidationErrorCode = "invalid_gateway_request" | "invalid_client_response";
 
@@ -585,10 +560,23 @@ function validateFailureResponse(response: Record<string, unknown>, expectedRequ
 	requireExactKeys(response, ["error", "ok", "proof_ref_or_unavailable", "protocol_version", "request_id"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
 	if ("proof_ref_or_unavailable" in response) validateProofReference(response.proof_ref_or_unavailable);
-	requireExactKeys(error, ["code", "message", "next_action"], ["next_action"]);
+	requireExactKeys(error, ["code", "message", "next_action", "recovery"], ["next_action", "recovery"]);
 	if (typeof error.code !== "string" || !SAFE_CODE.test(error.code)) invalidResponse();
 	requireSafeText(error.message, 512);
 	if ("next_action" in error) requireSafeText(error.next_action, 512);
+	if ("recovery" in error) validateFailureRecovery(error.recovery);
+}
+
+const MAX_RECOVERY_RETRY_AFTER_MS = 60 * 60 * 1000;
+
+function validateFailureRecovery(value: unknown): void {
+	const recovery = requireRecord(value);
+	requireExactKeys(recovery, ["kind", "retry_after_ms"], ["retry_after_ms"]);
+	if (!(CEAL_GATEWAY_RECOVERY_KINDS as readonly unknown[]).includes(recovery.kind)) invalidResponse();
+	if ("retry_after_ms" in recovery) {
+		const wait = recovery.retry_after_ms;
+		if (typeof wait !== "number" || !Number.isSafeInteger(wait) || wait < 0 || wait > MAX_RECOVERY_RETRY_AFTER_MS) invalidResponse();
+	}
 }
 
 function validatePolicyDenial(

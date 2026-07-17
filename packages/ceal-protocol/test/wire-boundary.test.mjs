@@ -160,6 +160,26 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	};
 	assert.deepEqual(decodeCealClientResponse(failure, handshakeRequest), failure);
 
+	const recoveredFailure = structuredClone(failure);
+	recoveredFailure.error.recovery = { kind: "upgrade_client" };
+	assert.deepEqual(decodeCealClientResponse(recoveredFailure, handshakeRequest), recoveredFailure);
+	const retryFailure = structuredClone(failure);
+	retryFailure.error.code = "rate_limited";
+	retryFailure.error.recovery = { kind: "retry", retry_after_ms: 30_000 };
+	assert.deepEqual(decodeCealClientResponse(retryFailure, handshakeRequest), retryFailure);
+	for (const recovery of [
+		{ kind: "reboot_universe" },
+		{ kind: "retry", retry_after_ms: -1 },
+		{ kind: "retry", retry_after_ms: 24 * 60 * 60 * 1000 },
+		{ kind: "retry", retry_after_ms: 5.5 },
+		{ kind: "retry", note: "extra keys are rejected" },
+		"retry",
+	]) {
+		const invalidRecovery = structuredClone(failure);
+		invalidRecovery.error.recovery = recovery;
+		assert.throws(() => decodeCealClientResponse(invalidRecovery, handshakeRequest), hasCode("invalid_client_response"));
+	}
+
 	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
 	const readback = readbackResponse(readbackRequest, callRequest.request_id);
 	assert.deepEqual(decodeCealClientResponse(readback, readbackRequest), readback);

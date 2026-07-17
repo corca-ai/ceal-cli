@@ -69,6 +69,11 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						accept: "application/json",
 						authorization: `Bearer ${accessToken}`,
 						"content-type": "application/json",
+						// This transport ships with the recovery-tolerant failure
+						// decoder, so it may declare acceptance of typed
+						// `error.recovery`; the Gateway never sends the field to a
+						// client that does not.
+						"x-ceal-recovery": "accept",
 					},
 					body: JSON.stringify(wireRequest),
 					redirect: "error",

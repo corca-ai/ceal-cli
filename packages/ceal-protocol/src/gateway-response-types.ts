@@ -22,12 +22,35 @@ export interface CealClientSuccess<TValue = unknown> {
 	proof_ref_or_unavailable?: CealProofReferenceOrUnavailable;
 }
 
+/**
+ * Closed recovery vocabulary: clients branch on the class, never on server
+ * prose. An unknown kind must be treated as absent (fall back to the local
+ * code table), and a non-member value must never be echoed into agent context.
+ */
+export const CEAL_GATEWAY_RECOVERY_KINDS = [
+	"retry",
+	"re_authenticate",
+	"select_granted_scope",
+	"request_approval",
+	"operator_restore",
+	"upgrade_client",
+	"none",
+] as const;
+
+export type CealGatewayRecoveryKind = (typeof CEAL_GATEWAY_RECOVERY_KINDS)[number];
+
+export interface CealGatewayRecovery {
+	kind: CealGatewayRecoveryKind;
+	/** Bounded wait hint for kind "retry"; clients must clamp before use. */
+	retry_after_ms?: number;
+}
+
 export interface CealClientFailure {
 	ok: false;
 	request_id: string;
 	protocol_version: typeof CEAL_PROTOCOL_VERSION;
 	proof_ref_or_unavailable?: CealProofReferenceOrUnavailable;
-	error: { code: string; message: string; next_action?: string };
+	error: { code: string; message: string; next_action?: string; recovery?: CealGatewayRecovery };
 }
 
 interface CealGatewayRequestEnvelope<TOperation extends CealClientOperation, TBody> {
