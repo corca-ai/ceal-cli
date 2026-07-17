@@ -109,7 +109,7 @@ function gatewayRecoveryKind(error: unknown): string | null {
 
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-	const hint = typeof code === "string" ? GATEWAY_FAILURE_HINTS[code] : undefined;
+	const hint = typeof code === "string" && Object.hasOwn(GATEWAY_FAILURE_HINTS, code) ? GATEWAY_FAILURE_HINTS[code] : undefined;
 	if (typeof code === "string" && hint) return { code, ...hint };
 	const kind = gatewayRecoveryKind(error);
 	if (typeof code === "string" && kind) return { code, ...GATEWAY_RECOVERY_HINTS[kind] };
