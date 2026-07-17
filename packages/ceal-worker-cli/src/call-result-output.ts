@@ -86,9 +86,32 @@ const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "c
 	incompatible_protocol: { message: "The Ceal client and Gateway protocol versions are incompatible.", nextAction: "Upgrade the Ceal client or Gateway to compatible releases.", denial: false },
 });
 
+// Locally-owned rendering for the Gateway's closed recovery vocabulary. The
+// known code table wins on disagreement; a recovery class only rescues codes
+// this CLI does not know, so a new failure code degrades by class instead of
+// to the generic hint. Non-member kinds are never echoed into agent context.
+const GATEWAY_RECOVERY_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "code">>> = Object.freeze({
+	retry: { message: "The Gateway declined the request with a retryable rejection.", nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.", denial: false },
+	re_authenticate: { message: "The Gateway rejected the client credential.", nextAction: "Obtain a current Gateway-issued client session and retry.", denial: true },
+	select_granted_scope: { message: "The Gateway rejected the requested Profile or target selection.", nextAction: "Use a Profile and target granted to the authenticated subject and retry.", denial: true },
+	request_approval: { message: "The Gateway declined the request pending policy approval.", nextAction: "Request policy approval for this capability and target.", denial: true },
+	operator_restore: { message: "The Gateway reported the backing connector as unavailable.", nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.", denial: false },
+	upgrade_client: { message: "The Ceal client and Gateway protocol versions are incompatible.", nextAction: "Upgrade the Ceal client or Gateway to compatible releases.", denial: false },
+});
+
+function gatewayRecoveryKind(error: unknown): string | null {
+	if (!error || typeof error !== "object" || !("recovery" in error)) return null;
+	const recovery = (error as { recovery?: unknown }).recovery;
+	if (!recovery || typeof recovery !== "object" || !("kind" in recovery)) return null;
+	const kind = (recovery as { kind?: unknown }).kind;
+	return typeof kind === "string" && Object.hasOwn(GATEWAY_RECOVERY_HINTS, kind) ? kind : null;
+}
+
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
 	const hint = typeof code === "string" ? GATEWAY_FAILURE_HINTS[code] : undefined;
 	if (typeof code === "string" && hint) return { code, ...hint };
+	const kind = gatewayRecoveryKind(error);
+	if (typeof code === "string" && kind) return { code, ...GATEWAY_RECOVERY_HINTS[kind] };
 	return { code: "gateway_request_failed", message: "The Gateway rejected the capability request.", nextAction: "Check Gateway status and audit readback, then retry with a new request ID.", denial: false };
 }

@@ -366,6 +366,40 @@ test("rate-limited calls explain a retryable recovery instead of operator restor
 	});
 });
 
+test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
+	assert.deepEqual(classifyGatewayFailure({
+		code: "quota_exceeded_v2", message: "server-controlled", next_action: "server-controlled prose",
+		recovery: { kind: "retry", retry_after_ms: 30_000 },
+	}), {
+		code: "quota_exceeded_v2",
+		message: "The Gateway declined the request with a retryable rejection.",
+		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+		denial: false,
+	});
+});
+
+test("the known code table wins over a disagreeing recovery class", () => {
+	assert.deepEqual(classifyGatewayFailure({
+		code: "rate_limited", message: "server-controlled", recovery: { kind: "operator_restore" },
+	}), {
+		code: "rate_limited",
+		message: "The Gateway rate quota for this client is temporarily exhausted.",
+		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+		denial: false,
+	});
+});
+
+test("a non-member recovery kind is never echoed and falls to the generic hint", () => {
+	assert.deepEqual(classifyGatewayFailure({
+		code: "mystery_code", message: "server-controlled", recovery: { kind: "reboot_universe" },
+	}), {
+		code: "gateway_request_failed",
+		message: "The Gateway rejected the capability request.",
+		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		denial: false,
+	});
+});
+
 test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
 	assert.deepEqual(classifyGatewayFailure({ code: "idempotency_conflict", message: "server-controlled" }), {
 		code: "idempotency_conflict",
