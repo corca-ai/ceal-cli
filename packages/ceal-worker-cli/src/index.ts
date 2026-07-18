@@ -2,6 +2,7 @@ import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@c
 import type {
 	CealGatewayAuditEvent,
 	CealGatewayCallValue,
+	CealGatewayDiscoveryCapability,
 	CealGatewayDiscoveryValue,
 	CealGatewayHandshakeValue,
 } from "@corca-ai/ceal-protocol";
@@ -85,7 +86,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "capabilities",
 		description: "Discover Gateway-issued capabilities and select bounded targets.",
-		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -172,6 +173,7 @@ function commandHelp(command: CealCommandDefinition): string {
 		? [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
+			"  --detail                Include each capability's full input_contract (default: concise).",
 			"  targets                 Select bounded targets for one discovered capability.",
 			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
 			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
@@ -234,10 +236,15 @@ function writeCommands(io: CealCliIo): number {
 }
 
 async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	// `--fresh` (catalog only) forces a live discovery probe past any cache. It is
-	// stripped before the existing parsers, which do not know the flag.
+	// `--fresh` (catalog only) forces a live discovery probe past any cache;
+	// `--detail` (either case) restores the full per-capability input contract
+	// that the concise default omits. Both are stripped before the existing
+	// parsers, which do not know the flags.
 	const wantsFresh = options[0] !== "targets" && options.includes("--fresh");
-	const effectiveOptions = wantsFresh ? options.filter((option) => option !== "--fresh") : options;
+	const wantsDetail = options.includes("--detail");
+	const effectiveOptions = options.filter(
+		(option) => option !== "--detail" && !(wantsFresh && option === "--fresh"),
+	);
 	const selection = parseTargetCatalogOptions(effectiveOptions);
 	if (selection === null) return writeError("invalid_argument", "Invalid capabilities target selection.", io);
 	const resolved = selection.kind === "targets"
@@ -251,7 +258,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		// gate while the expensive discovery probe is served from the client cache
 		// when warm. The targets case is a live paged query and is never cached.
 		if (selection.kind === "catalog") {
-			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, io, runtime);
+			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, wantsDetail, io, runtime);
 		}
 		const discovery = await client.request({
 			request_id: `${resolved.value.requestId}:discover`,
@@ -260,7 +267,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			body: selection.body,
 		});
 		if (!discovery.ok) return writeGatewayFailure(discovery, io);
-		return writeCapabilitiesAvailable(handshake, discovery, selection, io, { source: "live_discovery" });
+		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" });
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
@@ -274,6 +281,7 @@ async function serveCapabilityCatalog(
 	client: ReturnType<typeof createCealClient>,
 	selection: { kind: "catalog" },
 	wantsFresh: boolean,
+	wantsDetail: boolean,
 	io: CealCliIo,
 	runtime: CealCommandRuntime,
 ): Promise<number> {
@@ -294,7 +302,7 @@ async function serveCapabilityCatalog(
 			return writeCapabilitiesAvailable(
 				handshake,
 				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
-				selection, io,
+				selection, wantsDetail, io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
 			);
 		}
@@ -310,7 +318,7 @@ async function serveCapabilityCatalog(
 	if (runtime.saveDiscoveryCache) {
 		await runtime.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> }).catch(() => undefined);
 	}
-	return writeCapabilitiesAvailable(handshake, discovery, selection, io, { source: "live_discovery" });
+	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" });
 }
 
 type ParsedTargetCatalogOptions =
@@ -436,13 +444,28 @@ function shouldRetryAuthentication(
 	return !response.ok && gatewayFailureCode(response.error) === "authentication_failed" && Boolean(session?.refreshToken);
 }
 
+// Concise default: an agent scanning the catalog wants the capability id, label,
+// effect, and whether a target is required — not the full input grammar for all
+// ~10 capabilities on every `capabilities` call. `--detail` restores the bodies.
+// The omitted fields (`input_contract`, `write_contract`) are re-fetched by
+// re-running with `--detail`; the concise rows stay a strict subset so nothing
+// the caller needs to *select* a capability is dropped.
+function conciseCapability(capability: CealGatewayDiscoveryCapability): Record<string, unknown> {
+	const { input_contract: _input, write_contract: _write, ...summary } = capability;
+	return summary;
+}
+
 function writeCapabilitiesAvailable(
 	handshake: { request_id: string; value: CealGatewayHandshakeValue },
 	discovery: { request_id: string; value: CealGatewayDiscoveryValue },
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
+	detail: boolean,
 	io: CealCliIo,
 	provenance: CatalogProvenance,
 ): number {
+	const capabilities = detail
+		? discovery.value.capabilities
+		: discovery.value.capabilities.map(conciseCapability);
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1", command: "ceal", status: "available", gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
@@ -457,7 +480,10 @@ function writeCapabilitiesAvailable(
 			// current selection is `gateway.profile_ref` above.
 			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
-		capabilities: discovery.value.capabilities, targets: discovery.value.targets,
+		capabilities, targets: discovery.value.targets,
+		// Tell an agent the concise rows omit the input grammar and how to get it,
+		// so a compact default never reads as "this capability has no contract".
+		...(detail ? {} : { capability_detail: "Re-run 'ceal capabilities --detail' for per-capability input_contract." }),
 		target_catalog: discovery.value.target_catalog,
 		proof_level: discovery.value.proof_level, live_gateway_checked: true,
 		// `live_gateway_checked` reports the live handshake (the auth gate, always

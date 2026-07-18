@@ -620,6 +620,49 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 	});
 });
 
+test("capabilities defaults to a concise catalog that omits each per-capability contract body", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun([
+			"capabilities",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:concise:001",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"C".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		// The concise rows keep everything an agent needs to *select* a capability
+		// (id, label, effect, target requirement) but drop the input grammar body.
+		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
+		for (const capability of payload.capabilities) {
+			assert.equal(Object.hasOwn(capability, "input_contract"), false, "concise default must omit input_contract");
+			assert.equal(Object.hasOwn(capability, "write_contract"), false, "concise default must omit write_contract");
+			assert.equal(typeof capability.label, "string");
+			assert.equal(typeof capability.effect, "string");
+		}
+		// And the caller is told how to recover the omitted detail.
+		assert.match(payload.capability_detail, /--detail/u);
+	});
+});
+
+test("capabilities --detail restores each capability's full input contract", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun([
+			"capabilities", "--detail",
+			"--endpoint", endpoint,
+			"--profile", "profile:narnia",
+			"--request-id", "narnia:detail:001",
+			"--token-stdin",
+		], 0, { readSecret: async () => `ceal_personal_${"D".repeat(43)}` });
+		assert.equal(payload.status, "available");
+		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
+		const [capability] = payload.capabilities;
+		assert.equal(Object.hasOwn(capability, "input_contract"), true, "--detail must include input_contract");
+		assert.equal(capability.input_contract.schema_version, "ceal.message_search_input.v1");
+		// The concise-mode recovery hint is not repeated when the detail is present.
+		assert.equal(Object.hasOwn(payload, "capability_detail"), false);
+	});
+});
+
 test("capabilities negotiates and surfaces the eligible-Profile catalog for --profile selection", async () => {
 	const eligible = [
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },

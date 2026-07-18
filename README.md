@@ -24,7 +24,9 @@ use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 Capability discovery and invocation are provider-neutral contracts. `ceal
 capabilities` exposes the active Profile's current capability contracts,
 readiness, recovery, and a bounded target-catalog summary; it intentionally
-does not dump a target inventory. `ceal capabilities targets --capability
+does not dump a target inventory. The default output is concise (id, label,
+effect, and target requirement per capability); pass `--detail` to include each
+capability's full `input_contract`. `ceal capabilities targets --capability
 <capability-id> --match <text-or-url>` returns a bounded, current selection of
 opaque target references. Neither surface exposes Slack, GitHub, Notion, another
 provider's credential kind, API mode, or internal connector binding. `ceal call <capability-id> --target <target-ref> [key=value ...]`
