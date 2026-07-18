@@ -150,7 +150,10 @@ function validateEntry(entry: CealDiscoveryCacheEntry): void {
 function safeExistingFile(directory: string, file: string): boolean {
 	try {
 		const dir = lstatSync(directory);
-		if (dir.isSymbolicLink() || !dir.isDirectory()) return false;
+		// Match the session store's directory guarantee (0o700, no symlink): reached
+		// via the explicit-gateway path too, which never runs the session store's
+		// assertDirectory first. A wider-mode dir soft-fails to a live probe.
+		if (dir.isSymbolicLink() || !dir.isDirectory() || (dir.mode & 0o777) !== 0o700) return false;
 		const stat = lstatSync(file);
 		return !stat.isSymbolicLink() && stat.isFile() && (stat.mode & 0o777) === 0o600;
 	} catch { return false; }

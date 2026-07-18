@@ -56,6 +56,14 @@ test("discovery cache read degrades to a miss on any anomaly instead of throwing
 		chmodSync(cacheFile(home), 0o644);
 		assert.equal(await store.load(), null);
 	});
+	// A wider-mode `.ceal` directory soft-fails the read (matches the session
+	// store's 0o700 guarantee; reachable via the explicit-gateway path).
+	await withHome(async (home) => {
+		const store = createCealDiscoveryCacheStore(home);
+		await store.save(entry());
+		chmodSync(path.join(home, ".ceal"), 0o755);
+		assert.equal(await store.load(), null);
+	});
 });
 
 test("discovery cache read rejects a foreign discovery schema as a miss", async () => {
