@@ -119,6 +119,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 		const revokeFailure = await revokeClientSession(session);
 		if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
 		await store.remove();
+		await clearDiscoveryCache(runtime);
 		return writeLoggedOut(io);
 	}).catch((error) => writeClientSessionUnavailable(sessionStoreFailureCode(error), io));
 	let session: CealStoredSession | null;
@@ -127,6 +128,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 	const revokeFailure = await revokeClientSession(session);
 	if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
 	try { await runtime.removeSession(); } catch { return writeClientSessionUnavailable("session_remove_failed", io); }
+	await clearDiscoveryCache(runtime);
 	return writeLoggedOut(io);
 }
 
@@ -145,6 +147,13 @@ async function revokeClientSession(session: CealStoredSession): Promise<string |
 	} catch (error) {
 		return error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
 	}
+}
+
+// Logout leaves no session-derived local state behind. The discovery cache is
+// advisory, so a removal failure must never block a successful logout.
+async function clearDiscoveryCache(runtime: CealCommandRuntime): Promise<void> {
+	if (!runtime.removeDiscoveryCache) return;
+	try { await runtime.removeDiscoveryCache(); } catch { /* advisory cache: ignore */ }
 }
 
 function writeLoggedOut(io: CealCliIo): number {

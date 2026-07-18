@@ -826,6 +826,140 @@ test("YAML renderer rejects non-plain scalars, objects, cycles, and aliases", ()
 	assert.doesNotMatch(renderPlainYamlDocument({ text: "plain", nested: [true, null, 1.5] }), /^(?:---|%YAML)|[&*][A-Za-z0-9_-]+/mu);
 });
 
+test("capabilities probes live and populates the discovery cache when cold", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const cache = inMemoryDiscoveryCache();
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
+			...cache.runtime,
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(payload.claims_allowed, ["gateway_handshake", "gateway_discovery"]);
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		const entry = cache.entry();
+		assert.ok(entry, "cold probe must populate the cache");
+		assert.deepEqual(entry.key, {
+			gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.3.0",
+		});
+		assert.equal(entry.cachedAt, Date.parse("2026-07-18T12:00:00.000Z"));
+		assert.equal(entry.discovery.schema_version, "ceal.gateway_discovery.v2");
+	});
+});
+
+test("capabilities serves a warm discovery cache without a live discovery probe", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 60_000));
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(payload.catalog_source, "cached_discovery");
+		assert.equal(payload.live_gateway_checked, true, "the handshake is still a live gateway check");
+		assert.deepEqual(payload.claims_allowed, ["gateway_handshake"], "no live discovery is claimed when cached");
+		assert.equal(payload.catalog_cached_at, new Date(now - 60_000).toISOString());
+		assert.equal(typeof payload.catalog_expires_at, "string");
+		// The discovery probe never ran: only the handshake reached the gateway.
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake"]);
+		// The served catalog is the cached one (target_count 2), not a live re-probe (1).
+		assert.equal(payload.target_catalog.target_count, 2);
+	});
+});
+
+test("capabilities re-probes when the cached entry is past its freshness window", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 10_000));
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => now, discoveryCacheTtlMs: 5_000,
+			...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.equal(cache.entry().cachedAt, now, "stale re-probe refreshes the cache stamp");
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "cache now holds the live value");
+	});
+});
+
+test("capabilities re-probes when the cached key does not match the handshake identity", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		const foreign = cachedEntry(endpoint, now);
+		foreign.key.profileRef = "profile:other";
+		const cache = inMemoryDiscoveryCache(foreign);
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+	});
+});
+
+test("capabilities --fresh bypasses a warm cache and probes live", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now));
+		const payload = await yamlRun(["capabilities", "--fresh"], 0, {
+			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "--fresh refreshes the cache");
+	});
+});
+
+test("capabilities degrades to a live probe when the discovery cache read fails", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
+			loadDiscoveryCache: async () => { throw new Error("cache read boom"); },
+			saveDiscoveryCache: async () => {},
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+	});
+});
+
+function inMemoryDiscoveryCache(initial = null) {
+	let current = initial;
+	return {
+		entry: () => current,
+		runtime: {
+			loadDiscoveryCache: async () => current,
+			saveDiscoveryCache: async (value) => { current = value; },
+			removeDiscoveryCache: async () => { current = null; },
+		},
+	};
+}
+
+function cachedEntry(endpoint, cachedAt) {
+	return {
+		key: { gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.3.0" },
+		cachedAt,
+		discovery: {
+			schema_version: "ceal.gateway_discovery.v2",
+			profile_ref: "profile:narnia", membership_ref: "membership:narnia",
+			capabilities: [{
+				capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required",
+				input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
+				evidence_requirement: "gateway_audit",
+			}],
+			targets: [],
+			// target_count 2 distinguishes this cached value from a live re-probe (1).
+			target_catalog: { target_count: 2, returned_count: 0, complete: false, selection_required: true },
+			host_decision: "accepted", proof_level: "host_decision",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		},
+	};
+}
+
 async function withGateway(callback, responseFactory = null) {
 	const requests = [];
 	const server = createServer(async (request, response) => {

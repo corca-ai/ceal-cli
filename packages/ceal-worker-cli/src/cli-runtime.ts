@@ -1,3 +1,4 @@
+import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 
 export interface CealCliIo {
@@ -14,6 +15,13 @@ export interface CealCommandRuntime {
 	saveSession?: (session: CealStoredSession) => Promise<void>;
 	removeSession?: () => Promise<void>;
 	withSessionStateLock?: <T>(action: (store: CealLockedSessionStore) => Promise<T>) => Promise<T>;
+	// Client-local discovery-catalog cache (advisory; failures degrade to a live
+	// probe). Present only when a home directory is available. See discovery-cache.ts.
+	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
+	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
+	removeDiscoveryCache?: () => Promise<void>;
+	/** Freshness window for a served discovery-cache entry. */
+	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;
 	now?: () => number;
 }

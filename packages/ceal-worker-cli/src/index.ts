@@ -11,6 +11,7 @@ import {
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { writeHelp, writeYaml } from "./output.js";
@@ -30,6 +31,16 @@ export { renderPlainYamlDocument } from "./yaml.js";
 const CEAL_PACKAGE_VERSION = "0.64.0" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
+
+// Conservative default freshness for a served discovery-catalog cache entry.
+// The catalog is advisory (calls re-validate live), so a few minutes trades a
+// small staleness window for eliding the ~4.3s discovery probe on repeat use;
+// `--fresh` forces a live probe and `CEAL_DISCOVERY_CACHE_TTL_MS` overrides it.
+const DEFAULT_DISCOVERY_CACHE_TTL_MS = 300_000;
+
+type CatalogProvenance =
+	| { source: "live_discovery" }
+	| { source: "cached_discovery"; cachedAt: number; expiresAt: number };
 
 export type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 
@@ -74,7 +85,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "capabilities",
 		description: "Discover Gateway-issued capabilities and select bounded targets.",
-		usage: "ceal capabilities [--profile <profile-ref>] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -160,6 +171,7 @@ function commandHelp(command: CealCommandDefinition): string {
 	const options = command.name === "capabilities"
 		? [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
+			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
 			"  targets                 Select bounded targets for one discovered capability.",
 			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
 			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
@@ -222,28 +234,83 @@ function writeCommands(io: CealCliIo): number {
 }
 
 async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	const selection = parseTargetCatalogOptions(options);
+	// `--fresh` (catalog only) forces a live discovery probe past any cache. It is
+	// stripped before the existing parsers, which do not know the flag.
+	const wantsFresh = options[0] !== "targets" && options.includes("--fresh");
+	const effectiveOptions = wantsFresh ? options.filter((option) => option !== "--fresh") : options;
+	const selection = parseTargetCatalogOptions(effectiveOptions);
 	if (selection === null) return writeError("invalid_argument", "Invalid capabilities target selection.", io);
 	const resolved = selection.kind === "targets"
 		? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
-		: await resolveGatewayAccess(options, io, runtime);
+		: await resolveGatewayAccess(effectiveOptions, io, runtime);
 	if (!resolved.ok) return resolved.exitCode;
 	try {
 		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime);
 		if (!handshake.ok) return writeGatewayFailure(handshake, io);
+		// The catalog case is the cacheable one: its live handshake stays the auth
+		// gate while the expensive discovery probe is served from the client cache
+		// when warm. The targets case is a live paged query and is never cached.
+		if (selection.kind === "catalog") {
+			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, io, runtime);
+		}
 		const discovery = await client.request({
 			request_id: `${resolved.value.requestId}:discover`,
 			operation: "discover",
 			profile_ref: resolved.value.profileRef,
-			body: selection.kind === "targets" ? selection.body : {},
+			body: selection.body,
 		});
 		if (!discovery.ok) return writeGatewayFailure(discovery, io);
-		return writeCapabilitiesAvailable(handshake, discovery, selection, io);
+		return writeCapabilitiesAvailable(handshake, discovery, selection, io, { source: "live_discovery" });
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
 		return writeGatewayUnavailable(reason, io);
 	}
+}
+
+async function serveCapabilityCatalog(
+	access: GatewayAccess,
+	handshake: { request_id: string; value: CealGatewayHandshakeValue },
+	client: ReturnType<typeof createCealClient>,
+	selection: { kind: "catalog" },
+	wantsFresh: boolean,
+	io: CealCliIo,
+	runtime: CealCommandRuntime,
+): Promise<number> {
+	// Key the cache on the live handshake's authoritative identity, not the
+	// requested profile: a warm entry can only serve a session the Gateway just
+	// re-authenticated, and any profile/membership/protocol change is a cache miss.
+	const key: CealDiscoveryCacheKey = {
+		gatewayEndpoint: access.endpoint,
+		profileRef: handshake.value.profile_ref,
+		membershipRef: handshake.value.membership_ref,
+		negotiatedProtocolVersion: handshake.value.negotiated_protocol_version,
+	};
+	const now = runtime.now?.() ?? Date.now();
+	const ttlMs = runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS;
+	if (!wantsFresh && runtime.loadDiscoveryCache) {
+		const entry = await runtime.loadDiscoveryCache().catch(() => null);
+		if (entry && discoveryCacheEntryUsable(entry, key, now, ttlMs)) {
+			return writeCapabilitiesAvailable(
+				handshake,
+				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
+				selection, io,
+				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
+			);
+		}
+	}
+	const discovery = await client.request({
+		request_id: `${access.requestId}:discover`,
+		operation: "discover",
+		profile_ref: access.profileRef,
+		body: {},
+	});
+	if (!discovery.ok) return writeGatewayFailure(discovery, io);
+	// Cache writes are advisory: a failure just means the next call probes live.
+	if (runtime.saveDiscoveryCache) {
+		await runtime.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> }).catch(() => undefined);
+	}
+	return writeCapabilitiesAvailable(handshake, discovery, selection, io, { source: "live_discovery" });
 }
 
 type ParsedTargetCatalogOptions =
@@ -374,6 +441,7 @@ function writeCapabilitiesAvailable(
 	discovery: { request_id: string; value: CealGatewayDiscoveryValue },
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 	io: CealCliIo,
+	provenance: CatalogProvenance,
 ): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1", command: "ceal", status: "available", gateway_required: true,
@@ -392,7 +460,21 @@ function writeCapabilitiesAvailable(
 		capabilities: discovery.value.capabilities, targets: discovery.value.targets,
 		target_catalog: discovery.value.target_catalog,
 		proof_level: discovery.value.proof_level, live_gateway_checked: true,
-		claims_allowed: ["gateway_handshake", "gateway_discovery"], non_claims: discovery.value.non_claims,
+		// `live_gateway_checked` reports the live handshake (the auth gate, always
+		// run). `catalog_source` reports the resource catalog's provenance
+		// separately: `cached_discovery` means the handshake was live but the
+		// catalog was served from the client cache without a live discovery probe.
+		catalog_source: provenance.source,
+		...(provenance.source === "cached_discovery"
+			? {
+				catalog_cached_at: new Date(provenance.cachedAt).toISOString(),
+				catalog_expires_at: new Date(provenance.expiresAt).toISOString(),
+			}
+			: {}),
+		// Only claim a live discovery when one actually ran this invocation.
+		claims_allowed: provenance.source === "cached_discovery"
+			? ["gateway_handshake"] : ["gateway_handshake", "gateway_discovery"],
+		non_claims: discovery.value.non_claims,
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
 		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection) ? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) } : {}),
 		...(profileSelectionHint(handshake.value) ? { profile_selection: profileSelectionHint(handshake.value) } : {}),

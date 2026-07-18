@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
 import { createCealSessionStore } from "./profile-store.js";
 
 let sessionStore: ReturnType<typeof createCealSessionStore> | undefined;
 try { sessionStore = createCealSessionStore(process.env.HOME); } catch { sessionStore = undefined; }
+
+let discoveryCache: ReturnType<typeof createCealDiscoveryCacheStore> | undefined;
+try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch { discoveryCache = undefined; }
 
 void runCealCommand(process.argv.slice(2), {
 	stdout: process.stdout,
@@ -19,6 +23,10 @@ void runCealCommand(process.argv.slice(2), {
 	saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
 	removeSession: sessionStore ? () => sessionStore.remove() : undefined,
 	withSessionStateLock: sessionStore ? (action) => sessionStore.withStateLock(action) : undefined,
+	loadDiscoveryCache: discoveryCache ? () => discoveryCache.load() : undefined,
+	saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
+	removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
+	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
 	process.exitCode = code;
@@ -37,6 +45,12 @@ void runCealCommand(process.argv.slice(2), {
 	}));
 	process.exitCode = 3;
 });
+
+function parseCacheTtlOverride(value: string | undefined): number | undefined {
+	if (value === undefined || !/^\d{1,9}$/u.test(value)) return undefined;
+	const parsed = Number(value);
+	return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
 
 async function readStdinSecret(): Promise<string> {
 	let value = "";
