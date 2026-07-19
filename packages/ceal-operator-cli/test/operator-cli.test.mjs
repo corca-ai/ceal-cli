@@ -12,6 +12,7 @@ import { URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEALCTL_COMMANDS, renderPlainYamlDocument, runCealctlCommand } from "../dist/index.js";
 import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "../dist/local-gateway-owner-login-client.js";
+import { decodeCealProfileConnectorRegistry } from "../dist/profile-connector-admin-client.js";
 
 test("canonical registry is reachable through stable, read-only help", () => {
 	for (const args of [[], ["-h"], ["--help"], ["help"]]) {
@@ -746,3 +747,24 @@ function compatibleContract(origin) {
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
+
+test("connector registry decoder accepts an optional operation_policy and rejects malformed ones", () => {
+	const base = {
+		connector_binding_ref: "connector-binding:work-slack", profile_ref: "profile:work",
+		connector_kind: "slack", connector_principal_ref: "connector-principal:work-slack-bot",
+		revision: 2, status: "active",
+	};
+	const registry = (bindings) => ({ schema_version: "ceal.gateway_profile_connector_registry.v1", generation: 3, bindings });
+	// An operator can now express a connector's operation policy (e.g. enabling message.create).
+	const policy = ["message.search", "message.get", "resource.resolve", "conversation.thread.get", "message.create"];
+	const decoded = decodeCealProfileConnectorRegistry(registry([{ ...base, operation_policy: policy }]));
+	assert.deepEqual(decoded.bindings[0].operation_policy, policy);
+	// A base binding without operation_policy still decodes (backward compatible).
+	assert.ok(decodeCealProfileConnectorRegistry(registry([base])));
+	// Malformed operation_policy values are rejected (empty, duplicate, bad ref, non-array).
+	for (const bad of [[], ["message.search", "message.search"], ["not a ref!"], "message.create", { a: 1 }]) {
+		assert.throws(() => decodeCealProfileConnectorRegistry(registry([{ ...base, operation_policy: bad }])), /invalid configuration/u);
+	}
+	// An unknown extra binding field is still rejected.
+	assert.throws(() => decodeCealProfileConnectorRegistry(registry([{ ...base, extra: 1 }])), /invalid configuration/u);
+});

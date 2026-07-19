@@ -4,7 +4,7 @@ export type CealProfileConnectorStatus = "active" | "revoked";
 export interface CealProfileConnectorRegistry {
 	schema_version: "ceal.gateway_profile_connector_registry.v1";
 	generation: number;
-	bindings: Array<{ connector_binding_ref: string; profile_ref: string; connector_kind: string; connector_principal_ref: string; revision: number; status: CealProfileConnectorStatus }>;
+	bindings: Array<{ connector_binding_ref: string; profile_ref: string; connector_kind: string; connector_principal_ref: string; revision: number; status: CealProfileConnectorStatus; operation_policy?: readonly string[] }>;
 }
 export interface CealProfileConnectorState { status: "configured" | "not_configured" | "validated" | "applied"; dry_run: boolean; registry: CealProfileConnectorRegistry; proof_level: "host_decision"; }
 export type CealProfileConnectorReadiness = "ready" | "degraded" | "unavailable" | "unknown";
@@ -53,11 +53,29 @@ function assertBinding(value: unknown): void {
 
 function isBinding(value: unknown): boolean {
 	return isRecord(value)
-		&& hasKeys(value, ["connector_binding_ref", "connector_kind", "connector_principal_ref", "profile_ref", "revision", "status"])
+		&& hasBindingKeys(value)
 		&& hasSafeRefs(value.connector_binding_ref, value.connector_principal_ref, value.profile_ref)
 		&& typeof value.connector_kind === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value.connector_kind)
 		&& Number.isSafeInteger(value.revision) && Number(value.revision) >= 1
-		&& (value.status === "active" || value.status === "revoked");
+		&& (value.status === "active" || value.status === "revoked")
+		&& hasValidOperationPolicy(value);
+}
+
+// The base binding fields, optionally plus operation_policy. Mirrors the
+// Gateway's own binding grammar (hasOnlyBindingFields) so the operator CLI can
+// express a connector's operation policy (e.g. enabling message.create) instead
+// of silently dropping it.
+function hasBindingKeys(value: Record<string, unknown>): boolean {
+	const base = ["connector_binding_ref", "connector_kind", "connector_principal_ref", "profile_ref", "revision", "status"];
+	return hasKeys(value, base) || hasKeys(value, [...base, "operation_policy"]);
+}
+
+function hasValidOperationPolicy(value: Record<string, unknown>): boolean {
+	if (value.operation_policy === undefined) return true;
+	return Array.isArray(value.operation_policy)
+		&& value.operation_policy.length > 0
+		&& new Set(value.operation_policy).size === value.operation_policy.length
+		&& value.operation_policy.every((operation) => typeof operation === "string" && SAFE_REF.test(operation));
 }
 
 function hasSafeRefs(...refs: unknown[]): boolean {
