@@ -2,6 +2,8 @@ import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACT
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
+import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
+export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
 
@@ -51,6 +53,7 @@ export type {
 	CealGatewayAuthorizationSnapshot,
 	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
+	CealGatewayCacheOrigin,
 	CealGatewayCallValue,
 	CealGatewayDiscoverBody,
 	CealGatewayDiscoveryCapability,
@@ -382,7 +385,7 @@ function validateTargetCapabilityIds(target: Record<string, unknown>, availableC
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const call = requireRecord(value);
-	requireExactKeys(call, ["capability_id", "data", "grant_ref", "grant_revision", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"]);
+	requireExactKeys(call, ["cache_origin", "capability_id", "data", "grant_ref", "grant_revision", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"], ["cache_origin"]);
 	if (call.schema_version !== "ceal.gateway_call_result.v1"
 		|| call.capability_id !== expectedRequest.body.capability_id
 		|| call.target_ref !== expectedRequest.body.target_ref
@@ -393,6 +396,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 	validateGenericCapabilityResult(call.data, call.capability_id);
 	validateCallRedaction(call.redaction);
 	validateHostNonClaims(call.non_claims, true);
+	if ("cache_origin" in call) validateGatewayCacheOrigin({ requireRecord, requireExactKeys, invalidResponse }, call.cache_origin);
 }
 
 function validateGenericCapabilityResult(value: unknown, capabilityId: unknown): void {

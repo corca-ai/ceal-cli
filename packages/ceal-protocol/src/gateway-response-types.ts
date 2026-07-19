@@ -177,6 +177,27 @@ export interface CealGatewayRequestRequiredDiscoveryTarget {
 
 export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | CealGatewayRequestRequiredDiscoveryTarget;
 
+/**
+ * Present only when a read result was served from the Gateway's profile-keyed
+ * read cache (#606b) instead of a fresh provider call. It labels the served
+ * result with the timestamp of the underlying provider read and its staleness,
+ * so an agent is never silently handed a cached read as if it were live.
+ *
+ * This field is the SOLE live-vs-replay discriminator: a cache serve replays the
+ * original serve's `non_claims` (the live-provenance form), because the data was
+ * genuinely provider-fetched once and is provenance-equivalent. A decoder that
+ * must distinguish a fresh serve from a cached replay MUST branch on the presence
+ * of `cache_origin`, not on `non_claims`. The per-serve "this request did not
+ * reach the provider" fact is on the audit ledger, not in the value's non_claims.
+ */
+export interface CealGatewayCacheOrigin {
+	schema_version: "ceal.gateway_cache_origin.v1";
+	/** ISO-8601 UTC timestamp of the underlying provider read this result replays. */
+	origin_at: string;
+	/** Milliseconds between that provider read and this serve — the served result's staleness. */
+	age_ms: number;
+}
+
 export interface CealGatewayCallValue {
 	schema_version: "ceal.gateway_call_result.v1";
 	capability_id: string;
@@ -191,6 +212,8 @@ export interface CealGatewayCallValue {
 	host_decision: "accepted";
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+	/** Set only on a cache serve; absent on a fresh provider-backed result. */
+	cache_origin?: CealGatewayCacheOrigin;
 }
 
 export const CEAL_GATEWAY_POLICY_DENIAL_MESSAGE = "The authenticated profile is not granted this capability for the requested target." as const;
