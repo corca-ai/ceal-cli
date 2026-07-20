@@ -489,15 +489,23 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 
 function validateConnectorRouteFailure(value: unknown, event: Record<string, unknown>): void {
 	if (value === undefined) return;
-	if (event.outcome !== "failed" || event.error_code !== "connector_unavailable" || event.policy_decision !== "not_evaluated"
-		|| !["call", "discover"].includes(String(event.operation))) invalidResponse();
+	if (!isConnectorRouteFailureEvent(event)) invalidResponse();
 	const failure = requireRecord(value);
 	requireExactKeys(failure, ["connector_kind", "phase", "schema_version"]);
-	if (failure.schema_version !== "ceal.gateway_connector_route_failure.v1"
-		|| typeof failure.connector_kind !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(failure.connector_kind)
-		|| !["scope_observation", "target_selection", "route_resolution"].includes(String(failure.phase))) invalidResponse();
+	if (!isConnectorRouteFailureShape(failure)) invalidResponse();
 	const nonClaims = event.non_claims;
 	if (!Array.isArray(nonClaims) || !nonClaims.includes("provider_execution_not_reached")) invalidResponse();
+}
+
+function isConnectorRouteFailureEvent(event: Record<string, unknown>): boolean {
+	return event.outcome === "failed" && event.error_code === "connector_unavailable"
+		&& event.policy_decision === "not_evaluated" && ["call", "discover"].includes(String(event.operation));
+}
+
+function isConnectorRouteFailureShape(failure: Record<string, unknown>): boolean {
+	return failure.schema_version === "ceal.gateway_connector_route_failure.v1"
+		&& typeof failure.connector_kind === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(failure.connector_kind)
+		&& ["scope_observation", "target_selection", "route_resolution"].includes(String(failure.phase));
 }
 
 function validateAuthorizationSnapshot(value: unknown, event: Record<string, unknown>): void {
