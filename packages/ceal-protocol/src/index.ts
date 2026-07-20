@@ -6,6 +6,25 @@ import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js
 export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
+import {
+	assertSafeJsonValue,
+	CealProtocolValidationError,
+	FORBIDDEN_AUDIT_DETAIL_KEY,
+	invalidRequest,
+	invalidResponse,
+	isCealPublicSafeText,
+	isOperation,
+	isSafeExternalHttpsUrl,
+	requireExactKeys,
+	requireJsonByteSize,
+	requirePrefixedRef,
+	requireRecord,
+	requireSafeRef,
+	requireSafeText,
+	SAFE_CODE,
+} from "./gateway-validation-primitives.js";
+export { CealProtocolValidationError, isCealPublicSafeText, redactCealPublicUnsafeText } from "./gateway-validation-primitives.js";
+export type { CealProtocolValidationErrorCode } from "./gateway-validation-primitives.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -110,31 +129,10 @@ export type {
 
 export type CealClientResponse<TValue = unknown> = CealClientSuccess<TValue> | CealGatewayPolicyDenial | CealClientFailure;
 
-export type CealProtocolValidationErrorCode = "invalid_gateway_request" | "invalid_client_response";
-
-export class CealProtocolValidationError extends Error {
-	override readonly name = "CealProtocolValidationError";
-
-	constructor(readonly code: CealProtocolValidationErrorCode) {
-		super(code === "invalid_gateway_request"
-			? "Ceal Gateway request is invalid."
-			: "Ceal client response is invalid.");
-	}
-}
-
 const REQUEST_KEYS = ["body", "operation", "profile_ref", "protocol_version", "request_id"];
-const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
-const RAW_PROVIDER_REF = /(?:\b[CDGUW][A-Z0-9]{8,}\b|(?:slack|github|notion|google-workspace):[^\s"']+|[0-9]{10}[.][0-9]{4,})/u;
-const SECRET_MATERIAL = /(?:xox[baprs]-[A-Za-z0-9-]+|gh[opusr]_[A-Za-z0-9_-]+|ntn_[A-Za-z0-9_-]+|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+\S+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+)/iu;
-const OPAQUE_TEXT_MATERIAL = /(?:\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b(?=[A-Za-z0-9_-]{24,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{24,}\b)/u;
-const FORBIDDEN_SECRET_KEY = /^(?:[a-z0-9_]*(?:token|secret|password|credential(?:s)?|private_?key)|api_?key|authorization|bearer|raw_?provider_?payload|provider_?payload)$/iu;
-const FORBIDDEN_AUTHORITY_KEY = /^(?:actor_?ref|owner_?ref|registration_?ref|runner_?ref|auth_?decision|policy_?decision|host_?decision)$/iu;
-const FORBIDDEN_AUDIT_DETAIL_KEY = /^(?:arguments|body|content|input|payload|query|text|text_preview|url)$/iu;
 const MAX_REQUEST_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 16 * 1024;
 const MAX_RESPONSE_VALUE_BYTES = 64 * 1024;
-const TEXT_ENCODER = new TextEncoder();
 export function decodeCealGatewayRequest(value: unknown): CealGatewayRequest {
 	try {
 		const envelope = requireRecord(value);
@@ -476,9 +474,14 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	validateAuthorizationSnapshot(event.grant_snapshot, event);
 	if ("call" in event) validateAuditCallDetail(event.call, event);
 	else if (event.operation === "call" && event.outcome === "succeeded") invalidResponse();
+	// A failed call may honestly omit the provider_execution_not_reached
+	// non-claim only when the provider was actually reached: an unavailable
+	// backend after dispatch, or a resource that was fetched and then rejected
+	// as the wrong kind for the invoked capability.
 	const providerMayBeReached = event.operation === "call"
-		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable");
-	validateHostNonClaims(event.non_claims, providerMayBeReached);
+		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable" || event.error_code === "wrong_resource_kind");
+	const providerWasReached = event.operation === "call" && event.error_code === "wrong_resource_kind";
+	validateHostNonClaims(event.non_claims, providerMayBeReached, providerWasReached);
 }
 
 function validateAuthorizationSnapshot(value: unknown, event: Record<string, unknown>): void {
@@ -553,9 +556,13 @@ function validateDeniedAuditEvent(event: Record<string, unknown>): void {
 	if (!authenticationDenied && !authenticatedDenial) invalidResponse();
 }
 
-function validateHostNonClaims(value: unknown, providerMayBeReached = false): void {
+function validateHostNonClaims(value: unknown, providerMayBeReached = false, providerWasReached = false): void {
 	const fixture = ["provider_execution_not_reached", "production_audit_not_reached"];
 	const liveProvider = ["production_audit_not_reached"];
+	if (providerWasReached) {
+		if (!Array.isArray(value) || JSON.stringify(value) !== JSON.stringify(liveProvider)) invalidResponse();
+		return;
+	}
 	if (!Array.isArray(value) || (JSON.stringify(value) !== JSON.stringify(fixture)
 		&& (!providerMayBeReached || JSON.stringify(value) !== JSON.stringify(liveProvider)))) invalidResponse();
 }
@@ -626,182 +633,4 @@ function validateProofReference(value: unknown): void {
 	if (unavailable.state !== "unavailable") invalidResponse();
 	requireSafeText(unavailable.reason, 256);
 	requireSafeText(unavailable.owner_surface, 128);
-}
-
-interface SafeJsonOptions {
-	forbidAuthorityKeys: boolean;
-	allowHttpsUrl?: boolean;
-	allowResultContent?: boolean;
-}
-
-function assertSafeJsonValue(value: unknown, options: SafeJsonOptions, depth = 0, count = { value: 0 }): void {
-	count.value += 1;
-	if (depth > 8 || count.value > 512) invalidByContext(options);
-	if (value === null || typeof value === "boolean") return;
-	if (typeof value === "number") return assertSafeJsonNumber(value, options);
-	if (typeof value === "string") return assertSafeJsonString(value, options);
-	if (Array.isArray(value)) {
-		return assertSafeJsonArray(value, options, depth, count);
-	}
-	assertSafeJsonRecord(requireRecord(value), options, depth, count);
-}
-
-function assertSafeJsonNumber(value: number, options: SafeJsonOptions): void {
-	if (!Number.isFinite(value)) invalidByContext(options);
-}
-
-function assertSafeJsonString(value: string, options: SafeJsonOptions): void {
-	if (byteLength(value) > 4096 || SECRET_MATERIAL.test(value) || RAW_PROVIDER_REF.test(value)) invalidByContext(options);
-}
-
-function assertSafeJsonArray(value: unknown[], options: SafeJsonOptions, depth: number, count: { value: number }): void {
-	if (value.length > 128) invalidByContext(options);
-	for (const item of value) assertSafeJsonValue(item, options, depth + 1, count);
-}
-
-function assertSafeJsonRecord(record: Record<string, unknown>, options: SafeJsonOptions, depth: number, count: { value: number }): void {
-	const entries = Object.entries(record);
-	if (entries.length > 128) invalidByContext(options);
-	for (const [key, child] of entries) {
-		if (key === "credential_material_included" && child !== false) invalidByContext(options);
-		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
-		assertSafeJsonRecordChild(key, child, options, depth, count);
-	}
-}
-
-function assertSafeJsonRecordChild(key: string, child: unknown, options: SafeJsonOptions, depth: number, count: { value: number }): void {
-	if (options.allowResultContent && (key === "text" || key === "text_preview")) {
-		if (!isSafeResultContent(child, key)) invalidByContext(options);
-		return;
-	}
-	if (key === "url" && options.allowHttpsUrl && isSafeExternalHttpsUrl(child)) return;
-	assertSafeJsonValue(child, options, depth + 1, count);
-}
-
-function isSafeNegativeMaterialAssertion(key: string, value: unknown): boolean {
-	return key === "credential_material_included" && value === false;
-}
-
-function assertSafeJsonKey(key: string, options: SafeJsonOptions): void {
-	const invalid = !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(key)
-		|| FORBIDDEN_SECRET_KEY.test(key)
-		|| (options.forbidAuthorityKeys && FORBIDDEN_AUTHORITY_KEY.test(key));
-	if (invalid) invalidByContext(options);
-}
-
-function isSafeExternalHttpsUrl(value: unknown): boolean {
-	if (!isSafeExternalHttpsUrlInput(value)) return false;
-	try {
-		const url = new URL(value);
-		return isSafeExternalHttpsUrlShape(url) && hasSafeExternalHttpsQuery(url);
-	} catch {
-		return false;
-	}
-}
-
-function isSafeExternalHttpsUrlInput(value: unknown): value is string {
-	return typeof value === "string" && byteLength(value) <= 2048 && !SECRET_MATERIAL.test(value);
-}
-
-function isSafeExternalHttpsUrlShape(url: URL): boolean {
-	return url.protocol === "https:" && url.username === "" && url.password === "" && url.hash === "";
-}
-
-function hasSafeExternalHttpsQuery(url: URL): boolean {
-	for (const [key, parameter] of url.searchParams) {
-		if (FORBIDDEN_SECRET_KEY.test(key) || SECRET_MATERIAL.test(parameter)) return false;
-	}
-	return true;
-}
-
-function isSafeResultContent(value: unknown, key: "text" | "text_preview"): boolean {
-	const maximum = key === "text" ? 8192 : 1024;
-	return typeof value === "string" && byteLength(value) <= maximum
-		&& !SECRET_MATERIAL.test(value) && !hasControlCharacter(value);
-}
-
-function requireSafeRef(value: unknown): asserts value is string {
-	if (typeof value !== "string" || !SAFE_REF.test(value) || SECRET_MATERIAL.test(value) || RAW_PROVIDER_REF.test(value)) invalidRequestOrResponse();
-}
-
-function requirePrefixedRef(value: unknown, prefix: string): asserts value is string {
-	requireSafeRef(value);
-	if (!value.startsWith(prefix)) invalidRequestOrResponse();
-}
-
-function requireSafeText(value: unknown, maxBytes: number): asserts value is string {
-	if (!isCealPublicSafeText(value, maxBytes)) invalidRequestOrResponse();
-}
-
-export function isCealPublicSafeText(value: unknown, maxBytes: number): value is string {
-	return typeof value === "string" && value.trim() !== "" && byteLength(value) <= maxBytes && !hasControlCharacter(value)
-		&& !SECRET_MATERIAL.test(value) && !RAW_PROVIDER_REF.test(value) && !OPAQUE_TEXT_MATERIAL.test(value);
-}
-
-export function redactCealPublicUnsafeText(value: string): string {
-	return replaceAll(value, SECRET_MATERIAL, "[redacted-secret]").replace(new RegExp(RAW_PROVIDER_REF.source, `${RAW_PROVIDER_REF.flags}g`), "[provider-ref]")
-		.replace(new RegExp(OPAQUE_TEXT_MATERIAL.source, `${OPAQUE_TEXT_MATERIAL.flags}g`), "[redacted-opaque]")
-		.split("").map((character) => hasControlCharacter(character) ? " " : character).join("").trim();
-}
-
-function replaceAll(value: string, pattern: RegExp, replacement: string): string {
-	return value.replace(new RegExp(pattern.source, `${pattern.flags}g`), replacement);
-}
-
-function requireJsonByteSize(value: unknown, maximum: number, fail: () => never): void {
-	let serialized: string;
-	try {
-		serialized = JSON.stringify(value);
-	} catch {
-		fail();
-	}
-	if (serialized === undefined || byteLength(serialized) > maximum) fail();
-}
-
-function byteLength(value: string): number {
-	return TEXT_ENCODER.encode(value).byteLength;
-}
-
-function hasControlCharacter(value: string): boolean {
-	return [...value].some((character) => {
-		const code = character.codePointAt(0) ?? 0;
-		return code <= 31 || code === 127;
-	});
-}
-
-function requireExactKeys(record: Record<string, unknown>, allowedKeys: string[], optionalKeys: string[] = []): void {
-	const allowed = new Set(allowedKeys);
-	const optional = new Set(optionalKeys);
-	if (Object.keys(record).some((key) => !allowed.has(key))) invalidRequestOrResponse();
-	for (const key of allowed) if (!optional.has(key) && !Object.hasOwn(record, key)) invalidRequestOrResponse();
-}
-
-function requireRecord(value: unknown): Record<string, unknown> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) invalidRequestOrResponse();
-	const prototype = Object.getPrototypeOf(value);
-	if (prototype !== Object.prototype && prototype !== null) invalidRequestOrResponse();
-	return value as Record<string, unknown>;
-}
-
-function isOperation(value: unknown): value is CealClientOperation {
-	return ["handshake", "discover", "call", "readback"].includes(String(value));
-}
-
-function invalidByContext(options: { forbidAuthorityKeys: boolean }): never {
-	if (options.forbidAuthorityKeys) invalidRequest();
-	invalidResponse();
-}
-
-class InvalidWireShapeError extends Error {}
-
-function invalidRequestOrResponse(): never {
-	throw new InvalidWireShapeError();
-}
-
-function invalidRequest(): never {
-	throw new CealProtocolValidationError("invalid_gateway_request");
-}
-
-function invalidResponse(): never {
-	throw new CealProtocolValidationError("invalid_client_response");
 }

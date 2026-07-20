@@ -192,9 +192,17 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	ambiguousProviderFailure.value.events[0].non_claims = ["production_audit_not_reached"];
 	delete ambiguousProviderFailure.value.events[0].call;
 	assert.deepEqual(decodeCealClientResponse(ambiguousProviderFailure, readbackRequest), ambiguousProviderFailure);
+	const wrongResourceKindFailure = structuredClone(ambiguousProviderFailure);
+	wrongResourceKindFailure.value.events[0].error_code = "wrong_resource_kind";
+	assert.deepEqual(decodeCealClientResponse(wrongResourceKindFailure, readbackRequest), wrongResourceKindFailure);
+	wrongResourceKindFailure.value.events[0].non_claims.push("provider_execution_not_reached");
+	assert.throws(() => decodeCealClientResponse(wrongResourceKindFailure, readbackRequest), hasCode("invalid_client_response"));
 	const preProviderFailure = structuredClone(ambiguousProviderFailure);
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
+	const unavailableResourceFailure = structuredClone(ambiguousProviderFailure);
+	unavailableResourceFailure.value.events[0].error_code = "resource_not_available";
+	assert.throws(() => decodeCealClientResponse(unavailableResourceFailure, readbackRequest), hasCode("invalid_client_response"));
 });
 
 test("handshake decoder tolerates the optional negotiated eligible-Profile catalog without weakening the unchanged shape", () => {
