@@ -179,41 +179,7 @@ function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
 }
 
 function commandHelp(command: CealCommandDefinition): string {
-	const options = command.name === "guide" ? [
-			"  status                 Inspect the signed guide and Codex registration (Effect: read_only).",
-			"  register codex         Link the update-safe signed guide into the configured Codex skill directory (Effect: local_write).",
-		]
-		: command.name === "capabilities"
-		? [
-			"  --profile <profile-ref> Select one Profile for this request without re-login.",
-			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
-			"  --detail                Include each capability's full input_contract (default: concise).",
-			"  targets                 Select bounded targets for one discovered capability.",
-			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
-			"  targets --profile <profile-ref>  Select one assigned Profile for target discovery.",
-			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
-			"  targets --cursor <opaque> Continue one Gateway-issued selected target page.",
-			"  targets --limit <1-64>   Bound one selected target page (default: Gateway choice).",
-			"  --endpoint <https-url>  Gateway client endpoint.",
-			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
-			"  --token-stdin            Read the Gateway-issued client token from stdin.",
-		]
-		: command.name === "session" ? [
-			"  enroll                 Exchange a pre-approved one-time device-enrollment code for a local session.",
-			"  logout                 Revoke and remove the local session.",
-			"  --gateway <https-url>  Gateway client endpoint.",
-			"  (default)               On a safe terminal, prompt for the device-enrollment code with hidden input.",
-			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
-		] : command.name === "call" ? [
-			"  <capability-id>          Capability returned by 'ceal capabilities'.",
-			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
-			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
-			"  key=value               Capability input; repeat only fields in the discovered input contract.",
-			"                          Gateway validates capability-specific grammar and current Profile scope.",
-		] : command.name === "receipt" ? [
-			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
-			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
-		] : [];
+	const options = commandHelpOptions(command.name);
 	return [
 		`Usage: ${command.usage}`,
 		"",
@@ -228,6 +194,46 @@ function commandHelp(command: CealCommandDefinition): string {
 		...options,
 		"  -h, --help  Show this help without performing work.",
 	].join("\n");
+}
+
+function commandHelpOptions(name: CealCommandDefinition["name"]): readonly string[] {
+	if (name === "guide") return [
+			"  status                 Inspect the signed guide and Codex registration (Effect: read_only).",
+			"  register codex         Link the update-safe signed guide into the configured Codex skill directory (Effect: local_write).",
+		];
+	if (name === "capabilities") return [
+			"  --profile <profile-ref> Select one Profile for this request without re-login.",
+			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
+			"  --detail                Include each capability's full input_contract (default: concise).",
+			"  targets                 Select bounded targets for one discovered capability.",
+			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
+			"  targets --profile <profile-ref>  Select one assigned Profile for target discovery.",
+			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
+			"  targets --cursor <opaque> Continue one Gateway-issued selected target page.",
+			"  targets --limit <1-64>   Bound one selected target page (default: Gateway choice).",
+			"  --endpoint <https-url>  Gateway client endpoint.",
+			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
+			"  --token-stdin            Read the Gateway-issued client token from stdin.",
+		];
+	if (name === "session") return [
+			"  enroll                 Exchange a pre-approved one-time device-enrollment code for a local session.",
+			"  logout                 Revoke and remove the local session.",
+			"  --gateway <https-url>  Gateway client endpoint.",
+			"  (default)               On a safe terminal, prompt for the device-enrollment code with hidden input.",
+			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
+		];
+	if (name === "call") return [
+			"  <capability-id>          Capability returned by 'ceal capabilities'.",
+			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
+			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
+			"  key=value               Capability input; repeat only fields in the discovered input contract.",
+			"                          Gateway validates capability-specific grammar and current Profile scope.",
+		];
+	if (name === "receipt") return [
+			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
+			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
+		];
+	return [];
 }
 
 function writeVersion(io: CealCliIo): number {
@@ -251,9 +257,7 @@ function writeCommands(io: CealCliIo): number {
 }
 
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
-	const action = options.length === 0 || (options.length === 1 && options[0] === "status")
-		? "status"
-		: options.length === 2 && options[0] === "register" && options[1] === "codex" ? "register" : null;
+	const action = parseGuideAction(options);
 	if (!action) return writeError("invalid_argument", "Invalid guide action.", io);
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io);
@@ -263,6 +267,12 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 		effect: action === "status" ? "read_only" : "local_write", ...state,
 	});
 	return state.status === "unavailable" ? 3 : 0;
+}
+
+function parseGuideAction(options: readonly string[]): "status" | "register" | null {
+	if (options.length === 0) return "status";
+	if (options.length === 1 && options[0] === "status") return "status";
+	return options.length === 2 && options[0] === "register" && options[1] === "codex" ? "register" : null;
 }
 
 function writeAgentGuideUnavailable(io: CealCliIo): number {
