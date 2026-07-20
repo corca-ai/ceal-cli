@@ -46,10 +46,10 @@ type CatalogProvenance =
 export type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "capabilities" | "session" | "call" | "receipt";
+	name: "version" | "commands" | "guide" | "capabilities" | "session" | "call" | "receipt";
 	description: string;
 	usage: string;
-	effect: "read_only" | "local_write";
+	effect: "read_only" | "local_write" | "read_only_or_local_write";
 	evidence: "surface" | "surface_or_host_decision";
 	result_schema: string;
 	recovery: string;
@@ -84,9 +84,18 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
 	},
 	{
+		name: "guide",
+		description: "Inspect or register the signed agent guide for this installed Ceal release.",
+		usage: "ceal guide [status | register codex]",
+		effect: "read_only_or_local_write",
+		evidence: "surface",
+		result_schema: "ceal.guide.v1",
+		recovery: "Run 'ceal guide status', then register only through an explicitly supported local agent host.",
+	},
+	{
 		name: "capabilities",
 		description: "Discover Gateway-issued capabilities and select bounded targets.",
-		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -141,7 +150,7 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 }
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
-	return options.length === 0 || command === "capabilities" || command === "session" || command === "call" || command === "receipt";
+	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt";
 }
 
 function isSessionEnrollmentHelp(options: readonly string[]): boolean {
@@ -156,6 +165,7 @@ async function runKnownCommand(
 ): Promise<number> {
 	if (command === "version") return writeVersion(io);
 	if (command === "commands") return writeCommands(io);
+	if (command === "guide") return runGuide(options, io, runtime);
 	if (command === "session") return runSession(options, io, runtime);
 	if (command === "call") return runCall(options, io, runtime);
 	if (command === "receipt") return runReceipt(options, io, runtime);
@@ -169,13 +179,18 @@ function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
 }
 
 function commandHelp(command: CealCommandDefinition): string {
-	const options = command.name === "capabilities"
+	const options = command.name === "guide" ? [
+			"  status                 Inspect the signed guide and Codex registration (Effect: read_only).",
+			"  register codex         Link the update-safe signed guide into the configured Codex skill directory (Effect: local_write).",
+		]
+		: command.name === "capabilities"
 		? [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
 			"  --detail                Include each capability's full input_contract (default: concise).",
 			"  targets                 Select bounded targets for one discovered capability.",
 			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
+			"  targets --profile <profile-ref>  Select one assigned Profile for target discovery.",
 			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
 			"  targets --cursor <opaque> Continue one Gateway-issued selected target page.",
 			"  targets --limit <1-64>   Bound one selected target page (default: Gateway choice).",
@@ -233,6 +248,34 @@ function writeCommands(io: CealCliIo): number {
 		credential_context: CREDENTIAL_CONTEXT,
 		commands: CEAL_COMMANDS,
 	});
+}
+
+function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
+	const action = options.length === 0 || (options.length === 1 && options[0] === "status")
+		? "status"
+		: options.length === 2 && options[0] === "register" && options[1] === "codex" ? "register" : null;
+	if (!action) return writeError("invalid_argument", "Invalid guide action.", io);
+	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
+	if (!inspect) return writeAgentGuideUnavailable(io);
+	const state = inspect();
+	writeYaml(io.stdout, {
+		schema_version: "ceal.guide.v1", command: "ceal", action,
+		effect: action === "status" ? "read_only" : "local_write", ...state,
+	});
+	return state.status === "unavailable" ? 3 : 0;
+}
+
+function writeAgentGuideUnavailable(io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.guide.v1", command: "ceal", action: "status", effect: "read_only", status: "unavailable",
+		agent: "codex", guide_id: "ceal-guide", registered: false, update_safe: false,
+		error: {
+			kind: "guide_unavailable",
+			message: "The signed Ceal guide is not available from this command runtime.",
+			next_action: "Reinstall a signed Ceal worker release, then run 'ceal guide status'.",
+		},
+	});
+	return 3;
 }
 
 async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {

@@ -32,7 +32,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			assert.deepEqual(result.guides.map((item) => item.id), ["ceal-guide", "cealctl-guide"]);
 			assert.deepEqual(result.guides.map((item) => item.binary), ["ceal", "cealctl"]);
 			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
-				["session", "capabilities"],
+				["session", "guide", "capabilities", "call", "receipt"],
 				["login", "sessions", "logout", "access", "connectors", "enrollments"],
 			]);
 			assert.deepEqual(calls.map((item) => item.kind), [
@@ -185,10 +185,13 @@ test("CLI reports source build failure as one bounded JSON document", async () =
 	});
 });
 
-test("rejects platform artifacts that omit required enrollment workflow commands", () => {
-	assert.doesNotThrow(() => assertRequiredCommandDiscovery(["version", "session", "capabilities"], ["session", "capabilities"]));
+test("rejects platform artifacts that omit required enrollment and agent-guide workflow commands", () => {
+	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
+		["version", "session", "guide", "capabilities", "call", "receipt"],
+		["session", "guide", "capabilities", "call", "receipt"],
+	));
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "capabilities"], ["session", "capabilities"]),
+		() => assertRequiredCommandDiscovery(["version", "session", "capabilities"], ["session", "guide", "capabilities", "call", "receipt"]),
 		hasCode("smoke_failed"),
 	);
 	assert.doesNotThrow(() => assertRequiredCommandDiscovery(

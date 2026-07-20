@@ -60,13 +60,17 @@ test("canonical registry is reachable through stable, read-only help", async () 
 	for (const option of ["--endpoint", "--profile", "--request-id", "--token-stdin"]) {
 		assert.match(capabilitiesHelp.stdout, new RegExp(option, "u"));
 	}
+	assert.match(capabilitiesHelp.stdout, /targets --profile <profile-ref>/u);
+	const guideHelp = await run(["guide", "--help"]);
+	assert.match(guideHelp.stdout, /status[\s\S]+Effect: read_only/u);
+	assert.match(guideHelp.stdout, /register codex[\s\S]+Effect: local_write/u);
 });
 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "request:test"] : [command.name];
-		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" ? 3 : 0);
+		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" ? 3 : 0);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
 	}
@@ -86,7 +90,35 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "session", "capabilities", "call", "receipt"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "session", "guide", "capabilities", "call", "receipt"]);
+});
+
+test("guide status and Codex registration expose one update-safe local skill path", async () => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-guide-runtime-"));
+	const guidePath = path.join(root, "install", ".ceal-cli", "worker", "current", "guide");
+	const registrationPath = path.join(root, "codex", "skills", "ceal-guide");
+	mkdirSync(guidePath, { recursive: true });
+	writeFileSync(path.join(guidePath, "SKILL.md"), "name: ceal-guide\n");
+	let registered = false;
+	const inspect = () => ({
+		status: registered ? "registered" : "staged", agent: "codex", guide_id: "ceal-guide",
+		guide_path: guidePath, registration_path: registrationPath, update_safe: true, registered,
+	});
+	try {
+		const status = await yamlRun(["guide", "status"], 0, { inspectAgentGuide: inspect });
+		assert.equal(status.status, "staged");
+		assert.equal(status.registered, false);
+		assert.equal(status.effect, "read_only");
+		const result = await yamlRun(["guide", "register", "codex"], 0, {
+			registerAgentGuide: () => { registered = true; return inspect(); },
+		});
+		assert.equal(result.status, "registered");
+		assert.equal(result.action, "register");
+		assert.equal(result.effect, "local_write");
+		assert.equal(result.update_safe, true);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {

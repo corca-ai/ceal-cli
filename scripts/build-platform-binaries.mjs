@@ -31,7 +31,7 @@ const COMMANDS = Object.freeze([
 		id: "ceal",
 		packageDir: "ceal-worker-cli",
 		help: "Usage: ceal <command> [options]",
-		requiredCommands: ["session", "capabilities"],
+		requiredCommands: ["session", "guide", "capabilities", "call", "receipt"],
 	},
 	{
 		id: "cealctl",

@@ -22,6 +22,25 @@ YAML document; do not add an output-format flag and do not scrape prose.
 
 ## Workflow
 
+For the installed personal-client surface, use this exact provider-neutral
+sequence after reading the matching leaf help:
+
+```sh
+ceal capabilities --profile <profile-ref> --fresh
+ceal capabilities targets --profile <profile-ref> \
+  --capability <capability-id> --match <text-or-url> --limit 5
+ceal call <capability-id> --profile <profile-ref> \
+  --target <target-ref> key=value
+ceal receipt show <request-ref> --profile <profile-ref>
+```
+
+Omit `--match` only when the selected capability's target help permits a small
+unfiltered page. Use only ids, input fields, target refs, cursors, and request
+refs returned by installed help or the Gateway. A catalog grant is not backend
+readiness, and success on one search/read route says nothing about another
+route or write. This live personal-client sequence is not interchangeable with
+legacy worker fixtures, provider commands, or raw provider identifiers.
+
 1. Prefer a read-only discovery route learned from help before attempting an
    operation. The selected Profile's live capability discovery is the source
    of truth for current capabilities, input contracts, readiness, and the

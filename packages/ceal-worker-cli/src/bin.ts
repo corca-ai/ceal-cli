@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { createCealAgentGuideStore } from "./agent-guide.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
@@ -11,6 +12,8 @@ try { sessionStore = createCealSessionStore(process.env.HOME); } catch { session
 
 let discoveryCache: ReturnType<typeof createCealDiscoveryCacheStore> | undefined;
 try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch { discoveryCache = undefined; }
+
+const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME);
 
 void runCealCommand(process.argv.slice(2), {
 	stdout: process.stdout,
@@ -27,6 +30,8 @@ void runCealCommand(process.argv.slice(2), {
 	loadDiscoveryCache: discoveryCache ? () => discoveryCache.load() : undefined,
 	saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
 	removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
+	inspectAgentGuide: agentGuide ? () => agentGuide.inspect() : undefined,
+	registerAgentGuide: agentGuide ? () => agentGuide.register() : undefined,
 	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {

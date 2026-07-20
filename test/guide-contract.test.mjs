@@ -30,7 +30,13 @@ test("guide packages teach help-driven discovery without command snapshots", () 
 		assert.doesNotMatch(guide, /--json|--format json/u);
 		const top = runBinary(item, ["--help"]);
 		for (const route of parseRoutes(top.stdout)) {
-			assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
+			const stableWorkerFlow = item.skill === "ceal-guide" && ["capabilities", "call", "receipt"].includes(route.name);
+			if (!stableWorkerFlow) assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
+		}
+		if (item.skill === "ceal-guide") {
+			assert.match(guide, /ceal capabilities --profile <profile-ref> --fresh[\s\S]+ceal capabilities targets --profile <profile-ref>[\s\S]+ceal call <capability-id> --profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u);
+			assert.match(guide, /catalog grant is not backend\s+readiness/u);
+			assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
 		}
 	}
 });

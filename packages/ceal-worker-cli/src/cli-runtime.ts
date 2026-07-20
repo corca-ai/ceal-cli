@@ -1,4 +1,5 @@
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
+import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 
 export interface CealCliIo {
@@ -20,6 +21,8 @@ export interface CealCommandRuntime {
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
 	removeDiscoveryCache?: () => Promise<void>;
+	inspectAgentGuide?: () => CealAgentGuideState;
+	registerAgentGuide?: () => CealAgentGuideState;
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;

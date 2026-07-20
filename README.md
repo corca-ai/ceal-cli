@@ -255,25 +255,21 @@ automatic rollback is not performed. Reinstall an explicitly approved earlier
 tag with the same role to roll back. Unsigned installation is unsupported.
 The matching guide is staged as `guide/SKILL.md` inside that role's signed
 generation; the installer deliberately does not inject it into a particular
-agent runtime. Its final line reports the exact resolved path. Register that
-file through the selected agent's normal skill mechanism. For example, a Codex
-user who installed the worker role can link its update-safe `current` guide
-directory into Codex's skill directory:
+agent runtime. Its final line reports the exact resolved path. The worker CLI
+makes this local boundary discoverable and explicit:
 
 ```sh
-CEAL_INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -sfnT "$CEAL_INSTALL_DIR/.ceal-cli/worker/current/guide" \
-  "${CODEX_HOME:-$HOME/.codex}/skills/ceal-guide"
+ceal guide status
+ceal guide register codex
 ```
 
-An operator uses the same pattern with `operator/current/guide` and
-`cealctl-guide`. The link deliberately follows the role-owned `current`
-generation, so a verified update changes the guide and binary together. This
-registration is a local agent-host choice; the installer neither modifies an
-agent configuration nor claims that a staged guide has already been loaded.
-The `-T` form refuses an existing real directory instead of nesting a link
-inside it; inspect and replace a previous local registration deliberately.
+Registration links Codex to the role-owned `current/guide` directory, so a
+verified update changes the guide and binary together. It refuses to replace an
+existing real directory, file, or unmanaged link. This remains a deliberate
+local agent-host action: the installer neither modifies an agent configuration
+nor claims that a staged guide has already been loaded. Operator guide
+registration remains manual until `cealctl` exposes an equivalent supported
+host command.
 
 ## Release boundary
 
