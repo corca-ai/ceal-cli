@@ -72,9 +72,15 @@ then discovers a read-only route through help and parses its YAML result.
 The signed release contains both role-specific commands, but the installer
 supports Linux arm64 (`aarch64`/`arm64`) and amd64 (`x86_64`/`amd64`) and
 installs exactly one native command at a time. Its safe default is the personal
-worker command, `ceal`. It requires a POSIX shell, `cmp`, `curl`, `cosign`,
-`flock`, `sha256sum`, `mktemp`, `readlink`, `uname`, and standard Linux
-userland. Install and verify `cosign` using the [official Sigstore
+worker command, `ceal`. It requires a POSIX shell, `cmp`, `curl`, `flock`,
+`sha256sum`, `mktemp`, `readlink`, `uname`, and standard Linux userland.
+`cosign` verifies every signed asset: if it is already on `PATH` the installer
+uses it, otherwise the installer downloads a pinned, checksum-verified `cosign`
+release into an ephemeral directory for the run only (it never modifies your
+`PATH` or installs `cosign` permanently) and fails closed if the pinned checksum
+does not match. You therefore no longer have to pre-install `cosign` just to run
+`install.sh`. To additionally verify the installer's own signature before
+running it (recommended), install `cosign` using the [official Sigstore
 instructions](https://docs.sigstore.dev/cosign/system_config/installation/),
 then acquire the tag-bound installer as a signed release asset:
 

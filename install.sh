@@ -7,6 +7,7 @@ ROLE="${CEAL_INSTALL_ROLE:-worker}"
 INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
 WORKFLOW_FILE="cealctl-release.yml"
 ISSUER="https://token.actions.githubusercontent.com"
+COSIGN_VERSION="v2.6.4"
 TMP_DIR=""
 LOCK_PATH=""
 LOCK_HELD=0
@@ -65,6 +66,40 @@ select_role() {
 
 sha256_of() {
   sha256sum "$1" | cut -d' ' -f1
+}
+
+# Ensure a trusted cosign is available. If the user already has cosign on PATH we
+# respect it and do nothing. Only when cosign is absent do we download the
+# PINNED cosign release for the detected platform, verify it against a PINNED
+# known-good SHA256 embedded below (obtained from sigstore's published
+# cosign_checksums.txt for $COSIGN_VERSION), and use that verified binary for
+# this run only by prepending an ephemeral directory to PATH. We never write to
+# the user's PATH configuration or any persistent directory.
+bootstrap_cosign() {
+  if command -v cosign >/dev/null 2>&1; then
+    return 0
+  fi
+  for tool in curl sha256sum chmod; do
+    command -v "$tool" >/dev/null 2>&1 \
+      || fail "cosign is required and is auto-installed when absent, but that needs $tool; install cosign manually from https://docs.sigstore.dev/cosign/system_config/installation/"
+  done
+  case "$PLATFORM" in
+    linux-amd64) cosign_sha256=309779b0c4e409186b0a80daba99041fe2cf65a920ce645013901df6211895a9 ;;
+    linux-arm64) cosign_sha256=df408e5418129306fed7349ec46e27be0445d05c5127c07f435e9a566af67593 ;;
+    *) fail "cosign auto-install is not supported on $PLATFORM; install cosign manually from https://docs.sigstore.dev/cosign/system_config/installation/" ;;
+  esac
+  cosign_dir="$TMP_DIR/cosign-bootstrap"
+  mkdir "$cosign_dir" || fail "Could not create the ephemeral cosign bootstrap directory"
+  cosign_url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-$PLATFORM"
+  curl -fsSL "$cosign_url" -o "$cosign_dir/cosign" \
+    || fail "Could not download pinned cosign $COSIGN_VERSION from $cosign_url"
+  cosign_actual="$(sha256_of "$cosign_dir/cosign")"
+  [ "$cosign_sha256" = "$cosign_actual" ] \
+    || fail "Pinned cosign $COSIGN_VERSION checksum mismatch for $PLATFORM (expected $cosign_sha256, got $cosign_actual); refusing to use an unverified cosign"
+  chmod 755 "$cosign_dir/cosign"
+  PATH="$cosign_dir:$PATH"
+  export PATH
+  printf 'Bootstrapped pinned cosign %s (%s) into ephemeral %s for this run only\n' "$COSIGN_VERSION" "$PLATFORM" "$cosign_dir"
 }
 
 verify_signature() {
@@ -255,11 +290,13 @@ printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1
 select_role
 
 PLATFORM="$(detect_platform)"
+need mktemp
+TMP_DIR="$(mktemp -d)"
+trap cleanup EXIT HUP INT TERM
+bootstrap_cosign
 for tool in cmp curl cosign flock sha256sum uname mktemp readlink; do need "$tool"; done
 
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
-TMP_DIR="$(mktemp -d)"
-trap cleanup EXIT HUP INT TERM
 
 if [ ! -e "$INSTALL_DIR" ]; then
   (umask 077; mkdir -p "$INSTALL_DIR")
