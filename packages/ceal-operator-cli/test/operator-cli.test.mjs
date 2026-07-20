@@ -398,15 +398,16 @@ test("concurrent operator reads serialize single-use refresh rotation before the
 	const thirdRefresh = `ceal_refresh_${"T".repeat(43)}`;
 	let currentRefresh = firstRefresh;
 	const refreshRequests = [];
-	const origin = "https://gateway.example.test";
+	const origin = "https://gateway.example.test/corca-ai/ceal-prod";
+	const route = "/corca-ai/ceal-prod";
 	const common = {
 		profile: "operator", admin_api_origin: origin, deployment_id: "instance:test",
 		auth_issuer_origin: origin, auth_issuing_deployment_id: "instance:test",
 	};
 	const fetchFn = async (url, init = {}) => {
 		const pathname = new URL(String(url)).pathname;
-		if (pathname === "/api/cealctl/contract") return response(200, compatibleContract(origin));
-		if (pathname === "/api/cealctl/token/refresh") {
+		if (pathname === `${route}/api/cealctl/contract`) return response(200, compatibleContract(origin));
+		if (pathname === `${route}/api/cealctl/token/refresh`) {
 			const body = JSON.parse(String(init.body));
 			refreshRequests.push(body.refresh_token);
 			if (body.refresh_token !== currentRefresh) return response(409, { error_code: "refresh_replayed" });
@@ -419,11 +420,11 @@ test("concurrent operator reads serialize single-use refresh rotation before the
 				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
 			});
 		}
-		if (pathname === "/api/cealctl/v1/access") return response(200, {
+		if (pathname === `${route}/api/cealctl/v1/access`) return response(200, {
 			schema_version: "ceal.access_state.v1", ok: true, status: "configured", dry_run: false,
 			registry: emptyAccessRegistry(), proof_level: "host_decision",
 		});
-		if (pathname === "/api/cealctl/v1/profile-connectors") return response(200, {
+		if (pathname === `${route}/api/cealctl/v1/profile-connectors`) return response(200, {
 			schema_version: "ceal.profile_connector_state.v1", ok: true, status: "configured", dry_run: false,
 			registry: emptyConnectorRegistry(), proof_level: "host_decision",
 		});
@@ -516,6 +517,44 @@ test("a missing local Gateway authorization channel is rejected before login cre
 		assert.equal(payload.error.kind, "local_authorization_unavailable");
 		assert.match(payload.error.next_action, /Gateway admin host/u);
 		assert.equal(existsSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json")), false);
+	} finally {
+		rmSync(homeDir, { recursive: true, force: true });
+	}
+});
+
+test("login rejects retired apex and organization-only control targets before local authorization", async () => {
+	for (const origin of ["https://ceal.example.test", "https://ceal.example.test/corca-ai"]) {
+		const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-instance-route-"));
+		const result = await asyncRun(["login", origin], {
+			homeDir,
+			localGatewayOwnerSocketPath: "/tmp/cealctl-instance-route-must-not-open.sock",
+		});
+		try {
+			assert.equal(result.code, 3);
+			assert.equal(parseYaml(result.stdout).error.kind, "instance_route_required");
+			assert.match(result.stdout, /organization\/instance route/u);
+			assert.equal(existsSync(path.join(homeDir, ".ceal", "cealctl", "sessions.json")), false);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	}
+});
+
+test("stored organization-only sessions fail with canonical instance-route recovery", async () => {
+	const homeDir = mkdtempSync(path.join(tmpdir(), "cealctl-retired-session-"));
+	const sessionPath = path.join(homeDir, ".ceal", "cealctl", "sessions.json");
+	const origin = "https://ceal.example.test/corca-ai";
+	mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
+	writeFileSync(sessionPath, `${JSON.stringify({
+		schema_version: "cealctl.operator_sessions.v1",
+		current_profile: "operator",
+		profiles: { operator: { ...rotatedOperatorSession(origin, `ceal_refresh_${"R".repeat(43)}`), name: undefined } },
+	}, null, 2)}\n`, { mode: 0o600 });
+	try {
+		const result = await asyncRun(["sessions"], { homeDir });
+		assert.equal(result.code, 3);
+		assert.equal(parseYaml(result.stdout).error.kind, "instance_route_required");
+		assert.match(result.stdout, /organization\/instance route/u);
 	} finally {
 		rmSync(homeDir, { recursive: true, force: true });
 	}

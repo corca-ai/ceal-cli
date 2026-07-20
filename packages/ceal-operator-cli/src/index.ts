@@ -160,7 +160,7 @@ const TOP_LEVEL_HELP = [
 
 const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], readonly string[]>> = {
 	login: [
-		"  <admin-url>                   Canonical private Gateway Admin API base configured on this host.",
+		"  <admin-url>                   Canonical private Gateway base: https://<host>/<org>/<instance>.",
 		"  --session <safe-name>         Local operator session name (default: default).",
 	],
 	sessions: ["  use <safe-name>               Select one stored operator session."],
@@ -703,6 +703,8 @@ function writeSessionFailure(schemaVersion: string, kind: string, message: strin
 			message,
 			next_action: kind === "refresh_busy"
 				? "Another local Ceal process is changing this operator session. Wait briefly, then retry the same command."
+				: kind === "instance_route_required"
+				? "Use the canonical organization/instance route: cealctl login https://<host>/<org>/<instance> --session <name>. Bare-apex and organization-only control targets are retired."
 				: kind === "control_plane_upgrade_required"
 				? "The running Gateway is older than this CLI. Install/apply the matching Gateway release on the Gateway admin host, verify its local control channel, then retry."
 				: kind === "local_authorization_unavailable"

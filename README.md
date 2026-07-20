@@ -130,6 +130,9 @@ operator Session. It does not open a browser, print a device/activation code,
 or accept an operator secret through stdin. The resulting session is stored in
 an owner-only local file. Enrollment creation refreshes that session
 automatically; raw Admin API tokens are not CLI operands or stdin inputs.
+The Admin API base is always the internal organization/instance route
+`https://<host>/<org>/<instance>`; bare-apex and organization-only targets are
+retired and are never resolved to an instance implicitly.
 
 ```sh
 cealctl login https://ceal.example.test/acme/production --session production

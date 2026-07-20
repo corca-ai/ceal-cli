@@ -41,7 +41,7 @@ interface OperatorSessionState {
 
 export class OperatorSessionStoreError extends Error {
 	override readonly name = "OperatorSessionStoreError";
-	constructor(readonly code: "home_unavailable" | "invalid_profile" | "profile_missing" | "refresh_busy" | "state_invalid" | "unsafe_state_path") {
+	constructor(readonly code: "home_unavailable" | "invalid_profile" | "instance_route_required" | "profile_missing" | "refresh_busy" | "state_invalid" | "unsafe_state_path") {
 		super(`Ceal operator session ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -170,7 +170,16 @@ export function normalizeAdminOrigin(value: string): string {
 	if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
 		throw new OperatorSessionStoreError("invalid_profile");
 	}
-	url.pathname = url.pathname.replace(/\/+$/u, "");
+	const pathname = url.pathname.replace(/\/+$/u, "");
+	const segments = pathname === "" ? [] : pathname.slice(1).split("/");
+	if (!(loopback && segments.length === 0)) {
+		if (segments.length !== 2) throw new OperatorSessionStoreError("instance_route_required");
+		if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(segments[0] ?? "")
+			|| !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(segments[1] ?? "")) {
+			throw new OperatorSessionStoreError("invalid_profile");
+		}
+	}
+	url.pathname = pathname || "/";
 	return url.toString().replace(/\/$/u, "");
 }
 
