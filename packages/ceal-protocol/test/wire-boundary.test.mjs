@@ -349,7 +349,7 @@ test("legacy link fixtures accept only safe URL transport while leaving resource
 	const subResource = structuredClone(response);
 	subResource.value.data.resource = {
 		ref: "target:github-repository:183f6a7c0b67550c47076237", kind: "issue",
-		source: { provider: "github", url: "https://github.com/corca-ai/ceal/issues/42" }, address: { number: 42 },
+		source: { provider: "github", url: "https://github.com/octocat/hello-world/issues/42" }, address: { number: 42 },
 	};
 	assert.deepEqual(decodeCealClientResponse(subResource, request), subResource);
 });
