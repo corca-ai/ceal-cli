@@ -256,8 +256,10 @@ function writeCommands(io: CealCliIo): number {
 	});
 }
 
+const GUIDE_ACTIONS = new Map<string, "status" | "register">([["[]", "status"], ['["status"]', "status"], ['["register","codex"]', "register"]]);
+
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
-	const action = parseGuideAction(options);
+	const action = GUIDE_ACTIONS.get(JSON.stringify(options));
 	if (!action) return writeError("invalid_argument", "Invalid guide action.", io);
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io);
@@ -267,12 +269,6 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 		effect: action === "status" ? "read_only" : "local_write", ...state,
 	});
 	return state.status === "unavailable" ? 3 : 0;
-}
-
-function parseGuideAction(options: readonly string[]): "status" | "register" | null {
-	if (options.length === 0) return "status";
-	if (options.length === 1 && options[0] === "status") return "status";
-	return options.length === 2 && options[0] === "register" && options[1] === "codex" ? "register" : null;
 }
 
 function writeAgentGuideUnavailable(io: CealCliIo): number {
