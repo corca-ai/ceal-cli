@@ -102,8 +102,8 @@ jobs:
           mkdir dist
           for platform in linux-arm64 linux-amd64; do
             source="handoff/$platform"
-            [ "$(find "$source" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
-              "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-guide-SKILL.md cealctl-guide-SKILL.md ceal-$platform cealctl-$platform " ] \
+            [ "$(find "$source" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
+              "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest.json ceal-guide-SKILL.md ceal-$platform cealctl-guide-SKILL.md cealctl-$platform " ] \
               || { echo "Unexpected $platform build handoff inventory" >&2; exit 1; }
             (cd "$source" && sha256sum -c SHA256SUMS)
             cp "$source/ceal-$platform" "$source/cealctl-$platform" dist/
