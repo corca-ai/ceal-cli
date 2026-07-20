@@ -129,7 +129,7 @@ function writeArtifactArchive(root, archivePath, packageName, command) {
 	mkdirSync(packageDir, { recursive: true });
 	writeFileSync(path.join(packageDir, "package.json"), `${JSON.stringify({
 		name: packageName,
-		version: "0.64.0",
+		version: "0.65.0",
 		bin: { [command]: "./dist/bin.js" },
 	})}\n`);
 	execFileSync("tar", ["-czf", archivePath, "-C", staging, "package"]);

@@ -26,7 +26,7 @@ test("default worker installation creates only ceal and worker-owned state", () 
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
-		assert.match(result.stdout, /Installed ceal v0[.]64[.]0 .* as worker/u);
+		assert.match(result.stdout, /Installed ceal v0[.]65[.]0 .* as worker/u);
 		assert.match(result.stdout, /Signed guide staged at .*[/]guide[/]SKILL[.]md; register it through the selected agent runtime/u);
 		assert.match(readFileSync(path.join(install, "ceal"), "utf8"), /command=ceal/u);
 		assert.equal(existsSync(path.join(install, "cealctl")), false);
@@ -40,8 +40,8 @@ test("default worker installation creates only ceal and worker-owned state", () 
 		const log = readFileSync(cosignLog, "utf8");
 		assert.equal(log.match(/verify-blob/gu)?.length, 5);
 		assert.match(log, /corca-ai\/ceal-cli/u);
-		assert.match(log, /refs\/tags\/v0[.]64[.]0/u);
-		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]64[.]0/u);
+		assert.match(log, /refs\/tags\/v0[.]65[.]0/u);
+		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]65[.]0/u);
 	});
 });
 
@@ -49,7 +49,7 @@ test("explicit operator installation creates only cealctl and operator-owned sta
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
 		assert.equal(result.status, 0, result.stderr);
-		assert.match(result.stdout, /Installed cealctl v0[.]64[.]0 .* as operator/u);
+		assert.match(result.stdout, /Installed cealctl v0[.]65[.]0 .* as operator/u);
 		assert.match(result.stdout, /Signed guide staged at .*[/]guide[/]SKILL[.]md; register it through the selected agent runtime/u);
 		assert.equal(existsSync(path.join(install, "ceal")), false);
 		assert.match(readFileSync(path.join(install, "cealctl"), "utf8"), /command=cealctl/u);
@@ -309,7 +309,7 @@ test("workflow builds from public source and never downloads injected draft bina
 	for (const action of workflow.matchAll(/uses:\s+([^\s]+)/gu)) assert.match(action[1], /@[a-f0-9]{40}$/u);
 });
 
-function runInstaller({ root, release, tools, install, cosignLog, version = "v0.64.0", role = "worker" }) {
+function runInstaller({ root, release, tools, install, cosignLog, version = "v0.65.0", role = "worker" }) {
 	return spawnSync(INSTALLER, [], {
 		cwd: root,
 		encoding: "utf8",
@@ -384,7 +384,7 @@ function writePlatformManifest(release, platform) {
 		sha256: digest(readFileSync(path.join(release, name))),
 	});
 	writeFileSync(path.join(release, `ceal-cli-platform-release-manifest-${platform}.json`), `${JSON.stringify({
-		release_version: "0.64.0",
+		release_version: "0.65.0",
 		platform,
 		guides: {
 			"ceal-guide": guide("ceal-guide-SKILL.md", "ceal"),
@@ -413,7 +413,7 @@ function writeChecksums(release) {
 function writeBinary(file, command, marker = "generation-1", versionSuffix = "") {
 	const schema = command === "ceal" ? "ceal.version.v1" : "cealctl.version.v1";
 	const credentialContext = command === "ceal" ? "gateway_issued_client_session" : "cealctl_operator_admin_session";
-	writeFileSync(file, `#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.64.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`);
+	writeFileSync(file, `#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`);
 	chmodSync(file, 0o755);
 }
 

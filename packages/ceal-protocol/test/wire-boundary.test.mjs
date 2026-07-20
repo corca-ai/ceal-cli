@@ -39,7 +39,7 @@ test("public safe-text policy redacts every credential, provider, opaque, and co
 
 test("Gateway request decoder accepts the four exact semantic operations", () => {
 	const requests = [
-		envelope("handshake", { client: { name: "ceal", version: "0.64.0" } }),
+		envelope("handshake", { client: { name: "ceal", version: "0.65.0" } }),
 		envelope("discover", {}),
 		envelope("discover", { capability_id: "message.search", match: "Team inbox", limit: 1 }),
 		envelope("discover", { capability_id: "message.search", cursor: "cursor:continuation_001" }),
@@ -66,7 +66,7 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 		envelope("discover", { capability_id: "message.search", cursor: "not-a-cursor" }),
 		envelope("discover", { capability_id: "message.search", limit: 65 }),
 		envelope("discover", { capability_id: "message.search", match: "https://workspace.example.test/path?token=forbidden" }),
-		envelope("handshake", { client: { name: "ceal", version: "0.64.0", token: secret } }),
+		envelope("handshake", { client: { name: "ceal", version: "0.65.0", token: secret } }),
 		envelope("call", { capability_id: "message.search", target_ref: "slack:C123456789", arguments: {}, purpose: "Search" }),
 		envelope("call", { capability_id: "message.search", target_ref: "target:test", arguments: { access_token: secret }, purpose: "Search" }),
 		envelope("call", { capability_id: "message.search", target_ref: "target:test", arguments: { token: "opaque-gateway-secret" }, purpose: "Search" }),
@@ -129,7 +129,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 		arguments: { query: "quarterly plan", limit: 5 },
 		purpose: "Search",
 	});
-	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
+	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
 	const handshake = handshakeResponse(handshakeRequest);
 	assert.deepEqual(decodeCealClientResponse(handshake, handshakeRequest), handshake);
 
@@ -198,7 +198,7 @@ test("client response decoder accepts exact operation-correlated Gateway results
 });
 
 test("handshake decoder tolerates the optional negotiated eligible-Profile catalog without weakening the unchanged shape", () => {
-	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
+	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
 
 	// Unchanged shape (field absent, e.g. non-negotiating client / older Gateway)
 	// must still decode as before.
@@ -572,7 +572,7 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
 	]) assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
 
-	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.64.0" } });
+	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
 	const handshake = handshakeResponse(handshakeRequest);
 	for (const value of [
 		{ ...handshake, proof_ref_or_unavailable: undefined },

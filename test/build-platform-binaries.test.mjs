@@ -22,7 +22,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			const calls = [];
 			const outputDir = path.join(root, "release");
 			const result = await buildCealCliPlatformBinaries({
-				version: "0.64.0",
+				version: "0.65.0",
 				platform,
 				outputDir,
 			}, fakeDeps(calls, platform));
@@ -43,7 +43,7 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 			const manifest = JSON.parse(readFileSync(path.join(outputDir, result.manifest.name), "utf8"));
 			assert.equal(manifest.schema_version, "ceal.cli_platform_release_manifest.v1");
 			assert.equal(manifest.artifact_state, "unsigned_build_output");
-			assert.equal(manifest.release_version, "0.64.0");
+			assert.equal(manifest.release_version, "0.65.0");
 			assert.equal(manifest.platform, platform);
 			assert.deepEqual(Object.keys(manifest.artifacts), ["ceal", "cealctl"]);
 			assert.deepEqual(Object.keys(manifest.guides), ["ceal-guide", "cealctl-guide"]);
@@ -71,11 +71,11 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 test("rejects cross-platform builds, version drift, and unsafe replacement", async () => {
 	await withTempDir(async (root) => {
 		await assert.rejects(
-			() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "darwin-arm64", outputDir: path.join(root, "unsupported") }, fakeDeps([])),
+			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "darwin-arm64", outputDir: path.join(root, "unsupported") }, fakeDeps([])),
 			hasCode("unsupported_platform"),
 		);
 		await assert.rejects(
-			() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-amd64", outputDir: path.join(root, "cross") }, fakeDeps([])),
+			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-amd64", outputDir: path.join(root, "cross") }, fakeDeps([])),
 			hasCode("platform_mismatch"),
 		);
 		await assert.rejects(
@@ -84,7 +84,7 @@ test("rejects cross-platform builds, version drift, and unsafe replacement", asy
 		);
 		writeFileSync(path.join(root, "keep"), "keep\n");
 		await assert.rejects(
-			() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir: root, force: true }, fakeDeps([])),
+			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir: root, force: true }, fakeDeps([])),
 			hasCode("output_not_replaceable"),
 		);
 		assert.equal(readFileSync(path.join(root, "keep"), "utf8"), "keep\n");
@@ -95,7 +95,7 @@ test("builds current source once before bundling either command", async () => {
 	await withTempDir(async (root) => {
 		const calls = [];
 		await buildCealCliPlatformBinaries({
-			version: "0.64.0",
+			version: "0.65.0",
 			platform: "linux-arm64",
 			outputDir: path.join(root, "release"),
 		}, fakeDeps(calls));
@@ -118,7 +118,7 @@ test("rejects release output that overlaps a package build tree before source cl
 		]) {
 			const calls = [];
 			await assert.rejects(
-				() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir }, fakeDeps(calls)),
+				() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir }, fakeDeps(calls)),
 				hasCode("unsafe_output"),
 			);
 			assert.deepEqual(calls, []);
@@ -150,12 +150,12 @@ test("source build failure precedes release output mutation", async () => {
 	await withTempDir(async (root) => {
 		const outputDir = path.join(root, "release");
 		const workingDeps = fakeDeps([]);
-		await buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir }, workingDeps);
+		await buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir }, workingDeps);
 		const existingArtifact = readFileSync(path.join(outputDir, "ceal-linux-arm64"));
 		const deps = fakeDeps([]);
 		deps.buildSource = () => { throw new Error("compiler details stay private"); };
 		await assert.rejects(
-			() => buildCealCliPlatformBinaries({ version: "0.64.0", platform: "linux-arm64", outputDir, force: true }, deps),
+			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir, force: true }, deps),
 			hasCode("build_failed"),
 		);
 		assert.deepEqual(readFileSync(path.join(outputDir, "ceal-linux-arm64")), existingArtifact);
@@ -168,7 +168,7 @@ test("CLI reports source build failure as one bounded JSON document", async () =
 		deps.buildSource = () => { throw new Error("sensitive compiler details"); };
 		const lines = [];
 		const status = await runCli([
-			"--version", "0.64.0",
+			"--version", "0.65.0",
 			"--platform", "linux-arm64",
 			"--out", path.join(root, "release"),
 			"--json",
@@ -211,7 +211,7 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 		resolvePostjectCli: () => "postject.js",
 		readContract: () => ({
 			repository: "corca-ai/ceal-cli",
-			release_version: "0.64.0",
+			release_version: "0.65.0",
 			protocol: {},
 			guides: fakeGuideContract(),
 			first_proof_matrix: { platform: "linux-arm64" },
@@ -219,7 +219,7 @@ function fakeDeps(calls, currentPlatform = "linux-arm64") {
 			publication_blockers: [],
 			non_claims: [],
 		}),
-		readPackageManifest: (command) => ({ version: "0.64.0", bin: { [command.id]: "./dist/bin.js" } }),
+		readPackageManifest: (command) => ({ version: "0.65.0", bin: { [command.id]: "./dist/bin.js" } }),
 		readGuide: () => Buffer.from("fake signed guide\n"),
 		bundle: async ({ command, bundlePath }) => {
 			calls.push({ kind: "bundle", command: command.id });

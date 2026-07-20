@@ -79,7 +79,7 @@ instructions](https://docs.sigstore.dev/cosign/system_config/installation/),
 then acquire the tag-bound installer as a signed release asset:
 
 ```sh
-VERSION=v0.64.0
+VERSION=v0.65.0
 BASE="https://github.com/corca-ai/ceal-cli/releases/download/$VERSION"
 for asset in install.sh install.sh.sig install.sh.pem; do
   curl -fsSLO "$BASE/$asset"
@@ -187,7 +187,7 @@ host platform:
 
 ```sh
 npm run release:binaries -- \
-  --version 0.64.0 \
+  --version 0.65.0 \
   --platform linux-amd64 \
   --out dist \
   --json
@@ -275,7 +275,7 @@ The npm publication set is exactly `@corca-ai/ceal-protocol` and
 `@corca-ai/ceal`. The worker and operator CLI workspaces are private build
 inputs for the signed standalone binaries and must never be published to npm.
 Because npm cannot use staged publishing to create a new package, the first
-`0.64.0` pair requires a maintainer's direct 2FA bootstrap under the temporary
+`0.65.0` pair requires a maintainer's direct 2FA bootstrap under the temporary
 `bootstrap-0-64-0` tag, protocol first and client second. Registry readback of
 both exact package versions is required before moving a dist-tag.
 

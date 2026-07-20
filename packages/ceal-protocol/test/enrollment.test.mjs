@@ -30,7 +30,7 @@ test("enrollment request and issued result decode exact bounded material", () =>
 	assert.equal(decodeCealEnrollmentExchangeRequest({
 		schema_version: "ceal.enrollment_exchange.v1",
 		code: CODE,
-		client: { name: "ceal", version: "0.64.0" },
+		client: { name: "ceal", version: "0.65.0" },
 	}).code, CODE);
 	const result = decodeCealEnrollmentResponse({
 		schema_version: "ceal.enrollment_result.v1",
@@ -73,8 +73,8 @@ test("enrollment accepts one all-or-nothing refresh-capable result", () => {
 
 test("enrollment decoders reject extra fields, malformed codes, and token drift", () => {
 	for (const request of [
-		{ schema_version: "ceal.enrollment_exchange.v1", code: "short", client: { name: "ceal", version: "0.64.0" } },
-		{ schema_version: "ceal.enrollment_exchange.v1", code: CODE, client: { name: "ceal", version: "0.64.0" }, extra: true },
+		{ schema_version: "ceal.enrollment_exchange.v1", code: "short", client: { name: "ceal", version: "0.65.0" } },
+		{ schema_version: "ceal.enrollment_exchange.v1", code: CODE, client: { name: "ceal", version: "0.65.0" }, extra: true },
 	]) assert.throws(() => decodeCealEnrollmentExchangeRequest(request), TypeError);
 	assert.throws(() => decodeCealEnrollmentResponse({
 		schema_version: "ceal.enrollment_result.v1",

@@ -249,9 +249,9 @@ cleanup() {
 }
 
 [ -n "$VERSION" ] \
-  || fail "CEAL_VERSION is required until a compatible signed release is approved; set an explicit tag such as v0.64.0."
+  || fail "CEAL_VERSION is required until a compatible signed release is approved; set an explicit tag such as v0.65.0."
 printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' \
-  || fail "CEAL_VERSION must be an explicit tag such as v0.64.0."
+  || fail "CEAL_VERSION must be an explicit tag such as v0.65.0."
 select_role
 
 PLATFORM="$(detect_platform)"

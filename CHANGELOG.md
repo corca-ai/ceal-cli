@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.65.0
+
+- Make `ceal capabilities` concise by default (omit each capability's
+  `input_contract`/`write_contract`); add `--detail` to restore the full
+  contracts, keeping the catalog small on every call.
+- Cache the worker discovery catalog client-side so a warm `ceal capabilities`
+  skips the ~4.3s Gateway probe; harden the cache directory to owner-only 0700.
+- First signed public release cut from the reproducible dual-binary lane,
+  superseding the unpublished 0.64.0 local candidate.
+
 ## 0.64.0 (local candidate)
 
 - Add separate public source packages for `ceal` and `cealctl`.

@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-cli-repository",
-	"version": "0.64.0",
+	"version": "0.65.0",
 	"private": true,
 	"license": "MIT",
 	"description": "Public Ceal client, operator CLI, protocol, and release source",

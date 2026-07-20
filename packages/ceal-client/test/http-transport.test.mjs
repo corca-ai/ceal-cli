@@ -13,7 +13,7 @@ const request = {
 	request_id: "request:handshake:001",
 	operation: "handshake",
 	profile_ref: "profile:test",
-	body: { client: { name: "ceal", version: "0.64.0" } },
+	body: { client: { name: "ceal", version: "0.65.0" } },
 };
 
 test("HTTP transport posts a strict request to a loopback Gateway and decodes its correlated response", async () => {

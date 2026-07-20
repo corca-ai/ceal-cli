@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-operator-cli",
-	"version": "0.64.0",
+	"version": "0.65.0",
 	"private": true,
 	"license": "MIT",
 	"description": "Public Ceal operator CLI surface",
@@ -24,7 +24,7 @@
 		"prepack": "npm run build"
 	},
 	"dependencies": {
-		"@corca-ai/ceal-protocol": "0.64.0",
+		"@corca-ai/ceal-protocol": "0.65.0",
 		"yaml": "2.9.0"
 	},
 	"devDependencies": {

@@ -2,7 +2,7 @@
 	"schema_version": "ceal.cli_release_contract.v1",
 	"status": "local_candidate_not_published",
 	"repository": "corca-ai/ceal-cli",
-	"release_version": "0.64.0",
+	"release_version": "0.65.0",
 	"license": {
 		"spdx_identifier": "MIT",
 		"copyright": "Copyright (c) 2026 Corca, Inc.",
@@ -15,7 +15,7 @@
 	},
 	"protocol": {
 		"package": "@corca-ai/ceal-protocol",
-		"package_version": "0.64.0",
+		"package_version": "0.65.0",
 		"wire_version": "1.3.0",
 		"supported_gateway_range": {
 			"minimum": "1.3.0",
@@ -24,7 +24,7 @@
 	},
 	"client": {
 		"package": "@corca-ai/ceal",
-		"package_version": "0.64.0",
+		"package_version": "0.65.0",
 		"role": "client_sdk_only"
 	},
 	"npm_packages": {
@@ -38,7 +38,7 @@
 			"@corca-ai/ceal-operator-cli"
 		],
 		"initial_bootstrap": {
-			"version": "0.64.0",
+			"version": "0.65.0",
 			"method": "maintainer_direct_publish_with_2fa",
 			"order": [
 				"@corca-ai/ceal-protocol",
@@ -60,13 +60,13 @@
 	"artifacts": {
 		"ceal": {
 			"package": "@corca-ai/ceal-worker-cli",
-			"package_version": "0.64.0",
+			"package_version": "0.65.0",
 			"command": "ceal",
 			"credential_context": "gateway_issued_client_session"
 		},
 		"cealctl": {
 			"package": "@corca-ai/ceal-operator-cli",
-			"package_version": "0.64.0",
+			"package_version": "0.65.0",
 			"command": "cealctl",
 			"credential_context": "cealctl_operator_admin_session"
 		}

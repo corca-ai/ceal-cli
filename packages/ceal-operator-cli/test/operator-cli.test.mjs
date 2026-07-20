@@ -68,7 +68,7 @@ test("version reports package, protocol, range, and operator credential context"
 	assert.deepEqual(yamlRun(["version"]), {
 		schema_version: "cealctl.version.v1",
 		command: "cealctl",
-		version: "0.64.0",
+		version: "0.65.0",
 		protocol_version: "1.3.0",
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "cealctl_operator_admin_session",
@@ -602,7 +602,7 @@ test("packaged bin delegates once and preserves process exit codes", () => {
 	const binPath = new URL("../dist/bin.js", import.meta.url);
 	const version = spawnSync(process.execPath, [binPath.pathname, "version"], { encoding: "utf8" });
 	assert.equal(version.status, 0, version.stderr);
-	assert.equal(parseYaml(version.stdout).version, "0.64.0");
+	assert.equal(parseYaml(version.stdout).version, "0.65.0");
 	const unknown = spawnSync(process.execPath, [binPath.pathname, "call", "unsafe-secret"], { encoding: "utf8" });
 	assert.equal(unknown.status, 2);
 	assert.doesNotMatch(`${unknown.stdout}${unknown.stderr}`, /unsafe-secret/u);
@@ -611,8 +611,8 @@ test("packaged bin delegates once and preserves process exit codes", () => {
 test("package metadata stays exact and packages only dist plus MIT license", () => {
 	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 	assert.equal(manifest.name, "@corca-ai/ceal-operator-cli");
-	assert.equal(manifest.version, "0.64.0");
-	assert.equal(manifest.dependencies["@corca-ai/ceal-protocol"], "0.64.0");
+	assert.equal(manifest.version, "0.65.0");
+	assert.equal(manifest.dependencies["@corca-ai/ceal-protocol"], "0.65.0");
 	assert.equal(manifest.dependencies["@corca-ai/ceal"], undefined);
 	assert.equal(manifest.dependencies.yaml, "2.9.0");
 	assert.equal(manifest.license, "MIT");

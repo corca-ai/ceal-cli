@@ -24,7 +24,7 @@ test("canonical corpus validates exact bytes and runs through a consumer harness
 	assert.equal(corpus.cases.length, 24);
 	const report = await runConformanceCorpus(corpus, {
 		name: "fixture-reference-consumer",
-		version: "0.64.0",
+		version: "0.65.0",
 		execute: (testCase) => testCase.expected,
 	});
 	assert.deepEqual(
@@ -84,7 +84,7 @@ test("consumer mismatches and errors are deterministic report failures", async (
 	const { corpus } = await loadCanonicalCorpus();
 	const report = await runConformanceCorpus(corpus, {
 		name: "failing-consumer",
-		version: "0.64.0",
+		version: "0.65.0",
 		execute(testCase) {
 			if (testCase.id === "context.personal") throw new Error("adapter rejected case");
 			return testCase.id === "context.ci" ? { wrong: true } : testCase.expected;

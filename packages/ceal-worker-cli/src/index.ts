@@ -29,7 +29,7 @@ import {
 
 export { renderPlainYamlDocument } from "./yaml.js";
 
-const CEAL_PACKAGE_VERSION = "0.64.0" as const;
+const CEAL_PACKAGE_VERSION = "0.65.0" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 

@@ -76,7 +76,7 @@ test("version identifies the package, protocol, range, and credential context", 
 	assert.deepEqual(await yamlRun(["version"]), {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
-		version: "0.64.0",
+		version: "0.65.0",
 		protocol_version: "1.3.0",
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
@@ -770,7 +770,7 @@ test("capabilities selects a bounded target page through the stored client sessi
 		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
 		assert.deepEqual(requests.map((item) => item.body.body), [
-			{ client: { name: "ceal", version: "0.64.0" } },
+			{ client: { name: "ceal", version: "0.65.0" } },
 			{ capability_id: "message.search", match: "team", limit: 1 },
 		]);
 	});

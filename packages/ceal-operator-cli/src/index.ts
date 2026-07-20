@@ -34,7 +34,7 @@ import {
 import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "./local-gateway-owner-login-client.js";
 import { AdminApiContractClientError, requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
 
-export const CEAL_OPERATOR_CLI_VERSION = "0.64.0" as const;
+export const CEAL_OPERATOR_CLI_VERSION = "0.65.0" as const;
 export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_session" as const;
 
 export interface CealctlIo {

@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-protocol",
-	"version": "0.64.0",
+	"version": "0.65.0",
 	"license": "MIT",
 	"description": "Public Ceal protocol contracts and conformance corpus",
 	"repository": {

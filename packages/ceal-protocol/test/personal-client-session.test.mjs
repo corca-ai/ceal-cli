@@ -22,7 +22,7 @@ test("personal-client refresh and revoke messages have one strict secret-safe sh
 	assert.equal(decodeCealClientRefreshRequest({
 		schema_version: "ceal.client_refresh_request.v1",
 		refresh_token: REFRESH,
-		client: { name: "ceal", version: "0.64.0" },
+		client: { name: "ceal", version: "0.65.0" },
 	}).refresh_token, REFRESH);
 	const refreshed = decodeCealClientRefreshResponse({
 		schema_version: "ceal.client_refresh_result.v1",
@@ -46,7 +46,7 @@ test("personal-client refresh and revoke messages have one strict secret-safe sh
 
 test("personal-client session decoders reject drift and preserve stable recovery failures", () => {
 	assert.throws(() => decodeCealClientRefreshRequest({
-		schema_version: "ceal.client_refresh_request.v1", refresh_token: "short", client: { name: "ceal", version: "0.64.0" },
+		schema_version: "ceal.client_refresh_request.v1", refresh_token: "short", client: { name: "ceal", version: "0.65.0" },
 	}));
 	assert.throws(() => decodeCealClientRefreshResponse({
 		schema_version: "ceal.client_refresh_result.v1", ok: true, ...BINDING,
