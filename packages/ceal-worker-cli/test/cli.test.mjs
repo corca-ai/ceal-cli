@@ -442,6 +442,21 @@ test("an unknown failure code degrades by its typed recovery class, never by ser
 	});
 });
 
+test("receipt projects safe connector route provenance without provider material", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const receipt = await yamlRun(["receipt", "show", "narnia:route:1:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:route:receipt",
+		});
+		assert.deepEqual(receipt.events[0], {
+			ref: "gateway-audit:event:failed", operation: "call", outcome: "failed", authorization: "not_evaluated",
+			error_code: "connector_unavailable",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+			connector_route_failure: { connector_kind: "notion", phase: "scope_observation" },
+		});
+	}, (request) => connectorFailureReadbackResponse(request));
+});
+
 test("the known code table wins over a disagreeing recovery class", () => {
 	assert.deepEqual(classifyGatewayFailure({
 		code: "rate_limited", message: "server-controlled", recovery: { kind: "operator_restore" },
@@ -1353,6 +1368,20 @@ function failedReadbackResponse(request) {
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		}],
 	});
+}
+
+function connectorFailureReadbackResponse(request) {
+	const response = failedReadbackResponse(request);
+	const event = response.value.events[0];
+	event.policy_decision = "not_evaluated";
+	event.error_code = "connector_unavailable";
+	delete event.grant_snapshot;
+	event.connector_route_failure = {
+		schema_version: "ceal.gateway_connector_route_failure.v1",
+		connector_kind: "notion",
+		phase: "scope_observation",
+	};
+	return response;
 }
 
 function matureCapabilityAccess() {
