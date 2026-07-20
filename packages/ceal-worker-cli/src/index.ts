@@ -636,6 +636,7 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
 		authorization: event.policy_decision,
+		...(event.error_code === null ? {} : { error_code: event.error_code, non_claims: [...event.non_claims] }),
 		...(event.grant_snapshot ? {
 			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
 			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },

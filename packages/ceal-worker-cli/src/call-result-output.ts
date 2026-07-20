@@ -39,7 +39,7 @@ export function writeCallGatewayFailure(
 	writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
 		capability: parsed.capabilityId, target: parsed.targetRef,
-		...(proofRefs.length ? { receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs } } : {}),
+		receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
 		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
 	});
 	return 3;
@@ -80,6 +80,7 @@ const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "c
 	authentication_failed: { message: "The Gateway rejected the client credential.", nextAction: "Obtain a current Gateway-issued client session and retry.", denial: true },
 	profile_binding_denied: { message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true },
 	profile_access_denied: { message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true },
+	continuation_not_available: { message: "The approved continuation is no longer available.", nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.", denial: false },
 	connector_unavailable: { message: "The granted connector is currently unavailable.", nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.", denial: false },
 	rate_limited: { message: "The Gateway rate quota for this client is temporarily exhausted.", nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.", denial: false },
 	idempotency_conflict: { message: "The idempotency key names a different governed write.", nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.", denial: false },

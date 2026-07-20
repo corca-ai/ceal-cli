@@ -398,6 +398,38 @@ test("rate-limited calls explain a retryable recovery instead of operator restor
 	});
 });
 
+test("an unavailable continuation asks the agent to rediscover instead of restoring the connector", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "continuation_not_available", message: "server-controlled" }), {
+		code: "continuation_not_available",
+		message: "The approved continuation is no longer available.",
+		nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.",
+		denial: false,
+	});
+});
+
+test("a failed pre-provider call preserves its request ref and receipt exposes the safe failure phase", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const runtime = {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: (() => { let index = 0; return () => `narnia:failed:${++index}`; })(),
+		};
+		const failed = await yamlRun(["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], 3, runtime);
+		assert.deepEqual(failed.receipt, {
+			evidence: "not_read_back", request_ref: "narnia:failed:1:call", audit_refs: [],
+		});
+		assert.equal(failed.error.kind, "continuation_not_available");
+
+		const receipt = await yamlRun(["receipt", "show", "narnia:failed:1:call"], 0, runtime);
+		assert.deepEqual(receipt.events[0], {
+			ref: "gateway-audit:event:failed", operation: "call", outcome: "failed", authorization: "allowed",
+			error_code: "continuation_not_available",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+			capability: "message.get", target: "target:team-inbox",
+			grant: { ref: "grant:team-inbox-message-get", revision: 4 },
+		});
+	}, (request) => request.operation === "call" ? continuationFailureResponse(request) : failedReadbackResponse(request));
+});
+
 test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
 	assert.deepEqual(classifyGatewayFailure({
 		code: "quota_exceeded_v2", message: "server-controlled", next_action: "server-controlled prose",
@@ -1286,6 +1318,37 @@ function readbackResponse(request) {
 				grant_ref: "grant:team-inbox-message-search", grant_revision: 4, target_ref: "target:team-inbox",
 				requested_limit: 5, query_utf8_bytes: 6, result_count: 1,
 				coverage: matureSearchCoverage(),
+			},
+			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		}],
+	});
+}
+
+function continuationFailureResponse(request) {
+	return {
+		ok: false,
+		request_id: request.request_id,
+		protocol_version: "1.3.0",
+		error: {
+			code: "continuation_not_available",
+			message: "server-controlled",
+			next_action: "server-controlled",
+		},
+	};
+}
+
+function failedReadbackResponse(request) {
+	return success(request, {
+		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
+		events: [{
+			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:failed", request_id: request.body.request_id,
+			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
+			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+			occurred_at: "2026-07-20T13:00:00.000Z", operation: "call", auth_decision: "allowed", policy_decision: "allowed",
+			outcome: "failed", error_code: "continuation_not_available",
+			grant_snapshot: {
+				schema_version: "ceal.gateway_authorization_snapshot.v1", capability_id: "message.get", target_ref: "target:team-inbox",
+				grant_ref: "grant:team-inbox-message-get", grant_revision: 4,
 			},
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		}],
