@@ -20,6 +20,8 @@ const STATE_LOCK_OWNER = "owner.json";
 const STATE_LOCK_MAX_WAIT_MS = 30_000;
 const STATE_LOCK_POLL_MS = 25;
 const STATE_LOCK_INITIALIZATION_GRACE_MS = 1_000;
+const ORG_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/u;
+const INSTANCE_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 export interface OperatorSession {
 	name: string;
@@ -166,21 +168,32 @@ export function normalizeAdminOrigin(value: string): string {
 	let url: URL;
 	try { url = new URL(value); } catch { throw new OperatorSessionStoreError("invalid_profile"); }
 	const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-	const loopback = host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/u.test(host);
-	if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
-		throw new OperatorSessionStoreError("invalid_profile");
-	}
+	const loopback = isLoopbackHost(host);
+	assertAcceptableAdminUrl(url, loopback);
 	const pathname = url.pathname.replace(/\/+$/u, "");
-	const segments = pathname === "" ? [] : pathname.slice(1).split("/");
-	if (!(loopback && segments.length === 0)) {
-		if (segments.length !== 2) throw new OperatorSessionStoreError("instance_route_required");
-		if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(segments[0] ?? "")
-			|| !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(segments[1] ?? "")) {
-			throw new OperatorSessionStoreError("invalid_profile");
-		}
-	}
+	assertCanonicalAdminRoute(pathname, loopback);
 	url.pathname = pathname || "/";
 	return url.toString().replace(/\/$/u, "");
+}
+
+function isLoopbackHost(host: string): boolean {
+	return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/u.test(host);
+}
+
+function assertAcceptableAdminUrl(url: URL, loopback: boolean): void {
+	const acceptableProtocol = url.protocol === "https:" || (url.protocol === "http:" && loopback);
+	if (url.username || url.password || url.search || url.hash || !acceptableProtocol) {
+		throw new OperatorSessionStoreError("invalid_profile");
+	}
+}
+
+function assertCanonicalAdminRoute(pathname: string, loopback: boolean): void {
+	const segments = pathname === "" ? [] : pathname.slice(1).split("/");
+	if (loopback && segments.length === 0) return;
+	if (segments.length !== 2) throw new OperatorSessionStoreError("instance_route_required");
+	if (!ORG_SLUG.test(segments[0] ?? "") || !INSTANCE_SLUG.test(segments[1] ?? "")) {
+		throw new OperatorSessionStoreError("invalid_profile");
+	}
 }
 
 export function adminRequestUrl(origin: string, pathname: string): string {
