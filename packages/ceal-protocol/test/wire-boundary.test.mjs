@@ -344,6 +344,14 @@ test("legacy link fixtures accept only safe URL transport while leaving resource
 	const connectorNativeKind = structuredClone(response);
 	connectorNativeKind.value.data.resource.kind = "thread";
 	assert.deepEqual(decodeCealClientResponse(connectorNativeKind, request), connectorNativeKind);
+	// A non-slack connector kind plus a bounded integer sub-resource address
+	// (github issue) decodes additively — the resource shape is left to the Gateway.
+	const subResource = structuredClone(response);
+	subResource.value.data.resource = {
+		ref: "target:github-repository:183f6a7c0b67550c47076237", kind: "issue",
+		source: { provider: "github", url: "https://github.com/corca-ai/ceal/issues/42" }, address: { number: 42 },
+	};
+	assert.deepEqual(decodeCealClientResponse(subResource, request), subResource);
 });
 
 test("legacy write fixtures keep only generic write-boundary validation in the public protocol", () => {
