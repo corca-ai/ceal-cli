@@ -38,7 +38,7 @@
 			"@corca-ai/ceal-operator-cli"
 		],
 		"initial_bootstrap": {
-			"version": "0.65.0",
+			"version": "0.64.0",
 			"method": "maintainer_direct_publish_with_2fa",
 			"order": [
 				"@corca-ai/ceal-protocol",
