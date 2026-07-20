@@ -201,6 +201,8 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 	const routedConnectorFailure = structuredClone(ambiguousProviderFailure);
+	routedConnectorFailure.value.events[0].policy_decision = "not_evaluated";
+	delete routedConnectorFailure.value.events[0].grant_snapshot;
 	routedConnectorFailure.value.events[0].non_claims = ["provider_execution_not_reached", "production_audit_not_reached"];
 	routedConnectorFailure.value.events[0].connector_route_failure = {
 		schema_version: "ceal.gateway_connector_route_failure.v1",

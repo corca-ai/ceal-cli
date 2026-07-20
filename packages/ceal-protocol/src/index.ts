@@ -489,7 +489,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 
 function validateConnectorRouteFailure(value: unknown, event: Record<string, unknown>): void {
 	if (value === undefined) return;
-	if (event.outcome !== "failed" || event.error_code !== "connector_unavailable"
+	if (event.outcome !== "failed" || event.error_code !== "connector_unavailable" || event.policy_decision !== "not_evaluated"
 		|| !["call", "discover"].includes(String(event.operation))) invalidResponse();
 	const failure = requireRecord(value);
 	requireExactKeys(failure, ["connector_kind", "phase", "schema_version"]);

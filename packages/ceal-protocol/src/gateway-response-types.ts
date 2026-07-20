@@ -259,6 +259,7 @@ export interface CealGatewayAuditEvent {
 	policy_decision: "allowed" | "denied" | "not_evaluated";
 	outcome: "succeeded" | "denied" | "failed";
 	error_code: string | null;
+	/** Emitted only when the client negotiated `x-ceal-route-provenance: accept`. */
 	connector_route_failure?: CealGatewayConnectorRouteFailure;
 	grant_snapshot?: CealGatewayAuthorizationSnapshot;
 	call?: CealGatewayAuditCallDetail;

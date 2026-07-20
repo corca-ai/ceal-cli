@@ -42,6 +42,9 @@ export interface CealClientTransport {
  */
 export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = "x-ceal-profiles";
 
+/** Negotiates the optional safe connector-route failure audit projection. */
+export const CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER = "x-ceal-route-provenance";
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_TIMEOUT_MS = 120_000;
@@ -87,6 +90,7 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						// eligible-Profile catalog, so negotiate for it here; the
 						// Gateway omits the field for a client that does not.
 						[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER]: "accept",
+						[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER]: "accept",
 					},
 					body: JSON.stringify(wireRequest),
 					redirect: "error",
