@@ -170,8 +170,8 @@ jobs:
             || { echo "Downloaded handoff does not match unprivileged assembly $ASSEMBLED_SHA256SUMS_SHA256" >&2; exit 1; }
           [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "The ceal-cli-release environment has not approved SHA256SUMS $observed" >&2; exit 1; }
-          [ "$(find dist -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = \
-            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest-linux-amd64.json ceal-cli-platform-release-manifest-linux-arm64.json ceal-guide-SKILL.md cealctl-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 cealctl-linux-amd64 cealctl-linux-arm64 install.sh " ] \
+          [ "$(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
+            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-cli-platform-release-manifest-linux-amd64.json ceal-cli-platform-release-manifest-linux-arm64.json ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 cealctl-guide-SKILL.md cealctl-linux-amd64 cealctl-linux-arm64 install.sh " ] \
             || { echo "Unexpected build handoff inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)
           for platform in linux-arm64 linux-amd64; do
