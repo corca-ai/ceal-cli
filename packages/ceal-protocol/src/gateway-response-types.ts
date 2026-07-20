@@ -259,10 +259,18 @@ export interface CealGatewayAuditEvent {
 	policy_decision: "allowed" | "denied" | "not_evaluated";
 	outcome: "succeeded" | "denied" | "failed";
 	error_code: string | null;
+	connector_route_failure?: CealGatewayConnectorRouteFailure;
 	grant_snapshot?: CealGatewayAuthorizationSnapshot;
 	call?: CealGatewayAuditCallDetail;
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
+}
+
+/** Safe pre-provider provenance for a connector-owned route failure. */
+export interface CealGatewayConnectorRouteFailure {
+	schema_version: "ceal.gateway_connector_route_failure.v1";
+	connector_kind: string;
+	phase: "scope_observation" | "target_selection" | "route_resolution";
 }
 
 export interface CealGatewayAuthorizationSnapshot {

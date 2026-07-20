@@ -200,6 +200,20 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const preProviderFailure = structuredClone(ambiguousProviderFailure);
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
+	const routedConnectorFailure = structuredClone(ambiguousProviderFailure);
+	routedConnectorFailure.value.events[0].non_claims = ["provider_execution_not_reached", "production_audit_not_reached"];
+	routedConnectorFailure.value.events[0].connector_route_failure = {
+		schema_version: "ceal.gateway_connector_route_failure.v1",
+		connector_kind: "google-workspace",
+		phase: "scope_observation",
+	};
+	assert.deepEqual(decodeCealClientResponse(routedConnectorFailure, readbackRequest), routedConnectorFailure);
+	const spoofedProviderReach = structuredClone(routedConnectorFailure);
+	spoofedProviderReach.value.events[0].non_claims = ["production_audit_not_reached"];
+	assert.throws(() => decodeCealClientResponse(spoofedProviderReach, readbackRequest), hasCode("invalid_client_response"));
+	const unsafeConnectorKind = structuredClone(routedConnectorFailure);
+	unsafeConnectorKind.value.events[0].connector_route_failure.connector_kind = "Notion credential";
+	assert.throws(() => decodeCealClientResponse(unsafeConnectorKind, readbackRequest), hasCode("invalid_client_response"));
 	const unavailableResourceFailure = structuredClone(ambiguousProviderFailure);
 	unavailableResourceFailure.value.events[0].error_code = "resource_not_available";
 	assert.throws(() => decodeCealClientResponse(unavailableResourceFailure, readbackRequest), hasCode("invalid_client_response"));

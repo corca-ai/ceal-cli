@@ -74,6 +74,7 @@ export type {
 	CealGatewayAuditReadbackValue,
 	CealGatewayCacheOrigin,
 	CealGatewayCallValue,
+	CealGatewayConnectorRouteFailure,
 	CealGatewayDiscoverBody,
 	CealGatewayDiscoveryCapability,
 	CealGatewayDiscoveryTarget,
@@ -446,6 +447,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"call",
 		"client_ref",
 		"client_revision",
+		"connector_route_failure",
 		"error_code",
 		"event_ref",
 		"grant_snapshot",
@@ -463,7 +465,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"request_id",
 		"schema_version",
 		"subject_ref",
-	], ["call", "grant_snapshot"]);
+	], ["call", "connector_route_failure", "grant_snapshot"]);
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
 	for (const field of ["event_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(event[field]);
@@ -471,6 +473,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	requireIntegerRange(event.client_revision, 1, Number.MAX_SAFE_INTEGER);
 	validateAuditEventError(event);
 	validateAuditEventConsistency(event);
+	validateConnectorRouteFailure(event.connector_route_failure, event);
 	validateAuthorizationSnapshot(event.grant_snapshot, event);
 	if ("call" in event) validateAuditCallDetail(event.call, event);
 	else if (event.operation === "call" && event.outcome === "succeeded") invalidResponse();
@@ -482,6 +485,19 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		&& (event.outcome === "succeeded" || event.error_code === "connector_unavailable" || event.error_code === "wrong_resource_kind");
 	const providerWasReached = event.operation === "call" && event.error_code === "wrong_resource_kind";
 	validateHostNonClaims(event.non_claims, providerMayBeReached, providerWasReached);
+}
+
+function validateConnectorRouteFailure(value: unknown, event: Record<string, unknown>): void {
+	if (value === undefined) return;
+	if (event.outcome !== "failed" || event.error_code !== "connector_unavailable"
+		|| !["call", "discover"].includes(String(event.operation))) invalidResponse();
+	const failure = requireRecord(value);
+	requireExactKeys(failure, ["connector_kind", "phase", "schema_version"]);
+	if (failure.schema_version !== "ceal.gateway_connector_route_failure.v1"
+		|| typeof failure.connector_kind !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(failure.connector_kind)
+		|| !["scope_observation", "target_selection", "route_resolution"].includes(String(failure.phase))) invalidResponse();
+	const nonClaims = event.non_claims;
+	if (!Array.isArray(nonClaims) || !nonClaims.includes("provider_execution_not_reached")) invalidResponse();
 }
 
 function validateAuthorizationSnapshot(value: unknown, event: Record<string, unknown>): void {
