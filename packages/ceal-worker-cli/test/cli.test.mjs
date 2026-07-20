@@ -609,8 +609,9 @@ test("packaged bin persists an enrolled session with owner-only modes", async ()
 			assert.equal(result.code, 0, result.stdout);
 			assert.doesNotMatch(result.stdout, new RegExp(token, "u"));
 			assert.equal(statSync(path.join(home, ".ceal")).mode & 0o777, 0o700);
-			assert.equal(statSync(path.join(home, ".ceal", "client-session.json")).mode & 0o777, 0o600);
-			assert.equal(readFileSync(path.join(home, ".ceal", "client-session.json"), "utf8").includes(token), true);
+			const sessionPath = path.join(home, ".ceal", "client-session.json");
+			assert.equal(statSync(sessionPath).mode & 0o777, 0o600);
+			assert.equal(JSON.parse(readFileSync(sessionPath, "utf8")).access_token, token);
 		} finally { rmSync(home, { recursive: true, force: true }); }
 	});
 });

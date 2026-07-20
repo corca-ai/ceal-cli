@@ -27,9 +27,10 @@ test("session store writes owner-only issued material and reads it back", async 
 		await store.save(SESSION);
 		assert.deepEqual(await store.load(), SESSION);
 		const file = path.join(home, ".ceal", "client-session.json");
-		assert.equal(readFileSync(file, "utf8").includes(SESSION.accessToken), true);
-		assert.equal(readFileSync(file, "utf8").includes(SESSION.refreshToken), true);
-		assert.match(readFileSync(file, "utf8"), /ceal[.]client_session_store[.]v1/u);
+		const persisted = JSON.parse(readFileSync(file, "utf8"));
+		assert.equal(persisted.access_token, SESSION.accessToken);
+		assert.equal(persisted.refresh_token, SESSION.refreshToken);
+		assert.equal(persisted.schema_version, "ceal.client_session_store.v1");
 		assert.equal((await import("node:fs")).statSync(file).mode & 0o777, 0o600);
 		await store.remove();
 		assert.equal(await store.load(), null);
