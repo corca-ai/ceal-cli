@@ -29,8 +29,8 @@ sequence after reading the matching leaf help:
 ceal capabilities --profile <profile-ref> --fresh
 ceal capabilities targets --profile <profile-ref> \
   --capability <capability-id> --match <text-or-url> --limit 5
-ceal call <capability-id> --profile <profile-ref> \
-  --target <target-ref> key=value
+ceal call <capability-id> --target <target-ref> \
+  --profile <profile-ref> key=value
 ceal receipt show <request-ref> --profile <profile-ref>
 ```
 
