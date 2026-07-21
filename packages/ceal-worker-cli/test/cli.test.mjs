@@ -225,6 +225,22 @@ test("capabilities renews an expiring stored session once and persists the rotat
 	});
 });
 
+test("capabilities fails closed for malformed absolute refresh expiry before a refresh request", async () => {
+	await withRenewingGateway(async ({ endpoint, refreshCalls }) => {
+		const payload = await yamlRun(["capabilities"], 3, {
+			loadSession: async () => storedSession(endpoint, {
+				expiresAt: "2020-01-01T00:00:00.000Z",
+				refreshTokenAbsoluteExpiresAt: "not-a-date",
+			}),
+			saveSession: async () => {},
+			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+		});
+		assert.equal(payload.status, "unavailable");
+		assert.equal(payload.error.kind, "refresh_expired");
+		assert.equal(refreshCalls(), 0);
+	});
+});
+
 test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
 		let saved = null;
@@ -1161,12 +1177,14 @@ async function withRenewingGateway(callback, options = {}) {
 	const newAccessToken = `ceal_personal_${"N".repeat(43)}`;
 	const requests = [];
 	const revoked = [];
+	let refreshCallCount = 0;
 	let gatewayRejected = false;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		if (request.url === "/gateway/client/refresh") {
+			refreshCallCount += 1;
 			assert.equal(body.refresh_token, oldRefreshToken);
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(JSON.stringify({
@@ -1201,7 +1219,7 @@ async function withRenewingGateway(callback, options = {}) {
 	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
-	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, oldRefreshToken, newAccessToken, newRefreshToken, requests, revoked }); }
+	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, oldRefreshToken, newAccessToken, newRefreshToken, requests, revoked, refreshCalls: () => refreshCallCount }); }
 	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 }
 

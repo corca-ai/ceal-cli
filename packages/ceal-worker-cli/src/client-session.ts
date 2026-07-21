@@ -211,7 +211,8 @@ function sessionIsCurrent(session: CealStoredSession, now: number): boolean {
 }
 
 function requireRefreshContext(session: CealStoredSession, now: number): string {
-	if (Date.parse(session.refreshTokenAbsoluteExpiresAt) <= now) {
+	const expiresAt = Date.parse(session.refreshTokenAbsoluteExpiresAt);
+	if (!Number.isFinite(expiresAt) || expiresAt <= now) {
 		throw new CealClientSessionError("refresh_expired");
 	}
 	return session.refreshToken;
