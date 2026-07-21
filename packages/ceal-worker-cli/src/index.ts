@@ -43,6 +43,13 @@ type CatalogProvenance =
 	| { source: "live_discovery" }
 	| { source: "cached_discovery"; cachedAt: number; expiresAt: number };
 
+// The first call received an explicit authentication rejection, so no provider
+// invocation happened. Keep a failed renewal distinct from a transport loss
+// after a call was actually dispatched.
+class CealKnownPreProviderCallError extends Error {
+	constructor(readonly cause: unknown) { super("The Gateway rejected the call before provider execution."); }
+}
+
 export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
@@ -690,6 +697,7 @@ async function requestReceiptReadback(initialSession: CealStoredSession, profile
 }
 
 function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
+	const gatewayElapsedMs = event.call?.gateway_elapsed_ms;
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
 		authorization: event.policy_decision,
@@ -702,6 +710,8 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
 			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
 		} : {}),
+		...(typeof gatewayElapsedMs === "number" && Number.isSafeInteger(gatewayElapsedMs) && gatewayElapsedMs >= 0
+			? { timing: { gateway_elapsed_ms: gatewayElapsedMs } } : {}),
 	};
 }
 
@@ -734,9 +744,17 @@ async function executeCall(
 		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed);
 		completed = { value: call.value, events: readback.value.events, session };
 	} catch (error) {
+		if (error instanceof CealKnownPreProviderCallError) {
+			const reason = error.cause instanceof CealClientSessionError ? error.cause.code : "session_renewal_failed";
+			return writeCallUnavailable(reason, io, initialSession, parsed);
+		}
+		// A session renewal is attempted only after the Gateway explicitly
+		// returned authentication_failed. It is therefore a known pre-provider
+		// rejection, not an unknown call outcome; do not ask an agent to look up
+		// or preserve a receipt for an action the Gateway did not authorize.
 		if (error instanceof CealClientSessionError) return writeCallUnavailable(error.code, io, initialSession, parsed);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeCallUnavailable(reason, io, initialSession, parsed);
+		return writeCallUnavailable(reason, io, initialSession, parsed, requestId);
 	}
 	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.session, parsed);
 }
@@ -779,7 +797,8 @@ async function requestCapabilityCall(
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let call = await requestCapability(client, profileRef, parsed, requestId);
 	if (!shouldRetryAuthentication(call, session)) return { call, client, session };
-	session = await ensureCurrentSession(session, runtime, true);
+	try { session = await ensureCurrentSession(session, runtime, true); }
+	catch (error) { throw new CealKnownPreProviderCallError(error); }
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	call = await requestCapability(client, profileRef, parsed, requestId);
 	return { call, client, session };

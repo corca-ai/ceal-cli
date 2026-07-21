@@ -340,6 +340,7 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 				ref: "gateway-audit:event:001", operation: "call", outcome: "succeeded", authorization: "allowed",
 				capability: "message.search", target: "target:team-inbox",
 				grant: { ref: "grant:team-inbox-message-search", revision: 4 },
+				timing: { gateway_elapsed_ms: 42 },
 			}],
 		});
 		assert.deepEqual(requests.map((item) => item.body.operation), ["readback"]);
@@ -440,6 +441,27 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 		"reply_to=message:approved_001", "text=Approved", "idempotency_key=retry-001", "format=compact",
 	], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") });
 	assert.equal(payload.error.kind, "request_failed");
+	assert.deepEqual(payload.receipt, {
+		evidence: "outcome_unknown", request_ref: "ceal:call:call", audit_refs: [],
+	});
+	assert.match(payload.error.next_action, /Do not repeat a write yet/u);
+	assert.match(payload.error.next_action, /ceal receipt show ceal:call:call/u);
+});
+
+test("a rejected call followed by failed session renewal is known pre-provider state, not an unknown receipt", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, requests }) => {
+		const payload = await yamlRun([
+			"call", "message.search", "--target", "target:team-inbox", "query=launch",
+		], 3, {
+			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+			saveSession: async () => { throw new Error("local store unavailable"); },
+			nextRequestId: () => "narnia:renewal-failed:001",
+		});
+		assert.equal(payload.error.kind, "session_renewal_failed");
+		assert.equal("receipt" in payload, false);
+		assert.doesNotMatch(payload.error.next_action, /Do not repeat a write yet/u);
+		assert.deepEqual(requests.map((request) => request.body.operation), ["call"]);
+	}, { rejectFirstGateway: true });
 });
 
 test("rate-limited calls explain a retryable recovery instead of operator restoration", () => {
@@ -1387,7 +1409,7 @@ function readbackResponse(request) {
 			call: {
 				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search",
 				grant_ref: "grant:team-inbox-message-search", grant_revision: 4, target_ref: "target:team-inbox",
-				requested_limit: 5, query_utf8_bytes: 6, result_count: 1,
+				requested_limit: 5, query_utf8_bytes: 6, result_count: 1, gateway_elapsed_ms: 42,
 				coverage: matureSearchCoverage(),
 			},
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],

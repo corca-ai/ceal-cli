@@ -58,12 +58,24 @@ export function writeCallIncomplete(
 }
 
 export function writeCallUnavailable(
-	reason: string, io: ResultIo, session: CealStoredSession | null, parsed: CealParsedCapabilityCall | null,
+	reason: string, io: ResultIo, session: CealStoredSession | null, parsed: CealParsedCapabilityCall | null, requestId?: string,
 ): number {
+	const requestWasIssued = typeof requestId === "string";
 	writeYaml(io.stdout, {
 		schema_version: "ceal.result.v2", status: "error",
 		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
-		error: { kind: reason, message: "The capability call could not be completed.", next_action: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant." },
+		// A transport failure after the worker has allocated the Gateway request
+		// reference has an unknown outcome: the Gateway may have completed and
+		// audited the call after the client stopped waiting. Preserve that safe
+		// correlation key so an agent can inspect it instead of repeating a write.
+		...(requestWasIssued ? { receipt: { evidence: "outcome_unknown", request_ref: requestId, audit_refs: [] } } : {}),
+		error: {
+			kind: reason,
+			message: "The capability call could not be completed.",
+			next_action: requestWasIssued
+				? `Do not repeat a write yet. Run 'ceal receipt show ${requestId}' after a short wait to determine the Gateway outcome.`
+				: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
+		},
 	});
 	return 3;
 }
