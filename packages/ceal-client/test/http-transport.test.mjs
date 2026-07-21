@@ -5,10 +5,15 @@ import test from "node:test";
 import {
 	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
+	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CealHttpTransportError,
 	createCealClient,
 	createCealHttpTransport,
 } from "../dist/index.js";
+
+test("HTTP transport gives bounded Gateway capability calls a thirty-second default budget", () => {
+	assert.equal(CEAL_DEFAULT_HTTP_TIMEOUT_MS, 30_000);
+});
 
 const request = {
 	request_id: "request:handshake:001",

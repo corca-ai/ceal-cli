@@ -45,7 +45,12 @@ export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = "x-ceal-profiles";
 /** Negotiates the optional safe connector-route failure audit projection. */
 export const CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER = "x-ceal-route-provenance";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// Capability calls can legitimately traverse a bounded provider page before
+// the Gateway serializes its minimized result. Ten seconds cut off a completed
+// Gateway call just before its response reached an agent, so keep the default
+// below the existing two-minute hard cap while leaving room for that bounded
+// read path and ordinary cold-start latency.
+export const CEAL_DEFAULT_HTTP_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_CONFIGURED_RESPONSE_BYTES = 1024 * 1024;
@@ -55,7 +60,7 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 	const accessToken = validateAccessToken(options.accessToken);
 	const fetchFn = options.fetchFn ?? globalThis.fetch;
 	if (typeof fetchFn !== "function") throw new CealHttpTransportError("invalid_configuration");
-	const timeoutMs = boundedInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
+	const timeoutMs = boundedInteger(options.timeoutMs ?? CEAL_DEFAULT_HTTP_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
 	const maxResponseBytes = boundedInteger(options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES, 1, MAX_CONFIGURED_RESPONSE_BYTES);
 
 	return {
