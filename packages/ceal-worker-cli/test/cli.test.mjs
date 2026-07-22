@@ -1125,6 +1125,21 @@ test("capabilities degrades to a live probe when the discovery cache read fails"
 	});
 });
 
+test("capabilities degrades to a live probe when a fresh cache entry has a malformed discovery value", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		const malformed = cachedEntry(endpoint, now);
+		malformed.discovery = { schema_version: "ceal.gateway_discovery.v2" };
+		const cache = inMemoryDiscoveryCache(malformed);
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "the live discovery replaces the malformed cache value");
+	});
+});
+
 function inMemoryDiscoveryCache(initial = null) {
 	let current = initial;
 	return {

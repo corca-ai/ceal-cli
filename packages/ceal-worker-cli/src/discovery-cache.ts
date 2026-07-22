@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost
@@ -17,8 +18,9 @@ import path from "node:path";
 
 const CACHE_FILE = "client-discovery-cache.json";
 const CACHE_SCHEMA_VERSION = "ceal.client_discovery_cache.v1";
-const DISCOVERY_SCHEMA_VERSION = "ceal.gateway_discovery.v2";
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const CACHED_DISCOVERY_REQUEST_ID = "cache:discovery";
+const CACHED_DISCOVERY_PROOF_REF = "cache:local";
 
 export interface CealDiscoveryCacheKey {
 	gatewayEndpoint: string;
@@ -67,7 +69,10 @@ export function createCealDiscoveryCacheStore(home: string | undefined): CealDis
 export function discoveryCacheEntryUsable(
 	entry: CealDiscoveryCacheEntry, key: CealDiscoveryCacheKey, now: number, ttlMs: number,
 ): boolean {
-	return keysMatch(entry.key, key) && entry.cachedAt <= now && now - entry.cachedAt < ttlMs;
+	return isValidCacheKey(entry.key) && isValidCacheKey(key)
+		&& isValidCachedDiscovery(entry.discovery, entry.key)
+		&& Number.isFinite(entry.cachedAt) && Number.isFinite(now) && Number.isSafeInteger(ttlMs) && ttlMs >= 0
+		&& keysMatch(entry.key, key) && entry.cachedAt <= now && now - entry.cachedAt < ttlMs;
 }
 
 function keysMatch(a: CealDiscoveryCacheKey, b: CealDiscoveryCacheKey): boolean {
@@ -93,13 +98,14 @@ function parseCacheEntry(value: unknown): CealDiscoveryCacheEntry | null {
 	const protocol = value.negotiated_protocol_version;
 	const cachedAtRaw = value.cached_at;
 	const discovery = value.discovery;
-	if (!safeEndpoint(endpoint) || !safeRef(profile) || !safeRef(membership) || !safeRef(protocol)) return null;
+	const key = { gatewayEndpoint: endpoint, profileRef: profile, membershipRef: membership, negotiatedProtocolVersion: protocol };
+	if (!isValidCacheKey(key)) return null;
 	if (typeof cachedAtRaw !== "string") return null;
 	const cachedAt = Date.parse(cachedAtRaw);
 	if (!Number.isFinite(cachedAt)) return null;
-	if (!isRecord(discovery) || discovery.schema_version !== DISCOVERY_SCHEMA_VERSION) return null;
+	if (!isValidCachedDiscovery(discovery, key)) return null;
 	return {
-		key: { gatewayEndpoint: endpoint, profileRef: profile, membershipRef: membership, negotiatedProtocolVersion: protocol },
+		key,
 		cachedAt,
 		discovery,
 	};
@@ -140,11 +146,40 @@ function serializeEntry(entry: CealDiscoveryCacheEntry): Record<string, unknown>
 }
 
 function validateEntry(entry: CealDiscoveryCacheEntry): void {
-	const usable = safeEndpoint(entry.key.gatewayEndpoint) && safeRef(entry.key.profileRef)
-		&& safeRef(entry.key.membershipRef) && safeRef(entry.key.negotiatedProtocolVersion)
-		&& Number.isFinite(entry.cachedAt) && isRecord(entry.discovery)
-		&& entry.discovery.schema_version === DISCOVERY_SCHEMA_VERSION;
+	const usable = isValidCacheKey(entry.key) && Number.isFinite(entry.cachedAt)
+		&& isValidCachedDiscovery(entry.discovery, entry.key);
 	if (!usable) throw new CealDiscoveryCacheStoreError("unsafe_store");
+}
+
+function isValidCacheKey(value: unknown): value is CealDiscoveryCacheKey {
+	if (!isRecord(value)) return false;
+	return safeEndpoint(value.gatewayEndpoint) && safeRef(value.profileRef)
+		&& safeRef(value.membershipRef) && safeRef(value.negotiatedProtocolVersion);
+}
+
+// A cache entry crosses the same untyped disk boundary as a Gateway response.
+// Re-use the protocol decoder instead of trusting its top-level schema tag or
+// maintaining a weaker second discovery validator here.
+function isValidCachedDiscovery(value: unknown, key: CealDiscoveryCacheKey): value is Record<string, unknown> {
+	try {
+		const request = {
+			request_id: CACHED_DISCOVERY_REQUEST_ID,
+			protocol_version: CEAL_PROTOCOL_VERSION,
+			operation: "discover" as const,
+			profile_ref: key.profileRef,
+			body: {},
+		};
+		const response = decodeCealClientResponse({
+			ok: true,
+			request_id: CACHED_DISCOVERY_REQUEST_ID,
+			protocol_version: CEAL_PROTOCOL_VERSION,
+			proof_ref_or_unavailable: CACHED_DISCOVERY_PROOF_REF,
+			value,
+		}, request);
+		return response.ok && response.value.membership_ref === key.membershipRef;
+	} catch {
+		return false;
+	}
 }
 
 function safeExistingFile(directory: string, file: string): boolean {

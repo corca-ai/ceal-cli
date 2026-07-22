@@ -20,7 +20,17 @@ function entry(overrides = {}) {
 	return {
 		key: KEY,
 		cachedAt: Date.parse("2026-07-18T12:00:00.000Z"),
-		discovery: { schema_version: "ceal.gateway_discovery.v2", capabilities: [], targets: [], target_catalog: { target_count: 0 } },
+		discovery: {
+			schema_version: "ceal.gateway_discovery.v2",
+			profile_ref: KEY.profileRef,
+			membership_ref: KEY.membershipRef,
+			capabilities: [],
+			targets: [],
+			target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		},
 		...overrides,
 	};
 }
@@ -78,6 +88,18 @@ test("discovery cache read rejects a foreign discovery schema as a miss", async 
 	});
 });
 
+test("discovery cache read rejects a partial current-schema discovery value as a miss", async () => {
+	await withHome(async (home) => {
+		writeFileSync(cacheFile(home), JSON.stringify({
+			schema_version: "ceal.client_discovery_cache.v1",
+			gateway_endpoint: KEY.gatewayEndpoint, profile_ref: KEY.profileRef, membership_ref: KEY.membershipRef,
+			negotiated_protocol_version: KEY.negotiatedProtocolVersion, cached_at: "2026-07-18T12:00:00.000Z",
+			discovery: { schema_version: "ceal.gateway_discovery.v2" },
+		}), { mode: 0o600 });
+		assert.equal(await createCealDiscoveryCacheStore(home).load(), null);
+	});
+});
+
 test("discovery cache save fails closed on an invalid entry", async () => {
 	await withHome(async (home) => {
 		const store = createCealDiscoveryCacheStore(home);
@@ -101,6 +123,10 @@ test("discoveryCacheEntryUsable enforces key match and freshness", () => {
 	assert.equal(discoveryCacheEntryUsable(entry({ cachedAt: now + 10_000 }), KEY, now, 5_000), false, "future stamp is not usable");
 	assert.equal(discoveryCacheEntryUsable(fresh, { ...KEY, profileRef: "profile:other" }, now, 5_000), false, "key mismatch");
 	assert.equal(discoveryCacheEntryUsable(fresh, { ...KEY, negotiatedProtocolVersion: "1.2.0" }, now, 5_000), false, "protocol mismatch");
+	assert.equal(discoveryCacheEntryUsable(entry({
+		cachedAt: now - 1_000,
+		discovery: { ...entry().discovery, membership_ref: "membership:other" },
+	}), KEY, now, 5_000), false, "discovery membership mismatch");
 });
 
 function cacheFile(home) {
