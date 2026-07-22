@@ -1,20 +1,28 @@
 # Ceal CLI source candidate
 
-This tree is the local source candidate for the public `corca-ai/ceal-cli`
-repository. It owns four independently packaged surfaces:
+This tree is the local source candidate for the worker-facing
+`corca-ai/ceal-cli` repository. It owns two worker/client surfaces:
 
-- `@corca-ai/ceal-protocol`: wire types, compatibility, and canonical conformance;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;
-- `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing `ceal` binary;
-- `@corca-ai/ceal-operator-cli`: the private build workspace for the operator-facing `cealctl` binary.
+- `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing `ceal` binary.
+
+Gateway owns `cealctl`, `cealctl-guide`, and the canonical
+`@corca-ai/ceal-protocol` source/conformance corpus in private `corca-ai/ceal`.
+The matching protocol/operator trees retained here are frozen compatibility
+inputs while the worker cutover is completed; they are not writable source or a
+release/install authority. A worker source build must consume only a supplied
+packed Gateway protocol artifact. Run
+`node scripts/verify-gateway-protocol-consumer.mjs --help` for that local,
+no-network consumer proof.
 
 `@corca-ai/ceal` names only the client SDK. It does not contain the CLI,
 Agent runner, Gateway server, or an umbrella SDK.
 
-The two commands deliberately have separate help, command registries,
+The two commands deliberately retain separate help, command registries,
 credential-context identifiers, and package archives. `ceal` does not contain
-operator or credential-management commands. `cealctl` does not contain worker
-capability calls or worker Session material.
+operator or credential-management commands. The retained `cealctl` material is
+historical compatibility content; Gateway documentation and releases define its
+current operator surface.
 
 Both commands use conventional text only for progressive `--help` discovery.
 Every non-help result, including parser failures, is exactly one compact YAML

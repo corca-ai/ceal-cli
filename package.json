@@ -3,7 +3,7 @@
 	"version": "0.65.0",
 	"private": true,
 	"license": "MIT",
-	"description": "Public Ceal client, operator CLI, protocol, and release source",
+	"description": "Ceal worker CLI and client source; Gateway protocol/operator compatibility inputs are frozen",
 	"type": "module",
 	"engines": {
 		"node": ">=22.19.0"
