@@ -124,7 +124,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.result.v2",
-		recovery: "Run 'ceal capabilities', then use one granted capability and target exactly as discovered.",
+		recovery: "Run 'ceal capabilities', then select a target for that same capability with 'ceal capabilities targets --capability <capability-id>'. Do not mix a target returned for another capability.",
 	},
 	{
 		name: "receipt",

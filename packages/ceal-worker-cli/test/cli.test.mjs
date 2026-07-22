@@ -61,6 +61,9 @@ test("canonical registry is reachable through stable, read-only help", async () 
 		assert.match(capabilitiesHelp.stdout, new RegExp(option, "u"));
 	}
 	assert.match(capabilitiesHelp.stdout, /targets --profile <profile-ref>/u);
+	const callHelp = await run(["call", "--help"]);
+	assert.match(callHelp.stdout, /select a target for that same capability/u);
+	assert.match(callHelp.stdout, /Do not mix a target returned for another capability/u);
 	const guideHelp = await run(["guide", "--help"]);
 	assert.match(guideHelp.stdout, /status[\s\S]+Effect: read_only/u);
 	assert.match(guideHelp.stdout, /register codex[\s\S]+Effect: local_write/u);
