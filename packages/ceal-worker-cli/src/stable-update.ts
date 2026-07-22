@@ -60,12 +60,7 @@ function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRele
 	const workerDirectory = dirname(releasesDirectory);
 	const stateDirectory = dirname(workerDirectory);
 	const installDirectory = dirname(stateDirectory);
-	if (!/^ceal-linux-(?:arm64|amd64)$/u.test(commandPath.slice(commandPath.lastIndexOf("/") + 1))
-		|| commandPath !== join(generationDirectory, commandPath.slice(commandPath.lastIndexOf("/") + 1))
-		|| stateDirectory.slice(stateDirectory.lastIndexOf("/") + 1) !== ".ceal-cli"
-		|| workerDirectory.slice(workerDirectory.lastIndexOf("/") + 1) !== "worker"
-		|| releasesDirectory.slice(releasesDirectory.lastIndexOf("/") + 1) !== "releases"
-		|| realpathSync(join(workerDirectory, "current")) !== generationDirectory) throw new Error("unmanaged_release");
+	if (!isManagedWorkerGeneration({ commandPath, generationDirectory, releasesDirectory, workerDirectory, stateDirectory })) throw new Error("unmanaged_release");
 	const installerPath = join(generationDirectory, "install.sh");
 	const inventoryPath = join(generationDirectory, "SHA256SUMS");
 	if (!lstatSync(installerPath).isFile() || !lstatSync(inventoryPath).isFile()) throw new Error("unsafe_installer");
@@ -74,15 +69,32 @@ function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRele
 	return { commandPath, installerPath, generationDirectory, installDirectory };
 }
 
+function isManagedWorkerGeneration(paths: Pick<InstalledWorkerRelease, "commandPath" | "generationDirectory"> & { releasesDirectory: string; workerDirectory: string; stateDirectory: string }): boolean {
+	const commandName = basename(paths.commandPath);
+	return isWorkerBinary(commandName)
+		&& paths.commandPath === join(paths.generationDirectory, commandName)
+		&& basename(paths.stateDirectory) === ".ceal-cli"
+		&& basename(paths.workerDirectory) === "worker"
+		&& basename(paths.releasesDirectory) === "releases"
+		&& realpathSync(join(paths.workerDirectory, "current")) === paths.generationDirectory;
+}
+
+function basename(value: string): string { return value.slice(value.lastIndexOf("/") + 1); }
+function isWorkerBinary(value: string): boolean { return /^ceal-linux-(?:arm64|amd64)$/u.test(value); }
+
 async function readVersion(commandPath: string): Promise<{ version: string; platform: "linux-arm64" | "linux-amd64" } | null> {
 	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath));
-	if (run.code !== 0 || run.truncated || run.stderr.length > 0) return null;
+	if (run.code !== 0 || run.truncated || run.stderr !== "") return null;
 	try {
 		const payload = parse(run.stdout) as { schema_version?: unknown; command?: unknown; version?: unknown };
-		const platform = /ceal-linux-(arm64|amd64)$/u.exec(realpathSync(commandPath))?.[1];
-		if (payload?.schema_version !== "ceal.version.v1" || payload.command !== "ceal" || typeof payload.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(payload.version) || !platform) return null;
-		return { version: payload.version, platform: `linux-${platform}` as "linux-arm64" | "linux-amd64" };
+		return parseWorkerVersion(payload, commandPath);
 	} catch { return null; }
+}
+
+function parseWorkerVersion(payload: { schema_version?: unknown; command?: unknown; version?: unknown }, commandPath: string): { version: string; platform: "linux-arm64" | "linux-amd64" } | null {
+	const platform = /ceal-linux-(arm64|amd64)$/u.exec(realpathSync(commandPath))?.[1];
+	if (payload?.schema_version !== "ceal.version.v1" || payload.command !== "ceal" || typeof payload.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(payload.version) || !platform) return null;
+	return { version: payload.version, platform: `linux-${platform}` as "linux-arm64" | "linux-amd64" };
 }
 
 async function runProcess(command: string, args: readonly string[], env: NodeJS.ProcessEnv, cwd: string): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {

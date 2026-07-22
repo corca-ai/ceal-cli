@@ -1,3 +1,4 @@
+/* global process */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -50,7 +51,6 @@ test("stable updater rejects a verified installer result that would downgrade th
 	const worker = path.join(install, ".ceal-cli", "worker");
 	const releases = path.join(worker, "releases");
 	const first = path.join(releases, "0.65.1-linux-amd64-test");
-	const second = path.join(releases, "0.65.0-linux-amd64-test");
 	mkdirSync(first, { recursive: true });
 	writeWorkerBinary(path.join(first, "ceal-linux-amd64"), "0.65.1");
 	writeFileSync(path.join(first, "install.sh"), downgradeScript());
