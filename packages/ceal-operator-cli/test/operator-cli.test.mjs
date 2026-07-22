@@ -78,9 +78,54 @@ test("version reports package, protocol, range, and operator credential context"
 test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "connectors", "enrollments", "doctor"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "connectors", "enrollments", "ingress", "doctor"]);
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_session");
+});
+
+test("ingress plans customer-owned direct, tunnel, and private routes without network or secret input", async () => {
+	for (const mode of ["direct-origin", "outbound-tunnel", "private-network"]) {
+		let fetchCalls = 0;
+		const result = await asyncRun([
+			"ingress", "plan", "--gateway-host", "gateway.acme.test", "--org", "acme", "--instance", "production", "--mode", mode,
+		], { fetchFn: async () => { fetchCalls += 1; throw new Error("network must not run"); } });
+		assert.equal(result.code, 0, result.stdout);
+		const payload = parseYaml(result.stdout);
+		assert.equal(payload.schema_version, "cealctl.ingress_plan.v1");
+		assert.equal(payload.gateway_control_origin, "https://gateway.acme.test/acme/production");
+		assert.equal(payload.personal_client_endpoint, "https://gateway.acme.test/acme/production/api/ceal/v1");
+		assert.equal(payload.mode, mode);
+		assert.equal(payload.network_accessed, false);
+		assert.equal(payload.writes_external, false);
+		assert.equal(fetchCalls, 0);
+		assert.doesNotMatch(JSON.stringify(payload), /xox[ab]|ceal_(?:admin|refresh)_|client_secret_value/i);
+	}
+});
+
+test("ingress rejects the product landing hostname and verifies only transport without a response body", async () => {
+	const invalid = await asyncRun([
+		"ingress", "plan", "--gateway-host", "ceal.borca.ai", "--org", "acme", "--instance", "production", "--mode", "direct-origin",
+	]);
+	assert.equal(invalid.code, 2);
+	assert.equal(parseYaml(invalid.stdout).error.kind, "invalid_argument");
+
+	const verified = await asyncRun([
+		"ingress", "verify", "--gateway-host", "gateway.acme.test", "--org", "acme", "--instance", "production", "--mode", "direct-origin",
+	], { fetchFn: async (url, init) => {
+		assert.equal(String(url), "https://gateway.acme.test/acme/production/api/ceal/v1");
+		assert.equal(init.method, "GET");
+		assert.equal(init.redirect, "error");
+		assert.equal(init.headers.accept, "application/json");
+		return response(401, { deliberately_unread: "provider-or-token-shaped-data-is-never-rendered" });
+	} });
+	assert.equal(verified.code, 0, verified.stdout);
+	const payload = parseYaml(verified.stdout);
+	assert.equal(payload.status, "transport_reachable");
+	assert.equal(payload.proof_level, "transport");
+	assert.equal(payload.http_status, 401);
+	assert.equal(payload.raw_response_body_visible, false);
+	assert.equal(payload.gateway_route_verified, false);
+	assert.doesNotMatch(JSON.stringify(payload), /deliberately_unread|provider-or-token/i);
 });
 
 test("doctor reports surface health without setup, runtime, writes, or network claims", () => {
