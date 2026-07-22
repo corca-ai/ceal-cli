@@ -64,7 +64,7 @@ function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRele
 	const installerPath = join(generationDirectory, "install.sh");
 	const inventoryPath = join(generationDirectory, "SHA256SUMS");
 	if (!lstatSync(installerPath).isFile() || !lstatSync(inventoryPath).isFile()) throw new Error("unsafe_installer");
-	const expected = /^([a-f0-9]{64})  install[.]sh$/mu.exec(readFileSync(inventoryPath, "utf8"))?.[1];
+	const expected = /^([a-f0-9]{64}) {2}install[.]sh$/mu.exec(readFileSync(inventoryPath, "utf8"))?.[1];
 	if (!expected || expected !== digest(readFileSync(installerPath))) throw new Error("installer_digest_mismatch");
 	return { commandPath, installerPath, generationDirectory, installDirectory };
 }
