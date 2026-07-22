@@ -13,7 +13,7 @@
 	],
 	"scripts": {
 		"build": "npm --prefix packages/ceal-protocol run build && npm --prefix packages/ceal-client run build && npm --prefix packages/ceal-worker-cli run build && npm --prefix packages/ceal-operator-cli run build",
-		"test": "npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test && npm --prefix packages/ceal-worker-cli test && npm --prefix packages/ceal-operator-cli test && node --test test/*.test.mjs",
+		"test": "npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test && npm --prefix packages/ceal-worker-cli test && npm --prefix packages/ceal-operator-cli test && node --test --test-concurrency=1 test/*.test.mjs",
 		"check": "npm run build && npm test",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
 		"release:binaries": "node scripts/build-platform-binaries.mjs"

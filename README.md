@@ -103,10 +103,15 @@ ceal version
 ceal session --help
 ```
 
-An omitted `CEAL_VERSION` is rejected rather than resolving GitHub's mutable
-`latest` pointer. The default command directory is `$HOME/.local/bin`; it must
-be on `PATH`. Set `CEAL_INSTALL_DIR` for another user-owned directory. This
-default never installs `cealctl`.
+An omitted `CEAL_VERSION` is rejected. Bootstrap and explicit rollback use a
+tag such as `v0.65.0`; only an already verified installed worker command may
+use option-free `ceal update`. That command resolves GitHub's latest release
+only as a candidate, accepts only a canonical stable `vX.Y.Z` tag, and still
+verifies every tag-bound signature and checksum before switching the worker
+generation. It never selects candidates, updates `cealctl`, contacts a
+Gateway, or updates an Agent. The default command directory is
+`$HOME/.local/bin`; it must be on `PATH`. Set `CEAL_INSTALL_DIR` for another
+user-owned directory. This default never installs `cealctl`.
 
 `cealctl` is for an existing Gateway/control-plane operator only, never for a
 personal client machine. On that administrator host, select it explicitly:
@@ -244,8 +249,8 @@ System-wide or privileged installation is not supported. The installer
 preserves an existing directory's mode and unrelated files.
 
 `install.sh` downloads the selected role's signed binary plus its matching
-signed guide, the manifest, notice, and signed checksum inventory and their
-sidecars, constrains the
+signed guide, installer, manifest, notice, and signed checksum inventory and
+their sidecars, constrains the
 signing identity to this repository, workflow, issuer, and tag, validates the
 exact signed checksum inventory, checks the selected binary digest, and
 smoke-runs only that command. It installs the selected role into its own
@@ -256,10 +261,16 @@ preserves that role's previous generation and leaves the other command
 untouched. A successful update retains the previous generation locally, but
 automatic rollback is not performed. Reinstall an explicitly approved earlier
 tag with the same role to roll back. Unsigned installation is unsupported.
-The matching guide is staged as `guide/SKILL.md` inside that role's signed
-generation; the installer deliberately does not inject it into a particular
-agent runtime. Its final line reports the exact resolved path. The worker CLI
-makes this local boundary discoverable and explicit:
+The matching guide and the verified installer are staged inside that role's
+signed generation; the installer deliberately does not inject the guide into a
+particular agent runtime. `ceal update` invokes only that staged installer and
+returns one `ceal.update.v1` document with the resulting version, artifact
+digest, platform, and elapsed time. Its native packed-artifact isolated-prefix
+test takes about 19 seconds locally because it rebuilds the current Node SEA
+binary before exercising installation and update; this cost remains deliberate
+release-artifact evidence rather than a normal unit-test path. Its final line
+reports the exact resolved path. The worker CLI makes this local boundary
+discoverable and explicit:
 
 ```sh
 ceal guide status

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -16,7 +16,7 @@ test("installer requires an explicit signed tag before creating either role", ()
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, version: "" });
 		assert.equal(result.status, 1);
-		assert.match(result.stderr, /CEAL_VERSION is required until a compatible signed release is approved/u);
+		assert.match(result.stderr, /CEAL_VERSION is required; set stable for the latest signed release/u);
 		assert.equal(existsSync(cosignLog), false);
 		assert.equal(existsSync(install), false);
 	});
@@ -35,14 +35,82 @@ test("default worker installation creates only ceal and worker-owned state", () 
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
 		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "THIRD_PARTY_NOTICES.txt"), "utf8"), /yaml 2[.]9[.]0 \(ISC\)/u);
 		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "guide", "SKILL.md"), "utf8"), /ceal-guide/u);
+		assert.equal(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "install.sh"), "utf8"), "signed installer asset\n");
 		assert.equal(readdirSync(path.join(install, ".ceal-cli", "worker", "releases")).length, 1);
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "install.lock")).isFile(), true);
 		const log = readFileSync(cosignLog, "utf8");
-		assert.equal(log.match(/verify-blob/gu)?.length, 5);
+		assert.equal(log.match(/verify-blob/gu)?.length, 6);
 		assert.match(log, /corca-ai\/ceal-cli/u);
 		assert.match(log, /refs\/tags\/v0[.]65[.]0/u);
 		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]65[.]0/u);
 	});
+});
+
+test("stable mode resolves only a canonical latest release tag before the signed install path", () => {
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		const result = runInstaller({ root, release, tools, install, cosignLog, version: "stable" });
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(readFileSync(cosignLog, "utf8"), /refs\/tags\/v0[.]65[.]0/u);
+		assert.equal(existsSync(path.join(install, "ceal")), true);
+	});
+	for (const stableTag of ["v0.65.1-rc.1", "v00.65.1"]) {
+		withFixture(({ root, release, tools, install, cosignLog }) => {
+			const result = runInstaller({ root, release, tools, install, cosignLog, version: "stable", stableTag });
+			assert.notEqual(result.status, 0);
+			assert.match(result.stderr, /did not resolve to a canonical stable tag/u);
+			assert.equal(existsSync(install), false);
+		});
+	}
+	withFixture(({ root, release, tools, install, cosignLog }) => {
+		const result = runInstaller({ root, release, tools, install, cosignLog, version: "stable", minimumVersion: "0.65.1" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /older than the installed worker release/u);
+		assert.equal(existsSync(install), false);
+	});
+});
+
+test("packed native worker artifact installs into an isolated prefix and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, () => {
+	const artifact = mkdtempSync(path.join(tmpdir(), "ceal-cli-packed-update-"));
+	try {
+		const built = spawnSync(process.execPath, ["scripts/build-platform-binaries.mjs", "--version", "0.65.0", "--platform", "linux-amd64", "--out", artifact, "--json"], {
+			cwd: ROOT,
+			encoding: "utf8",
+		});
+		assert.equal(built.status, 0, built.stderr);
+		withFixture(({ root, release, tools, install, cosignLog }) => {
+			copyFileSync(path.join(artifact, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
+			copyFileSync(INSTALLER, path.join(release, "install.sh"));
+			writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
+			writeChecksums(release);
+			const installed = runInstaller({ root, release, tools, install, cosignLog });
+			assert.equal(installed.status, 0, installed.stderr);
+			const started = Date.now();
+			const updated = spawnSync(path.join(install, "ceal"), ["update"], {
+				encoding: "utf8",
+				env: {
+					...process.env,
+					COSIGN_LOG: cosignLog,
+					FAKE_RELEASE_DIR: release,
+					STABLE_TAG: "v0.65.0",
+					PATH: `${tools}:${process.env.PATH}`,
+				},
+			});
+			assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
+			assert.equal(updated.stderr, "");
+			const payload = parse(updated.stdout);
+			assert.equal(payload.schema_version, "ceal.update.v1");
+			assert.equal(payload.status, "unchanged");
+			assert.equal(payload.stable_only, true);
+			assert.equal(payload.previous_version, "0.65.0");
+			assert.equal(payload.installed_version, "0.65.0");
+			assert.equal(payload.platform, "linux-amd64");
+			assert.equal(payload.artifact_sha256, digest(readFileSync(path.join(install, "ceal"))));
+			assert.equal(typeof payload.elapsed_ms, "number");
+			assert.ok(Date.now() - started >= payload.elapsed_ms);
+		});
+	} finally {
+		rmSync(artifact, { recursive: true, force: true });
+	}
 });
 
 test("explicit operator installation creates only cealctl and operator-owned state", () => {
@@ -309,7 +377,7 @@ test("workflow builds from public source and never downloads injected draft bina
 	for (const action of workflow.matchAll(/uses:\s+([^\s]+)/gu)) assert.match(action[1], /@[a-f0-9]{40}$/u);
 });
 
-function runInstaller({ root, release, tools, install, cosignLog, version = "v0.65.0", role = "worker" }) {
+function runInstaller({ root, release, tools, install, cosignLog, version = "v0.65.0", role = "worker", stableTag = "v0.65.0", minimumVersion }) {
 	return spawnSync(INSTALLER, [], {
 		cwd: root,
 		encoding: "utf8",
@@ -320,6 +388,8 @@ function runInstaller({ root, release, tools, install, cosignLog, version = "v0.
 			CEAL_INSTALL_DIR: install,
 			COSIGN_LOG: cosignLog,
 			FAKE_RELEASE_DIR: release,
+			STABLE_TAG: stableTag,
+			...(minimumVersion ? { CEAL_MINIMUM_VERSION: minimumVersion } : {}),
 			PATH: `${tools}:${process.env.PATH}`,
 		},
 	});
@@ -368,6 +438,9 @@ function withFixture(callback) {
 			"  case \"$1\" in -o) shift; out=\"$1\" ;; http*) url=\"$1\" ;; esac",
 			"  shift",
 			"done",
+			"case \"$url\" in",
+			"  */releases/latest) printf 'HTTP/2 302\\nlocation: https://github.com/corca-ai/ceal-cli/releases/tag/%s\\n' \"$STABLE_TAG\"; exit 0 ;;",
+			"esac",
 			"[ -n \"$out\" ] || exit 2",
 			"cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
 		].join("\n"));

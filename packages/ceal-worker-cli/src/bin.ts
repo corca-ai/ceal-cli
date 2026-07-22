@@ -6,6 +6,7 @@ import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
 import { createCealSessionStore } from "./profile-store.js";
+import { createCealStableUpdateRunner } from "./stable-update.js";
 
 let sessionStore: ReturnType<typeof createCealSessionStore> | undefined;
 try { sessionStore = createCealSessionStore(process.env.HOME); } catch { sessionStore = undefined; }
@@ -14,6 +15,7 @@ let discoveryCache: ReturnType<typeof createCealDiscoveryCacheStore> | undefined
 try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch { discoveryCache = undefined; }
 
 const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME);
+const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
 
 void runCealCommand(process.argv.slice(2), {
 	stdout: process.stdout,
@@ -32,6 +34,7 @@ void runCealCommand(process.argv.slice(2), {
 	removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
 	inspectAgentGuide: agentGuide ? () => agentGuide.inspect() : undefined,
 	registerAgentGuide: agentGuide ? () => agentGuide.register() : undefined,
+	runStableUpdate,
 	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {

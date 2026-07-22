@@ -11,7 +11,7 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
-import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
@@ -43,10 +43,10 @@ type CatalogProvenance =
 	| { source: "live_discovery" }
 	| { source: "cached_discovery"; cachedAt: number; expiresAt: number };
 
-export type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "guide" | "capabilities" | "session" | "call" | "receipt";
+	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt";
 	description: string;
 	usage: string;
 	effect: "read_only" | "local_write" | "read_only_or_local_write";
@@ -73,6 +73,15 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		evidence: "surface",
 		result_schema: "ceal.commands.v1",
 		recovery: "Descend with 'ceal <command> --help' before invoking a command.",
+	},
+	{
+		name: "update",
+		description: "Install the latest stable signed worker release into this local prefix.",
+		usage: "ceal update",
+		effect: "local_write",
+		evidence: "surface",
+		result_schema: "ceal.update.v1",
+		recovery: "Reinstall an explicitly approved signed worker release if this installed CLI cannot update itself.",
 	},
 	{
 		name: "session",
@@ -165,11 +174,53 @@ async function runKnownCommand(
 ): Promise<number> {
 	if (command === "version") return writeVersion(io);
 	if (command === "commands") return writeCommands(io);
+	if (command === "update") return runUpdate(io, runtime);
 	if (command === "guide") return runGuide(options, io, runtime);
 	if (command === "session") return runSession(options, io, runtime);
 	if (command === "call") return runCall(options, io, runtime);
 	if (command === "receipt") return runReceipt(options, io, runtime);
 	return runCapabilities(options, io, runtime);
+}
+
+async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	if (!runtime.runStableUpdate) return writeUpdate(io, {
+		status: "unavailable",
+		error: {
+			kind: "update_unavailable",
+			message: "This Ceal command is not running from a verified installed worker release.",
+			next_action: "Install a signed stable worker release, then run 'ceal update' from that installed command.",
+		},
+	});
+	try {
+		return writeUpdate(io, await runtime.runStableUpdate());
+	} catch {
+		return writeUpdate(io, {
+			status: "unavailable",
+			error: {
+				kind: "update_failed",
+				message: "The stable signed worker update could not be completed.",
+				next_action: "Retry once, then reinstall an explicitly approved signed worker release.",
+			},
+		});
+	}
+}
+
+function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.update.v1",
+		command: "ceal",
+		status: result.status,
+		effect: "local_write",
+		stable_only: true,
+		...(result.previous_version ? { previous_version: result.previous_version } : {}),
+		...(result.installed_version ? { installed_version: result.installed_version } : {}),
+		...(result.platform ? { platform: result.platform } : {}),
+		...(result.artifact_sha256 ? { artifact_sha256: result.artifact_sha256 } : {}),
+		...(result.elapsed_ms === undefined ? {} : { elapsed_ms: result.elapsed_ms }),
+		...(result.error ? { error: result.error } : {}),
+		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
+	});
+	return result.status === "unavailable" ? 3 : 0;
 }
 
 function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {

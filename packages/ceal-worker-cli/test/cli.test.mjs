@@ -70,7 +70,7 @@ test("every public command emits one YAML document without a format flag", async
 	for (const command of CEAL_COMMANDS) {
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "request:test"] : [command.name];
-		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" ? 3 : 0);
+		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" || command.name === "update" ? 3 : 0);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
 	}
@@ -90,7 +90,44 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "session", "guide", "capabilities", "call", "receipt"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt"]);
+});
+
+test("update is option-free, stable-only, and keeps child execution behind one YAML result", async () => {
+	let invoked = 0;
+	const payload = await yamlRun(["update"], 0, {
+		runStableUpdate: async () => {
+			invoked += 1;
+			return {
+				status: "updated",
+				previous_version: "0.65.0",
+				installed_version: "0.65.1",
+				platform: "linux-arm64",
+				artifact_sha256: "a".repeat(64),
+				elapsed_ms: 42,
+			};
+		},
+	});
+	assert.deepEqual(payload, {
+		schema_version: "ceal.update.v1",
+		command: "ceal",
+		status: "updated",
+		effect: "local_write",
+		stable_only: true,
+		previous_version: "0.65.0",
+		installed_version: "0.65.1",
+		platform: "linux-arm64",
+		artifact_sha256: "a".repeat(64),
+		elapsed_ms: 42,
+		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
+	});
+	const invalid = await run(["update", "v0.65.1"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
+	assert.equal(invalid.code, 2);
+	assert.equal(invoked, 1);
+	const unavailable = await yamlRun(["update"], 3);
+	assert.equal(unavailable.schema_version, "ceal.update.v1");
+	assert.equal(unavailable.status, "unavailable");
+	assert.equal(unavailable.error.kind, "update_unavailable");
 });
 
 test("guide status and Codex registration expose one update-safe local skill path", async () => {

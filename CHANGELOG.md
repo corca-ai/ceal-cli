@@ -2,6 +2,10 @@
 
 ## 0.65.0
 
+- Add option-free, stable-only `ceal update` for a verified installed worker
+  release. It reuses only the staged release-signed installer, preserves the
+  operator command, reports version/digest/platform/elapsed readback as YAML,
+  and rejects an older resolved stable release.
 - Make `ceal capabilities` concise by default (omit each capability's
   `input_contract`/`write_contract`); add `--detail` to restore the full
   contracts, keeping the catalog small on every call.

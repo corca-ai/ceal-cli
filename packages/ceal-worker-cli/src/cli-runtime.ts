@@ -7,6 +7,20 @@ export interface CealCliIo {
 	stderr: { write(chunk: string): unknown };
 }
 
+export interface CealStableUpdateResult {
+	status: "updated" | "unchanged" | "unavailable";
+	previous_version?: string;
+	installed_version?: string;
+	platform?: "linux-arm64" | "linux-amd64";
+	artifact_sha256?: string;
+	elapsed_ms?: number;
+	error?: {
+		kind: "update_unavailable" | "update_failed" | "update_readback_failed";
+		message: string;
+		next_action: string;
+	};
+}
+
 export interface CealCommandRuntime {
 	readSecret?: () => Promise<string>;
 	promptEnrollmentCode?: () => Promise<string>;
@@ -23,6 +37,7 @@ export interface CealCommandRuntime {
 	removeDiscoveryCache?: () => Promise<void>;
 	inspectAgentGuide?: () => CealAgentGuideState;
 	registerAgentGuide?: () => CealAgentGuideState;
+	runStableUpdate?: () => Promise<CealStableUpdateResult>;
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;

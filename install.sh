@@ -144,6 +144,7 @@ verify_checksum_inventory() {
   verify_checksum "$MANIFEST_ASSET"
   verify_checksum "$NOTICE_ASSET"
   verify_checksum "$GUIDE_ASSET"
+  verify_checksum "install.sh"
 }
 
 verify_manifest_guide() {
@@ -164,6 +165,23 @@ verify_manifest_guide() {
       END { exit (found && valid) ? 0 : 1 }
     ' "$TMP_DIR/$MANIFEST_ASSET" \
     || fail "Selected guide does not match the signed platform manifest"
+}
+
+version_is_older() {
+  candidate="${1#v}"
+  baseline="${2#v}"
+  previous_ifs="$IFS"
+  IFS=.
+  set -- $candidate
+  candidate_major="$1"; candidate_minor="$2"; candidate_patch="$3"
+  set -- $baseline
+  baseline_major="$1"; baseline_minor="$2"; baseline_patch="$3"
+  IFS="$previous_ifs"
+  [ "$candidate_major" -lt "$baseline_major" ] && return 0
+  [ "$candidate_major" -gt "$baseline_major" ] && return 1
+  [ "$candidate_minor" -lt "$baseline_minor" ] && return 0
+  [ "$candidate_minor" -gt "$baseline_minor" ] && return 1
+  [ "$candidate_patch" -lt "$baseline_patch" ]
 }
 
 require_regular_directory() {
@@ -284,9 +302,11 @@ cleanup() {
 }
 
 [ -n "$VERSION" ] \
-  || fail "CEAL_VERSION is required until a compatible signed release is approved; set an explicit tag such as v0.65.0."
-printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' \
-  || fail "CEAL_VERSION must be an explicit tag such as v0.65.0."
+  || fail "CEAL_VERSION is required; set stable for the latest signed release or an explicit tag such as v0.65.0."
+if [ "$VERSION" != stable ]; then
+  printf '%s\n' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' \
+    || fail "CEAL_VERSION must be stable or an explicit tag such as v0.65.0."
+fi
 select_role
 
 PLATFORM="$(detect_platform)"
@@ -295,6 +315,20 @@ TMP_DIR="$(mktemp -d)"
 trap cleanup EXIT HUP INT TERM
 bootstrap_cosign
 for tool in cmp curl cosign flock sha256sum uname mktemp readlink; do need "$tool"; done
+
+if [ "$VERSION" = stable ]; then
+  STABLE_HEADERS="$(curl -fsSI --max-redirs 0 "https://github.com/$REPO/releases/latest")" \
+    || fail "Could not resolve the latest stable Ceal CLI release"
+  VERSION="$(printf '%s\n' "$STABLE_HEADERS" | tr -d '\r' | sed -n 's/^[Ll]ocation: https:\/\/github[.]com\/corca-ai\/ceal-cli\/releases\/tag\/\(v\(0\|[1-9][0-9]*\)[.]\(0\|[1-9][0-9]*\)[.]\(0\|[1-9][0-9]*\)\)$/\1/p' | tail -n 1)"
+  [ -n "$VERSION" ] \
+    || fail "Latest Ceal CLI release did not resolve to a canonical stable tag"
+  if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
+    printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' \
+      || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
+    version_is_older "$VERSION" "v$CEAL_MINIMUM_VERSION" \
+      && fail "Latest stable Ceal CLI release is older than the installed worker release"
+  fi
+fi
 
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 
@@ -328,7 +362,7 @@ COMMAND_ASSET="$COMMAND-$PLATFORM"
 MANIFEST_ASSET="ceal-cli-platform-release-manifest-$PLATFORM.json"
 NOTICE_ASSET="THIRD_PARTY_NOTICES.txt"
 
-for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "$GUIDE_ASSET" "SHA256SUMS"; do
+for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" "$GUIDE_ASSET" "install.sh" "SHA256SUMS"; do
   download_signed_asset "$asset"
   verify_signature "$asset"
 done
@@ -360,16 +394,18 @@ if [ ! -e "$GENERATION_DIR" ]; then
   cp "$TMP_DIR/$COMMAND_ASSET" "$STAGED_GENERATION/$COMMAND_ASSET"
   cp "$TMP_DIR/$MANIFEST_ASSET" "$STAGED_GENERATION/$MANIFEST_ASSET"
   cp "$TMP_DIR/$NOTICE_ASSET" "$STAGED_GENERATION/$NOTICE_ASSET"
+  cp "$TMP_DIR/install.sh" "$STAGED_GENERATION/install.sh"
   mkdir "$STAGED_GENERATION/guide"
   cp "$TMP_DIR/$GUIDE_ASSET" "$STAGED_GENERATION/guide/SKILL.md"
   cp "$TMP_DIR/SHA256SUMS" "$STAGED_GENERATION/SHA256SUMS"
   chmod 755 "$STAGED_GENERATION/$COMMAND_ASSET"
+  chmod 755 "$STAGED_GENERATION/install.sh"
   GENERATION_CREATED=1
   mv "$STAGED_GENERATION" "$GENERATION_DIR"
 else
   require_regular_directory "$GENERATION_DIR"
   require_regular_directory "$GENERATION_DIR/guide"
-  for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" SHA256SUMS; do
+  for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" "$NOTICE_ASSET" install.sh SHA256SUMS; do
     require_regular_file "$GENERATION_DIR/$asset"
     [ "$(sha256_of "$GENERATION_DIR/$asset")" = "$(sha256_of "$TMP_DIR/$asset")" ] \
       || fail "Existing release generation does not match the signed release"
