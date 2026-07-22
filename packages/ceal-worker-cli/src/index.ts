@@ -14,7 +14,8 @@ import {
 import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
-import { validCallPrefix, validCapabilityId, validTargetRef } from "./capability-arguments.js";
+import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
+import { parseNamedOptions } from "./named-options.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
 import {
@@ -142,6 +143,7 @@ const TOP_LEVEL_HELP = [
 	"Usage: ceal <command> [options]",
 	"",
 	"Worker-facing Ceal client. Organization authority and credentials remain with the Gateway.",
+	"Named options follow required positionals, are order-independent, and may be supplied once.",
 	"",
 	"Commands:",
 	...CEAL_COMMANDS.map((command) => `  ${command.name.padEnd(14)} ${command.description}`),
@@ -242,6 +244,7 @@ function commandHelp(command: CealCommandDefinition): string {
 		`Usage: ${command.usage}`,
 		"",
 		command.description,
+		"Named options follow required positionals, are order-independent, and may be supplied once.",
 		"",
 		`Effect: ${command.effect}`,
 		`Evidence: ${command.evidence}`,
@@ -446,7 +449,7 @@ function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTarget
 
 function parseTargetCatalogSelection(options: readonly string[]): ParsedTargetCatalogOptions {
 	const parsed = parseNamedOptions(options, new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]), new Set());
-	if (!parsed) return null;
+	if (!parsed || parsed.operands.length !== 0) return null;
 	const selection = {
 		capabilityId: parsed.values.get("--capability"),
 		cursor: parsed.values.get("--cursor"),
@@ -807,18 +810,20 @@ async function requestCapabilityCall(
 type ParsedCallOptions = CealParsedCapabilityCall | { ok: false };
 
 function parseCallOptions(options: readonly string[]): ParsedCallOptions {
-	if (!validCallPrefix(options)) return { ok: false };
+	if (options.length < 3 || options.length > 67) return { ok: false };
 	const capabilityId = options[0];
-	const targetRef = options[2];
 	if (!validCapabilityId(capabilityId)) return { ok: false };
+	const parsed = parseNamedOptions(options.slice(1), new Set(["--target", "--profile"]), new Set());
+	if (!parsed) return { ok: false };
+	const targetRef = parsed.values.get("--target");
 	if (!validTargetRef(targetRef)) return { ok: false };
-	const profile = extractProfileOption(options.slice(3));
-	if (!profile) return { ok: false };
-	const operands = parseKeyValueOperands(profile.remaining);
+	const profileRef = parsed.values.get("--profile");
+	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) return { ok: false };
+	const operands = parseKeyValueOperands(parsed.operands);
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
 	return {
-		ok: true, capabilityId, targetRef: targetRef as string, arguments: arguments_, ...(profile.value ? { profileRef: profile.value } : {}),
+		ok: true, capabilityId, targetRef, arguments: arguments_, ...(profileRef ? { profileRef } : {}),
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
 	};
 }
@@ -893,7 +898,7 @@ type ParsedGatewayOptions =
 
 function parseGatewayOptions(options: readonly string[]): ParsedGatewayOptions {
 	const parsed = parseNamedOptions(options, new Set(["--endpoint", "--profile", "--request-id"]), new Set(["--token-stdin"]));
-	if (!parsed || !parsed.flags.has("--token-stdin")) return invalidGatewayOptions();
+	if (!parsed || parsed.operands.length !== 0 || !parsed.flags.has("--token-stdin")) return invalidGatewayOptions();
 	const endpoint = parsed.values.get("--endpoint");
 	const profileRef = parsed.values.get("--profile");
 	const requestId = parsed.values.get("--request-id");
@@ -901,27 +906,6 @@ function parseGatewayOptions(options: readonly string[]): ParsedGatewayOptions {
 	if (!/^profile:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(profileRef)) return invalidGatewayOptions();
 	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,117}$/u.test(requestId)) return invalidGatewayOptions();
 	return { ok: true, endpoint, profileRef, requestId };
-}
-
-function parseNamedOptions(
-	options: readonly string[], valueOptions: ReadonlySet<string>, flagOptions: ReadonlySet<string>,
-): { values: Map<string, string>; flags: Set<string> } | null {
-	const values = new Map<string, string>();
-	const flags = new Set<string>();
-	for (let index = 0; index < options.length; index += 1) {
-		const option = options[index];
-		if (flagOptions.has(option)) {
-			if (flags.has(option)) return null;
-			flags.add(option);
-			continue;
-		}
-		if (!valueOptions.has(option) || values.has(option)) return null;
-		const value = options[index + 1];
-		if (!value) return null;
-		values.set(option, value);
-		index += 1;
-	}
-	return { values, flags };
 }
 
 function invalidGatewayOptions(): ParsedGatewayOptions {

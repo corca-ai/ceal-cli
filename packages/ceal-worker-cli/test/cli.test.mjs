@@ -37,6 +37,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 		const result = await run(args);
 		assert.equal(result.code, 0);
 		assert.match(result.stdout, /^Usage: ceal <command> \[options\]/u);
+		assert.match(result.stdout, /Named options follow required positionals, are order-independent, and may be supplied once\./u);
 		assert.equal(result.stderr, "");
 		for (const command of CEAL_COMMANDS) assert.match(result.stdout, new RegExp(`^  ${command.name}\\s`, "mu"));
 	}
@@ -46,6 +47,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 			assert.equal(result.code, 0);
 			assert.equal(result.stderr, "");
 			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(command.usage)}$`, "mu"));
+			assert.match(result.stdout, /Named options follow required positionals, are order-independent, and may be supplied once\./u);
 			assert.match(result.stdout, new RegExp(`^Effect: ${command.effect}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Evidence: ${command.evidence}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Result schema: ${command.result_schema}$`, "mu"));
@@ -164,7 +166,7 @@ test("guide status and Codex registration expose one update-safe local skill pat
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
 	await withEnrollmentGateway(async ({ endpoint, token }) => {
 		let stored = null;
-		const payload = await yamlRun(["session", "enroll", "--gateway", endpoint, "--code-stdin"], 0, {
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
 			saveSession: async (session) => { stored = session; },
 		});
@@ -359,7 +361,7 @@ test("stored client Session selects an assigned Profile per request without anot
 		const capabilities = await yamlRun(["capabilities", "--profile", "profile:ax"], 0, runtime);
 		assert.equal(capabilities.gateway.profile_ref, "profile:ax");
 		const call = await yamlRun([
-			"call", "message.search", "--target", "target:team-inbox", "--profile", "profile:ax", "query=launch",
+			"call", "message.search", "--profile", "profile:ax", "--target", "target:team-inbox", "query=launch",
 		], 0, runtime);
 		assert.equal(call.status, "completed");
 		const receipt = await yamlRun(["receipt", "show", "narnia:profile:3:call", "--profile", "profile:ax"], 0, runtime);

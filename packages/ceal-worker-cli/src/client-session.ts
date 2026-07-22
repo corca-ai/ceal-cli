@@ -6,6 +6,7 @@ import {
 	createCealPersonalClientSessionClient,
 } from "@corca-ai/ceal";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import { CealSessionStoreError } from "./profile-store.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -273,10 +274,11 @@ export function writeClientSessionUnavailable(reason: string, io: CealCliIo): nu
 }
 
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
-	if (options[0] !== "enroll" || options[1] !== "--gateway" || !options[2]) return { ok: false };
-	if (options.length === 3) return { ok: true, gateway: options[2], input: "interactive" };
-	if (options.length === 4 && options[3] === "--code-stdin") return { ok: true, gateway: options[2], input: "stdin" };
-	return { ok: false };
+	if (options[0] !== "enroll") return { ok: false };
+	const parsed = parseNamedOptions(options.slice(1), new Set(["--gateway"]), new Set(["--code-stdin"]));
+	const gateway = parsed?.values.get("--gateway");
+	if (!parsed || parsed.operands.length !== 0 || !gateway) return { ok: false };
+	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive" };
 }
 
 function writeEnrollmentInvalidArgument(io: CealCliIo): number {
