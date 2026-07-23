@@ -69,7 +69,7 @@ test("stable mode resolves only a canonical latest release tag before the signed
 	});
 });
 
-test("packed native worker artifact installs into an isolated prefix and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, () => {
+test("packed native worker artifact preserves a post-allocation failure receipt and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, () => {
 	const artifact = mkdtempSync(path.join(tmpdir(), "ceal-cli-packed-update-"));
 	try {
 		const built = spawnSync(process.execPath, ["scripts/build-platform-binaries.mjs", "--version", "0.65.0", "--platform", "linux-amd64", "--out", artifact, "--json"], {
@@ -84,6 +84,24 @@ test("packed native worker artifact installs into an isolated prefix and perform
 			writeChecksums(release);
 			const installed = runInstaller({ root, release, tools, install, cosignLog });
 			assert.equal(installed.status, 0, installed.stderr);
+			writeWorkerSession(install);
+			const unavailable = spawnSync(path.join(install, "ceal"), ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
+				encoding: "utf8",
+				env: { ...process.env, HOME: install, PATH: `${tools}:${process.env.PATH}` },
+			});
+			assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
+			assert.equal(unavailable.stderr, "");
+			const unavailablePayload = parse(unavailable.stdout);
+			assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
+			assert.equal(unavailablePayload.status, "error");
+			assert.equal(unavailablePayload.capability, "message.search");
+			assert.equal(unavailablePayload.target, "target:team-inbox");
+			assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
+			assert.match(unavailablePayload.receipt.request_ref, /^ceal:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:call$/u);
+			assert.deepEqual(unavailablePayload.receipt.audit_refs, []);
+			assert.equal(unavailablePayload.error.kind, "request_failed");
+			assert.match(unavailablePayload.error.next_action, new RegExp(`Do not repeat a write yet[.] Run 'ceal receipt show ${unavailablePayload.receipt.request_ref}'`, "u"));
+			assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
 			const started = Date.now();
 			const updated = spawnSync(path.join(install, "ceal"), ["update"], {
 				encoding: "utf8",
@@ -481,6 +499,29 @@ function writeChecksums(release) {
 	];
 	writeFileSync(path.join(release, "SHA256SUMS"), checksummed.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
 	return checksummed;
+}
+
+function writeWorkerSession(home) {
+	const stateDirectory = path.join(home, ".ceal");
+	mkdirSync(stateDirectory, { mode: 0o700 });
+	chmodSync(stateDirectory, 0o700);
+	writeFileSync(path.join(stateDirectory, "client-session.json"), `${JSON.stringify({
+		schema_version: "ceal.client_session_store.v1",
+		// Port zero cannot have a listening TCP service, so this proves the
+		// transport-failure branch without depending on a locally free port.
+		gateway_endpoint: "http://127.0.0.1:0",
+		profile_ref: "profile:narnia",
+		membership_ref: "membership:narnia",
+		registration_ref: "registration:narnia",
+		client_ref: "client:narnia",
+		subject_ref: "subject:worker",
+		instance_ref: "instance:corca",
+		access_token: `ceal_personal_${"P".repeat(43)}`,
+		expires_at: "2099-07-14T00:00:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+	})}\n`, { mode: 0o600 });
 }
 
 function writeBinary(file, command, marker = "generation-1", versionSuffix = "") {
