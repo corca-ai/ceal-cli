@@ -147,13 +147,6 @@ The Admin API base is always the internal organization/instance route
 `https://<host>/<org>/<instance>`; bare-apex and organization-only targets are
 retired and are never resolved to an instance implicitly.
 
-Before provisioning that route, use the customer-neutral [Gateway ingress
-operator guide](./docs/gateway-ingress.md). In a release whose installed help
-lists the command, `cealctl ingress plan` identifies
-the exact control/client URLs for a direct origin, outbound tunnel, or private
-network; `cealctl ingress verify` is a credential-free transport check. Neither
-command changes DNS, tunnels, TLS, Gateway state, or provider configuration.
-
 ```sh
 cealctl login https://ceal.example.test/acme/production --session production
 cealctl sessions

@@ -33,7 +33,6 @@ import {
 } from "./operator-session-client.js";
 import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "./local-gateway-owner-login-client.js";
 import { AdminApiContractClientError, requireCompatibleAdminApiContract } from "./admin-api-contract-client.js";
-import { ingressHelp, runIngress } from "./ingress-plan.js";
 
 export const CEAL_OPERATOR_CLI_VERSION = "0.65.0" as const;
 export const CEALCTL_CREDENTIAL_CONTEXT = "cealctl_operator_admin_session" as const;
@@ -53,11 +52,11 @@ export interface CealctlRuntime {
 }
 
 export interface CealctlCommandDefinition {
-	name: "version" | "commands" | "login" | "sessions" | "logout" | "access" | "connectors" | "enrollments" | "ingress" | "doctor";
+	name: "version" | "commands" | "login" | "sessions" | "logout" | "access" | "connectors" | "enrollments" | "doctor";
 	description: string;
 	usage: string;
 	effect: "read_only" | "control_write";
-	evidence: "surface" | "host_decision" | "transport";
+	evidence: "surface" | "host_decision";
 	result_schema: string;
 	recovery: string;
 }
@@ -136,15 +135,6 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 		recovery: "Inspect this command, then create a replacement code if enrollment does not complete before expiry.",
 	},
 	{
-		name: "ingress",
-		description: "Plan or read-only verify one customer-controlled Gateway ingress route.",
-		usage: "cealctl ingress <plan|verify> --gateway-host <hostname> --org <slug> --instance <slug> --mode <direct-origin|outbound-tunnel|private-network>",
-		effect: "read_only",
-		evidence: "transport",
-		result_schema: "cealctl.ingress.v1",
-		recovery: "Run 'cealctl ingress --help'; plans do not configure DNS, edge policy, TLS, Gateway state, or provider access.",
-	},
-	{
 		name: "doctor",
 		description: "Check this binary and protocol surface without setup or runtime access.",
 		usage: "cealctl doctor",
@@ -196,7 +186,6 @@ const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], rea
 		"  --instance <safe-name>        Customer instance bound by the Gateway.",
 		"  --operator-session <name>     Use a named stored admin session.",
 	],
-	ingress: ingressHelp(),
 };
 
 export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtime: CealctlRuntime = {}): number | Promise<number> {
@@ -226,7 +215,6 @@ const COMMAND_RUNNERS: Record<CealctlCommandDefinition["name"], CealctlCommandRu
 	access: runAccess,
 	connectors: runProfileConnectors,
 	enrollments: runEnrollments,
-	ingress: runIngress,
 	doctor: (options, io) => writeReadOnlyCommand(options, io, writeDoctor, "doctor"),
 };
 
