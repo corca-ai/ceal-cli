@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { WorkerReleaseInputsError, validateWorkerReleaseInputs } from "./verify-worker-release-inputs.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROTOCOL_NAME = "@corca-ai/ceal-protocol";
@@ -26,10 +27,11 @@ export class GatewayProtocolConsumerError extends Error {
 export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTarball, protocolProvenance, keepWorkspace = false } = {}) {
 	const root = path.resolve(repoRoot);
 	const input = validateArtifactInput({ protocolTarball, protocolProvenance });
+	const releaseInputs = validateReleaseInputs(root, input.provenance.artifact.version);
 	const workspace = mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-"));
 	try {
-		const client = buildClient({ root, workspace, input });
-		const worker = buildWorker({ root, workspace, input, client });
+		const client = buildClient({ root, workspace, input, releaseInputs });
+		const worker = buildWorker({ root, workspace, input, client, releaseInputs });
 		const installed = installAndExerciseWorker({ workspace, input, client, worker });
 		const result = {
 			schema_version: "ceal.gateway_protocol_packed_consumer_proof.v1",
@@ -38,6 +40,10 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 			writes_external: false,
 			gateway_protocol: input.provenance,
 			worker_source: { repository: "corca-ai/ceal-cli", commit: git(root, ["rev-parse", "HEAD"]), tree: git(root, ["rev-parse", "HEAD^{tree}"]) },
+			worker_release_inputs: {
+				...releaseInputs,
+				guide_sha256: sha256(readRegularFile(path.join(root, releaseInputs.guide), "invalid_worker_release_inputs")),
+			},
 			consumer: installed,
 			non_claims: [
 				"This proves a local packed artifact consumer only; it does not publish, sign, install, update, or roll back a release.",
@@ -52,6 +58,16 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 			throw error;
 		}
 		throw new GatewayProtocolConsumerError("consumer_verification_failed", "Gateway protocol packed-consumer verification failed.", workspace);
+	}
+}
+
+function validateReleaseInputs(root, protocolVersion) {
+	try { return validateWorkerReleaseInputs({ repoRoot: root, protocolVersion }); }
+	catch (error) {
+		if (error instanceof WorkerReleaseInputsError) {
+			throw new GatewayProtocolConsumerError("invalid_worker_release_inputs", "Worker release inputs do not satisfy the owned-only release contract.");
+		}
+		throw error;
 	}
 }
 
@@ -84,8 +100,8 @@ function validateArtifactInput({ protocolTarball, protocolProvenance }) {
 	return { tarball, provenancePath, provenance, sha256: provenance.artifact.sha256, manifest };
 }
 
-function buildClient({ root, workspace, input }) {
-	const source = copySourcePackage(root, workspace, "ceal-client");
+function buildClient({ root, workspace, input, releaseInputs }) {
+	const source = copySourcePackage(root, workspace, releaseInputs.packages.client.path);
 	const manifest = readJson(path.join(source, "package.json"), "invalid_client_package");
 	assertPublishedDependency(manifest, PROTOCOL_NAME, input.provenance.artifact.version, "invalid_client_package");
 	setDependencies(source, { [PROTOCOL_NAME]: artifactSpecifier(input.tarball) });
@@ -97,8 +113,8 @@ function buildClient({ root, workspace, input }) {
 	return { source, tarball, protocol };
 }
 
-function buildWorker({ root, workspace, input, client }) {
-	const source = copySourcePackage(root, workspace, "ceal-worker-cli");
+function buildWorker({ root, workspace, input, client, releaseInputs }) {
+	const source = copySourcePackage(root, workspace, releaseInputs.packages.worker.path);
 	const manifest = readJson(path.join(source, "package.json"), "invalid_worker_package");
 	assertPublishedDependency(manifest, PROTOCOL_NAME, input.provenance.artifact.version, "invalid_worker_package");
 	assertPublishedDependency(manifest, CLIENT_NAME, input.provenance.artifact.version, "invalid_worker_package");
@@ -143,9 +159,9 @@ function installAndExerciseWorker({ workspace, input, client, worker }) {
 	};
 }
 
-function copySourcePackage(root, workspace, name) {
-	const source = path.join(root, "packages", name);
-	const destination = path.join(workspace, "sources", name);
+function copySourcePackage(root, workspace, sourcePath) {
+	const source = path.join(root, sourcePath);
+	const destination = path.join(workspace, "sources", path.basename(sourcePath));
 	cpSync(source, destination, {
 		recursive: true,
 		filter: (entry) => !["node_modules", "dist"].includes(path.basename(entry)),

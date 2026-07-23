@@ -1,0 +1,30 @@
+{
+	"schema_version": "ceal.worker_release_inputs.v1",
+	"source_repository": "corca-ai/ceal-cli",
+	"packages": {
+		"client": {
+			"path": "packages/ceal-client",
+			"name": "@corca-ai/ceal"
+		},
+		"worker": {
+			"path": "packages/ceal-worker-cli",
+			"name": "@corca-ai/ceal-worker-cli"
+		}
+	},
+	"guide": "skills/ceal-guide/SKILL.md",
+	"protocol": {
+		"package": "@corca-ai/ceal-protocol",
+		"input": "gateway_artifact_only"
+	},
+	"forbidden_paths": [
+		"packages/ceal-protocol",
+		"packages/ceal-operator-cli",
+		"skills/cealctl-guide",
+		"install.sh",
+		"release-contract.json",
+		"scripts/build-platform-binaries.mjs",
+		"scripts/build-release-manifest.mjs",
+		".github/workflows/cealctl-release.yml",
+		".github/workflows/npm-package-stage.yml"
+	]
+}
