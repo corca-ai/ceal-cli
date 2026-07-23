@@ -293,36 +293,7 @@ function isVersion(value) { return typeof value === "string" && /^(0|[1-9][0-9]*
 function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
 function fail(code, message) { throw new WorkerReleaseArtifactError(code, message); }
 
-function parseArgs(argv) {
-	const options = { force: false };
-	let json = false;
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === "--help" || arg === "-h") return { help: true, json, options };
-		if (arg === "--json") json = true;
-		else if (arg === "--force") options.force = true;
-		else if (["--version", "--platform", "--out", "--protocol-tarball", "--protocol-provenance"].includes(arg)) {
-			const field = { "--out": "outputDirectory", "--protocol-tarball": "protocolTarball", "--protocol-provenance": "protocolProvenance" }[arg] ?? arg.slice(2);
-			options[field] = argv[++index];
-		} else fail("invalid_argument", "Unexpected worker artifact argument.");
-	}
-	return { help: false, json, options };
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	process.stderr.write("build-worker-release-artifact is a development-only module; use release:worker:package or release:worker:native with a lock-bound --gateway-handoff-archive.\n");
+	process.exitCode = 2;
 }
-
-export async function runCli(argv, io = console, deps = {}) {
-	const json = argv.includes("--json");
-	try {
-		const parsed = parseArgs(argv);
-		if (parsed.help) { io.log("usage: node scripts/build-worker-release-artifact.mjs --protocol-tarball <absolute-tgz> --protocol-provenance <absolute-json> --out <absolute-directory> [--version <semver>] [--platform <platform>] [--force] [--json]"); return 0; }
-		const result = await buildWorkerReleaseArtifact(parsed.options, deps);
-		io.log(parsed.json ? JSON.stringify(result, null, 2) : `Built local worker artifact ${result.artifact.name}.`);
-		return 0;
-	} catch (error) {
-		const normalized = error instanceof WorkerReleaseArtifactError ? error : new WorkerReleaseArtifactError("build_failed", "Could not build local worker artifact.");
-		const payload = { schema_version: "ceal.worker_release_artifact_build_error.v1", ok: false, error_code: normalized.code };
-		if (json) io.log(JSON.stringify(payload)); else io.error("Could not build local worker artifact.");
-		return 2;
-	}
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));

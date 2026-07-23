@@ -123,6 +123,10 @@ local archive consumer does not download Actions artifacts or claim cosign
 verification; the later least-privilege downloader must verify the signed
 artifact before presenting this input.
 
+The retired raw-input `worker-release:build` command is not an alternate
+release route. Its implementation remains an import-only development/test
+module and exits nonzero if invoked as a program.
+
 The package command makes an isolated packed `ceal` consumer candidate, and
 the native command builds one host-native `ceal` executable from that internal
 packed consumer. Each native candidate carries a platform-qualified

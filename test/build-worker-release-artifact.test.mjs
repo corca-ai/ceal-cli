@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +10,19 @@ import { buildWorkerReleaseArtifact } from "../scripts/build-worker-release-arti
 import { makeGatewayProtocolFixture } from "./gateway-protocol-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("raw worker artifact helper is import-only and no longer has a release command", () => {
+	const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+	assert.equal(manifest.scripts["worker-release:build"], undefined);
+	const result = spawnSync(process.execPath, ["scripts/build-worker-release-artifact.mjs", "--json"], {
+		cwd: ROOT,
+		encoding: "utf8",
+	});
+	assert.equal(result.status, 2);
+	assert.equal(result.stdout, "");
+	assert.match(result.stderr, /development-only module/u);
+	assert.match(result.stderr, /--gateway-handoff-archive/u);
+});
 
 test("isolated worker artifact builder emits only ceal-owned local build assets", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-test-"));
