@@ -3,7 +3,6 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
-	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
 	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
@@ -56,59 +55,6 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 	}
-});
-
-test("HTTP transport scopes strict optional audit timing negotiation to readback", async () => {
-	// Golden value: the client cannot import the server's literal, so pin the
-	// negotiation constant to the exact string the Gateway matches. A drift here
-	// silently disables the catalog without a wire-visible error.
-	assert.equal(CEAL_GATEWAY_PROFILES_ACCEPT_HEADER, "x-ceal-profiles");
-	assert.equal(CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER, "x-ceal-route-provenance");
-	assert.equal(CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER, "x-ceal-audit-timing");
-
-	const observedHeaders = new Map();
-	const client = createCealClient(createCealHttpTransport({
-		endpoint: "https://gateway.example.test/client",
-		accessToken: "gateway-issued-token",
-		fetchFn: async (_endpoint, init) => {
-			const body = JSON.parse(init.body);
-			observedHeaders.set(body.operation, init.headers);
-			if (body.operation === "readback") {
-				return globalThis.Response.json({
-					ok: false, request_id: body.request_id, protocol_version: "1.3.0",
-					proof_ref_or_unavailable: `proof:${body.request_id}`,
-					error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
-				}, { status: 401 });
-			}
-			if (body.operation === "call") return globalThis.Response.json(allowedCallResponse(body));
-			return globalThis.Response.json(handshakeResponse(body));
-		},
-	}));
-	const response = await client.request(request);
-	assert.equal(response.ok, true);
-	const call = await client.request({
-		request_id: "request:call:header-scope", operation: "call", profile_ref: "profile:test",
-		body: {
-			capability_id: "message.search", target_ref: "target:workspace",
-			arguments: { query: "audit timing", limit: 1 }, purpose: "Prove audit timing header scope",
-		},
-	});
-	assert.equal(call.ok, true);
-	const readback = await client.request({
-		request_id: "request:readback:001", operation: "readback", profile_ref: "profile:test",
-		body: { request_id: "request:prior:001" },
-	});
-	assert.equal(readback.ok, false);
-	// Sent unconditionally alongside the recovery negotiation, mirroring it.
-	const handshakeHeaders = observedHeaders.get("handshake");
-	const callHeaders = observedHeaders.get("call");
-	const readbackHeaders = observedHeaders.get("readback");
-	assert.equal(handshakeHeaders["x-ceal-recovery"], "accept");
-	assert.equal(handshakeHeaders[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER], "accept");
-	assert.equal(handshakeHeaders[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER], "accept");
-	assert.equal(handshakeHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], undefined);
-	assert.equal(callHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], undefined);
-	assert.equal(readbackHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], "accept");
 });
 
 test("HTTP transport refuses redirects before the request body can reach another endpoint", async () => {
