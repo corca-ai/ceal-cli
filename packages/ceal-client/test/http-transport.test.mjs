@@ -3,8 +3,6 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
-	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
-	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CealHttpTransportError,
 	createCealClient,
