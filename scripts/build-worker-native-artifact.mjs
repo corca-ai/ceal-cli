@@ -89,7 +89,9 @@ function resolveInputs(repoRoot, options, dependencies) {
 		return (dependencies.resolveInputs ?? resolveWorkerReleaseInputs)({
 			repoRoot,
 			protocolTarball: options.protocolTarball,
+			clientTarball: options.clientTarball,
 			protocolProvenance: options.protocolProvenance,
+			conformanceProof: options.conformanceProof,
 			handoffManifest: options.handoffManifest,
 			expectedHandoffSha256: options.expectedHandoffSha256,
 		});
@@ -303,10 +305,10 @@ function parseArgs(argv) {
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") { json = true; continue; }
 		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--platform", "--protocol-tarball", "--protocol-provenance", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
+		if (["--out", "--platform", "--protocol-tarball", "--client-tarball", "--protocol-provenance", "--conformance-proof", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
 			const value = argv[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Native worker artifact option requires a value.");
-			const name = arg === "--out" ? "outputDirectory" : arg === "--platform" ? "platform" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256";
+			const name = arg === "--out" ? "outputDirectory" : arg === "--platform" ? "platform" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--client-tarball" ? "clientTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--conformance-proof" ? "conformanceProof" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256";
 			options[name] = value;
 			continue;
 		}
@@ -320,7 +322,7 @@ export async function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --protocol-provenance <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--platform <current-platform>] [--force] [--json]");
+			io.log("usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --client-tarball <absolute-tgz> --protocol-provenance <absolute-json> --conformance-proof <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--platform <current-platform>] [--force] [--json]");
 			return 0;
 		}
 		const result = await buildWorkerNativeArtifact(parsed.options);

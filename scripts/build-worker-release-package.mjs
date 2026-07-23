@@ -36,7 +36,15 @@ export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	let inputs;
 	try {
-		inputs = (dependencies.resolveInputs ?? resolveWorkerReleaseInputs)({ repoRoot, protocolTarball: options.protocolTarball, protocolProvenance: options.protocolProvenance, handoffManifest: options.handoffManifest, expectedHandoffSha256: options.expectedHandoffSha256 });
+		inputs = (dependencies.resolveInputs ?? resolveWorkerReleaseInputs)({
+			repoRoot,
+			protocolTarball: options.protocolTarball,
+			clientTarball: options.clientTarball,
+			protocolProvenance: options.protocolProvenance,
+			conformanceProof: options.conformanceProof,
+			handoffManifest: options.handoffManifest,
+			expectedHandoffSha256: options.expectedHandoffSha256,
+		});
 	} catch (error) {
 		if (error instanceof WorkerReleaseInputError) throw new WorkerReleasePackageError(error.code, error.message);
 		throw error;
@@ -312,10 +320,10 @@ function parseArgs(argv) {
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") { json = true; continue; }
 		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--protocol-tarball", "--protocol-provenance", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
+		if (["--out", "--protocol-tarball", "--client-tarball", "--protocol-provenance", "--conformance-proof", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
 			const value = argv[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Worker package option requires a value.");
-			options[arg === "--out" ? "outputDirectory" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256"] = value;
+			options[arg === "--out" ? "outputDirectory" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--client-tarball" ? "clientTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--conformance-proof" ? "conformanceProof" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256"] = value;
 			continue;
 		}
 		fail("invalid_argument", "Unexpected worker package build argument.");
@@ -328,7 +336,7 @@ export function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --protocol-provenance <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--force] [--json]");
+			io.log("usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --client-tarball <absolute-tgz> --protocol-provenance <absolute-json> --conformance-proof <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--force] [--json]");
 			return 0;
 		}
 		const result = buildWorkerReleasePackage(parsed.options);

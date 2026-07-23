@@ -95,14 +95,24 @@ checkout.
 
 The local worker preflight accepts an exact Gateway handoff only through
 `release:worker:inputs`, `release:worker:package`, and
-`release:worker:native`. It requires the Protocol tarball, its Gateway
-provenance sidecar, the enclosing handoff manifest, and a caller-supplied
-SHA-256 of that manifest. The caller-supplied digest binds the exact received
-packet; it does not authenticate its sender. The package command makes an
-isolated packed `ceal` consumer candidate, and the native command builds one
-host-native `ceal` executable from that internal packed consumer. Neither may
-contain `cealctl`, an operator guide, copied Protocol source, a tag, installer,
-or signing claim.
+`release:worker:native`. It requires one directory carrying the Gateway-owned
+marker, Protocol and client tarballs, the Protocol provenance sidecar, the
+conformance-proof sidecar, the enclosing handoff manifest, and a separately
+supplied SHA-256 of that manifest. It cross-checks both package records,
+tarball bytes/integrity, packed manifests/exports, producer commit/tree,
+conformance proof, and Protocol provenance before it builds anything. The
+caller-supplied digest binds the exact received packet; it does not authenticate
+its sender. The package command makes an isolated packed `ceal` consumer
+candidate, and the native command builds one host-native `ceal` executable from
+that internal packed consumer. Each native candidate carries a platform-qualified
+`ceal-worker-native-artifact-manifest-linux-<arch>.json`, the separate
+worker-only `install-ceal.sh`, its declared `ceal-worker-v1` lane, and a
+checksum inventory so an installed signed generation can run option-free `ceal
+update` without falling back to the historical `install.sh`. A future
+two-platform release must merge both binaries and both qualified manifests into
+one exact seven-primary-asset inventory; a platform never shares another
+platform's manifest. Neither path may contain `cealctl`, an operator guide,
+copied Protocol source, or a tag/signing claim.
 
 A future signed worker route will add a worker-specific `ceal-v*` tag namespace,
 workflow, asset allowlist, and installer. It must keep consuming a
