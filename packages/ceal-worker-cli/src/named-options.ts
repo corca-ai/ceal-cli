@@ -48,6 +48,7 @@ function consumeNamedOption(
 	}
 	if (!valueOptions.has(option)) return "unknown";
 	if (values.has(option) || !following) return "invalid";
+	if (following !== "--" && following.startsWith("--") && (valueOptions.has(following) || flagOptions.has(following))) return "invalid";
 	values.set(option, following);
 	return "value";
 }

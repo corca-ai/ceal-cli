@@ -30,6 +30,15 @@ test("named option parser rejects ambiguous or unsupported option forms", () => 
 	assert.equal(normalized(["--target", "target:team-inbox", "--", "query=ceal"]), null);
 });
 
+test("named option values may use non-grammar option-looking text", () => {
+	assert.deepEqual(normalized(["--target", "--literal"]), {
+		values: { "--target": "--literal" }, flags: [], operands: [],
+	});
+	assert.deepEqual(normalized(["--target", "--"]), {
+		values: { "--target": "--" }, flags: [], operands: [],
+	});
+});
+
 test("named option parser keeps flags separate from values and operands", () => {
 	assert.deepEqual(normalized(["query=ceal", "--fresh", "--target", "target:team-inbox", "--detail"]), {
 		values: { "--target": "target:team-inbox" }, flags: ["--fresh", "--detail"], operands: ["query=ceal"],
