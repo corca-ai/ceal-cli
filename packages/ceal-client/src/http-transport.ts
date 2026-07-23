@@ -45,6 +45,9 @@ export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = "x-ceal-profiles";
 /** Negotiates the optional safe connector-route failure audit projection. */
 export const CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER = "x-ceal-route-provenance";
 
+/** Negotiates the optional bounded Gateway handling time on audit readback. */
+export const CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER = "x-ceal-audit-timing";
+
 // Capability calls can legitimately traverse a bounded provider page before
 // the Gateway serializes its minimized result. Ten seconds cut off a completed
 // Gateway call just before its response reached an agent, so keep the default
@@ -96,6 +99,12 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						// Gateway omits the field for a client that does not.
 						[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER]: "accept",
 						[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER]: "accept",
+						// Audit event timing is an additive strict-decoder field. It only
+						// has meaning on readback, so keep the wire negotiation scoped to
+						// that operation rather than expanding every Gateway request.
+						...(wireRequest.operation === "readback"
+							? { [CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER]: "accept" }
+							: {}),
 					},
 					body: JSON.stringify(wireRequest),
 					redirect: "error",

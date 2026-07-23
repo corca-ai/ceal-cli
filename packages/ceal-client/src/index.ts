@@ -8,6 +8,7 @@ import type { CealClientTransport } from "./http-transport.js";
 
 export {
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
+	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
 	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
 	CealHttpTransportError,
