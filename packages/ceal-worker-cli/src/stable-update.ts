@@ -61,12 +61,24 @@ function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRele
 	const stateDirectory = dirname(workerDirectory);
 	const installDirectory = dirname(stateDirectory);
 	if (!isManagedWorkerGeneration({ commandPath, generationDirectory, releasesDirectory, workerDirectory, stateDirectory })) throw new Error("unmanaged_release");
-	const installerPath = join(generationDirectory, "install.sh");
 	const inventoryPath = join(generationDirectory, "SHA256SUMS");
-	if (!lstatSync(installerPath).isFile() || !lstatSync(inventoryPath).isFile()) throw new Error("unsafe_installer");
-	const expected = /^([a-f0-9]{64}) {2}install[.]sh$/mu.exec(readFileSync(inventoryPath, "utf8"))?.[1];
-	if (!expected || expected !== digest(readFileSync(installerPath))) throw new Error("installer_digest_mismatch");
+	if (!lstatSync(inventoryPath).isFile()) throw new Error("unsafe_installer");
+	const installerPath = findVerifiedInstaller(generationDirectory, readFileSync(inventoryPath, "utf8"));
 	return { commandPath, installerPath, generationDirectory, installDirectory };
+}
+
+function findVerifiedInstaller(generationDirectory: string, inventory: string): string {
+	const candidates = ["install-ceal.sh", "install.sh"].flatMap((name) => {
+		const file = join(generationDirectory, name);
+		try {
+			const stat = lstatSync(file);
+			if (!stat.isFile() || stat.isSymbolicLink()) return [];
+			const expected = new RegExp(`^([a-f0-9]{64}) {2}${escapePattern(name)}$`, "mu").exec(inventory)?.[1];
+			return expected === digest(readFileSync(file)) ? [file] : [];
+		} catch { return []; }
+	});
+	if (candidates.length !== 1) throw new Error("installer_digest_mismatch");
+	return candidates[0]!;
 }
 
 function isManagedWorkerGeneration(paths: Pick<InstalledWorkerRelease, "commandPath" | "generationDirectory"> & { releasesDirectory: string; workerDirectory: string; stateDirectory: string }): boolean {
@@ -81,6 +93,7 @@ function isManagedWorkerGeneration(paths: Pick<InstalledWorkerRelease, "commandP
 
 function basename(value: string): string { return value.slice(value.lastIndexOf("/") + 1); }
 function isWorkerBinary(value: string): boolean { return /^ceal-linux-(?:arm64|amd64)$/u.test(value); }
+function escapePattern(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"); }
 
 async function readVersion(commandPath: string): Promise<{ version: string; platform: "linux-arm64" | "linux-amd64" } | null> {
 	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath));

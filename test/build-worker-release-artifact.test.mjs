@@ -24,7 +24,7 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 		version: "0.65.0",
 	}, fakeDeps(workspace, calls));
 	assert.equal(result.ok, true);
-	assert.equal(result.artifact.name, "ceal-worker-linux-amd64");
+	assert.equal(result.artifact.name, "ceal-linux-amd64");
 	assert.equal(result.artifact.smoke.command, "ceal");
 	assert.equal(result.checksums.entry_count, 4);
 	assert.deepEqual(calls, ["consumer", "bundle", "blob", "runtime", "inject", "smoke"]);
@@ -33,13 +33,13 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 		"SHA256SUMS",
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
-		"ceal-worker-linux-amd64",
+		"ceal-linux-amd64",
 		"worker-release-manifest.json",
 	]);
 	const manifest = JSON.parse(readFileSync(path.join(root, "output", "worker-release-manifest.json"), "utf8"));
 	assert.equal(manifest.command, "ceal");
 	assert.equal(manifest.artifact_state, "unsigned_local_build");
-	assert.equal(manifest.artifacts.ceal.name, "ceal-worker-linux-amd64");
+	assert.equal(manifest.artifacts.ceal.name, "ceal-linux-amd64");
 	assert.equal(manifest.artifacts.cealctl, undefined);
 	assert.equal(existsSync(path.join(root, "output", "cealctl-linux-amd64")), false);
 	assert.equal(existsSync(workspace), false);
@@ -104,16 +104,16 @@ test("worker artifact builder proves the real packed protocol consumer and SEA o
 		version: "0.65.0",
 	});
 	assert.equal(result.proof_level, "local_integration");
-	assert.equal(result.artifact.name, "ceal-worker-linux-amd64");
+	assert.equal(result.artifact.name, "ceal-linux-amd64");
 	assert.deepEqual(list(output), [
 		".ceal-worker-release-output",
 		"SHA256SUMS",
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
-		"ceal-worker-linux-amd64",
+		"ceal-linux-amd64",
 		"worker-release-manifest.json",
 	]);
-	assert.match(readFileSync(path.join(output, "SHA256SUMS"), "utf8"), /ceal-worker-linux-amd64/u);
+	assert.match(readFileSync(path.join(output, "SHA256SUMS"), "utf8"), /ceal-linux-amd64/u);
 });
 
 function workerWorkspace(root) {

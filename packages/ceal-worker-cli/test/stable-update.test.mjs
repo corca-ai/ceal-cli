@@ -64,6 +64,26 @@ test("stable updater rejects a verified installer result that would downgrade th
 	assert.equal(result.error.kind, "update_failed");
 });
 
+test("stable updater runs only the checksum-bound migrated worker installer", async (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-stable-update-migrated-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const install = path.join(root, "prefix");
+	const worker = path.join(install, ".ceal-cli", "worker");
+	const first = path.join(worker, "releases", "0.65.1-linux-amd64-worker");
+	const second = path.join(worker, "releases", "0.65.2-linux-amd64-worker");
+	mkdirSync(first, { recursive: true });
+	writeWorkerBinary(path.join(first, "ceal-linux-amd64"), "0.65.1");
+	writeFileSync(path.join(first, "install-ceal.sh"), updateScript(second, "0.65.2"));
+	chmodSync(path.join(first, "install-ceal.sh"), 0o755);
+	writeInventory(first, "install-ceal.sh");
+	symlinkSync("releases/0.65.1-linux-amd64-worker", path.join(worker, "current"));
+	mkdirSync(install, { recursive: true });
+	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
+	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
+	assert.equal(result.status, "updated");
+	assert.equal(result.installed_version, "0.65.2");
+});
+
 function updateScript(nextGeneration, version = "0.65.1") {
 	return `#!/usr/bin/env sh
 set -eu
@@ -104,9 +124,9 @@ exit 2
 	chmodSync(file, 0o755);
 }
 
-function writeInventory(generation) {
-	const installer = readFileSync(path.join(generation, "install.sh"));
-	writeFileSync(path.join(generation, "SHA256SUMS"), `${digest(installer)}  install.sh\n`);
+function writeInventory(generation, installerName = "install.sh") {
+	const installer = readFileSync(path.join(generation, installerName));
+	writeFileSync(path.join(generation, "SHA256SUMS"), `${digest(installer)}  ${installerName}\n`);
 }
 
 function digest(bytes) {

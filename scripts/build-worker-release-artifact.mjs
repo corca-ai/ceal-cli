@@ -114,7 +114,7 @@ async function buildArtifact({ normalized, proof, work, workerVersion, deps }) {
 	await (deps.bundle ?? bundleWorker)({ entry, bundlePath });
 	const blobPath = path.join(work, "ceal.blob");
 	(deps.createBlob ?? createBlob)({ bundlePath, blobPath, work });
-	const name = `ceal-worker-${normalized.platform}`;
+	const name = `ceal-${normalized.platform}`;
 	const artifactPath = path.join(normalized.outputDirectory, name);
 	(deps.copyRuntime ?? copyRuntime)({ artifactPath });
 	chmodSync(artifactPath, 0o755);
