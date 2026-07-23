@@ -16,7 +16,8 @@
 		"test": "npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test && npm --prefix packages/ceal-worker-cli test && npm --prefix packages/ceal-operator-cli test && node --test --test-concurrency=1 test/*.test.mjs",
 		"check": "npm run build && npm test",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
-		"release:binaries": "node scripts/build-platform-binaries.mjs"
+		"release:binaries": "node scripts/build-platform-binaries.mjs",
+		"worker-release:build": "node scripts/build-worker-release-artifact.mjs"
 	},
 	"dependencies": {
 		"yaml": "2.9.0"
