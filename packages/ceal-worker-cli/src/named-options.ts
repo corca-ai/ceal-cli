@@ -47,7 +47,7 @@ function consumeNamedOption(
 		return "flag";
 	}
 	if (!valueOptions.has(option)) return "unknown";
-	if (values.has(option) || !following || following.startsWith("--")) return "invalid";
+	if (values.has(option) || !following) return "invalid";
 	values.set(option, following);
 	return "value";
 }

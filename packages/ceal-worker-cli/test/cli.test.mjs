@@ -755,6 +755,24 @@ test("capabilities reports an honest Gateway-required unavailable surface withou
 	assert.equal(Object.hasOwn(payload, "next_actions"), false);
 });
 
+test("capabilities rejects stray operands in both explicit and target-selection grammars", async () => {
+	const explicit = await yamlRun([
+		"capabilities",
+		"--endpoint", "https://gateway.example.test",
+		"--profile", "profile:narnia",
+		"--request-id", "narnia:grammar:001",
+		"--token-stdin",
+		"unexpected",
+	], 2);
+	assert.equal(explicit.error.kind, "invalid_argument");
+	const targets = await yamlRun(["capabilities", "targets", "--capability", "message.search", "unexpected"], 2);
+	assert.equal(targets.error.kind, "invalid_argument");
+	for (const match of ["--literal", "--"]) {
+		const optionLikeValue = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", match]);
+		assert.equal(optionLikeValue.status, "unavailable");
+	}
+});
+
 test("capabilities performs outbound handshake and discovery with a stdin-only token", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = "ceal_personal_test_token_never_render";
