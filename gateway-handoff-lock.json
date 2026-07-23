@@ -1,0 +1,18 @@
+{
+  "schema_version": "ceal.worker_gateway_handoff_lock.v1",
+  "status": "locked",
+  "gateway": {
+    "repository": "corca-ai/ceal",
+    "workflow_path": ".github/workflows/gateway-handoff-archive.yml",
+    "commit": "57e23865c4f96f703d7976600abe298b505eedfd",
+    "tree": "f03cac6af9d30bc2318886ca2f9e3cc222d9d6c9",
+    "tag": "gateway-handoff-v0.65.0",
+    "actions_run_id": 30051088428,
+    "artifact_name": "ceal-gateway-handoff-57e23865c4f96f703d7976600abe298b505eedfd"
+  },
+  "archive": {
+    "filename": "ceal-gateway-handoff-0.65.0.tar.gz",
+    "sha256": "0eb650ab118a4e61345cba0d7e57e28d5aba6e46a6f28d7581153d3fa762a355",
+    "handoff_manifest_sha256": "fce0dc832ccfb2b06d0457dd838c9f3353d3ebb17ab7cdaa2db550bc8d58795d"
+  }
+}
