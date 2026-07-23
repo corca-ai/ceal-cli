@@ -4,6 +4,8 @@ export interface ParsedNamedOptions {
 	operands: string[];
 }
 
+type NamedOptionOutcome = "flag" | "value" | "unknown" | "invalid";
+
 /**
  * Parses the named-option part of one command grammar without assigning meaning
  * to its positional operands. Named options may appear anywhere in the argv
@@ -18,16 +20,10 @@ export function parseNamedOptions(
 	const operands: string[] = [];
 	for (let index = 0; index < options.length; index += 1) {
 		const option = options[index]!;
-		if (flagOptions.has(option)) {
-			if (flags.has(option)) return null;
-			flags.add(option);
-			continue;
-		}
-		if (valueOptions.has(option)) {
-			if (values.has(option)) return null;
-			const value = options[index + 1];
-			if (!value || value.startsWith("--")) return null;
-			values.set(option, value);
+		const outcome = consumeNamedOption(option, options[index + 1], valueOptions, flagOptions, values, flags);
+		if (outcome === "invalid") return null;
+		if (outcome === "flag") continue;
+		if (outcome === "value") {
 			index += 1;
 			continue;
 		}
@@ -35,4 +31,23 @@ export function parseNamedOptions(
 		operands.push(option);
 	}
 	return { values, flags, operands };
+}
+
+function consumeNamedOption(
+	option: string,
+	following: string | undefined,
+	valueOptions: ReadonlySet<string>,
+	flagOptions: ReadonlySet<string>,
+	values: Map<string, string>,
+	flags: Set<string>,
+): NamedOptionOutcome {
+	if (flagOptions.has(option)) {
+		if (flags.has(option)) return "invalid";
+		flags.add(option);
+		return "flag";
+	}
+	if (!valueOptions.has(option)) return "unknown";
+	if (values.has(option) || !following || following.startsWith("--")) return "invalid";
+	values.set(option, following);
+	return "value";
 }
