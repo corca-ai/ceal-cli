@@ -1,18 +1,29 @@
 # Ceal CLI source candidate
 
-This tree is the local source candidate for the worker-facing
-`corca-ai/ceal-cli` repository. It owns two worker/client surfaces:
+This tree is the local source candidate for the private `corca-ai/ceal-cli`
+repository. It is a transitional composite: its current source authority is
+the public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
 
+## Ownership status
+
+- `corca-ai/ceal-cli` owns `@corca-ai/ceal` and `@corca-ai/ceal-worker-cli`.
+- `corca-ai/ceal` owns `@corca-ai/ceal-protocol`, `cealctl`, `cealctl-guide`,
+  their release/install contract, and canonical conformance.
+- The protocol and `packages/ceal-operator-cli` paths remaining here are frozen
+  compatibility inputs until the migration ledger's Stage 5 deletion gate. Do
+  not add a Gateway/operator feature, release surface, guide, or command to
+  them; consume the Gateway-issued artifact instead.
+
+The workspace still contains four historical package directories so packed
+consumer and deletion gates can be proved:
+
+- `@corca-ai/ceal-protocol`: frozen Gateway compatibility input;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;
-- `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing `ceal` binary.
+- `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing `ceal` binary;
+- `@corca-ai/ceal-operator-cli`: frozen Gateway operator compatibility input.
 
-Gateway owns `cealctl`, `cealctl-guide`, and the canonical
-`@corca-ai/ceal-protocol` source/conformance corpus in private `corca-ai/ceal`.
-The matching protocol/operator trees retained here are frozen compatibility
-inputs while the worker cutover is completed; they are not writable source or a
-release/install authority. A worker source build must consume only a supplied
-packed Gateway protocol artifact. Run
-`node scripts/verify-gateway-protocol-consumer.mjs --help` for that local,
+A worker source build consumes only a supplied packed Gateway protocol artifact.
+Run `node scripts/verify-gateway-protocol-consumer.mjs --help` for that local,
 no-network consumer proof.
 
 `@corca-ai/ceal` names only the client SDK. It does not contain the CLI,
