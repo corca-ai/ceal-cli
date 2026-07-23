@@ -8,7 +8,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	assertWorkerReleaseSourcePath,
-	resolveWorkerReleaseInputs,
+	resolveWorkerReleaseDevelopmentInputs,
+	runCli,
 	WorkerReleaseInputError,
 } from "../scripts/worker-release-inputs.mjs";
 
@@ -16,7 +17,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("worker release inventory accepts one exact complete Gateway handoff", (context) => {
 	const fixture = handoffFixture(context);
-	const resolution = resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture });
+	const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
 	assert.equal(resolution.ok, true);
 	assert.equal(resolution.protocol.package, "@corca-ai/ceal-protocol");
 	assert.equal(resolution.gateway_client.name, "@corca-ai/ceal");
@@ -29,31 +30,31 @@ test("worker release inventory rejects stale sidecars, missing package pair, and
 	const fixture = handoffFixture(context);
 	const marker = path.join(fixture.root, ".ceal-handoff-owner");
 	writeFileSync(marker, "unexpected\n");
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_marker_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_marker_mismatch"));
 	writeFileSync(marker, "ceal.repository_extraction_gateway_handoff.v1\n");
 	writeFileSync(fixture.conformanceProof, "{}\n");
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_conformance_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_conformance_mismatch"));
 	writeConformanceProof(fixture);
 	const stale = JSON.parse(JSON.stringify(fixture.provenance));
 	stale.artifact.sha256 = "0".repeat(64);
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(stale)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	fixture.provenance.artifact.exports = ["."];
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
 	fixture.provenance.artifact.exports = [".", "./conformance"];
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, protocolTarball: path.relative(ROOT, fixture.protocolTarball), ...rest(fixture) }), hasCode("protocol_tarball"));
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture, handoffManifest: path.join(ROOT, "worker-release-inputs.json") }), hasCode("handoff_layout_mismatch"));
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture, expectedHandoffSha256: "0".repeat(64) }), hasCode("handoff_trust_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, protocolTarball: path.relative(ROOT, fixture.protocolTarball), ...rest(fixture) }), hasCode("protocol_tarball"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, handoffManifest: path.join(ROOT, "worker-release-inputs.json") }), hasCode("handoff_layout_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, expectedHandoffSha256: "0".repeat(64) }), hasCode("handoff_trust_mismatch"));
 	const missingClient = path.join(fixture.root, "different", path.basename(fixture.clientTarball));
 	mkdirSync(path.dirname(missingClient), { recursive: true });
 	writeFileSync(missingClient, readFileSync(fixture.clientTarball));
-	assert.throws(() => resolveWorkerReleaseInputs({ repoRoot: ROOT, ...fixture, clientTarball: missingClient }), hasCode("handoff_layout_mismatch"));
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, clientTarball: missingClient }), hasCode("handoff_layout_mismatch"));
 });
 
 test("worker release inventory rejects Gateway and legacy composite paths", () => {
@@ -64,6 +65,15 @@ test("worker release inventory rejects Gateway and legacy composite paths", () =
 	assert.equal(assertWorkerReleaseSourcePath(inventory, "packages/ceal-worker-cli/src/index.ts"), "packages/ceal-worker-cli/src/index.ts");
 	assert.equal(assertWorkerReleaseSourcePath(inventory, "packages/ceal-client/src/index.ts"), "packages/ceal-client/src/index.ts");
 	assert.throws(() => assertWorkerReleaseSourcePath(inventory, "README.md"), hasCode("undeclared_release_input"));
+});
+
+test("release CLI rejects raw handoff arguments and requires the reviewed archive lane", () => {
+	const messages = [];
+	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	assert.equal(runCli(["--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
+	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
+	assert.equal(runCli(["--json"], io), 2);
+	assert.equal(JSON.parse(messages.pop()).error_code, "gateway_handoff_archive_required");
 });
 
 function handoffFixture(context) {

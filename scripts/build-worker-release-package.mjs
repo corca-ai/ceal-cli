@@ -17,7 +17,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveWorkerReleaseInputs, WorkerReleaseInputError } from "./worker-release-inputs.mjs";
+import {
+	withWorkerReleaseDevelopmentInputs,
+	withWorkerReleaseInputs,
+	WorkerReleaseInputError,
+} from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-package";
@@ -33,49 +37,47 @@ export class WorkerReleasePackageError extends Error {
 }
 
 export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
+	return buildWorkerReleasePackageWithInputs(options, dependencies, withWorkerReleaseInputs);
+}
+
+export function buildWorkerReleasePackageFromDevelopmentInputs(options = {}, dependencies = {}) {
+	return buildWorkerReleasePackageWithInputs(options, dependencies, withWorkerReleaseDevelopmentInputs);
+}
+
+function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInputs) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	let inputs;
-	try {
-		inputs = (dependencies.resolveInputs ?? resolveWorkerReleaseInputs)({
-			repoRoot,
-			protocolTarball: options.protocolTarball,
-			clientTarball: options.clientTarball,
-			protocolProvenance: options.protocolProvenance,
-			conformanceProof: options.conformanceProof,
-			handoffManifest: options.handoffManifest,
-			expectedHandoffSha256: options.expectedHandoffSha256,
-		});
-	} catch (error) {
-		if (error instanceof WorkerReleaseInputError) throw new WorkerReleasePackageError(error.code, error.message);
-		throw error;
-	}
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
-	const version = resolveVersion(repoRoot, inputs);
-	let stage;
 	try {
-		stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
-		const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: path.resolve(options.protocolTarball), dependencies });
-		materializeOutput({ output, repoRoot, inputs, version, packed });
-		return {
-			schema_version: "ceal.worker_release_package_build.v1",
-			ok: true,
-			proof_level: "local_state",
-			writes_external: false,
-			output_dir: output.directory,
-			version,
-			artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
-			consumer_smoke: packed.consumerSmoke,
-			protocol: inputs.protocol,
-			non_claims: [
-				"This is a local packed worker-package proof, not a native binary, signature, tag, upload, installation, or Gateway action.",
-				"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
-			],
-		};
+		return resolveInputs({ ...options, repoRoot }, ({ inputs, rawInputs }) => {
+			let stage;
+			try {
+				stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
+				const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: rawInputs.protocolTarball, dependencies });
+				const version = resolveVersion(repoRoot, inputs);
+				materializeOutput({ output, repoRoot, inputs, version, packed });
+				return {
+					schema_version: "ceal.worker_release_package_build.v1",
+					ok: true,
+					proof_level: "local_state",
+					writes_external: false,
+					output_dir: output.directory,
+					version,
+					artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
+					consumer_smoke: packed.consumerSmoke,
+					protocol: inputs.protocol,
+					non_claims: [
+						"This is a local packed worker-package proof, not a native binary, signature, tag, upload, installation, or Gateway action.",
+						"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
+					],
+				};
+			} finally {
+				if (stage) rmSync(stage, { recursive: true, force: true });
+			}
+		}, dependencies);
 	} catch (error) {
 		if (error instanceof WorkerReleasePackageError) throw error;
+		if (error instanceof WorkerReleaseInputError) throw new WorkerReleasePackageError(error.code, error.message);
 		throw new WorkerReleasePackageError("worker_package_build_failed", "Could not build the isolated worker package.");
-	} finally {
-		if (stage) rmSync(stage, { recursive: true, force: true });
 	}
 }
 
@@ -320,10 +322,10 @@ function parseArgs(argv) {
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") { json = true; continue; }
 		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--protocol-tarball", "--client-tarball", "--protocol-provenance", "--conformance-proof", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
+		if (["--out", "--gateway-handoff-archive"].includes(arg)) {
 			const value = argv[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Worker package option requires a value.");
-			options[arg === "--out" ? "outputDirectory" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--client-tarball" ? "clientTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--conformance-proof" ? "conformanceProof" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256"] = value;
+			options[arg === "--out" ? "outputDirectory" : "gatewayHandoffArchive"] = value;
 			continue;
 		}
 		fail("invalid_argument", "Unexpected worker package build argument.");
@@ -336,7 +338,7 @@ export function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --client-tarball <absolute-tgz> --protocol-provenance <absolute-json> --conformance-proof <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--force] [--json]");
+			io.log("usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--force] [--json]");
 			return 0;
 		}
 		const result = buildWorkerReleasePackage(parsed.options);

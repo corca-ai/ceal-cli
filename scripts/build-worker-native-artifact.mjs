@@ -22,7 +22,11 @@ import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.mjs";
-import { resolveWorkerReleaseInputs, WorkerReleaseInputError } from "./worker-release-inputs.mjs";
+import {
+	withWorkerReleaseDevelopmentInputsAsync,
+	withWorkerReleaseInputsAsync,
+	WorkerReleaseInputError,
+} from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
@@ -41,63 +45,57 @@ export class WorkerNativeArtifactError extends Error {
 }
 
 export async function buildWorkerNativeArtifact(options = {}, dependencies = {}) {
+	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseInputsAsync);
+}
+
+export async function buildWorkerNativeArtifactFromDevelopmentInputs(options = {}, dependencies = {}) {
+	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseDevelopmentInputsAsync);
+}
+
+async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolveInputs) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	const inputs = resolveInputs(repoRoot, options, dependencies);
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
 	const platform = resolvePlatform(options.platform, dependencies);
-	let stage;
 	try {
-		stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
-		const packed = prepareWorkerReleaseConsumer({
-			repoRoot,
-			stage,
-			inputs,
-			protocolTarball: path.resolve(options.protocolTarball),
-			dependencies,
-		});
-		const version = resolveVersion(repoRoot, inputs);
-		const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-		materializeOutput({ output, repoRoot, inputs, version, platform, artifact });
-		return {
-			schema_version: "ceal.worker_native_artifact_build.v1",
-			ok: true,
-			proof_level: "local_state",
-			writes_external: false,
-			output_dir: output.directory,
-			version,
-			platform,
-			artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
-			consumer_smoke: packed.consumerSmoke,
-			native_smoke: artifact.smoke,
-			protocol: inputs.protocol,
-			non_claims: [
-				"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
-				"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
-			],
-		};
+		return await resolveInputs({ ...options, repoRoot }, async ({ inputs, rawInputs }) => {
+			let stage;
+			try {
+				stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
+				const packed = prepareWorkerReleaseConsumer({
+					repoRoot,
+					stage,
+					inputs,
+					protocolTarball: rawInputs.protocolTarball,
+					dependencies,
+				});
+				const version = resolveVersion(repoRoot, inputs);
+				const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
+				materializeOutput({ output, repoRoot, inputs, version, platform, artifact });
+				return {
+					schema_version: "ceal.worker_native_artifact_build.v1",
+					ok: true,
+					proof_level: "local_state",
+					writes_external: false,
+					output_dir: output.directory,
+					version,
+					platform,
+					artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
+					consumer_smoke: packed.consumerSmoke,
+					native_smoke: artifact.smoke,
+					protocol: inputs.protocol,
+					non_claims: [
+						"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
+						"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
+					],
+				};
+			} finally {
+				if (stage) rmSync(stage, { recursive: true, force: true });
+			}
+		}, dependencies);
 	} catch (error) {
 		if (error instanceof WorkerNativeArtifactError) throw error;
 		if (error instanceof WorkerReleasePackageError || error instanceof WorkerReleaseInputError) throw new WorkerNativeArtifactError(error.code, error.message);
 		throw new WorkerNativeArtifactError("worker_native_artifact_build_failed", "Could not build the isolated native worker artifact.");
-	} finally {
-		if (stage) rmSync(stage, { recursive: true, force: true });
-	}
-}
-
-function resolveInputs(repoRoot, options, dependencies) {
-	try {
-		return (dependencies.resolveInputs ?? resolveWorkerReleaseInputs)({
-			repoRoot,
-			protocolTarball: options.protocolTarball,
-			clientTarball: options.clientTarball,
-			protocolProvenance: options.protocolProvenance,
-			conformanceProof: options.conformanceProof,
-			handoffManifest: options.handoffManifest,
-			expectedHandoffSha256: options.expectedHandoffSha256,
-		});
-	} catch (error) {
-		if (error instanceof WorkerReleaseInputError) throw new WorkerNativeArtifactError(error.code, error.message);
-		throw error;
 	}
 }
 
@@ -305,10 +303,10 @@ function parseArgs(argv) {
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") { json = true; continue; }
 		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--platform", "--protocol-tarball", "--client-tarball", "--protocol-provenance", "--conformance-proof", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
+		if (["--out", "--platform", "--gateway-handoff-archive"].includes(arg)) {
 			const value = argv[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Native worker artifact option requires a value.");
-			const name = arg === "--out" ? "outputDirectory" : arg === "--platform" ? "platform" : arg === "--protocol-tarball" ? "protocolTarball" : arg === "--client-tarball" ? "clientTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--conformance-proof" ? "conformanceProof" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256";
+			const name = arg === "--out" ? "outputDirectory" : arg === "--platform" ? "platform" : "gatewayHandoffArchive";
 			options[name] = value;
 			continue;
 		}
@@ -322,7 +320,7 @@ export async function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --protocol-tarball <absolute-tgz> --client-tarball <absolute-tgz> --protocol-provenance <absolute-json> --conformance-proof <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--platform <current-platform>] [--force] [--json]");
+			io.log("usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--platform <current-platform>] [--force] [--json]");
 			return 0;
 		}
 		const result = await buildWorkerNativeArtifact(parsed.options);

@@ -5,6 +5,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	consumeLockedGatewayHandoffArchive,
+	consumeLockedGatewayHandoffArchiveSync,
+	WorkerGatewayHandoffArchiveError,
+} from "./worker-gateway-handoff-archive.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INPUTS_FILENAME = "worker-release-inputs.json";
@@ -15,6 +20,7 @@ const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-handoff-owner";
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const PACKAGE_NAMES = ["@corca-ai/ceal-protocol", "@corca-ai/ceal"];
+const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "clientTarball", "protocolProvenance", "conformanceProof", "handoffManifest", "expectedHandoffSha256"];
 
 export class WorkerReleaseInputError extends Error {
 	constructor(code, message) {
@@ -24,7 +30,8 @@ export class WorkerReleaseInputError extends Error {
 	}
 }
 
-export function resolveWorkerReleaseInputs(options = {}) {
+export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
+	assertDevelopmentRawInputs(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const inventory = readInventory(options.inventoryPath ?? path.join(repoRoot, INPUTS_FILENAME));
 	assertInventory(inventory, repoRoot);
@@ -68,6 +75,102 @@ export function resolveWorkerReleaseInputs(options = {}) {
 		trust_anchor: { kind: "caller_supplied_manifest_sha256", value: expectedHandoffSha256 },
 		forbidden_release_inputs: [...inventory.forbidden_release_inputs],
 		non_claims: [...inventory.non_claims, "This caller-supplied digest binds exact local input bytes; it does not authenticate who supplied that digest or packet."],
+	};
+}
+
+export function resolveWorkerReleaseInputsFromLockedGatewayArchive(options = {}, dependencies = {}) {
+	return withWorkerReleaseInputs(options, ({ inputs }) => inputs, dependencies);
+}
+
+export function withWorkerReleaseInputs(options, consume, dependencies = {}) {
+	assertReleaseArchiveInput(options);
+	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	try {
+		return (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchiveSync)({
+			repoRoot,
+			archiveFile: options.gatewayHandoffArchive,
+		}, {
+			resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
+			consume: ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
+		});
+	} catch (error) {
+		if (error instanceof WorkerGatewayHandoffArchiveError) throw new WorkerReleaseInputError(error.code, error.message);
+		throw error;
+	}
+}
+
+export async function withWorkerReleaseInputsAsync(options, consume, dependencies = {}) {
+	assertReleaseArchiveInput(options);
+	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	try {
+		return await (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchive)({
+			repoRoot,
+			archiveFile: options.gatewayHandoffArchive,
+		}, {
+			resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
+			consume: async ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
+		});
+	} catch (error) {
+		if (error instanceof WorkerGatewayHandoffArchiveError) throw new WorkerReleaseInputError(error.code, error.message);
+		throw error;
+	}
+}
+
+export function withWorkerReleaseDevelopmentInputs(options, consume) {
+	assertDevelopmentRawInputs(options);
+	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	const rawInputs = rawInputOptions(repoRoot, options);
+	return consume({ inputs: resolveWorkerReleaseDevelopmentInputs(rawInputs), rawInputs });
+}
+
+export async function withWorkerReleaseDevelopmentInputsAsync(options, consume) {
+	assertDevelopmentRawInputs(options);
+	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	const rawInputs = rawInputOptions(repoRoot, options);
+	return await consume({ inputs: resolveWorkerReleaseDevelopmentInputs(rawInputs), rawInputs });
+}
+
+function rawInputOptions(repoRoot, options) {
+	return {
+		repoRoot,
+		protocolTarball: options.protocolTarball,
+		clientTarball: options.clientTarball,
+		protocolProvenance: options.protocolProvenance,
+		conformanceProof: options.conformanceProof,
+		handoffManifest: options.handoffManifest,
+		expectedHandoffSha256: options.expectedHandoffSha256,
+	};
+}
+
+function assertReleaseArchiveInput(options) {
+	if (!options.gatewayHandoffArchive) fail("gateway_handoff_archive_required", "Worker release commands require one lock-bound Gateway handoff archive.");
+	if (RAW_HANDOFF_INPUT_KEYS.some((key) => options[key] !== undefined)) {
+		fail("input_mode_conflict", "Gateway handoff archive input cannot be combined with raw handoff files or digests.");
+	}
+}
+
+function assertDevelopmentRawInputs(options) {
+	if (options.gatewayHandoffArchive) fail("development_input_mode", "Development input resolution accepts raw local handoff files only.");
+}
+
+function lockBoundResolution(resolution, lock) {
+	return {
+		...resolution,
+		trust_anchor: {
+			kind: "reviewed_gateway_handoff_lock",
+			lock_filename: lock.filename,
+			gateway_repository: lock.gateway_repository,
+			gateway_commit: lock.gateway_commit,
+			gateway_tag: lock.gateway_tag,
+			actions_run_id: lock.actions_run_id,
+			artifact_name: lock.artifact_name,
+			archive_filename: lock.archive_filename,
+			archive_sha256: lock.archive_sha256,
+		},
+		non_claims: [
+			...resolution.non_claims.filter((entry) => !entry.startsWith("This caller-supplied digest")),
+			"The reviewed lock binds a locally supplied archive; it does not download an Actions artifact, publish a release, or prove a signature identity.",
+		],
 	};
 }
 
@@ -370,14 +473,15 @@ function parseArgs(argv) {
 		const arg = argv[index];
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") { json = true; continue; }
-		if (["--protocol-tarball", "--client-tarball", "--protocol-provenance", "--conformance-proof", "--handoff-manifest", "--expected-handoff-sha256"].includes(arg)) {
+		if (arg === "--gateway-handoff-archive") {
 			const value = argv[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Worker release input option requires a value.");
-			options[arg === "--protocol-tarball" ? "protocolTarball" : arg === "--client-tarball" ? "clientTarball" : arg === "--protocol-provenance" ? "protocolProvenance" : arg === "--conformance-proof" ? "conformanceProof" : arg === "--handoff-manifest" ? "handoffManifest" : "expectedHandoffSha256"] = value;
+			options.gatewayHandoffArchive = value;
 			continue;
 		}
 		fail("invalid_argument", "Unexpected worker release input argument.");
 	}
+	assertReleaseArchiveInput(options);
 	return { help: false, json, options };
 }
 
@@ -386,10 +490,10 @@ export function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/worker-release-inputs.mjs --protocol-tarball <absolute-tgz> --client-tarball <absolute-tgz> --protocol-provenance <absolute-json> --conformance-proof <absolute-json> --handoff-manifest <absolute-json> --expected-handoff-sha256 <sha256> [--json]");
+			io.log("usage: node scripts/worker-release-inputs.mjs --gateway-handoff-archive <absolute-tar.gz> [--json]");
 			return 0;
 		}
-		const result = resolveWorkerReleaseInputs(parsed.options);
+		const result = resolveWorkerReleaseInputsFromLockedGatewayArchive(parsed.options);
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : "Worker release inputs are verified.");
 		return 0;
 	} catch (error) {

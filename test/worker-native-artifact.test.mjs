@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { buildWorkerNativeArtifact, WorkerNativeArtifactError } from "../scripts/build-worker-native-artifact.mjs";
+import {
+	buildWorkerNativeArtifact,
+	buildWorkerNativeArtifactFromDevelopmentInputs,
+	runCli,
+	WorkerNativeArtifactError,
+} from "../scripts/build-worker-native-artifact.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 test("native worker artifact consumes a manifest-bound packed consumer and emits no operator material", async (context) => {
 	const fixture = packedProtocolFixture(context);
 	const output = path.join(fixture.root, "worker-native");
-	const result = await buildWorkerNativeArtifact({ outputDirectory: output, ...fixture });
+	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
 	const platform = process.arch === "arm64" ? "linux-arm64" : "linux-amd64";
 	const otherPlatform = platform === "linux-arm64" ? "linux-amd64" : "linux-arm64";
@@ -64,9 +70,22 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64}  /u.test(line) && line.endsWith(`  ${name}`)), true);
 	}
 	await assert.rejects(
-		() => buildWorkerNativeArtifact({ outputDirectory: path.join(fixture.root, "cross-platform"), platform: otherPlatform, ...fixture }),
+		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "cross-platform"), platform: otherPlatform, ...fixture }),
 		hasCode("platform_mismatch"),
 	);
+});
+
+test("production native build accepts only the locked archive lane", async (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-boundary-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	await assert.rejects(
+		() => buildWorkerNativeArtifact({ outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
+		hasCode("gateway_handoff_archive_required"),
+	);
+	const messages = [];
+	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	assert.equal(await runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
+	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
 });
 
 function hasCode(code) {

@@ -93,18 +93,39 @@ currently the worker-only release route. The historical dual `install.sh`,
 Do not execute, amend, publish, or use them to install either command from this
 checkout.
 
-The local worker preflight accepts an exact Gateway handoff only through
 `release:worker:inputs`, `release:worker:package`, and
-`release:worker:native`. It requires one directory carrying the Gateway-owned
-marker, Protocol and client tarballs, the Protocol provenance sidecar, the
-conformance-proof sidecar, the enclosing handoff manifest, and a separately
-supplied SHA-256 of that manifest. It cross-checks both package records,
-tarball bytes/integrity, packed manifests/exports, producer commit/tree,
-conformance proof, and Protocol provenance before it builds anything. The
-caller-supplied digest binds the exact received packet; it does not authenticate
-its sender. The package command makes an isolated packed `ceal` consumer
-candidate, and the native command builds one host-native `ceal` executable from
-that internal packed consumer. Each native candidate carries a platform-qualified
+`release:worker:native` accept exactly one `--gateway-handoff-archive`
+argument. The archive must match a source-reviewed
+`gateway-handoff-lock.json`, contain the exact six-file Gateway packet, and is
+copied into a private temporary directory before its bytes are checked and it
+is extracted. The release commands reject the former six raw file/digest
+arguments, so a caller cannot replace the reviewed archive binding with a
+caller-selected digest.
+
+There is intentionally no lock in the repository yet: a real
+`gateway-handoff-v*` workflow run must produce the immutable archive before a
+reviewed lock can be committed. The explicit
+`*FromDevelopmentInputs` APIs remain test/development seams for assembling and
+validating a raw local packet; they are not exposed through a release command,
+do not authenticate a sender, and do not establish release readiness.
+
+The future immutable handoff form instead accepts one locally available
+`--gateway-handoff-archive` and requires this repository's reviewed
+`gateway-handoff-lock.json`. The lock pins the Gateway repository/workflow,
+tag, commit/tree, Actions run and artifact name, archive SHA-256, and embedded
+handoff-manifest SHA-256. The archive must contain exactly the marker, two
+package tarballs, manifest, conformance proof, and Protocol provenance; it is
+extracted only into a disposable directory for the preflight/package/native
+operation. The lock is intentionally absent until the Gateway's separate
+`gateway-handoff-v*` workflow has produced a real signed archive and a reviewer
+can pin its immutable facts. The commands fail closed while it is absent. This
+local archive consumer does not download Actions artifacts or claim cosign
+verification; the later least-privilege downloader must verify the signed
+artifact before presenting this input.
+
+The package command makes an isolated packed `ceal` consumer candidate, and
+the native command builds one host-native `ceal` executable from that internal
+packed consumer. Each native candidate carries a platform-qualified
 `ceal-worker-native-artifact-manifest-linux-<arch>.json`, the separate
 worker-only `install-ceal.sh`, its declared `ceal-worker-v1` lane, and a
 checksum inventory so an installed signed generation can run option-free `ceal

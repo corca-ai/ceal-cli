@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildWorkerReleasePackage } from "../scripts/build-worker-release-package.mjs";
+import {
+	buildWorkerReleasePackage,
+	buildWorkerReleasePackageFromDevelopmentInputs,
+	runCli,
+	WorkerReleasePackageError,
+} from "../scripts/build-worker-release-package.mjs";
 import { ROOT, packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 test("worker package build consumes a manifest-bound packed Protocol and emits no operator material", (context) => {
 	const fixture = packedProtocolFixture(context);
 	const output = path.join(fixture.root, "worker-package");
-	const result = buildWorkerReleasePackage({ repoRoot: ROOT, outputDirectory: output, ...fixture });
+	const result = buildWorkerReleasePackageFromDevelopmentInputs({ repoRoot: ROOT, outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
 	assert.deepEqual(result.consumer_smoke, {
 		command: "ceal", installed_from_packed_archives: true, source_or_workspace_fallback_used: false,
@@ -32,4 +38,17 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 	assert.match(packedPaths, /^package\/dist\/bin[.]js$/mu);
 	assert.doesNotMatch(packedPaths, /(?:^|\/)src\//u);
 	assert.doesNotMatch(packedPaths, /cealctl|operator/u);
+});
+
+test("production package build accepts only the locked archive lane", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	assert.throws(
+		() => buildWorkerReleasePackage({ repoRoot: ROOT, outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
+		(error) => error instanceof WorkerReleasePackageError && error.code === "gateway_handoff_archive_required",
+	);
+	const messages = [];
+	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	assert.equal(runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
+	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
 });
