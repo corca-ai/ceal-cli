@@ -35,9 +35,10 @@ export async function buildWorkerReleaseArtifact(options = {}, deps = {}) {
 		try {
 			const artifact = await buildArtifact({ normalized, proof, work, workerVersion, deps });
 			const guide = copyGuide({ normalized, proof });
+			const installer = copyInstaller({ normalized, proof });
 			const notices = copyNotices(normalized);
-			const manifest = writeManifest({ normalized, proof, artifact, guide, notices, workerVersion });
-			writeChecksums(normalized.outputDirectory, [artifact, guide, notices, manifest]);
+			const manifest = writeManifest({ normalized, proof, artifact, guide, installer, notices, workerVersion });
+			writeChecksums(normalized.outputDirectory, [artifact, guide, installer, notices, manifest]);
 			return {
 				schema_version: "ceal.worker_release_artifact_build.v1",
 				ok: true,
@@ -48,9 +49,10 @@ export async function buildWorkerReleaseArtifact(options = {}, deps = {}) {
 				output_dir: normalized.outputDirectory,
 				artifact,
 				guide,
+				installer,
 				notices,
 				manifest,
-				checksums: { name: "SHA256SUMS", entry_count: 4 },
+				checksums: { name: "SHA256SUMS", entry_count: 5 },
 			};
 		} finally {
 			rmSync(work, { recursive: true, force: true });
@@ -163,6 +165,17 @@ function copyGuide({ normalized, proof }) {
 	return { name, bytes: bytes.length, sha256: sha256(bytes) };
 }
 
+function copyInstaller({ normalized, proof }) {
+	if (proof.worker_release_inputs?.installer !== "install-ceal.sh") fail("invalid_worker_inputs", "Packed consumer did not retain the worker installer input.");
+	const source = path.join(ROOT, proof.worker_release_inputs.installer);
+	if (!isRegularFile(source)) fail("invalid_worker_inputs", "Worker installer input is not a regular file.");
+	const name = "install-ceal.sh";
+	const bytes = readFileSync(source);
+	if (proof.worker_release_inputs?.installer_sha256 !== sha256(bytes)) fail("installer_drift", "Worker installer changed after the packed-consumer proof.");
+	writeFileSync(path.join(normalized.outputDirectory, name), bytes, { mode: 0o755 });
+	return { name, bytes: bytes.length, sha256: sha256(bytes) };
+}
+
 function copyNotices(normalized) {
 	const name = "THIRD_PARTY_NOTICES.txt";
 	const bytes = readFileSync(path.join(ROOT, name));
@@ -170,8 +183,8 @@ function copyNotices(normalized) {
 	return { name, bytes: bytes.length, sha256: sha256(bytes) };
 }
 
-function writeManifest({ normalized, proof, artifact, guide, notices, workerVersion }) {
-	const name = "worker-release-manifest.json";
+function writeManifest({ normalized, proof, artifact, guide, installer, notices, workerVersion }) {
+	const name = `ceal-worker-release-manifest-${normalized.platform}.json`;
 	const manifest = {
 		schema_version: "ceal.worker_release_manifest.v1",
 		artifact_state: "unsigned_local_build",
@@ -183,6 +196,7 @@ function writeManifest({ normalized, proof, artifact, guide, notices, workerVers
 		worker_release_inputs: proof.worker_release_inputs,
 		artifacts: { ceal: artifact },
 		guide,
+		installer,
 		third_party_notices: notices,
 		non_claims: [
 			"This local build does not create a tag, signature, release upload, publication, installation, update, or rollback.",

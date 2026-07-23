@@ -12,6 +12,7 @@
 		}
 	},
 	"guide": "skills/ceal-guide/SKILL.md",
+	"installer": "install-ceal.sh",
 	"protocol": {
 		"package": "@corca-ai/ceal-protocol",
 		"input": "gateway_artifact_only"

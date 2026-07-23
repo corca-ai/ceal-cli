@@ -43,6 +43,7 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 			worker_release_inputs: {
 				...releaseInputs,
 				guide_sha256: sha256(readRegularFile(path.join(root, releaseInputs.guide), "invalid_worker_release_inputs")),
+				installer_sha256: sha256(readRegularFile(path.join(root, releaseInputs.installer), "invalid_worker_release_inputs")),
 			},
 			consumer: installed,
 			non_claims: [

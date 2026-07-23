@@ -14,6 +14,7 @@ const EXPECTED = Object.freeze({
 		worker: { path: "packages/ceal-worker-cli", name: "@corca-ai/ceal-worker-cli" },
 	},
 	guide: "skills/ceal-guide/SKILL.md",
+	installer: "install-ceal.sh",
 	protocol: { package: "@corca-ai/ceal-protocol", input: "gateway_artifact_only" },
 	forbidden_paths: [
 		"packages/ceal-protocol",
@@ -43,13 +44,15 @@ export function validateWorkerReleaseInputs({ repoRoot = REPO_ROOT, protocolVers
 	assertRegularDirectory(root, candidate.packages.client.path);
 	assertRegularDirectory(root, candidate.packages.worker.path);
 	assertRegularFile(root, candidate.guide);
+	assertRegularFile(root, candidate.installer);
 	assertPackage(root, candidate.packages.client, protocolVersion, false);
 	assertPackage(root, candidate.packages.worker, protocolVersion, true);
 	return {
 		schema_version: candidate.schema_version,
 		source_repository: candidate.source_repository,
-		packages: candidate.packages,
-		guide: candidate.guide,
+	packages: candidate.packages,
+	guide: candidate.guide,
+	installer: candidate.installer,
 		protocol: {
 			package: candidate.protocol.package,
 			input: candidate.protocol.input,
@@ -74,11 +77,12 @@ function assertInventoryShape(inventory) {
 		|| !Array.isArray(inventory.forbidden_paths)) {
 		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory does not match the owned-only release contract.");
 	}
-	const selectedPaths = [inventory.packages?.client?.path, inventory.packages?.worker?.path, inventory.guide];
+	const selectedPaths = [inventory.packages?.client?.path, inventory.packages?.worker?.path, inventory.guide, inventory.installer];
 	if (selectedPaths.some((entry) => inventory.forbidden_paths.includes(entry))) {
 		throw new WorkerReleaseInputsError("forbidden_input", "Worker release inventory selected a Gateway-owned or legacy path.");
 	}
 	if (inventory.guide !== EXPECTED.guide
+		|| inventory.installer !== EXPECTED.installer
 		|| !sameObject(inventory.protocol, EXPECTED.protocol)
 		|| !sameObject(inventory.packages?.client, EXPECTED.packages.client)
 		|| !sameObject(inventory.packages?.worker, EXPECTED.packages.worker)) {
@@ -114,7 +118,7 @@ function assertRegularDirectory(root, relativePath) {
 function assertRegularFile(root, relativePath) {
 	const target = absolutePath(root, relativePath, "unsafe_path");
 	const stat = existsSync(target) ? lstatSync(target) : null;
-	if (!stat?.isFile() || stat.isSymbolicLink()) throw new WorkerReleaseInputsError("unsafe_path", "Worker release guide must be a regular file.");
+	if (!stat?.isFile() || stat.isSymbolicLink()) throw new WorkerReleaseInputsError("unsafe_path", "Worker release file input must be a regular file.");
 }
 
 function absolutePath(root, relativePath, code) {

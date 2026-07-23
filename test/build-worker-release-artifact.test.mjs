@@ -4,8 +4,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { buildWorkerReleaseArtifact } from "../scripts/build-worker-release-artifact.mjs";
 import { makeGatewayProtocolFixture } from "./gateway-protocol-fixture.mjs";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("isolated worker artifact builder emits only ceal-owned local build assets", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-test-"));
@@ -26,7 +29,7 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 	assert.equal(result.ok, true);
 	assert.equal(result.artifact.name, "ceal-linux-amd64");
 	assert.equal(result.artifact.smoke.command, "ceal");
-	assert.equal(result.checksums.entry_count, 4);
+	assert.equal(result.checksums.entry_count, 5);
 	assert.deepEqual(calls, ["consumer", "bundle", "blob", "runtime", "inject", "smoke"]);
 	assert.deepEqual(list(path.join(root, "output")), [
 		".ceal-worker-release-output",
@@ -34,13 +37,15 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
 		"ceal-linux-amd64",
-		"worker-release-manifest.json",
+		"ceal-worker-release-manifest-linux-amd64.json",
+		"install-ceal.sh",
 	]);
-	const manifest = JSON.parse(readFileSync(path.join(root, "output", "worker-release-manifest.json"), "utf8"));
+	const manifest = JSON.parse(readFileSync(path.join(root, "output", "ceal-worker-release-manifest-linux-amd64.json"), "utf8"));
 	assert.equal(manifest.command, "ceal");
 	assert.equal(manifest.artifact_state, "unsigned_local_build");
 	assert.equal(manifest.artifacts.ceal.name, "ceal-linux-amd64");
 	assert.equal(manifest.artifacts.cealctl, undefined);
+	assert.equal(manifest.installer.name, "install-ceal.sh");
 	assert.equal(existsSync(path.join(root, "output", "cealctl-linux-amd64")), false);
 	assert.equal(existsSync(workspace), false);
 });
@@ -111,7 +116,8 @@ test("worker artifact builder proves the real packed protocol consumer and SEA o
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
 		"ceal-linux-amd64",
-		"worker-release-manifest.json",
+		"ceal-worker-release-manifest-linux-amd64.json",
+		"install-ceal.sh",
 	]);
 	assert.match(readFileSync(path.join(output, "SHA256SUMS"), "utf8"), /ceal-linux-amd64/u);
 });
@@ -140,7 +146,12 @@ function fakeDeps(workspace, calls) {
 				workspace,
 				gateway_protocol: { source: { repository: "corca-ai/ceal" } },
 				worker_source: { repository: "corca-ai/ceal-cli" },
-				worker_release_inputs: { guide: "skills/ceal-guide/SKILL.md", guide_sha256: sha256(readFileSync(path.resolve("skills/ceal-guide/SKILL.md"))) },
+				worker_release_inputs: {
+					guide: "skills/ceal-guide/SKILL.md",
+					guide_sha256: sha256(readFileSync(path.join(ROOT, "skills/ceal-guide/SKILL.md"))),
+					installer: "install-ceal.sh",
+					installer_sha256: sha256(readFileSync(path.join(ROOT, "install-ceal.sh"))),
+				},
 			};
 		},
 		bundle: async ({ bundlePath }) => {
