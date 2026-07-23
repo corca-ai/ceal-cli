@@ -17,7 +17,9 @@
 		"check": "npm run build && npm test",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
 		"release:binaries": "node scripts/build-platform-binaries.mjs",
-		"worker-release:build": "node scripts/build-worker-release-artifact.mjs"
+		"worker-release:build": "node scripts/build-worker-release-artifact.mjs",
+		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",
+		"release:worker:package": "node scripts/build-worker-release-package.mjs"
 	},
 	"dependencies": {
 		"yaml": "2.9.0"

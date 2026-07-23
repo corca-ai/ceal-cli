@@ -86,18 +86,25 @@ it is not a worker-release builder.
 
 ## Worker release boundary
 
-No release, installer, tag, or GitHub workflow in this repository is currently
-the worker-only release route. The historical dual `install.sh`,
+No signed release, installer, tag, or GitHub workflow in this repository is
+currently the worker-only release route. The historical dual `install.sh`,
 `release:binaries`, `release:manifest`, bare `v*` tags, and
 `.github/workflows/cealctl-release.yml` remain frozen compatibility material.
 Do not execute, amend, publish, or use them to install either command from this
 checkout.
 
-A future worker route must consume an exact Gateway-issued Protocol artifact
-and provenance record rather than any local protocol source. It will have a
-worker-specific inventory, `ceal-v*` tag namespace, workflow, asset allowlist,
-and installer. Until that route has its own local packed-consumer proof, this
-repository makes no signed release or installation claim.
+The local worker preflight accepts an exact Gateway handoff only through
+`release:worker:inputs` and `release:worker:package`. It requires the Protocol
+tarball, its Gateway provenance sidecar, the enclosing handoff manifest, and a
+caller-supplied SHA-256 of that manifest. The caller-supplied digest binds the
+exact received packet; it does not authenticate its sender. The package command
+then makes an isolated packed `ceal` consumer candidate containing no
+`cealctl`, operator guide, copied Protocol source, tag, installer, or signing
+claim.
+
+A future signed worker route will add a worker-specific `ceal-v*` tag namespace,
+workflow, asset allowlist, and installer. It must keep consuming a
+Gateway-issued Protocol artifact rather than any local Protocol source.
 
 Gateway operators must obtain `cealctl`, its guide, installation/update path,
 and operational instructions from the Gateway-owned `corca-ai/ceal` source. The
