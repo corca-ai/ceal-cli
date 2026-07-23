@@ -46,7 +46,7 @@ export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
 	let stage;
 	try {
 		stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
-		const packed = packOwnedWorker({ repoRoot, stage, inputs, protocolTarball: path.resolve(options.protocolTarball), dependencies });
+		const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: path.resolve(options.protocolTarball), dependencies });
 		materializeOutput({ output, repoRoot, inputs, version, packed });
 		return {
 			schema_version: "ceal.worker_release_package_build.v1",
@@ -71,7 +71,7 @@ export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
 	}
 }
 
-function packOwnedWorker({ repoRoot, stage, inputs, protocolTarball, dependencies }) {
+export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball, dependencies = {} }) {
 	const packageRoot = path.join(stage, "packages");
 	const clientStage = stageOwnedPackage(repoRoot, packageRoot, inputs.client.source_path);
 	const workerStage = stageOwnedPackage(repoRoot, packageRoot, inputs.worker.source_path);
@@ -85,10 +85,12 @@ function packOwnedWorker({ repoRoot, stage, inputs, protocolTarball, dependencie
 	compilePackage(workerStage, dependencyRoot, dependencies);
 	const packedWorker = packPackage(workerStage, path.join(stage, "packed"), dependencies);
 	if (packedWorker.package !== inputs.worker.package) fail("worker_package_pack_failed", "Packed worker identity does not match the worker release inventory.");
-	const consumerSmoke = smokeInstalledWorker({ stage, dependencyRoot, packedClient: packedClient.path, packedWorker: packedWorker.path, inputs, dependencies });
+	const consumer = stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient: packedClient.path, packedWorker: packedWorker.path, inputs });
+	const consumerSmoke = smokeInstalledWorker({ consumer, inputs, dependencies });
 	return {
 		worker: { name: packedWorker.filename, bytes: packedWorker.bytes, sha256: packedWorker.sha256, path: packedWorker.path },
 		consumerSmoke,
+		consumer,
 	};
 }
 
@@ -176,22 +178,26 @@ function packPackage(packageDirectory, outputDirectory, dependencies) {
 	return { path: artifact, filename: metadata.filename, bytes: bytes.length, sha256: sha256(bytes), package: metadata.name, version: metadata.version };
 }
 
-function smokeInstalledWorker({ stage, dependencyRoot, packedClient, packedWorker, inputs, dependencies }) {
-	const consumer = path.join(stage, "consumer");
-	const modules = path.join(consumer, "node_modules");
+function stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient, packedWorker, inputs }) {
+	const directory = path.join(stage, "consumer");
+	const modules = path.join(directory, "node_modules");
 	mkdirSync(modules, { recursive: true, mode: 0o755 });
 	for (const name of ["yaml", inputs.protocol.package]) stageInstalledDependency(dependencyRoot, modules, name);
 	stagePackedPackage(packedClient, modules, inputs.client.package);
 	stagePackedPackage(packedWorker, modules, inputs.worker.package);
 	const workerBin = path.join(modules, ...inputs.worker.package.split("/"), "dist", "bin.js");
 	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink()) fail("consumer_smoke_failed", "Installed worker package did not expose its declared command.");
+	return { directory, workerBin };
+}
+
+function smokeInstalledWorker({ consumer, inputs, dependencies }) {
 	let output;
 	try {
-		output = (dependencies.runConsumer ?? execFileSync)(process.execPath, [workerBin, "commands"], {
-			cwd: consumer,
+		output = (dependencies.runConsumer ?? execFileSync)(process.execPath, [consumer.workerBin, "commands"], {
+			cwd: consumer.directory,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, HOME: path.join(consumer, "home") },
+			env: { ...process.env, HOME: path.join(consumer.directory, "home") },
 		});
 	} catch {
 		fail("consumer_smoke_failed", "Installed packed worker command could not run.");

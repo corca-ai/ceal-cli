@@ -94,13 +94,15 @@ Do not execute, amend, publish, or use them to install either command from this
 checkout.
 
 The local worker preflight accepts an exact Gateway handoff only through
-`release:worker:inputs` and `release:worker:package`. It requires the Protocol
-tarball, its Gateway provenance sidecar, the enclosing handoff manifest, and a
-caller-supplied SHA-256 of that manifest. The caller-supplied digest binds the
-exact received packet; it does not authenticate its sender. The package command
-then makes an isolated packed `ceal` consumer candidate containing no
-`cealctl`, operator guide, copied Protocol source, tag, installer, or signing
-claim.
+`release:worker:inputs`, `release:worker:package`, and
+`release:worker:native`. It requires the Protocol tarball, its Gateway
+provenance sidecar, the enclosing handoff manifest, and a caller-supplied
+SHA-256 of that manifest. The caller-supplied digest binds the exact received
+packet; it does not authenticate its sender. The package command makes an
+isolated packed `ceal` consumer candidate, and the native command builds one
+host-native `ceal` executable from that internal packed consumer. Neither may
+contain `cealctl`, an operator guide, copied Protocol source, a tag, installer,
+or signing claim.
 
 A future signed worker route will add a worker-specific `ceal-v*` tag namespace,
 workflow, asset allowlist, and installer. It must keep consuming a
