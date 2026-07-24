@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { createCealEnrollmentClient, CealEnrollmentClientError } from "../dist/index.js";
@@ -36,6 +37,10 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		assert.equal(result.profile_ref, "profile:narnia");
 		assert.equal(requests[0].url, "/api/ceal/v1/enroll");
 		assert.equal(requests[0].body.code, "A".repeat(43));
+		// Drift guard: the hardcoded client-identification version must track
+		// the client package manifest.
+		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
 	} finally { await close(server); }
 });
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { createCealPersonalClientSessionClient, CealPersonalClientSessionError } from "../dist/index.js";
@@ -40,6 +41,10 @@ test("personal-client session client rotates and revokes only through derived Ga
 		assert.deepEqual(requests.map((item) => item.url), ["/api/ceal/v1/refresh", "/api/ceal/v1/revoke"]);
 		assert.equal(requests[0].body.refresh_token, REFRESH);
 		assert.equal(requests[1].body.refresh_token, REFRESH);
+		// Drift guard: the hardcoded client-identification version must track
+		// the client package manifest.
+		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
 	} finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 

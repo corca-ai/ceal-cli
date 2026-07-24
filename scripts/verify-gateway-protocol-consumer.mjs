@@ -247,7 +247,7 @@ function assertContainedRegularPath(root, target, code) {
 }
 
 function assertPublishedDependency(manifest, name, version, code) {
-	if (manifest?.dependencies?.[name] !== version) throw new GatewayProtocolConsumerError(code, "Worker source dependency must be an exact published protocol version.");
+	if (manifest?.dependencies?.[name] !== version) throw new GatewayProtocolConsumerError(code, `Worker source dependency on ${name} must be the exact published version ${version}.`);
 }
 
 function artifactSpecifier(file) { return `file:${file}`; }

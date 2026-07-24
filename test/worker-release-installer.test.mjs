@@ -249,6 +249,7 @@ test("real native worker installs through the worker lane and performs an option
 		assert.equal(payload.previous_version, built.version);
 		assert.equal(payload.installed_version, built.version);
 		assert.equal(payload.platform, "linux-amd64");
+		assert.equal(typeof payload.elapsed_ms, "number");
 	});
 });
 

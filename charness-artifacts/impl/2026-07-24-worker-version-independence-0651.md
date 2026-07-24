@@ -54,6 +54,15 @@ and legacy dual-lane contract remain untouched at 0.65.0.
 - No legacy `release:binaries`/`release:manifest` execution or amendment; no
   protocol/operator source change; no tag/publication inside this slice.
 
+## Gate Debt
+
+- The linux-amd64 `npm run check` at tag time builds a real SEA artifact four
+  times (worker-native test, real-consumer artifact test, the worker-lane
+  install/update test, and the CI compose determinism pair). Necessary while
+  each proves a distinct seam; revisit if a shared fixture artifact becomes
+  safe to reuse. The arm64 job proves native smoke adaptively but exercises
+  the installer integration only with stub binaries.
+
 ## Acceptance Checks
 
 - `release:worker:inputs`, `release:worker:package`, and
