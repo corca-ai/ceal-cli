@@ -7,11 +7,13 @@ export interface CealCliIo {
 	stderr: { write(chunk: string): unknown };
 }
 
+export type CealWorkerPlatform = "linux-arm64" | "linux-amd64" | "darwin-arm64" | "darwin-amd64";
+
 export interface CealStableUpdateResult {
 	status: "updated" | "unchanged" | "unavailable";
 	previous_version?: string;
 	installed_version?: string;
-	platform?: "linux-arm64" | "linux-amd64";
+	platform?: CealWorkerPlatform;
 	artifact_sha256?: string;
 	elapsed_ms?: number;
 	error?: {

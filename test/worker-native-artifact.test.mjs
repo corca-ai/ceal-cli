@@ -19,8 +19,9 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	const output = path.join(fixture.root, "worker-native");
 	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
-	const platform = process.arch === "arm64" ? "linux-arm64" : "linux-amd64";
-	const otherPlatform = platform === "linux-arm64" ? "linux-amd64" : "linux-arm64";
+	const architecture = process.arch === "arm64" ? "arm64" : "amd64";
+	const platform = `${process.platform === "darwin" ? "darwin" : "linux"}-${architecture}`;
+	const otherPlatform = platform.endsWith("arm64") ? platform.replace("arm64", "amd64") : platform.replace("amd64", "arm64");
 	assert.equal(result.platform, platform);
 	assert.deepEqual(result.consumer_smoke, {
 		command: "ceal", installed_from_packed_archives: true, source_or_workspace_fallback_used: false,
@@ -71,6 +72,35 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	}
 	await assert.rejects(
 		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "cross-platform"), platform: otherPlatform, ...fixture }),
+		hasCode("platform_mismatch"),
+	);
+});
+
+// The real postject macho-segment and codesign calls only run on a macOS
+// host; this fixture proves the darwin step order, platform propagation, and
+// artifact naming deterministically on the Linux lane.
+test("darwin native build removes, injects, then ad-hoc signs in order", async (context) => {
+	const fixture = packedProtocolFixture(context);
+	const output = path.join(fixture.root, "worker-native-darwin");
+	const steps = [];
+	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture }, {
+		currentPlatform: () => "darwin-arm64",
+		bundle: async ({ bundlePath }) => writeFileSync(bundlePath, "bundle\n"),
+		createBlob: ({ blobPath }) => writeFileSync(blobPath, "blob\n"),
+		copyRuntime: ({ artifactPath }) => writeFileSync(artifactPath, "runtime\n"),
+		removeMachoSignature: ({ artifactPath }) => { steps.push("remove-signature"); writeFileSync(artifactPath, "unsigned\n"); },
+		injectBlob: ({ artifactPath, platform }) => { steps.push(`inject:${platform}`); writeFileSync(artifactPath, "injected\n"); },
+		signMachoAdhoc: ({ artifactPath }) => { steps.push("adhoc-sign"); writeFileSync(artifactPath, "signed\n"); },
+		resolvePostjectCli: () => "postject-fixture",
+		smoke: ({ artifactPath, version }) => ({ command: "ceal", version, help: true, required_commands: [], operator_surface_absent: true, fixture_artifact: path.basename(artifactPath) }),
+	});
+	assert.equal(result.ok, true);
+	assert.equal(result.platform, "darwin-arm64");
+	assert.equal(result.artifact.name, "ceal-darwin-arm64");
+	assert.deepEqual(steps, ["remove-signature", "inject:darwin-arm64", "adhoc-sign"]);
+	assert.equal(readFileSync(path.join(output, "ceal-darwin-arm64"), "utf8"), "signed\n");
+	await assert.rejects(
+		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "darwin-cross"), platform: "linux-arm64", ...fixture }, { currentPlatform: () => "darwin-arm64" }),
 		hasCode("platform_mismatch"),
 	);
 });

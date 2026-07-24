@@ -34,6 +34,28 @@ test("stable updater only launches a current managed worker generation and reads
 	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 });
 
+test("stable updater recognizes a managed darwin worker generation", async (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-stable-update-darwin-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const install = path.join(root, "prefix");
+	const worker = path.join(install, ".ceal-cli", "worker");
+	const first = path.join(worker, "releases", "0.65.1-darwin-arm64-worker");
+	const second = path.join(worker, "releases", "0.65.2-darwin-arm64-worker");
+	mkdirSync(first, { recursive: true });
+	writeWorkerBinary(path.join(first, "ceal-darwin-arm64"), "0.65.1");
+	writeFileSync(path.join(first, "install-ceal.sh"), updateScript(second, "0.65.2", "ceal-darwin-arm64"));
+	chmodSync(path.join(first, "install-ceal.sh"), 0o755);
+	writeInventory(first, "install-ceal.sh");
+	symlinkSync("releases/0.65.1-darwin-arm64-worker", path.join(worker, "current"));
+	mkdirSync(install, { recursive: true });
+	symlinkSync(".ceal-cli/worker/current/ceal-darwin-arm64", path.join(install, "ceal"));
+	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
+	assert.equal(result.status, "updated");
+	assert.equal(result.installed_version, "0.65.2");
+	assert.equal(result.platform, "darwin-arm64");
+	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-darwin-arm64");
+});
+
 test("stable updater fails closed for an unmanaged or tampered staged installer", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-stable-update-unsafe-"));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -84,13 +106,13 @@ test("stable updater runs only the checksum-bound migrated worker installer", as
 	assert.equal(result.installed_version, "0.65.2");
 });
 
-function updateScript(nextGeneration, version = "0.65.1") {
+function updateScript(nextGeneration, version = "0.65.1", binaryName = "ceal-linux-amd64") {
 	return `#!/usr/bin/env sh
 set -eu
 [ "$CEAL_VERSION" = stable ]
 [ "$CEAL_INSTALL_ROLE" = worker ]
 mkdir -p '${nextGeneration}'
-cat > '${path.join(nextGeneration, "ceal-linux-amd64")}' <<'EOF'
+cat > '${path.join(nextGeneration, binaryName)}' <<'EOF'
 #!/usr/bin/env sh
 if [ "\${1:-}" = version ]; then
   printf 'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: ${version}\\n'
@@ -98,9 +120,9 @@ if [ "\${1:-}" = version ]; then
 fi
 exit 2
 EOF
-chmod 755 '${path.join(nextGeneration, "ceal-linux-amd64")}'
-ln -s 'releases/${path.basename(nextGeneration)}' "$CEAL_INSTALL_DIR/.ceal-cli/worker/current.next"
-mv -Tf "$CEAL_INSTALL_DIR/.ceal-cli/worker/current.next" "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
+chmod 755 '${path.join(nextGeneration, binaryName)}'
+rm -f "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
+ln -s 'releases/${path.basename(nextGeneration)}' "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
 printf 'installer prose must not escape\\n'
 `;
 }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
-import type { CealStableUpdateResult } from "./cli-runtime.js";
+import type { CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
 
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
@@ -92,10 +92,10 @@ function isManagedWorkerGeneration(paths: Pick<InstalledWorkerRelease, "commandP
 }
 
 function basename(value: string): string { return value.slice(value.lastIndexOf("/") + 1); }
-function isWorkerBinary(value: string): boolean { return /^ceal-linux-(?:arm64|amd64)$/u.test(value); }
+function isWorkerBinary(value: string): boolean { return /^ceal-(?:linux|darwin)-(?:arm64|amd64)$/u.test(value); }
 function escapePattern(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"); }
 
-async function readVersion(commandPath: string): Promise<{ version: string; platform: "linux-arm64" | "linux-amd64" } | null> {
+async function readVersion(commandPath: string): Promise<{ version: string; platform: CealWorkerPlatform } | null> {
 	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath));
 	if (run.code !== 0 || run.truncated || run.stderr !== "") return null;
 	try {
@@ -104,10 +104,10 @@ async function readVersion(commandPath: string): Promise<{ version: string; plat
 	} catch { return null; }
 }
 
-function parseWorkerVersion(payload: { schema_version?: unknown; command?: unknown; version?: unknown }, commandPath: string): { version: string; platform: "linux-arm64" | "linux-amd64" } | null {
-	const platform = /ceal-linux-(arm64|amd64)$/u.exec(realpathSync(commandPath))?.[1];
+function parseWorkerVersion(payload: { schema_version?: unknown; command?: unknown; version?: unknown }, commandPath: string): { version: string; platform: CealWorkerPlatform } | null {
+	const platform = /ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(realpathSync(commandPath))?.[1];
 	if (payload?.schema_version !== "ceal.version.v1" || payload.command !== "ceal" || typeof payload.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(payload.version) || !platform) return null;
-	return { version: payload.version, platform: `linux-${platform}` as "linux-arm64" | "linux-amd64" };
+	return { version: payload.version, platform: platform as CealWorkerPlatform };
 }
 
 async function runProcess(command: string, args: readonly string[], env: NodeJS.ProcessEnv, cwd: string): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {

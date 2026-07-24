@@ -11,7 +11,9 @@ ISSUER="https://token.actions.githubusercontent.com"
 COSIGN_VERSION="v2.6.4"
 TMP_DIR=""
 LOCK_PATH=""
+LOCK_DIR=""
 LOCK_HELD=0
+MV_HAS_T=0
 COMMITTED=0
 GENERATION_CREATED=0
 CURRENT_SWITCHED=0
@@ -26,23 +28,47 @@ TARGET_NEEDS_LINK_UPDATE=0
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is required"; }
-sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+# macOS ships shasum but not sha256sum; both print "<sha256>  <path>".
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+need_sha256() { command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required"; }
+
+# BSD mv has no -T and moves a file into a symlinked directory target. The
+# probe keys on the actual mv, so the non-atomic fallback runs only where GNU
+# mv is absent, and only while the install lock is held.
+probe_mv_t() {
+  : > "$TMP_DIR/.mv-t-src"
+  if mv -T "$TMP_DIR/.mv-t-src" "$TMP_DIR/.mv-t-dst" 2>/dev/null; then MV_HAS_T=1; else MV_HAS_T=0; rm -f "$TMP_DIR/.mv-t-src"; fi
+}
+replace_link() {
+  link_temp="$2.next.$$"; rm -f "$link_temp"; ln -s "$1" "$link_temp"
+  if [ "$MV_HAS_T" = 1 ]; then mv -Tf "$link_temp" "$2"
+  else rm -f "$2"; mv -f "$link_temp" "$2"; fi
+}
 
 detect_platform() {
   os="$(uname -s)"; arch="$(uname -m)"
   case "$os:$arch" in
     Linux:aarch64|Linux:arm64) printf '%s\n' linux-arm64 ;;
     Linux:x86_64|Linux:amd64) printf '%s\n' linux-amd64 ;;
-    *) fail "Unsupported Ceal worker platform: $os $arch (supported: linux-arm64, linux-amd64)" ;;
+    Darwin:arm64) printf '%s\n' darwin-arm64 ;;
+    Darwin:x86_64) printf '%s\n' darwin-amd64 ;;
+    *) fail "Unsupported Ceal worker platform: $os $arch (supported: linux-arm64, linux-amd64, darwin-arm64, darwin-amd64)" ;;
   esac
 }
 
 bootstrap_cosign() {
   command -v cosign >/dev/null 2>&1 && return 0
-  for tool in curl sha256sum chmod; do command -v "$tool" >/dev/null 2>&1 || fail "cosign is required; install it from https://docs.sigstore.dev/cosign/system_config/installation/"; done
+  need_sha256
+  for tool in curl chmod; do command -v "$tool" >/dev/null 2>&1 || fail "cosign is required; install it from https://docs.sigstore.dev/cosign/system_config/installation/"; done
   case "$PLATFORM" in
     linux-amd64) cosign_sha256=309779b0c4e409186b0a80daba99041fe2cf65a920ce645013901df6211895a9 ;;
     linux-arm64) cosign_sha256=df408e5418129306fed7349ec46e27be0445d05c5127c07f435e9a566af67593 ;;
+    darwin-amd64) cosign_sha256=ec648fddfedf1dad59dff9fbab177284a618204e03126ea37a87ab3cec4e7cb1 ;;
+    darwin-arm64) cosign_sha256=b2987c1b55a1e2735c59ac5c3e140acbf7ba5c1ed0cc07dbbf1b85676595237e ;;
     *) fail "cosign auto-install is not supported on $PLATFORM" ;;
   esac
   cosign_dir="$TMP_DIR/cosign-bootstrap"
@@ -60,8 +86,15 @@ is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]
 # lane, so worker stable selection reads the release list and accepts only the
 # first current, non-draft ceal-v semantic tag.  The selected tag is still
 # verified by its exact OIDC identity below.
+# While the repository is private, CEAL_GITHUB_TOKEN authenticates release
+# downloads; once public the anonymous path is canonical and the token is unused.
+auth_curl() {
+  if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then curl -fsSL -H "Authorization: Bearer $CEAL_GITHUB_TOKEN" "$@"
+  else curl -fsSL "$@"; fi
+}
+
 resolve_stable_tag() {
-  curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=100" -o "$TMP_DIR/releases.json" \
+  auth_curl "https://api.github.com/repos/$REPO/releases?per_page=100" -o "$TMP_DIR/releases.json" \
     || fail "Could not resolve the worker stable release list"
   candidate="$(python3 - "$TMP_DIR/releases.json" <<'PY'
 import json
@@ -115,13 +148,28 @@ verify_checksum() {
   [ "$expected" = "$(sha256_of "$TMP_DIR/$asset")" ] || fail "Checksum mismatch for $asset"
 }
 
+# The signed inventory may cover any subset of the supported platforms, but it
+# must stay worker-only: shared assets exactly once, every named platform as a
+# complete binary+manifest pair, and nothing outside the allowlist.
 verify_checksum_inventory() {
-  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = 7 ] || fail "SHA256SUMS must contain exactly seven worker release entries"
-  invalid="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-linux-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|ceal-linux-(amd64|arm64)|install-ceal[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
+  invalid="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-(linux|darwin)-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|ceal-(linux|darwin)-(amd64|arm64)|install-ceal[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
   [ "$invalid" = 0 ] || fail "SHA256SUMS contains a malformed or unexpected worker entry"
   observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
-  expected="$(printf '%s\n' THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh | sort)"
-  [ "$observed" = "$expected" ] || fail "SHA256SUMS must contain exactly the worker-only release entries"
+  [ -z "$(printf '%s\n' "$observed" | uniq -d)" ] || fail "SHA256SUMS contains a duplicate worker entry"
+  for shared in THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md install-ceal.sh; do
+    printf '%s\n' "$observed" | grep -Fqx "$shared" || fail "SHA256SUMS is missing the required worker entry $shared"
+  done
+  release_platforms=0
+  for candidate in linux-arm64 linux-amd64 darwin-arm64 darwin-amd64; do
+    has_binary=0; has_manifest=0
+    printf '%s\n' "$observed" | grep -Fqx "ceal-$candidate" && has_binary=1
+    printf '%s\n' "$observed" | grep -Fqx "ceal-worker-release-manifest-$candidate.json" && has_manifest=1
+    [ "$has_binary" = "$has_manifest" ] || fail "SHA256SUMS names an incomplete worker platform pair for $candidate"
+    release_platforms=$((release_platforms + has_binary))
+  done
+  [ "$release_platforms" -ge 1 ] || fail "SHA256SUMS names no worker release platform"
+  [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = "$((3 + 2 * release_platforms))" ] || fail "SHA256SUMS must contain exactly the worker-only release entries"
+  printf '%s\n' "$observed" | grep -Fqx "ceal-$PLATFORM" || fail "Signed worker release does not include this platform: $PLATFORM"
   for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md install-ceal.sh; do verify_checksum "$asset"; done
 }
 
@@ -158,7 +206,7 @@ verify_version_output() {
   cmp -s "$stdout_path" "$expected_path" || fail "ceal reported an invalid version YAML document for $VERSION"
 }
 
-download_signed_asset() { asset="$1"; curl -fsSL "$BASE_URL/$asset" -o "$TMP_DIR/$asset"; curl -fsSL "$BASE_URL/$asset.sig" -o "$TMP_DIR/$asset.sig"; curl -fsSL "$BASE_URL/$asset.pem" -o "$TMP_DIR/$asset.pem"; }
+download_signed_asset() { asset="$1"; auth_curl "$BASE_URL/$asset" -o "$TMP_DIR/$asset"; auth_curl "$BASE_URL/$asset.sig" -o "$TMP_DIR/$asset.sig"; auth_curl "$BASE_URL/$asset.pem" -o "$TMP_DIR/$asset.pem"; }
 require_regular_directory() { [ -d "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 require_regular_file() { [ -f "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 
@@ -178,19 +226,34 @@ capture_target() {
 
 restore_target() { rm -f "$COMMAND_TARGET"; case "$TARGET_STATE" in managed_link) ln -s "$TARGET_PREVIOUS_LINK" "$COMMAND_TARGET" ;; regular_file) cp -p "$TMP_DIR/previous-command" "$COMMAND_TARGET" ;; esac; }
 
+# flock self-releases on crash but does not exist on macOS; the fallback mkdir
+# lock is atomic everywhere and reports the exact stale path to remove.
 acquire_install_lock() {
-  if [ -e "$LOCK_PATH" ] || [ -L "$LOCK_PATH" ]; then [ ! -L "$LOCK_PATH" ] && [ -f "$LOCK_PATH" ] || fail "Ceal worker install lock is unsafe; remove it only after confirming no installation is active"
-  else (umask 077; : > "$LOCK_PATH") || fail "Could not create Ceal worker install lock"; fi
-  exec 9<>"$LOCK_PATH" || fail "Could not open Ceal worker install lock"
-  flock -n 9 || { exec 9>&-; fail "Another Ceal worker installation is active"; }
-  LOCK_HELD=1
+  if command -v flock >/dev/null 2>&1; then
+    if [ -e "$LOCK_PATH" ] || [ -L "$LOCK_PATH" ]; then [ ! -L "$LOCK_PATH" ] && [ -f "$LOCK_PATH" ] || fail "Ceal worker install lock is unsafe; remove it only after confirming no installation is active"
+    else (umask 077; : > "$LOCK_PATH") || fail "Could not create Ceal worker install lock"; fi
+    exec 9<>"$LOCK_PATH" || fail "Could not open Ceal worker install lock"
+    flock -n 9 || { exec 9>&-; fail "Another Ceal worker installation is active"; }
+    LOCK_HELD=1
+  else
+    LOCK_DIR="$LOCK_PATH.d"
+    mkdir "$LOCK_DIR" 2>/dev/null || fail "Another Ceal worker installation is active; if none is, remove the stale lock directory $LOCK_DIR"
+    LOCK_HELD=2
+  fi
 }
-release_install_lock() { [ "$LOCK_HELD" = 1 ] || return; flock -u 9 2>/dev/null || true; exec 9>&-; LOCK_HELD=0; }
+release_install_lock() {
+  case "$LOCK_HELD" in
+    1) flock -u 9 2>/dev/null || true; exec 9>&- ;;
+    2) rmdir "$LOCK_DIR" 2>/dev/null || true ;;
+    *) return 0 ;;
+  esac
+  LOCK_HELD=0
+}
 
 cleanup() {
   status=$?; trap - EXIT HUP INT TERM
   if [ "$COMMITTED" != 1 ]; then
-    if [ "$CURRENT_SWITCHED" = 1 ]; then if [ -n "$PREVIOUS_CURRENT" ]; then ln -s "$PREVIOUS_CURRENT" "$CURRENT_LINK.rollback.$$"; mv -Tf "$CURRENT_LINK.rollback.$$" "$CURRENT_LINK"; else rm -f "$CURRENT_LINK"; fi; fi
+    if [ "$CURRENT_SWITCHED" = 1 ]; then if [ -n "$PREVIOUS_CURRENT" ]; then replace_link "$PREVIOUS_CURRENT" "$CURRENT_LINK"; else rm -f "$CURRENT_LINK"; fi; fi
     [ "$TARGET_MUTATED" = 1 ] && restore_target
     [ "$GENERATION_CREATED" = 1 ] && rm -rf "$GENERATION_DIR"
     [ -n "$STAGED_GENERATION" ] && rm -rf "$STAGED_GENERATION"
@@ -205,8 +268,10 @@ cleanup() {
 [ "$VERSION" = stable ] || is_tag "$VERSION" || fail "CEAL_VERSION must be stable or an explicit tag such as ceal-v0.65.0."
 PLATFORM="$(detect_platform)"
 need mktemp; TMP_DIR="$(mktemp -d)"; trap cleanup EXIT HUP INT TERM
+probe_mv_t
 bootstrap_cosign
-for tool in cmp curl cosign flock grep python3 sed sha256sum sort uname mktemp readlink; do need "$tool"; done
+need_sha256
+for tool in cmp curl cosign grep python3 sed sort uniq wc uname mktemp readlink; do need "$tool"; done
 if [ "$VERSION" = stable ]; then VERSION="$(resolve_stable_tag)"; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
@@ -238,7 +303,7 @@ else
   for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt install-ceal.sh SHA256SUMS; do require_regular_file "$GENERATION_DIR/$asset"; [ "$(sha256_of "$GENERATION_DIR/$asset")" = "$(sha256_of "$TMP_DIR/$asset")" ] || fail "Existing worker release generation does not match the signed release"; done
   require_regular_file "$GENERATION_DIR/guide/SKILL.md"; [ "$(sha256_of "$GENERATION_DIR/guide/SKILL.md")" = "$(sha256_of "$TMP_DIR/ceal-guide-SKILL.md")" ] || fail "Existing worker release generation does not match the signed guide"
 fi
-ln -s "releases/$GENERATION_ID" "$CURRENT_LINK.next.$$"; mv -Tf "$CURRENT_LINK.next.$$" "$CURRENT_LINK"; CURRENT_SWITCHED=1
+replace_link "releases/$GENERATION_ID" "$CURRENT_LINK"; CURRENT_SWITCHED=1
 if [ "$TARGET_NEEDS_LINK_UPDATE" = 1 ]; then TARGET_MUTATED=1; rm -f "$COMMAND_TARGET"; ln -s "$COMMAND_LINK_TARGET" "$COMMAND_TARGET"; fi
 verify_version_output "$COMMAND_TARGET"; COMMITTED=1
 printf 'Installed ceal %s (%s) as worker at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"

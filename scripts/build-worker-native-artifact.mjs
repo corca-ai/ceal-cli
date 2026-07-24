@@ -110,7 +110,9 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 		(dependencies.createBlob ?? createBlob)({ bundlePath, blobPath, work });
 		(dependencies.copyRuntime ?? copyRuntime)({ artifactPath });
 		chmodSync(artifactPath, 0o755);
-		(dependencies.injectBlob ?? injectBlob)({ artifactPath, blobPath, postjectCli: dependencies.resolvePostjectCli?.() ?? resolvePostjectCli() });
+		if (platform.startsWith("darwin-")) (dependencies.removeMachoSignature ?? removeMachoSignature)({ artifactPath });
+		(dependencies.injectBlob ?? injectBlob)({ artifactPath, blobPath, platform, postjectCli: dependencies.resolvePostjectCli?.() ?? resolvePostjectCli() });
+		if (platform.startsWith("darwin-")) (dependencies.signMachoAdhoc ?? signMachoAdhoc)({ artifactPath });
 		const smoke = (dependencies.smoke ?? smokeArtifact)({ artifactPath, version });
 		const bytes = readFileSync(artifactPath);
 		return { name: path.basename(artifactPath), path: artifactPath, bytes: bytes.length, sha256: sha256(bytes), smoke };
@@ -159,11 +161,30 @@ function copyRuntime({ artifactPath }) {
 	copyFileSync(process.execPath, artifactPath);
 }
 
-function injectBlob({ artifactPath, blobPath, postjectCli }) {
+function injectBlob({ artifactPath, blobPath, platform, postjectCli }) {
+	const machoArguments = platform.startsWith("darwin-") ? ["--macho-segment-name", "NODE_SEA"] : [];
 	try {
-		execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite"], { stdio: "pipe" });
+		execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite", ...machoArguments], { stdio: "pipe" });
 	} catch {
 		fail("worker_native_injection_failed", "Native worker SEA blob could not be injected.");
+	}
+}
+
+// Mach-O binaries must drop the runtime's original signature before postject
+// injection and carry at least an ad-hoc signature to execute on arm64 macOS.
+function removeMachoSignature({ artifactPath }) {
+	try {
+		execFileSync("codesign", ["--remove-signature", artifactPath], { stdio: "pipe" });
+	} catch {
+		fail("worker_native_signature_failed", "Native worker artifact signature could not be removed before injection.");
+	}
+}
+
+function signMachoAdhoc({ artifactPath }) {
+	try {
+		execFileSync("codesign", ["--force", "--sign", "-", artifactPath], { stdio: "pipe" });
+	} catch {
+		fail("worker_native_signature_failed", "Native worker artifact could not be ad-hoc signed.");
 	}
 }
 
@@ -242,7 +263,7 @@ function resolveVersion(repoRoot, inputs) {
 
 function resolvePlatform(value, dependencies) {
 	const current = (dependencies.currentPlatform ?? currentPlatform)();
-	if (!/^linux-(?:arm64|amd64)$/u.test(current)) fail("unsupported_platform", "Native worker artifacts require a supported Linux host platform.");
+	if (!/^(?:linux|darwin)-(?:arm64|amd64)$/u.test(current)) fail("unsupported_platform", "Native worker artifacts require a supported Linux or macOS host platform.");
 	if (value !== undefined && value !== current) fail("platform_mismatch", "Native worker artifacts must be built on their target platform.");
 	return current;
 }

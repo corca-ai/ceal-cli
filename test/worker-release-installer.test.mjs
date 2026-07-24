@@ -72,9 +72,52 @@ test("worker installer rejects non-worker checksum inventory before changing cea
 		appendChecksum(release, "cealctl-linux-arm64");
 		const result = run({ install, release, tools, log, version: TAG });
 		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /seven worker release entries/u);
+		assert.match(result.stderr, /malformed or unexpected worker entry/u);
 		assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "keep\n");
 		assert.equal(existsSync(log), true);
+	});
+});
+
+test("worker installer rejects an incomplete platform pair before changing ceal", () => {
+	withFixture(({ install, release, tools, log }) => {
+		mkdirSync(install, { recursive: true });
+		writeFileSync(path.join(install, "ceal"), "keep\n");
+		writeWorkerBinary(path.join(release, "ceal-darwin-arm64"));
+		appendChecksum(release, "ceal-darwin-arm64");
+		const result = run({ install, release, tools, log, version: TAG });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /incomplete worker platform pair for darwin-arm64/u);
+		assert.equal(readFileSync(path.join(install, "ceal"), "utf8"), "keep\n");
+	});
+});
+
+test("worker installer rejects a signed release that skips this platform", () => {
+	withFixture(({ install, release, tools, log }) => {
+		writeDarwinAssets(release);
+		writeChecksums(release, ["darwin-arm64", "darwin-amd64"]);
+		rewriteSidecars(release);
+		const result = run({ install, release, tools, log, version: TAG });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /does not include this platform: linux-arm64/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+});
+
+test("worker installer installs on a darwin host through the portable tool lane", () => {
+	withFixture(({ install, release, tools, log }) => {
+		writeDarwinAssets(release);
+		writeChecksums(release, ["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"]);
+		rewriteSidecars(release);
+		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 2 ;; esac");
+		const restricted = restrictedTools(tools);
+		const result = run({ install, release, tools, log, version: TAG, restrictedPath: restricted });
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Installed ceal ceal-v0[.]65[.]0 \(darwin-arm64\)/u);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-darwin-arm64");
+		assert.equal(existsSync(path.join(install, ".ceal-cli", "worker", "install.lock.d")), false);
+		const cosign = readFileSync(log, "utf8");
+		assert.match(cosign, /ceal-darwin-arm64/u);
+		assert.match(cosign, /ceal-release[.]yml@refs\/tags\/ceal-v0[.]65[.]0/u);
 	});
 });
 
@@ -102,8 +145,23 @@ function withFixture(callback) {
 	} finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-function run({ install, release, tools, log, version, releases = "[]", cosignFail = false }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", FAKE_RELEASE_DIR: release, FAKE_RELEASES: releases, PATH: `${tools}:${process.env.PATH}` } });
+function run({ install, release, tools, log, version, releases = "[]", cosignFail = false, restrictedPath = null }) {
+	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", FAKE_RELEASE_DIR: release, FAKE_RELEASES: releases, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+}
+
+// A darwin host has shasum but neither sha256sum nor flock; the restricted
+// PATH proves the portable lane end to end on this Linux host.
+function restrictedTools(tools) {
+	const resolve = (name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+	for (const name of ["sh", "mktemp", "grep", "sed", "sort", "uniq", "wc", "tr", "cut", "cmp", "python3", "chmod", "mkdir", "rmdir", "rm", "ln", "mv", "cp", "readlink"]) {
+		const found = resolve(name);
+		assert.notEqual(found, "", `restricted tool ${name} must exist on the test host`);
+		if (!existsSync(path.join(tools, name))) symlinkSync(found, path.join(tools, name));
+	}
+	const sha256sum = resolve("sha256sum");
+	assert.notEqual(sha256sum, "");
+	writeTool(path.join(tools, "shasum"), `[ "\${1:-}" = -a ] && [ "\${2:-}" = 256 ] || exit 2\nshift 2\nexec ${sha256sum} "$@"`);
+	return tools;
 }
 
 function writeWorkerBinary(file) {
@@ -116,13 +174,21 @@ function writeManifest(release, platform) {
 	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify({ schema_version: "ceal.worker_release_manifest.v1", version: "0.65.0", platform, command: "ceal", guide: { name: "ceal-guide-SKILL.md", sha256: digest(guide) } }, null, 2)}\n`);
 }
 
-function writeChecksums(release) {
-	const entries = ["THIRD_PARTY_NOTICES.txt", "ceal-guide-SKILL.md", "ceal-linux-amd64", "ceal-linux-arm64", "ceal-worker-release-manifest-linux-amd64.json", "ceal-worker-release-manifest-linux-arm64.json", "install-ceal.sh"];
+function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {
+	const entries = ["THIRD_PARTY_NOTICES.txt", "ceal-guide-SKILL.md", "install-ceal.sh", ...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`])].sort();
 	writeFileSync(path.join(release, "SHA256SUMS"), entries.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
 	return entries;
 }
 
+function writeDarwinAssets(release) {
+	for (const platform of ["darwin-arm64", "darwin-amd64"]) {
+		writeWorkerBinary(path.join(release, `ceal-${platform}`));
+		writeManifest(release, platform);
+	}
+}
+
 function appendChecksum(release, name) { writeFileSync(path.join(release, "SHA256SUMS"), `${digest(readFileSync(path.join(release, name)))}  ${name}\n`, { flag: "a" }); }
+function rewriteSidecars(release) { for (const name of [...readFileSync(path.join(release, "SHA256SUMS"), "utf8").trim().split("\n").map((line) => line.slice(66)), "SHA256SUMS"]) { writeFileSync(path.join(release, `${name}.sig`), "signature\n"); writeFileSync(path.join(release, `${name}.pem`), "certificate\n"); } }
 function rewriteChecksumsAndSidecars(release) { for (const name of writeChecksums(release)) { writeFileSync(path.join(release, `${name}.sig`), "signature\n"); writeFileSync(path.join(release, `${name}.pem`), "certificate\n"); } }
 function writeTool(file, body) { writeFileSync(file, `#!/usr/bin/env sh\nset -eu\n${body}\n`); chmodSync(file, 0o755); }
 function digest(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
