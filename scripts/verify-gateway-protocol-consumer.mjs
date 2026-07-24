@@ -28,7 +28,9 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 	const root = path.resolve(repoRoot);
 	const input = validateArtifactInput({ protocolTarball, protocolProvenance });
 	const releaseInputs = validateReleaseInputs(root, input.provenance.artifact.version);
-	const workspace = mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-"));
+	// Canonicalize so lock/path comparisons agree on hosts where the temp root
+	// sits behind a symlink (macOS /var -> /private/var).
+	const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-")));
 	try {
 		const client = buildClient({ root, workspace, input, releaseInputs });
 		const worker = buildWorker({ root, workspace, input, client, releaseInputs });
@@ -219,7 +221,9 @@ function assertInstalledProtocol(root, input) {
 	}
 	const lock = readJson(path.join(root, "package-lock.json"), "invalid_protocol_lock");
 	const entry = lock?.packages?.[`node_modules/${PROTOCOL_NAME}`];
-	if (entry?.link === true || typeof entry.integrity !== "string" || resolveLockTarball(root, entry.resolved) !== input.tarball) {
+	// npm records `resolved` against the canonicalized package root, so both
+	// sides are realpath-compared; a mismatch still fails closed.
+	if (entry?.link === true || typeof entry.integrity !== "string" || canonicalLockTarball(root, entry.resolved) !== realpathSync(input.tarball)) {
 		throw new GatewayProtocolConsumerError("protocol_lock_mismatch", "Installed protocol lock entry does not point to the supplied Gateway tarball.");
 	}
 	return { package_root: packageRoot, lock: { resolved: entry.resolved, integrity: entry.integrity } };
@@ -248,6 +252,12 @@ function artifactSpecifier(file) { return `file:${file}`; }
 function resolveLockTarball(root, resolved) {
 	if (typeof resolved !== "string" || !resolved.startsWith("file:")) return null;
 	return path.resolve(root, resolved.slice("file:".length));
+}
+
+function canonicalLockTarball(root, resolved) {
+	const tarball = resolveLockTarball(root, resolved);
+	if (tarball === null || !existsSync(tarball)) return null;
+	return realpathSync(tarball);
 }
 
 function requireAbsoluteRegularFile(value, code) {

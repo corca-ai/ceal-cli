@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -96,7 +96,11 @@ async function verifyConsumer(normalized, deps) {
 function cleanupFailedConsumerWorkspace(workspace) {
 	if (typeof workspace !== "string" || !path.isAbsolute(workspace)) return;
 	const resolved = path.resolve(workspace);
-	if (path.dirname(resolved) !== tmpdir() || !path.basename(resolved).startsWith("ceal-gateway-protocol-consumer-")) return;
+	// The workspace is canonicalized at creation, so compare against the
+	// canonical temp root (macOS reports /var while realpath is /private/var).
+	let canonicalTempRoot;
+	try { canonicalTempRoot = realpathSync(tmpdir()); } catch { return; }
+	if (path.dirname(resolved) !== canonicalTempRoot || !path.basename(resolved).startsWith("ceal-gateway-protocol-consumer-")) return;
 	rmSync(resolved, { recursive: true, force: true });
 }
 
