@@ -297,17 +297,8 @@ test("local suggestions fire deterministically and stay linked to observed evide
 			accessToken: ACCESS_TOKEN,
 			expiresAt: "2099-07-14T00:00:00.000Z",
 		}),
-		// Cached ten minutes ago against the five-minute default TTL: expired.
-		loadDiscoveryCache: async () => ({
-			key: {
-				gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
-				profileRef: "profile:suggestion-fixture",
-				membershipRef: "membership:suggestion-fixture",
-				negotiatedProtocolVersion: "1.3.0",
-			},
-			cachedAt: NOW - 10 * 60_000,
-			discovery: { capabilities: [], targets: [] },
-		}),
+		// No cached catalog at all: the genuinely missing case.
+		loadDiscoveryCache: async () => null,
 		loadReceiptSpool: async () => ({
 			entries: [
 				{
@@ -339,7 +330,7 @@ test("local suggestions fire deterministically and stay linked to observed evide
 	// Only the stale collector fires; an inactive (unused) runtime is not advice.
 	assert.deepEqual(byKind.get("stale_collector").evidence, { runtime: "claude", root: "~/.claude", health: "stale" });
 	assert.deepEqual(byKind.get("missing_cache_opportunity").evidence, {
-		session: "present", discovery_cache: "cached", within_ttl: false,
+		session: "present", discovery_cache: "absent",
 	});
 	assert.match(byKind.get("missing_cache_opportunity").next_action, /ceal capabilities/u);
 	// Rendered entries are newest-first, so the latest failure leads the refs
@@ -354,6 +345,24 @@ test("local suggestions fire deterministically and stay linked to observed evide
 	// Deterministic: the same local state yields the same suggestions.
 	const rerun = await buildObserverState(runtime);
 	assert.deepEqual(rerun.suggestions, state.suggestions);
+
+	// A merely expired cache self-heals on the next discovery: routine TTL
+	// expiry must not keep the suggestion permanently on.
+	const expired = await buildObserverState({
+		...runtime,
+		loadDiscoveryCache: async () => ({
+			key: {
+				gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+				profileRef: "profile:suggestion-fixture",
+				membershipRef: "membership:suggestion-fixture",
+				negotiatedProtocolVersion: "1.3.0",
+			},
+			cachedAt: NOW - 10 * 60_000,
+			discovery: { capabilities: [], targets: [] },
+		}),
+	});
+	assert.equal(expired.discovery_cache.within_ttl, false);
+	assert.equal(expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"), false);
 });
 
 function rawRequest(baseUrl, requestPath, headers) {

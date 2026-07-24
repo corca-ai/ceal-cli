@@ -94,7 +94,7 @@ transcripts are always declared, and remaining sessions stay inventory-only
 until an explicit per-session drill-down (`/api/observer/v1/agent-session/…`)
 runs the same bounded scan on demand; the ref is grammar-validated and never
 joined into a path. **My agent work** also lists local suggestions:
-deterministic rules over the rendered sections (stale collector, expired
+deterministic rules over the rendered sections (stale collector, missing
 capability cache, repeated non-completed calls, unknown-outcome receipts),
 each linked to its observed evidence and never a model judgment.
 Neither adapter's coverage claim generalizes to the other, and nothing is

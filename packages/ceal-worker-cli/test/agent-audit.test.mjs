@@ -337,6 +337,20 @@ test("per-session drill-down scans any inventoried session without trusting the 
 		// A missing sessions root is a confirmed absence, not a walk failure.
 		assert.equal(inspectAgentSessionEvents(home, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4").status, "not_found");
 	});
+	withHome((home) => {
+		// A ref duplicated across projects resolves to the newest transcript —
+		// this tiebreak decides which file gets opened, so it stays pinned.
+		const older = path.join(home, ".claude", "projects", "a-old");
+		const newer = path.join(home, ".claude", "projects", "b-new");
+		mkdirSync(older, { recursive: true });
+		mkdirSync(newer, { recursive: true });
+		writeSession(older, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 3_600_000, '{"type":"mode"}\n');
+		writeSession(newer, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n{"type":"mode"}\n');
+		const lookup = inspectAgentSessionEvents(home, "claude", "11111111-2222-3333-4444-555555555555");
+		assert.equal(lookup.status, "scanned");
+		assert.equal(lookup.session.lastActivityAt, NOW - 60_000);
+		assert.equal(lookup.session.events.eventCount, 2);
+	});
 	// A missing home cannot fabricate a lookup result.
 	assert.equal(inspectAgentSessionEvents(undefined, "claude", "11111111-2222-3333-4444-555555555555").status, "unreadable");
 	withHome((home) => {

@@ -90,16 +90,15 @@ function buildLocalSuggestions(
 			next_action: `If ${String(adapter.runtime)} is still in use, confirm it writes transcripts under ${String(adapter.root)}.`,
 		});
 	}
-	if (session.status === "present" && (cache.status === "absent" || cache.within_ttl === false)) {
+	// Only a genuinely missing catalog fires (masterplan: "a missing Ceal cache
+	// opportunity"). Routine TTL expiry self-heals on the next discovery and
+	// would keep this entry permanently on, eroding trust in the section.
+	if (session.status === "present" && cache.status === "absent") {
 		entries.push({
 			kind: "missing_cache_opportunity",
-			evidence: {
-				session: session.status,
-				discovery_cache: cache.status,
-				...(cache.within_ttl === false ? { within_ttl: false } : {}),
-			},
-			suggestion: "A client session is present but the local capability catalog is absent or expired.",
-			next_action: "Run 'ceal capabilities' to refresh the cached catalog.",
+			evidence: { session: session.status, discovery_cache: cache.status },
+			suggestion: "A client session is present but no local capability catalog has been cached yet.",
+			next_action: "Run 'ceal capabilities' to cache the capability catalog.",
 		});
 	}
 	const spooled = Array.isArray(receipts.entries) ? (receipts.entries as Record<string, unknown>[]) : [];
@@ -449,6 +448,8 @@ function respondAgentSession(response: ServerResponse, runtime: CealObserverRunt
 		return;
 	}
 	const session = lookup.session;
+	// "unreadable" is a declared local gap on the owner's own machine, not an
+	// absence, so it stays 200 like every other declared-gap projection here.
 	body(lookup.status === "not_found" ? 404 : 200, {
 		...envelope,
 		status: lookup.status,
