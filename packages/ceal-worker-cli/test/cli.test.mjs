@@ -431,6 +431,35 @@ test("a policy-denied receipt retains the error code, non-claims, and negotiated
 	}, (request) => policyDeniedReadbackResponse(request));
 });
 
+test("a legacy readback without negotiated timing omits the timing block instead of rendering zero", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(["receipt", "show", "narnia:denied:2:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:denied-receipt:2",
+		});
+		assert.equal(payload.status, "verified");
+		assert.equal("timing" in payload.events[0], false);
+	}, (request) => {
+		const response = policyDeniedReadbackResponse(request);
+		delete response.value.events[0].gateway_elapsed_ms;
+		return response;
+	});
+});
+
+test("event-level Gateway timing stays authoritative over successful call-detail timing", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(["receipt", "show", "narnia:call:2:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:receipt:2",
+		});
+		assert.deepEqual(payload.events[0].timing, { gateway_elapsed_ms: 57 });
+	}, (request) => {
+		const response = readbackResponse(request);
+		response.value.events[0].gateway_elapsed_ms = 57;
+		return response;
+	});
+});
+
 test("stored client Session selects an assigned Profile per request without another login", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const runtime = {

@@ -799,7 +799,9 @@ async function requestReceiptReadback(initialSession: CealStoredSession, profile
 function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
 	// A denied or failed call has no call detail, so its negotiated Gateway
 	// handling time arrives on the event itself rather than inside `call`.
-	const gatewayElapsedMs = event.call?.gateway_elapsed_ms ?? event.gateway_elapsed_ms;
+	// When both carry timing the event envelope stays authoritative; call
+	// detail remains a backward-compatible fallback for older successful data.
+	const gatewayElapsedMs = safeGatewayElapsed(event.gateway_elapsed_ms) ?? safeGatewayElapsed(event.call?.gateway_elapsed_ms);
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
 		authorization: event.policy_decision,
@@ -812,9 +814,12 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
 			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
 		} : {}),
-		...(typeof gatewayElapsedMs === "number" && Number.isSafeInteger(gatewayElapsedMs) && gatewayElapsedMs >= 0
-			? { timing: { gateway_elapsed_ms: gatewayElapsedMs } } : {}),
+		...(gatewayElapsedMs === undefined ? {} : { timing: { gateway_elapsed_ms: gatewayElapsedMs } }),
 	};
+}
+
+function safeGatewayElapsed(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function writeReceiptError(kind: string, message: string, io: CealCliIo): number {
