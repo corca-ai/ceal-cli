@@ -111,10 +111,14 @@ curl -fsSL https://github.com/corca-ai/ceal-cli/releases/latest/download/install
   | CEAL_VERSION=stable sh
 ```
 
-While the repository is private, download the release copy of
-`install-ceal.sh` with `gh` (or pass `CEAL_GITHUB_TOKEN=$(gh auth token)` so
-the installer can fetch release assets); once the repository is public the
-anonymous curl form above is canonical. Supported platforms: `linux-arm64`,
+The `latest/download` form and `CEAL_VERSION=stable` resolve only after an
+operator has promoted a `ceal-v*` prerelease to a normal release; until then
+install an explicit tag (`CEAL_VERSION=ceal-v0.65.0`) against that release's
+own `install-ceal.sh`. While the repository is private, download the release
+copy of `install-ceal.sh` with `gh` (or pass
+`CEAL_GITHUB_TOKEN=$(gh auth token)` so the installer can fetch release
+assets); once the repository is public the anonymous curl form above is
+canonical. Supported platforms: `linux-arm64`,
 `linux-amd64`, `darwin-arm64`, `darwin-amd64`. The installer verifies every
 asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under

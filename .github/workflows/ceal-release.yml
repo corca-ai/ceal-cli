@@ -138,6 +138,8 @@ jobs:
             echo "- SHA256SUMS digest: $digest"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve exact unprivileged worker release handoff
+        # include-hidden-files stays off on purpose: dropping the composed-set
+        # marker here is what keeps it out of the published asset inventory.
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ceal-worker-release-${{ github.sha }}
@@ -166,7 +168,7 @@ jobs:
           observed="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }
-          [ "$(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
+          [ "$(find dist -maxdepth 1 -type f -not -name '.*' -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
             "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
             || { echo "Unexpected worker release inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)

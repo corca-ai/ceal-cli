@@ -145,6 +145,10 @@ function observeGuide(runtime: CealObserverRuntime): Record<string, unknown> {
 	}
 }
 
+// Allow-by-type on purpose: cached capability/catalog entries are non-secret
+// Gateway metadata, and dropping every nested value keeps a poisoned cache
+// file from smuggling structures into the page. The session projection above
+// stays allow-by-name because it fronts a store that does hold secrets.
 function scalarProjection(value: unknown): Record<string, unknown> {
 	if (typeof value !== "object" || value === null) return {};
 	return Object.fromEntries(Object.entries(value as Record<string, unknown>)

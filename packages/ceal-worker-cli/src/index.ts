@@ -249,6 +249,13 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 	const address = server.address();
 	const boundPort = typeof address === "object" && address !== null ? address.port : port;
 	const url = `http://127.0.0.1:${boundPort}/`;
+	// A serve-phase server error (for example accept failure) must close the
+	// observer instead of crashing the process through an unhandled 'error'.
+	let observerExitCode = 0;
+	server.on("error", () => {
+		observerExitCode = 3;
+		server.close();
+	});
 	writeYaml(io.stdout, {
 		schema_version: "ceal.observe.v1",
 		command: "ceal",
@@ -264,7 +271,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 			"The observer serves until this command is interrupted.",
 		],
 	});
-	const closed = new Promise<number>((resolveClose) => server.once("close", () => resolveClose(0)));
+	const closed = new Promise<number>((resolveClose) => server.once("close", () => resolveClose(observerExitCode)));
 	runtime.onObserverListening?.({
 		url,
 		close: () => new Promise<void>((resolveStop, rejectStop) => server.close((error) => (error ? rejectStop(error) : resolveStop()))),

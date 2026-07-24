@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.65.0 (worker-only release addendum, `ceal-v0.65.0`)
+
+- Cut the first worker-only signed release route: `ceal-release.yml` builds
+  per-platform asset sets from the locked Gateway handoff archive, signs them
+  keyless, and publishes a `ceal-v*` prerelease that `install-ceal.sh`
+  verifies fail-closed. This lane supersedes the legacy dual `v0.65.0`
+  release for worker installs; the version number stays 0.65.0 because the
+  supplied Gateway Protocol artifact and the frozen release contract pin it.
+- Extend the worker lane to `darwin-arm64`/`darwin-amd64`: portable installer
+  (shasum/mkdir-lock/BSD-mv fallbacks, darwin cosign pins), Mach-O SEA
+  ad-hoc signing in the native builder, and darwin-aware `ceal update`.
+  macOS artifacts are built manually from a Mac checkout for now
+  (`docs/macos-worker-runbook.md`); darwin CI runners stay disabled.
+- Add loopback-only `ceal observe`: a guarded 127.0.0.1 page over cached
+  session (tokens structurally redacted), capability/target catalog, install
+  generation, and guide status; receipts render as `unknown` and the server
+  never contacts the Gateway or a provider.
+
 ## 0.65.0
 
 - Add option-free, stable-only `ceal update` for a verified installed worker
