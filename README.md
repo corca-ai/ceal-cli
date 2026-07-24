@@ -74,14 +74,18 @@ provider payloads, or token material. It is advisory client evidence for the
 local Workbench view; the Gateway audit ledger stays authoritative through
 `ceal receipt show`, and a spool failure never changes call behavior.
 
-The observer also renders a read-only agent-runtime transcript inventory (the
-first `ceal-audit` stage): the Claude adapter lists sessions under
-`~/.claude/projects` by identity, recency, and size with collector health
-(`active`/`stale`/`inactive`/`unknown`) and coverage `transcript-observed` at
-`session_inventory` depth; transcript content is never read, copied, or
-forwarded, and the Codex adapter honestly reports `unsupported`. Neither
-adapter's coverage claim generalizes to the other, and nothing is forwarded to
-the Gateway in this stage.
+The observer also renders a read-only agent-runtime audit view (`ceal-audit`):
+the Claude adapter lists sessions under `~/.claude/projects` and the Codex
+adapter lists rollouts under `~/.codex/sessions` by identity, recency, and
+size with collector health (`active`/`stale`/`inactive`/`unknown`) and
+coverage `transcript-observed`. The newest three sessions per adapter
+additionally carry a bounded event summary (`session_events` depth): lines are
+parsed locally under fixed byte/line budgets, but only fixed-vocabulary kind
+counts, integer totals, and re-serialized timestamps surface — transcript
+content, prompts, and tool arguments never do, truncation and unreadable
+transcripts are always declared, and remaining sessions stay inventory-only.
+Neither adapter's coverage claim generalizes to the other, and nothing is
+forwarded to the Gateway in this stage.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread
