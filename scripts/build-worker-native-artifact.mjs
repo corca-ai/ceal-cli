@@ -106,7 +106,7 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 	const blobPath = path.join(work, "ceal.blob");
 	const artifactPath = path.join(work, `ceal-${platform}`);
 	try {
-		await (dependencies.bundle ?? bundleInstalledWorker)({ workerBin: packed.consumer.workerBin, bundlePath });
+		await (dependencies.bundle ?? bundleInstalledWorker)({ workerBin: packed.consumer.workerBin, bundlePath, consumerDirectory: packed.consumer.directory });
 		(dependencies.createBlob ?? createBlob)({ bundlePath, blobPath, work });
 		(dependencies.copyRuntime ?? copyRuntime)({ artifactPath });
 		chmodSync(artifactPath, 0o755);
@@ -122,10 +122,14 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 	}
 }
 
-async function bundleInstalledWorker({ workerBin, bundlePath }) {
+async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory }) {
 	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink()) fail("worker_native_bundle_failed", "Packed worker consumer entrypoint is unavailable.");
 	try {
 		await esbuild.build({
+			// Pin the bundler's working directory to the staged consumer so its
+			// emitted module-path comments are stage-independent; the SEA blob,
+			// and therefore the whole artifact, must be byte-reproducible.
+			absWorkingDir: consumerDirectory,
 			bundle: true,
 			entryPoints: [workerBin],
 			format: "cjs",
