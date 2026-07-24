@@ -25,6 +25,9 @@ const MAX_AUDIT_REFS = 8;
 
 export const RECEIPT_SPOOL_MAX_ENTRIES = 200;
 export const RECEIPT_SPOOL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+// Tolerated forward clock skew: an entry recorded further in the future could
+// never be expired by retention, so it is dropped instead of retained.
+const FUTURE_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
 
 export interface CealReceiptSpoolEntry {
 	/** Epoch milliseconds when the client recorded this call outcome. */
@@ -57,13 +60,13 @@ export interface CealReceiptSpoolStore {
 	remove(): Promise<void>;
 }
 
-export function createCealReceiptSpoolStore(home: string | undefined): CealReceiptSpoolStore {
+export function createCealReceiptSpoolStore(home: string | undefined, now: () => number = Date.now): CealReceiptSpoolStore {
 	if (!home || !path.isAbsolute(home)) throw new CealReceiptSpoolStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, SPOOL_FILE);
 	return {
-		async load() { return readSpool(directory, file); },
-		async append(entry) { appendEntry(directory, file, entry); },
+		async load() { return readSpool(directory, file, now()); },
+		async append(entry) { appendEntry(directory, file, entry, now()); },
 		async remove() { removeSpool(file); },
 	};
 }
@@ -99,14 +102,14 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 	};
 }
 
-function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry): void {
+function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
 	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
-	const existing = readSpool(directory, file)?.entries ?? [];
-	// Retention and size bounds are enforced on every append relative to the
-	// newest entry, so the spool cannot grow past its declared bounds even if
-	// the clock or an old file disagrees.
+	const existing = readSpool(directory, file, now)?.entries ?? [];
+	// Size and retention bounds are enforced on every append (and read applies
+	// the same retention window), so the spool cannot grow past its declared
+	// bounds even if the clock or an old file disagrees.
 	const entries = [...existing, entry]
-		.filter((candidate) => candidate.recordedAt > entry.recordedAt - RECEIPT_SPOOL_RETENTION_MS)
+		.filter((candidate) => withinRetention(candidate.recordedAt, Math.max(now, entry.recordedAt)))
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
 	prepareDirectory(directory);
 	if (existsSync(file)) assertFile(file);
@@ -120,19 +123,24 @@ function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEnt
 	}
 }
 
-function readSpool(directory: string, file: string): CealReceiptSpoolState | null {
+function readSpool(directory: string, file: string, now: number): CealReceiptSpoolState | null {
 	if (!existsSync(file)) return null;
 	if (!safeExistingFile(directory, file)) return null;
 	let parsed: unknown;
 	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { return null; }
 	if (!isRecord(parsed) || parsed.schema_version !== SPOOL_SCHEMA_VERSION || !Array.isArray(parsed.entries)) return null;
-	// Individually invalid entries are dropped instead of poisoning the whole
-	// spool; the remainder stays serveable local evidence.
+	// Individually invalid or retention-expired entries are dropped instead of
+	// poisoning the whole spool; retention applies on read too, so a dormant
+	// client cannot serve entries past the advertised window.
 	const entries = parsed.entries.flatMap((value) => {
 		const entry = parseEntry(value);
-		return entry ? [entry] : [];
+		return entry && withinRetention(entry.recordedAt, now) ? [entry] : [];
 	}).slice(-RECEIPT_SPOOL_MAX_ENTRIES);
 	return { entries, bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS } };
+}
+
+function withinRetention(recordedAt: number, now: number): boolean {
+	return recordedAt > now - RECEIPT_SPOOL_RETENTION_MS && recordedAt <= now + FUTURE_SKEW_TOLERANCE_MS;
 }
 
 function removeSpool(file: string): void {

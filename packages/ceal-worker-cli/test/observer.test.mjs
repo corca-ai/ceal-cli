@@ -57,7 +57,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		},
 	});
 
-	const spoolStore = createCealReceiptSpoolStore(home);
+	const spoolStore = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
 	await spoolStore.append({
 		recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
 		requestRef: "narnia:observer:1:call",

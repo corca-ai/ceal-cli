@@ -28,7 +28,7 @@ function entry(overrides = {}) {
 
 test("receipt spool appends owner-only and reads entries back", async () => {
 	await withHome(async (home) => {
-		const store = createCealReceiptSpoolStore(home);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		assert.equal(await store.load(), null);
 		await store.append(entry());
 		const state = await store.load();
@@ -44,7 +44,7 @@ test("receipt spool appends owner-only and reads entries back", async () => {
 
 test("receipt spool enforces entry-count and retention bounds on append", async () => {
 	await withHome(async (home) => {
-		const store = createCealReceiptSpoolStore(home);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		// One expired entry plus enough fresh entries to overflow the cap.
 		await store.append(entry({ recordedAt: BASE_TIME - RECEIPT_SPOOL_RETENTION_MS - 1, requestRef: "narnia:call:expired" }));
 		for (let index = 0; index <= RECEIPT_SPOOL_MAX_ENTRIES; index += 1) {
@@ -58,24 +58,48 @@ test("receipt spool enforces entry-count and retention bounds on append", async 
 	});
 });
 
+test("receipt spool applies retention on read and drops far-future entries", async () => {
+	await withHome(async (home) => {
+		await createCealReceiptSpoolStore(home, () => BASE_TIME).append(entry());
+		// A dormant client past the retention window serves nothing, even though
+		// no append ran to trim the file.
+		const dormant = await createCealReceiptSpoolStore(home, () => BASE_TIME + RECEIPT_SPOOL_RETENTION_MS + 1).load();
+		assert.deepEqual(dormant.entries, []);
+	});
+	await withHome(async (home) => {
+		// A future-dated entry beyond clock-skew tolerance could never expire, so
+		// it is dropped instead of retained.
+		await createCealReceiptSpoolStore(home, () => BASE_TIME).append(entry());
+		const file = spoolFile(home);
+		const parsed = JSON.parse(readFileSync(file, "utf8"));
+		parsed.entries.push({
+			recorded_at: new Date(BASE_TIME + 60 * 60 * 1000).toISOString(),
+			request_ref: "narnia:call:future", status: "completed", evidence: "readback_verified", audit_refs: [],
+		});
+		writeFileSync(file, JSON.stringify(parsed), { mode: 0o600 });
+		const state = await createCealReceiptSpoolStore(home, () => BASE_TIME).load();
+		assert.deepEqual(state.entries, [entry()]);
+	});
+});
+
 test("receipt spool read degrades to a miss on any anomaly instead of throwing", async () => {
 	await withHome(async (home) => {
 		writeFileSync(spoolFile(home), "{ not json", { mode: 0o600 });
-		assert.equal(await createCealReceiptSpoolStore(home).load(), null);
+		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
 	});
 	await withHome(async (home) => {
 		writeFileSync(spoolFile(home), JSON.stringify({ schema_version: "wrong", entries: [] }), { mode: 0o600 });
-		assert.equal(await createCealReceiptSpoolStore(home).load(), null);
+		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
 	});
 	await withHome(async (home) => {
 		writeFileSync(spoolFile(home), JSON.stringify({ schema_version: "ceal.receipt_spool.v1", entries: [] }), { mode: 0o644 });
-		assert.equal(await createCealReceiptSpoolStore(home).load(), null);
+		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
 	});
 });
 
 test("receipt spool drops individually invalid entries without losing the rest", async () => {
 	await withHome(async (home) => {
-		const store = createCealReceiptSpoolStore(home);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await store.append(entry());
 		const file = spoolFile(home);
 		const parsed = JSON.parse(readFileSync(file, "utf8"));
@@ -89,7 +113,7 @@ test("receipt spool drops individually invalid entries without losing the rest",
 
 test("receipt spool refuses an unsafe entry and a symlinked store", async () => {
 	await withHome(async (home) => {
-		const store = createCealReceiptSpoolStore(home);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await assert.rejects(store.append(entry({ requestRef: "free text with spaces" })), CealReceiptSpoolStoreError);
 		mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
 		writeFileSync(path.join(home, "elsewhere.json"), "{}", { mode: 0o600 });
