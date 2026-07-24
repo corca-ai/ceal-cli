@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.65.2 (`ceal-v0.65.2`)
+
+- Remove GitHub Releases from the worker delivery path. The tag workflow now
+  publishes and reads back the signed worker asset set through the Ceal static
+  release origin, then advances a digest-bound stable pointer. The installer
+  and missing-cosign bootstrap fetch only that origin; GitHub remains the
+  source and tag-bound OIDC signing identity.
+- Add the explicit, re-verified stable rollback workflow. It can move only the
+  stable pointer after it has re-downloaded the selected versioned inventory,
+  checked its hashes, and verified every OIDC signature.
+
 ## 0.65.1 (`ceal-v0.65.1`)
 
 - Version the worker independently of the pinned Gateway Protocol artifact:

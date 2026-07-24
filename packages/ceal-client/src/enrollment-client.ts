@@ -43,7 +43,7 @@ export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOp
 					body: JSON.stringify({
 						schema_version: CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
 						code,
-						client: { name: "ceal", version: "0.65.1" },
+						client: { name: "ceal", version: "0.65.2" },
 					}),
 					redirect: "error",
 					signal: controller.signal,

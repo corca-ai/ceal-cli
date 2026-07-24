@@ -33,7 +33,7 @@ import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 
 export { renderPlainYamlDocument } from "./yaml.js";
 
-const CEAL_PACKAGE_VERSION = "0.65.1" as const;
+const CEAL_PACKAGE_VERSION = "0.65.2" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 
