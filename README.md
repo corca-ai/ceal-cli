@@ -61,6 +61,13 @@ compact result envelope with primary data and verified readback identity. Rich
 audit evidence is read only on demand so agents do not infer completion from an
 exit code alone.
 
+`ceal observe` serves a loopback-only (`127.0.0.1`, Host-header guarded)
+read-only page and JSON endpoint over the client's cached local state:
+session identity with token material structurally redacted, the cached
+capability/target catalog with its age and TTL, the managed install
+generation, and agent-guide registration. It performs no Gateway or provider
+contact; receipts render as `unknown` because no local receipt store exists.
+
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread
 replies, but the public client neither reimplements that behavior nor turns it
@@ -86,12 +93,36 @@ it is not a worker-release builder.
 
 ## Worker release boundary
 
-No signed release, installer, tag, or GitHub workflow in this repository is
-currently the worker-only release route. The historical dual `install.sh`,
-`release:binaries`, `release:manifest`, bare `v*` tags, and
+`.github/workflows/ceal-release.yml` is the worker-only release route: a
+`ceal-v*` tag builds the asset set per platform from the locked Gateway
+handoff archive, merges one exact inventory, signs every asset with cosign
+keyless, and publishes a GitHub prerelease. Promoting a prerelease to the
+stable lane (`CEAL_VERSION=stable` / `ceal update`) is a separate operator
+edit. The historical dual `install.sh`, `release:binaries`,
+`release:manifest`, bare `v*` tags, and
 `.github/workflows/cealctl-release.yml` remain frozen compatibility material.
-Do not execute, amend, publish, or use them to install either command from this
-checkout.
+Do not execute, amend, publish, or use them to install either command from
+this checkout.
+
+### Installing the worker
+
+```sh
+curl -fsSL https://github.com/corca-ai/ceal-cli/releases/latest/download/install-ceal.sh \
+  | CEAL_VERSION=stable sh
+```
+
+While the repository is private, download the release copy of
+`install-ceal.sh` with `gh` (or pass `CEAL_GITHUB_TOKEN=$(gh auth token)` so
+the installer can fetch release assets); once the repository is public the
+anonymous curl form above is canonical. Supported platforms: `linux-arm64`,
+`linux-amd64`, `darwin-arm64`, `darwin-amd64`. The installer verifies every
+asset against its cosign keyless identity and the signed `SHA256SUMS`
+inventory before an atomic generation switch under
+`$CEAL_INSTALL_DIR/.ceal-cli/worker/` (default `~/.local/bin`), and the
+installed `ceal update` re-runs the release-staged installer stable-only.
+macOS artifacts are currently built manually from a Mac checkout
+([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)); the darwin CI
+runner matrix entries exist but stay disabled by operator decision.
 
 `release:worker:inputs`, `release:worker:package`, and
 `release:worker:native` accept exactly one `--gateway-handoff-archive`
@@ -102,46 +133,36 @@ is extracted. The release commands reject the former six raw file/digest
 arguments, so a caller cannot replace the reviewed archive binding with a
 caller-selected digest.
 
-There is intentionally no lock in the repository yet: a real
-`gateway-handoff-v*` workflow run must produce the immutable archive before a
-reviewed lock can be committed. The explicit
+The committed `gateway-handoff-lock.json` pins the Gateway
+repository/workflow, tag, commit/tree, Actions run and artifact name, archive
+SHA-256, and embedded handoff-manifest SHA-256 for the one consumable archive.
+The archive must contain exactly the marker, two package tarballs, manifest,
+conformance proof, and Protocol provenance; it is extracted only into a
+disposable directory for the preflight/package/native operation, and every
+release command fails closed on any mismatch. The explicit
 `*FromDevelopmentInputs` APIs remain test/development seams for assembling and
 validating a raw local packet; they are not exposed through a release command,
-do not authenticate a sender, and do not establish release readiness.
-
-The future immutable handoff form instead accepts one locally available
-`--gateway-handoff-archive` and requires this repository's reviewed
-`gateway-handoff-lock.json`. The lock pins the Gateway repository/workflow,
-tag, commit/tree, Actions run and artifact name, archive SHA-256, and embedded
-handoff-manifest SHA-256. The archive must contain exactly the marker, two
-package tarballs, manifest, conformance proof, and Protocol provenance; it is
-extracted only into a disposable directory for the preflight/package/native
-operation. The lock is intentionally absent until the Gateway's separate
-`gateway-handoff-v*` workflow has produced a real signed archive and a reviewer
-can pin its immutable facts. The commands fail closed while it is absent. This
+do not authenticate a sender, and do not establish release readiness. This
 local archive consumer does not download Actions artifacts or claim cosign
-verification; the later least-privilege downloader must verify the signed
-artifact before presenting this input.
+verification; the release workflow re-verifies the archive digest against the
+lock before building.
 
 The retired raw-input `worker-release:build` command is not an alternate
 release route. Its implementation remains an import-only development/test
 module and exits nonzero if invoked as a program.
 
-The package command makes an isolated packed `ceal` consumer candidate, and
-the native command builds one host-native `ceal` executable from that internal
-packed consumer. Each native candidate carries a platform-qualified
-`ceal-worker-native-artifact-manifest-linux-<arch>.json`, the separate
-worker-only `install-ceal.sh`, its declared `ceal-worker-v1` lane, and a
-checksum inventory so an installed signed generation can run option-free `ceal
-update` without falling back to the historical `install.sh`. A future
-two-platform release must merge both binaries and both qualified manifests into
-one exact seven-primary-asset inventory; a platform never shares another
-platform's manifest. Neither path may contain `cealctl`, an operator guide,
-copied Protocol source, or a tag/signing claim.
-
-A future signed worker route will add a worker-specific `ceal-v*` tag namespace,
-workflow, asset allowlist, and installer. It must keep consuming a
-Gateway-issued Protocol artifact rather than any local Protocol source.
+The package command makes an isolated packed `ceal` consumer candidate; the
+native command builds one host-native `ceal` executable from that internal
+packed consumer (on macOS the Mach-O signature is removed before SEA
+injection and ad-hoc re-signed after); and `release:worker:assets compose`
+turns one native candidate into the installer-facing per-platform set —
+`ceal-<platform>`, `ceal-worker-release-manifest-<platform>.json`, the signed
+guide, notices, `install-ceal.sh`, and a checksum inventory — while
+`release:worker:assets merge` combines per-platform sets into the one exact
+release inventory (shared assets byte-identical, every platform a complete
+binary+manifest pair; a platform never shares another platform's manifest).
+Neither path may contain `cealctl`, an operator guide, copied Protocol
+source, or a tag/signing claim outside the release workflow.
 
 Gateway operators must obtain `cealctl`, its guide, installation/update path,
 and operational instructions from the Gateway-owned `corca-ai/ceal` source. The
