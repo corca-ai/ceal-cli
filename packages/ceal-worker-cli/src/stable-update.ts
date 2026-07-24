@@ -46,11 +46,20 @@ export function createCealStableUpdateRunner(executablePath: string, environment
 	};
 }
 
-interface InstalledWorkerRelease {
+export interface InstalledWorkerRelease {
 	commandPath: string;
 	installerPath: string;
 	generationDirectory: string;
 	installDirectory: string;
+}
+
+/** Observation-safe view of the managed install layout: null instead of throwing. */
+export function inspectInstalledWorkerRelease(executablePath: string): InstalledWorkerRelease | null {
+	try {
+		return findInstalledWorkerRelease(executablePath);
+	} catch {
+		return null;
+	}
 }
 
 function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRelease {

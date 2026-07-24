@@ -74,8 +74,12 @@ test("canonical registry is reachable through stable, read-only help", async () 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
-			: command.name === "receipt" ? ["receipt", "show", "request:test"] : [command.name];
-		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" || command.name === "update" ? 3 : 0);
+			: command.name === "receipt" ? ["receipt", "show", "request:test"]
+			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
+		// The observer intentionally serves until closed; close it right after
+		// its single serving document is written.
+		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
+		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" || command.name === "update" ? 3 : 0, runtime);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
 	}
@@ -95,7 +99,7 @@ test("version identifies the package, protocol, range, and credential context", 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt"]);
+	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe"]);
 });
 
 test("update is option-free, stable-only, and keeps child execution behind one YAML result", async () => {

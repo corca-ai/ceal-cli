@@ -1,0 +1,170 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { parse } from "yaml";
+import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
+import { runCealCommand } from "../dist/index.js";
+import { createCealSessionStore } from "../dist/profile-store.js";
+
+const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
+const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
+
+test("ceal observe serves redacted cached state on a guarded loopback page", async (context) => {
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-home-"));
+	context.after(() => rmSync(home, { recursive: true, force: true }));
+	const sessionStore = createCealSessionStore(home);
+	await sessionStore.save({
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:observer-fixture",
+		membershipRef: "membership:observer-fixture",
+		registrationRef: "registration:observer-fixture",
+		clientRef: "client:observer-fixture",
+		subjectRef: "subject:observer-fixture",
+		instanceRef: "instance:observer-fixture",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-07-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	});
+	const cacheStore = createCealDiscoveryCacheStore(home);
+	await cacheStore.save({
+		key: {
+			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+			profileRef: "profile:observer-fixture",
+			membershipRef: "membership:observer-fixture",
+			negotiatedProtocolVersion: "1.3.0",
+		},
+		cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
+		discovery: {
+			schema_version: "ceal.gateway_discovery.v2",
+			profile_ref: "profile:observer-fixture",
+			membership_ref: "membership:observer-fixture",
+			capabilities: [{
+				capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required",
+				input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
+				evidence_requirement: "gateway_audit",
+			}],
+			targets: [],
+			target_catalog: { target_count: 3, returned_count: 0, complete: false, selection_required: true },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		},
+	});
+
+	const io = collectingIo();
+	let handle;
+	const handleReady = new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			loadSession: () => sessionStore.load(),
+			loadDiscoveryCache: () => cacheStore.load(),
+			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
+			executablePath: process.execPath,
+			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
+			onObserverListening: (value) => { handle = value; resolve(value); },
+		}).then((code) => { io.exitCode = code; });
+	});
+	await handleReady;
+	context.after(async () => { try { await handle.close(); } catch { /* already closed */ } });
+
+	const doc = parse(io.stdout.join(""));
+	assert.equal(doc.schema_version, "ceal.observe.v1");
+	assert.equal(doc.status, "serving");
+	assert.match(doc.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+	assert.deepEqual(doc.boundary, { admin_surface: false, provider_credentials: false, live_refresh: false });
+
+	const stateResponse = await fetch(`${doc.url}api/observer/v1/state`);
+	assert.equal(stateResponse.status, 200);
+	assert.equal(stateResponse.headers.get("cache-control"), "no-store");
+	const stateBody = await stateResponse.text();
+	assert.doesNotMatch(stateBody, /ceal_personal_|ceal_refresh_/u);
+	const state = JSON.parse(stateBody);
+	assert.equal(state.schema_version, "ceal.observer_state.v1");
+	assert.equal(state.session.status, "present");
+	assert.equal(state.session.secrets, "redacted");
+	assert.equal(state.session.access_token, undefined);
+	assert.equal(state.session.profile_ref, "profile:observer-fixture");
+	assert.equal(state.discovery_cache.status, "cached");
+	assert.equal(state.discovery_cache.capability_count, 1);
+	assert.deepEqual(state.discovery_cache.capabilities, [{
+		capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required", evidence_requirement: "gateway_audit",
+	}]);
+	assert.equal(state.discovery_cache.within_ttl, true);
+	assert.equal(state.discovery_cache.age_ms, 60_000);
+	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
+	assert.equal(state.install.status, "unmanaged");
+	assert.equal(state.guide.status, "staged");
+	assert.equal(state.receipts.status, "unknown");
+	assert.match(state.receipts.non_claim, /no local cache/u);
+
+	const page = await fetch(doc.url);
+	assert.equal(page.status, 200);
+	assert.match(page.headers.get("content-type"), /text\/html/u);
+	assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
+	const html = await page.text();
+	assert.match(html, /Ceal local observer/u);
+	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
+
+	const rebound = await rawRequest(doc.url, "/api/observer/v1/state", { host: "evil.example:80" });
+	assert.equal(rebound.status, 403);
+	const forwarded = await fetch(`${doc.url}api/observer/v1/state`, { headers: { "x-forwarded-for": "203.0.113.7" } });
+	assert.equal(forwarded.status, 403);
+	const write = await fetch(doc.url, { method: "POST", body: "{}" });
+	assert.equal(write.status, 405);
+	const missing = await fetch(`${doc.url}unknown`);
+	assert.equal(missing.status, 404);
+
+	await handle.close();
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(io.exitCode, 0);
+});
+
+test("ceal observe reports absent stores and rejects invalid ports without serving", async () => {
+	const io = collectingIo();
+	let handle;
+	await new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			onObserverListening: (value) => { handle = value; resolve(value); },
+		});
+	});
+	const doc = parse(io.stdout.join(""));
+	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(state.session.status, "unavailable");
+	assert.equal(state.discovery_cache.status, "unavailable");
+	assert.equal(state.install.status, "unavailable");
+	assert.equal(state.guide.status, "unavailable");
+	assert.equal(state.receipts.status, "unknown");
+	await handle.close();
+
+	const invalid = collectingIo();
+	assert.equal(await runCealCommand(["observe", "--port", "80"], invalid, {}), 2);
+	assert.match(invalid.stdout.join(""), /invalid_argument/u);
+	const trailing = collectingIo();
+	assert.equal(await runCealCommand(["observe", "extra"], trailing, {}), 2);
+});
+
+function rawRequest(baseUrl, requestPath, headers) {
+	const port = Number(new URL(baseUrl).port);
+	return new Promise((resolve, reject) => {
+		const request = httpRequest({ host: "127.0.0.1", port, path: requestPath, method: "GET", headers, setHost: false }, (response) => {
+			response.resume();
+			response.once("end", () => resolve({ status: response.statusCode }));
+		});
+		request.once("error", reject);
+		request.end();
+	});
+}
+
+function collectingIo() {
+	const io = { stdout: [], stderr: [], exitCode: undefined };
+	return {
+		stdout: { write: (chunk) => io.stdout.push(String(chunk)), join: (separator) => io.stdout.join(separator ?? "") },
+		stderr: { write: (chunk) => io.stderr.push(String(chunk)), join: (separator) => io.stderr.join(separator ?? "") },
+		get exitCode() { return io.exitCode; },
+		set exitCode(value) { io.exitCode = value; },
+	};
+}

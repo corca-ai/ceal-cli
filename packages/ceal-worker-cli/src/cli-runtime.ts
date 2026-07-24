@@ -40,6 +40,10 @@ export interface CealCommandRuntime {
 	inspectAgentGuide?: () => CealAgentGuideState;
 	registerAgentGuide?: () => CealAgentGuideState;
 	runStableUpdate?: () => Promise<CealStableUpdateResult>;
+	/** Real executable path for managed-install observation (`ceal observe`). */
+	executablePath?: string;
+	/** Test/embedding hook: receives the live observer URL and a closer. */
+	onObserverListening?: (handle: { url: string; close: () => Promise<void> }) => void;
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;

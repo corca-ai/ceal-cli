@@ -16,6 +16,7 @@ import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discove
 import type { CealStoredSession } from "./profile-store.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { parseNamedOptions } from "./named-options.js";
+import { createCealObserverServer } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
 import {
@@ -40,6 +41,10 @@ const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 // `--fresh` forces a live probe and `CEAL_DISCOVERY_CACHE_TTL_MS` overrides it.
 const DEFAULT_DISCOVERY_CACHE_TTL_MS = 300_000;
 
+// 0xCEA1: a stable, unregistered default so the printed observer URL is
+// predictable across sessions; --port 0 selects an ephemeral port instead.
+const DEFAULT_OBSERVER_PORT = 52897;
+
 type CatalogProvenance =
 	| { source: "live_discovery" }
 	| { source: "cached_discovery"; cachedAt: number; expiresAt: number };
@@ -54,7 +59,7 @@ class CealKnownPreProviderCallError extends Error {
 export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt";
+	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe";
 	description: string;
 	usage: string;
 	effect: "read_only" | "local_write" | "read_only_or_local_write";
@@ -136,6 +141,15 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		result_schema: "ceal.receipt.v1",
 		recovery: "Use the receipt reference returned by a completed call, then retry after renewing the client session if needed.",
 	},
+	{
+		name: "observe",
+		description: "Serve a loopback-only read-only page over this client's cached local state.",
+		usage: "ceal observe [--port <0|1024-65535>]",
+		effect: "read_only",
+		evidence: "surface",
+		result_schema: "ceal.observe.v1",
+		recovery: "Open the printed 127.0.0.1 URL in a local browser; stop the observer with Ctrl-C.",
+	},
 ];
 
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
@@ -168,7 +182,7 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 }
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
-	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt";
+	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt" || command === "observe";
 }
 
 function isSessionEnrollmentHelp(options: readonly string[]): boolean {
@@ -188,7 +202,74 @@ async function runKnownCommand(
 	if (command === "session") return runSession(options, io, runtime);
 	if (command === "call") return runCall(options, io, runtime);
 	if (command === "receipt") return runReceipt(options, io, runtime);
+	if (command === "observe") return runObserve(options, io, runtime);
 	return runCapabilities(options, io, runtime);
+}
+
+async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const parsed = parseNamedOptions(options, new Set(["--port"]), new Set());
+	if (!parsed || parsed.operands.length !== 0) return writeError("invalid_argument", "Invalid ceal observe options.", io);
+	const rawPort = parsed.values.get("--port");
+	let port = DEFAULT_OBSERVER_PORT;
+	if (rawPort !== undefined) {
+		if (!/^\d{1,5}$/u.test(rawPort) || (Number(rawPort) !== 0 && (Number(rawPort) < 1024 || Number(rawPort) > 65535))) {
+			return writeError("invalid_argument", "ceal observe --port must be 0 (ephemeral) or 1024-65535.", io);
+		}
+		port = Number(rawPort);
+	}
+	const server = createCealObserverServer({
+		loadSession: runtime.loadSession,
+		loadDiscoveryCache: runtime.loadDiscoveryCache,
+		inspectAgentGuide: runtime.inspectAgentGuide,
+		executablePath: runtime.executablePath,
+		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
+		now: runtime.now,
+	});
+	try {
+		await new Promise<void>((resolveListen, rejectListen) => {
+			server.once("error", rejectListen);
+			server.listen(port, "127.0.0.1", () => {
+				server.removeListener("error", rejectListen);
+				resolveListen();
+			});
+		});
+	} catch {
+		writeYaml(io.stdout, {
+			schema_version: "ceal.observe.v1",
+			command: "ceal",
+			status: "unavailable",
+			error: {
+				kind: "port_unavailable",
+				message: "The local observer could not bind its loopback port.",
+				next_action: "Choose a free local port with 'ceal observe --port <port>'.",
+			},
+		});
+		return 3;
+	}
+	const address = server.address();
+	const boundPort = typeof address === "object" && address !== null ? address.port : port;
+	const url = `http://127.0.0.1:${boundPort}/`;
+	writeYaml(io.stdout, {
+		schema_version: "ceal.observe.v1",
+		command: "ceal",
+		status: "serving",
+		url,
+		bind_address: "127.0.0.1",
+		effect: "read_only",
+		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
+		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration"],
+		receipts: "unknown_no_local_store",
+		non_claims: [
+			"Cached/local state only; the observer never contacts the Gateway or a provider.",
+			"The observer serves until this command is interrupted.",
+		],
+	});
+	const closed = new Promise<number>((resolveClose) => server.once("close", () => resolveClose(0)));
+	runtime.onObserverListening?.({
+		url,
+		close: () => new Promise<void>((resolveStop, rejectStop) => server.close((error) => (error ? rejectStop(error) : resolveStop()))),
+	});
+	return closed;
 }
 
 async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -293,6 +374,11 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 	if (name === "receipt") return [
 			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
+		];
+	if (name === "observe") return [
+			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
+			"                          Serves cached session/capability/install/guide state; receipts stay unknown.",
+			"                          No admin surface, no provider credentials, no live refresh.",
 		];
 	return [];
 }

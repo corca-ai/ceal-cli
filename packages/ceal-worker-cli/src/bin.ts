@@ -35,6 +35,7 @@ void runCealCommand(process.argv.slice(2), {
 	inspectAgentGuide: agentGuide ? () => agentGuide.inspect() : undefined,
 	registerAgentGuide: agentGuide ? () => agentGuide.register() : undefined,
 	runStableUpdate,
+	executablePath: process.execPath,
 	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
 	nextRequestId: () => `ceal:${randomUUID()}`,
 }).then((code) => {
