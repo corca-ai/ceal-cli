@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -75,6 +75,18 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 			loadSession: () => sessionStore.load(),
 			loadDiscoveryCache: () => cacheStore.load(),
 			loadReceiptSpool: () => spoolStore.load(),
+			inspectAgentAudit: () => ({
+				schemaVersion: "ceal.agent_activity.v1",
+				adapters: [
+					{
+						runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
+						depth: "session_inventory", sessionCount: 1,
+						sessions: [{ sessionRef: "11111111-2222-3333-4444-555555555555", lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048 }],
+					},
+					{ runtime: "codex", root: "~/.codex", health: "unknown", coverage: "unsupported", note: "The Codex adapter is not implemented yet." },
+				],
+				nonClaims: ["Session inventory only: transcript content is never read, copied, or forwarded."],
+			}),
 			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
 			executablePath: process.execPath,
 			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
@@ -124,6 +136,14 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		audit_refs: ["gateway-audit:event:777"],
 	}]);
 	assert.match(state.receipts.non_claim, /Gateway audit ledger stays authoritative/u);
+	assert.equal(state.agent_activity.status, "inventoried");
+	assert.deepEqual(state.agent_activity.adapters[0], {
+		runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
+		depth: "session_inventory", session_count: 1,
+		sessions: [{ session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048 }],
+	});
+	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
+	assert.match(state.agent_activity.non_claims[0], /never read, copied, or forwarded/u);
 
 	const page = await fetch(doc.url);
 	assert.equal(page.status, 200);
@@ -147,6 +167,29 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(io.exitCode, 0);
 });
 
+test("ceal observe renders a corrupt receipt spool as unreadable, not an empty history", async (context) => {
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-corrupt-"));
+	context.after(() => rmSync(home, { recursive: true, force: true }));
+	mkdirSync(path.join(home, ".ceal"), { mode: 0o700 });
+	writeFileSync(path.join(home, ".ceal", "receipt-spool.json"), "{ not json", { mode: 0o600 });
+	const spoolStore = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
+
+	const io = collectingIo();
+	let handle;
+	await new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			loadReceiptSpool: () => spoolStore.load(),
+			onObserverListening: (value) => { handle = value; resolve(value); },
+		});
+	});
+	context.after(async () => { try { await handle.close(); } catch { /* already closed */ } });
+	const doc = parse(io.stdout.join(""));
+	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(state.receipts.status, "unreadable");
+	assert.equal("entries" in state.receipts, false);
+	await handle.close();
+});
+
 test("ceal observe reports absent stores and rejects invalid ports without serving", async () => {
 	const io = collectingIo();
 	let handle;
@@ -162,6 +205,7 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.equal(state.install.status, "unavailable");
 	assert.equal(state.guide.status, "unavailable");
 	assert.equal(state.receipts.status, "unavailable");
+	assert.equal(state.agent_activity.status, "unavailable");
 	await handle.close();
 
 	const invalid = collectingIo();

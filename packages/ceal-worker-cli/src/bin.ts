@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { inspectAgentAudit } from "./agent-audit.js";
 import { createCealAgentGuideStore } from "./agent-guide.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
@@ -42,6 +43,7 @@ void runCealCommand(process.argv.slice(2), {
 	// rejected spool write from becoming an unhandled rejection.
 	recordReceiptSpool: receiptSpool ? (entry) => { void receiptSpool.append(entry).catch(() => {}) } : undefined,
 	loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,
+	inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, Date.now()),
 	runStableUpdate,
 	executablePath: process.execPath,
 	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),

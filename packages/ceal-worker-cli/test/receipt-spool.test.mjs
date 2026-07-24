@@ -82,18 +82,26 @@ test("receipt spool applies retention on read and drops far-future entries", asy
 	});
 });
 
-test("receipt spool read degrades to a miss on any anomaly instead of throwing", async () => {
+test("receipt spool load reports a present-but-unusable file while append still soft-misses", async () => {
+	// load throws so the observer can render `unreadable` instead of an empty
+	// history; append treats the same anomaly as a miss and keeps recording.
+	const anomalies = [
+		["{ not json", 0o600],
+		[JSON.stringify({ schema_version: "wrong", entries: [] }), 0o600],
+		[JSON.stringify({ schema_version: "ceal.receipt_spool.v1", entries: [] }), 0o644],
+	];
+	for (const [content, mode] of anomalies) {
+		await withHome(async (home) => {
+			writeFileSync(spoolFile(home), content, { mode });
+			const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+			await assert.rejects(store.load(), CealReceiptSpoolStoreError);
+		});
+	}
 	await withHome(async (home) => {
 		writeFileSync(spoolFile(home), "{ not json", { mode: 0o600 });
-		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
-	});
-	await withHome(async (home) => {
-		writeFileSync(spoolFile(home), JSON.stringify({ schema_version: "wrong", entries: [] }), { mode: 0o600 });
-		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
-	});
-	await withHome(async (home) => {
-		writeFileSync(spoolFile(home), JSON.stringify({ schema_version: "ceal.receipt_spool.v1", entries: [] }), { mode: 0o644 });
-		assert.equal(await createCealReceiptSpoolStore(home, () => BASE_TIME).load(), null);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry());
+		assert.deepEqual((await store.load()).entries, [entry()]);
 	});
 });
 

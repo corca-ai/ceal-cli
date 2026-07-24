@@ -223,6 +223,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		loadSession: runtime.loadSession,
 		loadDiscoveryCache: runtime.loadDiscoveryCache,
 		loadReceiptSpool: runtime.loadReceiptSpool,
+		inspectAgentAudit: runtime.inspectAgentAudit,
 		inspectAgentGuide: runtime.inspectAgentGuide,
 		executablePath: runtime.executablePath,
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
@@ -267,7 +268,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		bind_address: "127.0.0.1",
 		effect: "read_only",
 		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
-		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration", "receipt_spool_metadata"],
+		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration", "receipt_spool_metadata", "agent_runtime_transcript_inventory"],
 		receipts: "local_spool_metadata",
 		non_claims: [
 			"Cached/local state only; the observer never contacts the Gateway or a provider.",

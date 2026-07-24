@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import type { CealAgentAuditState } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -18,6 +19,7 @@ export interface CealObserverRuntime {
 	loadSession?: () => Promise<CealStoredSession | null>;
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
+	inspectAgentAudit?: () => CealAgentAuditState;
 	inspectAgentGuide?: () => CealAgentGuideState;
 	executablePath?: string;
 	discoveryCacheTtlMs?: number;
@@ -49,7 +51,39 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		install: observeInstall(runtime),
 		guide: observeGuide(runtime),
 		receipts: await observeReceiptSpool(runtime),
+		agent_activity: observeAgentAudit(runtime),
 		non_claims: [...OBSERVER_NON_CLAIMS],
+	};
+}
+
+function observeAgentAudit(runtime: CealObserverRuntime): Record<string, unknown> {
+	if (!runtime.inspectAgentAudit) return { status: "unavailable" };
+	let state: CealAgentAuditState;
+	try {
+		state = runtime.inspectAgentAudit();
+	} catch {
+		return { status: "unavailable" };
+	}
+	return {
+		status: "inventoried",
+		schema_version: state.schemaVersion,
+		adapters: state.adapters.map((adapter) => ({
+			runtime: adapter.runtime,
+			root: adapter.root,
+			health: adapter.health,
+			coverage: adapter.coverage,
+			...(adapter.depth === undefined ? {} : { depth: adapter.depth }),
+			...(adapter.sessionCount === undefined ? {} : { session_count: adapter.sessionCount }),
+			...(adapter.sessions === undefined ? {} : {
+				sessions: adapter.sessions.map((session) => ({
+					session_ref: session.sessionRef,
+					last_activity_at: new Date(session.lastActivityAt).toISOString(),
+					transcript_bytes: session.transcriptBytes,
+				})),
+			}),
+			...(adapter.note === undefined ? {} : { note: adapter.note }),
+		})),
+		non_claims: state.nonClaims,
 	};
 }
 
@@ -68,6 +102,9 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 			non_claim: RECEIPT_SPOOL_NON_CLAIM,
 		};
 	}
+	// Render newest-first by recorded time, not append order, so concurrent
+	// writers or clock skew cannot scramble the visible history.
+	const ordered = [...spool.entries].sort((a, b) => a.recordedAt - b.recordedAt);
 	return {
 		status: "spooled",
 		// Masterplan coverage vocabulary: the spool records only Ceal-mediated
@@ -75,7 +112,7 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 		coverage: "ceal-mediated",
 		entry_count: spool.entries.length,
 		bounds: { max_entries: spool.bounds.maxEntries, retention_ms: spool.bounds.retentionMs },
-		entries: spool.entries.slice(-RECEIPT_SPOOL_RENDER_LIMIT).reverse().map((entry) => ({
+		entries: ordered.slice(-RECEIPT_SPOOL_RENDER_LIMIT).reverse().map((entry) => ({
 			recorded_at: new Date(entry.recordedAt).toISOString(),
 			request_ref: entry.requestRef,
 			status: entry.status,
@@ -304,6 +341,22 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   }
   receiptsBody += "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>";
   parts.push(section("Receipts (" + s.receipts.status + ")", receiptsBody));
+  const activity = s.agent_activity;
+  let activityBody = "";
+  if (Array.isArray(activity.adapters)) {
+    activityBody += activity.adapters.map((adapter) => {
+      let body = rows(Object.entries(adapter).filter(([k]) => k !== "sessions"));
+      if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
+        body += "<h2 class=\\"muted\\">Recent sessions</h2>" + adapter.sessions
+          .map((sessionEntry) => rows(Object.entries(sessionEntry))).join("<hr>");
+      }
+      return body;
+    }).join("<hr>");
+  }
+  if (Array.isArray(activity.non_claims)) {
+    activityBody += "<ul>" + activity.non_claims.map((n) => "<li class=\\"warn\\">" + esc(n) + "</li>").join("") + "</ul>";
+  }
+  parts.push(section("Agent activity (" + activity.status + ")", activityBody));
   parts.push(section("Non-claims", "<ul>" + s.non_claims.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>"));
   document.getElementById("root").innerHTML = parts.join("");
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });

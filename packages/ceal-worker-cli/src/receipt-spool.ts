@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
@@ -65,7 +65,13 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, SPOOL_FILE);
 	return {
-		async load() { return readSpool(directory, file, now()); },
+		async load() {
+			const state = readSpool(directory, file, now());
+			// A present-but-unusable file is an anomaly the observer should show
+			// as unreadable, not an empty history; append still soft-misses.
+			if (state === null && existsSync(file)) throw new CealReceiptSpoolStoreError("unsafe_store");
+			return state;
+		},
 		async append(entry) { appendEntry(directory, file, entry, now()); },
 		async remove() { removeSpool(file); },
 	};
@@ -112,6 +118,7 @@ function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEnt
 		.filter((candidate) => withinRetention(candidate.recordedAt, Math.max(now, entry.recordedAt)))
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
 	prepareDirectory(directory);
+	sweepStaleTemporaries(directory, now);
 	if (existsSync(file)) assertFile(file);
 	const temporary = path.join(directory, `.receipt-spool.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
 	try {
@@ -141,6 +148,24 @@ function readSpool(directory: string, file: string, now: number): CealReceiptSpo
 
 function withinRetention(recordedAt: number, now: number): boolean {
 	return recordedAt > now - RECEIPT_SPOOL_RETENTION_MS && recordedAt <= now + FUTURE_SKEW_TOLERANCE_MS;
+}
+
+// A crash between temp write and rename orphans a .tmp file; sweep only our
+// own naming pattern and only well after any live writer would have renamed,
+// so a concurrent append's in-flight temp file is never touched.
+const STALE_TEMPORARY_AGE_MS = 60 * 60 * 1000;
+
+function sweepStaleTemporaries(directory: string, now: number): void {
+	let names: string[];
+	try { names = readdirSync(directory); } catch { return; }
+	for (const name of names) {
+		if (!/^[.]receipt-spool[.].+[.]tmp$/u.test(name)) continue;
+		const stale = path.join(directory, name);
+		try {
+			const stat = lstatSync(stale);
+			if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
+		} catch { /* best effort; never block the append */ }
+	}
 }
 
 function removeSpool(file: string): void {

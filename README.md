@@ -74,6 +74,15 @@ provider payloads, or token material. It is advisory client evidence for the
 local Workbench view; the Gateway audit ledger stays authoritative through
 `ceal receipt show`, and a spool failure never changes call behavior.
 
+The observer also renders a read-only agent-runtime transcript inventory (the
+first `ceal-audit` stage): the Claude adapter lists sessions under
+`~/.claude/projects` by identity, recency, and size with collector health
+(`active`/`stale`/`inactive`/`unknown`) and coverage `transcript-observed` at
+`session_inventory` depth; transcript content is never read, copied, or
+forwarded, and the Codex adapter honestly reports `unsupported`. Neither
+adapter's coverage claim generalizes to the other, and nothing is forwarded to
+the Gateway in this stage.
+
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread
 replies, but the public client neither reimplements that behavior nor turns it

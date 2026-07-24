@@ -1,3 +1,4 @@
+import type { CealAgentAuditState } from "./agent-audit.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
@@ -44,6 +45,9 @@ export interface CealCommandRuntime {
 	// failures never change call behavior). See receipt-spool.ts.
 	recordReceiptSpool?: (entry: CealReceiptSpoolEntry) => void;
 	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
+	// Read-only agent-runtime transcript inventory (ceal-audit first stage;
+	// never reads transcript content). See agent-audit.ts.
+	inspectAgentAudit?: () => CealAgentAuditState;
 	runStableUpdate?: () => Promise<CealStableUpdateResult>;
 	/** Real executable path for managed-install observation (`ceal observe`). */
 	executablePath?: string;
