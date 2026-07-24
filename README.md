@@ -90,7 +90,13 @@ additionally carry a bounded event summary (`session_events` depth): lines are
 parsed locally under fixed byte/line budgets, but only fixed-vocabulary kind
 counts, integer totals, and re-serialized timestamps surface — transcript
 content, prompts, and tool arguments never do, truncation and unreadable
-transcripts are always declared, and remaining sessions stay inventory-only.
+transcripts are always declared, and remaining sessions stay inventory-only
+until an explicit per-session drill-down (`/api/observer/v1/agent-session/…`)
+runs the same bounded scan on demand; the ref is grammar-validated and never
+joined into a path. **My agent work** also lists local suggestions:
+deterministic rules over the rendered sections (stale collector, expired
+capability cache, repeated non-completed calls, unknown-outcome receipts),
+each linked to its observed evidence and never a model judgment.
 Neither adapter's coverage claim generalizes to the other, and nothing is
 forwarded to the Gateway in this stage.
 

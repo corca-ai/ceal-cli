@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { inspectAgentAudit } from "../dist/agent-audit.js";
+import { inspectAgentAudit, inspectAgentSessionEvents } from "../dist/agent-audit.js";
 
 const NOW = Date.parse("2026-07-24T12:00:00.000Z");
 
@@ -292,6 +292,63 @@ test("event scan stays bounded and declares truncation and unreadable transcript
 			assert.equal(claude.sessions[0].events, "unreadable");
 			assert.equal(claude.depth, "session_inventory");
 			assert.deepEqual(claude.eventScan, { scannedSessions: 0, sessionLimit: 3 });
+		} finally {
+			chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o600);
+		}
+	});
+});
+
+test("per-session drill-down scans any inventoried session without trusting the ref as a path", () => {
+	withHome((home) => {
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		for (let index = 0; index < 5; index += 1) {
+			writeSession(project, `11111111-2222-3333-4444-55555555555${index}.jsonl`, NOW - (index + 1) * 60_000, '{"type":"mode","secret":"SECRET-DRILL"}\n');
+		}
+		// The oldest session sits beyond the newest-3 auto-scan window; the
+		// drill-down still reaches it with the same structural redaction.
+		const lookup = inspectAgentSessionEvents(home, "claude", "11111111-2222-3333-4444-555555555554");
+		assert.equal(lookup.status, "scanned");
+		assert.equal(lookup.session.sessionRef, "11111111-2222-3333-4444-555555555554");
+		assert.deepEqual(lookup.session.events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
+		assert.equal(JSON.stringify(lookup).includes("SECRET-DRILL"), false);
+		assert.equal("transcriptPath" in lookup.session, false);
+
+		assert.equal(inspectAgentSessionEvents(home, "claude", "99999999-9999-9999-9999-999999999999").status, "not_found");
+		// Grammar violations are rejected before any filesystem access; the ref
+		// is never joined into a path, so traversal shapes cannot resolve.
+		assert.equal(inspectAgentSessionEvents(home, "claude", "../../etc/passwd"), null);
+		assert.equal(inspectAgentSessionEvents(home, "shell", "11111111-2222-3333-4444-555555555554"), null);
+	});
+	withHome((home) => {
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000,
+			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"session_meta","payload":{"instructions":"SECRET-META"}}\n');
+		const codex = inspectAgentSessionEvents(home, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4");
+		assert.equal(codex.status, "scanned");
+		assert.deepEqual(codex.session.events, {
+			scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0,
+			firstEventAt: Date.parse("2026-07-24T11:00:00.000Z"), lastScannedEventAt: Date.parse("2026-07-24T11:00:00.000Z"),
+		});
+		assert.equal(JSON.stringify(codex).includes("SECRET-META"), false);
+	});
+	withHome((home) => {
+		// A missing sessions root is a confirmed absence, not a walk failure.
+		assert.equal(inspectAgentSessionEvents(home, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4").status, "not_found");
+	});
+	// A missing home cannot fabricate a lookup result.
+	assert.equal(inspectAgentSessionEvents(undefined, "claude", "11111111-2222-3333-4444-555555555555").status, "unreadable");
+	withHome((home) => {
+		// An unreadable transcript stays a declared per-session gap.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
+		chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o000);
+		try {
+			const lookup = inspectAgentSessionEvents(home, "claude", "11111111-2222-3333-4444-555555555555");
+			assert.equal(lookup.status, "scanned");
+			assert.equal(lookup.session.events, "unreadable");
 		} finally {
 			chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o600);
 		}

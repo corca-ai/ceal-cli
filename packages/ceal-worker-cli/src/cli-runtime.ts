@@ -1,4 +1,4 @@
-import type { CealAgentAuditState } from "./agent-audit.js";
+import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
@@ -49,6 +49,9 @@ export interface CealCommandRuntime {
 	// event summaries (ceal-audit; transcript text never surfaces). See
 	// agent-audit.ts.
 	inspectAgentAudit?: () => CealAgentAuditState;
+	// On-demand bounded event scan for one inventoried session (Workbench
+	// drill-down); null declares a rejected runtime/ref grammar.
+	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
 	runStableUpdate?: () => Promise<CealStableUpdateResult>;
 	/** Real executable path for managed-install observation (`ceal observe`). */
 	executablePath?: string;

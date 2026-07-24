@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import type { CealAgentAuditSession, CealAgentAuditState } from "./agent-audit.js";
+import { AGENT_AUDIT_NON_CLAIMS, type CealAgentAuditSession, type CealAgentAuditState, type CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -20,6 +20,7 @@ export interface CealObserverRuntime {
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
 	inspectAgentAudit?: () => CealAgentAuditState;
+	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
 	inspectAgentGuide?: () => CealAgentGuideState;
 	executablePath?: string;
 	discoveryCacheTtlMs?: number;
@@ -41,21 +42,97 @@ const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 export async function buildObserverState(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	const now = runtime.now?.() ?? Date.now();
 	const receipts = await observeReceiptSpool(runtime);
+	const session = await observeSession(runtime);
+	const discoveryCache = await observeDiscoveryCache(runtime, now);
+	const agentActivity = observeAgentAudit(runtime);
 	return {
 		schema_version: "ceal.observer_state.v1",
 		command: "ceal",
 		proof_level: "local_state",
 		generated_at: new Date(now).toISOString(),
 		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
-		session: await observeSession(runtime),
-		discovery_cache: await observeDiscoveryCache(runtime, now),
+		session,
+		discovery_cache: discoveryCache,
 		install: observeInstall(runtime),
 		guide: observeGuide(runtime),
 		receipts,
-		agent_activity: observeAgentAudit(runtime),
+		agent_activity: agentActivity,
+		suggestions: buildLocalSuggestions(session, discoveryCache, receipts, agentActivity),
 		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],
 	};
+}
+
+// Masterplan contract for initial Workbench suggestions: local, deterministic,
+// and linked to their observed evidence — never opaque model judgments about
+// the user. Every rule below reads only the projections this page already
+// renders, so each entry's evidence is independently inspectable above it.
+const SUGGESTIONS_NON_CLAIM =
+	"Deterministic local rules over the cached/local sections above; not model judgment, a completeness claim, or a Gateway policy conclusion." as const;
+
+function buildLocalSuggestions(
+	session: Record<string, unknown>,
+	cache: Record<string, unknown>,
+	receipts: Record<string, unknown>,
+	activity: Record<string, unknown>,
+): Record<string, unknown> {
+	const entries: Record<string, unknown>[] = [];
+	const adapters = Array.isArray(activity.adapters) ? (activity.adapters as Record<string, unknown>[]) : [];
+	for (const adapter of adapters) {
+		// "stale" means sessions exist but none is recent — observed evidence of a
+		// collector gap. "inactive"/"unknown" stay silent: an unused runtime or a
+		// read failure is not evidence the owner should act.
+		if (adapter.health !== "stale") continue;
+		entries.push({
+			kind: "stale_collector",
+			evidence: { runtime: adapter.runtime, root: adapter.root, health: adapter.health },
+			suggestion: `The ${String(adapter.runtime)} transcript root has sessions but none within the recency window, so recent work there is not locally observed.`,
+			next_action: `If ${String(adapter.runtime)} is still in use, confirm it writes transcripts under ${String(adapter.root)}.`,
+		});
+	}
+	if (session.status === "present" && (cache.status === "absent" || cache.within_ttl === false)) {
+		entries.push({
+			kind: "missing_cache_opportunity",
+			evidence: {
+				session: session.status,
+				discovery_cache: cache.status,
+				...(cache.within_ttl === false ? { within_ttl: false } : {}),
+			},
+			suggestion: "A client session is present but the local capability catalog is absent or expired.",
+			next_action: "Run 'ceal capabilities' to refresh the cached catalog.",
+		});
+	}
+	const spooled = Array.isArray(receipts.entries) ? (receipts.entries as Record<string, unknown>[]) : [];
+	const failedByCapability = new Map<string, string[]>();
+	for (const entry of spooled) {
+		if (entry.status === "completed" || typeof entry.capability !== "string") continue;
+		const refs = failedByCapability.get(entry.capability) ?? [];
+		refs.push(String(entry.request_ref));
+		failedByCapability.set(entry.capability, refs);
+	}
+	for (const [capability, refs] of failedByCapability) {
+		if (refs.length < 2) continue;
+		entries.push({
+			kind: "repeated_failed_work",
+			evidence: { capability, request_refs: refs },
+			suggestion: `The rendered spool window holds ${refs.length} non-completed '${capability}' calls.`,
+			// Rendered entries are newest-first, so refs[0] is the latest failure.
+			next_action: `Read 'ceal receipt show ${refs[0]}' for the audited disposition before retrying.`,
+		});
+	}
+	for (const entry of spooled) {
+		if (entry.evidence !== "outcome_unknown") continue;
+		entries.push({
+			kind: "unknown_outcome_receipt",
+			evidence: {
+				request_ref: entry.request_ref,
+				...(typeof entry.capability === "string" ? { capability: entry.capability } : {}),
+			},
+			suggestion: "A call ended with an unknown Gateway outcome; the Gateway may have completed it after the client stopped waiting.",
+			next_action: `Run 'ceal receipt show ${String(entry.request_ref)}' to resolve the outcome before repeating a write.`,
+		});
+	}
+	return { status: "evaluated", entries, non_claim: SUGGESTIONS_NON_CLAIM };
 }
 
 // The privacy projection is declared, not probed: it names the fixed local
@@ -320,6 +397,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 		response.end(`${JSON.stringify(state, null, 2)}\n`);
 		return;
 	}
+	const drillDown = url === undefined ? null : AGENT_SESSION_ROUTE.exec(url);
+	if (drillDown) {
+		respondAgentSession(response, runtime, drillDown[1], drillDown[2]);
+		return;
+	}
 	if (url === "/") {
 		response.writeHead(200, {
 			"content-type": "text/html; charset=utf-8",
@@ -333,6 +415,53 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 	}
 	response.writeHead(404, { "content-type": "application/json" });
 	response.end(JSON.stringify({ ok: false, error: "unknown_observer_path" }));
+}
+
+// Per-session drill-down: the same bounded structural event scan the state
+// endpoint runs for the newest sessions, on demand for any inventoried one.
+// The route grammar is deliberately loose (segment shape only); the audit
+// module re-validates runtime and ref before any filesystem access and null
+// maps to a plain 404, so this route adds no new input reachability.
+const AGENT_SESSION_ROUTE = /^\/api\/observer\/v1\/agent-session\/([a-z]+)\/([0-9a-f-]{1,64})$/u;
+
+function respondAgentSession(response: ServerResponse, runtime: CealObserverRuntime, adapterRuntime: string, sessionRef: string): void {
+	const body = (status: number, payload: Record<string, unknown>) => {
+		response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+		response.end(`${JSON.stringify(payload, null, 2)}\n`);
+	};
+	const envelope = {
+		schema_version: "ceal.observer_agent_session.v1",
+		runtime: adapterRuntime,
+		session_ref: sessionRef,
+	};
+	if (!runtime.inspectAgentSession) {
+		body(200, { ...envelope, status: "unavailable" });
+		return;
+	}
+	let lookup: CealAgentSessionEventsLookup | null;
+	try {
+		lookup = runtime.inspectAgentSession(adapterRuntime, sessionRef);
+	} catch {
+		lookup = { status: "unreadable" };
+	}
+	if (lookup === null) {
+		body(404, { ok: false, error: "unknown_observer_path" });
+		return;
+	}
+	const session = lookup.session;
+	body(lookup.status === "not_found" ? 404 : 200, {
+		...envelope,
+		status: lookup.status,
+		...(session === undefined ? {} : {
+			session: {
+				session_ref: session.sessionRef,
+				last_activity_at: new Date(session.lastActivityAt).toISOString(),
+				transcript_bytes: session.transcriptBytes,
+				...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
+			},
+		}),
+		non_claims: [...AGENT_AUDIT_NON_CLAIMS],
+	});
 }
 
 // Workbench shell: the masterplan's first navigation — "My agent work" and
@@ -383,13 +512,23 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       let body = rows(Object.entries(adapter).filter(([k]) => k !== "sessions"));
       if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
         body += "<h2 class=\\"muted\\">Recent sessions</h2>" + adapter.sessions
-          .map((sessionEntry) => rows(Object.entries(sessionEntry))).join("<hr>");
+          .map((sessionEntry) => "<div>" + rows(Object.entries(sessionEntry))
+            + (sessionEntry.events === undefined && typeof sessionEntry.session_ref === "string"
+              ? "<button class=\\"drill\\" data-runtime=\\"" + esc(String(adapter.runtime)) + "\\" data-ref=\\"" + esc(sessionEntry.session_ref) + "\\">Scan events</button><div class=\\"drill-result\\"></div>"
+              : "")
+            + "</div>").join("<hr>");
       }
       return body;
     }).join("<hr>");
   }
   if (Array.isArray(activity.non_claims)) agentView += list(activity.non_claims, "warn");
-  const agentBody = section("Agent activity (" + activity.status + ")", agentView);
+  const sugg = s.suggestions ?? {};
+  let suggView = Array.isArray(sugg.entries) && sugg.entries.length
+    ? sugg.entries.map((entry) => rows(Object.entries(entry))).join("<hr>")
+    : "<p class=\\"muted\\">No suggestions from the local rules.</p>";
+  if (typeof sugg.non_claim === "string") suggView += "<p class=\\"warn\\">" + esc(sugg.non_claim) + "</p>";
+  const agentBody = section("Suggestions (" + (sugg.status ?? "unavailable") + ")", suggView)
+    + section("Agent activity (" + activity.status + ")", agentView);
 
   const parts = [];
   parts.push(section("Session (" + s.session.status + ")", rows(Object.entries(s.session))));
@@ -440,6 +579,17 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
     button.addEventListener("click", () => show(view));
     nav.appendChild(button);
   }
+  // Per-session drill-down: an explicit owner click fetches the bounded scan
+  // for one listed session; a view switch discards the result (no local copy).
+  root.addEventListener("click", (event) => {
+    const drill = event.target.closest ? event.target.closest("button.drill") : null;
+    if (!drill) return;
+    drill.disabled = true;
+    fetch("/api/observer/v1/agent-session/" + drill.dataset.runtime + "/" + drill.dataset.ref)
+      .then((r) => r.json())
+      .then((detail) => { drill.nextElementSibling.innerHTML = rows(Object.entries(detail)); })
+      .catch(() => { drill.nextElementSibling.textContent = "Could not scan this session."; drill.disabled = false; });
+  });
   show(VIEWS[0]);
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });
 </script>

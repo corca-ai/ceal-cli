@@ -224,6 +224,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		loadDiscoveryCache: runtime.loadDiscoveryCache,
 		loadReceiptSpool: runtime.loadReceiptSpool,
 		inspectAgentAudit: runtime.inspectAgentAudit,
+		inspectAgentSession: runtime.inspectAgentSession,
 		inspectAgentGuide: runtime.inspectAgentGuide,
 		executablePath: runtime.executablePath,
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,

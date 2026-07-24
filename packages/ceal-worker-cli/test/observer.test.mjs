@@ -7,6 +7,7 @@ import test from "node:test";
 import { parse } from "yaml";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
+import { buildObserverState } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
 
@@ -94,6 +95,20 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				],
 				nonClaims: ["Bounded event metadata only: fixed-vocabulary kind counts; raw payloads are never surfaced, copied, or forwarded."],
 			}),
+			inspectAgentSession: (runtimeName, sessionRef) => {
+				if (runtimeName !== "claude" && runtimeName !== "codex") return null;
+				if (sessionRef !== "11111111-2222-3333-4444-555555555555") return { status: "not_found" };
+				return {
+					status: "scanned",
+					session: {
+						sessionRef, lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048,
+						events: {
+							scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
+							firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+						},
+					},
+				};
+			},
 			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
 			executablePath: process.execPath,
 			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
@@ -158,6 +173,11 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	});
 	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
 	assert.match(state.agent_activity.non_claims[0], /never surfaced, copied, or forwarded/u);
+	// A healthy fixture produces no suggestions: the rules stay silent instead
+	// of inventing advice without observed evidence.
+	assert.equal(state.suggestions.status, "evaluated");
+	assert.deepEqual(state.suggestions.entries, []);
+	assert.match(state.suggestions.non_claim, /not model judgment/u);
 	assert.equal(state.privacy.status, "declared");
 	assert.equal(state.privacy.gateway_forwarding, "none");
 	assert.equal(state.privacy.provider_contact, "none");
@@ -176,6 +196,28 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /My agent work/u);
 	assert.match(html, /Privacy & retention/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
+
+	const drill = await fetch(`${doc.url}api/observer/v1/agent-session/claude/11111111-2222-3333-4444-555555555555`);
+	assert.equal(drill.status, 200);
+	const drillBody = await drill.json();
+	assert.equal(drillBody.schema_version, "ceal.observer_agent_session.v1");
+	assert.equal(drillBody.runtime, "claude");
+	assert.equal(drillBody.status, "scanned");
+	assert.deepEqual(drillBody.session, {
+		session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048,
+		events: {
+			scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
+			first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+		},
+	});
+	assert.match(drillBody.non_claims[0], /never surfaced, copied, or forwarded/u);
+	const drillMissing = await fetch(`${doc.url}api/observer/v1/agent-session/claude/99999999-9999-9999-9999-999999999999`);
+	assert.equal(drillMissing.status, 404);
+	assert.equal((await drillMissing.json()).status, "not_found");
+	// A traversal-shaped ref never matches the route grammar.
+	const drillBad = await fetch(`${doc.url}api/observer/v1/agent-session/claude/..%2F..%2Fetc%2Fpasswd`);
+	assert.equal(drillBad.status, 404);
+	assert.equal((await drillBad.json()).error, "unknown_observer_path");
 
 	const rebound = await rawRequest(doc.url, "/api/observer/v1/state", { host: "evil.example:80" });
 	assert.equal(rebound.status, 403);
@@ -239,6 +281,79 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.match(invalid.stdout.join(""), /invalid_argument/u);
 	const trailing = collectingIo();
 	assert.equal(await runCealCommand(["observe", "extra"], trailing, {}), 2);
+});
+
+test("local suggestions fire deterministically and stay linked to observed evidence", async () => {
+	const NOW = Date.parse("2026-07-24T00:10:00.000Z");
+	const runtime = {
+		loadSession: async () => ({
+			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+			profileRef: "profile:suggestion-fixture",
+			membershipRef: "membership:suggestion-fixture",
+			registrationRef: "registration:suggestion-fixture",
+			clientRef: "client:suggestion-fixture",
+			subjectRef: "subject:suggestion-fixture",
+			instanceRef: "instance:suggestion-fixture",
+			accessToken: ACCESS_TOKEN,
+			expiresAt: "2099-07-14T00:00:00.000Z",
+		}),
+		// Cached ten minutes ago against the five-minute default TTL: expired.
+		loadDiscoveryCache: async () => ({
+			key: {
+				gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+				profileRef: "profile:suggestion-fixture",
+				membershipRef: "membership:suggestion-fixture",
+				negotiatedProtocolVersion: "1.3.0",
+			},
+			cachedAt: NOW - 10 * 60_000,
+			discovery: { capabilities: [], targets: [] },
+		}),
+		loadReceiptSpool: async () => ({
+			entries: [
+				{
+					recordedAt: NOW - 120_000, requestRef: "narnia:sugg:1:call", status: "error",
+					evidence: "not_read_back", auditRefs: [], capabilityId: "message.search", targetRef: "target:team-inbox",
+				},
+				{
+					recordedAt: NOW - 60_000, requestRef: "narnia:sugg:2:call", status: "error",
+					evidence: "outcome_unknown", auditRefs: [], capabilityId: "message.search", targetRef: "target:team-inbox",
+				},
+			],
+			bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
+		}),
+		inspectAgentAudit: () => ({
+			schemaVersion: "ceal.agent_activity.v1",
+			adapters: [
+				{ runtime: "claude", root: "~/.claude", health: "stale", coverage: "transcript-observed" },
+				{ runtime: "codex", root: "~/.codex", health: "inactive", coverage: "transcript-observed" },
+			],
+			nonClaims: [],
+		}),
+		now: () => NOW,
+	};
+	const state = await buildObserverState(runtime);
+	const byKind = new Map(state.suggestions.entries.map((entry) => [entry.kind, entry]));
+	assert.deepEqual([...byKind.keys()].sort(), [
+		"missing_cache_opportunity", "repeated_failed_work", "stale_collector", "unknown_outcome_receipt",
+	]);
+	// Only the stale collector fires; an inactive (unused) runtime is not advice.
+	assert.deepEqual(byKind.get("stale_collector").evidence, { runtime: "claude", root: "~/.claude", health: "stale" });
+	assert.deepEqual(byKind.get("missing_cache_opportunity").evidence, {
+		session: "present", discovery_cache: "cached", within_ttl: false,
+	});
+	assert.match(byKind.get("missing_cache_opportunity").next_action, /ceal capabilities/u);
+	// Rendered entries are newest-first, so the latest failure leads the refs
+	// and anchors the receipt lookup.
+	assert.deepEqual(byKind.get("repeated_failed_work").evidence, {
+		capability: "message.search", request_refs: ["narnia:sugg:2:call", "narnia:sugg:1:call"],
+	});
+	assert.match(byKind.get("repeated_failed_work").next_action, /ceal receipt show narnia:sugg:2:call/u);
+	assert.deepEqual(byKind.get("unknown_outcome_receipt").evidence, {
+		request_ref: "narnia:sugg:2:call", capability: "message.search",
+	});
+	// Deterministic: the same local state yields the same suggestions.
+	const rerun = await buildObserverState(runtime);
+	assert.deepEqual(rerun.suggestions, state.suggestions);
 });
 
 function rawRequest(baseUrl, requestPath, headers) {

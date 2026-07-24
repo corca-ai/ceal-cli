@@ -94,6 +94,60 @@ export interface CealAgentAuditState {
 	nonClaims: string[];
 }
 
+export interface CealAgentSessionEventsLookup {
+	/** "unreadable" declares a failed walk or root refusal, never an absence. */
+	status: "scanned" | "not_found" | "unreadable";
+	session?: CealAgentAuditSession;
+}
+
+// Exactly the session_ref grammar the inventory itself surfaces; anything else
+// is rejected before any filesystem access.
+const SESSION_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+/**
+ * On-demand bounded event scan for one inventoried session, so the Workbench
+ * can drill into any listed session, not only the newest auto-scanned ones.
+ * The caller-supplied ref is never joined into a path: the same inventory walk
+ * runs again and only a walk-produced transcript path is opened, so a crafted
+ * ref cannot become a read primitive. Returns null for a grammar violation.
+ */
+export function inspectAgentSessionEvents(
+	home: string | undefined,
+	runtime: string,
+	sessionRef: string,
+): CealAgentSessionEventsLookup | null {
+	if ((runtime !== "claude" && runtime !== "codex") || !SESSION_REF.test(sessionRef)) return null;
+	const root = home && path.isAbsolute(home) ? home : null;
+	if (!root) return { status: "unreadable" };
+	const adapter = runtime === "claude"
+		? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, classify: classifyClaudeLine }
+		: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, classify: classifyCodexLine };
+	try {
+		lstatSync(adapter.directory);
+	} catch (error) {
+		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
+		return code === "ENOENT" ? { status: "not_found" } : { status: "unreadable" };
+	}
+	let collected: { sessions: CollectedSession[]; partial: boolean };
+	try {
+		collected = adapter.collect(adapter.directory);
+	} catch {
+		return { status: "unreadable" };
+	}
+	const wanted = sessionRef.toLowerCase();
+	const matches = collected.sessions.filter((session) => session.sessionRef === wanted);
+	if (matches.length === 0) return { status: "not_found" };
+	// A duplicated ref across shards resolves to the newest transcript.
+	matches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+	const { transcriptPath, ...session } = matches[0];
+	return { status: "scanned", session: { ...session, events: scanSessionEvents(transcriptPath, adapter.classify) } };
+}
+
+export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
+	"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
+	"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only.",
+]);
+
 export function inspectAgentAudit(home: string | undefined, now: number): CealAgentAuditState {
 	const adapters: CealAgentAuditAdapterState[] = [
 		observeClaudeAdapter(home, now),
@@ -102,10 +156,7 @@ export function inspectAgentAudit(home: string | undefined, now: number): CealAg
 	return {
 		schemaVersion: "ceal.agent_activity.v1",
 		adapters,
-		nonClaims: [
-			"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
-			"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only.",
-		],
+		nonClaims: [...AGENT_AUDIT_NON_CLAIMS],
 	};
 }
 
