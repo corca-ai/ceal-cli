@@ -20,7 +20,8 @@
 		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",
 		"release:worker:package": "node scripts/build-worker-release-package.mjs",
 		"release:worker:native": "node scripts/build-worker-native-artifact.mjs",
-		"release:worker:assets": "node scripts/build-worker-release-assets.mjs"
+		"release:worker:assets": "node scripts/build-worker-release-assets.mjs",
+		"prewarm:offline-cache": "node scripts/prewarm-offline-consumer-cache.mjs"
 	},
 	"dependencies": {
 		"yaml": "2.9.0"

@@ -13,8 +13,13 @@ Prerequisites on the Mac: Node `>=22.19.0`, Xcode command line tools
 ```sh
 git clone https://github.com/corca-ai/ceal-cli.git && cd ceal-cli
 npm ci
+npm run prewarm:offline-cache
 npm run check
 ```
+
+The prewarm step caches the exact lockfile-pinned dependency closure that the
+`npm install --offline` packed-consumer proofs need; a cold npm cache
+otherwise fails those proofs with `ENOTCACHED`.
 
 `npm run check` is darwin-aware: the native artifact integration test builds a
 real `ceal-darwin-<arch>` SEA binary, removes the runtime signature before

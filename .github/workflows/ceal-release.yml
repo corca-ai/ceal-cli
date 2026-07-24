@@ -51,6 +51,8 @@ jobs:
           cache: npm
       - name: Install exact dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prewarm the offline packed-consumer cache
+        run: node scripts/prewarm-offline-consumer-cache.mjs
       - name: Build and test source
         run: npm run check
       - name: Download the locked Gateway handoff archive
