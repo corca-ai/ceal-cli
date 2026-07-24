@@ -59,6 +59,9 @@ export type CealAgentAuditEventKind =
  * `completeness` whether the bounded scan covered the whole transcript; a
  * field the runtime never supplied is omitted, not zero. Field semantics
  * (e.g. cache accounting inside input tokens) stay runtime-defined.
+ * `usageEvents` follows the source: deduplicated API turns for
+ * `event_usage_sum`, cumulative readings observed for
+ * `runtime_cumulative_last`.
  */
 export interface CealAgentAuditTokenUsage {
 	source: "event_usage_sum" | "runtime_cumulative_last";
@@ -370,20 +373,23 @@ function addUsageReadings(totals: TokenUsageReading | undefined, reading: TokenU
 	const sum: TokenUsageReading = { ...totals };
 	for (const field of USAGE_FIELD_KEYS) {
 		const value = reading[field];
-		if (value !== undefined) sum[field] = (sum[field] ?? 0) + value;
+		// Saturate so a pathological transcript cannot push a sum past safe
+		// integer range into Infinity/null in the serialized state.
+		if (value !== undefined) sum[field] = Math.min(Number.MAX_SAFE_INTEGER, (sum[field] ?? 0) + value);
 	}
 	return sum;
 }
 
-// Reads only allowlisted integer fields into the normalized reading; anything
-// non-integer or negative is ignored, never rendered. Returns null when the
-// source object supplied no usable field, so absence stays omitted-not-zero.
+// Reads only allowlisted safe non-negative integer fields into the normalized
+// reading; anything non-integer, negative, or beyond safe integer range is
+// ignored, never rendered. Returns null when the source object supplied no
+// usable field, so absence stays omitted-not-zero.
 function usageReading(source: Record<string, unknown>, fields: Record<keyof TokenUsageReading, string>): TokenUsageReading | null {
 	const reading: TokenUsageReading = {};
 	let present = false;
 	for (const field of USAGE_FIELD_KEYS) {
 		const value = source[fields[field]];
-		if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+		if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
 			reading[field] = value;
 			present = true;
 		}

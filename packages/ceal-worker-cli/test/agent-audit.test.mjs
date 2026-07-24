@@ -381,8 +381,9 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			`{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}],"usage":${usage}},"timestamp":"2026-07-24T10:00:01.000Z"}`,
 			// Second turn falls back to the message id as the dedupe key.
 			'{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":3,"output_tokens":5}},"timestamp":"2026-07-24T10:00:02.000Z"}',
-			// Non-integer and negative values are ignored, never rendered.
-			'{"type":"assistant","requestId":"req_3","message":{"content":[{"type":"text","text":"c"}],"usage":{"input_tokens":-4,"output_tokens":"9"}},"timestamp":"2026-07-24T10:00:03.000Z"}',
+			// Non-integer, negative, and beyond-safe-range values are ignored,
+			// never rendered.
+			'{"type":"assistant","requestId":"req_3","message":{"content":[{"type":"text","text":"c"}],"usage":{"input_tokens":-4,"output_tokens":"9","cache_read_input_tokens":1e308}},"timestamp":"2026-07-24T10:00:03.000Z"}',
 			'{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-07-24T10:00:04.000Z"}',
 		];
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
@@ -404,7 +405,10 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 		mkdirSync(day, { recursive: true });
 		const lines = [
 			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"cache_write_input_tokens":0,"output_tokens":20}}}}',
-			'{"timestamp":"2026-07-24T11:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":150,"cache_write_input_tokens":0,"output_tokens":40}}}}',
+			// The last reading replaces the whole earlier reading as supplied:
+			// a field it no longer carries (cache_write) drops instead of
+			// inheriting a stale earlier value.
+			'{"timestamp":"2026-07-24T11:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":150,"output_tokens":40}}}}',
 		];
 		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
 		const codex = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "codex");
@@ -415,7 +419,6 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			inputTokens: 200,
 			outputTokens: 40,
 			cacheReadTokens: 150,
-			cacheWriteTokens: 0,
 		});
 	});
 	withHome((home) => {
@@ -432,7 +435,8 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 		// A truncated scan declares its figures cover only the scanned prefix.
 		const project = path.join(home, ".claude", "projects", "-repo");
 		mkdirSync(project, { recursive: true });
-		const usageLine = '{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":2}},"timestamp":"2026-07-24T10:00:00.000Z"}\n';
+		// A runtime-supplied zero still surfaces: only absence is omitted.
+		const usageLine = '{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0}},"timestamp":"2026-07-24T10:00:00.000Z"}\n';
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, usageLine + '{"type":"mode"}\n'.repeat(5010));
 		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
 		assert.equal(claude.sessions[0].events.scan, "truncated");
@@ -442,6 +446,7 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			usageEvents: 1,
 			inputTokens: 1,
 			outputTokens: 2,
+			cacheWriteTokens: 0,
 		});
 	});
 	// The token non-claim is honesty-critical wording: runtime-supplied, not
