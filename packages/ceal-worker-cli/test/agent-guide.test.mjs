@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCealAgentGuideStore } from "../dist/agent-guide.js";
 
 test("Codex guide registration follows the role current pointer across releases", () => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-")));
 	const state = path.join(root, "install", ".ceal-cli", "worker");
 	const firstRelease = createRelease(state, "first");
 	const codexHome = path.join(root, "codex");
@@ -36,7 +36,7 @@ test("Codex guide registration follows the role current pointer across releases"
 });
 
 test("guide registration refuses to replace an existing Codex skill directory", () => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-conflict-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-conflict-")));
 	const state = path.join(root, "install", ".ceal-cli", "worker");
 	const release = createRelease(state, "first");
 	const codexHome = path.join(root, "codex");

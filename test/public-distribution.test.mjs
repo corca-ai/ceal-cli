@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -70,7 +70,7 @@ test("stable mode resolves only a canonical latest release tag before the signed
 });
 
 test("packed native worker artifact preserves both post-allocation failure receipts and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, async () => {
-	const artifact = mkdtempSync(path.join(tmpdir(), "ceal-cli-packed-update-"));
+	const artifact = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-cli-packed-update-")));
 	try {
 		const built = spawnSync(process.execPath, ["scripts/build-platform-binaries.mjs", "--version", "0.65.0", "--platform", "linux-amd64", "--out", artifact, "--json"], {
 			cwd: ROOT,
@@ -447,7 +447,7 @@ function waitForLock(holder, lockPath) {
 }
 
 function withFixture(callback) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-cli-install-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-cli-install-test-")));
 	const cleanup = () => rmSync(root, { recursive: true, force: true });
 	try {
 		const release = path.join(root, "release");

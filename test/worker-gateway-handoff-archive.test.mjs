@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -97,7 +97,7 @@ test("worker input facade preserves the reviewed lock trust anchor and maps arch
 });
 
 function archiveFixture(context, { extraFile = null } = {}) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-gateway-handoff-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-gateway-handoff-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const repoRoot = path.join(root, "repo");
 	const handoff = path.join(root, "handoff");

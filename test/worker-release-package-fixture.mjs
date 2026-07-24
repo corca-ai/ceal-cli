@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function packedProtocolFixture(context) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const protocol = packPackage(root, "packages/ceal-protocol", [".", "./conformance"]);
 	const client = packPackage(root, "packages/ceal-client", ["."]);

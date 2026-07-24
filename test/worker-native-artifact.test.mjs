@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -106,7 +106,7 @@ test("darwin native build removes, injects, then ad-hoc signs in order", async (
 });
 
 test("production native build accepts only the locked archive lane", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-boundary-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-native-boundary-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	await assert.rejects(
 		() => buildWorkerNativeArtifact({ outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 export const REPO_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
 
 export function makeGatewayProtocolFixture() {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-test-")));
 	const source = path.join(root, "protocol");
 	const output = path.join(root, "artifacts");
 	mkdirSync(output, { recursive: true, mode: 0o755 });

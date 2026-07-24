@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,7 +17,7 @@ import {
 const INSTALLER_ALLOWLIST = /^(THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-(linux|darwin)-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|ceal-(linux|darwin)-(amd64|arm64)|install-ceal[.]sh)$/u;
 
 test("composed worker release assets match the installer's signed inventory contract", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const output = path.join(root, "assets-linux-arm64");
 	const result = await composeWorkerReleaseAssets(
@@ -57,7 +57,7 @@ test("composed worker release assets match the installer's signed inventory cont
 });
 
 test("merged worker release sets stay pair-complete with byte-identical shared assets", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-merge-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-merge-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const repoRoot = fixtureRepo(root);
 	const inputs = [];

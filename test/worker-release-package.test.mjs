@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -41,7 +41,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 });
 
 test("production package build accepts only the locked archive lane", (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	assert.throws(
 		() => buildWorkerReleasePackage({ repoRoot: ROOT, outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),

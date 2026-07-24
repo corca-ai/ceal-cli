@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -77,7 +77,7 @@ test("release CLI rejects raw handoff arguments and requires the reviewed archiv
 });
 
 function handoffFixture(context) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-inputs-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-inputs-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const protocol = packedPackage(root, {
 		name: "@corca-ai/ceal-protocol",

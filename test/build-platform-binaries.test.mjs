@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -266,7 +266,7 @@ function hasCode(code) {
 }
 
 async function withTempDir(callback) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-test-")));
 	try { await callback(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 

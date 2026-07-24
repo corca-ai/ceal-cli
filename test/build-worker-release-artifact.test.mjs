@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -25,7 +25,7 @@ test("raw worker artifact helper is import-only and no longer has a release comm
 });
 
 test("isolated worker artifact builder emits only ceal-owned local build assets", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const protocolTarball = path.join(root, "protocol.tgz");
 	const protocolProvenance = path.join(root, "protocol.json");
@@ -65,7 +65,7 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 });
 
 test("worker artifact builder rejects a symlinked output parent before consumer work", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-output-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-output-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const protocolTarball = path.join(root, "protocol.tgz");
 	const protocolProvenance = path.join(root, "protocol.json");
@@ -87,7 +87,7 @@ test("worker artifact builder rejects a symlinked output parent before consumer 
 });
 
 test("worker artifact builder removes a failed packed-consumer workspace", async (context) => {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-failure-test-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-failure-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const protocolTarball = path.join(root, "protocol.tgz");
 	const protocolProvenance = path.join(root, "protocol.json");
@@ -110,7 +110,7 @@ test("worker artifact builder removes a failed packed-consumer workspace", async
 
 test("worker artifact builder proves the real packed protocol consumer and SEA output", { skip: process.platform !== "linux" || process.arch !== "x64" }, async (context) => {
 	const fixture = makeGatewayProtocolFixture();
-	const output = mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-integration-test-"));
+	const output = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-integration-test-")));
 	context.after(() => {
 		rmSync(fixture.root, { recursive: true, force: true });
 		rmSync(output, { recursive: true, force: true });
