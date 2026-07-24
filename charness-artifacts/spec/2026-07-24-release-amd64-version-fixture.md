@@ -1,5 +1,9 @@
 # AMD64 Worker Release Fixture Repair
 
+Status: closed — `ceal-v0.65.3` passed the amd64 release gate, signed and
+published the static-origin release set, advanced stable, and completed fresh
+installer/update proof.
+
 ## Problem
 
 The first static-origin worker release tag, `ceal-v0.65.2`, reached the GitHub
@@ -105,3 +109,12 @@ debug record remains the causal evidence source.
 Commit the source-derived fixture and `0.65.3` version bump, run the local
 gate, perform a bounded fresh-eye review, then push and tag `ceal-v0.65.3` for
 the required amd64 release proof.
+
+## Closeout
+
+Actions run `30133762847` completed build (linux-amd64), build (linux-arm64),
+assembly, and sign-and-publish successfully. Its final job published the
+immutable signed set and activated the public stable pointer. A fresh temporary
+Linux arm64 install verified the release signatures, reported `ceal` `0.65.3`,
+and completed an option-free stable update unchanged. This proves the worker
+release boundary; it does not claim Gateway or provider behavior.

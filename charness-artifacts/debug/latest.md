@@ -47,8 +47,15 @@ the release job may proceed to its immutable-publication stages.
 ## Verification
 
 - Confirmed by the failed job's exact error and the source comparison above.
-- Pending final-consumer proof: a new immutable amd64 release tag must complete
-  the test and publish the signed static asset set.
+- Replacement Actions run `30133762847` completed on `ceal-v0.65.3`: its amd64
+  build job `89613434670`, assembly job `89613728899`, and signed R2 publication
+  job `89613772651` all passed.
+- Final-consumer proof: the public stable pointer selects `ceal-v0.65.3`
+  (`SHA256SUMS` digest
+  `c5392bb8b46c5f131334de47d412d6f844bd1ec414cc39580b62567385966cd4`), and a
+  fresh temporary Linux arm64 installation verified all signed assets, reported
+  `ceal version` `0.65.3`, then completed option-free `ceal update` unchanged
+  in 13,518 ms. The end-to-end command took 27 seconds.
 
 ## Root Cause
 
@@ -63,8 +70,9 @@ structural cause is a missing source-of-truth invariant in the fixture.
   publishable artifact.
 - Producer Proof: `packages/ceal-worker-cli/package.json` is the isolated
   package version checked by `requireWorkerSource`.
-- Final-Consumer Proof: pending a successful amd64 tag job; the failed job
-  already proves that its build gate consumes the mismatch.
+- Final-Consumer Proof: Actions run `30133762847` passed the replacement amd64
+  tag job, published the signed static asset set, advanced the stable pointer,
+  and a fresh public installer/update readback consumed that set.
 - Interface-Shape Sibling Scan: searched explicit `version: "0.65.*"` release
   fixtures and all `buildWorkerReleaseArtifact` call sites.
 - Non-Claims: no artifact, static object, stable pointer, installation, or
@@ -97,18 +105,22 @@ structural cause is a missing source-of-truth invariant in the fixture.
 - Interrupt ID: release-amd64-version-fixture
 - Risk Class: external-seam
 - Seam: local ARM test selection to GitHub amd64 release gate
-- Disproving Observation: the source-derived fixture passes the new amd64 tag.
-- What Local Reasoning Cannot Prove: GitHub runner execution and R2 publication.
+- Disproving Observation: the source-derived fixture passed the replacement
+  amd64 tag in Actions run `30133762847`.
+- What Local Reasoning Cannot Prove: this release proof does not prove Gateway
+  connection, enrollment, an agent runtime, or a provider action.
 - Generalization Pressure: monitor
 
 ## Interrupt Decision
 
-- Resolution: open
+- Resolution: resolved
 - Critique Required: yes
 - Next Step: spec
 - Handoff Artifact: charness-artifacts/spec/2026-07-24-release-amd64-version-fixture.md
 
 ## Prevention
 
-Replace the stale literal with the worker package manifest version, retain the
-amd64 release gate, and record the successful replacement tag before closing.
+Derive the requested version from the worker package manifest, retain the amd64
+release gate, and use the immutable tag workflow as the final architecture
+proof. `ceal-v0.65.3` is the successful replacement; `ceal-v0.65.2` remains a
+failed, unpublished tag.
