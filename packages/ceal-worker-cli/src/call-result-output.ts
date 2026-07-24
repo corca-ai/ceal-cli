@@ -107,6 +107,11 @@ const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "c
 	authentication_failed: { message: "The Gateway rejected the client credential.", nextAction: "Obtain a current Gateway-issued client session and retry.", denial: true },
 	profile_binding_denied: { message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true },
 	profile_access_denied: { message: "The Gateway rejected the requested Profile selection.", nextAction: "Use a Profile assigned to the authenticated subject and retry.", denial: true },
+	// Deliberately not a denial: the Gateway's opaque contract does not disclose
+	// whether policy or absence made the resource unavailable, so the call
+	// surface must not claim an authorization decision. The receipt readback is
+	// the authoritative audited disposition.
+	resource_not_available: { message: "The Gateway reported the requested resource as not available to this client.", nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.", denial: false },
 	continuation_not_available: { message: "The approved continuation is no longer available.", nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.", denial: false },
 	connector_unavailable: { message: "The granted connector is currently unavailable.", nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.", denial: false },
 	rate_limited: { message: "The Gateway rate quota for this client is temporarily exhausted.", nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.", denial: false },

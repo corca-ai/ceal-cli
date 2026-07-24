@@ -613,6 +613,34 @@ test("an unavailable continuation asks the agent to rediscover instead of restor
 	});
 });
 
+test("an unavailable resource keeps its own code without claiming an authorization decision", () => {
+	// Exact Stage 3 opaque-denial shape: a known code with no recovery hint must
+	// not degrade to the generic gateway_request_failed classification.
+	assert.deepEqual(classifyGatewayFailure({ code: "resource_not_available", message: "server-controlled" }), {
+		code: "resource_not_available",
+		message: "The Gateway reported the requested resource as not available to this client.",
+		nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
+		denial: false,
+	});
+});
+
+test("an opaque resource denial classifies at the call surface and defers disposition to the receipt", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const runtime = {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: (() => { let index = 0; return () => `narnia:opaque:${++index}`; })(),
+		};
+		const failed = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=roadmap"], 3, runtime);
+		assert.equal(failed.status, "error");
+		assert.equal(failed.error.kind, "resource_not_available");
+		assert.deepEqual(failed.receipt, {
+			evidence: "not_read_back", request_ref: "narnia:opaque:1:call", audit_refs: [],
+		});
+	}, (request) => request.operation === "call"
+		? { ok: false, request_id: request.request_id, protocol_version: "1.3.0", error: { code: "resource_not_available", message: "server-controlled", next_action: "server-controlled" } }
+		: policyDeniedReadbackResponse(request));
+});
+
 test("a failed pre-provider call preserves its request ref and receipt exposes the safe failure phase", async () => {
 	await withGateway(async ({ endpoint }) => {
 		const runtime = {
