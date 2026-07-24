@@ -411,6 +411,26 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 	});
 });
 
+test("a policy-denied receipt retains the error code, non-claims, and negotiated Gateway timing", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(["receipt", "show", "narnia:denied:1:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:denied-receipt:1",
+		});
+		assert.deepEqual(payload, {
+			schema_version: "ceal.receipt.v1",
+			status: "verified",
+			request_ref: "narnia:denied:1:call",
+			events: [{
+				ref: "gateway-audit:event:denied", operation: "call", outcome: "denied", authorization: "denied",
+				error_code: "resource_not_available",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+				timing: { gateway_elapsed_ms: 6892 },
+			}],
+		});
+	}, (request) => policyDeniedReadbackResponse(request));
+});
+
 test("stored client Session selects an assigned Profile per request without another login", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const runtime = {
@@ -1517,6 +1537,23 @@ function readbackResponse(request) {
 				requested_limit: 5, query_utf8_bytes: 6, result_count: 1, gateway_elapsed_ms: 42,
 				coverage: matureSearchCoverage(),
 			},
+			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		}],
+	});
+}
+
+// Mirrors the applied Gateway's pre-provider policy denial: no call detail or
+// grant snapshot exists, so the negotiated handling time rides on the event.
+function policyDeniedReadbackResponse(request) {
+	return success(request, {
+		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
+		events: [{
+			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:denied", request_id: request.body.request_id,
+			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
+			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
+			occurred_at: "2026-07-24T09:00:00.000Z",
+			operation: "call", auth_decision: "allowed", policy_decision: "denied", outcome: "denied",
+			error_code: "resource_not_available", gateway_elapsed_ms: 6892,
 			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		}],
 	});

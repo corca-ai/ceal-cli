@@ -797,7 +797,9 @@ async function requestReceiptReadback(initialSession: CealStoredSession, profile
 }
 
 function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
-	const gatewayElapsedMs = event.call?.gateway_elapsed_ms;
+	// A denied or failed call has no call detail, so its negotiated Gateway
+	// handling time arrives on the event itself rather than inside `call`.
+	const gatewayElapsedMs = event.call?.gateway_elapsed_ms ?? event.gateway_elapsed_ms;
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
 		authorization: event.policy_decision,
