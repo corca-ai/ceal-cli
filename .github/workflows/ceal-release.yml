@@ -8,9 +8,10 @@ name: Ceal worker release
 # in this repository. Releases are created as prereleases; promoting one to the
 # stable lane (`ceal update` / CEAL_VERSION=stable) is a separate operator
 # publication to the worker static origin: upload the verified asset set to
-# https://ceal.borca.ai/releases/worker/<tag>/ and rotate
-# releases/worker/stable/ceal-worker-stable-release.json last
-# (install-ceal.sh resolves stable there, not from the GitHub release list).
+# https://ceal.borca.ai/releases/worker/<tag>/, then rotate
+# releases/worker/stable/ceal-worker-stable-release.json and the bootstrap
+# copy releases/worker/stable/install-ceal.sh last (install-ceal.sh resolves
+# stable there, not from the GitHub release list).
 
 on:
   push:

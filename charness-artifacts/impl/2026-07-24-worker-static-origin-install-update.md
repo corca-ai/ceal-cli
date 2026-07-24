@@ -26,7 +26,13 @@ release there.
    and `sha256sums_sha256` (SHA-256 of that tag's `SHA256SUMS`). The installer
    validates the schema, the tag grammar, and — after downloading and
    signature-verifying the release set — that the downloaded `SHA256SUMS`
-   digest equals the pointer digest.
+   digest equals the pointer digest. Promotion also rotates
+   `releases/worker/stable/install-ceal.sh`, a byte-identical copy of the
+   stable tag's signed installer, as the anonymous bootstrap entrypoint; the
+   bootstrap copy is convenience only, since the installer re-downloads and
+   signature-verifies `install-ceal.sh` from the versioned prefix.
+   A stable-resolved run ignores `CEAL_GITHUB_TOKEN` entirely and always
+   downloads from the static origin.
 4. Signature trust is unchanged: every asset is still verified against the
    cosign keyless OIDC identity `ceal-release.yml@refs/tags/<tag>` regardless
    of download origin. The stable pointer can only select among genuinely

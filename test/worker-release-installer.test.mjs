@@ -48,24 +48,45 @@ test("worker stable resolver follows the worker static-origin stable pointer", (
 	});
 });
 
-test("worker stable resolver never sends the GitHub token to the static origin", () => {
+test("worker stable lane ignores the GitHub token and stays on the static origin", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeStablePointer(release);
-		const inventory = stageAssetInventory(release);
 		const headerLog = path.join(path.dirname(log), "curl-fetches.log");
-		const result = run({ install, release, tools, log, version: "stable", token: "fake-token", inventory, headerLog });
+		const result = run({ install, release, tools, log, version: "stable", token: "fake-token", headerLog });
 		assert.equal(result.status, 0, result.stderr);
-		const fetches = readFileSync(headerLog, "utf8").trim().split("\n");
-		const staticFetches = fetches.filter((line) => line.includes("ceal.borca.ai"));
-		assert.equal(staticFetches.length, 1, "stable pointer must be the only static-origin fetch in the token lane");
-		for (const line of staticFetches) assert.doesNotMatch(line, /Authorization/u);
-		assert.match(readFileSync(headerLog, "utf8"), /Authorization: Bearer fake-token/u);
+		const fetches = readFileSync(headerLog, "utf8");
+		assert.doesNotMatch(fetches, /api[.]github[.]com/u);
+		assert.doesNotMatch(fetches, /Authorization/u);
+	});
+});
+
+test("worker stable update refuses a pointer older than the installed release", () => {
+	withFixture(({ install, release, tools, log }) => {
+		writeStablePointer(release);
+		const result = run({ install, release, tools, log, version: "stable", minimumVersion: "0.66.0" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /older than the installed worker release/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
 	});
 });
 
 test("worker installer rejects a malformed or mismatched stable pointer", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeStablePointer(release, { tag: "v9.9.9" });
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /stable release pointer is not a valid/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+	withFixture(({ install, release, tools, log }) => {
+		writeStablePointer(release, { sha256sums_sha256: "not-a-release-set-digest" });
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /stable release pointer is not a valid/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+	withFixture(({ install, release, tools, log }) => {
+		writeFileSync(path.join(release, "ceal-worker-stable-release.json"), "");
 		const result = run({ install, release, tools, log, version: "stable" });
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /stable release pointer is not a valid/u);
@@ -204,8 +225,8 @@ function withFixture(callback) {
 	} finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", inventory = "{}", headerLog = "" }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", inventory = "{}", minimumVersion = "", headerLog = "" }) {
+	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, CEAL_MINIMUM_VERSION: minimumVersion, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
 }
 
 // Mirrors the private-repo shape: every asset is reachable only through its

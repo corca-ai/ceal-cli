@@ -140,7 +140,11 @@ Worker distribution is the worker-owned static-origin prefix
 `releases/worker/stable/ceal-worker-stable-release.json`
 (`ceal.worker_stable_release.v1`: the stable tag plus the SHA-256 of that
 tag's `SHA256SUMS`, which the installer re-checks against the downloaded
-signed inventory). Until an operator publishes the first release set and
+signed inventory). Promotion rotates that pointer together with the bootstrap
+copy `releases/worker/stable/install-ceal.sh` used above; the stable lane
+ignores `CEAL_GITHUB_TOKEN` and re-verifies every asset — including
+`install-ceal.sh` itself — from the versioned prefix. Until an operator
+publishes the first release set and
 rotates the stable pointer, these URLs 404: install an explicit published tag
 (`CEAL_VERSION=ceal-v0.65.0`) instead, or — as a maintainer verifying a
 private prerelease before promotion — download that release's

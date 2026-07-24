@@ -90,7 +90,8 @@ is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]
 # maintainer can verify a private prerelease with an explicit tag before
 # promotion; CEAL_GITHUB_TOKEN resolves each asset id from the release
 # inventory fetched once per run.  The bearer token is sent only to
-# api.github.com, never to the static origin.
+# api.github.com, never to the static origin, and the stable lane ignores it
+# entirely: a stable-resolved release always downloads from the static origin.
 auth_curl() {
   if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then curl -fsSL -H "Authorization: Bearer $CEAL_GITHUB_TOKEN" "$@"
   else curl -fsSL "$@"; fi
@@ -315,7 +316,7 @@ probe_mv_t
 bootstrap_cosign
 need_sha256
 for tool in cmp curl cosign grep python3 sed sort uniq wc uname mktemp readlink; do need "$tool"; done
-if [ "$VERSION" = stable ]; then resolve_stable_release; fi
+if [ "$VERSION" = stable ]; then resolve_stable_release; CEAL_GITHUB_TOKEN=""; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
   version_is_older "$VERSION" "$CEAL_MINIMUM_VERSION" && fail "Latest stable Ceal worker release is older than the installed worker release"
