@@ -5,7 +5,7 @@
 // the one signed release inventory that install-ceal.sh consumes.
 
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,9 @@ export class WorkerReleaseAssetsError extends Error {
 export async function composeWorkerReleaseAssets(options = {}, dependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
-	const stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-assets-"));
+	// Canonicalize the stage so the native builder's no-symlink output guard
+	// accepts it on hosts whose temp root sits behind a symlink (macOS /var).
+	const stage = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-assets-")));
 	// The native builder needs build-time dependencies (esbuild/postject);
 	// loading it lazily keeps `merge` runnable on a dependency-free host.
 	let nativeErrorClass = null;
