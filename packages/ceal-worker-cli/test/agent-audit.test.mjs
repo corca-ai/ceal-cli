@@ -21,8 +21,12 @@ test("agent audit inventories Claude sessions without reading transcript content
 		const claude = state.adapters.find((adapter) => adapter.runtime === "claude");
 		assert.equal(claude.health, "active");
 		assert.equal(claude.coverage, "transcript-observed");
-		assert.equal(claude.depth, "session_inventory");
+		assert.equal(claude.depth, "session_events");
 		assert.equal(claude.sessionCount, 2);
+		// Event summaries expose kind counts only; the "secret" value stays local.
+		assert.deepEqual(claude.sessions[0].events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
+		assert.deepEqual(claude.sessions[1].events, { scan: "complete", eventCount: 0, kinds: {}, unparsedLines: 1 });
+		assert.deepEqual(claude.eventScan, { scannedSessions: 2, sessionLimit: 3 });
 		assert.deepEqual(claude.sessions.map((session) => session.sessionRef), [
 			"11111111-2222-3333-4444-555555555555",
 			"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -53,9 +57,12 @@ test("agent audit inventories Codex rollouts newest-first without reading conten
 		const codex = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "codex");
 		assert.equal(codex.health, "active");
 		assert.equal(codex.coverage, "transcript-observed");
-		assert.equal(codex.depth, "session_inventory");
+		assert.equal(codex.depth, "session_events");
 		assert.equal(codex.inventory, undefined);
 		assert.equal(codex.sessionCount, 2);
+		// A parsed line without a recognized grammar is counted, never echoed.
+		assert.deepEqual(codex.sessions[0].events, { scan: "complete", eventCount: 1, kinds: { other: 1 }, unparsedLines: 0 });
+		assert.deepEqual(codex.eventScan, { scannedSessions: 2, sessionLimit: 3 });
 		// Only the machine-generated rollout UUID surfaces as a session_ref.
 		assert.deepEqual(codex.sessions.map((session) => session.sessionRef), [
 			"019f9174-fec1-78d2-b4be-91402cdc66d4",
@@ -164,6 +171,124 @@ test("agent audit marks a truncated walk as a partial inventory, never complete"
 		// A partial walk that found nothing proves nothing about inactivity.
 		assert.equal(claude.health, "unknown");
 		assert.equal(claude.sessionCount, undefined);
+	});
+});
+
+test("event depth classifies Claude lines with structural redaction", () => {
+	withHome((home) => {
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		const lines = [
+			'{"type":"user","message":{"role":"user","content":"do the thing SECRET-USER"},"timestamp":"2026-07-24T10:00:00.000Z"}',
+			'{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"SECRET-THINK"}]},"timestamp":"2026-07-24T10:00:05.000Z"}',
+			'{"type":"assistant","message":{"content":[{"type":"text","text":"SECRET-ANSWER"},{"type":"tool_use","name":"Bash","input":{"command":"SECRET-CMD"}}]},"timestamp":"2026-07-24T10:00:10.000Z"}',
+			'{"type":"user","message":{"content":[{"type":"tool_result","content":"SECRET-RESULT"}]},"timestamp":"2026-07-24T10:00:15.000Z"}',
+			'{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]},"timestamp":"2026-07-24T10:00:20.000Z"}',
+			'{"type":"file-history-snapshot","snapshot":{"path":"SECRET-PATH"}}',
+			'{"type":"totally-new-kind","timestamp":"2026-07-24T10:00:25.000Z"}',
+			"not json at all",
+		];
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
+
+		const state = inspectAgentAudit(home, NOW);
+		const claude = state.adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(claude.depth, "session_events");
+		assert.deepEqual(claude.sessions[0].events, {
+			scan: "complete",
+			eventCount: 7,
+			kinds: { user_message: 1, reasoning: 1, tool_call: 1, tool_result: 1, assistant_message: 1, session_state: 1, other: 1 },
+			unparsedLines: 1,
+			firstEventAt: Date.parse("2026-07-24T10:00:00.000Z"),
+			lastScannedEventAt: Date.parse("2026-07-24T10:00:25.000Z"),
+		});
+		// Structural redaction: no transcript field value survives into the state.
+		assert.equal(JSON.stringify(state).includes("SECRET-"), false);
+	});
+});
+
+test("event depth classifies Codex rollout lines and never echoes payloads", () => {
+	withHome((home) => {
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		const lines = [
+			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"session_meta","payload":{"instructions":"SECRET-INSTR"}}',
+			'{"timestamp":"2026-07-24T11:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"SECRET-MSG"}}',
+			'{"timestamp":"2026-07-24T11:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"SECRET-INPUT"}]}}',
+			'{"timestamp":"2026-07-24T11:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"SECRET-OUTPUT"}]}}',
+			'{"timestamp":"2026-07-24T11:00:04.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[]}}',
+			'{"timestamp":"2026-07-24T11:00:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":["SECRET-SUMMARY"]}}',
+			'{"timestamp":"2026-07-24T11:00:06.000Z","type":"response_item","payload":{"type":"custom_tool_call","input":"SECRET-ARGS"}}',
+			'{"timestamp":"2026-07-24T11:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"SECRET-TOOLOUT"}}',
+			'{"timestamp":"2026-07-24T11:00:08.000Z","type":"response_item","payload":{"type":"widget"}}',
+		];
+		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
+
+		const state = inspectAgentAudit(home, NOW);
+		const codex = state.adapters.find((adapter) => adapter.runtime === "codex");
+		assert.equal(codex.depth, "session_events");
+		assert.deepEqual(codex.sessions[0].events, {
+			scan: "complete",
+			eventCount: 9,
+			// The event_msg mirror of the user utterance counts as session_state,
+			// so one message is never counted twice.
+			kinds: { session_state: 3, user_message: 1, assistant_message: 1, reasoning: 1, tool_call: 1, tool_result: 1, other: 1 },
+			unparsedLines: 0,
+			firstEventAt: Date.parse("2026-07-24T11:00:00.000Z"),
+			lastScannedEventAt: Date.parse("2026-07-24T11:00:08.000Z"),
+		});
+		assert.equal(JSON.stringify(state).includes("SECRET-"), false);
+	});
+});
+
+test("event scan stays bounded and declares truncation and unreadable transcripts", () => {
+	withHome((home) => {
+		// Five sessions: only the newest three carry event summaries.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		for (let index = 0; index < 5; index += 1) {
+			writeSession(project, `11111111-2222-3333-4444-55555555555${index}.jsonl`, NOW - (index + 1) * 60_000, '{"type":"mode"}\n');
+		}
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.deepEqual(claude.eventScan, { scannedSessions: 3, sessionLimit: 3 });
+		assert.deepEqual(claude.sessions.map((session) => session.events !== undefined), [true, true, true, false, false]);
+	});
+	withHome((home) => {
+		// The 5000-line budget truncates a longer transcript, declared as such.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n'.repeat(5010));
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(claude.sessions[0].events.scan, "truncated");
+		assert.equal(claude.sessions[0].events.eventCount, 5000);
+	});
+	withHome((home) => {
+		// The byte budget drops the trailing partial line instead of counting a
+		// real event as unparsed.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		const wideLine = `{"type":"mode","pad":"${"x".repeat(700)}"}\n`;
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, wideLine.repeat(3000));
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(claude.sessions[0].events.scan, "truncated");
+		assert.equal(claude.sessions[0].events.unparsedLines, 0);
+		assert.ok(claude.sessions[0].events.eventCount > 0);
+		assert.ok(claude.sessions[0].events.eventCount < 3000);
+	});
+	withHome((home) => {
+		// An unreadable transcript is a declared per-session gap; with no scanned
+		// session the adapter honestly stays at inventory depth.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
+		chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o000);
+		try {
+			const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+			assert.equal(claude.sessions[0].events, "unreadable");
+			assert.equal(claude.depth, "session_inventory");
+			assert.deepEqual(claude.eventScan, { scannedSessions: 0, sessionLimit: 3 });
+		} finally {
+			chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o600);
+		}
 	});
 });
 

@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import type { CealAgentAuditState } from "./agent-audit.js";
+import type { CealAgentAuditSession, CealAgentAuditState } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -80,11 +80,29 @@ function observeAgentAudit(runtime: CealObserverRuntime): Record<string, unknown
 					session_ref: session.sessionRef,
 					last_activity_at: new Date(session.lastActivityAt).toISOString(),
 					transcript_bytes: session.transcriptBytes,
+					...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
 				})),
+			}),
+			...(adapter.eventScan === undefined ? {} : {
+				event_scan: { scanned_sessions: adapter.eventScan.scannedSessions, session_limit: adapter.eventScan.sessionLimit },
 			}),
 			...(adapter.note === undefined ? {} : { note: adapter.note }),
 		})),
 		non_claims: state.nonClaims,
+	};
+}
+
+// Event summaries re-key to the page's snake_case vocabulary; the values are
+// already structurally redacted (fixed kinds, integers, parsed epochs).
+function projectSessionEvents(events: NonNullable<CealAgentAuditSession["events"]>): unknown {
+	if (events === "unreadable") return "unreadable";
+	return {
+		scan: events.scan,
+		event_count: events.eventCount,
+		kinds: events.kinds,
+		unparsed_lines: events.unparsedLines,
+		...(events.firstEventAt === undefined ? {} : { first_event_at: new Date(events.firstEventAt).toISOString() }),
+		...(events.lastScannedEventAt === undefined ? {} : { last_scanned_event_at: new Date(events.lastScannedEventAt).toISOString() }),
 	};
 }
 

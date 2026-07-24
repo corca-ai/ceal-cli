@@ -1,19 +1,20 @@
-import { lstatSync, readdirSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-// First ceal-audit delivery inside the worker: a read-only local inventory of
-// supported agent runtimes' native transcript roots, rendered by the observer
-// Workbench shell. The masterplan fixes the vocabulary consumed here — one
-// normalized contract shared by the Codex and Claude adapters, collector
-// health (active/stale/inactive/unknown), and evidence coverage
-// (ceal-mediated/hook-enhanced/transcript-observed/unsupported) — and this
-// slice deliberately stops at session inventory: transcript files are listed
-// by identity, recency, and size, but their content is never opened, so no
-// redaction path exists to fail. A permission or read failure reports
-// `unknown`, never a fabricated inventory; an unimplemented adapter would
-// report `unsupported`, never silence. Both adapters now stop at the same
-// session-inventory depth, and neither's coverage claim generalizes to the
-// other.
+// ceal-audit inside the worker: a read-only local view of supported agent
+// runtimes' native transcript roots, rendered by the observer Workbench
+// shell. The masterplan fixes the vocabulary consumed here — one normalized
+// contract shared by the Codex and Claude adapters, collector health
+// (active/stale/inactive/unknown), and evidence coverage
+// (ceal-mediated/hook-enhanced/transcript-observed/unsupported). The full
+// inventory lists transcript files by identity, recency, and size; the
+// newest few sessions additionally get a bounded event summary whose
+// redaction is structural: lines are parsed locally, but only fixed
+// vocabulary kinds, integer counts, and re-serialized timestamps leave the
+// parser — no transcript field value is ever echoed. A permission or read
+// failure reports `unknown` (inventory) or `unreadable` (events), never a
+// fabricated result; an unimplemented adapter would report `unsupported`,
+// never silence. Neither adapter's coverage claim generalizes to the other.
 
 const CLAUDE_ROOT = ".claude";
 const CODEX_ROOT = ".codex";
@@ -31,11 +32,41 @@ const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const CODEX_ROLLOUT_FILE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]jsonl$/iu;
 const CODEX_DATE_SEGMENT = [/^\d{4}$/u, /^\d{2}$/u, /^\d{2}$/u];
 const HEALTH_BASIS = "health derived from newest transcript mtime (active within 24h); not a liveness probe";
+// Event depth is deliberately bounded: only the newest sessions are scanned,
+// and each transcript is read from the start up to fixed byte/line budgets so
+// a huge or adversarial file cannot stall the observer. Hitting a budget is
+// always declared as `scan: "truncated"`, never presented as complete.
+const EVENT_SCAN_SESSIONS = 3;
+const MAX_EVENT_BYTES = 2 * 1024 * 1024;
+const MAX_EVENT_LINES = 5000;
+// Only a timestamp that already looks like an ISO instant is parsed, and it
+// re-surfaces solely as the parsed epoch — raw strings never pass through.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
+
+export type CealAgentAuditEventKind =
+	| "user_message"
+	| "assistant_message"
+	| "tool_call"
+	| "tool_result"
+	| "reasoning"
+	| "session_state"
+	| "other";
+
+export interface CealAgentAuditSessionEvents {
+	scan: "complete" | "truncated";
+	eventCount: number;
+	kinds: Partial<Record<CealAgentAuditEventKind, number>>;
+	unparsedLines: number;
+	firstEventAt?: number;
+	lastScannedEventAt?: number;
+}
 
 export interface CealAgentAuditSession {
 	sessionRef: string;
 	lastActivityAt: number;
 	transcriptBytes: number;
+	/** Present only for the newest scanned sessions; "unreadable" is a declared gap. */
+	events?: CealAgentAuditSessionEvents | "unreadable";
 }
 
 export interface CealAgentAuditAdapterState {
@@ -43,11 +74,13 @@ export interface CealAgentAuditAdapterState {
 	root: string;
 	health: "active" | "stale" | "inactive" | "unknown";
 	coverage: "transcript-observed" | "unsupported";
-	depth?: "session_inventory";
+	depth?: "session_inventory" | "session_events";
 	/** Present as "partial" when the walk was truncated or a subtree was unreadable. */
 	inventory?: "partial";
 	sessionCount?: number;
 	sessions?: CealAgentAuditSession[];
+	/** Declares the event-scan bound so the newest-sessions cap is never silent. */
+	eventScan?: { scannedSessions: number; sessionLimit: number };
 	note?: string;
 }
 
@@ -66,27 +99,33 @@ export function inspectAgentAudit(home: string | undefined, now: number): CealAg
 		schemaVersion: "ceal.agent_activity.v1",
 		adapters,
 		nonClaims: [
-			"Session inventory only: transcript content is never read, copied, or forwarded.",
-			"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap.",
+			"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
+			"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only.",
 		],
 	};
 }
 
 function observeClaudeAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
 	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CLAUDE_ROOT, "projects") : null;
-	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, now);
+	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, classifyClaudeLine, now);
 }
 
 function observeCodexAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
 	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CODEX_ROOT, "sessions") : null;
-	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, now);
+	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, classifyCodexLine, now);
+}
+
+/** Inventory row plus the private transcript path consumed by the event scan. */
+interface CollectedSession extends CealAgentAuditSession {
+	transcriptPath: string;
 }
 
 function observeTranscriptAdapter(
 	runtime: CealAgentAuditAdapterState["runtime"],
 	root: string,
 	sessionsDirectory: string | null,
-	collect: (directory: string) => { sessions: CealAgentAuditSession[]; partial: boolean },
+	collect: (directory: string) => { sessions: CollectedSession[]; partial: boolean },
+	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
 	now: number,
 ): CealAgentAuditAdapterState {
 	const base: CealAgentAuditAdapterState = {
@@ -106,7 +145,7 @@ function observeTranscriptAdapter(
 		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
 		return code === "ENOENT" ? { ...base, health: "inactive", sessionCount: 0, sessions: [] } : base;
 	}
-	let collected: { sessions: CealAgentAuditSession[]; partial: boolean };
+	let collected: { sessions: CollectedSession[]; partial: boolean };
 	try {
 		collected = collect(sessionsDirectory);
 	} catch {
@@ -121,22 +160,159 @@ function observeTranscriptAdapter(
 		return partial ? { ...base, ...partialFields } : { ...base, health: "inactive", sessionCount: 0, sessions: [] };
 	}
 	sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+	const rendered = sessions.slice(0, RENDERED_SESSIONS).map(({ transcriptPath, ...session }, index) =>
+		index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, classify) } : session);
+	const scannedSessions = rendered.filter((session) => typeof session.events === "object").length;
 	return {
 		...base,
 		...partialFields,
+		// Depth reports what was achieved, not what was attempted: with every
+		// scan unreadable the adapter honestly stays at inventory depth.
+		depth: scannedSessions > 0 ? "session_events" : "session_inventory",
 		health: now - sessions[0].lastActivityAt < ACTIVE_WINDOW_MS ? "active" : "stale",
 		sessionCount: sessions.length,
-		sessions: sessions.slice(0, RENDERED_SESSIONS),
+		sessions: rendered,
+		eventScan: { scannedSessions, sessionLimit: EVENT_SCAN_SESSIONS },
 	};
 }
 
+// Bounded, structurally redacting event scan of one transcript. The file is
+// re-opened with O_NOFOLLOW and re-checked as a regular file so the
+// inventory-time symlink refusal cannot be raced. Only classified kind
+// counts, integer totals, and parsed epoch timestamps leave this function.
+function scanSessionEvents(
+	transcriptPath: string,
+	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
+): CealAgentAuditSessionEvents | "unreadable" {
+	let descriptor: number;
+	try {
+		descriptor = openSync(transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+	} catch {
+		return "unreadable";
+	}
+	try {
+		const stat = fstatSync(descriptor);
+		if (!stat.isFile()) return "unreadable";
+		const buffer = Buffer.alloc(Math.min(stat.size, MAX_EVENT_BYTES));
+		const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+		const truncatedBytes = stat.size > MAX_EVENT_BYTES;
+		const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+		// A byte-truncated read ends in a partial line; scanning it would
+		// misreport a real event as unparsed.
+		if (truncatedBytes) lines.pop();
+		return summarizeEventLines(lines.filter((line) => line.trim() !== ""), truncatedBytes, classify);
+	} catch {
+		return "unreadable";
+	} finally {
+		closeSync(descriptor);
+	}
+}
+
+function summarizeEventLines(
+	lines: string[],
+	truncatedBytes: boolean,
+	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
+): CealAgentAuditSessionEvents {
+	const kinds: Partial<Record<CealAgentAuditEventKind, number>> = {};
+	let eventCount = 0;
+	let unparsedLines = 0;
+	let firstEventAt: number | undefined;
+	let lastScannedEventAt: number | undefined;
+	for (const line of lines.slice(0, MAX_EVENT_LINES)) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			unparsedLines += 1;
+			continue;
+		}
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			unparsedLines += 1;
+			continue;
+		}
+		const record = parsed as Record<string, unknown>;
+		const kind = classify(record);
+		kinds[kind] = (kinds[kind] ?? 0) + 1;
+		eventCount += 1;
+		const timestamp = typeof record.timestamp === "string" && ISO_INSTANT.test(record.timestamp)
+			? Date.parse(record.timestamp)
+			: Number.NaN;
+		if (Number.isFinite(timestamp)) {
+			firstEventAt = firstEventAt === undefined ? timestamp : Math.min(firstEventAt, timestamp);
+			lastScannedEventAt = lastScannedEventAt === undefined ? timestamp : Math.max(lastScannedEventAt, timestamp);
+		}
+	}
+	return {
+		scan: truncatedBytes || lines.length > MAX_EVENT_LINES ? "truncated" : "complete",
+		eventCount,
+		kinds,
+		unparsedLines,
+		...(firstEventAt === undefined ? {} : { firstEventAt }),
+		...(lastScannedEventAt === undefined ? {} : { lastScannedEventAt }),
+	};
+}
+
+// Claude Code line grammar: conversational lines carry type user/assistant
+// with a content-item array; runtime bookkeeping lines carry their own types.
+// Classification reads only `type` fields — never text, arguments, or paths.
+const CLAUDE_STATE_TYPES = new Set([
+	"system", "mode", "ai-title", "last-prompt", "attachment", "permission-mode", "queue-operation", "summary",
+]);
+
+function classifyClaudeLine(line: Record<string, unknown>): CealAgentAuditEventKind {
+	const type = line.type;
+	if (type === "assistant" || type === "user") {
+		const message = line.message;
+		const content = message && typeof message === "object" ? (message as Record<string, unknown>).content : null;
+		const items = Array.isArray(content) ? content : [];
+		const has = (itemType: string) =>
+			items.some((item) => !!item && typeof item === "object" && (item as Record<string, unknown>).type === itemType);
+		if (type === "assistant") {
+			if (has("tool_use")) return "tool_call";
+			if (has("thinking") && !has("text")) return "reasoning";
+			return "assistant_message";
+		}
+		return has("tool_result") ? "tool_result" : "user_message";
+	}
+	if (typeof type === "string" && (CLAUDE_STATE_TYPES.has(type) || type.startsWith("file-history-"))) return "session_state";
+	return "other";
+}
+
+// Codex rollout grammar: response_item lines carry the conversation payload;
+// event_msg mirrors of user/agent messages count as session_state so one
+// utterance is never counted twice. Classification reads only `type`/`role`.
+const CODEX_STATE_TYPES = new Set([
+	"session_meta", "turn_context", "world_state", "compacted", "event_msg", "inter_agent_communication_metadata",
+]);
+
+function classifyCodexLine(line: Record<string, unknown>): CealAgentAuditEventKind {
+	const type = line.type;
+	if (type === "response_item") {
+		const payload = line.payload;
+		const payloadType = payload && typeof payload === "object" ? (payload as Record<string, unknown>).type : null;
+		if (payloadType === "message") {
+			const role = (payload as Record<string, unknown>).role;
+			if (role === "user") return "user_message";
+			if (role === "assistant") return "assistant_message";
+			return "session_state";
+		}
+		if (payloadType === "agent_message") return "assistant_message";
+		if (payloadType === "reasoning") return "reasoning";
+		if (typeof payloadType === "string" && payloadType.endsWith("_call_output")) return "tool_result";
+		if (typeof payloadType === "string" && payloadType.endsWith("_call")) return "tool_call";
+		return "other";
+	}
+	if (typeof type === "string" && CODEX_STATE_TYPES.has(type)) return "session_state";
+	return "other";
+}
+
 // Claude Code stores one JSONL transcript per session under
-// ~/.claude/projects/<project-directory>/<session-uuid>.jsonl. Only the file
-// identity and stat metadata are consumed. `partial` reports an exhausted walk
-// budget or an unreadable/vanished subtree so a truncated inventory is never
-// presented as complete.
-function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSession[]; partial: boolean } {
-	const sessions: CealAgentAuditSession[] = [];
+// ~/.claude/projects/<project-directory>/<session-uuid>.jsonl. The inventory
+// walk consumes only file identity and stat metadata. `partial` reports an
+// exhausted walk budget or an unreadable/vanished subtree so a truncated
+// inventory is never presented as complete.
+function collectClaudeSessions(projects: string): { sessions: CollectedSession[]; partial: boolean } {
+	const sessions: CollectedSession[] = [];
 	let examined = 0;
 	let partial = false;
 	const root = lstatSync(projects);
@@ -162,6 +338,7 @@ function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSess
 				sessionRef: file.slice(0, -".jsonl".length),
 				lastActivityAt: stat.mtimeMs,
 				transcriptBytes: stat.size,
+				transcriptPath: transcript,
 			});
 		}
 	}
@@ -169,14 +346,14 @@ function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSess
 }
 
 // Codex stores one JSONL rollout per session under
-// ~/.codex/sessions/YYYY/MM/DD/rollout-<stamp>-<session-uuid>.jsonl. Only file
-// identity and stat metadata are consumed, and only the machine-generated
-// UUID surfaces as a session_ref. The date shards are walked newest-named
-// first so a truncated walk keeps the newest shards; health derives from
-// mtime, so its accuracy is guaranteed only for a complete walk — any
-// truncation is always declared as `inventory: partial`.
-function collectCodexSessions(sessionsRoot: string): { sessions: CealAgentAuditSession[]; partial: boolean } {
-	const sessions: CealAgentAuditSession[] = [];
+// ~/.codex/sessions/YYYY/MM/DD/rollout-<stamp>-<session-uuid>.jsonl. The
+// inventory walk consumes only file identity and stat metadata, and only the
+// machine-generated UUID surfaces as a session_ref. The date shards are
+// walked newest-named first so a truncated walk keeps the newest shards;
+// health derives from mtime, so its accuracy is guaranteed only for a
+// complete walk — any truncation is always declared as `inventory: partial`.
+function collectCodexSessions(sessionsRoot: string): { sessions: CollectedSession[]; partial: boolean } {
+	const sessions: CollectedSession[] = [];
 	const walk = { examined: 0, partial: false };
 	const root = lstatSync(sessionsRoot);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
@@ -192,13 +369,15 @@ function collectCodexSessions(sessionsRoot: string): { sessions: CealAgentAuditS
 			walk.examined += 1;
 			const rollout = CODEX_ROLLOUT_FILE.exec(file);
 			if (!rollout) continue;
+			const rolloutPath = path.join(dayDirectory, file);
 			let stat;
-			try { stat = lstatSync(path.join(dayDirectory, file)); } catch { walk.partial = true; continue; }
+			try { stat = lstatSync(rolloutPath); } catch { walk.partial = true; continue; }
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
 				sessionRef: rollout[1].toLowerCase(),
 				lastActivityAt: stat.mtimeMs,
 				transcriptBytes: stat.size,
+				transcriptPath: rolloutPath,
 			});
 		}
 	}

@@ -80,12 +80,19 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				adapters: [
 					{
 						runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
-						depth: "session_inventory", sessionCount: 1,
-						sessions: [{ sessionRef: "11111111-2222-3333-4444-555555555555", lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048 }],
+						depth: "session_events", sessionCount: 1,
+						sessions: [{
+							sessionRef: "11111111-2222-3333-4444-555555555555", lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048,
+							events: {
+								scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
+								firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+							},
+						}],
+						eventScan: { scannedSessions: 1, sessionLimit: 3 },
 					},
 					{ runtime: "codex", root: "~/.codex", health: "unknown", coverage: "unsupported", note: "The Codex adapter is not implemented yet." },
 				],
-				nonClaims: ["Session inventory only: transcript content is never read, copied, or forwarded."],
+				nonClaims: ["Bounded event metadata only: fixed-vocabulary kind counts; raw payloads are never surfaced, copied, or forwarded."],
 			}),
 			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
 			executablePath: process.execPath,
@@ -139,11 +146,18 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.agent_activity.status, "inventoried");
 	assert.deepEqual(state.agent_activity.adapters[0], {
 		runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
-		depth: "session_inventory", session_count: 1,
-		sessions: [{ session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048 }],
+		depth: "session_events", session_count: 1,
+		sessions: [{
+			session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048,
+			events: {
+				scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
+				first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+			},
+		}],
+		event_scan: { scanned_sessions: 1, session_limit: 3 },
 	});
 	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
-	assert.match(state.agent_activity.non_claims[0], /never read, copied, or forwarded/u);
+	assert.match(state.agent_activity.non_claims[0], /never surfaced, copied, or forwarded/u);
 
 	const page = await fetch(doc.url);
 	assert.equal(page.status, 200);

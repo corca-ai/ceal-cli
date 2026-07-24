@@ -45,8 +45,9 @@ export interface CealCommandRuntime {
 	// failures never change call behavior). See receipt-spool.ts.
 	recordReceiptSpool?: (entry: CealReceiptSpoolEntry) => void;
 	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
-	// Read-only agent-runtime transcript inventory (ceal-audit first stage;
-	// never reads transcript content). See agent-audit.ts.
+	// Read-only agent-runtime transcript inventory plus bounded normalized
+	// event summaries (ceal-audit; transcript text never surfaces). See
+	// agent-audit.ts.
 	inspectAgentAudit?: () => CealAgentAuditState;
 	runStableUpdate?: () => Promise<CealStableUpdateResult>;
 	/** Real executable path for managed-install observation (`ceal observe`). */
