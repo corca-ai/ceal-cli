@@ -171,9 +171,10 @@ function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSess
 // Codex stores one JSONL rollout per session under
 // ~/.codex/sessions/YYYY/MM/DD/rollout-<stamp>-<session-uuid>.jsonl. Only file
 // identity and stat metadata are consumed, and only the machine-generated
-// UUID surfaces as a session_ref. The date shards are walked newest-first so
-// an exhausted budget truncates the oldest history, keeping recency-derived
-// health honest under `inventory: partial`.
+// UUID surfaces as a session_ref. The date shards are walked newest-named
+// first so a truncated walk keeps the newest shards; health derives from
+// mtime, so its accuracy is guaranteed only for a complete walk — any
+// truncation is always declared as `inventory: partial`.
 function collectCodexSessions(sessionsRoot: string): { sessions: CealAgentAuditSession[]; partial: boolean } {
 	const sessions: CealAgentAuditSession[] = [];
 	const walk = { examined: 0, partial: false };
