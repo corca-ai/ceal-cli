@@ -1,6 +1,6 @@
 # Worker Static-Origin Install/Update Move
 
-Status: in progress (contract first; closeout ledger appended at slice end).
+Status: closed (source slice complete; publication remains an operator action).
 Source handoff: `corca-ai/ceal` `docs/handoff.md` Next Session item 4 — move
 worker install/update to its own static-origin prefix; do not use Gateway
 `releases/gateway/` or edit a Gateway copy.
@@ -71,3 +71,49 @@ release there.
 - `npm run check` clean.
 - Truth surfaces synced: README install section, installer comments, release
   workflow promotion comment.
+
+## Closeout Ledger
+
+- Implemented: `install-ceal.sh` stable resolution moved to the worker
+  static-origin pointer with release-set digest binding; anonymous downloads
+  moved to `releases/worker/<tag>/`; stable lane ignores `CEAL_GITHUB_TOKEN`;
+  explicit-tag authenticated GitHub lane retained for pre-promotion
+  maintainer verification. Commits `e3c18b2` (move) and `a17cfee` (review
+  fixes). `stable-update.ts` needed no change: `ceal update` re-runs the
+  release-staged installer with `CEAL_VERSION=stable`.
+- Verification: targeted `node --test test/worker-release-installer.test.mjs`
+  11/11 pass (~4.3 s) covering static pointer resolution, token-boundary
+  (no `api.github.com`, no `Authorization` in the stable lane), malformed/
+  empty/mismatched pointer rejection before install mutation, downgrade
+  guard via `CEAL_MINIMUM_VERSION`, legacy migration, darwin portable lane,
+  and the explicit-tag authenticated lane. Full gate `npm run check`
+  (build + all tests, 72 files' suites) exit 0, ~78 s twice (pre- and
+  post-review-fix). Gate debt: `npm run check` ~78 s is dominated by the
+  packed-consumer/native release tests, unchanged by this slice; targeted
+  iteration stayed on the 4 s installer test.
+- Lint Gate: not-detected (repo has no standing lint script; `npm run check`
+  is the declared gate and passed).
+- Truth Surface Sync: README install section, installer comment blocks,
+  release workflow promotion comment, and this contract now all state the
+  same layout including the rotated `stable/install-ceal.sh` bootstrap copy.
+- Boundary Ownership: owned-correctly. Worker distribution prefix and
+  installer are `ceal-cli`-owned; Gateway `releases/gateway/`, `cealctl`
+  manifest code, and Gateway compatibility copies were not read from,
+  written to, or copied.
+- Critique: bounded fresh-eye reviewer (read-only) confirmed shell
+  correctness and the token/digest security posture; its one must-fix
+  (bootstrap URL absent from the declared layout) and three cheap
+  improve-laters (stable-lane token gating, downgrade-guard test, pointer
+  grammar/empty-body tests) were applied in `a17cfee`. Remaining
+  improve-later accepted as-is: guard messages say "stable" even for the
+  hypothetical explicit-tag + `CEAL_MINIMUM_VERSION` caller (no real caller).
+- Residual Risks / Non-claims: nothing is published at
+  `https://ceal.borca.ai/releases/worker/` yet — stable install/update 404s
+  until an operator publishes a release set and rotates the pointer, and the
+  currently *installed* workers still carry the previous GitHub-lane
+  installer until the next signed release. This slice is source + local test
+  proof only: no tag, release publication, static-origin upload, signed
+  artifact, installed-client, Gateway, or provider claim. The stable pointer
+  itself is unsigned origin metadata (deferred decision recorded above).
+- Instance apply: not applicable (no Ceal instance consumes this repo's
+  worktree at runtime).
