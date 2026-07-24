@@ -163,6 +163,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.privacy.provider_contact, "none");
 	assert.deepEqual(state.privacy.receipt_spool_retention, { max_entries: 200, retention_ms: 30 * 24 * 60 * 60 * 1000 });
 	assert.ok(state.privacy.local_sources.some((source) => source.includes("client-session.json")));
+	assert.ok(state.privacy.local_sources.some((source) => source.includes("~/.codex/skills/ceal-guide")));
 	assert.ok(state.privacy.local_sources.some((source) => source.includes("~/.claude/projects")));
 	assert.match(state.privacy.transcript_handling, /never stored, rendered, or forwarded/u);
 
