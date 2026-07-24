@@ -1229,7 +1229,11 @@ async function withGateway(callback, responseFactory = null) {
 
 async function runBin(args, stdin, env = {}) {
 	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
-	const child = spawn(process.execPath, [bin, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
+	// Never let the real binary touch the developer's actual home: the CLI
+	// persists session/discovery state under $HOME/.ceal, so an un-overridden
+	// spawn would leak fixture data into the real store.
+	const isolatedHome = env.HOME === undefined ? mkdtempSync(path.join(tmpdir(), "ceal-bin-isolated-home-")) : null;
+	const child = spawn(process.execPath, [bin, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env, ...(isolatedHome ? { HOME: isolatedHome } : {}) } });
 	let stdout = "";
 	let stderr = "";
 	child.stdout.setEncoding("utf8");
@@ -1237,11 +1241,15 @@ async function runBin(args, stdin, env = {}) {
 	child.stdout.on("data", (chunk) => { stdout += chunk; });
 	child.stderr.on("data", (chunk) => { stderr += chunk; });
 	child.stdin.end(stdin);
-	const code = await new Promise((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", resolve);
-	});
-	return { code, stdout, stderr };
+	try {
+		const code = await new Promise((resolve, reject) => {
+			child.once("error", reject);
+			child.once("close", resolve);
+		});
+		return { code, stdout, stderr };
+	} finally {
+		if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
+	}
 }
 
 async function withEnrollmentGateway(callback) {

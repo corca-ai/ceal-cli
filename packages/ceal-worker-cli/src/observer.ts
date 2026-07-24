@@ -233,9 +233,12 @@ const OBSERVER_PAGE = `<!doctype html>
 <p class="muted">No admin surface, no provider credentials, no live refresh. Reload the page after running a live command to see newer cached state.</p>
 <div id="root">Loading local state…</div>
 <script>
+const fmt = (v) => Array.isArray(v) ? v.map(fmt).join(", ")
+  : (typeof v === "object" && v !== null) ? Object.entries(v).map(([k, x]) => k + ": " + fmt(x)).join(" \\u00b7 ")
+  : String(v);
 const rows = (pairs) => "<table>" + pairs
   .filter(([, v]) => v !== undefined && v !== null)
-  .map(([k, v]) => "<tr><th>" + esc(k) + "</th><td>" + esc(String(v)) + "</td></tr>").join("") + "</table>";
+  .map(([k, v]) => "<tr><th>" + esc(k) + "</th><td>" + esc(fmt(v)) + "</td></tr>").join("") + "</table>";
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
