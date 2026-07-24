@@ -9,7 +9,6 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildWorkerNativeArtifact, WorkerNativeArtifactError } from "./build-worker-native-artifact.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -31,9 +30,18 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
 	const stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-assets-"));
+	// The native builder needs build-time dependencies (esbuild/postject);
+	// loading it lazily keeps `merge` runnable on a dependency-free host.
+	let nativeErrorClass = null;
 	try {
+		let buildNative = dependencies.buildNative;
+		if (!buildNative) {
+			const nativeModule = await import("./build-worker-native-artifact.mjs");
+			buildNative = nativeModule.buildWorkerNativeArtifact;
+			nativeErrorClass = nativeModule.WorkerNativeArtifactError;
+		}
 		const nativeOut = path.join(stage, "native");
-		const native = await (dependencies.buildNative ?? buildWorkerNativeArtifact)({
+		const native = await buildNative({
 			outputDirectory: nativeOut,
 			gatewayHandoffArchive: options.gatewayHandoffArchive,
 			platform: options.platform,
@@ -99,7 +107,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		};
 	} catch (error) {
 		if (error instanceof WorkerReleaseAssetsError) throw error;
-		if (error instanceof WorkerNativeArtifactError) throw new WorkerReleaseAssetsError(error.code, error.message);
+		if (nativeErrorClass && error instanceof nativeErrorClass) throw new WorkerReleaseAssetsError(error.code, error.message);
 		throw new WorkerReleaseAssetsError("worker_release_assets_failed", "Could not compose worker release assets.");
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
