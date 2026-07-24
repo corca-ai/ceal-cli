@@ -450,6 +450,7 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"connector_route_failure",
 		"error_code",
 		"event_ref",
+		"gateway_elapsed_ms",
 		"grant_snapshot",
 		"instance_ref",
 		"membership_ref",
@@ -465,13 +466,14 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 		"request_id",
 		"schema_version",
 		"subject_ref",
-	], ["call", "connector_route_failure", "grant_snapshot"]);
+	], ["call", "connector_route_failure", "gateway_elapsed_ms", "grant_snapshot"]);
 	validateAuditEventIdentity(event, expectedRequest, targetRequestId);
 	validateAuditEventDecisions(event);
 	for (const field of ["event_ref", "membership_ref", "registration_ref", "client_ref", "subject_ref", "instance_ref"] as const) requireSafeRef(event[field]);
 	requireIntegerRange(event.membership_revision, 1, Number.MAX_SAFE_INTEGER);
 	requireIntegerRange(event.client_revision, 1, Number.MAX_SAFE_INTEGER);
 	validateAuditEventError(event);
+	if (event.gateway_elapsed_ms !== undefined) requireIntegerRange(event.gateway_elapsed_ms, 0, Number.MAX_SAFE_INTEGER);
 	validateAuditEventConsistency(event);
 	validateConnectorRouteFailure(event.connector_route_failure, event);
 	validateAuthorizationSnapshot(event.grant_snapshot, event);

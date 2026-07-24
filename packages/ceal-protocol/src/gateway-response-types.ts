@@ -261,6 +261,8 @@ export interface CealGatewayAuditEvent {
 	error_code: string | null;
 	/** Emitted only when the client negotiated `x-ceal-route-provenance: accept`. */
 	connector_route_failure?: CealGatewayConnectorRouteFailure;
+	/** Emitted only when the client negotiated `x-ceal-audit-timing: accept`. */
+	gateway_elapsed_ms?: number;
 	grant_snapshot?: CealGatewayAuthorizationSnapshot;
 	call?: CealGatewayAuditCallDetail;
 	proof_level: "host_decision";
