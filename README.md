@@ -134,10 +134,10 @@ it is not a worker-release builder.
 `.github/workflows/ceal-release.yml` is the worker-only release route: a
 `ceal-v*` tag builds the asset set per platform from the locked Gateway
 handoff archive, merges one exact inventory, signs every asset with cosign
-keyless, and publishes a GitHub prerelease. Promoting a prerelease to the
-stable lane (`CEAL_VERSION=stable` / `ceal update`) is a separate operator
-publication: upload the verified asset set to the worker static origin
-`releases/worker/<tag>/`, then rotate
+keyless, and publishes the exact bytes to the worker static origin. GitHub is
+the source and tag-bound OIDC signer identity; it is not a release artifact
+origin. A successful tag run promotes that verified release to the stable lane
+(`CEAL_VERSION=stable` / `ceal update`) by rotating
 `releases/worker/stable/ceal-worker-stable-release.json` last.
 The historical dual `install.sh`, `release:binaries`,
 `release:manifest`, bare `v*` tags, and
@@ -161,15 +161,19 @@ Worker distribution is the worker-owned static-origin prefix
 tag's `SHA256SUMS`, which the installer re-checks against the downloaded
 signed inventory). Promotion rotates that pointer together with the bootstrap
 copy `releases/worker/stable/install-ceal.sh` used above; the stable lane
-ignores `CEAL_GITHUB_TOKEN` and re-verifies every asset — including
-`install-ceal.sh` itself — from the versioned prefix. Until an operator
-publishes the first release set and
-rotates the stable pointer, these URLs 404: install an explicit published tag
-(`CEAL_VERSION=ceal-v0.65.0`) instead, or — as a maintainer verifying a
-private prerelease before promotion — download that release's
-`install-ceal.sh` with `gh` and pass `CEAL_GITHUB_TOKEN=$(gh auth token)` for
-the authenticated GitHub API lane (the token is sent only to
-`api.github.com`, never to the static origin). Supported platforms: `linux-arm64`,
+re-verifies every asset — including `install-ceal.sh` itself — from the
+versioned prefix. Until the first stable worker tag is published, these stable
+URLs 404; install an explicit published static tag instead:
+
+```sh
+curl -fsSL https://ceal.borca.ai/releases/worker/ceal-v0.65.2/install-ceal.sh \
+  | CEAL_VERSION=ceal-v0.65.2 sh
+```
+
+As with any `curl | sh` installer, this initial bootstrap deliberately trusts
+the TLS-authenticated release origin for the shell script. Cosign verification
+begins before any worker executable is accepted; the bootstrap script itself
+is re-verified as a signed versioned asset during installation. Supported platforms: `linux-arm64`,
 `linux-amd64`, `darwin-arm64`, `darwin-amd64`. The installer verifies every
 asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under

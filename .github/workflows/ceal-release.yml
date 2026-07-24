@@ -2,16 +2,13 @@ name: Ceal worker release
 
 # Worker-only release lane. The dual cealctl lane in cealctl-release.yml stays
 # frozen compatibility material; this workflow signs and publishes exactly the
-# worker asset inventory that install-ceal.sh verifies.
+# worker asset inventory that install-ceal.sh verifies to the Ceal release
+# origin. GitHub supplies source and OIDC signing identity, never release
+# artifact storage or the stable channel resolver.
 #
-# The tag push is the release approval: only maintainers can push ceal-v* tags
-# in this repository. Releases are created as prereleases; promoting one to the
-# stable lane (`ceal update` / CEAL_VERSION=stable) is a separate operator
-# publication to the worker static origin: upload the verified asset set to
-# https://ceal.borca.ai/releases/worker/<tag>/, then rotate
-# releases/worker/stable/ceal-worker-stable-release.json and the bootstrap
-# copy releases/worker/stable/install-ceal.sh last (install-ceal.sh resolves
-# stable there, not from the GitHub release list).
+# The tag push is the stable-release approval: only maintainers can push
+# ceal-v* tags in this repository. The immutable versioned object set is fully
+# read back and verified before one mutable stable pointer is advanced.
 
 on:
   push:
@@ -20,9 +17,19 @@ on:
 
 permissions: {}
 
+# Versioned objects are create-or-identical within this sole writer lane. The
+# group prevents two tag jobs from racing the public-404 -> first-write window;
+# stable movement has its own explicit rollback workflow.
+concurrency:
+  group: ceal-worker-release-origin
+  cancel-in-progress: false
+
 env:
   HANDOFF_RELEASE_TAG: gateway-handoff-v0.65.0
   HANDOFF_ARCHIVE: ceal-gateway-handoff-0.65.0.tar.gz
+  CEAL_RELEASE_ORIGIN: https://ceal.borca.ai/releases
+  CEAL_RELEASE_BUCKET: ceal-release
+  GATEWAY_HANDOFF_ORIGIN: https://ceal.borca.ai/releases/gateway-handoff
 
 jobs:
   build:
@@ -61,14 +68,12 @@ jobs:
       - name: Build and test source
         run: npm run check
       - name: Download the locked Gateway handoff archive
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/gateway-handoff"
-          gh release download "$HANDOFF_RELEASE_TAG" --repo "$GH_REPO" \
-            --pattern "$HANDOFF_ARCHIVE" --dir "$RUNNER_TEMP/gateway-handoff"
+          curl --fail --silent --show-error --location \
+            "$GATEWAY_HANDOFF_ORIGIN/$HANDOFF_RELEASE_TAG/$HANDOFF_ARCHIVE" \
+            --output "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE"
           expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("gateway-handoff-lock.json","utf8")).archive.sha256')"
           observed="$(sha256sum "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE" | cut -d' ' -f1)"
           [ "$expected" = "$observed" ] \
@@ -157,9 +162,12 @@ jobs:
   sign-and-publish:
     needs: assemble
     permissions:
-      contents: write
+      contents: read
       id-token: write
     runs-on: ubuntu-24.04
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_RELEASE_CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Download exact assembled release handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -186,13 +194,16 @@ jobs:
           done
       - name: Install cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
-      - name: Sign and publish one exact worker prerelease
+      - name: Sign, publish, and activate one exact stable worker release
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          [[ "$TAG" =~ ^ceal-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::Worker release tags must be canonical ceal-vMAJOR.MINOR.PATCH"; exit 1; }
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+            [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
+          done
           primary=(
             ceal-linux-arm64 ceal-linux-amd64
             ceal-worker-release-manifest-linux-arm64.json
@@ -205,50 +216,106 @@ jobs:
           done
           mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
 
-          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-            [ "$(gh release view "$TAG" --repo "$GH_REPO" --json isPrerelease --jq .isPrerelease)" = true ] \
-              || { echo "Existing release is not a prerelease; refusing to mutate a promoted release" >&2; exit 1; }
-          else
-            gh release create "$TAG" --repo "$GH_REPO" --prerelease --verify-tag \
-              --title "Ceal worker $TAG" \
-              --notes "Worker-only signed release. Install with install-ceal.sh (CEAL_VERSION=$TAG). This lane supersedes the legacy dual v* releases for worker installs; no npm publication, Gateway change, or provider action is part of this release."
-          fi
-
-          existing_inventory="$(mktemp)"
-          gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' > "$existing_inventory"
-          mapfile -t existing < <(sort "$existing_inventory")
-          if [ "${#existing[@]}" -gt 0 ]; then
-            if ! diff -u <(printf '%s\n' "${expected_sorted[@]}") <(printf '%s\n' "${existing[@]}"); then
-              echo "Release asset inventory is partial or unexpected; delete and recreate the prerelease after review, then rerun." >&2
-              exit 1
-            fi
-          else
-            for asset in "${primary[@]}"; do
-              cosign sign-blob --yes \
-                --output-signature "dist/$asset.sig" \
-                --output-certificate "dist/$asset.pem" \
-                "dist/$asset"
-            done
-            gh release upload "$TAG" --repo "$GH_REPO" dist/*
-          fi
-
-          rm -rf readback
-          mkdir readback
-          gh release download "$TAG" --repo "$GH_REPO" --dir readback
-          mapfile -t observed < <(find readback -maxdepth 1 -type f -printf '%f\n' | sort)
-          diff -u <(printf '%s\n' "${expected_sorted[@]}") <(printf '%s\n' "${observed[@]}")
-          identity="https://github.com/$GH_REPO/.github/workflows/ceal-release.yml@refs/tags/$TAG"
           for asset in "${primary[@]}"; do
-            cmp "dist/$asset" "readback/$asset"
+            cosign sign-blob --yes \
+              --output-signature "dist/$asset.sig" \
+              --output-certificate "dist/$asset.pem" \
+              "dist/$asset"
+          done
+
+          version_prefix="releases/worker/$TAG"
+          version_url="$CEAL_RELEASE_ORIGIN/worker/$TAG"
+          readback_dir="$RUNNER_TEMP/ceal-worker-release-readback"
+          mkdir -p "$readback_dir"
+          fetch_public() {
+            local url="$1"
+            local output="$2"
+            local http_code
+            http_code="$(curl --silent --show-error --location --output "$output" --write-out '%{http_code}' "${url}?readback=${GITHUB_SHA}-${RANDOM}")"
+            printf '%s' "$http_code"
+          }
+          put_immutable() {
+            local name="$1"
+            local source="dist/$name"
+            local deployed="$readback_dir/$name"
+            local http_code
+            http_code="$(fetch_public "$version_url/$name" "$deployed")"
+            case "$http_code" in
+              200) cmp "$source" "$deployed" ;;
+              404)
+                npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
+                  "$CEAL_RELEASE_BUCKET/$version_prefix/$name" --file "$source" --remote \
+                  --cache-control "public, max-age=31536000, immutable"
+                http_code="$(fetch_public "$version_url/$name" "$deployed")"
+                [ "$http_code" = 200 ] || { echo "::error::Expected public readback for $name, got HTTP $http_code"; exit 1; }
+                cmp "$source" "$deployed"
+                ;;
+              *) echo "::error::Unexpected immutable object readback HTTP $http_code for $name"; exit 1 ;;
+            esac
+          }
+          for name in "${expected_sorted[@]}"; do
+            put_immutable "$name"
+          done
+          mapfile -t observed < <(find "$readback_dir" -maxdepth 1 -type f -printf '%f\n' | sort)
+          diff -u <(printf '%s\n' "${expected_sorted[@]}") <(printf '%s\n' "${observed[@]}")
+          identity="https://github.com/corca-ai/ceal-cli/.github/workflows/ceal-release.yml@refs/tags/$TAG"
+          for asset in "${primary[@]}"; do
+            cmp "dist/$asset" "$readback_dir/$asset"
             cosign verify-blob \
-              --certificate "readback/$asset.pem" \
-              --signature "readback/$asset.sig" \
+              --certificate "$readback_dir/$asset.pem" \
+              --signature "$readback_dir/$asset.sig" \
               --certificate-identity "$identity" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              --certificate-github-workflow-repository "$GH_REPO" \
+              --certificate-github-workflow-repository "corca-ai/ceal-cli" \
               --certificate-github-workflow-ref "refs/tags/$TAG" \
-              "readback/$asset" >/dev/null
+              "$readback_dir/$asset" >/dev/null
           done
+
+          stable_dir="$RUNNER_TEMP/ceal-worker-stable"
+          mkdir -p "$stable_dir"
+          cp dist/install-ceal.sh "$stable_dir/install-ceal.sh"
+          release_set_sha="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+          printf '{"schema_version":"ceal.worker_stable_release.v1","tag":"%s","sha256sums_sha256":"%s"}\n' "$TAG" "$release_set_sha" > "$stable_dir/ceal-worker-stable-release.json"
+          stable_url="$CEAL_RELEASE_ORIGIN/worker/stable"
+          stable_readback="$RUNNER_TEMP/ceal-worker-stable-readback"
+          mkdir -p "$stable_readback"
+          current_pointer="$stable_readback/current-pointer.json"
+          current_status="$(fetch_public "$stable_url/ceal-worker-stable-release.json" "$current_pointer")"
+          case "$current_status" in
+            200)
+              node --input-type=module -e '
+                import { readFileSync } from "node:fs";
+                const pointer = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                const current = pointer?.tag;
+                const target = process.argv[2];
+                if (pointer?.schema_version !== "ceal.worker_stable_release.v1" || !/^[a-f0-9]{64}$/.test(pointer?.sha256sums_sha256 ?? "")) throw new Error("existing stable pointer is invalid");
+                const parse = (tag) => {
+                  const match = /^ceal-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(tag);
+                  if (!match) throw new Error("existing stable pointer is invalid");
+                  return match.slice(1).map(Number);
+                };
+                const left = parse(current); const right = parse(target);
+                for (let index = 0; index < 3; index += 1) {
+                  if (left[index] > right[index]) throw new Error("refusing to downgrade stable worker pointer");
+                  if (left[index] < right[index]) process.exit(0);
+                }
+              ' "$current_pointer" "$TAG"
+              ;;
+            404) ;;
+            *) echo "::error::Unexpected stable pointer readback HTTP $current_status"; exit 1 ;;
+          esac
+          npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
+            "$CEAL_RELEASE_BUCKET/releases/worker/stable/install-ceal.sh" \
+            --file "$stable_dir/install-ceal.sh" --remote --cache-control "no-cache, max-age=0"
+          bootstrap_status="$(fetch_public "$stable_url/install-ceal.sh" "$stable_readback/install-ceal.sh")"
+          [ "$bootstrap_status" = 200 ] || { echo "::error::Expected stable installer readback, got HTTP $bootstrap_status"; exit 1; }
+          cmp "$stable_dir/install-ceal.sh" "$stable_readback/install-ceal.sh"
+          npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
+            "$CEAL_RELEASE_BUCKET/releases/worker/stable/ceal-worker-stable-release.json" \
+            --file "$stable_dir/ceal-worker-stable-release.json" --remote --cache-control "no-cache, max-age=0"
+          pointer_status="$(fetch_public "$stable_url/ceal-worker-stable-release.json" "$stable_readback/ceal-worker-stable-release.json")"
+          [ "$pointer_status" = 200 ] || { echo "::error::Expected stable pointer readback, got HTTP $pointer_status"; exit 1; }
+          cmp "$stable_dir/ceal-worker-stable-release.json" "$stable_readback/ceal-worker-stable-release.json"
           {
             echo "## Ceal worker release evidence"
             echo
@@ -257,4 +324,5 @@ jobs:
             echo "- approved SHA256SUMS digest: $(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
             echo "- remote primary bytes: exact local match"
             echo "- remote signature identity: verified"
+            echo "- stable signed-inventory pointer: advanced after immutable artifact verification"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -102,10 +102,38 @@ test("worker release workflow signs only the worker inventory from the locked ar
 	assert.match(workflow, /build-worker-release-assets\.mjs merge/u);
 	assert.doesNotMatch(workflow, /cealctl-linux/u);
 	assert.doesNotMatch(workflow, /cealctl-guide/u);
-	assert.match(workflow, /--prerelease --verify-tag/u);
+	assert.match(workflow, /GATEWAY_HANDOFF_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases\/gateway-handoff/u);
+	assert.match(workflow, /\$GATEWAY_HANDOFF_ORIGIN\/\$HANDOFF_RELEASE_TAG\/\$HANDOFF_ARCHIVE/u);
+	assert.match(workflow, /CEAL_RELEASE_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases/u);
+	assert.match(workflow, /concurrency:\n  group: ceal-worker-release-origin\n  cancel-in-progress: false/u);
+	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
+	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_API_TOKEN/u);
+	assert.match(workflow, /wrangler r2 object put[\s\S]+--remote/u);
+	assert.match(workflow, /releases\/worker\/stable\/ceal-worker-stable-release[.]json/u);
+	assert.match(workflow, /ceal[.]worker_stable_release[.]v1/u);
+	assert.match(workflow, /sha256sums_sha256/u);
+	assert.match(workflow, /stable signed-inventory pointer: advanced after immutable artifact verification/u);
+	assert.doesNotMatch(workflow, /gh release/u);
+	assert.doesNotMatch(workflow, /contents: write/u);
 	assert.match(workflow, /ceal-release\.yml@refs\/tags\/\$TAG/u);
 	assert.match(workflow, /id-token: write/u);
 	assert.match(workflow, /cosign sign-blob --yes/u);
+});
+
+test("worker stable rollback re-verifies an immutable public tag before moving the pointer", () => {
+	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-worker-stable-rollback.yml"), "utf8");
+	assert.match(workflow, /workflow_dispatch:/u);
+	assert.match(workflow, /Type ROLLBACK to replace the stable pointer/u);
+	assert.match(workflow, /inputs[.]confirmation == 'ROLLBACK'/u);
+	assert.match(workflow, /concurrency:\n  group: ceal-worker-release-origin\n  cancel-in-progress: false/u);
+	assert.match(workflow, /sha256sum -c SHA256SUMS/u);
+	assert.match(workflow, /cosign verify-blob/u);
+	assert.doesNotMatch(workflow, /cosign sign-blob|gh release/u);
+	assert.match(workflow, /wrangler r2 object put[\s\S]+--remote/u);
+	const publicProofIndex = workflow.indexOf("cosign verify-blob");
+	const pointerAdvanceIndex = workflow.indexOf('releases/worker/stable/ceal-worker-stable-release.json');
+	assert.ok(publicProofIndex >= 0, "rollback must verify immutable public signatures");
+	assert.ok(pointerAdvanceIndex > publicProofIndex, "rollback must move stable only after immutable public proof");
 });
 
 function fakeNativeBuild(platform, version) {

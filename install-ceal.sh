@@ -3,8 +3,10 @@ set -eu
 
 # Worker-only installer.  This deliberately has no operator role or cealctl
 # compatibility path: it can change only the ceal link and .ceal-cli/worker.
-REPO="corca-ai/ceal-cli"
-STATIC_ORIGIN="https://ceal.borca.ai/releases/worker"
+# The published-worker origin is separate from every Gateway control endpoint.
+# GitHub remains the tag-bound OIDC signer identity, not an artifact origin.
+RELEASE_ORIGIN="${CEAL_RELEASE_ORIGIN:-https://ceal.borca.ai/releases}"
+WORKER_RELEASE_ORIGIN="$RELEASE_ORIGIN/worker"
 VERSION="${CEAL_VERSION:-}"
 STABLE_RELEASE_SET_SHA=""
 INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
@@ -75,7 +77,7 @@ bootstrap_cosign() {
   esac
   cosign_dir="$TMP_DIR/cosign-bootstrap"
   mkdir "$cosign_dir" || fail "Could not create the ephemeral cosign bootstrap directory"
-  cosign_url="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-$PLATFORM"
+  cosign_url="$RELEASE_ORIGIN/tooling/cosign/$COSIGN_VERSION/cosign-$PLATFORM"
   curl -fsSL "$cosign_url" -o "$cosign_dir/cosign" || fail "Could not download pinned cosign $COSIGN_VERSION"
   [ "$(sha256_of "$cosign_dir/cosign")" = "$cosign_sha256" ] || fail "Pinned cosign $COSIGN_VERSION checksum mismatch; refusing to use it"
   chmod 755 "$cosign_dir/cosign"
@@ -84,62 +86,18 @@ bootstrap_cosign() {
 
 is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'; }
 
-# Anonymous distribution is the worker-owned static origin: versioned assets
-# live under $STATIC_ORIGIN/<tag>/ and stable selection reads the stable
-# pointer there.  The authenticated GitHub API lane remains only so a
-# maintainer can verify a private prerelease with an explicit tag before
-# promotion; CEAL_GITHUB_TOKEN resolves each asset id from the release
-# inventory fetched once per run.  The bearer token is sent only to
-# api.github.com, never to the static origin, and the stable lane ignores it
-# entirely: a stable-resolved release always downloads from the static origin.
-auth_curl() {
-  if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then curl -fsSL -H "Authorization: Bearer $CEAL_GITHUB_TOKEN" "$@"
-  else curl -fsSL "$@"; fi
-}
-
-fetch_release_inventory() {
-  [ -n "${CEAL_GITHUB_TOKEN:-}" ] || return 0
-  auth_curl "https://api.github.com/repos/$REPO/releases/tags/$VERSION" -o "$TMP_DIR/release-inventory.json" \
-    || fail "Could not read the authenticated release inventory for $VERSION"
-}
-
-release_asset_id() {
-  python3 - "$TMP_DIR/release-inventory.json" "$1" <<'PY'
-import json
-import sys
-
-try:
-    release = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
-    sys.exit(1)
-assets = release.get("assets") if isinstance(release, dict) else None
-for asset in assets if isinstance(assets, list) else []:
-    if isinstance(asset, dict) and asset.get("name") == sys.argv[2] and isinstance(asset.get("id"), int):
-        print(asset["id"])
-        sys.exit(0)
-sys.exit(1)
-PY
-}
-
 download_asset() {
   download_name="$1"
-  if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then
-    download_asset_id="$(release_asset_id "$download_name")" || fail "Signed release $VERSION does not contain the asset $download_name"
-    auth_curl -H "Accept: application/octet-stream" "https://api.github.com/repos/$REPO/releases/assets/$download_asset_id" -o "$TMP_DIR/$download_name"
-  else
-    curl -fsSL "$BASE_URL/$download_name" -o "$TMP_DIR/$download_name"
-  fi
+  curl -fsSL "$BASE_URL/$download_name" -o "$TMP_DIR/$download_name" \
+    || fail "Could not download signed worker asset $download_name"
 }
 
-# Stable selection is the worker-owned static-origin pointer, not a GitHub
-# release list: an operator publishes each signed release set under
-# $STATIC_ORIGIN/<tag>/ and rotates stable/ceal-worker-stable-release.json
-# last.  The pointer can only select a genuinely signed release: every asset
-# is still verified against its exact tag OIDC identity below, and the
-# pointer digest must match the downloaded signed SHA256SUMS bytes.
+# Stable selection is a worker-owned static-origin pointer. It pins both the
+# immutable tag and its signed SHA256SUMS bytes; every asset is then checked
+# against the exact tag-bound OIDC identity below.
 resolve_stable_release() {
-  curl -fsSL "$STATIC_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
-    || fail "Could not resolve the worker stable release pointer from $STATIC_ORIGIN/stable/"
+  curl -fsSL "$WORKER_RELEASE_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
+    || fail "Could not resolve the worker stable release pointer"
   stable_resolved="$(python3 - "$TMP_DIR/stable-release.json" <<'PY'
 import json
 import re
@@ -178,10 +136,10 @@ version_is_older() {
 }
 
 verify_signature() {
-  asset="$1"; identity="https://github.com/$REPO/.github/workflows/$WORKFLOW_FILE@refs/tags/$VERSION"
+  asset="$1"; identity="https://github.com/corca-ai/ceal-cli/.github/workflows/$WORKFLOW_FILE@refs/tags/$VERSION"
   cosign verify-blob --certificate "$TMP_DIR/$asset.pem" --signature "$TMP_DIR/$asset.sig" \
     --certificate-identity "$identity" --certificate-oidc-issuer "$ISSUER" \
-    --certificate-github-workflow-repository "$REPO" \
+    --certificate-github-workflow-repository "corca-ai/ceal-cli" \
     --certificate-github-workflow-ref "refs/tags/$VERSION" "$TMP_DIR/$asset" >/dev/null
 }
 
@@ -316,13 +274,12 @@ probe_mv_t
 bootstrap_cosign
 need_sha256
 for tool in cmp curl cosign grep python3 sed sort uniq wc uname mktemp readlink; do need "$tool"; done
-if [ "$VERSION" = stable ]; then resolve_stable_release; CEAL_GITHUB_TOKEN=""; fi
+if [ "$VERSION" = stable ]; then resolve_stable_release; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
   version_is_older "$VERSION" "$CEAL_MINIMUM_VERSION" && fail "Latest stable Ceal worker release is older than the installed worker release"
 fi
-BASE_URL="$STATIC_ORIGIN/$VERSION"
-fetch_release_inventory
+BASE_URL="$WORKER_RELEASE_ORIGIN/$VERSION"
 if [ ! -e "$INSTALL_DIR" ]; then (umask 077; mkdir -p "$INSTALL_DIR"); elif [ -L "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then fail "Install directory must be a regular directory"; fi
 STATE_ROOT="$INSTALL_DIR/.ceal-cli"; [ ! -e "$STATE_ROOT" ] && (umask 077; mkdir "$STATE_ROOT")
 [ -d "$STATE_ROOT" ] && [ ! -L "$STATE_ROOT" ] || fail "Ceal worker state directory must be a regular directory"

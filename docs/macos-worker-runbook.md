@@ -5,8 +5,9 @@ checkout instead of macOS CI runners, to control runner cost while the lane
 stabilizes. The `ceal-release.yml` matrix keeps the darwin entries commented
 for the later CI cutover.
 
-Prerequisites on the Mac: Node `>=22.19.0`, Xcode command line tools
-(`codesign`), and `gh` authenticated for `corca-ai/ceal-cli`.
+Prerequisites on the Mac: Node `>=22.19.0` and Xcode command line tools
+(`codesign`). The release archive is fetched from the static Ceal release
+origin; a GitHub Release credential is not involved.
 
 ## 1. Build and check from a clean checkout
 
@@ -28,12 +29,12 @@ postject injection (`--macho-segment-name NODE_SEA`), and ad-hoc re-signs it.
 ## 2. Obtain the locked Gateway handoff archive
 
 The only consumable Protocol input is the archive pinned by
-`gateway-handoff-lock.json`. Download it from the repository's
-`gateway-handoff-v0.65.0` release and verify its digest:
+`gateway-handoff-lock.json`. Download the static, versioned archive and
+verify its digest:
 
 ```sh
-gh release download gateway-handoff-v0.65.0 --repo corca-ai/ceal-cli \
-  --pattern 'ceal-gateway-handoff-0.65.0.tar.gz' --dir "$HOME/Downloads"
+curl -fsSLo "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz" \
+  https://ceal.borca.ai/releases/gateway-handoff/gateway-handoff-v0.65.0/ceal-gateway-handoff-0.65.0.tar.gz
 shasum -a 256 "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz"
 # must equal archive.sha256 in gateway-handoff-lock.json
 ```

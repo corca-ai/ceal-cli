@@ -1,0 +1,106 @@
+name: Ceal worker stable rollback
+
+# This never rebuilds, signs, or changes a versioned object. It moves the
+# mutable worker pointer only after re-verifying the selected immutable public
+# release inventory. The literal confirmation keeps rollback distinct from a
+# tag-triggered release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Previously published canonical worker tag (ceal-vMAJOR.MINOR.PATCH)"
+        required: true
+        type: string
+      confirmation:
+        description: "Type ROLLBACK to replace the stable pointer"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ceal-worker-release-origin
+  cancel-in-progress: false
+
+env:
+  CEAL_RELEASE_ORIGIN: https://ceal.borca.ai/releases
+  CEAL_RELEASE_BUCKET: ceal-release
+
+jobs:
+  rollback:
+    if: ${{ inputs.confirmation == 'ROLLBACK' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_RELEASE_CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+      - name: Re-verify an immutable worker release, then move stable
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^ceal-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::Worker rollback tag must be canonical ceal-vMAJOR.MINOR.PATCH"; exit 1; }
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+            [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
+          done
+          primary=(
+            ceal-linux-arm64 ceal-linux-amd64
+            ceal-worker-release-manifest-linux-arm64.json
+            ceal-worker-release-manifest-linux-amd64.json
+            ceal-guide-SKILL.md THIRD_PARTY_NOTICES.txt SHA256SUMS install-ceal.sh
+          )
+          readback_dir="$RUNNER_TEMP/ceal-worker-rollback-readback"
+          mkdir -p "$readback_dir"
+          version_url="$CEAL_RELEASE_ORIGIN/worker/$TAG"
+          for asset in "${primary[@]}"; do
+            curl --fail --silent --show-error --location "$version_url/$asset" --output "$readback_dir/$asset"
+            curl --fail --silent --show-error --location "$version_url/$asset.sig" --output "$readback_dir/$asset.sig"
+            curl --fail --silent --show-error --location "$version_url/$asset.pem" --output "$readback_dir/$asset.pem"
+          done
+          (
+            cd "$readback_dir"
+            sha256sum -c SHA256SUMS
+          )
+          identity="https://github.com/corca-ai/ceal-cli/.github/workflows/ceal-release.yml@refs/tags/$TAG"
+          for asset in "${primary[@]}"; do
+            cosign verify-blob \
+              --certificate "$readback_dir/$asset.pem" \
+              --signature "$readback_dir/$asset.sig" \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-github-workflow-repository "corca-ai/ceal-cli" \
+              --certificate-github-workflow-ref "refs/tags/$TAG" \
+              "$readback_dir/$asset" >/dev/null
+          done
+          stable_dir="$RUNNER_TEMP/ceal-worker-stable"
+          mkdir -p "$stable_dir"
+          cp "$readback_dir/install-ceal.sh" "$stable_dir/install-ceal.sh"
+          release_set_sha="$(sha256sum "$readback_dir/SHA256SUMS" | cut -d' ' -f1)"
+          printf '{"schema_version":"ceal.worker_stable_release.v1","tag":"%s","sha256sums_sha256":"%s"}\n' "$TAG" "$release_set_sha" > "$stable_dir/ceal-worker-stable-release.json"
+          npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
+            "$CEAL_RELEASE_BUCKET/releases/worker/stable/install-ceal.sh" \
+            --file "$stable_dir/install-ceal.sh" --remote --cache-control "no-cache, max-age=0"
+          curl --fail --silent --show-error --location \
+            "$CEAL_RELEASE_ORIGIN/worker/stable/install-ceal.sh?readback=${GITHUB_SHA}-${RANDOM}" \
+            --output "$stable_dir/install-ceal-readback.sh"
+          cmp "$stable_dir/install-ceal.sh" "$stable_dir/install-ceal-readback.sh"
+          npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
+            "$CEAL_RELEASE_BUCKET/releases/worker/stable/ceal-worker-stable-release.json" \
+            --file "$stable_dir/ceal-worker-stable-release.json" --remote --cache-control "no-cache, max-age=0"
+          curl --fail --silent --show-error --location \
+            "$CEAL_RELEASE_ORIGIN/worker/stable/ceal-worker-stable-release.json?readback=${GITHUB_SHA}-${RANDOM}" \
+            --output "$stable_dir/ceal-worker-stable-release-readback.json"
+          cmp "$stable_dir/ceal-worker-stable-release.json" "$stable_dir/ceal-worker-stable-release-readback.json"
+          {
+            echo "## Ceal worker stable rollback evidence"
+            echo
+            echo "- selected immutable tag: $TAG"
+            echo "- public SHA256SUMS inventory: verified"
+            echo "- public OIDC signatures: verified"
+            echo "- stable pointer: moved after immutable public proof"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -38,14 +38,14 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 test("worker stable resolver follows the worker static-origin stable pointer", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeStablePointer(release);
-		const headerLog = path.join(path.dirname(log), "curl-fetches.log");
-		const result = run({ install, release, tools, log, version: "stable", headerLog });
+		const urlLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: "stable", urlLog });
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.match(readFileSync(log, "utf8"), /refs\/tags\/ceal-v0[.]65[.]0/u);
-		const fetches = readFileSync(headerLog, "utf8");
-		assert.match(fetches, /^https:\/\/ceal[.]borca[.]ai\/releases\/worker\/stable\/ceal-worker-stable-release[.]json$/mu);
-		assert.match(fetches, /^https:\/\/ceal[.]borca[.]ai\/releases\/worker\/ceal-v0[.]65[.]0\/ceal-linux-arm64$/mu);
+		const fetches = readFileSync(urlLog, "utf8");
+		assert.match(fetches, /^https:\/\/release[.]example[.]test\/releases\/worker\/stable\/ceal-worker-stable-release[.]json$/mu);
+		assert.match(fetches, /^https:\/\/release[.]example[.]test\/releases\/worker\/ceal-v0[.]65[.]0\/ceal-linux-arm64$/mu);
 		assert.doesNotMatch(fetches, /api[.]github[.]com/u);
 		assert.doesNotMatch(fetches, /Authorization/u);
 	});
@@ -54,12 +54,26 @@ test("worker stable resolver follows the worker static-origin stable pointer", (
 test("worker stable lane ignores the GitHub token and stays on the static origin", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeStablePointer(release);
-		const headerLog = path.join(path.dirname(log), "curl-fetches.log");
-		const result = run({ install, release, tools, log, version: "stable", token: "fake-token", headerLog });
+		const urlLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: "stable", token: "fake-token", urlLog });
 		assert.equal(result.status, 0, result.stderr);
-		const fetches = readFileSync(headerLog, "utf8");
+		const fetches = readFileSync(urlLog, "utf8");
 		assert.doesNotMatch(fetches, /api[.]github[.]com/u);
 		assert.doesNotMatch(fetches, /Authorization/u);
+	});
+});
+
+test("worker installer bootstraps missing cosign only from the static release origin", () => {
+	withFixture(({ install, release, tools, log }) => {
+		rmSync(path.join(tools, "cosign"));
+		writeFileSync(path.join(release, "cosign-linux-arm64"), "not the pinned cosign binary\n");
+		const urlLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: TAG, restrictedPath: restrictedTools(tools), urlLog });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /Pinned cosign v2[.]6[.]4 checksum mismatch/u);
+		const fetches = readFileSync(urlLog, "utf8");
+		assert.match(fetches, /^https:\/\/release[.]example[.]test\/releases\/tooling\/cosign\/v2[.]6[.]4\/cosign-linux-arm64$/mu);
+		assert.doesNotMatch(fetches, /github[.]com/u);
 	});
 });
 
@@ -161,23 +175,15 @@ test("worker installer rejects a signed release that skips this platform", () =>
 	});
 });
 
-test("worker installer downloads private release assets through the authenticated API", () => {
+test("worker installer downloads explicit tags only from the static release origin", () => {
 	withFixture(({ install, release, tools, log }) => {
-		const inventory = stageAssetInventory(release);
-		const headerLog = path.join(path.dirname(log), "curl-headers.log");
-		const result = run({ install, release, tools, log, version: TAG, token: "fake-token", inventory, headerLog });
+		const urlLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: TAG, token: "fake-token", urlLog });
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
-		const headers = readFileSync(headerLog, "utf8");
-		assert.match(headers, /Authorization: Bearer fake-token/u);
-		assert.match(headers, /Accept: application\/octet-stream/u);
-	});
-	withFixture(({ install, release, tools, log }) => {
-		const inventory = JSON.stringify({ assets: [{ name: "SHA256SUMS", id: 1 }] });
-		const result = run({ install, release, tools, log, version: TAG, token: "fake-token", inventory });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /does not contain the asset/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
+		const fetches = readFileSync(urlLog, "utf8");
+		assert.match(fetches, /^https:\/\/release[.]example[.]test\/releases\/worker\/ceal-v0[.]65[.]0\/SHA256SUMS$/mu);
+		assert.doesNotMatch(fetches, /github[.]com|Authorization/u);
 	});
 });
 
@@ -239,7 +245,7 @@ test("real native worker installs through the worker lane and performs an option
 
 		const updated = spawnSync(installed, ["update"], {
 			encoding: "utf8",
-			env: { ...process.env, COSIGN_LOG: log, FAKE_RELEASE_DIR: release, PATH: `${tools}:${process.env.PATH}` },
+			env: { ...process.env, CEAL_RELEASE_ORIGIN: "https://release.example.test/releases", COSIGN_LOG: log, FAKE_RELEASE_DIR: release, PATH: `${tools}:${process.env.PATH}` },
 		});
 		assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
 		const payload = parse(updated.stdout);
@@ -289,30 +295,18 @@ function withFixture(callback) {
 		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac");
 		writeTool(path.join(tools, "cosign"), "printf '%s\\n' \"$*\" >> \"$COSIGN_LOG\"\n[ -z \"${COSIGN_FAIL:-}\" ] || exit 1");
 		writeTool(path.join(tools, "curl"), [
-			"url=''", "out=''", "headers=''",
-			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; -H) shift; headers=\"$headers | $1\" ;; http*) url=\"$1\" ;; esac; shift; done",
-			"printf '%s%s\\n' \"$url\" \"$headers\" >> \"${CURL_HEADER_LOG:-/dev/null}\"",
-			"case \"$url\" in",
-			"  *api.github.com*/releases/tags/*) printf '%s' \"${FAKE_RELEASE_INVENTORY-}\" > \"$out\"; exit 0 ;;",
-			"  *api.github.com*/releases/assets/*) cp \"$FAKE_RELEASE_DIR/asset-${url##*/}\" \"$out\"; exit 0 ;;",
-			"esac",
+			"url=''", "out=''",
+			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; http*) url=\"$1\" ;; esac; shift; done",
+			"printf '%s\\n' \"$url\" >> \"${CURL_URL_LOG:-/dev/null}\"",
+			"case \"$url\" in *tooling/cosign/v2.6.4/cosign-linux-arm64) cp \"$FAKE_RELEASE_DIR/cosign-linux-arm64\" \"$out\"; exit 0 ;; *github.com*|*api.github.com*) exit 97 ;; esac",
 			"[ -n \"$out\" ] || exit 2", "cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
 		].join("\n"));
 		return callback({ install, release, tools, log });
 	} finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", inventory = "{}", minimumVersion = "", headerLog = "" }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, CEAL_MINIMUM_VERSION: minimumVersion, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
-}
-
-// Mirrors the private-repo shape: every asset is reachable only through its
-// numeric API asset id, never the anonymous browser download URL.
-function stageAssetInventory(release) {
-	const names = readdirSync(release).filter((name) => !name.startsWith("asset-"));
-	const assets = names.map((name, index) => ({ name, id: index + 1 }));
-	for (const asset of assets) copyFileSync(path.join(release, asset.name), path.join(release, `asset-${asset.id}`));
-	return JSON.stringify({ assets });
+function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", minimumVersion = "", urlLog = "" }) {
+	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, CEAL_RELEASE_ORIGIN: "https://release.example.test/releases", CEAL_MINIMUM_VERSION: minimumVersion, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_URL_LOG: urlLog, FAKE_RELEASE_DIR: release, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
 }
 
 // A darwin host has shasum but neither sha256sum nor flock; the restricted
