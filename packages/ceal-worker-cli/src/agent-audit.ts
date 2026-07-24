@@ -10,8 +10,9 @@ import path from "node:path";
 // inventory lists transcript files by identity, recency, and size; the
 // newest few sessions additionally get a bounded event summary whose
 // redaction is structural: lines are parsed locally, but only fixed
-// vocabulary kinds, integer counts, and re-serialized timestamps leave the
-// parser — no transcript field value is ever echoed. A permission or read
+// vocabulary kinds, integer counts (including runtime-supplied token
+// totals), and re-serialized timestamps leave the parser — no transcript
+// field value is ever echoed. A permission or read
 // failure reports `unknown` (inventory) or `unreadable` (events), never a
 // fabricated result; an unimplemented adapter would report `unsupported`,
 // never silence. Neither adapter's coverage claim generalizes to the other.
@@ -52,6 +53,23 @@ export type CealAgentAuditEventKind =
 	| "session_state"
 	| "other";
 
+/**
+ * Per-session token figures, present only when the runtime's own transcript
+ * supplied usage integers. `source` names how the runtime supplied them and
+ * `completeness` whether the bounded scan covered the whole transcript; a
+ * field the runtime never supplied is omitted, not zero. Field semantics
+ * (e.g. cache accounting inside input tokens) stay runtime-defined.
+ */
+export interface CealAgentAuditTokenUsage {
+	source: "event_usage_sum" | "runtime_cumulative_last";
+	completeness: "full_transcript" | "scanned_prefix";
+	usageEvents: number;
+	inputTokens?: number;
+	outputTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+}
+
 export interface CealAgentAuditSessionEvents {
 	scan: "complete" | "truncated";
 	eventCount: number;
@@ -59,6 +77,7 @@ export interface CealAgentAuditSessionEvents {
 	unparsedLines: number;
 	firstEventAt?: number;
 	lastScannedEventAt?: number;
+	tokenUsage?: CealAgentAuditTokenUsage;
 }
 
 export interface CealAgentAuditSession {
@@ -120,8 +139,8 @@ export function inspectAgentSessionEvents(
 	const root = home && path.isAbsolute(home) ? home : null;
 	if (!root) return { status: "unreadable" };
 	const adapter = runtime === "claude"
-		? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, classify: classifyClaudeLine }
-		: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, classify: classifyCodexLine };
+		? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
+		: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
 	try {
 		lstatSync(adapter.directory);
 	} catch (error) {
@@ -140,12 +159,13 @@ export function inspectAgentSessionEvents(
 	// A duplicated ref across shards resolves to the newest transcript.
 	matches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 	const { transcriptPath, ...session } = matches[0];
-	return { status: "scanned", session: { ...session, events: scanSessionEvents(transcriptPath, adapter.classify) } };
+	return { status: "scanned", session: { ...session, events: scanSessionEvents(transcriptPath, adapter.lines) } };
 }
 
 export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 	"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
 	"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only.",
+	"Token figures are runtime-supplied transcript accounting surfaced as integers with explicit source and scan completeness; field semantics are runtime-defined, figures are not comparable across runtimes, and this is not a cost or billing claim. No latency figure is shown because neither runtime supplies one.",
 ]);
 
 export function inspectAgentAudit(home: string | undefined, now: number): CealAgentAuditState {
@@ -162,12 +182,12 @@ export function inspectAgentAudit(home: string | undefined, now: number): CealAg
 
 function observeClaudeAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
 	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CLAUDE_ROOT, "projects") : null;
-	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, classifyClaudeLine, now);
+	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, CLAUDE_LINE_ADAPTER, now);
 }
 
 function observeCodexAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
 	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CODEX_ROOT, "sessions") : null;
-	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, classifyCodexLine, now);
+	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, CODEX_LINE_ADAPTER, now);
 }
 
 /** Inventory row plus the private transcript path consumed by the event scan. */
@@ -180,7 +200,7 @@ function observeTranscriptAdapter(
 	root: string,
 	sessionsDirectory: string | null,
 	collect: (directory: string) => { sessions: CollectedSession[]; partial: boolean },
-	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
+	lines: TranscriptLineAdapter,
 	now: number,
 ): CealAgentAuditAdapterState {
 	const base: CealAgentAuditAdapterState = {
@@ -216,7 +236,7 @@ function observeTranscriptAdapter(
 	}
 	sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 	const rendered = sessions.slice(0, RENDERED_SESSIONS).map(({ transcriptPath, ...session }, index) =>
-		index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, classify) } : session);
+		index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session);
 	const scannedSessions = rendered.filter((session) => typeof session.events === "object").length;
 	return {
 		...base,
@@ -231,13 +251,28 @@ function observeTranscriptAdapter(
 	};
 }
 
+// How one runtime's transcript lines become normalized metadata: `classify`
+// maps a line to a fixed-vocabulary kind; `readUsage` extracts runtime-
+// supplied token integers (with an optional in-function dedupe key for
+// runtimes that repeat one API turn's usage across records); `usageSource`
+// declares whether readings sum per event or the last cumulative one wins.
+interface TranscriptLineAdapter {
+	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind;
+	readUsage: (line: Record<string, unknown>) => { reading: TokenUsageReading; dedupeKey?: string } | null;
+	usageSource: CealAgentAuditTokenUsage["source"];
+}
+
+type TokenUsageReading = Pick<CealAgentAuditTokenUsage, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">;
+
+const USAGE_FIELD_KEYS = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"] as const;
+
 // Bounded, structurally redacting event scan of one transcript. The file is
 // re-opened with O_NOFOLLOW and re-checked as a regular file so the
 // inventory-time symlink refusal cannot be raced. Only classified kind
 // counts, integer totals, and parsed epoch timestamps leave this function.
 function scanSessionEvents(
 	transcriptPath: string,
-	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
+	adapter: TranscriptLineAdapter,
 ): CealAgentAuditSessionEvents | "unreadable" {
 	let descriptor: number;
 	try {
@@ -255,7 +290,7 @@ function scanSessionEvents(
 		// A byte-truncated read ends in a partial line; scanning it would
 		// misreport a real event as unparsed.
 		if (truncatedBytes) lines.pop();
-		return summarizeEventLines(lines.filter((line) => line.trim() !== ""), truncatedBytes, classify);
+		return summarizeEventLines(lines.filter((line) => line.trim() !== ""), truncatedBytes, adapter);
 	} catch {
 		return "unreadable";
 	} finally {
@@ -266,13 +301,18 @@ function scanSessionEvents(
 function summarizeEventLines(
 	lines: string[],
 	truncatedBytes: boolean,
-	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind,
+	adapter: TranscriptLineAdapter,
 ): CealAgentAuditSessionEvents {
 	const kinds: Partial<Record<CealAgentAuditEventKind, number>> = {};
 	let eventCount = 0;
 	let unparsedLines = 0;
 	let firstEventAt: number | undefined;
 	let lastScannedEventAt: number | undefined;
+	// Dedupe keys are transcript-supplied identifiers consumed in-function only;
+	// they never leave the parser.
+	const seenUsageKeys = new Set<string>();
+	let usageEvents = 0;
+	let usageTotals: TokenUsageReading | undefined;
 	for (const line of lines.slice(0, MAX_EVENT_LINES)) {
 		let parsed: unknown;
 		try {
@@ -286,9 +326,17 @@ function summarizeEventLines(
 			continue;
 		}
 		const record = parsed as Record<string, unknown>;
-		const kind = classify(record);
+		const kind = adapter.classify(record);
 		kinds[kind] = (kinds[kind] ?? 0) + 1;
 		eventCount += 1;
+		const usage = adapter.readUsage(record);
+		if (usage && (usage.dedupeKey === undefined || !seenUsageKeys.has(usage.dedupeKey))) {
+			if (usage.dedupeKey !== undefined) seenUsageKeys.add(usage.dedupeKey);
+			usageEvents += 1;
+			usageTotals = adapter.usageSource === "runtime_cumulative_last"
+				? usage.reading
+				: addUsageReadings(usageTotals, usage.reading);
+		}
 		const timestamp = typeof record.timestamp === "string" && ISO_INSTANT.test(record.timestamp)
 			? Date.parse(record.timestamp)
 			: Number.NaN;
@@ -297,14 +345,50 @@ function summarizeEventLines(
 			lastScannedEventAt = lastScannedEventAt === undefined ? timestamp : Math.max(lastScannedEventAt, timestamp);
 		}
 	}
+	const scan = truncatedBytes || lines.length > MAX_EVENT_LINES ? "truncated" : "complete";
 	return {
-		scan: truncatedBytes || lines.length > MAX_EVENT_LINES ? "truncated" : "complete",
+		scan,
 		eventCount,
 		kinds,
 		unparsedLines,
 		...(firstEventAt === undefined ? {} : { firstEventAt }),
 		...(lastScannedEventAt === undefined ? {} : { lastScannedEventAt }),
+		// Omitted, not zero: a session whose runtime supplied no usage shows no
+		// token figures at all.
+		...(usageTotals === undefined ? {} : {
+			tokenUsage: {
+				source: adapter.usageSource,
+				completeness: scan === "complete" ? "full_transcript" as const : "scanned_prefix" as const,
+				usageEvents,
+				...usageTotals,
+			},
+		}),
 	};
+}
+
+function addUsageReadings(totals: TokenUsageReading | undefined, reading: TokenUsageReading): TokenUsageReading {
+	const sum: TokenUsageReading = { ...totals };
+	for (const field of USAGE_FIELD_KEYS) {
+		const value = reading[field];
+		if (value !== undefined) sum[field] = (sum[field] ?? 0) + value;
+	}
+	return sum;
+}
+
+// Reads only allowlisted integer fields into the normalized reading; anything
+// non-integer or negative is ignored, never rendered. Returns null when the
+// source object supplied no usable field, so absence stays omitted-not-zero.
+function usageReading(source: Record<string, unknown>, fields: Record<keyof TokenUsageReading, string>): TokenUsageReading | null {
+	const reading: TokenUsageReading = {};
+	let present = false;
+	for (const field of USAGE_FIELD_KEYS) {
+		const value = source[fields[field]];
+		if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+			reading[field] = value;
+			present = true;
+		}
+	}
+	return present ? reading : null;
 }
 
 // Claude Code line grammar: conversational lines carry type user/assistant
@@ -333,6 +417,36 @@ function classifyClaudeLine(line: Record<string, unknown>): CealAgentAuditEventK
 	return "other";
 }
 
+// Claude Code repeats one API turn's identical `message.usage` object on every
+// record of that turn (one record per content block), so the sum deduplicates
+// by `requestId` (fallback: the message id). Only the allowlisted integer
+// fields are read; the key itself stays in-function.
+const CLAUDE_USAGE_FIELDS: Record<keyof TokenUsageReading, string> = {
+	inputTokens: "input_tokens",
+	outputTokens: "output_tokens",
+	cacheReadTokens: "cache_read_input_tokens",
+	cacheWriteTokens: "cache_creation_input_tokens",
+};
+
+function readClaudeUsage(line: Record<string, unknown>): { reading: TokenUsageReading; dedupeKey?: string } | null {
+	if (line.type !== "assistant") return null;
+	const message = line.message;
+	if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+	const usage = (message as Record<string, unknown>).usage;
+	if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+	const reading = usageReading(usage as Record<string, unknown>, CLAUDE_USAGE_FIELDS);
+	if (!reading) return null;
+	const messageId = (message as Record<string, unknown>).id;
+	const dedupeKey = typeof line.requestId === "string" ? line.requestId : typeof messageId === "string" ? messageId : undefined;
+	return { reading, ...(dedupeKey === undefined ? {} : { dedupeKey }) };
+}
+
+const CLAUDE_LINE_ADAPTER: TranscriptLineAdapter = {
+	classify: classifyClaudeLine,
+	readUsage: readClaudeUsage,
+	usageSource: "event_usage_sum",
+};
+
 // Codex rollout grammar: response_item lines carry the conversation payload;
 // event_msg mirrors of user/agent messages count as session_state so one
 // utterance is never counted twice. Classification reads only `type`/`role`.
@@ -360,6 +474,36 @@ function classifyCodexLine(line: Record<string, unknown>): CealAgentAuditEventKi
 	if (typeof type === "string" && CODEX_STATE_TYPES.has(type)) return "session_state";
 	return "other";
 }
+
+// Codex emits `event_msg`/`token_count` lines whose `info.total_token_usage`
+// is the runtime's own session-cumulative accounting, so the last reading in
+// the scanned prefix wins instead of summing.
+const CODEX_USAGE_FIELDS: Record<keyof TokenUsageReading, string> = {
+	inputTokens: "input_tokens",
+	outputTokens: "output_tokens",
+	cacheReadTokens: "cached_input_tokens",
+	cacheWriteTokens: "cache_write_input_tokens",
+};
+
+function readCodexUsage(line: Record<string, unknown>): { reading: TokenUsageReading } | null {
+	if (line.type !== "event_msg") return null;
+	const payload = line.payload;
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+	const envelope = payload as Record<string, unknown>;
+	if (envelope.type !== "token_count") return null;
+	const info = envelope.info;
+	if (!info || typeof info !== "object" || Array.isArray(info)) return null;
+	const total = (info as Record<string, unknown>).total_token_usage;
+	if (!total || typeof total !== "object" || Array.isArray(total)) return null;
+	const reading = usageReading(total as Record<string, unknown>, CODEX_USAGE_FIELDS);
+	return reading ? { reading } : null;
+}
+
+const CODEX_LINE_ADAPTER: TranscriptLineAdapter = {
+	classify: classifyCodexLine,
+	readUsage: readCodexUsage,
+	usageSource: "runtime_cumulative_last",
+};
 
 // Claude Code stores one JSONL transcript per session under
 // ~/.claude/projects/<project-directory>/<session-uuid>.jsonl. The inventory

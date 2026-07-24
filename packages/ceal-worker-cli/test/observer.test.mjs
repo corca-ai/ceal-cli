@@ -87,6 +87,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 							events: {
 								scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
 								firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+								// Partial-field usage: only the supplied field may surface.
+								tokenUsage: { source: "event_usage_sum", completeness: "full_transcript", usageEvents: 1, outputTokens: 15 },
 							},
 						}],
 						eventScan: { scannedSessions: 1, sessionLimit: 3 },
@@ -105,6 +107,10 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 						events: {
 							scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
 							firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+							tokenUsage: {
+								source: "event_usage_sum", completeness: "full_transcript", usageEvents: 1,
+								inputTokens: 5, outputTokens: 15, cacheReadTokens: 100, cacheWriteTokens: 50,
+							},
 						},
 					},
 				};
@@ -167,6 +173,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 			events: {
 				scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
 				first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+				// Omitted-not-zero survives the projection: unsupplied fields have no key.
+				token_usage: { source: "event_usage_sum", completeness: "full_transcript", usage_events: 1, output_tokens: 15 },
 			},
 		}],
 		event_scan: { scanned_sessions: 1, session_limit: 3 },
@@ -208,6 +216,10 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		events: {
 			scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
 			first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+			token_usage: {
+				source: "event_usage_sum", completeness: "full_transcript", usage_events: 1,
+				input_tokens: 5, output_tokens: 15, cache_read_tokens: 100, cache_write_tokens: 50,
+			},
 		},
 	});
 	assert.match(drillBody.non_claims[0], /never surfaced, copied, or forwarded/u);

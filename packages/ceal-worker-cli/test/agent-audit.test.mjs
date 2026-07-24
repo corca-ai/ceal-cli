@@ -369,6 +369,89 @@ test("per-session drill-down scans any inventoried session without trusting the 
 	});
 });
 
+test("token figures surface only when the runtime supplied usage, summed once per Claude request", () => {
+	withHome((home) => {
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		const usage = '{"input_tokens":2,"output_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}';
+		const lines = [
+			// One API turn split across two records repeats the identical usage
+			// object; the sum counts it once via the shared requestId.
+			`{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"text","text":"a"}],"usage":${usage}},"timestamp":"2026-07-24T10:00:00.000Z"}`,
+			`{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}],"usage":${usage}},"timestamp":"2026-07-24T10:00:01.000Z"}`,
+			// Second turn falls back to the message id as the dedupe key.
+			'{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":3,"output_tokens":5}},"timestamp":"2026-07-24T10:00:02.000Z"}',
+			// Non-integer and negative values are ignored, never rendered.
+			'{"type":"assistant","requestId":"req_3","message":{"content":[{"type":"text","text":"c"}],"usage":{"input_tokens":-4,"output_tokens":"9"}},"timestamp":"2026-07-24T10:00:03.000Z"}',
+			'{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-07-24T10:00:04.000Z"}',
+		];
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.deepEqual(claude.sessions[0].events.tokenUsage, {
+			source: "event_usage_sum",
+			completeness: "full_transcript",
+			usageEvents: 2,
+			inputTokens: 5,
+			outputTokens: 15,
+			cacheReadTokens: 100,
+			cacheWriteTokens: 50,
+		});
+	});
+	withHome((home) => {
+		// Codex supplies its own session-cumulative accounting: the last
+		// token_count reading wins instead of summing.
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		const lines = [
+			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"cache_write_input_tokens":0,"output_tokens":20}}}}',
+			'{"timestamp":"2026-07-24T11:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":150,"cache_write_input_tokens":0,"output_tokens":40}}}}',
+		];
+		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
+		const codex = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		assert.deepEqual(codex.sessions[0].events.tokenUsage, {
+			source: "runtime_cumulative_last",
+			completeness: "full_transcript",
+			usageEvents: 2,
+			inputTokens: 200,
+			outputTokens: 40,
+			cacheReadTokens: 150,
+			cacheWriteTokens: 0,
+		});
+	});
+	withHome((home) => {
+		// Omitted, not zero: a transcript whose runtime supplied no usage shows
+		// no token figures at all.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000,
+			'{"type":"assistant","message":{"content":[{"type":"text","text":"a"}]},"timestamp":"2026-07-24T10:00:00.000Z"}\n');
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal("tokenUsage" in claude.sessions[0].events, false);
+	});
+	withHome((home) => {
+		// A truncated scan declares its figures cover only the scanned prefix.
+		const project = path.join(home, ".claude", "projects", "-repo");
+		mkdirSync(project, { recursive: true });
+		const usageLine = '{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":2}},"timestamp":"2026-07-24T10:00:00.000Z"}\n';
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, usageLine + '{"type":"mode"}\n'.repeat(5010));
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(claude.sessions[0].events.scan, "truncated");
+		assert.deepEqual(claude.sessions[0].events.tokenUsage, {
+			source: "event_usage_sum",
+			completeness: "scanned_prefix",
+			usageEvents: 1,
+			inputTokens: 1,
+			outputTokens: 2,
+		});
+	});
+	// The token non-claim is honesty-critical wording: runtime-supplied, not
+	// comparable across runtimes, no cost claim, and no latency figure.
+	const state = inspectAgentAudit(undefined, NOW);
+	assert.match(state.nonClaims[2], /runtime-supplied/u);
+	assert.match(state.nonClaims[2], /not comparable across runtimes/u);
+	assert.match(state.nonClaims[2], /No latency figure/u);
+});
+
 function writeSession(directory, name, mtimeMs, content) {
 	const file = path.join(directory, name);
 	writeFileSync(file, content);

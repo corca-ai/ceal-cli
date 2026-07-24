@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { AGENT_AUDIT_NON_CLAIMS, type CealAgentAuditSession, type CealAgentAuditState, type CealAgentSessionEventsLookup } from "./agent-audit.js";
+import { AGENT_AUDIT_NON_CLAIMS, type CealAgentAuditSession, type CealAgentAuditState, type CealAgentAuditTokenUsage, type CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -154,7 +154,7 @@ function observePrivacy(receipts: Record<string, unknown>): Record<string, unkno
 		gateway_forwarding: "none",
 		provider_contact: "none",
 		transcript_handling:
-			"Agent transcripts are parsed locally under fixed byte/line budgets for kind counts and timestamps; their text is never stored, rendered, or forwarded.",
+			"Agent transcripts are parsed locally under fixed byte/line budgets for kind counts, timestamps, and runtime-supplied token totals; their text is never stored, rendered, or forwarded.",
 		...(typeof bounds === "object" && bounds !== null ? { receipt_spool_retention: bounds } : {}),
 	};
 }
@@ -206,6 +206,21 @@ function projectSessionEvents(events: NonNullable<CealAgentAuditSession["events"
 		unparsed_lines: events.unparsedLines,
 		...(events.firstEventAt === undefined ? {} : { first_event_at: new Date(events.firstEventAt).toISOString() }),
 		...(events.lastScannedEventAt === undefined ? {} : { last_scanned_event_at: new Date(events.lastScannedEventAt).toISOString() }),
+		...(events.tokenUsage === undefined ? {} : { token_usage: projectTokenUsage(events.tokenUsage) }),
+	};
+}
+
+// Runtime-supplied token figures keep their omitted-not-zero shape: a field
+// the runtime never supplied has no key here either.
+function projectTokenUsage(usage: CealAgentAuditTokenUsage): Record<string, unknown> {
+	return {
+		source: usage.source,
+		completeness: usage.completeness,
+		usage_events: usage.usageEvents,
+		...(usage.inputTokens === undefined ? {} : { input_tokens: usage.inputTokens }),
+		...(usage.outputTokens === undefined ? {} : { output_tokens: usage.outputTokens }),
+		...(usage.cacheReadTokens === undefined ? {} : { cache_read_tokens: usage.cacheReadTokens }),
+		...(usage.cacheWriteTokens === undefined ? {} : { cache_write_tokens: usage.cacheWriteTokens }),
 	};
 }
 

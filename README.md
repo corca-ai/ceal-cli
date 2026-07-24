@@ -93,7 +93,13 @@ content, prompts, and tool arguments never do, truncation and unreadable
 transcripts are always declared, and remaining sessions stay inventory-only
 until an explicit per-session drill-down (`/api/observer/v1/agent-session/…`)
 runs the same bounded scan on demand; the ref is grammar-validated and never
-joined into a path. **My agent work** also lists local suggestions:
+joined into a path. When a runtime's own transcript supplies token accounting
+(Claude per-request `message.usage`, Codex cumulative `token_count`), the
+event summary adds per-session token figures that name their source and scan
+completeness; an unsupplied field or session is omitted, never rendered as
+zero, figures are not comparable across runtimes, and no latency figure is
+derived because neither runtime supplies one.
+**My agent work** also lists local suggestions:
 deterministic rules over the rendered sections (stale collector, missing
 capability cache, repeated non-completed calls, unknown-outcome receipts),
 each linked to its observed evidence and never a model judgment.
