@@ -624,6 +624,20 @@ test("an unavailable resource keeps its own code without claiming an authorizati
 	});
 });
 
+test("a resource_not_available recovery hint cannot flip the opaque failure into a denial", () => {
+	// Precedence suppression: the known-code table wins even when the Gateway
+	// attaches an authorization-flavored recovery kind, so the call surface can
+	// never synthesize an authorization decision from an opaque failure.
+	assert.deepEqual(classifyGatewayFailure({
+		code: "resource_not_available", message: "server-controlled", recovery: { kind: "request_approval" },
+	}), {
+		code: "resource_not_available",
+		message: "The Gateway reported the requested resource as not available to this client.",
+		nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
+		denial: false,
+	});
+});
+
 test("an opaque resource denial classifies at the call surface and defers disposition to the receipt", async () => {
 	await withGateway(async ({ endpoint }) => {
 		const runtime = {
