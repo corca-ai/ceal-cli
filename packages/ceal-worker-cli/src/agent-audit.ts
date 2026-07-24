@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 // First ceal-audit delivery inside the worker: a read-only local inventory of
@@ -22,7 +22,10 @@ const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Bound the directory walk so a pathological root cannot stall the observer.
 const MAX_ENTRIES_EXAMINED = 2000;
 const RENDERED_SESSIONS = 10;
-const SESSION_FILE = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}[.]jsonl$/u;
+// Exactly the UUID grammar Claude Code uses for transcript filenames, so a
+// human-meaningful filename can never surface as a rendered session_ref.
+const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.]jsonl$/iu;
+const HEALTH_BASIS = "health derived from newest transcript mtime (active within 24h); not a liveness probe";
 
 export interface CealAgentAuditSession {
 	sessionRef: string;
@@ -36,6 +39,8 @@ export interface CealAgentAuditAdapterState {
 	health: "active" | "stale" | "inactive" | "unknown";
 	coverage: "transcript-observed" | "unsupported";
 	depth?: "session_inventory";
+	/** Present as "partial" when the walk was truncated or a subtree was unreadable. */
+	inventory?: "partial";
 	sessionCount?: number;
 	sessions?: CealAgentAuditSession[];
 	note?: string;
@@ -75,20 +80,36 @@ function observeClaudeAdapter(home: string | undefined, now: number): CealAgentA
 		health: "unknown",
 		coverage: "transcript-observed",
 		depth: "session_inventory",
+		note: HEALTH_BASIS,
 	};
 	if (!home || !path.isAbsolute(home)) return base;
 	const projects = path.join(home, CLAUDE_ROOT, "projects");
-	if (!existsSync(projects)) return { ...base, health: "inactive", sessionCount: 0, sessions: [] };
-	let sessions: CealAgentAuditSession[];
+	// Only a confirmed absence is `inactive`; a permission or lookup failure
+	// stays `unknown` so a read failure can never fabricate an empty inventory.
 	try {
-		sessions = collectClaudeSessions(projects);
+		lstatSync(projects);
+	} catch (error) {
+		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
+		return code === "ENOENT" ? { ...base, health: "inactive", sessionCount: 0, sessions: [] } : base;
+	}
+	let collected: { sessions: CealAgentAuditSession[]; partial: boolean };
+	try {
+		collected = collectClaudeSessions(projects);
 	} catch {
 		return base;
 	}
-	if (sessions.length === 0) return { ...base, health: "inactive", sessionCount: 0, sessions: [] };
+	const { sessions, partial } = collected;
+	const partialFields = partial
+		? { inventory: "partial" as const, note: `${HEALTH_BASIS}; inventory truncated or partly unreadable` }
+		: {};
+	// A partial walk that found nothing proves nothing about inactivity.
+	if (sessions.length === 0) {
+		return partial ? { ...base, ...partialFields } : { ...base, health: "inactive", sessionCount: 0, sessions: [] };
+	}
 	sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 	return {
 		...base,
+		...partialFields,
 		health: now - sessions[0].lastActivityAt < ACTIVE_WINDOW_MS ? "active" : "stale",
 		sessionCount: sessions.length,
 		sessions: sessions.slice(0, RENDERED_SESSIONS),
@@ -97,28 +118,31 @@ function observeClaudeAdapter(home: string | undefined, now: number): CealAgentA
 
 // Claude Code stores one JSONL transcript per session under
 // ~/.claude/projects/<project-directory>/<session-uuid>.jsonl. Only the file
-// identity and stat metadata are consumed.
-function collectClaudeSessions(projects: string): CealAgentAuditSession[] {
+// identity and stat metadata are consumed. `partial` reports an exhausted walk
+// budget or an unreadable/vanished subtree so a truncated inventory is never
+// presented as complete.
+function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSession[]; partial: boolean } {
 	const sessions: CealAgentAuditSession[] = [];
 	let examined = 0;
+	let partial = false;
 	const root = lstatSync(projects);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const project of readdirSync(projects)) {
-		if (examined >= MAX_ENTRIES_EXAMINED) break;
+		if (examined >= MAX_ENTRIES_EXAMINED) { partial = true; break; }
 		examined += 1;
 		const projectDirectory = path.join(projects, project);
 		let projectStat;
-		try { projectStat = lstatSync(projectDirectory); } catch { continue; }
+		try { projectStat = lstatSync(projectDirectory); } catch { partial = true; continue; }
 		if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) continue;
 		let files: string[];
-		try { files = readdirSync(projectDirectory); } catch { continue; }
+		try { files = readdirSync(projectDirectory); } catch { partial = true; continue; }
 		for (const file of files) {
-			if (examined >= MAX_ENTRIES_EXAMINED) break;
+			if (examined >= MAX_ENTRIES_EXAMINED) { partial = true; break; }
 			examined += 1;
 			if (!SESSION_FILE.test(file)) continue;
 			const transcript = path.join(projectDirectory, file);
 			let stat;
-			try { stat = lstatSync(transcript); } catch { continue; }
+			try { stat = lstatSync(transcript); } catch { partial = true; continue; }
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
 				sessionRef: file.slice(0, -".jsonl".length),
@@ -127,5 +151,5 @@ function collectClaudeSessions(projects: string): CealAgentAuditSession[] {
 			});
 		}
 	}
-	return sessions;
+	return { sessions, partial };
 }

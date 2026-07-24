@@ -56,6 +56,36 @@ test("agent audit reports inactive, stale, and unknown honestly", () => {
 	const unknown = inspectAgentAudit(undefined, NOW).adapters.find((adapter) => adapter.runtime === "claude");
 	assert.equal(unknown.health, "unknown");
 	assert.equal(unknown.sessions, undefined);
+	// A lookup failure that is not a confirmed absence (here: projects is a
+	// symlink, refused) stays unknown instead of fabricating an empty inventory.
+	withHome((home) => {
+		mkdirSync(path.join(home, ".claude"), { recursive: true });
+		mkdirSync(path.join(home, "elsewhere"));
+		symlinkSync(path.join(home, "elsewhere"), path.join(home, ".claude", "projects"));
+		const refused = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(refused.health, "unknown");
+		assert.equal(refused.sessions, undefined);
+	});
+});
+
+test("agent audit marks a truncated walk as a partial inventory, never complete", () => {
+	withHome((home) => {
+		// One junk-stuffed project exhausts the walk budget before a later
+		// project's real session is reached.
+		const junk = path.join(home, ".claude", "projects", "a-junk");
+		mkdirSync(junk, { recursive: true });
+		for (let index = 0; index < 2000; index += 1) writeFileSync(path.join(junk, `noise-${index}.txt`), "");
+		const real = path.join(home, ".claude", "projects", "z-real");
+		mkdirSync(real, { recursive: true });
+		writeSession(real, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, "x\n");
+
+		const claude = inspectAgentAudit(home, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		assert.equal(claude.inventory, "partial");
+		assert.match(claude.note, /truncated or partly unreadable/u);
+		// A partial walk that found nothing proves nothing about inactivity.
+		assert.equal(claude.health, "unknown");
+		assert.equal(claude.sessionCount, undefined);
+	});
 });
 
 function writeSession(directory, name, mtimeMs, content) {

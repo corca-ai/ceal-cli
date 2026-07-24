@@ -73,6 +73,7 @@ function observeAgentAudit(runtime: CealObserverRuntime): Record<string, unknown
 			health: adapter.health,
 			coverage: adapter.coverage,
 			...(adapter.depth === undefined ? {} : { depth: adapter.depth }),
+			...(adapter.inventory === undefined ? {} : { inventory: adapter.inventory }),
 			...(adapter.sessionCount === undefined ? {} : { session_count: adapter.sessionCount }),
 			...(adapter.sessions === undefined ? {} : {
 				sessions: adapter.sessions.map((session) => ({
