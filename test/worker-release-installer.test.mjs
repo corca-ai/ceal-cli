@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -103,6 +103,26 @@ test("worker installer rejects a signed release that skips this platform", () =>
 	});
 });
 
+test("worker installer downloads private release assets through the authenticated API", () => {
+	withFixture(({ install, release, tools, log }) => {
+		const inventory = stageAssetInventory(release);
+		const headerLog = path.join(path.dirname(log), "curl-headers.log");
+		const result = run({ install, release, tools, log, version: TAG, token: "fake-token", inventory, headerLog });
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
+		const headers = readFileSync(headerLog, "utf8");
+		assert.match(headers, /Authorization: Bearer fake-token/u);
+		assert.match(headers, /Accept: application\/octet-stream/u);
+	});
+	withFixture(({ install, release, tools, log }) => {
+		const inventory = JSON.stringify({ assets: [{ name: "SHA256SUMS", id: 1 }] });
+		const result = run({ install, release, tools, log, version: TAG, token: "fake-token", inventory });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /does not contain the asset/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+});
+
 test("worker installer installs on a darwin host through the portable tool lane", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeDarwinAssets(release);
@@ -137,16 +157,30 @@ function withFixture(callback) {
 		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac");
 		writeTool(path.join(tools, "cosign"), "printf '%s\\n' \"$*\" >> \"$COSIGN_LOG\"\n[ -z \"${COSIGN_FAIL:-}\" ] || exit 1");
 		writeTool(path.join(tools, "curl"), [
-			"url=''", "out=''", "while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; http*) url=\"$1\" ;; esac; shift; done",
-			"case \"$url\" in *api.github.com*/releases*) printf '%s' \"${FAKE_RELEASES:-[]}\" > \"$out\"; exit 0 ;; esac",
+			"url=''", "out=''",
+			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; -H) shift; printf '%s\\n' \"$1\" >> \"${CURL_HEADER_LOG:-/dev/null}\" ;; http*) url=\"$1\" ;; esac; shift; done",
+			"case \"$url\" in",
+			"  *api.github.com*/releases/tags/*) printf '%s' \"${FAKE_RELEASE_INVENTORY-}\" > \"$out\"; exit 0 ;;",
+			"  *api.github.com*/releases/assets/*) cp \"$FAKE_RELEASE_DIR/asset-${url##*/}\" \"$out\"; exit 0 ;;",
+			"  *api.github.com*/releases*) printf '%s' \"${FAKE_RELEASES:-[]}\" > \"$out\"; exit 0 ;;",
+			"esac",
 			"[ -n \"$out\" ] || exit 2", "cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
 		].join("\n"));
 		return callback({ install, release, tools, log });
 	} finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-function run({ install, release, tools, log, version, releases = "[]", cosignFail = false, restrictedPath = null }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", FAKE_RELEASE_DIR: release, FAKE_RELEASES: releases, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+function run({ install, release, tools, log, version, releases = "[]", cosignFail = false, restrictedPath = null, token = "", inventory = "{}", headerLog = "" }) {
+	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASES: releases, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+}
+
+// Mirrors the private-repo shape: every asset is reachable only through its
+// numeric API asset id, never the anonymous browser download URL.
+function stageAssetInventory(release) {
+	const names = readdirSync(release).filter((name) => !name.startsWith("asset-"));
+	const assets = names.map((name, index) => ({ name, id: index + 1 }));
+	for (const asset of assets) copyFileSync(path.join(release, asset.name), path.join(release, `asset-${asset.id}`));
+	return JSON.stringify({ assets });
 }
 
 // A darwin host has shasum but neither sha256sum nor flock; the restricted

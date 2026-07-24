@@ -87,10 +87,47 @@ is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]
 # first current, non-draft ceal-v semantic tag.  The selected tag is still
 # verified by its exact OIDC identity below.
 # While the repository is private, CEAL_GITHUB_TOKEN authenticates release
-# downloads; once public the anonymous path is canonical and the token is unused.
+# access; once public the anonymous path is canonical and the token is unused.
+# Private release assets are reachable only through the API asset endpoint
+# (the browser download URL 404s for tokens), so the token lane resolves each
+# asset id from the release inventory fetched once per run.
 auth_curl() {
   if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then curl -fsSL -H "Authorization: Bearer $CEAL_GITHUB_TOKEN" "$@"
   else curl -fsSL "$@"; fi
+}
+
+fetch_release_inventory() {
+  [ -n "${CEAL_GITHUB_TOKEN:-}" ] || return 0
+  auth_curl "https://api.github.com/repos/$REPO/releases/tags/$VERSION" -o "$TMP_DIR/release-inventory.json" \
+    || fail "Could not read the authenticated release inventory for $VERSION"
+}
+
+release_asset_id() {
+  python3 - "$TMP_DIR/release-inventory.json" "$1" <<'PY'
+import json
+import sys
+
+try:
+    release = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(1)
+assets = release.get("assets") if isinstance(release, dict) else None
+for asset in assets if isinstance(assets, list) else []:
+    if isinstance(asset, dict) and asset.get("name") == sys.argv[2] and isinstance(asset.get("id"), int):
+        print(asset["id"])
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+download_asset() {
+  download_name="$1"
+  if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then
+    download_asset_id="$(release_asset_id "$download_name")" || fail "Signed release $VERSION does not contain the asset $download_name"
+    auth_curl -H "Accept: application/octet-stream" "https://api.github.com/repos/$REPO/releases/assets/$download_asset_id" -o "$TMP_DIR/$download_name"
+  else
+    curl -fsSL "$BASE_URL/$download_name" -o "$TMP_DIR/$download_name"
+  fi
 }
 
 resolve_stable_tag() {
@@ -206,7 +243,7 @@ verify_version_output() {
   cmp -s "$stdout_path" "$expected_path" || fail "ceal reported an invalid version YAML document for $VERSION"
 }
 
-download_signed_asset() { asset="$1"; auth_curl "$BASE_URL/$asset" -o "$TMP_DIR/$asset"; auth_curl "$BASE_URL/$asset.sig" -o "$TMP_DIR/$asset.sig"; auth_curl "$BASE_URL/$asset.pem" -o "$TMP_DIR/$asset.pem"; }
+download_signed_asset() { asset="$1"; download_asset "$asset"; download_asset "$asset.sig"; download_asset "$asset.pem"; }
 require_regular_directory() { [ -d "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 require_regular_file() { [ -f "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 
@@ -278,6 +315,7 @@ if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   version_is_older "$VERSION" "$CEAL_MINIMUM_VERSION" && fail "Latest stable Ceal worker release is older than the installed worker release"
 fi
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+fetch_release_inventory
 if [ ! -e "$INSTALL_DIR" ]; then (umask 077; mkdir -p "$INSTALL_DIR"); elif [ -L "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then fail "Install directory must be a regular directory"; fi
 STATE_ROOT="$INSTALL_DIR/.ceal-cli"; [ ! -e "$STATE_ROOT" ] && (umask 077; mkdir "$STATE_ROOT")
 [ -d "$STATE_ROOT" ] && [ ! -L "$STATE_ROOT" ] || fail "Ceal worker state directory must be a regular directory"
