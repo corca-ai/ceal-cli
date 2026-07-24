@@ -61,8 +61,15 @@ compact result envelope with primary data and verified readback identity. Rich
 audit evidence is read only on demand so agents do not infer completion from an
 exit code alone.
 
-`ceal observe` serves a loopback-only (`127.0.0.1`, Host-header guarded)
-read-only page and JSON endpoint over the client's cached local state:
+`ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
+read-only Workbench page and JSON endpoint over the client's cached local
+state. The page's first navigation keeps the masterplan's two views
+deliberately separate — **My agent work** (the agent-runtime activity below)
+and **Ceal** (session, capability cache, install, guide, receipts) — plus a
+**Privacy & retention** view that declares the local sources this client
+reads, the receipt-spool retention bounds, and the fixed no-forwarding
+boundary (`gateway_forwarding: none`, `provider_contact: none`). The state
+covers:
 session identity with token material structurally redacted, the cached
 capability/target catalog with its age and TTL, the managed install
 generation, agent-guide registration, and the local receipt spool. It performs

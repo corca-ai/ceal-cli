@@ -40,6 +40,7 @@ const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 
 export async function buildObserverState(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	const now = runtime.now?.() ?? Date.now();
+	const receipts = await observeReceiptSpool(runtime);
 	return {
 		schema_version: "ceal.observer_state.v1",
 		command: "ceal",
@@ -50,9 +51,34 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		discovery_cache: await observeDiscoveryCache(runtime, now),
 		install: observeInstall(runtime),
 		guide: observeGuide(runtime),
-		receipts: await observeReceiptSpool(runtime),
+		receipts,
 		agent_activity: observeAgentAudit(runtime),
+		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],
+	};
+}
+
+// The privacy projection is declared, not probed: it names the fixed local
+// sources this client reads and the fixed no-forwarding boundary of this page.
+// The only dynamic value is the retention bound echoed from the loaded spool.
+const PRIVACY_LOCAL_SOURCES = [
+	"~/.ceal/client-session.json (session identity; token fields never serialized)",
+	"~/.ceal/client-discovery-cache.json (cached capability/target catalog)",
+	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
+	"managed worker install layout (generation manifest metadata)",
+	"~/.claude/projects and ~/.codex/sessions (bounded local transcript scan; fixed-vocabulary metadata only)",
+] as const;
+
+function observePrivacy(receipts: Record<string, unknown>): Record<string, unknown> {
+	const bounds = receipts.bounds;
+	return {
+		status: "declared",
+		local_sources: [...PRIVACY_LOCAL_SOURCES],
+		gateway_forwarding: "none",
+		provider_contact: "none",
+		transcript_handling:
+			"Agent transcripts are parsed locally under fixed byte/line budgets for kind counts and timestamps; their text is never stored, rendered, or forwarded.",
+		...(typeof bounds === "object" && bounds !== null ? { receipt_spool_retention: bounds } : {}),
 	};
 }
 
@@ -308,12 +334,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 	response.end(JSON.stringify({ ok: false, error: "unknown_observer_path" }));
 }
 
+// Workbench shell: the masterplan's first navigation — "My agent work" and
+// "Ceal" stay deliberately separate views, and "Privacy & retention" makes the
+// local data boundary and (absent) forwarding state inspectable. One embedded
+// document over the one state endpoint; no router, no build step.
 const OBSERVER_PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ceal local observer</title>
+<title>Ceal Workbench</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
@@ -323,11 +353,15 @@ const OBSERVER_PAGE = `<!doctype html>
   td, th { text-align: left; padding: .15rem .8rem .15rem 0; vertical-align: top; word-break: break-all; }
   .muted { opacity: .65; }
   .warn { color: #b45309; }
+  nav { margin: 1rem 0; display: flex; gap: .5rem; }
+  nav button { font: inherit; padding: .2rem .8rem; border: 1px solid currentColor; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: .65; }
+  nav button[aria-current="true"] { opacity: 1; font-weight: 700; }
 </style>
 </head>
 <body>
-<h1>Ceal local observer <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
+<h1>Ceal Workbench <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
 <p class="muted">No admin surface, no provider credentials, no live refresh. Reload the page after running a live command to see newer cached state.</p>
+<nav id="nav"></nav>
 <div id="root">Loading local state…</div>
 <script>
 const fmt = (v) => Array.isArray(v) ? v.map(fmt).join(", ")
@@ -338,7 +372,24 @@ const rows = (pairs) => "<table>" + pairs
   .map(([k, v]) => "<tr><th>" + esc(k) + "</th><td>" + esc(fmt(v)) + "</td></tr>").join("") + "</table>";
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
+const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
+const VIEWS = ["My agent work", "Ceal", "Privacy & retention"];
 fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
+  const activity = s.agent_activity;
+  let agentView = "";
+  if (Array.isArray(activity.adapters)) {
+    agentView += activity.adapters.map((adapter) => {
+      let body = rows(Object.entries(adapter).filter(([k]) => k !== "sessions"));
+      if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
+        body += "<h2 class=\\"muted\\">Recent sessions</h2>" + adapter.sessions
+          .map((sessionEntry) => rows(Object.entries(sessionEntry))).join("<hr>");
+      }
+      return body;
+    }).join("<hr>");
+  }
+  if (Array.isArray(activity.non_claims)) agentView += list(activity.non_claims, "warn");
+  const agentBody = section("Agent activity (" + activity.status + ")", agentView);
+
   const parts = [];
   parts.push(section("Session (" + s.session.status + ")", rows(Object.entries(s.session))));
   const cache = s.discovery_cache;
@@ -360,24 +411,35 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   }
   receiptsBody += "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>";
   parts.push(section("Receipts (" + s.receipts.status + ")", receiptsBody));
-  const activity = s.agent_activity;
-  let activityBody = "";
-  if (Array.isArray(activity.adapters)) {
-    activityBody += activity.adapters.map((adapter) => {
-      let body = rows(Object.entries(adapter).filter(([k]) => k !== "sessions"));
-      if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
-        body += "<h2 class=\\"muted\\">Recent sessions</h2>" + adapter.sessions
-          .map((sessionEntry) => rows(Object.entries(sessionEntry))).join("<hr>");
-      }
-      return body;
-    }).join("<hr>");
+  const cealBody = parts.join("");
+
+  const privacy = s.privacy ?? {};
+  let privacyView = rows([["boundary", s.boundary],
+    ["gateway_forwarding", privacy.gateway_forwarding], ["provider_contact", privacy.provider_contact],
+    ["receipt_spool_retention", privacy.receipt_spool_retention]]);
+  if (Array.isArray(privacy.local_sources)) {
+    privacyView += "<h2 class=\\"muted\\">Local sources read by this client</h2>" + list(privacy.local_sources, "muted");
   }
-  if (Array.isArray(activity.non_claims)) {
-    activityBody += "<ul>" + activity.non_claims.map((n) => "<li class=\\"warn\\">" + esc(n) + "</li>").join("") + "</ul>";
+  if (typeof privacy.transcript_handling === "string") privacyView += "<p>" + esc(privacy.transcript_handling) + "</p>";
+  privacyView += list(s.non_claims, "warn");
+  const privacyBody = section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
+
+  const bodies = { "My agent work": agentBody, "Ceal": cealBody, "Privacy & retention": privacyBody };
+  const nav = document.getElementById("nav");
+  const root = document.getElementById("root");
+  const show = (view) => {
+    root.innerHTML = bodies[view];
+    for (const button of nav.querySelectorAll("button")) {
+      button.setAttribute("aria-current", String(button.textContent === view));
+    }
+  };
+  for (const view of VIEWS) {
+    const button = document.createElement("button");
+    button.textContent = view;
+    button.addEventListener("click", () => show(view));
+    nav.appendChild(button);
   }
-  parts.push(section("Agent activity (" + activity.status + ")", activityBody));
-  parts.push(section("Non-claims", "<ul>" + s.non_claims.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>"));
-  document.getElementById("root").innerHTML = parts.join("");
+  show(VIEWS[0]);
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });
 </script>
 </body>

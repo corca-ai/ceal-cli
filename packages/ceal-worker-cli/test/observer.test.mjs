@@ -158,13 +158,22 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	});
 	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
 	assert.match(state.agent_activity.non_claims[0], /never surfaced, copied, or forwarded/u);
+	assert.equal(state.privacy.status, "declared");
+	assert.equal(state.privacy.gateway_forwarding, "none");
+	assert.equal(state.privacy.provider_contact, "none");
+	assert.deepEqual(state.privacy.receipt_spool_retention, { max_entries: 200, retention_ms: 30 * 24 * 60 * 60 * 1000 });
+	assert.ok(state.privacy.local_sources.some((source) => source.includes("client-session.json")));
+	assert.ok(state.privacy.local_sources.some((source) => source.includes("~/.claude/projects")));
+	assert.match(state.privacy.transcript_handling, /never stored, rendered, or forwarded/u);
 
 	const page = await fetch(doc.url);
 	assert.equal(page.status, 200);
 	assert.match(page.headers.get("content-type"), /text\/html/u);
 	assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
 	const html = await page.text();
-	assert.match(html, /Ceal local observer/u);
+	assert.match(html, /Ceal Workbench/u);
+	assert.match(html, /My agent work/u);
+	assert.match(html, /Privacy & retention/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
 
 	const rebound = await rawRequest(doc.url, "/api/observer/v1/state", { host: "evil.example:80" });
@@ -220,6 +229,8 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.equal(state.guide.status, "unavailable");
 	assert.equal(state.receipts.status, "unavailable");
 	assert.equal(state.agent_activity.status, "unavailable");
+	assert.equal(state.privacy.status, "declared");
+	assert.equal("receipt_spool_retention" in state.privacy, false);
 	await handle.close();
 
 	const invalid = collectingIo();
