@@ -33,8 +33,14 @@ test("agent audit inventories Claude sessions without reading transcript content
 		]);
 		assert.equal(claude.sessions[0].lastActivityAt, NOW - 60_000);
 		assert.equal(typeof claude.sessions[0].transcriptBytes, "number");
-		// The projection carries file identity and stat metadata only.
+		// The projection carries file identity, stat metadata, and fixed-vocabulary
+		// event metadata only.
 		assert.equal(JSON.stringify(state).includes("transcript text"), false);
+		// Pin the honesty-critical non-claim wording: content is parsed locally,
+		// so the claim must be metadata-only surfacing, not "never read".
+		assert.match(state.nonClaims[0], /kind counts and re-serialized timestamps/u);
+		assert.match(state.nonClaims[0], /transcript content, prompts, tool arguments/u);
+		assert.equal(state.nonClaims.some((claim) => claim.includes("never read")), false);
 
 		// The Claude fixture home has no ~/.codex/sessions: a confirmed absence.
 		const codex = state.adapters.find((adapter) => adapter.runtime === "codex");

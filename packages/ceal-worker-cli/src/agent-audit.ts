@@ -79,7 +79,11 @@ export interface CealAgentAuditAdapterState {
 	inventory?: "partial";
 	sessionCount?: number;
 	sessions?: CealAgentAuditSession[];
-	/** Declares the event-scan bound so the newest-sessions cap is never silent. */
+	/**
+	 * Declares the event-scan bound so the newest-sessions cap is never silent.
+	 * scannedSessions counts successful scans only; an attempted-but-unreadable
+	 * session is excluded here and appears as `events: "unreadable"` instead.
+	 */
 	eventScan?: { scannedSessions: number; sessionLimit: number };
 	note?: string;
 }
