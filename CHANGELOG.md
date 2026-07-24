@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.65.2 (`ceal-v0.65.2`)
+## 0.65.3 (`ceal-v0.65.3`)
+
+- Repair the amd64-only real-native release proof by deriving its requested
+  version from the worker package manifest. The first `ceal-v0.65.2` attempt
+  stopped at that proof before it assembled, signed, uploaded, or advanced any
+  static release state; `0.65.3` is the replacement publication tag.
+
+## 0.65.2 (`ceal-v0.65.2`, unpublished)
 
 - Remove GitHub Releases from the worker delivery path. The tag workflow now
   publishes and reads back the signed worker asset set through the Ceal static

@@ -166,8 +166,8 @@ versioned prefix. Until the first stable worker tag is published, these stable
 URLs 404; install an explicit published static tag instead:
 
 ```sh
-curl -fsSL https://ceal.borca.ai/releases/worker/ceal-v0.65.2/install-ceal.sh \
-  | CEAL_VERSION=ceal-v0.65.2 sh
+curl -fsSL https://ceal.borca.ai/releases/worker/ceal-v0.65.3/install-ceal.sh \
+  | CEAL_VERSION=ceal-v0.65.3 sh
 ```
 
 As with any `curl | sh` installer, this initial bootstrap deliberately trusts

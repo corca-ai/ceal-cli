@@ -10,6 +10,7 @@ import { buildWorkerReleaseArtifact } from "../scripts/build-worker-release-arti
 import { makeGatewayProtocolFixture } from "./gateway-protocol-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WORKER_PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages", "ceal-worker-cli", "package.json"), "utf8")).version;
 
 test("raw worker artifact helper is import-only and no longer has a release command", () => {
 	const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -120,7 +121,7 @@ test("worker artifact builder proves the real packed protocol consumer and SEA o
 		protocolProvenance: fixture.provenance,
 		outputDirectory: output,
 		platform: "linux-amd64",
-		version: "0.65.1",
+		version: WORKER_PACKAGE_VERSION,
 	});
 	assert.equal(result.proof_level, "local_integration");
 	assert.equal(result.artifact.name, "ceal-linux-amd64");
