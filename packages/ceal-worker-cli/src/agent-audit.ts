@@ -10,9 +10,10 @@ import path from "node:path";
 // slice deliberately stops at session inventory: transcript files are listed
 // by identity, recency, and size, but their content is never opened, so no
 // redaction path exists to fail. A permission or read failure reports
-// `unknown`, never a fabricated inventory; an unimplemented adapter reports
-// `unsupported`, never silence. Neither adapter's coverage claim generalizes
-// to the other.
+// `unknown`, never a fabricated inventory; an unimplemented adapter would
+// report `unsupported`, never silence. Both adapters now stop at the same
+// session-inventory depth, and neither's coverage claim generalizes to the
+// other.
 
 const CLAUDE_ROOT = ".claude";
 const CODEX_ROOT = ".codex";
@@ -25,6 +26,10 @@ const RENDERED_SESSIONS = 10;
 // Exactly the UUID grammar Claude Code uses for transcript filenames, so a
 // human-meaningful filename can never surface as a rendered session_ref.
 const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.]jsonl$/iu;
+// Codex rollouts live under sessions/YYYY/MM/DD; only the machine-generated
+// rollout grammar is accepted, and only its UUID surfaces as a session_ref.
+const CODEX_ROLLOUT_FILE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]jsonl$/iu;
+const CODEX_DATE_SEGMENT = [/^\d{4}$/u, /^\d{2}$/u, /^\d{2}$/u];
 const HEALTH_BASIS = "health derived from newest transcript mtime (active within 24h); not a liveness probe";
 
 export interface CealAgentAuditSession {
@@ -55,13 +60,7 @@ export interface CealAgentAuditState {
 export function inspectAgentAudit(home: string | undefined, now: number): CealAgentAuditState {
 	const adapters: CealAgentAuditAdapterState[] = [
 		observeClaudeAdapter(home, now),
-		{
-			runtime: "codex",
-			root: `~/${CODEX_ROOT}`,
-			health: "unknown",
-			coverage: "unsupported",
-			note: "The Codex adapter is not implemented yet; absent data is a coverage gap, not proof of inactivity.",
-		},
+		observeCodexAdapter(home, now),
 	];
 	return {
 		schemaVersion: "ceal.agent_activity.v1",
@@ -74,27 +73,42 @@ export function inspectAgentAudit(home: string | undefined, now: number): CealAg
 }
 
 function observeClaudeAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
+	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CLAUDE_ROOT, "projects") : null;
+	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, now);
+}
+
+function observeCodexAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
+	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CODEX_ROOT, "sessions") : null;
+	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, now);
+}
+
+function observeTranscriptAdapter(
+	runtime: CealAgentAuditAdapterState["runtime"],
+	root: string,
+	sessionsDirectory: string | null,
+	collect: (directory: string) => { sessions: CealAgentAuditSession[]; partial: boolean },
+	now: number,
+): CealAgentAuditAdapterState {
 	const base: CealAgentAuditAdapterState = {
-		runtime: "claude",
-		root: `~/${CLAUDE_ROOT}`,
+		runtime,
+		root,
 		health: "unknown",
 		coverage: "transcript-observed",
 		depth: "session_inventory",
 		note: HEALTH_BASIS,
 	};
-	if (!home || !path.isAbsolute(home)) return base;
-	const projects = path.join(home, CLAUDE_ROOT, "projects");
+	if (!sessionsDirectory) return base;
 	// Only a confirmed absence is `inactive`; a permission or lookup failure
 	// stays `unknown` so a read failure can never fabricate an empty inventory.
 	try {
-		lstatSync(projects);
+		lstatSync(sessionsDirectory);
 	} catch (error) {
 		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
 		return code === "ENOENT" ? { ...base, health: "inactive", sessionCount: 0, sessions: [] } : base;
 	}
 	let collected: { sessions: CealAgentAuditSession[]; partial: boolean };
 	try {
-		collected = collectClaudeSessions(projects);
+		collected = collect(sessionsDirectory);
 	} catch {
 		return base;
 	}
@@ -152,4 +166,73 @@ function collectClaudeSessions(projects: string): { sessions: CealAgentAuditSess
 		}
 	}
 	return { sessions, partial };
+}
+
+// Codex stores one JSONL rollout per session under
+// ~/.codex/sessions/YYYY/MM/DD/rollout-<stamp>-<session-uuid>.jsonl. Only file
+// identity and stat metadata are consumed, and only the machine-generated
+// UUID surfaces as a session_ref. The date shards are walked newest-first so
+// an exhausted budget truncates the oldest history, keeping recency-derived
+// health honest under `inventory: partial`.
+function collectCodexSessions(sessionsRoot: string): { sessions: CealAgentAuditSession[]; partial: boolean } {
+	const sessions: CealAgentAuditSession[] = [];
+	const walk = { examined: 0, partial: false };
+	const root = lstatSync(sessionsRoot);
+	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
+	for (const dayDirectory of codexDayDirectories(sessionsRoot, walk)) {
+		if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+		let files: string[];
+		try { files = readdirSync(dayDirectory); } catch { walk.partial = true; continue; }
+		// Descending name order puts newer rollout stamps first, so a budget
+		// truncation inside one day still keeps its newest sessions.
+		files.sort(descending);
+		for (const file of files) {
+			if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+			walk.examined += 1;
+			const rollout = CODEX_ROLLOUT_FILE.exec(file);
+			if (!rollout) continue;
+			let stat;
+			try { stat = lstatSync(path.join(dayDirectory, file)); } catch { walk.partial = true; continue; }
+			if (stat.isSymbolicLink() || !stat.isFile()) continue;
+			sessions.push({
+				sessionRef: rollout[1].toLowerCase(),
+				lastActivityAt: stat.mtimeMs,
+				transcriptBytes: stat.size,
+			});
+		}
+	}
+	return { sessions, partial: walk.partial };
+}
+
+// Locale-independent descending name order; zero-padded date shards and
+// rollout stamps therefore sort newest-first.
+function descending(a: string, b: string): number {
+	return a < b ? 1 : a > b ? -1 : 0;
+}
+
+// Resolves YYYY/MM/DD leaf directories in descending date order, consuming
+// the shared walk budget and refusing symlinked shards at every level.
+function codexDayDirectories(sessionsRoot: string, walk: { examined: number; partial: boolean }): string[] {
+	let levels = [sessionsRoot];
+	for (const segment of CODEX_DATE_SEGMENT) {
+		const next: string[] = [];
+		for (const parent of levels) {
+			if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+			let entries: string[];
+			try { entries = readdirSync(parent); } catch { walk.partial = true; continue; }
+			entries.sort(descending);
+			for (const entry of entries) {
+				if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+				walk.examined += 1;
+				if (!segment.test(entry)) continue;
+				const child = path.join(parent, entry);
+				let stat;
+				try { stat = lstatSync(child); } catch { walk.partial = true; continue; }
+				if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+				next.push(child);
+			}
+		}
+		levels = next;
+	}
+	return levels;
 }
