@@ -65,8 +65,14 @@ exit code alone.
 read-only page and JSON endpoint over the client's cached local state:
 session identity with token material structurally redacted, the cached
 capability/target catalog with its age and TTL, the managed install
-generation, and agent-guide registration. It performs no Gateway or provider
-contact; receipts render as `unknown` because no local receipt store exists.
+generation, agent-guide registration, and the local receipt spool. It performs
+no Gateway or provider contact. The receipt spool is an owner-only, size- and
+retention-bounded record of each receipt-bearing `ceal call` outcome as an
+allowlisted metadata projection (request/audit references, capability, target,
+status, evidence, safe error kind) — never call arguments, purpose text,
+provider payloads, or token material. It is advisory client evidence for the
+local Workbench view; the Gateway audit ledger stays authoritative through
+`ceal receipt show`, and a spool failure never changes call behavior.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread

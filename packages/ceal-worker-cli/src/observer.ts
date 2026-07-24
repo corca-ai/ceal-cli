@@ -4,17 +4,20 @@ import { join } from "node:path";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
+import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
 
 // Local client observer: one loopback page over the state this client already
 // holds. Boundary (fixed): no admin surface, no provider credential, and no
 // live refresh — the server never contacts the Gateway or any provider, and
 // session token material never enters a response (structural allowlist, not
-// string masking). Receipts have no local store, so they render as unknown.
+// string masking). Receipts render from the local receipt spool's allowlisted
+// call-outcome metadata; the Gateway audit ledger stays authoritative.
 
 export interface CealObserverRuntime {
 	loadSession?: () => Promise<CealStoredSession | null>;
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
+	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
 	inspectAgentGuide?: () => CealAgentGuideState;
 	executablePath?: string;
 	discoveryCacheTtlMs?: number;
@@ -26,10 +29,12 @@ const OBSERVER_NON_CLAIMS = [
 	"Absent or unverified Gateway data is unknown, not a denial or an availability claim.",
 ] as const;
 
-const RECEIPTS_UNKNOWN = {
-	status: "unknown",
-	non_claim: "Receipts have no local cache; live evidence exists only through 'ceal receipt show <request-ref>'.",
-} as const;
+const RECEIPT_SPOOL_NON_CLAIM =
+	"Client-recorded call metadata only; the Gateway audit ledger stays authoritative through 'ceal receipt show <request-ref>'." as const;
+
+// The page shows a bounded recent window; the spool file itself already caps
+// total entries and retention.
+const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 
 export async function buildObserverState(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	const now = runtime.now?.() ?? Date.now();
@@ -43,8 +48,44 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		discovery_cache: await observeDiscoveryCache(runtime, now),
 		install: observeInstall(runtime),
 		guide: observeGuide(runtime),
-		receipts: RECEIPTS_UNKNOWN,
+		receipts: await observeReceiptSpool(runtime),
 		non_claims: [...OBSERVER_NON_CLAIMS],
+	};
+}
+
+async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
+	if (!runtime.loadReceiptSpool) return { status: "unavailable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
+	let spool: CealReceiptSpoolState | null;
+	try {
+		spool = await runtime.loadReceiptSpool();
+	} catch {
+		return { status: "unreadable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
+	}
+	if (!spool || spool.entries.length === 0) {
+		return {
+			status: "absent",
+			note: "No spooled call outcomes yet; entries appear after receipt-bearing 'ceal call' results.",
+			non_claim: RECEIPT_SPOOL_NON_CLAIM,
+		};
+	}
+	return {
+		status: "spooled",
+		// Masterplan coverage vocabulary: the spool records only Ceal-mediated
+		// call outcomes; agent-native transcript/hook evidence is a later tier.
+		coverage: "ceal-mediated",
+		entry_count: spool.entries.length,
+		bounds: { max_entries: spool.bounds.maxEntries, retention_ms: spool.bounds.retentionMs },
+		entries: spool.entries.slice(-RECEIPT_SPOOL_RENDER_LIMIT).reverse().map((entry) => ({
+			recorded_at: new Date(entry.recordedAt).toISOString(),
+			request_ref: entry.requestRef,
+			status: entry.status,
+			evidence: entry.evidence,
+			...(entry.capabilityId === undefined ? {} : { capability: entry.capabilityId }),
+			...(entry.targetRef === undefined ? {} : { target: entry.targetRef }),
+			...(entry.errorKind === undefined ? {} : { error_kind: entry.errorKind }),
+			...(entry.auditRefs.length === 0 ? {} : { audit_refs: entry.auditRefs }),
+		})),
+		non_claim: RECEIPT_SPOOL_NON_CLAIM,
 	};
 }
 
@@ -253,7 +294,16 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   parts.push(section("Discovery cache (" + cache.status + ")", cacheBody));
   parts.push(section("Installed release (" + s.install.status + ")", rows(Object.entries(s.install))));
   parts.push(section("Agent guide (" + s.guide.status + ")", rows(Object.entries(s.guide).filter(([, v]) => typeof v !== "object"))));
-  parts.push(section("Receipts (" + s.receipts.status + ")", "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>"));
+  let receiptsBody = "";
+  if (Array.isArray(s.receipts.entries) && s.receipts.entries.length) {
+    receiptsBody += rows(Object.entries(s.receipts).filter(([k]) => k !== "entries" && k !== "non_claim"));
+    receiptsBody += "<h2 class=\\"muted\\">Recent call outcomes</h2>" + s.receipts.entries
+      .map((entry) => rows(Object.entries(entry))).join("<hr>");
+  } else if (s.receipts.note) {
+    receiptsBody += "<p class=\\"muted\\">" + esc(s.receipts.note) + "</p>";
+  }
+  receiptsBody += "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>";
+  parts.push(section("Receipts (" + s.receipts.status + ")", receiptsBody));
   parts.push(section("Non-claims", "<ul>" + s.non_claims.map((n) => "<li>" + esc(n) + "</li>").join("") + "</ul>"));
   document.getElementById("root").innerHTML = parts.join("");
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });

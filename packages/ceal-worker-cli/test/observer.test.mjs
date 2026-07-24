@@ -8,6 +8,7 @@ import { parse } from "yaml";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
+import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
 
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
@@ -56,12 +57,24 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		},
 	});
 
+	const spoolStore = createCealReceiptSpoolStore(home);
+	await spoolStore.append({
+		recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
+		requestRef: "narnia:observer:1:call",
+		status: "completed",
+		evidence: "readback_verified",
+		auditRefs: ["gateway-audit:event:777"],
+		capabilityId: "message.search",
+		targetRef: "target:team-inbox",
+	});
+
 	const io = collectingIo();
 	let handle;
 	const handleReady = new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadSession: () => sessionStore.load(),
 			loadDiscoveryCache: () => cacheStore.load(),
+			loadReceiptSpool: () => spoolStore.load(),
 			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
 			executablePath: process.execPath,
 			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
@@ -98,8 +111,19 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
 	assert.equal(state.install.status, "unmanaged");
 	assert.equal(state.guide.status, "staged");
-	assert.equal(state.receipts.status, "unknown");
-	assert.match(state.receipts.non_claim, /no local cache/u);
+	assert.equal(state.receipts.status, "spooled");
+	assert.equal(state.receipts.coverage, "ceal-mediated");
+	assert.equal(state.receipts.entry_count, 1);
+	assert.deepEqual(state.receipts.entries, [{
+		recorded_at: "2026-07-24T00:00:30.000Z",
+		request_ref: "narnia:observer:1:call",
+		status: "completed",
+		evidence: "readback_verified",
+		capability: "message.search",
+		target: "target:team-inbox",
+		audit_refs: ["gateway-audit:event:777"],
+	}]);
+	assert.match(state.receipts.non_claim, /Gateway audit ledger stays authoritative/u);
 
 	const page = await fetch(doc.url);
 	assert.equal(page.status, 200);
@@ -137,7 +161,7 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.equal(state.discovery_cache.status, "unavailable");
 	assert.equal(state.install.status, "unavailable");
 	assert.equal(state.guide.status, "unavailable");
-	assert.equal(state.receipts.status, "unknown");
+	assert.equal(state.receipts.status, "unavailable");
 	await handle.close();
 
 	const invalid = collectingIo();

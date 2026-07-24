@@ -1,6 +1,7 @@
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
+import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 
 export interface CealCliIo {
 	stdout: { write(chunk: string): unknown };
@@ -39,6 +40,10 @@ export interface CealCommandRuntime {
 	removeDiscoveryCache?: () => Promise<void>;
 	inspectAgentGuide?: () => CealAgentGuideState;
 	registerAgentGuide?: () => CealAgentGuideState;
+	// Client-local receipt spool (advisory allowlisted call-outcome metadata;
+	// failures never change call behavior). See receipt-spool.ts.
+	recordReceiptSpool?: (entry: CealReceiptSpoolEntry) => void;
+	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
 	runStableUpdate?: () => Promise<CealStableUpdateResult>;
 	/** Real executable path for managed-install observation (`ceal observe`). */
 	executablePath?: string;

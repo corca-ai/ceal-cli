@@ -8,6 +8,14 @@ import { writeYaml } from "./output.js";
 
 interface ResultIo { stdout: { write(chunk: string): unknown } }
 
+/**
+ * Optional receipt-spool hook: receives the exact emitted result envelope so
+ * the spooled projection can only ever be a subset of what the caller already
+ * saw. The recorder must swallow its own failures (see index.ts wiring); a
+ * spool problem never changes a call's output or exit code.
+ */
+export type CealCallResultRecorder = (envelope: Record<string, unknown>) => void;
+
 export interface CealParsedCapabilityCall {
 	ok: true;
 	capabilityId: string;
@@ -17,51 +25,58 @@ export interface CealParsedCapabilityCall {
 	profileRef?: string;
 }
 
+function emitCallResult(io: ResultIo, envelope: Record<string, unknown>, record: CealCallResultRecorder | undefined): number {
+	const exitCode = writeYaml(io.stdout, envelope);
+	record?.(envelope);
+	return exitCode;
+}
+
 export function writeCallCompleted(
 	value: CealGatewayCallValue, events: unknown, requestId: string, io: ResultIo,
-	session: CealStoredSession, parsed: CealParsedCapabilityCall,
+	session: CealStoredSession, parsed: CealParsedCapabilityCall, record?: CealCallResultRecorder,
 ): number {
 	const eventRefs = Array.isArray(events) ? events.flatMap((event) => event && typeof event === "object" && "event_ref" in event ? [String(event.event_ref)] : []) : [];
-	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed);
-	return writeYaml(io.stdout, {
+	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed, record);
+	return emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
 		target: parsed.targetRef, data: value.data,
 		receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
-	});
+	}, record);
 }
 
 export function writeCallGatewayFailure(
 	response: { error: unknown; proof_ref_or_unavailable?: unknown }, io: ResultIo, session: CealStoredSession,
-	parsed: CealParsedCapabilityCall, requestId: string,
+	parsed: CealParsedCapabilityCall, requestId: string, record?: CealCallResultRecorder,
 ): number {
 	const failure = classifyGatewayFailure(response.error);
 	const proofRefs = typeof response.proof_ref_or_unavailable === "string" ? [response.proof_ref_or_unavailable] : [];
-	writeYaml(io.stdout, {
+	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
 		capability: parsed.capabilityId, target: parsed.targetRef,
 		receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
 		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
-	});
+	}, record);
 	return 3;
 }
 
 export function writeCallIncomplete(
 	value: CealGatewayCallValue, requestId: string, reason: string, io: ResultIo,
-	session: CealStoredSession, parsed: CealParsedCapabilityCall,
+	session: CealStoredSession, parsed: CealParsedCapabilityCall, record?: CealCallResultRecorder,
 ): number {
-	writeYaml(io.stdout, {
+	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
 		data: value.data, receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
-	});
+	}, record);
 	return 3;
 }
 
 export function writeCallUnavailable(
 	reason: string, io: ResultIo, session: CealStoredSession | null, parsed: CealParsedCapabilityCall | null, requestId?: string,
+	record?: CealCallResultRecorder,
 ): number {
 	const requestWasIssued = typeof requestId === "string";
-	writeYaml(io.stdout, {
+	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "error",
 		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
 		// A transport failure after the worker has allocated the Gateway request
@@ -76,7 +91,7 @@ export function writeCallUnavailable(
 				? `Do not repeat a write yet. Run 'ceal receipt show ${requestId}' after a short wait to determine the Gateway outcome.`
 				: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
 		},
-	});
+	}, record);
 	return 3;
 }
 

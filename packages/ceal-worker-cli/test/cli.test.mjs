@@ -335,6 +335,61 @@ test("call invokes one granted capability and independently reads back its audit
 	});
 });
 
+test("call spools an allowlisted receipt projection and a spool failure never changes the result", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const spooled = [];
+		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: (() => { let id = 0; return () => `narnia:spool:${++id}`; })(),
+			recordReceiptSpool: (entry) => spooled.push(entry),
+			now: () => Date.parse("2026-07-24T12:00:00.000Z"),
+		});
+		assert.equal(payload.status, "completed");
+		assert.deepEqual(spooled, [{
+			recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
+			requestRef: "narnia:spool:1:call",
+			status: "completed",
+			evidence: "readback_verified",
+			auditRefs: ["gateway-audit:event:001"],
+			capabilityId: "message.search",
+			targetRef: "target:team-inbox",
+		}]);
+		// The spooled projection may never carry call arguments or result data.
+		assert.equal(JSON.stringify(spooled).includes("launch"), false);
+	});
+	await withGateway(async ({ endpoint }) => {
+		const broken = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			recordReceiptSpool: () => { throw new Error("spool unavailable"); },
+		});
+		assert.equal(broken.status, "completed");
+		assert.equal(broken.receipt.evidence, "readback_verified");
+	});
+});
+
+test("a pre-issue call failure is not spooled while an issued unknown-outcome failure is", async () => {
+	const spooled = [];
+	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
+		recordReceiptSpool: (entry) => spooled.push(entry),
+	});
+	assert.deepEqual(spooled, []);
+	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
+		loadSession: async () => storedSession("http://127.0.0.1:9"),
+		recordReceiptSpool: (entry) => spooled.push(entry),
+		now: () => Date.parse("2026-07-24T12:00:00.000Z"),
+	});
+	assert.deepEqual(spooled, [{
+		recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
+		requestRef: "ceal:call:call",
+		status: "error",
+		evidence: "outcome_unknown",
+		auditRefs: [],
+		capabilityId: "message.search",
+		targetRef: "target:team-inbox",
+		errorKind: "request_failed",
+	}]);
+});
+
 test("receipt keeps audit metadata out of normal results and retrieves a safe projection on demand", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(["receipt", "show", "narnia:call:1:call"], 0, {

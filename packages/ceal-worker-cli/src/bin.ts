@@ -6,6 +6,7 @@ import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
 import { createCealSessionStore } from "./profile-store.js";
+import { createCealReceiptSpoolStore } from "./receipt-spool.js";
 import { createCealStableUpdateRunner } from "./stable-update.js";
 
 let sessionStore: ReturnType<typeof createCealSessionStore> | undefined;
@@ -13,6 +14,9 @@ try { sessionStore = createCealSessionStore(process.env.HOME); } catch { session
 
 let discoveryCache: ReturnType<typeof createCealDiscoveryCacheStore> | undefined;
 try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch { discoveryCache = undefined; }
+
+let receiptSpool: ReturnType<typeof createCealReceiptSpoolStore> | undefined;
+try { receiptSpool = createCealReceiptSpoolStore(process.env.HOME); } catch { receiptSpool = undefined; }
 
 const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME);
 const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
@@ -34,6 +38,10 @@ void runCealCommand(process.argv.slice(2), {
 	removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
 	inspectAgentGuide: agentGuide ? () => agentGuide.inspect() : undefined,
 	registerAgentGuide: agentGuide ? () => agentGuide.register() : undefined,
+	// The append is synchronous inside the async wrapper; the .catch keeps a
+	// rejected spool write from becoming an unhandled rejection.
+	recordReceiptSpool: receiptSpool ? (entry) => { void receiptSpool.append(entry).catch(() => {}) } : undefined,
+	loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,
 	runStableUpdate,
 	executablePath: process.execPath,
 	discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),

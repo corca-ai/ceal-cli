@@ -22,12 +22,14 @@ import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSe
 import {
 	classifyGatewayFailure,
 	gatewayFailureCode,
+	type CealCallResultRecorder,
 	type CealParsedCapabilityCall,
 	writeCallCompleted,
 	writeCallGatewayFailure,
 	writeCallIncomplete,
 	writeCallUnavailable,
 } from "./call-result-output.js";
+import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 
 export { renderPlainYamlDocument } from "./yaml.js";
 
@@ -220,6 +222,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 	const server = createCealObserverServer({
 		loadSession: runtime.loadSession,
 		loadDiscoveryCache: runtime.loadDiscoveryCache,
+		loadReceiptSpool: runtime.loadReceiptSpool,
 		inspectAgentGuide: runtime.inspectAgentGuide,
 		executablePath: runtime.executablePath,
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
@@ -264,8 +267,8 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		bind_address: "127.0.0.1",
 		effect: "read_only",
 		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
-		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration"],
-		receipts: "unknown_no_local_store",
+		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration", "receipt_spool_metadata"],
+		receipts: "local_spool_metadata",
 		non_claims: [
 			"Cached/local state only; the observer never contacts the Gateway or a provider.",
 			"The observer serves until this command is interrupted.",
@@ -384,7 +387,7 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 		];
 	if (name === "observe") return [
 			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
-			"                          Serves cached session/capability/install/guide state; receipts stay unknown.",
+			"                          Serves cached session/capability/install/guide state and spooled call-outcome metadata.",
 			"                          No admin surface, no provider credentials, no live refresh.",
 		];
 	return [];
@@ -819,6 +822,21 @@ function writeReceiptError(kind: string, message: string, io: CealCliIo): number
 	return 3;
 }
 
+// Best-effort receipt-spool recorder: projects the emitted result envelope
+// through the spool's allowlist and appends it. Every failure is swallowed so
+// a broken spool can never change a call's output or exit code, and a
+// receipt-less envelope (pre-issue failure) projects to nothing.
+function callResultRecorder(runtime: CealCommandRuntime): CealCallResultRecorder | undefined {
+	const record = runtime.recordReceiptSpool;
+	if (!record) return undefined;
+	return (envelope) => {
+		try {
+			const entry = receiptSpoolEntryFromCallResult(envelope, runtime.now?.() ?? Date.now());
+			if (entry) record(entry);
+		} catch { /* spool failure must never change call behavior */ }
+	};
+}
+
 async function executeCall(
 	initialSession: CealStoredSession,
 	profileRef: string,
@@ -827,17 +845,18 @@ async function executeCall(
 	io: CealCliIo,
 	runtime: CealCommandRuntime,
 ): Promise<number> {
+	const record = callResultRecorder(runtime);
 	let completed: { value: CealGatewayCallValue; events: unknown; session: CealStoredSession } | null = null;
 	try {
 		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);
-		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId);
+		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId, record);
 		const readback = await client.request({
 			request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
 			operation: "readback",
 			profile_ref: profileRef,
 			body: { request_id: requestId },
 		});
-		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed);
+		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed, record);
 		completed = { value: call.value, events: readback.value.events, session };
 	} catch (error) {
 		if (error instanceof CealKnownPreProviderCallError) {
@@ -850,9 +869,9 @@ async function executeCall(
 		// or preserve a receipt for an action the Gateway did not authorize.
 		if (error instanceof CealClientSessionError) return writeCallUnavailable(error.code, io, initialSession, parsed);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeCallUnavailable(reason, io, initialSession, parsed, requestId);
+		return writeCallUnavailable(reason, io, initialSession, parsed, requestId, record);
 	}
-	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.session, parsed);
+	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.session, parsed, record);
 }
 
 type CallSessionResolution = { ok: true; session: CealStoredSession } | { ok: false; reason: string };
