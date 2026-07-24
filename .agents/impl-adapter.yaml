@@ -4,7 +4,11 @@ language: en
 output_dir: charness-artifacts/impl
 preset_id: portable-defaults
 customized_from: portable-defaults
-verification_tools: []
+verification_tools:
+  - "npm run check"
 ui_verification_tools: []
 verification_install_proposals: []
-truth_surfaces: []
+truth_surfaces:
+  - README.md
+  - worker-release-inputs.json
+  - gateway-handoff-lock.json
