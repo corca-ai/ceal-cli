@@ -801,6 +801,9 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 	// handling time arrives on the event itself rather than inside `call`.
 	// When both carry timing the event envelope stays authoritative; call
 	// detail remains a backward-compatible fallback for older successful data.
+	// The call-detail guard is load-bearing, not redundant: the strict decoder
+	// integer-checks only the event-level field, while call detail admits any
+	// finite number.
 	const gatewayElapsedMs = safeGatewayElapsed(event.gateway_elapsed_ms) ?? safeGatewayElapsed(event.call?.gateway_elapsed_ms);
 	return {
 		ref: event.event_ref, operation: event.operation, outcome: event.outcome,

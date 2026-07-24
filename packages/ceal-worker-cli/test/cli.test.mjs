@@ -446,6 +446,21 @@ test("a legacy readback without negotiated timing omits the timing block instead
 	});
 });
 
+test("a decoder-legal invalid call-detail timing is omitted, not rendered", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(["receipt", "show", "narnia:call:3:call"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:receipt:3",
+		});
+		assert.equal(payload.status, "verified");
+		assert.equal("timing" in payload.events[0], false);
+	}, (request) => {
+		const response = readbackResponse(request);
+		response.value.events[0].call.gateway_elapsed_ms = 42.5;
+		return response;
+	});
+});
+
 test("event-level Gateway timing stays authoritative over successful call-detail timing", async () => {
 	await withGateway(async ({ endpoint }) => {
 		const payload = await yamlRun(["receipt", "show", "narnia:call:2:call"], 0, {
