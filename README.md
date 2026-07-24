@@ -117,7 +117,10 @@ it is not a worker-release builder.
 handoff archive, merges one exact inventory, signs every asset with cosign
 keyless, and publishes a GitHub prerelease. Promoting a prerelease to the
 stable lane (`CEAL_VERSION=stable` / `ceal update`) is a separate operator
-edit. The historical dual `install.sh`, `release:binaries`,
+publication: upload the verified asset set to the worker static origin
+`releases/worker/<tag>/`, then rotate
+`releases/worker/stable/ceal-worker-stable-release.json` last.
+The historical dual `install.sh`, `release:binaries`,
 `release:manifest`, bare `v*` tags, and
 `.github/workflows/cealctl-release.yml` remain frozen compatibility material.
 Do not execute, amend, publish, or use them to install either command from
@@ -126,18 +129,24 @@ this checkout.
 ### Installing the worker
 
 ```sh
-curl -fsSL https://github.com/corca-ai/ceal-cli/releases/latest/download/install-ceal.sh \
+curl -fsSL https://ceal.borca.ai/releases/worker/stable/install-ceal.sh \
   | CEAL_VERSION=stable sh
 ```
 
-The `latest/download` form and `CEAL_VERSION=stable` resolve only after an
-operator has promoted a `ceal-v*` prerelease to a normal release; until then
-install an explicit tag (`CEAL_VERSION=ceal-v0.65.0`) against that release's
-own `install-ceal.sh`. While the repository is private, download the release
-copy of `install-ceal.sh` with `gh` (or pass
-`CEAL_GITHUB_TOKEN=$(gh auth token)` so the installer can fetch release
-assets); once the repository is public the anonymous curl form above is
-canonical. Supported platforms: `linux-arm64`,
+Worker distribution is the worker-owned static-origin prefix
+`https://ceal.borca.ai/releases/worker/` — never the Gateway-owned
+`releases/gateway/`. Each signed release set is published under
+`releases/worker/<tag>/`, and `CEAL_VERSION=stable` resolves
+`releases/worker/stable/ceal-worker-stable-release.json`
+(`ceal.worker_stable_release.v1`: the stable tag plus the SHA-256 of that
+tag's `SHA256SUMS`, which the installer re-checks against the downloaded
+signed inventory). Until an operator publishes the first release set and
+rotates the stable pointer, these URLs 404: install an explicit published tag
+(`CEAL_VERSION=ceal-v0.65.0`) instead, or — as a maintainer verifying a
+private prerelease before promotion — download that release's
+`install-ceal.sh` with `gh` and pass `CEAL_GITHUB_TOKEN=$(gh auth token)` for
+the authenticated GitHub API lane (the token is sent only to
+`api.github.com`, never to the static origin). Supported platforms: `linux-arm64`,
 `linux-amd64`, `darwin-arm64`, `darwin-amd64`. The installer verifies every
 asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under

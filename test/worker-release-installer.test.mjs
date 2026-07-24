@@ -32,17 +32,51 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 	});
 });
 
-test("worker stable resolver ignores bare, draft, and prerelease tags", () => {
+test("worker stable resolver follows the worker static-origin stable pointer", () => {
 	withFixture(({ install, release, tools, log }) => {
-		const releases = JSON.stringify([
-			{ name: "legacy, global latest", prerelease: false, tag_name: "v9.9.9", unknown: { safe: true }, draft: false },
-			{ prerelease: true, name: "candidate, one", tag_name: "ceal-v0.66.0-rc.1", draft: false },
-			{ tag_name: "ceal-v0.66.0", draft: true, prerelease: false, name: "draft, two" },
-			{ unknown: ["field"], prerelease: false, name: "worker, stable", draft: false, tag_name: TAG },
-		]);
-		const result = run({ install, release, tools, log, version: "stable", releases });
+		writeStablePointer(release);
+		const headerLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: "stable", headerLog });
 		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.match(readFileSync(log, "utf8"), /refs\/tags\/ceal-v0[.]65[.]0/u);
+		const fetches = readFileSync(headerLog, "utf8");
+		assert.match(fetches, /^https:\/\/ceal[.]borca[.]ai\/releases\/worker\/stable\/ceal-worker-stable-release[.]json$/mu);
+		assert.match(fetches, /^https:\/\/ceal[.]borca[.]ai\/releases\/worker\/ceal-v0[.]65[.]0\/ceal-linux-arm64$/mu);
+		assert.doesNotMatch(fetches, /api[.]github[.]com/u);
+		assert.doesNotMatch(fetches, /Authorization/u);
+	});
+});
+
+test("worker stable resolver never sends the GitHub token to the static origin", () => {
+	withFixture(({ install, release, tools, log }) => {
+		writeStablePointer(release);
+		const inventory = stageAssetInventory(release);
+		const headerLog = path.join(path.dirname(log), "curl-fetches.log");
+		const result = run({ install, release, tools, log, version: "stable", token: "fake-token", inventory, headerLog });
+		assert.equal(result.status, 0, result.stderr);
+		const fetches = readFileSync(headerLog, "utf8").trim().split("\n");
+		const staticFetches = fetches.filter((line) => line.includes("ceal.borca.ai"));
+		assert.equal(staticFetches.length, 1, "stable pointer must be the only static-origin fetch in the token lane");
+		for (const line of staticFetches) assert.doesNotMatch(line, /Authorization/u);
+		assert.match(readFileSync(headerLog, "utf8"), /Authorization: Bearer fake-token/u);
+	});
+});
+
+test("worker installer rejects a malformed or mismatched stable pointer", () => {
+	withFixture(({ install, release, tools, log }) => {
+		writeStablePointer(release, { tag: "v9.9.9" });
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /stable release pointer is not a valid/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+	withFixture(({ install, release, tools, log }) => {
+		writeStablePointer(release, { sha256sums_sha256: digest("tampered release set") });
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /does not match the downloaded signed SHA256SUMS/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
 	});
 });
 
@@ -157,12 +191,12 @@ function withFixture(callback) {
 		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac");
 		writeTool(path.join(tools, "cosign"), "printf '%s\\n' \"$*\" >> \"$COSIGN_LOG\"\n[ -z \"${COSIGN_FAIL:-}\" ] || exit 1");
 		writeTool(path.join(tools, "curl"), [
-			"url=''", "out=''",
-			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; -H) shift; printf '%s\\n' \"$1\" >> \"${CURL_HEADER_LOG:-/dev/null}\" ;; http*) url=\"$1\" ;; esac; shift; done",
+			"url=''", "out=''", "headers=''",
+			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; -H) shift; headers=\"$headers | $1\" ;; http*) url=\"$1\" ;; esac; shift; done",
+			"printf '%s%s\\n' \"$url\" \"$headers\" >> \"${CURL_HEADER_LOG:-/dev/null}\"",
 			"case \"$url\" in",
 			"  *api.github.com*/releases/tags/*) printf '%s' \"${FAKE_RELEASE_INVENTORY-}\" > \"$out\"; exit 0 ;;",
 			"  *api.github.com*/releases/assets/*) cp \"$FAKE_RELEASE_DIR/asset-${url##*/}\" \"$out\"; exit 0 ;;",
-			"  *api.github.com*/releases*) printf '%s' \"${FAKE_RELEASES:-[]}\" > \"$out\"; exit 0 ;;",
 			"esac",
 			"[ -n \"$out\" ] || exit 2", "cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
 		].join("\n"));
@@ -170,8 +204,8 @@ function withFixture(callback) {
 	} finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-function run({ install, release, tools, log, version, releases = "[]", cosignFail = false, restrictedPath = null, token = "", inventory = "{}", headerLog = "" }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASES: releases, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", inventory = "{}", headerLog = "" }) {
+	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_HEADER_LOG: headerLog, FAKE_RELEASE_DIR: release, FAKE_RELEASE_INVENTORY: inventory, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
 }
 
 // Mirrors the private-repo shape: every asset is reachable only through its
@@ -201,6 +235,14 @@ function restrictedTools(tools) {
 function writeWorkerBinary(file) {
 	writeFileSync(file, "#!/usr/bin/env sh\nif [ \"${1:-}\" = version ]; then printf 'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: gateway_issued_client_session\\n'; exit 0; fi\nif [ \"${1:-}\" = --help ]; then exit 0; fi\nexit 2\n");
 	chmodSync(file, 0o755);
+}
+
+// The stable pointer is operator-published static-origin metadata, not a
+// signed release asset; the installer re-checks its digest against the
+// downloaded signed SHA256SUMS.
+function writeStablePointer(release, overrides = {}) {
+	const releaseSet = digest(readFileSync(path.join(release, "SHA256SUMS")));
+	writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify({ schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSet, ...overrides })}\n`);
 }
 
 function writeManifest(release, platform) {

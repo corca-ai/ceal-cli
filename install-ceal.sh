@@ -4,7 +4,9 @@ set -eu
 # Worker-only installer.  This deliberately has no operator role or cealctl
 # compatibility path: it can change only the ceal link and .ceal-cli/worker.
 REPO="corca-ai/ceal-cli"
+STATIC_ORIGIN="https://ceal.borca.ai/releases/worker"
 VERSION="${CEAL_VERSION:-}"
+STABLE_RELEASE_SET_SHA=""
 INSTALL_DIR="${CEAL_INSTALL_DIR:-$HOME/.local/bin}"
 WORKFLOW_FILE="ceal-release.yml"
 ISSUER="https://token.actions.githubusercontent.com"
@@ -82,15 +84,13 @@ bootstrap_cosign() {
 
 is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'; }
 
-# GitHub has one global `latest` release.  Legacy bare-v releases retain that
-# lane, so worker stable selection reads the release list and accepts only the
-# first current, non-draft ceal-v semantic tag.  The selected tag is still
-# verified by its exact OIDC identity below.
-# While the repository is private, CEAL_GITHUB_TOKEN authenticates release
-# access; once public the anonymous path is canonical and the token is unused.
-# Private release assets are reachable only through the API asset endpoint
-# (the browser download URL 404s for tokens), so the token lane resolves each
-# asset id from the release inventory fetched once per run.
+# Anonymous distribution is the worker-owned static origin: versioned assets
+# live under $STATIC_ORIGIN/<tag>/ and stable selection reads the stable
+# pointer there.  The authenticated GitHub API lane remains only so a
+# maintainer can verify a private prerelease with an explicit tag before
+# promotion; CEAL_GITHUB_TOKEN resolves each asset id from the release
+# inventory fetched once per run.  The bearer token is sent only to
+# api.github.com, never to the static origin.
 auth_curl() {
   if [ -n "${CEAL_GITHUB_TOKEN:-}" ]; then curl -fsSL -H "Authorization: Bearer $CEAL_GITHUB_TOKEN" "$@"
   else curl -fsSL "$@"; fi
@@ -130,33 +130,39 @@ download_asset() {
   fi
 }
 
-resolve_stable_tag() {
-  auth_curl "https://api.github.com/repos/$REPO/releases?per_page=100" -o "$TMP_DIR/releases.json" \
-    || fail "Could not resolve the worker stable release list"
-  candidate="$(python3 - "$TMP_DIR/releases.json" <<'PY'
+# Stable selection is the worker-owned static-origin pointer, not a GitHub
+# release list: an operator publishes each signed release set under
+# $STATIC_ORIGIN/<tag>/ and rotates stable/ceal-worker-stable-release.json
+# last.  The pointer can only select a genuinely signed release: every asset
+# is still verified against its exact tag OIDC identity below, and the
+# pointer digest must match the downloaded signed SHA256SUMS bytes.
+resolve_stable_release() {
+  curl -fsSL "$STATIC_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
+    || fail "Could not resolve the worker stable release pointer from $STATIC_ORIGIN/stable/"
+  stable_resolved="$(python3 - "$TMP_DIR/stable-release.json" <<'PY'
 import json
 import re
 import sys
 
 try:
-    releases = json.load(open(sys.argv[1], encoding="utf-8"))
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
 except (OSError, ValueError):
     sys.exit(1)
-if not isinstance(releases, list):
+if not isinstance(value, dict) or value.get("schema_version") != "ceal.worker_stable_release.v1":
     sys.exit(1)
-tag_pattern = re.compile(r"^ceal-v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
-for release in releases:
-    if not isinstance(release, dict):
-        continue
-    tag = release.get("tag_name")
-    if release.get("draft") is False and release.get("prerelease") is False and isinstance(tag, str) and tag_pattern.fullmatch(tag):
-        print(tag)
-        sys.exit(0)
-sys.exit(1)
+tag = value.get("tag")
+release_set = value.get("sha256sums_sha256")
+if not isinstance(tag, str) or not re.fullmatch(r"ceal-v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag):
+    sys.exit(1)
+if not isinstance(release_set, str) or not re.fullmatch(r"[a-f0-9]{64}", release_set):
+    sys.exit(1)
+print(tag)
+print(release_set)
 PY
-)" || fail "Worker release list did not resolve to a canonical stable ceal-v tag"
-  is_tag "$candidate" || fail "Worker release list did not resolve to a canonical stable ceal-v tag"
-  printf '%s\n' "$candidate"
+)" || fail "Worker stable release pointer is not a valid ceal.worker_stable_release.v1 document"
+  VERSION="$(printf '%s\n' "$stable_resolved" | sed -n 1p)"
+  STABLE_RELEASE_SET_SHA="$(printf '%s\n' "$stable_resolved" | sed -n 2p)"
+  is_tag "$VERSION" || fail "Worker stable release pointer did not resolve to a canonical ceal-v tag"
 }
 
 version_is_older() {
@@ -309,12 +315,12 @@ probe_mv_t
 bootstrap_cosign
 need_sha256
 for tool in cmp curl cosign grep python3 sed sort uniq wc uname mktemp readlink; do need "$tool"; done
-if [ "$VERSION" = stable ]; then VERSION="$(resolve_stable_tag)"; fi
+if [ "$VERSION" = stable ]; then resolve_stable_release; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
   version_is_older "$VERSION" "$CEAL_MINIMUM_VERSION" && fail "Latest stable Ceal worker release is older than the installed worker release"
 fi
-BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+BASE_URL="$STATIC_ORIGIN/$VERSION"
 fetch_release_inventory
 if [ ! -e "$INSTALL_DIR" ]; then (umask 077; mkdir -p "$INSTALL_DIR"); elif [ -L "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then fail "Install directory must be a regular directory"; fi
 STATE_ROOT="$INSTALL_DIR/.ceal-cli"; [ ! -e "$STATE_ROOT" ] && (umask 077; mkdir "$STATE_ROOT")
@@ -326,6 +332,7 @@ STATE_DIR="$STATE_ROOT/worker"; [ ! -e "$STATE_DIR" ] && (umask 077; mkdir "$STA
 LOCK_PATH="$STATE_DIR/install.lock"; acquire_install_lock
 COMMAND_ASSET="ceal-$PLATFORM"; MANIFEST_ASSET="ceal-worker-release-manifest-$PLATFORM.json"
 for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md install-ceal.sh SHA256SUMS; do download_signed_asset "$asset"; verify_signature "$asset"; done
+[ -z "$STABLE_RELEASE_SET_SHA" ] || [ "$(sha256_of "$TMP_DIR/SHA256SUMS")" = "$STABLE_RELEASE_SET_SHA" ] || fail "Stable release pointer does not match the downloaded signed SHA256SUMS"
 verify_checksum_inventory; verify_manifest_guide
 chmod 755 "$TMP_DIR/$COMMAND_ASSET"; verify_version_output "$TMP_DIR/$COMMAND_ASSET"; "$TMP_DIR/$COMMAND_ASSET" --help >/dev/null
 COMMAND_TARGET="$INSTALL_DIR/ceal"; COMMAND_LINK_TARGET=".ceal-cli/worker/current/$COMMAND_ASSET"; LEGACY_COMMAND_LINK_TARGET=".ceal-cli/current/$COMMAND_ASSET"; CURRENT_LINK="$STATE_DIR/current"; capture_target
