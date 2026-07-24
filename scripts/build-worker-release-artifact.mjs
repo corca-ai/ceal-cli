@@ -96,11 +96,16 @@ async function verifyConsumer(normalized, deps) {
 function cleanupFailedConsumerWorkspace(workspace) {
 	if (typeof workspace !== "string" || !path.isAbsolute(workspace)) return;
 	const resolved = path.resolve(workspace);
-	// The workspace is canonicalized at creation, so compare against the
-	// canonical temp root (macOS reports /var while realpath is /private/var).
+	// Canonicalize only the parent so a raw or canonical temp path both match
+	// (macOS reports /var while realpath is /private/var); the workspace entry
+	// itself is never followed, so a planted symlink cannot redirect the rm.
+	let parent;
 	let canonicalTempRoot;
-	try { canonicalTempRoot = realpathSync(tmpdir()); } catch { return; }
-	if (path.dirname(resolved) !== canonicalTempRoot || !path.basename(resolved).startsWith("ceal-gateway-protocol-consumer-")) return;
+	try {
+		parent = realpathSync(path.dirname(resolved));
+		canonicalTempRoot = realpathSync(tmpdir());
+	} catch { return; }
+	if (parent !== canonicalTempRoot || !path.basename(resolved).startsWith("ceal-gateway-protocol-consumer-")) return;
 	rmSync(resolved, { recursive: true, force: true });
 }
 
