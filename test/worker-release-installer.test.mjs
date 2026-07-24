@@ -7,6 +7,9 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
+import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
+import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install-ceal.sh");
@@ -196,6 +199,79 @@ test("worker installer installs on a darwin host through the portable tool lane"
 	});
 });
 
+// The worker lane owns the real-binary install/update proof after version
+// independence: the legacy dual installer can no longer represent current
+// worker source, so this test installs a real packed native artifact through
+// install-ceal.sh, smokes an installed post-allocation receipt, and performs
+// a real option-free `ceal update` against the stable pointer.
+test("real native worker installs through the worker lane and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, async (context) => {
+	const fixture = packedProtocolFixture(context);
+	const native = path.join(fixture.root, "worker-native-install");
+	const built = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: native, ...fixture });
+	assert.equal(built.ok, true);
+	assert.equal(built.platform, "linux-amd64");
+	const realTag = `ceal-v${built.version}`;
+	withFixture(({ install, release, tools, log }) => {
+		copyFileSync(path.join(native, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
+		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
+		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform, built.version);
+		writeChecksums(release);
+		writeStablePointer(release, { tag: realTag });
+		rewriteSidecars(release);
+		const result = run({ install, release, tools, log, version: realTag });
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
+		const installed = path.join(install, "ceal");
+		const version = parse(spawnSync(installed, ["version"], { encoding: "utf8" }).stdout);
+		assert.equal(version.version, built.version);
+		assert.equal(version.protocol_version, "1.3.0");
+
+		writeWorkerSession(install);
+		const unavailable = spawnSync(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
+			encoding: "utf8",
+			env: { ...process.env, HOME: install },
+		});
+		assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
+		const unavailablePayload = parse(unavailable.stdout);
+		assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
+		assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
+		assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
+
+		const updated = spawnSync(installed, ["update"], {
+			encoding: "utf8",
+			env: { ...process.env, COSIGN_LOG: log, FAKE_RELEASE_DIR: release, PATH: `${tools}:${process.env.PATH}` },
+		});
+		assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
+		const payload = parse(updated.stdout);
+		assert.equal(payload.schema_version, "ceal.update.v1");
+		assert.equal(payload.status, "unchanged");
+		assert.equal(payload.stable_only, true);
+		assert.equal(payload.previous_version, built.version);
+		assert.equal(payload.installed_version, built.version);
+		assert.equal(payload.platform, "linux-amd64");
+	});
+});
+
+function writeWorkerSession(home) {
+	const directory = path.join(home, ".ceal");
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	writeFileSync(path.join(directory, "client-session.json"), `${JSON.stringify({
+		schema_version: "ceal.client_session_store.v1",
+		gateway_endpoint: "http://127.0.0.1:1/gateway/client",
+		profile_ref: "profile:installer-fixture",
+		membership_ref: "membership:installer-fixture",
+		registration_ref: "registration:installer-fixture",
+		client_ref: "client:installer-fixture",
+		subject_ref: "subject:installer-fixture",
+		instance_ref: "instance:installer-fixture",
+		access_token: `ceal_personal_${"P".repeat(43)}`,
+		expires_at: "2099-07-14T00:00:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+	}, null, 2)}\n`, { mode: 0o600 });
+}
+
 function withFixture(callback) {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-installer-"));
 	try {
@@ -266,9 +342,9 @@ function writeStablePointer(release, overrides = {}) {
 	writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify({ schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSet, ...overrides })}\n`);
 }
 
-function writeManifest(release, platform) {
+function writeManifest(release, platform, version = "0.65.0") {
 	const guide = readFileSync(path.join(release, "ceal-guide-SKILL.md"));
-	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify({ schema_version: "ceal.worker_release_manifest.v1", version: "0.65.0", platform, command: "ceal", guide: { name: "ceal-guide-SKILL.md", sha256: digest(guide) } }, null, 2)}\n`);
+	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify({ schema_version: "ceal.worker_release_manifest.v1", version, platform, command: "ceal", guide: { name: "ceal-guide-SKILL.md", sha256: digest(guide) } }, null, 2)}\n`);
 }
 
 function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {

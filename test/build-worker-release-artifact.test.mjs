@@ -120,7 +120,7 @@ test("worker artifact builder proves the real packed protocol consumer and SEA o
 		protocolProvenance: fixture.provenance,
 		outputDirectory: output,
 		platform: "linux-amd64",
-		version: "0.65.0",
+		version: "0.65.1",
 	});
 	assert.equal(result.proof_level, "local_integration");
 	assert.equal(result.artifact.name, "ceal-linux-amd64");

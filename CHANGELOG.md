@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.65.1 (`ceal-v0.65.1`)
+
+- Version the worker independently of the pinned Gateway Protocol artifact:
+  worker and client move together to 0.65.1 while both keep the exact
+  `@corca-ai/ceal-protocol@0.65.0` pin from the signed
+  `gateway-handoff-v0.65.0` archive; frozen compatibility packages and the
+  legacy dual-lane contract stay at 0.65.0.
+- Complete the receipt event-level timing contract: strict decode accepts the
+  negotiated top-level `gateway_elapsed_ms`, denied/failed receipts render
+  `error_code`, `non_claims`, and `timing` with the event envelope
+  authoritative over call-detail timing, and missing negotiation omits timing
+  rather than rendering zero.
+- Shape `ceal observe` into the Workbench first navigation: separate
+  "My agent work" and "Ceal" views plus a "Privacy & retention" view backed by
+  a declared-source `privacy` state section (local sources, retention bounds,
+  fixed no-forwarding boundary).
+
 ## 0.65.0 (worker-only release addendum, `ceal-v0.65.0`)
 
 - Cut the first worker-only signed release route: `ceal-release.yml` builds

@@ -113,14 +113,17 @@ function buildClient({ root, workspace, input, releaseInputs }) {
 	run(source, "npm", ["run", "build"], "client_build");
 	setDependencies(source, { [PROTOCOL_NAME]: input.provenance.artifact.version });
 	const tarball = pack(source, path.join(workspace, "tarballs"), CLIENT_NAME, "client_pack");
-	return { source, tarball, protocol };
+	return { source, tarball, protocol, version: manifest.version };
 }
 
 function buildWorker({ root, workspace, input, client, releaseInputs }) {
 	const source = copySourcePackage(root, workspace, releaseInputs.packages.worker.path);
 	const manifest = readJson(path.join(source, "package.json"), "invalid_worker_package");
+	// The worker versions with the client, not with the pinned Gateway
+	// protocol artifact: the protocol dependency alone must match the
+	// supplied artifact exactly.
 	assertPublishedDependency(manifest, PROTOCOL_NAME, input.provenance.artifact.version, "invalid_worker_package");
-	assertPublishedDependency(manifest, CLIENT_NAME, input.provenance.artifact.version, "invalid_worker_package");
+	assertPublishedDependency(manifest, CLIENT_NAME, client.version, "invalid_worker_package");
 	setDependencies(source, {
 		[PROTOCOL_NAME]: artifactSpecifier(input.tarball),
 		[CLIENT_NAME]: artifactSpecifier(client.tarball.path),
@@ -131,7 +134,7 @@ function buildWorker({ root, workspace, input, client, releaseInputs }) {
 	run(source, "npm", ["run", "build"], "worker_build");
 	setDependencies(source, {
 		[PROTOCOL_NAME]: input.provenance.artifact.version,
-		[CLIENT_NAME]: input.provenance.artifact.version,
+		[CLIENT_NAME]: client.version,
 	});
 	const tarball = pack(source, path.join(workspace, "tarballs"), WORKER_NAME, "worker_pack");
 	return { source, tarball, protocol };

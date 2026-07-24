@@ -86,14 +86,17 @@ test("every public command emits one YAML document without a format flag", async
 });
 
 test("version identifies the package, protocol, range, and credential context", async () => {
+	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 	assert.deepEqual(await yamlRun(["version"]), {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
-		version: "0.65.0",
+		// Drift guard: the rendered version must track the package manifest.
+		version: manifest.version,
 		protocol_version: "1.3.0",
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
 	});
+	assert.equal(manifest.version, "0.65.1");
 });
 
 test("commands YAML is the machine-readable discovery surface", async () => {
@@ -1071,7 +1074,7 @@ test("capabilities selects a bounded target page through the stored client sessi
 		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
 		assert.deepEqual(requests.map((item) => item.body.body), [
-			{ client: { name: "ceal", version: "0.65.0" } },
+			{ client: { name: "ceal", version: "0.65.1" } },
 			{ capability_id: "message.search", match: "team", limit: 1 },
 		]);
 	});

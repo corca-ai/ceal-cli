@@ -69,90 +69,12 @@ test("stable mode resolves only a canonical latest release tag before the signed
 	});
 });
 
-test("packed native worker artifact preserves both post-allocation failure receipts and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, async () => {
-	const artifact = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-cli-packed-update-")));
-	try {
-		const built = spawnSync(process.execPath, ["scripts/build-platform-binaries.mjs", "--version", "0.65.0", "--platform", "linux-amd64", "--out", artifact, "--json"], {
-			cwd: ROOT,
-			encoding: "utf8",
-		});
-		assert.equal(built.status, 0, built.stderr);
-		await withFixture(async ({ root, release, tools, install, cosignLog }) => {
-			copyFileSync(path.join(artifact, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
-			copyFileSync(INSTALLER, path.join(release, "install.sh"));
-			writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
-			writeChecksums(release);
-			const installed = runInstaller({ root, release, tools, install, cosignLog });
-			assert.equal(installed.status, 0, installed.stderr);
-			writeWorkerSession(install);
-			const unavailable = spawnSync(path.join(install, "ceal"), ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
-				encoding: "utf8",
-				env: { ...process.env, HOME: install, PATH: `${tools}:${process.env.PATH}` },
-			});
-			assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
-			assert.equal(unavailable.stderr, "");
-			const unavailablePayload = parse(unavailable.stdout);
-			assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
-			assert.equal(unavailablePayload.status, "error");
-			assert.equal(unavailablePayload.capability, "message.search");
-			assert.equal(unavailablePayload.target, "target:team-inbox");
-			assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
-			assert.match(unavailablePayload.receipt.request_ref, /^ceal:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:call$/u);
-			assert.deepEqual(unavailablePayload.receipt.audit_refs, []);
-			assert.equal(unavailablePayload.error.kind, "request_failed");
-			assert.match(unavailablePayload.error.next_action, new RegExp(`Do not repeat a write yet[.] Run 'ceal receipt show ${unavailablePayload.receipt.request_ref}'`, "u"));
-			assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
-
-			const gatewayFailure = await startParsedGatewayFailureServer();
-			try {
-				writeWorkerSession(install, gatewayFailure.endpoint);
-				const rejected = spawnSync(path.join(install, "ceal"), ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
-					encoding: "utf8",
-					env: { ...process.env, HOME: install, PATH: `${tools}:${process.env.PATH}` },
-				});
-				assert.equal(rejected.status, 3, `${rejected.stderr}\n${rejected.stdout}`);
-				assert.equal(rejected.stderr, "");
-				const rejectedPayload = parse(rejected.stdout);
-				assert.equal(rejectedPayload.schema_version, "ceal.result.v2");
-				assert.equal(rejectedPayload.status, "error");
-				assert.equal(rejectedPayload.capability, "message.search");
-				assert.equal(rejectedPayload.target, "target:team-inbox");
-				assert.equal(rejectedPayload.receipt.evidence, "not_read_back");
-				assert.match(rejectedPayload.receipt.request_ref, /^ceal:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:call$/u);
-				assert.deepEqual(rejectedPayload.receipt.audit_refs, []);
-				assert.equal(rejectedPayload.error.kind, "gateway_request_failed");
-				assert.doesNotMatch(rejected.stdout, /ceal_(?:personal|refresh)_/u);
-			} finally {
-				await gatewayFailure.close();
-			}
-			const started = Date.now();
-			const updated = spawnSync(path.join(install, "ceal"), ["update"], {
-				encoding: "utf8",
-				env: {
-					...process.env,
-					COSIGN_LOG: cosignLog,
-					FAKE_RELEASE_DIR: release,
-					STABLE_TAG: "v0.65.0",
-					PATH: `${tools}:${process.env.PATH}`,
-				},
-			});
-			assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
-			assert.equal(updated.stderr, "");
-			const payload = parse(updated.stdout);
-			assert.equal(payload.schema_version, "ceal.update.v1");
-			assert.equal(payload.status, "unchanged");
-			assert.equal(payload.stable_only, true);
-			assert.equal(payload.previous_version, "0.65.0");
-			assert.equal(payload.installed_version, "0.65.0");
-			assert.equal(payload.platform, "linux-amd64");
-			assert.equal(payload.artifact_sha256, digest(readFileSync(path.join(install, "ceal"))));
-			assert.equal(typeof payload.elapsed_ms, "number");
-			assert.ok(Date.now() - started >= payload.elapsed_ms);
-		});
-	} finally {
-		rmSync(artifact, { recursive: true, force: true });
-	}
-});
+// The real-binary install/update and post-allocation receipt proofs moved to
+// the worker lane after version independence: the frozen legacy dual builder
+// can no longer represent current worker source. See
+// test/worker-native-artifact.test.mjs (real packed receipts) and
+// test/worker-release-installer.test.mjs (real native install and stable
+// update through install-ceal.sh).
 
 test("explicit operator installation creates only cealctl and operator-owned state", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
@@ -527,86 +449,6 @@ function writeChecksums(release) {
 	];
 	writeFileSync(path.join(release, "SHA256SUMS"), checksummed.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
 	return checksummed;
-}
-
-function writeWorkerSession(home, gatewayEndpoint = "http://127.0.0.1:0") {
-	const stateDirectory = path.join(home, ".ceal");
-	mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
-	chmodSync(stateDirectory, 0o700);
-	writeFileSync(path.join(stateDirectory, "client-session.json"), `${JSON.stringify({
-		schema_version: "ceal.client_session_store.v1",
-		// Port zero cannot have a listening TCP service, so this proves the
-		// transport-failure branch without depending on a locally free port.
-		gateway_endpoint: gatewayEndpoint,
-		profile_ref: "profile:narnia",
-		membership_ref: "membership:narnia",
-		registration_ref: "registration:narnia",
-		client_ref: "client:narnia",
-		subject_ref: "subject:worker",
-		instance_ref: "instance:corca",
-		access_token: `ceal_personal_${"P".repeat(43)}`,
-		expires_at: "2099-07-14T00:00:00.000Z",
-		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-	})}\n`, { mode: 0o600 });
-}
-
-async function startParsedGatewayFailureServer() {
-	const child = spawn(process.execPath, ["--input-type=module", "--eval", [
-		'import { createServer } from "node:http";',
-		"const server = createServer(async (request, response) => {",
-		"  const chunks = []; for await (const chunk of request) chunks.push(chunk);",
-		"  const body = JSON.parse(Buffer.concat(chunks).toString(\"utf8\"));",
-		"  response.writeHead(200, { \"content-type\": \"application/json\" });",
-		"  response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: \"1.3.0\", error: { code: \"uncategorized_gateway_failure\", message: \"server-controlled\", next_action: \"server-controlled\" } }));",
-		"});",
-		"server.listen(0, \"127.0.0.1\", () => { const address = server.address(); console.log(JSON.stringify({ endpoint: `http://127.0.0.1:${address.port}/gateway/client` })); });",
-		"process.once(\"SIGTERM\", () => server.close(() => process.exit(0)));",
-	].join("\n")], { stdio: ["ignore", "pipe", "pipe"] });
-	try {
-		const ready = await readChildJsonLine(child);
-		if (!ready || typeof ready.endpoint !== "string") throw new Error("parsed Gateway failure fixture did not report an endpoint");
-		return {
-			endpoint: ready.endpoint,
-			close: () => stopChild(child),
-		};
-	} catch (error) {
-		await stopChild(child);
-		throw error;
-	}
-}
-
-function readChildJsonLine(child) {
-	return new Promise((resolve, reject) => {
-		let stdout = "";
-		const fail = (error) => { cleanup(); reject(error); };
-		const onData = (chunk) => {
-			stdout += chunk;
-			const newline = stdout.indexOf("\n");
-			if (newline < 0) return;
-			try {
-				const value = JSON.parse(stdout.slice(0, newline));
-				cleanup();
-				resolve(value);
-			} catch { fail(new Error("parsed Gateway failure fixture emitted invalid startup data")); }
-		};
-		const onExit = (code, signal) => fail(new Error(`parsed Gateway failure fixture exited before startup (${code ?? signal ?? "unknown"})`));
-		const cleanup = () => {
-			child.stdout.off("data", onData);
-			child.off("exit", onExit);
-		};
-		child.stdout.on("data", onData);
-		child.once("exit", onExit);
-	});
-}
-
-function stopChild(child) {
-	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-	return new Promise((resolve) => {
-		child.once("exit", resolve);
-		child.kill("SIGTERM");
-	});
 }
 
 function writeBinary(file, command, marker = "generation-1", versionSuffix = "") {

@@ -258,9 +258,11 @@ function materializeOutput({ output, repoRoot, inputs, version, platform, artifa
 }
 
 function resolveVersion(repoRoot, inputs) {
+	// Worker and client version together; the exact protocol pin against the
+	// supplied artifact is enforced by the release-input resolver.
 	const versions = [inputs.worker, inputs.client].map((entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version);
-	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1 || versions[0] !== inputs.protocol.version) {
-		fail("version_mismatch", "Worker, client, and supplied Gateway Protocol versions must match exactly.");
+	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
+		fail("version_mismatch", "Worker and client package versions must match exactly.");
 	}
 	return versions[0];
 }

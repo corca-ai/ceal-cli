@@ -22,8 +22,16 @@ test("one release contract binds package, protocol, binary, and rollback identit
 		"ceal-worker-cli",
 		"ceal-operator-cli",
 	].map((name) => [name, readPackageJson(name)]));
-	assert.equal(rootPackage.version, contract.release_version);
-	for (const manifest of Object.values(packages)) assert.equal(manifest.version, contract.release_version);
+	// The legacy dual-lane contract stays frozen at its 0.65.0 identity and
+	// binds only the frozen compatibility packages. Worker-owned packages
+	// version independently but move together, keeping the exact protocol pin.
+	assert.equal(contract.release_version, "0.65.0");
+	for (const name of ["ceal-protocol", "ceal-operator-cli"]) assert.equal(packages[name].version, contract.release_version);
+	assert.equal(packages["ceal-client"].version, rootPackage.version);
+	assert.equal(packages["ceal-worker-cli"].version, rootPackage.version);
+	assert.equal(packages["ceal-client"].dependencies["@corca-ai/ceal-protocol"], contract.protocol.package_version);
+	assert.equal(packages["ceal-worker-cli"].dependencies["@corca-ai/ceal-protocol"], contract.protocol.package_version);
+	assert.equal(packages["ceal-worker-cli"].dependencies["@corca-ai/ceal"], packages["ceal-client"].version);
 	assert.equal(packages["ceal-protocol"].name, contract.protocol.package);
 	assert.equal(packages["ceal-client"].name, contract.client.package);
 	assert.equal(contract.client.role, "client_sdk_only");
