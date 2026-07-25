@@ -135,18 +135,41 @@ test("worker release workflow builds, merges, and signs every contracted release
 	const built = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
 	assert.deepEqual([...built].sort(), [...platforms].sort(), "every contracted platform needs a build runner");
 
-	const assemble = JSON.stringify(parsed.jobs.assemble.steps);
-	const publish = JSON.stringify(parsed.jobs["sign-and-publish"].steps);
+	// Each site is isolated: asserting against a whole job lets one site cover
+	// for another, which is exactly the partial-inventory bug being guarded.
+	const downloads = parsed.jobs.assemble.steps.flatMap((step) => (step.with?.name ? [step.with.name] : []));
+	const merge = runStepContaining(parsed.jobs.assemble, "build-worker-release-assets.mjs merge");
+	const inventory = runStepContaining(parsed.jobs["sign-and-publish"], "Unexpected worker release inventory");
+	const signing = bashArray(runStepContaining(parsed.jobs["sign-and-publish"], "cosign sign-blob"), "primary");
+	const manifestLoop = /for platform in ([^;]+); do/u.exec(inventory)?.[1].trim().split(/\s+/u);
+
+	assert.deepEqual([...manifestLoop].sort(), [...platforms].sort(), "manifest check must cover every platform");
 	for (const platform of platforms) {
-		assert.ok(assemble.includes(`-${platform}`), `assemble must download the ${platform} handoff`);
-		assert.ok(assemble.includes(`handoff/${platform}`), `assemble must merge the ${platform} input`);
-		assert.ok(publish.includes(`ceal-${platform}`), `publish must sign the ${platform} binary`);
 		assert.ok(
-			publish.includes(`ceal-worker-release-manifest-${platform}.json`),
-			`publish must sign the ${platform} manifest`,
+			downloads.some((name) => name.endsWith(`-${platform}`)),
+			`assemble must download the ${platform} handoff`,
 		);
+		assert.ok(merge.includes(`--input "$PWD/handoff/${platform}"`), `assemble must merge the ${platform} input`);
+		for (const asset of [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]) {
+			assert.ok(inventory.includes(asset), `the exact inventory gate must accept ${asset}`);
+			assert.ok(signing.includes(asset), `the signing array must cover ${asset}`);
+		}
 	}
 });
+
+function runStepContaining(job, needle) {
+	const found = job.steps.filter((step) => (step.run ?? "").includes(needle));
+	assert.equal(found.length, 1, `expected exactly one step containing ${needle}`);
+	return found[0].run;
+}
+
+// Reads `name=( ... )` as the shell would split it, so a token dropped from the
+// array is visible even when the same token appears elsewhere in the step.
+function bashArray(script, name) {
+	const body = new RegExp(`${name}=\\(([^)]*)\\)`, "u").exec(script);
+	assert.ok(body, `expected a ${name}=( ... ) array`);
+	return body[1].trim().split(/\s+/u);
+}
 
 // The build job is the only one that runs on macOS runners, which ship no GNU
 // coreutils; a sha256sum there fails the darwin legs and blocks every release.
