@@ -124,6 +124,16 @@ npm ci
 npm run check
 ```
 
+`npm run check` is the final proof gate and takes roughly 95s; about 80s of that
+is the release-artifact and native-binary suites, which cannot observe CLI or
+client behavior. While iterating, use the fast lane and keep the full gate for
+the last run before pushing or tagging:
+
+```sh
+npm run check:unit   # build + the four package suites, roughly 14s
+npm run test:release # release-artifact and native-binary suites only
+```
+
 The composite extraction verifier still packs all four historical packages,
 installs them into an isolated consumer, and scans the archives for private
 paths and cross-command implementation. It remains deletion-gate evidence only;
