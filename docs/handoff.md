@@ -40,9 +40,32 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
   directory that was never there — batch it into the next release, not its own.
 - The Codex host is still **staged** here (`~/.codex/skills/ceal-guide` absent).
   Registering it is a one-command local write nobody has asked for yet.
-- This host is enrolled against **`ceal-dev`** while adoption targets
-  **`ceal-prod`**, and dev's Slack connector reports `scope_unavailable`, so no
-  `ceal call` works: item 3 is blocked on the Gateway host, not here.
+- This host is now enrolled against **`instance:ceal-prod`**
+  (`registration:130cda7e-…`, `client:narnia`, `profile:work`). Both stale claims
+  in the previous baton are corrected: dev's Slack connector is **not**
+  `scope_unavailable` (five channels `granted`, `#ceal-dev` included) and prod's
+  `grants: []` does **not** mean an empty catalog.
+- The two instances serve **different catalogs**, which is the fact that matters
+  for planning: dev has five read capabilities including `message.enumerate`
+  (the #633 route, applied on dev only); prod has nineteen including Calendar,
+  Drive, Sheets, Notion, GitHub — and **writes** (`message.create`,
+  `github.issue.comment.create`, `notion.page.comment.create`) — but **no
+  `message.enumerate`**. Any #633 continuation work needs dev; any write-path
+  work needs prod.
+- Instance binding is per-session and the worker CLI stores one session, so
+  switching is destructive locally: enrolling prod replaced the dev session.
+  Reversible — a replacement dev code is mintable on the Gateway host from the
+  `default` operator session.
+- Enrollment lane, verified end to end on the Gateway host (`ssh oc`), no browser
+  needed: `cealctl login <admin-origin> --session <name>` authorizes through the
+  local owner socket `$XDG_RUNTIME_DIR/ceal/admin-gateway.sock`, then
+  `cealctl enrollments create --client narnia --profile work --subject hwidong
+  --instance <name> --operator-session <name>` mints a one-time code for
+  `ceal session enroll --code-stdin`. Use `~/ceal/packages/ceal-operator-cli`
+  (the owner copy); the installed `cealctl 0.65.3` there is the other lineage and
+  has no `enrollments` route. A **web-shell activation code is not this code**:
+  `ceal-ops admin-api invite` is hard-capped to `ceal.chat` +
+  `ceal.connector.setup` and can never carry `ceal.client.enroll`.
 
 ## Next Session
 
@@ -66,9 +89,19 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Discuss
 
-- Should this host also enroll a `ceal-prod` client now? Adoption runs on prod,
-  prod has `grants: []`, and proving the write path end to end needs a prod
-  session here.
+- **Parallel session overlap, unresolved.** `~/ceal-cli` on the Gateway host has
+  two unpushed commits from another session — `7f36a61 fix(worker): preserve
+  invalid argument recovery` and `e5d466e test(worker): cover invalid argument
+  recovery` — branched from `933d189`, so their `origin/main` predates the
+  `0.65.6` release. They add the `invalid_arguments` entry this host's live probe
+  proved missing. Do not reimplement it here; that file is also where
+  `ceal-cli#2`'s items 2 and 3 must land, so one session should own
+  `call-result-output.ts` at a time.
+- A session reaches many **profiles** (`eligible_profiles` + `--profile`) but one
+  **instance**: the endpoint path carries the instance and enrollment material is
+  minted per instance. Cross-instance access from one session would be a design
+  change, not a configuration fix. Worth deciding, since an operator working
+  across dev and prod currently re-enrolls to switch.
 - Client-device naming for email onboarding: operator-named `client_ref` or
   derived? This host is the first device that would follow the convention.
 - `Subcommands:` grammar has no spec while three test parsers and two sha-pinned
