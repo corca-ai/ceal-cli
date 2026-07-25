@@ -152,14 +152,10 @@ curl -fsSL https://ceal.borca.ai/releases/worker/stable/install-ceal.sh \
   | CEAL_VERSION=stable sh
 ```
 
-The installer needs `curl`, `python3`, and the usual POSIX text tools; it
-bootstraps a pinned `cosign` when one is absent. On macOS `python3` is the one
-that is not there by default — no Python 3 has shipped with the system since
-12.3, so `/usr/bin/python3` is a Command Line Tools shim that may prompt or
-fail. Run `xcode-select --install` first if `python3 --version` does not
-answer. The installer reads `python3` only to parse and validate the signed
-stable pointer; it is not a runtime dependency of `ceal` itself, which is a
-standalone binary.
+The installer needs only `curl`, `awk`, and the usual POSIX text tools, all of
+which a stock Linux or macOS host already has; it bootstraps a pinned `cosign`
+when one is absent. There is no Python, Node, or package-manager prerequisite,
+and `ceal` itself is a standalone binary.
 
 Worker distribution is the worker-owned static-origin prefix
 `https://ceal.borca.ai/releases/worker/` — never the Gateway-owned

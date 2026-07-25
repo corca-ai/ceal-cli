@@ -98,27 +98,40 @@ download_asset() {
 resolve_stable_release() {
   curl -fsSL "$WORKER_RELEASE_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
     || fail "Could not resolve the worker stable release pointer"
-  stable_resolved="$(python3 - "$TMP_DIR/stable-release.json" <<'PY'
-import json
-import re
-import sys
-
-try:
-    value = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
-    sys.exit(1)
-if not isinstance(value, dict) or value.get("schema_version") != "ceal.worker_stable_release.v1":
-    sys.exit(1)
-tag = value.get("tag")
-release_set = value.get("sha256sums_sha256")
-if not isinstance(tag, str) or not re.fullmatch(r"ceal-v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag):
-    sys.exit(1)
-if not isinstance(release_set, str) or not re.fullmatch(r"[a-f0-9]{64}", release_set):
-    sys.exit(1)
-print(tag)
-print(release_set)
-PY
-)" || fail "Worker stable release pointer is not a valid ceal.worker_stable_release.v1 document"
+  # Extracted by key rather than by position so a later added field does not
+  # break an already installed generation. A key that appears more than once —
+  # including one smuggled inside a string value — is rejected rather than
+  # resolved to whichever copy won. No interval expressions: the awk on macOS
+  # does not reliably support them.
+  stable_resolved="$(awk '
+    function occurrences(text, key,   copy) {
+      copy = text
+      return gsub("\"" key "\"[[:space:]]*:", "", copy)
+    }
+    function value_of(text, key,   copy) {
+      copy = text
+      if (!match(copy, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"")) return ""
+      copy = substr(copy, RSTART, RLENGTH)
+      sub("^\"" key "\"[[:space:]]*:[[:space:]]*\"", "", copy)
+      sub("\"$", "", copy)
+      return copy
+    }
+    { document = document $0 "\n" }
+    END {
+      for (index_of_key = 1; index_of_key <= 3; index_of_key += 1) {
+        key = (index_of_key == 1 ? "schema_version" : (index_of_key == 2 ? "tag" : "sha256sums_sha256"))
+        if (occurrences(document, key) != 1) exit 1
+      }
+      if (value_of(document, "schema_version") != "ceal.worker_stable_release.v1") exit 1
+      tag = value_of(document, "tag")
+      release_set = value_of(document, "sha256sums_sha256")
+      if (tag !~ /^ceal-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/) exit 1
+      if (length(release_set) != 64 || release_set ~ /[^a-f0-9]/) exit 1
+      print tag
+      print release_set
+    }
+  ' "$TMP_DIR/stable-release.json")" \
+    || fail "Worker stable release pointer is not a valid ceal.worker_stable_release.v1 document"
   VERSION="$(printf '%s\n' "$stable_resolved" | sed -n 1p)"
   STABLE_RELEASE_SET_SHA="$(printf '%s\n' "$stable_resolved" | sed -n 2p)"
   is_tag "$VERSION" || fail "Worker stable release pointer did not resolve to a canonical ceal-v tag"
@@ -177,27 +190,36 @@ verify_checksum_inventory() {
 
 verify_manifest_guide() {
   guide_sha="$(grep -E '^[a-f0-9]{64}  ceal-guide-SKILL[.]md$' "$TMP_DIR/SHA256SUMS" | cut -d' ' -f1)"
-  python3 - "$TMP_DIR/$MANIFEST_ASSET" "${VERSION#ceal-v}" "$PLATFORM" "$guide_sha" <<'PY' \
+  # These bytes are already signature-verified, so this is a shape and binding
+  # check, not a trust boundary. Anchored on the generator's exact two-space
+  # layout so a top-level key cannot be satisfied by its namesake nested inside
+  # protocol, artifact, or native_smoke; every key must appear exactly once.
+  awk -v expected_version="${VERSION#ceal-v}" -v expected_platform="$PLATFORM" -v expected_guide_sha="$guide_sha" '
+    function scalar(line,   value) {
+      value = line
+      sub("^[[:space:]]*\"[^\"]+\":[[:space:]]*\"", "", value)
+      sub("\",?$", "", value)
+      return value
+    }
+    /^  "schema_version": "[^"]*",?$/ { schema_version = scalar($0); schema_count += 1; next }
+    /^  "version": "[^"]*",?$/        { version = scalar($0); version_count += 1; next }
+    /^  "platform": "[^"]*",?$/       { platform = scalar($0); platform_count += 1; next }
+    /^  "command": "[^"]*",?$/        { command = scalar($0); command_count += 1; next }
+    /^  "guide": \{$/                 { in_guide = 1; guide_count += 1; next }
+    in_guide && /^  \},?$/            { in_guide = 0; next }
+    in_guide && /^    "name": "[^"]*",?$/   { guide_name = scalar($0); guide_name_count += 1; next }
+    in_guide && /^    "sha256": "[^"]*",?$/ { guide_sha = scalar($0); guide_sha_count += 1; next }
+    END {
+      if (schema_count != 1 || version_count != 1 || platform_count != 1) exit 1
+      if (command_count != 1 || guide_count != 1) exit 1
+      if (guide_name_count != 1 || guide_sha_count != 1) exit 1
+      if (schema_version != "ceal.worker_release_manifest.v1") exit 1
+      if (version != expected_version || platform != expected_platform) exit 1
+      if (command != "ceal") exit 1
+      if (guide_name != "ceal-guide-SKILL.md" || guide_sha != expected_guide_sha) exit 1
+    }
+  ' "$TMP_DIR/$MANIFEST_ASSET" \
     || fail "Selected guide does not match the signed worker platform manifest"
-import json
-import sys
-
-try:
-    value = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
-    sys.exit(1)
-guide = value.get("guide") if isinstance(value, dict) else None
-valid = (
-    value.get("schema_version") == "ceal.worker_release_manifest.v1"
-    and value.get("version") == sys.argv[2]
-    and value.get("platform") == sys.argv[3]
-    and value.get("command") == "ceal"
-    and isinstance(guide, dict)
-    and guide.get("name") == "ceal-guide-SKILL.md"
-    and guide.get("sha256") == sys.argv[4]
-)
-sys.exit(0 if valid else 1)
-PY
 }
 
 verify_version_output() {
@@ -273,7 +295,7 @@ need mktemp; TMP_DIR="$(mktemp -d)"; trap cleanup EXIT HUP INT TERM
 probe_mv_t
 bootstrap_cosign
 need_sha256
-for tool in cmp curl cosign grep python3 sed sort uniq wc uname mktemp readlink; do need "$tool"; done
+for tool in awk cmp curl cosign grep sed sort uniq wc uname mktemp readlink; do need "$tool"; done
 if [ "$VERSION" = stable ]; then resolve_stable_release; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"

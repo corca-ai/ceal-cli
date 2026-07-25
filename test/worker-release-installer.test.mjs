@@ -321,7 +321,10 @@ function run({ install, release, tools, log, version, cosignFail = false, restri
 // the host being simulated is the host running the test.
 function restrictedTools(tools) {
 	const resolve = (name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
-	for (const name of ["sh", "mktemp", "grep", "sed", "sort", "uniq", "wc", "tr", "cut", "cmp", "python3", "chmod", "mkdir", "rmdir", "rm", "ln", "mv", "cp", "readlink"]) {
+	// Models a stock Mac: awk is present, python3 is deliberately absent, so an
+	// installer that reaches for python3 again fails here instead of on a
+	// colleague's machine.
+	for (const name of ["sh", "mktemp", "grep", "sed", "sort", "uniq", "wc", "tr", "cut", "cmp", "awk", "chmod", "mkdir", "rmdir", "rm", "ln", "mv", "cp", "readlink"]) {
 		const found = resolve(name);
 		assert.notEqual(found, "", `restricted tool ${name} must exist on the test host`);
 		if (!existsSync(path.join(tools, name))) symlinkSync(found, path.join(tools, name));
