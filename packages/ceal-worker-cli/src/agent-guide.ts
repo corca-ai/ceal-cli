@@ -58,21 +58,20 @@ export interface CealAgentGuideHostState {
 }
 
 export interface CealAgentGuideState {
-	status: "registered" | "staged" | "unavailable";
+	// About this document, not about a host: did the command answer? Per-host
+	// registration lives in `hosts` and nowhere else, so there is no summary to
+	// mistake for the running host's state (corca-ai/ceal-cli#4).
+	status: "available" | "unavailable";
+	/** The host this document is about: the detected one, or the one a route named. */
 	agent: CealAgentGuideHost;
 	guide_id: "ceal-guide";
 	guide_path?: string;
-	registration_path?: string;
 	update_safe: boolean;
-	registered: boolean;
 	// Whether `agent` names the host this process is running inside, or a
 	// fallback because no host identified itself. A reader that only reads the
 	// top-level fields is right by default when this says `detected`.
 	agent_source?: "detected" | "default";
-	// Additive per-host projection: `agent` and the sibling fields keep naming the
-	// default host so a Codex-only reader of `ceal.guide.v1` is unaffected, while a
-	// reader that knows more than one host reads every advertised host from
-	// `hosts` — including the ones whose directory could not be resolved.
+	/** Every advertised host, including ones whose directory did not resolve. */
 	hosts?: readonly CealAgentGuideHostState[];
 	error?: {
 		kind: "guide_unavailable" | "registration_conflict" | "registration_failed";
@@ -108,7 +107,9 @@ export function createCealAgentGuideStore(
 	for (const host of CEAL_AGENT_GUIDE_HOSTS) {
 		// An empty override is no override; a relative or list-shaped one is a
 		// refusal, never a guess: `join`ing it would create a skill tree under the
-		// current working directory and then report it as a real registration.
+		// current working directory, or under a literal `dir:`-named path, and then
+		// report it as a real registration. Verified for the colon case: Claude Code
+		// given `CLAUDE_CONFIG_DIR=a:b` finds neither directory's state.
 		const raw = overrides[host.agent] || (homeDirectory ? join(homeDirectory, host.defaultRoot) : undefined);
 		const usable = raw !== undefined && isAbsolute(raw) && !raw.includes(":");
 		resolved.set(host.agent, {
@@ -163,7 +164,6 @@ function unavailableState(agent: CealAgentGuideHost): CealAgentGuideState {
 		agent,
 		guide_id: "ceal-guide",
 		update_safe: false,
-		registered: false,
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available beside this installed binary.",
@@ -188,7 +188,6 @@ function hostUnresolvedState(
 		guide_id: "ceal-guide",
 		guide_path: guidePath,
 		update_safe: false,
-		registered: false,
 		hosts: hostStates(guidePath, resolved),
 		error: {
 			kind: "registration_failed",
@@ -230,15 +229,12 @@ function inspectRegistration(
 	registrationPath: string,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 ): CealAgentGuideState {
-	const registered = registrationMatches(guidePath, registrationPath);
 	return {
-		status: registered ? "registered" : "staged",
+		status: "available",
 		agent,
 		guide_id: "ceal-guide",
 		guide_path: guidePath,
-		registration_path: registrationPath,
 		update_safe: true,
-		registered,
 		hosts: hostStates(guidePath, resolved),
 	};
 }
@@ -276,7 +272,6 @@ function registerGuide(
 		return {
 			...inspected,
 			status: "unavailable",
-			registered: false,
 			hosts: withActingHostUnavailable(inspected, agent),
 			error: {
 				kind: "registration_failed",
@@ -301,7 +296,6 @@ function conflictState(
 	return {
 		...inspected,
 		status: "unavailable",
-		registered: false,
 		hosts: withActingHostUnavailable(inspected, agent),
 		error: {
 			kind: "registration_conflict",

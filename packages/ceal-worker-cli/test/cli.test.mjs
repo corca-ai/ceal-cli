@@ -233,6 +233,19 @@ test("version identifies the package, protocol, range, and credential context", 
 	assert.equal(manifest.version, "0.65.10");
 });
 
+// `ceal update` runs the *installed* generation's `install-ceal.sh`, and older
+// installers compare this document whole. Adding one field to it in 0.65.7 broke
+// every installed client's upgrade path, so the key set is frozen rather than
+// left to a comment. Unlock condition: once no supported client predates the
+// installer that field-checks instead of byte-comparing (0.65.9), this document
+// may carry `ok` like every other one, and this gate can go.
+test("the version document's key set is frozen for older installers", async () => {
+	assert.deepEqual(Object.keys(await yamlRun(["version"])), [
+		"schema_version", "command", "version", "protocol_version",
+		"supported_gateway_protocol_range", "credential_context",
+	]);
+});
+
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
@@ -312,8 +325,8 @@ test("guide status and per-host registration expose one update-safe local skill 
 		// fields it always did, while `hosts` names every supported host.
 		assert.equal(status.agent, "codex");
 		assert.deepEqual(status.hosts.map((host) => host.agent), ["codex", "claude"]);
-		// The document says out loud that its top-level fields are one host only.
-		assert.match(status.non_claims.join(" "), /describe only the agent host named by 'agent'/u);
+		// No caveat is needed: there is no top-level per-host projection to misread.
+		assert.equal("non_claims" in status, false);
 		// The declared route token is what selects the host; the dispatcher passes
 		// it through instead of registering a host of its own choosing.
 		for (const agent of ["codex", "claude"]) {
@@ -363,8 +376,9 @@ test("every declared guide register route names a supported agent host", async (
 // host — never as noise on a healthy install.
 test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
 	const guide = (registered, agentSource) => () => ({
-		status: registered ? "registered" : "staged", agent: "claude", agent_source: agentSource,
-		guide_id: "ceal-guide", update_safe: true, registered,
+		status: "available", agent: "claude", agent_source: agentSource,
+		guide_id: "ceal-guide", update_safe: true,
+		hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
 	});
 	await withGateway(async ({ endpoint }) => {
 		const unregistered = await yamlRun(["capabilities"], 0, {
@@ -375,7 +389,7 @@ test("capabilities points an unregistered running host at the guide, and stays s
 		assert.match(unregistered.agent_guide.next_action, /ceal guide register claude/u);
 
 		// Registered, undetected host, and a missing guide asset each stay silent.
-		const missingAsset = () => ({ status: "unavailable", agent: "claude", agent_source: "detected", guide_id: "ceal-guide", update_safe: false, registered: false });
+		const missingAsset = () => ({ status: "unavailable", agent: "claude", agent_source: "detected", guide_id: "ceal-guide", update_safe: false });
 		for (const state of [guide(true, "detected"), guide(false, "default"), missingAsset]) {
 			const quiet = await yamlRun(["capabilities"], 0, {
 				loadSession: async () => storedSession(endpoint),

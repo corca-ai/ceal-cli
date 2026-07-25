@@ -479,7 +479,6 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	writeYaml(io.stdout, {
 		schema_version: "ceal.guide.v1", command: "ceal", ok: state.status !== "unavailable", action,
 		effect: action === "status" ? "read_only" : "local_write", ...state,
-		non_claims: [AGENT_GUIDE_PROJECTION_NON_CLAIM],
 	});
 	return state.status === "unavailable" ? 3 : 0;
 }
@@ -488,11 +487,6 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 // was asked? It is not "the state is good" — `ceal session` reporting
 // `unconfigured` answered correctly, while `ceal capabilities` without a session
 // could not answer at all. That is why `ok` tracks the exit code exactly.
-//
-// The top-level fields describe one host; an agent that stops reading there
-// would take a staged default host for "the guide is not registered anywhere".
-const AGENT_GUIDE_PROJECTION_NON_CLAIM =
-	"The top-level status, registration_path, and registered fields describe only the agent host named by 'agent'; read 'agent_source' to see whether that host was detected as the one running, and 'hosts' for every supported host.";
 
 function writeAgentGuideUnavailable(
 	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
@@ -506,7 +500,6 @@ function writeAgentGuideUnavailable(
 			message: "The signed Ceal guide is not available from this command runtime.",
 			next_action: "Reinstall a signed Ceal worker release, then run 'ceal guide status'.",
 		},
-		non_claims: [AGENT_GUIDE_PROJECTION_NON_CLAIM],
 	});
 	return 3;
 }
@@ -828,12 +821,14 @@ function profileSelectionHint(handshake: CealGatewayHandshakeValue): {
 function unregisteredGuideAdvisory(runtime: CealCommandRuntime): Record<string, unknown> {
 	try {
 		const state = runtime.inspectAgentGuide?.();
-		// Only when the guide is present and merely unregistered for this host:
-		// advising `guide register` while the asset itself is missing would send
-		// an agent to a route that cannot succeed.
-		if (!state || state.agent_source !== "detected" || state.registered || state.status !== "staged") return {};
+		// Only when the guide is present and merely unregistered for the host that
+		// is running: advising `guide register` while the asset itself is missing
+		// would send an agent to a route that cannot succeed.
+		if (!state || state.agent_source !== "detected" || state.status !== "available") return {};
+		const host = state.hosts?.find((entry) => entry.agent === state.agent);
+		if (!host || host.status !== "staged") return {};
 		return { agent_guide: {
-			status: state.status,
+			status: host.status,
 			agent: state.agent,
 			next_action: `This agent host has not registered the signed Ceal guide, which encodes how to read leaf help and what a result does and does not prove. Run 'ceal guide register ${state.agent}'.`,
 		} };
