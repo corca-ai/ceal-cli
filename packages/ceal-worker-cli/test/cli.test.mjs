@@ -545,6 +545,66 @@ test("capabilities fails closed for malformed absolute refresh expiry before a r
 	});
 });
 
+test("a local session summary does not present an untested refresh credential as live renewal", async () => {
+	const payload = await yamlRun(["session"], 0, {
+		loadSession: async () => storedSession("https://gateway.example.test", { expiresAt: "2020-01-01T00:00:00.000Z" }),
+		now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+	});
+	assert.equal(payload.schema_version, "ceal.client_session.v1");
+	assert.equal(payload.renewal_configured, true);
+	assert.equal(payload.renewal_status, "not_checked");
+	assert.equal(Object.hasOwn(payload, "renewal_available"), false);
+});
+
+test("renewal transport failure is retryable session state, not an invalid enrollment", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
+		const runtime = {
+			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+			saveSession: async () => assert.fail("an unavailable renewal must not replace local state"),
+		};
+		const capabilities = await yamlRun(["capabilities", "--fresh"], 3, runtime);
+		assert.equal(capabilities.schema_version, "ceal.client_session.v1");
+		assert.equal(capabilities.error.kind, "session_renewal_unavailable");
+		assert.equal(capabilities.error.retryable, true);
+		assert.match(capabilities.error.next_action, /does not establish.*invalid/u);
+
+		const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
+		assert.equal(call.error.kind, "session_renewal_unavailable");
+		assert.equal(call.error.retryable, true);
+		assert.equal(Object.hasOwn(call, "receipt"), false);
+
+		const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
+		assert.equal(receipt.error.kind, "session_renewal_unavailable");
+		assert.equal(receipt.error.retryable, true);
+	}, { invalidRefreshResponse: true });
+});
+
+test("typed Gateway refresh denial requires reenrollment instead of retry", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
+		const payload = await yamlRun(["capabilities"], 3, {
+			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+			saveSession: async () => assert.fail("a denied refresh must not replace local state"),
+		});
+		assert.equal(payload.error.kind, "refresh_invalid");
+		assert.equal(payload.error.retryable, false);
+		assert.match(payload.error.next_action, /replacement device-enrollment code/u);
+	}, { refreshDeniedCode: "refresh_invalid" });
+});
+
+test("logout retains local session when Gateway revocation transport is unavailable", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
+		let removed = false;
+		const payload = await yamlRun(["session", "logout"], 3, {
+			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+			removeSession: async () => { removed = true; },
+		});
+		assert.equal(payload.error.kind, "session_revocation_unavailable");
+		assert.equal(payload.error.retryable, true);
+		assert.match(payload.error.next_action, /Keep the local session/u);
+		assert.equal(removed, false);
+	}, { invalidRevokeResponse: true });
+});
+
 test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
 		let saved = null;
@@ -1826,6 +1886,19 @@ async function withRenewingGateway(callback, options = {}) {
 		if (request.url === "/gateway/client/refresh") {
 			refreshCallCount += 1;
 			assert.equal(body.refresh_token, oldRefreshToken);
+			if (options.invalidRefreshResponse) {
+				response.writeHead(500, { "content-type": "text/plain" });
+				response.end("Gateway failure without the client JSON contract");
+				return;
+			}
+			if (options.refreshDeniedCode) {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(JSON.stringify({
+					schema_version: "ceal.client_refresh_result.v1", ok: false,
+					error: { code: options.refreshDeniedCode, message: "Gateway rejected refresh.", next_action: "Reenroll." },
+				}));
+				return;
+			}
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(JSON.stringify({
 				schema_version: "ceal.client_refresh_result.v1", ok: true,
@@ -1839,6 +1912,11 @@ async function withRenewingGateway(callback, options = {}) {
 		}
 		if (request.url === "/gateway/client/revoke") {
 			revoked.push(body.refresh_token);
+			if (options.invalidRevokeResponse) {
+				response.writeHead(500, { "content-type": "text/plain" });
+				response.end("Gateway failure without the client JSON contract");
+				return;
+			}
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }));
 			return;

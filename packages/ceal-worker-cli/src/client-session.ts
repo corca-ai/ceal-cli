@@ -40,7 +40,11 @@ function configuredSessionSummary(session: CealStoredSession, now: number): Reco
 		membership_ref: session.membershipRef, registration_ref: session.registrationRef, client_ref: session.clientRef,
 		subject_ref: session.subjectRef, instance_ref: session.instanceRef, expires_at: session.expiresAt,
 		access_status: Date.parse(session.expiresAt) > now ? "current" : "expired",
-		renewal_available: true,
+		// A stored refresh credential is necessary but does not prove a live
+		// Gateway renewal.  Advertising it as "available" made an expired client
+		// look healthy precisely when an operator needed to distinguish the two.
+		renewal_configured: true,
+		renewal_status: "not_checked",
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
 		raw_token_visible: false, proof_level: "local_state",
@@ -53,7 +57,8 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 		schema_version: "ceal.client_session.v1", command: "ceal", ok: true, status: "unconfigured",
 		gateway_endpoint: null, profile_ref: null, membership_ref: null, registration_ref: null, client_ref: null,
 		subject_ref: null, instance_ref: null, expires_at: null, access_status: null,
-		renewal_available: false, refresh_token_idle_expires_at: null, refresh_token_absolute_expires_at: null,
+		renewal_configured: false, renewal_status: "not_configured",
+		refresh_token_idle_expires_at: null, refresh_token_absolute_expires_at: null,
 		raw_token_visible: false, proof_level: "local_state", next_action: "Run 'ceal session enroll --help'.",
 	};
 }
@@ -110,7 +115,8 @@ function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toS
 		gateway_endpoint: gateway, profile_ref: response.profileRef, membership_ref: response.membershipRef,
 		registration_ref: response.registrationRef, client_ref: response.clientRef, subject_ref: response.subjectRef,
 		instance_ref: response.instanceRef, expires_at: response.expiresAt,
-		renewal_available: true,
+		renewal_configured: true,
+		renewal_status: "not_checked",
 		refresh_token_idle_expires_at: response.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: response.refreshTokenAbsoluteExpiresAt,
 		raw_token_visible: false, proof_level: "host_decision",
@@ -152,7 +158,7 @@ async function revokeClientSession(session: CealStoredSession): Promise<string |
 		const response = await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
 		return !response.ok && response.error.code !== "refresh_revoked" ? response.error.code : null;
 	} catch (error) {
-		return error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
+		return clientSessionTransportFailure(error, "revocation");
 	}
 }
 
@@ -229,8 +235,19 @@ async function refreshSession(session: CealStoredSession, refreshToken: string) 
 	try {
 		return await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).refresh(refreshToken);
 	} catch (error) {
-		throw new CealClientSessionError(error instanceof CealPersonalClientSessionError ? error.code : "request_failed");
+		throw new CealClientSessionError(clientSessionTransportFailure(error, "renewal"));
 	}
+}
+
+function clientSessionTransportFailure(error: unknown, operation: "renewal" | "revocation"): string {
+	const code = error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
+	// The transport client deliberately cannot claim why a peer returned no
+	// valid Gateway response.  Keep that uncertainty explicit at the session
+	// boundary instead of presenting it as a rejected or unusable enrollment.
+	if (code === "request_timeout" || code === "request_failed" || code === "invalid_response") {
+		return `session_${operation}_unavailable`;
+	}
+	return code;
 }
 
 function assertSessionBindings(session: CealStoredSession, response: CealClientRefreshResult): void {
@@ -265,18 +282,62 @@ function rotatedSession(session: CealStoredSession, response: CealClientRefreshR
 }
 
 export function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
+	const failure = classifyClientSessionFailure(reason);
 	writeYaml(io.stdout, {
 		schema_version: "ceal.client_session.v1", command: "ceal", ok: false, status: "unavailable",
 		credential_context: CREDENTIAL_CONTEXT, proof_level: "surface", raw_token_visible: false,
 		error: {
-			kind: reason,
-			message: "The stored Gateway session could not be renewed or revoked safely.",
-			next_action: reason === "refresh_busy"
-				? "Another local Ceal process is changing this session. Wait briefly, then retry the same command."
-				: "Run 'ceal session' to inspect expiry, then ask the organization administrator for a replacement device-enrollment code if renewal is unavailable.",
+			kind: failure.kind,
+			retryable: failure.retryable,
+			message: failure.message,
+			next_action: failure.nextAction,
 		},
 	});
 	return 3;
+}
+
+export function classifyClientSessionFailure(reason: string): { kind: string; retryable: boolean; message: string; nextAction: string } {
+	if (reason === "session_renewal_unavailable") {
+		return {
+			kind: reason, retryable: true,
+			message: "The Gateway did not return a usable response while renewing the stored session.",
+			nextAction: "Wait briefly, then retry the same command. This does not establish that the enrollment or refresh credential is invalid.",
+		};
+	}
+	if (reason === "session_revocation_unavailable") {
+		return {
+			kind: reason, retryable: true,
+			message: "The Gateway did not return a usable response while revoking the stored session.",
+			nextAction: "Wait briefly, then retry 'ceal session logout'. Keep the local session until Gateway revocation succeeds.",
+		};
+	}
+	if (reason === "refresh_busy") {
+		return {
+			kind: reason, retryable: true,
+			message: "Another local Ceal process is changing this session.",
+			nextAction: "Wait briefly, then retry the same command.",
+		};
+	}
+	if (new Set(["refresh_expired", "refresh_invalid", "refresh_replayed", "refresh_revoked", "reenrollment_required", "binding_changed"]).has(reason)) {
+		return {
+			kind: reason, retryable: false,
+			message: "The stored Gateway session can no longer be renewed.",
+			nextAction: "Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
+		};
+	}
+	return {
+		kind: reason, retryable: false,
+		message: "The stored Gateway session could not be used safely.",
+		nextAction: "Run 'ceal session' to inspect local state, then correct the reported local configuration or ask the organization administrator for a replacement device-enrollment code.",
+	};
+}
+
+export function isClassifiedClientSessionFailure(reason: string): boolean {
+	return new Set([
+		"session_renewal_unavailable", "session_revocation_unavailable", "refresh_busy",
+		"refresh_expired", "refresh_invalid", "refresh_replayed", "refresh_revoked",
+		"reenrollment_required", "binding_changed",
+	]).has(reason);
 }
 
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {

@@ -4,6 +4,7 @@ import {
 	type CealGatewayCallValue,
 } from "@corca-ai/ceal-protocol";
 import type { CealStoredSession } from "./profile-store.js";
+import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { writeYaml } from "./output.js";
 
 interface ResultIo { stdout: { write(chunk: string): unknown } }
@@ -107,6 +108,7 @@ export function writeCallUnavailable(
 	record?: CealCallResultRecorder, capabilityEffect?: CealCapabilityEffect,
 ): number {
 	const requestWasIssued = typeof requestId === "string";
+	const sessionFailure = isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : null;
 	emitCallResult(io, {
 		schema_version: "ceal.result.v2", ok: false, status: "error",
 		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
@@ -118,10 +120,12 @@ export function writeCallUnavailable(
 		...(requestWasIssued ? { receipt: { evidence: "outcome_unknown", request_ref: requestId, audit_refs: [] } } : {}),
 		error: {
 			kind: reason,
-			message: "The capability call could not be completed.",
-			next_action: requestWasIssued
+			...(sessionFailure ? { retryable: sessionFailure.retryable, message: sessionFailure.message, next_action: sessionFailure.nextAction } : {
+				message: "The capability call could not be completed.",
+				next_action: requestWasIssued
 				? `${unknownOutcomeCaution(capabilityEffect)}Run 'ceal receipt show ${requestId}' after a short wait to read the Gateway outcome; while that reference has no audited outcome the Gateway answers 'audit_event_not_found'.`
 				: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
+			}),
 		},
 	}, record);
 	return 3;

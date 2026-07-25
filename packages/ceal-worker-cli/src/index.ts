@@ -21,7 +21,7 @@ import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf }
 import type { CealSubcommandDefinition } from "./subcommands.js";
 import { createCealObserverServer } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
-import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
+import { CealClientSessionError, classifyClientSessionFailure, ensureCurrentSession, isClassifiedClientSessionFailure, runSession, writeClientSessionUnavailable } from "./client-session.js";
 import {
 	classifyGatewayFailure,
 	gatewayFailureCode,
@@ -896,7 +896,12 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 	const parsed = parseReceiptOptions(options);
 	if (!parsed) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
 	const resolved = await resolveCallSession(runtime);
-	if (!resolved.ok) return writeReceiptError(resolved.reason, "The Gateway receipt could not be read.", io);
+	if (!resolved.ok) return writeReceiptError(
+		resolved.reason,
+		"The Gateway receipt could not be read.",
+		io,
+		isClassifiedClientSessionFailure(resolved.reason) ? classifyClientSessionFailure(resolved.reason) : undefined,
+	);
 	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {
 		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime);
@@ -905,7 +910,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 		// answer about this reference, not a broken receipt route.
 		if (!readback.ok) {
 			const failure = classifyGatewayFailure(readback.error);
-			return writeReceiptError(failure.code, failure.message, io, failure.nextAction, resolved.session, profileRef);
+			return writeReceiptError(failure.code, failure.message, io, undefined, failure.nextAction, resolved.session, profileRef);
 		}
 		return writeYaml(io.stdout, {
 			schema_version: "ceal.receipt.v1", ok: true, status: "verified", request_ref: parsed.requestRef,
@@ -915,7 +920,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 	} catch (error) {
 		const reason = error instanceof CealClientSessionError ? error.code
 			: error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeReceiptError(reason, "The Gateway receipt could not be read.", io);
+		return writeReceiptError(reason, "The Gateway receipt could not be read.", io, isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : undefined);
 	}
 }
 
@@ -966,13 +971,15 @@ function safeGatewayElapsed(value: unknown): number | undefined {
 }
 
 function writeReceiptError(
-	kind: string, message: string, io: CealCliIo, nextAction?: string,
-	session?: CealStoredSession, profileRef?: string,
+	kind: string, message: string, io: CealCliIo, sessionFailure?: ReturnType<typeof classifyClientSessionFailure>,
+	nextAction?: string, session?: CealStoredSession, profileRef?: string,
 ): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.receipt.v1", ok: false, status: "error",
 		...gatewayResultIdentity(session ?? null, profileRef),
-		error: {
+		error: sessionFailure ? {
+			kind: sessionFailure.kind, retryable: sessionFailure.retryable, message: sessionFailure.message, next_action: sessionFailure.nextAction,
+		} : {
 			kind, message,
 			// Only a session/route problem is fixed by re-checking the session. When
 			// the Gateway answered about the reference itself, pass its answer
