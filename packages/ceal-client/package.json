@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal",
-	"version": "0.65.4",
+	"version": "0.65.5",
 	"license": "MIT",
 	"description": "Public Ceal client SDK for Gateway-neutral requests and responses; no CLI, Agent, or Gateway server",
 	"repository": {

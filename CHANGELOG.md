@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.65.5 (`ceal-v0.65.5`)
+
+- Give every subcommand the installed help advertises its own leaf help, so the
+  signed guide's mandated descent can be completed. `ceal capabilities targets
+  --help` answered `invalid_argument` (exit 2) instead of that leaf's
+  `Effect` / `Evidence` / `Result schema` / `Recovery/readback`, which left an
+  agent unable to tell whether an unfiltered target page was in contract
+  (corca-ai/ceal-cli#1). Subcommands are now declared next to the command
+  registry in both CLIs, parent help advertises a `Subcommands:` block, and the
+  target-selection leaf states that an unfiltered page is permitted and bounded
+  by `--limit <1-64>` with the Gateway still authoritative.
+- Treat a help token anywhere in the tail as read-only help. `ceal session
+  enroll --gateway --help` previously passed `--help` as the gateway value and
+  reached the enrollment runner, prompting for a device-enrollment code before
+  it could fail; `cealctl sessions use --help` reached the session runner the
+  same way. A help probe now resolves to the nearest declared leaf — falling
+  back to the parent, whose `Subcommands:` block names the real routes — with no
+  credential read, stdin read, or network call reachable from it.
+- Fix `cealctl enrollments create` advertising `cealctl.enrollments.v1`, the
+  schema only the bare route emits; the route emits
+  `cealctl.enrollment_created.v1`. A new per-package gate requires every
+  declared result schema to exist in the emitting package.
+- Carry the child routes in `ceal commands` and `cealctl commands`, so the
+  machine-readable inventory is not shallower than the prose help surface.
+- Narrow the worker guide's opaque-cursor rule to the target page that actually
+  emits `next_cursor`. A capability's own result paging is a separate contract
+  read from its discovered input contract, so an integer offset no longer reads
+  as a guide violation; both guide hashes in `release-contract.json` are
+  re-signed accordingly.
+
 ## 0.65.4 (`ceal-v0.65.4`)
 
 - Build and sign `darwin-arm64` and `darwin-amd64` in the tagged worker lane,

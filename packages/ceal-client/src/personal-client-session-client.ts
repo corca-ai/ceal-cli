@@ -44,7 +44,7 @@ export function createCealPersonalClientSessionClient(
 			body: {
 				schema_version: CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 				refresh_token: refreshToken,
-				client: { name: "ceal", version: "0.65.4" },
+				client: { name: "ceal", version: "0.65.5" },
 			},
 			decode: decodeCealClientRefreshResponse,
 		}),
