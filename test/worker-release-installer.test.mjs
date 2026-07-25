@@ -123,6 +123,66 @@ test("worker installer rejects a malformed or mismatched stable pointer", () => 
 	});
 });
 
+// The pointer is read before any signature exists, so it is the one document an
+// origin can choose freely. Each case below fails if its specific guard in
+// resolve_stable_release is removed.
+test("worker installer rejects every pointer an origin could choose freely", () => {
+	const releaseSetOf = (release) => digest(readFileSync(path.join(release, "SHA256SUMS")));
+	const cases = [
+		// A 64-character non-hex value: proves the character check, not the length check.
+		{ why: "digest is the right length but not hex", pointer: (r) => ({ sha256sums_sha256: "z".repeat(64) }) },
+		{ why: "schema_version is not the v1 reader's schema", pointer: () => ({ schema_version: "ceal.worker_stable_release.v2" }) },
+		{ why: "schema_version is absent", pointer: () => ({ schema_version: undefined }) },
+		{ why: "tag is absent", pointer: () => ({ tag: undefined }) },
+		{ why: "tag is not a string", pointer: () => ({ tag: 123 }) },
+		{ why: "tag carries a leading zero", pointer: () => ({ tag: "ceal-v01.2.3" }) },
+	];
+	for (const { why, pointer } of cases) {
+		withFixture(({ install, release, tools, log }) => {
+			const overrides = pointer(release);
+			const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSetOf(release), ...overrides };
+			for (const [key, value] of Object.entries(overrides)) if (value === undefined) delete body[key];
+			writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify(body)}\n`);
+			const result = run({ install, release, tools, log, version: "stable" });
+			assert.notEqual(result.status, 0, why);
+			assert.match(result.stderr, /stable release pointer is not a valid/u, why);
+			assert.equal(existsSync(path.join(install, "ceal")), false, why);
+		});
+	}
+
+	// A duplicate key must be refused outright rather than resolved to whichever
+	// copy the reader happened to match, so put the decoy first.
+	withFixture(({ install, release, tools, log }) => {
+		writeFileSync(
+			path.join(release, "ceal-worker-stable-release.json"),
+			`{"schema_version":"ceal.worker_stable_release.v1","tag":"ceal-v9.9.9","tag":"${TAG}","sha256sums_sha256":"${releaseSetOf(release)}"}\n`,
+		);
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /stable release pointer is not a valid/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+});
+
+// Already installed generations re-run their own copy of this script against
+// whatever the origin serves later, so a pointer that gained a field, changed
+// key order, or is pretty-printed must still resolve.
+test("worker installer resolves a reordered, extended, or pretty-printed pointer", () => {
+	for (const render of [
+		(body) => JSON.stringify({ sha256sums_sha256: body.sha256sums_sha256, schema_version: body.schema_version, tag: body.tag }),
+		(body) => JSON.stringify({ ...body, published_at: "2026-07-25T00:00:00Z", signature: { keyless: true } }),
+		(body) => JSON.stringify(body, null, 2),
+	]) {
+		withFixture(({ install, release, tools, log }) => {
+			const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: digest(readFileSync(path.join(release, "SHA256SUMS"))) };
+			writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${render(body)}\n`);
+			const result = run({ install, release, tools, log, version: "stable" });
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
+		});
+	}
+});
+
 test("worker installer rejects a syntactically valid decoy manifest and a rejected signer", () => {
 	withFixture(({ install, release, tools, log }) => {
 		const manifest = path.join(release, "ceal-worker-release-manifest-linux-arm64.json");
@@ -138,6 +198,44 @@ test("worker installer rejects a syntactically valid decoy manifest and a reject
 		assert.notEqual(rejected.status, 0);
 		assert.equal(existsSync(path.join(install, "ceal")), false);
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "worker", "current")), false);
+	});
+});
+
+// Each override breaks exactly one binding the manifest check exists to hold.
+// Without these, that whole check can be deleted and the suite still passes.
+test("worker installer rejects a manifest that does not bind this release, platform, command, and guide", () => {
+	const cases = [
+		{ why: "guide digest is not the signed guide", overrides: { guide: { name: "ceal-guide-SKILL.md", bytes: 7, sha256: "f".repeat(64) } } },
+		{ why: "guide is renamed", overrides: { guide: { name: "evil-SKILL.md", bytes: 7, sha256: "f".repeat(64) } } },
+		{ why: "guide block is absent", overrides: { guide: undefined } },
+		{ why: "command is another binary", overrides: { command: "cealctl" } },
+		{ why: "version is a different release", overrides: { version: "0.65.9" } },
+		{ why: "platform is another platform", overrides: { platform: "linux-amd64" } },
+		{ why: "schema_version is not the manifest schema", overrides: { schema_version: "evil.v1" } },
+	];
+	for (const { why, overrides } of cases) {
+		withFixture(({ install, release, tools, log }) => {
+			writeManifest(release, "linux-arm64", "0.65.0", overrides);
+			rewriteChecksumsAndSidecars(release);
+			const result = run({ install, release, tools, log, version: TAG });
+			assert.notEqual(result.status, 0, why);
+			assert.match(result.stderr, /signed worker platform manifest/u, why);
+			assert.equal(existsSync(path.join(install, "ceal")), false, why);
+		});
+	}
+
+	// The only thing the occurrence counts add over the equality checks: a
+	// duplicate key whose second copy is correct would otherwise be accepted,
+	// because the later line overwrites the earlier one.
+	withFixture(({ install, release, tools, log }) => {
+		const manifestPath = path.join(release, `ceal-worker-release-manifest-linux-arm64.json`);
+		writeManifest(release, "linux-arm64");
+		writeFileSync(manifestPath, readFileSync(manifestPath, "utf8").replace('  "version": "0.65.0",', '  "version": "9.9.9",\n  "version": "0.65.0",'));
+		rewriteChecksumsAndSidecars(release);
+		const result = run({ install, release, tools, log, version: TAG });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /signed worker platform manifest/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
 	});
 });
 
@@ -348,9 +446,27 @@ function writeStablePointer(release, overrides = {}) {
 	writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify({ schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSet, ...overrides })}\n`);
 }
 
-function writeManifest(release, platform, version = "0.65.0") {
+// Mirrors the shape build-worker-release-assets.mjs actually emits. The nested
+// blocks are the point: artifact and installer carry their own name/sha256, and
+// protocol and native_smoke carry their own version/command, so a manifest
+// reader that matches those keys at any depth binds the wrong value. A minimal
+// fixture cannot catch that.
+function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
 	const guide = readFileSync(path.join(release, "ceal-guide-SKILL.md"));
-	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify({ schema_version: "ceal.worker_release_manifest.v1", version, platform, command: "ceal", guide: { name: "ceal-guide-SKILL.md", sha256: digest(guide) } }, null, 2)}\n`);
+	const manifest = {
+		schema_version: "ceal.worker_release_manifest.v1",
+		artifact_state: "unsigned_build_candidate",
+		version,
+		platform,
+		command: "ceal",
+		artifact: { name: `ceal-${platform}`, bytes: 1024, sha256: digest("artifact") },
+		guide: { name: "ceal-guide-SKILL.md", bytes: guide.length, sha256: digest(guide) },
+		installer: { name: "install-ceal.sh", bytes: 2048, sha256: digest("installer") },
+		protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: digest("protocol") },
+		native_smoke: { command: "ceal", version, help: true, operator_surface_absent: true },
+		...overrides,
+	};
+	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {

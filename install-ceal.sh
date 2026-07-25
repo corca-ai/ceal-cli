@@ -99,20 +99,26 @@ resolve_stable_release() {
   curl -fsSL "$WORKER_RELEASE_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
     || fail "Could not resolve the worker stable release pointer"
   # Extracted by key rather than by position so a later added field does not
-  # break an already installed generation. A key that appears more than once —
-  # including one smuggled inside a string value — is rejected rather than
-  # resolved to whichever copy won. No interval expressions: the awk on macOS
-  # does not reliably support them.
+  # break an already installed generation. A key that appears more than once is
+  # rejected rather than resolved to whichever copy matched first. Because this
+  # is a v1-only reader, the three key names are reserved: a future v1 document
+  # must not reuse them at any nesting depth, or already installed generations
+  # stop resolving stable.
+  #
+  # Portability, since this runs on whatever awk the host has: no interval
+  # expressions and no POSIX character classes. macOS ships BWK awk 20070501,
+  # which predates its character-class support, and [[:space:]] there would
+  # parse as a bracket list plus a literal ] and never match.
   stable_resolved="$(awk '
     function occurrences(text, key,   copy) {
       copy = text
-      return gsub("\"" key "\"[[:space:]]*:", "", copy)
+      return gsub("\"" key "\"[ \t]*:", "", copy)
     }
     function value_of(text, key,   copy) {
       copy = text
-      if (!match(copy, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"")) return ""
+      if (!match(copy, "\"" key "\"[ \t]*:[ \t]*\"[^\"]*\"")) return ""
       copy = substr(copy, RSTART, RLENGTH)
-      sub("^\"" key "\"[[:space:]]*:[[:space:]]*\"", "", copy)
+      sub("^\"" key "\"[ \t]*:[ \t]*\"", "", copy)
       sub("\"$", "", copy)
       return copy
     }
@@ -197,7 +203,7 @@ verify_manifest_guide() {
   awk -v expected_version="${VERSION#ceal-v}" -v expected_platform="$PLATFORM" -v expected_guide_sha="$guide_sha" '
     function scalar(line,   value) {
       value = line
-      sub("^[[:space:]]*\"[^\"]+\":[[:space:]]*\"", "", value)
+      sub("^[ \t]*\"[^\"]+\":[ \t]*\"", "", value)
       sub("\",?$", "", value)
       return value
     }
@@ -295,7 +301,7 @@ need mktemp; TMP_DIR="$(mktemp -d)"; trap cleanup EXIT HUP INT TERM
 probe_mv_t
 bootstrap_cosign
 need_sha256
-for tool in awk cmp curl cosign grep sed sort uniq wc uname mktemp readlink; do need "$tool"; done
+for tool in awk cmp curl cosign cut grep sed sort tr uniq wc uname mktemp readlink; do need "$tool"; done
 if [ "$VERSION" = stable ]; then resolve_stable_release; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
