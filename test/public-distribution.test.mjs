@@ -8,11 +8,20 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { requireHostTools } from "./host-tools.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install.sh");
 
-test("installer requires an explicit signed tag before creating either role", () => {
+// The frozen dual installer requires GNU flock and sha256sum (install.sh:317)
+// and the concurrency fixtures spawn flock directly, so this suite only runs on
+// a host that has them. That is not a coverage gap on macOS: install.sh serves
+// the legacy dual lane, which is linux-only and is not on the worker release
+// path. Worker install behaviour is proved by worker-release-installer.test.mjs.
+const legacyInstallerSkip = requireHostTools("flock", "sha256sum");
+const legacyInstallerTest = (name, fn) => test(name, { skip: legacyInstallerSkip }, fn);
+
+legacyInstallerTest("installer requires an explicit signed tag before creating either role", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, version: "" });
 		assert.equal(result.status, 1);
@@ -22,7 +31,7 @@ test("installer requires an explicit signed tag before creating either role", ()
 	});
 });
 
-test("default worker installation creates only ceal and worker-owned state", () => {
+legacyInstallerTest("default worker installation creates only ceal and worker-owned state", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
@@ -46,7 +55,7 @@ test("default worker installation creates only ceal and worker-owned state", () 
 	});
 });
 
-test("stable mode resolves only a canonical latest release tag before the signed install path", () => {
+legacyInstallerTest("stable mode resolves only a canonical latest release tag before the signed install path", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, version: "stable" });
 		assert.equal(result.status, 0, result.stderr);
@@ -76,7 +85,7 @@ test("stable mode resolves only a canonical latest release tag before the signed
 // test/worker-release-installer.test.mjs (real native install and stable
 // update through install-ceal.sh).
 
-test("explicit operator installation creates only cealctl and operator-owned state", () => {
+legacyInstallerTest("explicit operator installation creates only cealctl and operator-owned state", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const result = runInstaller({ root, release, tools, install, cosignLog, role: "operator" });
 		assert.equal(result.status, 0, result.stderr);
@@ -91,7 +100,7 @@ test("explicit operator installation creates only cealctl and operator-owned sta
 	});
 });
 
-test("worker installation safely migrates only its legacy dual-installer command link", () => {
+legacyInstallerTest("worker installation safely migrates only its legacy dual-installer command link", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(path.join(install, ".ceal-cli", "releases", "legacy"), { recursive: true });
 		symlinkSync("releases/legacy", path.join(install, ".ceal-cli", "current"));
@@ -105,7 +114,7 @@ test("worker installation safely migrates only its legacy dual-installer command
 	});
 });
 
-test("installer rejects an unrecognized role without downloading or modifying commands", () => {
+legacyInstallerTest("installer rejects an unrecognized role without downloading or modifying commands", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(install, { recursive: true });
 		writeFileSync(path.join(install, "ceal"), "existing-worker\n");
@@ -119,7 +128,7 @@ test("installer rejects an unrecognized role without downloading or modifying co
 	});
 });
 
-test("installer selects the signed amd64 worker artifact on x86_64", () => {
+legacyInstallerTest("installer selects the signed amd64 worker artifact on x86_64", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
 		const result = runInstaller({ root, release, tools, install, cosignLog });
@@ -130,7 +139,7 @@ test("installer selects the signed amd64 worker artifact on x86_64", () => {
 	});
 });
 
-test("installer rejects malformed or misidentified selected-command version YAML", () => {
+legacyInstallerTest("installer rejects malformed or misidentified selected-command version YAML", () => {
 	for (const [role, asset, command] of [["worker", "ceal-linux-arm64", "cealctl"], ["operator", "cealctl-linux-arm64", "ceal"]]) {
 		withFixture(({ root, release, tools, install, cosignLog }) => {
 			writeBinary(path.join(release, asset), command, "generation-1");
@@ -144,7 +153,7 @@ test("installer rejects malformed or misidentified selected-command version YAML
 	}
 });
 
-test("installer preserves an existing directory mode and unrelated files", () => {
+legacyInstallerTest("installer preserves an existing directory mode and unrelated files", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(install, { mode: 0o755 });
 		writeFileSync(path.join(install, "unrelated"), "keep\n");
@@ -156,7 +165,7 @@ test("installer preserves an existing directory mode and unrelated files", () =>
 	});
 });
 
-test("installer refuses a concurrent worker install without changing either command", () => {
+legacyInstallerTest("installer refuses a concurrent worker install without changing either command", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(path.join(install, ".ceal-cli", "worker", "releases"), { recursive: true });
 		const lockPath = path.join(install, ".ceal-cli", "worker", "install.lock");
@@ -178,7 +187,7 @@ test("installer refuses a concurrent worker install without changing either comm
 	});
 });
 
-test("installer reuses an unlocked persistent role lock and rejects unsafe locks", () => {
+legacyInstallerTest("installer reuses an unlocked persistent role lock and rejects unsafe locks", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(path.join(install, ".ceal-cli", "worker", "releases"), { recursive: true });
 		writeFileSync(path.join(install, ".ceal-cli", "worker", "install.lock"), "");
@@ -196,7 +205,7 @@ test("installer reuses an unlocked persistent role lock and rejects unsafe locks
 	});
 });
 
-test("worker and operator updates use independent state and do not modify the other command", () => {
+legacyInstallerTest("worker and operator updates use independent state and do not modify the other command", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const workerFirst = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(workerFirst.status, 0, workerFirst.stderr);
@@ -231,7 +240,7 @@ test("worker and operator updates use independent state and do not modify the ot
 	});
 });
 
-test("checksum failure preserves the selected command and leaves the other role untouched", () => {
+legacyInstallerTest("checksum failure preserves the selected command and leaves the other role untouched", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(install, { recursive: true });
 		writeFileSync(path.join(install, "ceal"), "old-ceal\n");
@@ -246,7 +255,7 @@ test("checksum failure preserves the selected command and leaves the other role 
 	});
 });
 
-test("guide checksum failure preserves the selected command before staging a generation", () => {
+legacyInstallerTest("guide checksum failure preserves the selected command before staging a generation", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		mkdirSync(install, { recursive: true });
 		writeFileSync(path.join(install, "ceal"), "old-ceal\n");
@@ -259,7 +268,7 @@ test("guide checksum failure preserves the selected command before staging a gen
 	});
 });
 
-test("installer rejects a selected guide that does not match its signed platform manifest", () => {
+legacyInstallerTest("installer rejects a selected guide that does not match its signed platform manifest", () => {
 	for (const [field, value] of [
 		["name", "cealctl-guide-SKILL.md"],
 		["binary", "cealctl"],
@@ -281,7 +290,7 @@ test("installer rejects a selected guide that does not match its signed platform
 	}
 });
 
-test("installer rejects an unsafe existing staged guide without moving current", () => {
+legacyInstallerTest("installer rejects an unsafe existing staged guide without moving current", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const first = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(first.status, 0, first.stderr);
@@ -297,7 +306,7 @@ test("installer rejects an unsafe existing staged guide without moving current",
 	});
 });
 
-test("installer rejects signed checksum files with malformed extra lines", () => {
+legacyInstallerTest("installer rejects signed checksum files with malformed extra lines", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
 		const sums = readFileSync(path.join(release, "SHA256SUMS"), "utf8");
 		writeFileSync(path.join(release, "SHA256SUMS"), `${sums}not-a-checksum-line\n`);

@@ -10,10 +10,15 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
+import { requireHostTools } from "./host-tools.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install-ceal.sh");
 const TAG = "ceal-v0.65.0";
+// See restrictedTools below: the darwin simulation is assembled from a real
+// GNU sha256sum, so it can only be staged on a host that has one.
+const simulatedDarwinSkip = requireHostTools("sha256sum");
+const simulatedDarwinTest = (name, fn) => test(name, { skip: simulatedDarwinSkip }, fn);
 
 test("worker-only installer migrates only ceal from a legacy dual release", () => {
 	withFixture(({ install, release, tools, log }) => {
@@ -63,7 +68,7 @@ test("worker stable lane ignores the GitHub token and stays on the static origin
 	});
 });
 
-test("worker installer bootstraps missing cosign only from the static release origin", () => {
+simulatedDarwinTest("worker installer bootstraps missing cosign only from the static release origin", () => {
 	withFixture(({ install, release, tools, log }) => {
 		rmSync(path.join(tools, "cosign"));
 		writeFileSync(path.join(release, "cosign-linux-arm64"), "not the pinned cosign binary\n");
@@ -187,7 +192,7 @@ test("worker installer downloads explicit tags only from the static release orig
 	});
 });
 
-test("worker installer installs on a darwin host through the portable tool lane", () => {
+simulatedDarwinTest("worker installer installs on a darwin host through the portable tool lane", () => {
 	withFixture(({ install, release, tools, log }) => {
 		writeDarwinAssets(release);
 		writeChecksums(release, ["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"]);
@@ -310,7 +315,10 @@ function run({ install, release, tools, log, version, cosignFail = false, restri
 }
 
 // A darwin host has shasum but neither sha256sum nor flock; the restricted
-// PATH proves the portable lane end to end on this Linux host.
+// PATH proves the portable lane end to end on this Linux host. The simulation
+// is built by faking shasum on top of a real sha256sum, so it needs a host that
+// has one — which a real darwin runner does not. Skipping there loses nothing:
+// the host being simulated is the host running the test.
 function restrictedTools(tools) {
 	const resolve = (name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 	for (const name of ["sh", "mktemp", "grep", "sed", "sort", "uniq", "wc", "tr", "cut", "cmp", "python3", "chmod", "mkdir", "rmdir", "rm", "ln", "mv", "cp", "readlink"]) {
