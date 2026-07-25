@@ -257,6 +257,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		writeYaml(io.stdout, {
 			schema_version: "ceal.observe.v1",
 			command: "ceal",
+			ok: false,
 			status: "unavailable",
 			error: {
 				kind: "port_unavailable",
@@ -279,6 +280,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 	writeYaml(io.stdout, {
 		schema_version: "ceal.observe.v1",
 		command: "ceal",
+		ok: true,
 		status: "serving",
 		url,
 		bind_address: "127.0.0.1",
@@ -326,6 +328,7 @@ function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.update.v1",
 		command: "ceal",
+		ok: result.status !== "unavailable",
 		status: result.status,
 		effect: "local_write",
 		stable_only: true,
@@ -430,6 +433,7 @@ function writeVersion(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
+		ok: true,
 		version: CEAL_PACKAGE_VERSION,
 		protocol_version: PROTOCOL_VERSION,
 		supported_gateway_protocol_range: CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE,
@@ -441,6 +445,7 @@ function writeCommands(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.commands.v1",
 		command: "ceal",
+		ok: true,
 		credential_context: CREDENTIAL_CONTEXT,
 		commands: CEAL_COMMANDS,
 		// Keep the machine-readable inventory at the same depth as installed help:
@@ -473,13 +478,18 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
 	const state = inspect(agent);
 	writeYaml(io.stdout, {
-		schema_version: "ceal.guide.v1", command: "ceal", action,
+		schema_version: "ceal.guide.v1", command: "ceal", ok: state.status !== "unavailable", action,
 		effect: action === "status" ? "read_only" : "local_write", ...state,
 		non_claims: [AGENT_GUIDE_PROJECTION_NON_CLAIM],
 	});
 	return state.status === "unavailable" ? 3 : 0;
 }
 
+// `ok` answers one question on every surface: did this command answer what it
+// was asked? It is not "the state is good" — `ceal session` reporting
+// `unconfigured` answered correctly, while `ceal capabilities` without a session
+// could not answer at all. That is why `ok` tracks the exit code exactly.
+//
 // The top-level fields describe one host; an agent that stops reading there
 // would take a staged default host for "the guide is not registered anywhere".
 const AGENT_GUIDE_PROJECTION_NON_CLAIM =
@@ -489,9 +499,9 @@ function writeAgentGuideUnavailable(
 	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
 ): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.guide.v1", command: "ceal", action,
+		schema_version: "ceal.guide.v1", command: "ceal", ok: false, action,
 		effect: action === "status" ? "read_only" : "local_write", status: "unavailable",
-		agent, guide_id: "ceal-guide", registered: false, update_safe: false,
+		agent, agent_source: "default", guide_id: "ceal-guide", registered: false, update_safe: false,
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available from this command runtime.",
@@ -851,16 +861,30 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 	// cache before the call, so an unknown-outcome failure can tell a read from a
 	// possible write. A cold or stale cache simply yields undefined, which keeps
 	// the conservative caution.
-	const capabilityEffect = await cachedCapabilityEffect(parsed.capabilityId, runtime);
-	return executeCall(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed, requestId, io, runtime, capabilityEffect);
+	const effectiveProfile = parsed.profileRef ?? resolved.session.profileRef;
+	const capabilityEffect = await cachedCapabilityEffect(parsed.capabilityId, runtime, {
+		gatewayEndpoint: resolved.session.gatewayEndpoint,
+		profileRef: effectiveProfile,
+		membershipRef: resolved.session.membershipRef,
+		negotiatedProtocolVersion: PROTOCOL_VERSION,
+	});
+	return executeCall(resolved.session, effectiveProfile, parsed, requestId, io, runtime, capabilityEffect);
 }
 
 async function cachedCapabilityEffect(
-	capabilityId: string, runtime: CealCommandRuntime,
+	capabilityId: string, runtime: CealCommandRuntime, key: CealDiscoveryCacheKey,
 ): Promise<CealCapabilityEffect | undefined> {
 	try {
 		const entry = await runtime.loadDiscoveryCache?.();
-		const capabilities = entry?.discovery?.capabilities;
+		// The same file serves one home directory across instances and profiles, and an
+		// entry for another instance can call the same capability id a read where
+		// this one calls it a write. Trust it only under the identity and freshness
+		// the catalog path already requires, or the caution is suppressed for a
+		// write whose outcome is unknown.
+		const now = runtime.now?.() ?? Date.now();
+		const ttlMs = runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS;
+		if (!entry || !discoveryCacheEntryUsable(entry, key, now, ttlMs)) return undefined;
+		const capabilities = (entry.discovery as { capabilities?: unknown }).capabilities;
 		if (!Array.isArray(capabilities)) return undefined;
 		const match = capabilities.find((capability) => capability && typeof capability === "object"
 			&& (capability as { capability_id?: unknown }).capability_id === capabilityId);
@@ -1129,7 +1153,7 @@ function writeCallValidationFailure(io: CealCliIo): number {
 }
 
 function writeCapabilitiesUnavailable(io: CealCliIo): number {
-	return writeYaml(io.stdout, {
+	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
 		ok: false,
@@ -1141,8 +1165,18 @@ function writeCapabilitiesUnavailable(io: CealCliIo): number {
 		live_gateway_checked: false,
 		claims_allowed: [] as readonly never[],
 		non_claims: ["No live Gateway discovery, authorization, provider action, or audit readback was reached."],
-		next_action: CEAL_COMMANDS[2].recovery,
+		// This is the most-hit failure state on this surface — fresh install, no
+		// session, logged out — so it owes the same `ok`/`error.kind` shape as
+		// every other failure. It previously answered `ok: false` with no error
+		// object and exit 0, which is the exact "failure that looks like success"
+		// this release exists to remove.
+		error: {
+			kind: "client_session_unavailable",
+			message: "No Gateway-issued client session is configured for this client.",
+			next_action: CEAL_COMMANDS[2].recovery,
+		},
 	});
+	return 3;
 }
 
 type ParsedGatewayOptions =

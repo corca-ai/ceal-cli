@@ -294,6 +294,9 @@ test("the projection names the running host when the environment identifies it",
 		assert.equal(detectCealAgentGuideHost({ CLAUDE_CODE_ENTRYPOINT: "cli" }), "claude");
 		assert.equal(detectCealAgentGuideHost({ CODEX_THREAD_ID: "t" }), "codex");
 		assert.equal(detectCealAgentGuideHost({}), undefined);
+		// A nested agent inherits the outer host's markers. Picking by table order
+		// there would advise registering a host that is not the one running.
+		assert.equal(detectCealAgentGuideHost({ CLAUDECODE: "1", CODEX_THREAD_ID: "t" }), undefined);
 
 		const binary = path.join(release, "ceal-linux-arm64");
 		const detected = createCealAgentGuideStore(binary, root, undefined, undefined, "claude");

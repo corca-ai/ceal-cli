@@ -69,8 +69,14 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
 3. Use Ceal refs returned by the selected page. Do not substitute raw provider
    ids, local paths, or remembered deployment names.
 4. Execute only the route and options exposed by the installed leaf help.
-5. Parse the complete stdout YAML document. Inspect status, evidence, claim,
-   error, next-action, artifact, and readback fields that are actually present.
+5. Parse the complete stdout YAML document. Branch on `ok`, which every command
+   answers with the same meaning — whether the command answered what it was
+   asked, not whether the state is good — and which agrees with the exit code.
+   When `ok` is false, read `error.kind`; that is the one error key on every
+   surface. Then inspect status, evidence, claim, next-action, artifact, and
+   readback fields that are actually present, and the issuing `gateway` block
+   when a result carries one, since two Gateway instances answer with the same
+   profile and client names.
 6. Read any returned artifact before answering. For a write, report completion
    only when the result permits the claim and the required authoritative
    readback or audit evidence is present.

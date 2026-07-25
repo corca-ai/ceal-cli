@@ -35,7 +35,7 @@ async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<
 
 function configuredSessionSummary(session: CealStoredSession, now: number): Record<string, unknown> {
 	return {
-		schema_version: "ceal.client_session.v1", command: "ceal", status: "configured",
+		schema_version: "ceal.client_session.v1", command: "ceal", ok: true, status: "configured",
 		gateway_endpoint: session.gatewayEndpoint, profile_ref: session.profileRef,
 		membership_ref: session.membershipRef, registration_ref: session.registrationRef, client_ref: session.clientRef,
 		subject_ref: session.subjectRef, instance_ref: session.instanceRef, expires_at: session.expiresAt,
@@ -50,7 +50,7 @@ function configuredSessionSummary(session: CealStoredSession, now: number): Reco
 
 function unconfiguredSessionSummary(): Record<string, unknown> {
 	return {
-		schema_version: "ceal.client_session.v1", command: "ceal", status: "unconfigured",
+		schema_version: "ceal.client_session.v1", command: "ceal", ok: true, status: "unconfigured",
 		gateway_endpoint: null, profile_ref: null, membership_ref: null, registration_ref: null, client_ref: null,
 		subject_ref: null, instance_ref: null, expires_at: null, access_status: null,
 		renewal_available: false, refresh_token_idle_expires_at: null, refresh_token_absolute_expires_at: null,
@@ -105,7 +105,7 @@ function toStoredSession(gatewayEndpoint: string, response: {
 
 function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toStoredSession>, io: CealCliIo): number {
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.session_enrollment.v1", command: "ceal", status: "enrolled",
+		schema_version: "ceal.session_enrollment.v1", command: "ceal", ok: true, status: "enrolled",
 		enrollment_kind: "preapproved_client_device",
 		gateway_endpoint: gateway, profile_ref: response.profileRef, membership_ref: response.membershipRef,
 		registration_ref: response.registrationRef, client_ref: response.clientRef, subject_ref: response.subjectRef,
@@ -141,7 +141,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 
 function writeAlreadyLoggedOut(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.session_logout.v1", command: "ceal", status: "already_logged_out",
+		schema_version: "ceal.session_logout.v1", command: "ceal", ok: true, status: "already_logged_out",
 		server_session_revoked: false, local_session_removed: false, raw_token_visible: false,
 		proof_level: "local_state", next_action: "Run 'ceal session enroll --help' to configure a session.",
 	});
@@ -165,7 +165,7 @@ async function clearDiscoveryCache(runtime: CealCommandRuntime): Promise<void> {
 
 function writeLoggedOut(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.session_logout.v1", command: "ceal", status: "logged_out",
+		schema_version: "ceal.session_logout.v1", command: "ceal", ok: true, status: "logged_out",
 		server_session_revoked: true, local_session_removed: true, raw_token_visible: false,
 		proof_level: "host_decision",
 		next_action: "Run 'ceal session enroll --help' to configure another session.",
@@ -266,7 +266,7 @@ function rotatedSession(session: CealStoredSession, response: CealClientRefreshR
 
 export function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.client_session.v1", command: "ceal", status: "unavailable",
+		schema_version: "ceal.client_session.v1", command: "ceal", ok: false, status: "unavailable",
 		credential_context: CREDENTIAL_CONTEXT, proof_level: "surface", raw_token_visible: false,
 		error: {
 			kind: reason,
@@ -299,9 +299,11 @@ function writeEnrollmentRejected(code: string, io: CealCliIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1",
 		command: "ceal",
+		ok: false,
 		status: "denied",
 		proof_level: "host_decision",
 		error: {
+			kind: code,
 			code,
 			message: "The Gateway rejected the device-enrollment code.",
 			next_action: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code.",
@@ -314,6 +316,7 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1",
 		command: "ceal",
+		ok: false,
 		status: "unavailable",
 		proof_level: "surface",
 		error: {

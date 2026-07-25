@@ -52,7 +52,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	const unknownPayload = parse(unknown.stdout);
 	assert.equal(unknownPayload.receipt.evidence, "outcome_unknown");
 	assert.match(unknownPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
-	assert.match(unknownPayload.error.next_action, /Do not repeat a write yet/u);
+	assert.match(unknownPayload.error.next_action, /Do not repeat this call yet/u);
 	assert.doesNotMatch(unknown.stdout, /ceal_personal_|ceal_refresh_/u);
 	await withFailureGateway(async (endpoint) => {
 		const failedHome = path.join(fixture.root, "failed-home");

@@ -196,7 +196,8 @@ test("every public command emits one YAML document without a format flag", async
 		// The observer intentionally serves until closed; close it right after
 		// its single serving document is written.
 		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
-		const payload = await yamlRun(args, command.name === "call" || command.name === "receipt" || command.name === "guide" || command.name === "update" ? 3 : 0, runtime);
+		const failing = ["call", "receipt", "guide", "update", "capabilities"].includes(command.name);
+		const payload = await yamlRun(args, failing ? 3 : 0, runtime);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
 	}
@@ -207,6 +208,7 @@ test("version identifies the package, protocol, range, and credential context", 
 	assert.deepEqual(await yamlRun(["version"]), {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
+		ok: true,
 		// Drift guard: the rendered version must track the package manifest.
 		version: manifest.version,
 		protocol_version: "1.3.0",
@@ -249,6 +251,7 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 	assert.deepEqual(payload, {
 		schema_version: "ceal.update.v1",
 		command: "ceal",
+		ok: true,
 		status: "updated",
 		effect: "local_write",
 		stable_only: true,
@@ -369,32 +372,36 @@ test("capabilities points an unregistered running host at the guide, and stays s
 });
 
 // corca-ai/ceal-cli#2 item 1, the one that cost real data: a client read
-// `error.kind` only, so a discovery failure looked like no error at all and a
-// 36-call sweep silently lost 16 calls. One error key and one success predicate
-// across surfaces is what lets a caller write a single handler.
-test("one error key and one success predicate answer for every surface", async () => {
-	const surfaces = [
-		await yamlRun(["capabilities"], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") }),
-		await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-			loadSession: async () => storedSession("http://127.0.0.1:9"),
-		}),
-		await yamlRun(["receipt", "show", "ceal:missing:call"], 3, {
-			loadSession: async () => storedSession("http://127.0.0.1:9"),
-		}),
-	];
-	for (const payload of surfaces) {
-		assert.equal(payload.ok, false, payload.schema_version);
-		assert.match(payload.error.kind, /\S/u, `${payload.schema_version} must carry error.kind`);
+// `error.kind` only, so a discovery failure — which published `error.code` —
+// looked like no error at all, and a 36-call sweep lost 16 calls while
+// reporting none of them. The predicate is only worth anything if it holds
+// everywhere, so derive the sweep from the command table rather than hand-picking
+// surfaces: `ok` must be present, agree with the exit code, and imply an
+// `error.kind` when false.
+test("every command answers one success predicate that agrees with its exit code", async () => {
+	for (const command of CEAL_COMMANDS) {
+		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
+			: command.name === "receipt" ? ["receipt", "show", "ceal:missing:call"]
+			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
+		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
+		const { code, stdout } = await run(args, runtime);
+		const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+		assert.equal(typeof payload.ok, "boolean", `${command.name} must carry ok`);
+		assert.equal(payload.ok, code === 0, `${command.name}: ok must agree with exit ${code}`);
+		if (payload.ok === false) {
+			assert.match(payload.error?.kind ?? "", /\S/u, `${command.name}: a false ok owes error.kind`);
+		}
 	}
 
-	// The Gateway-rejection writer is only reachable with a live rejection, so
-	// gate its shape structurally: no emitted error object may carry `code`
-	// without the canonical `kind` beside it.
+	// The Gateway-rejection writer needs a live rejection, so gate its shape
+	// structurally instead: no emitted error object may carry `code` without the
+	// canonical `kind` beside it.
 	const source = readdirSync(new URL("../src", import.meta.url))
 		.filter((entry) => entry.endsWith(".ts"))
 		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
 	for (const [, body] of source.matchAll(/error: \{([^}]*)\}/gu)) {
-		if (/\bcode:/u.test(body)) assert.match(body, /\bkind:/u, `error object with code but no kind: ${body.trim()}`);
+		// `code,` shorthand counts too: the first pass of this gate missed one.
+		if (/\bcode\s*[:,]/u.test(body)) assert.match(body, /\bkind:/u, `error object with code but no kind: ${body.trim()}`);
 	}
 });
 
@@ -877,14 +884,9 @@ test("an unknown outcome on a declared read does not warn about repeating a writ
 		"call", "message.search", "--target", "target:team-inbox", "query=launch",
 	], 3, {
 		loadSession: async () => session,
-		loadDiscoveryCache: async () => ({
-			key: {
-				gatewayEndpoint: session.gatewayEndpoint, profileRef: session.profileRef,
-				membershipRef: session.membershipRef, negotiatedProtocolVersion: "1.3.0",
-			},
-			cachedAt: Date.now(),
-			discovery: { capabilities: [{ capability_id: "message.search", effect: "read" }] },
-		}),
+		// A real cached entry: the effect lookup trusts the cache only under the
+		// same identity and freshness rules the catalog path uses.
+		loadDiscoveryCache: async () => cachedEntry(session.gatewayEndpoint, Date.now()),
 	});
 	assert.equal(payload.error.kind, "request_failed");
 	assert.equal(payload.receipt.evidence, "outcome_unknown");
@@ -1251,13 +1253,17 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 });
 
 test("capabilities reports an honest Gateway-required unavailable surface without connection options", async () => {
-	const payload = await yamlRun(["capabilities"]);
+	// No client session is a failure, and now answers like one: ok false, an
+	// error object with a kind, and a failing exit code.
+	const payload = await yamlRun(["capabilities"], 3);
 	assert.equal(payload.status, "unavailable");
+	assert.equal(payload.ok, false);
+	assert.equal(payload.error.kind, "client_session_unavailable");
 	assert.equal(payload.proof_level, "surface");
 	assert.equal(payload.live_gateway_checked, false);
 	assert.deepEqual(payload.capabilities, []);
 	assert.deepEqual(payload.claims_allowed, []);
-	assert.equal(typeof payload.next_action, "string");
+	assert.equal(typeof payload.error.next_action, "string");
 	assert.equal(Object.hasOwn(payload, "next_actions"), false);
 });
 
@@ -1274,8 +1280,11 @@ test("capabilities rejects stray operands in both explicit and target-selection 
 	const targets = await yamlRun(["capabilities", "targets", "--capability", "message.search", "unexpected"], 2);
 	assert.equal(targets.error.kind, "invalid_argument");
 	for (const match of ["--literal", "--"]) {
-		const optionLikeValue = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", match]);
+		// An option-like value is accepted as a value; with no session configured
+		// the surface then fails closed, which is now an exit-3 answer.
+		const optionLikeValue = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", match], 3);
 		assert.equal(optionLikeValue.status, "unavailable");
+		assert.equal(optionLikeValue.ok, false);
 	}
 });
 

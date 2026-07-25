@@ -122,7 +122,7 @@ function exerciseCustomerScenario(scenario) {
 	for (const field of ["Usage:", "Effect: read_only", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 		assert.match(selected.help, new RegExp(field, "u"));
 	}
-	const result = runBinary(scenario, [selected.name]);
+	const result = runBinary(scenario, [selected.name], { allowFailure: true });
 	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
 	assert.deepEqual(documents[0].errors, []);
@@ -131,13 +131,16 @@ function exerciseCustomerScenario(scenario) {
 	scenario.assertResult(value);
 }
 
-function runBinary(item, args) {
+function runBinary(item, args, { allowFailure = false } = {}) {
 	const bin = path.join(BINARY_ROOT, "packages", item.packageDir, "dist", "bin.js");
 	const result = spawnSync(process.execPath, [bin, ...args], {
 		encoding: "utf8",
 		env: { ...process.env, HOME: ISOLATED_HOME },
 	});
-	assert.equal(result.status, 0, result.stderr);
+	// A cold-start scenario runs in an isolated HOME with no session, and a
+	// surface that cannot answer without one now fails closed. The document is
+	// still the single YAML answer this gate reads.
+	if (!allowFailure) assert.equal(result.status, 0, result.stderr);
 	assert.equal(result.stderr, "");
 	return result;
 }

@@ -33,7 +33,12 @@ const CEAL_AGENT_GUIDE_HOSTS: readonly {
 export function detectCealAgentGuideHost(
 	environment: Record<string, string | undefined>,
 ): CealAgentGuideHost | undefined {
-	return CEAL_AGENT_GUIDE_HOSTS.find((host) => host.runningMarkers.some((marker) => environment[marker]))?.agent;
+	// A nested agent inherits the outer host's markers, so two hosts can look
+	// present at once. Table order would then pick a host that is not the one
+	// running and advise registering it — reinstating the reported bug one level
+	// down. Ambiguity degrades to "undetected", which stays silent.
+	const present = CEAL_AGENT_GUIDE_HOSTS.filter((host) => host.runningMarkers.some((marker) => environment[marker]));
+	return present.length === 1 ? present[0]!.agent : undefined;
 }
 
 const DEFAULT_AGENT_GUIDE_HOST = CEAL_AGENT_GUIDE_HOSTS[0]!.agent;
