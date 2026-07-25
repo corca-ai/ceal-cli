@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.65.7 (`ceal-v0.65.7`)
+
+Four reports from a study that uses `ceal` as its only path to organizational
+data. Each one is a case where the surface told an agent less, or worse, than it
+knew.
+
+- Answer with one error key and one success predicate on every surface
+  (corca-ai/ceal-cli#2). A client that read `error.kind` saw discovery failures —
+  which published `error.code` — as no error at all, so its retry path was
+  skipped and a 36-call sweep lost 16 calls while reporting none of them. `kind`
+  is now the one error key everywhere, with `code` retained beside it on the
+  capabilities surface for one release, and every result document carries `ok`, a
+  boolean that means the same thing whatever a surface calls its `status`. Status
+  vocabularies themselves are unchanged.
+- Preserve the Gateway's `invalid_arguments` rejection instead of flattening it
+  into a generic failure that advised a retry. An out-of-contract argument is a
+  deterministic caller error; the recovery now asks for a correction.
+- Render `audit_event_not_found` and `invalid_readback_request`, and stop
+  describing `ceal receipt show` as serving completed calls only. An unknown
+  outcome used to point at a route the same surface documented as unusable for
+  it; the Gateway had been answering precisely all along. A rejected call's
+  reference does read back as `verified`, which this release documents.
+- Gate the replay caution on the failing capability's declared effect. "Do not
+  repeat a write" rode on every unknown outcome, including declared reads; it now
+  consults the client's own discovery cache, and a cold cache keeps the caution.
+- Name the issuing Gateway on `ceal call` and `ceal receipt show`
+  (corca-ai/ceal-cli#3). Two instances answer with the same profile name, the
+  same client, and cross-stable target refs, so archived responses could not be
+  attributed — one study mixed 2,387 records from two instances and read it as a
+  narrowed grant. Both documents now carry the `gateway:` block discovery already
+  emitted, stamped with the profile the call actually used.
+- Name the agent host that is running, and point an agent at the signed guide
+  (corca-ai/ceal-cli#4). `ceal guide status` reported the first declared host, so
+  a Claude Code session read `agent: codex` and `registered: false` while its own
+  registration was live. The summary now names the detected host and says so in
+  `agent_source`; the per-host `hosts` list and the previously projected fields
+  are unchanged in place. `ceal capabilities` carries one advisory when the
+  detected host has the guide staged but unregistered, and stays silent
+  otherwise.
+- Name the missing target when a skills directory is a link to nothing, instead
+  of advising against replacing a skill directory that was never there.
+
 ## 0.65.6 (`ceal-v0.65.6`)
 
 - Register the signed guide with Claude Code, not only Codex. `ceal guide
