@@ -110,14 +110,14 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 	{
 		parent: "receipt",
 		route: ["show"],
-		description: "Read the caller's safe Gateway audit receipt for one completed call.",
+		description: "Read the caller's safe Gateway audit receipt for one audited call outcome, including a rejected one.",
 		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
-		recovery: "Use the request reference returned by a completed 'ceal call', then retry after renewing the client session if needed.",
+		recovery: "Use the request reference a 'ceal call' returned; while no audited outcome exists for it the Gateway answers 'audit_event_not_found'.",
 		options: [
-			"  <request-ref>           Request reference returned by a completed call.",
+			"  <request-ref>           Request reference returned by a call, audited or rejected.",
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
 		],
 	},

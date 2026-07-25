@@ -572,6 +572,7 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 			schema_version: "ceal.receipt.v1",
 			status: "verified",
 			request_ref: "narnia:call:1:call",
+			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
 			events: [{
 				ref: "gateway-audit:event:001", operation: "call", outcome: "succeeded", authorization: "allowed",
 				capability: "message.search", target: "target:team-inbox",
@@ -593,6 +594,7 @@ test("a policy-denied receipt retains the error code, non-claims, and negotiated
 			schema_version: "ceal.receipt.v1",
 			status: "verified",
 			request_ref: "narnia:denied:1:call",
+			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
 			events: [{
 				ref: "gateway-audit:event:denied", operation: "call", outcome: "denied", authorization: "denied",
 				error_code: "resource_not_available",
@@ -686,6 +688,60 @@ test("call refuses to claim completion when audit readback has no verified event
 	assert.equal(payload.error.kind, "audit_readback_missing");
 });
 
+// corca-ai/ceal-cli#3: two instances answer with the same profile name, the same
+// client, and cross-stable target refs, so a result that does not name its
+// issuing Gateway cannot be attributed after the fact. A study mixed 2,387
+// records from two instances exactly this way.
+test("every call result names the issuing instance and the profile it used", async () => {
+	const session = {
+		gatewayEndpoint: "https://gateway.example/api/ceal/v1", profileRef: "profile:work",
+		membershipRef: "membership:hwidong-work", registrationRef: "registration:1", clientRef: "client:narnia",
+		subjectRef: "subject:hwidong", instanceRef: "instance:ceal-prod", accessToken: "token",
+		expiresAt: new Date(Date.now() + 600_000).toISOString(), refreshToken: "refresh",
+		refreshTokenIdleExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+		refreshTokenAbsoluteExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+	};
+	let stdout = "";
+	const io = { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } };
+	writeCallCompleted({
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
+		grant_ref: "grant:g", grant_revision: 1, target_ref: "target:t",
+		data: { schema_version: "ceal.message_get_result.v1", ref: "message:1" },
+		redaction: { state: "applied", omitted_classes: [] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: [],
+	}, [{ event_ref: "gateway-audit:1" }], "request:1", io, session, {
+		// The per-call override, not the session default, is what answered.
+		capabilityId: "message.get", targetRef: "target:t", arguments: {}, purpose: "Read", profileRef: "profile:kb-study",
+	});
+	const completed = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	assert.deepEqual(completed.gateway, { instance_ref: "instance:ceal-prod", profile_ref: "profile:kb-study" });
+
+	// A failure path is where misattribution is most likely, so it carries the
+	// same stamp; with no session resolved there is nothing to claim.
+	const failure = await yamlRun(["call", "message.get", "--target", "target:t"], 3, {
+		loadSession: async () => session,
+		nextRequestId: () => "ceal:test",
+	});
+	assert.deepEqual(failure.gateway, { instance_ref: "instance:ceal-prod", profile_ref: "profile:work" });
+	const unresolved = await yamlRun(["call", "message.get", "--target", "target:t"], 3);
+	assert.equal(unresolved.gateway, undefined);
+});
+
+// corca-ai/ceal-cli#2: an unknown outcome told the caller to consult a receipt
+// route the same surface documented as completed-calls-only, and warned about a
+// write on a declared read.
+test("an unknown outcome points at the Gateway's own answer and does not invent a write", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "audit_event_not_found" }), {
+		code: "audit_event_not_found",
+		message: "The Gateway has no audited outcome for that request reference.",
+		nextAction: "If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.",
+		denial: false,
+	});
+	const receiptLeaf = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "receipt");
+	assert.match(receiptLeaf.recovery, /audit_event_not_found/u);
+	assert.doesNotMatch(receiptLeaf.description, /completed call\b/u);
+});
+
 test("compatibility result data passes through without a client-side message projection", () => {
 	let stdout = "";
 	const code = writeCallCompleted({
@@ -744,8 +800,36 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 	assert.deepEqual(payload.receipt, {
 		evidence: "outcome_unknown", request_ref: "ceal:call:call", audit_refs: [],
 	});
-	assert.match(payload.error.next_action, /Do not repeat a write yet/u);
+	// The effect is unknown here (no discovery cache), so the caution stands.
+	assert.match(payload.error.next_action, /Do not repeat this call yet/u);
 	assert.match(payload.error.next_action, /ceal receipt show ceal:call:call/u);
+	assert.match(payload.error.next_action, /audit_event_not_found/u);
+});
+
+// corca-ai/ceal-cli#2 item 3: the failing capability was a declared read, and
+// write-grade caution on an idempotent read makes an agent apply replay
+// discipline that does not apply — and makes a later transcript reader see a
+// write that never existed.
+test("an unknown outcome on a declared read does not warn about repeating a write", async () => {
+	const session = storedSession("http://127.0.0.1:9");
+	const payload = await yamlRun([
+		"call", "message.search", "--target", "target:team-inbox", "query=launch",
+	], 3, {
+		loadSession: async () => session,
+		loadDiscoveryCache: async () => ({
+			key: {
+				gatewayEndpoint: session.gatewayEndpoint, profileRef: session.profileRef,
+				membershipRef: session.membershipRef, negotiatedProtocolVersion: "1.3.0",
+			},
+			cachedAt: Date.now(),
+			discovery: { capabilities: [{ capability_id: "message.search", effect: "read" }] },
+		}),
+	});
+	assert.equal(payload.error.kind, "request_failed");
+	assert.equal(payload.receipt.evidence, "outcome_unknown");
+	assert.doesNotMatch(payload.error.next_action, /Do not repeat/u);
+	// It still points at the route that resolves the unknown outcome.
+	assert.match(payload.error.next_action, /ceal receipt show/u);
 });
 
 test("a rejected call followed by failed session renewal is known pre-provider state, not an unknown receipt", async () => {
@@ -759,7 +843,7 @@ test("a rejected call followed by failed session renewal is known pre-provider s
 		});
 		assert.equal(payload.error.kind, "session_renewal_failed");
 		assert.equal("receipt" in payload, false);
-		assert.doesNotMatch(payload.error.next_action, /Do not repeat a write yet/u);
+		assert.doesNotMatch(payload.error.next_action, /Do not repeat this call yet/u);
 		assert.deepEqual(requests.map((request) => request.body.operation), ["call"]);
 	}, { rejectFirstGateway: true });
 });

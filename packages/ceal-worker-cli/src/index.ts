@@ -25,7 +25,9 @@ import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSe
 import {
 	classifyGatewayFailure,
 	gatewayFailureCode,
+	gatewayResultIdentity,
 	type CealCallResultRecorder,
+	type CealCapabilityEffect,
 	type CealParsedCapabilityCall,
 	writeCallCompleted,
 	writeCallGatewayFailure,
@@ -141,12 +143,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "receipt",
-		description: "Inspect safe Gateway evidence for one completed capability call.",
+		description: "Inspect safe Gateway evidence for one audited capability call outcome.",
 		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
-		recovery: "Use the receipt reference returned by a completed call, then retry after renewing the client session if needed.",
+		recovery: "Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
 	},
 	{
 		name: "observe",
@@ -817,7 +819,26 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
-	return executeCall(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed, requestId, io, runtime);
+	// Read the capability's declared effect from the client's own discovery
+	// cache before the call, so an unknown-outcome failure can tell a read from a
+	// possible write. A cold or stale cache simply yields undefined, which keeps
+	// the conservative caution.
+	const capabilityEffect = await cachedCapabilityEffect(parsed.capabilityId, runtime);
+	return executeCall(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed, requestId, io, runtime, capabilityEffect);
+}
+
+async function cachedCapabilityEffect(
+	capabilityId: string, runtime: CealCommandRuntime,
+): Promise<CealCapabilityEffect | undefined> {
+	try {
+		const entry = await runtime.loadDiscoveryCache?.();
+		const capabilities = entry?.discovery?.capabilities;
+		if (!Array.isArray(capabilities)) return undefined;
+		const match = capabilities.find((capability) => capability && typeof capability === "object"
+			&& (capability as { capability_id?: unknown }).capability_id === capabilityId);
+		const effect = match && typeof match === "object" ? (match as { effect?: unknown }).effect : undefined;
+		return effect === "read" || effect === "write" ? effect : undefined;
+	} catch { return undefined; }
 }
 
 async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -825,11 +846,19 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 	if (!parsed) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok) return writeReceiptError(resolved.reason, "The Gateway receipt could not be read.", io);
+	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {
-		const { readback } = await requestReceiptReadback(resolved.session, parsed.profileRef ?? resolved.session.profileRef, parsed.requestRef, runtime);
-		if (!readback.ok) return writeReceiptError(classifyGatewayFailure(readback.error).code, "The Gateway receipt could not be read.", io);
+		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime);
+		// The Gateway's own failure vocabulary decides the answer: an unknown or
+		// not-yet-audited reference is `audit_event_not_found`, which is a real
+		// answer about this reference, not a broken receipt route.
+		if (!readback.ok) {
+			const failure = classifyGatewayFailure(readback.error);
+			return writeReceiptError(failure.code, failure.message, io, failure.nextAction, resolved.session, profileRef);
+		}
 		return writeYaml(io.stdout, {
 			schema_version: "ceal.receipt.v1", status: "verified", request_ref: parsed.requestRef,
+			...gatewayResultIdentity(resolved.session, profileRef),
 			events: readback.value.events.map(projectReceiptEvent),
 		});
 	} catch (error) {
@@ -885,10 +914,20 @@ function safeGatewayElapsed(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-function writeReceiptError(kind: string, message: string, io: CealCliIo): number {
+function writeReceiptError(
+	kind: string, message: string, io: CealCliIo, nextAction?: string,
+	session?: CealStoredSession, profileRef?: string,
+): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.receipt.v1", status: "error",
-		error: { kind, message, next_action: "Use a receipt reference from a completed call after confirming the client session." },
+		...gatewayResultIdentity(session ?? null, profileRef),
+		error: {
+			kind, message,
+			// Only a session/route problem is fixed by re-checking the session. When
+			// the Gateway answered about the reference itself, pass its answer
+			// through instead of overwriting it with generic advice.
+			next_action: nextAction ?? "Use a receipt reference from a completed call after confirming the client session.",
+		},
 	});
 	return 3;
 }
@@ -915,6 +954,7 @@ async function executeCall(
 	requestId: string,
 	io: CealCliIo,
 	runtime: CealCommandRuntime,
+	capabilityEffect?: CealCapabilityEffect,
 ): Promise<number> {
 	const record = callResultRecorder(runtime);
 	let completed: { value: CealGatewayCallValue; events: unknown; session: CealStoredSession } | null = null;
@@ -932,15 +972,15 @@ async function executeCall(
 	} catch (error) {
 		if (error instanceof CealKnownPreProviderCallError) {
 			const reason = error.cause instanceof CealClientSessionError ? error.cause.code : "session_renewal_failed";
-			return writeCallUnavailable(reason, io, initialSession, parsed);
+			return writeCallUnavailable(reason, io, initialSession, parsed, undefined, undefined, capabilityEffect);
 		}
 		// A session renewal is attempted only after the Gateway explicitly
 		// returned authentication_failed. It is therefore a known pre-provider
 		// rejection, not an unknown call outcome; do not ask an agent to look up
 		// or preserve a receipt for an action the Gateway did not authorize.
-		if (error instanceof CealClientSessionError) return writeCallUnavailable(error.code, io, initialSession, parsed);
+		if (error instanceof CealClientSessionError) return writeCallUnavailable(error.code, io, initialSession, parsed, undefined, undefined, capabilityEffect);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeCallUnavailable(reason, io, initialSession, parsed, requestId, record);
+		return writeCallUnavailable(reason, io, initialSession, parsed, requestId, record, capabilityEffect);
 	}
 	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.session, parsed, record);
 }

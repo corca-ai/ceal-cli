@@ -16,6 +16,19 @@ interface ResultIo { stdout: { write(chunk: string): unknown } }
  */
 export type CealCallResultRecorder = (envelope: Record<string, unknown>) => void;
 
+/** The failing capability's declared effect, when discovery is known locally. */
+export type CealCapabilityEffect = "read" | "write";
+
+// An unknown outcome only warrants replay caution for a capability that can
+// change provider state. Attaching "do not repeat a write" to a declared read
+// makes an agent apply write-grade discipline to an idempotent call, and makes
+// the operator reading the transcript later see a write that never existed
+// (corca-ai/ceal-cli#2). An unknown effect keeps the caution: silence would be
+// the unsafe default.
+function unknownOutcomeCaution(effect: CealCapabilityEffect | undefined): string {
+	return effect === "read" ? "" : "Do not repeat this call yet; its provider outcome is unknown. ";
+}
+
 export interface CealParsedCapabilityCall {
 	ok: true;
 	capabilityId: string;
@@ -31,6 +44,22 @@ function emitCallResult(io: ResultIo, envelope: Record<string, unknown>, record:
 	return exitCode;
 }
 
+/**
+ * The issuing Gateway identity for one result, in the same `gateway:` shape the
+ * discovery surfaces already emit. A result that omits it cannot be attributed
+ * later: two instances answer with the same profile name, the same client, and
+ * cross-stable target refs, so an archived response is indistinguishable from
+ * one produced by the other instance (corca-ai/ceal-cli#3). The profile stamped
+ * is the one the call actually used, which is the per-call `--profile` override
+ * when present, not the session default.
+ */
+export function gatewayResultIdentity(
+	session: CealStoredSession | null, profileRef?: string,
+): { gateway: { instance_ref: string; profile_ref: string } } | Record<string, never> {
+	if (!session) return {};
+	return { gateway: { instance_ref: session.instanceRef, profile_ref: profileRef ?? session.profileRef } };
+}
+
 export function writeCallCompleted(
 	value: CealGatewayCallValue, events: unknown, requestId: string, io: ResultIo,
 	session: CealStoredSession, parsed: CealParsedCapabilityCall, record?: CealCallResultRecorder,
@@ -39,7 +68,7 @@ export function writeCallCompleted(
 	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed, record);
 	return emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
-		target: parsed.targetRef, data: value.data,
+		target: parsed.targetRef, ...gatewayResultIdentity(session, parsed.profileRef), data: value.data,
 		receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
 	}, record);
 }
@@ -53,6 +82,7 @@ export function writeCallGatewayFailure(
 	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
 		capability: parsed.capabilityId, target: parsed.targetRef,
+		...gatewayResultIdentity(session, parsed.profileRef),
 		receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
 		error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
 	}, record);
@@ -65,6 +95,7 @@ export function writeCallIncomplete(
 ): number {
 	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
+		...gatewayResultIdentity(session, parsed.profileRef),
 		data: value.data, receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
 	}, record);
@@ -73,12 +104,13 @@ export function writeCallIncomplete(
 
 export function writeCallUnavailable(
 	reason: string, io: ResultIo, session: CealStoredSession | null, parsed: CealParsedCapabilityCall | null, requestId?: string,
-	record?: CealCallResultRecorder,
+	record?: CealCallResultRecorder, capabilityEffect?: CealCapabilityEffect,
 ): number {
 	const requestWasIssued = typeof requestId === "string";
 	emitCallResult(io, {
 		schema_version: "ceal.result.v2", status: "error",
 		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
+		...gatewayResultIdentity(session, parsed?.profileRef),
 		// A transport failure after the worker has allocated the Gateway request
 		// reference has an unknown outcome: the Gateway may have completed and
 		// audited the call after the client stopped waiting. Preserve that safe
@@ -88,7 +120,7 @@ export function writeCallUnavailable(
 			kind: reason,
 			message: "The capability call could not be completed.",
 			next_action: requestWasIssued
-				? `Do not repeat a write yet. Run 'ceal receipt show ${requestId}' after a short wait to determine the Gateway outcome.`
+				? `${unknownOutcomeCaution(capabilityEffect)}Run 'ceal receipt show ${requestId}' after a short wait to read the Gateway outcome; while that reference has no audited outcome the Gateway answers 'audit_event_not_found'.`
 				: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
 		},
 	}, record);
@@ -114,6 +146,13 @@ const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "c
 	resource_not_available: { message: "The Gateway reported the requested resource as not available to this client.", nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.", denial: false },
 	continuation_not_available: { message: "The approved continuation is no longer available.", nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.", denial: false },
 	invalid_arguments: { message: "The capability arguments do not satisfy the published input contract.", nextAction: "Correct the capability arguments, then retry the call with a new request ID.", denial: false },
+	// The Gateway answers a readback for an unknown or not-yet-audited request
+	// reference with its own 404 code. Rendering that as the generic failure is
+	// what made an unknown outcome unresolvable: the caller was told to consult a
+	// receipt route that had, in fact, answered precisely — no audited outcome
+	// exists for this reference (corca-ai/ceal-cli#2).
+	audit_event_not_found: { message: "The Gateway has no audited outcome for that request reference.", nextAction: "If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.", denial: false },
+	invalid_readback_request: { message: "The request reference is not a readable Gateway request id.", nextAction: "Use the exact 'receipt.request_ref' string a 'ceal call' returned; do not construct or truncate it.", denial: false },
 	connector_unavailable: { message: "The granted connector is currently unavailable.", nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.", denial: false },
 	rate_limited: { message: "The Gateway rate quota for this client is temporarily exhausted.", nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.", denial: false },
 	idempotency_conflict: { message: "The idempotency key names a different governed write.", nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.", denial: false },
