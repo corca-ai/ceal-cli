@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.65.4 (`ceal-v0.65.4`)
+
+- Build and sign `darwin-arm64` and `darwin-amd64` in the tagged worker lane,
+  making a macOS install possible for the first time. `install-ceal.sh`
+  verifies every asset against its tag-bound OIDC signing identity and has no
+  unsigned bypass, so a manually built Mac artifact had no install path at all.
+- Extend every release-lane site that names a platform, including the stable
+  rollback workflow. Left at the linux set, a rollback to a four-platform tag
+  would have failed its checksum pass — and, had it passed, would have advanced
+  the stable pointer having verified only half the signed assets.
+- Verify the Gateway handoff archive with node instead of `sha256sum` in the
+  build job, which now also runs on macOS runners that do not ship it.
+- Gate the frozen legacy dual-installer suite and the two simulated-darwin
+  cases on the host tools they require rather than on the platform. Neither is
+  macOS coverage: `install.sh` serves the linux-only legacy lane, and the
+  simulation's host is the host it simulates.
+
 ## 0.65.3 (`ceal-v0.65.3`)
 
 - Repair the amd64-only real-native release proof by deriving its requested

@@ -96,7 +96,7 @@ test("version identifies the package, protocol, range, and credential context", 
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
 	});
-	assert.equal(manifest.version, "0.65.3");
+	assert.equal(manifest.version, "0.65.4");
 });
 
 test("commands YAML is the machine-readable discovery surface", async () => {
@@ -113,7 +113,7 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 			return {
 				status: "updated",
 				previous_version: "0.65.0",
-				installed_version: "0.65.3",
+				installed_version: "0.65.4",
 				platform: "linux-arm64",
 				artifact_sha256: "a".repeat(64),
 				elapsed_ms: 42,
@@ -127,13 +127,13 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 		effect: "local_write",
 		stable_only: true,
 		previous_version: "0.65.0",
-		installed_version: "0.65.3",
+		installed_version: "0.65.4",
 		platform: "linux-arm64",
 		artifact_sha256: "a".repeat(64),
 		elapsed_ms: 42,
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
-	const invalid = await run(["update", "v0.65.3"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
+	const invalid = await run(["update", "v0.65.4"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
 	assert.equal(invalid.code, 2);
 	assert.equal(invoked, 1);
 	const unavailable = await yamlRun(["update"], 3);
@@ -1116,7 +1116,7 @@ test("capabilities selects a bounded target page through the stored client sessi
 		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
 		assert.deepEqual(requests.map((item) => item.body.body), [
-			{ client: { name: "ceal", version: "0.65.3" } },
+			{ client: { name: "ceal", version: "0.65.4" } },
 			{ capability_id: "message.search", match: "team", limit: 1 },
 		]);
 	});
