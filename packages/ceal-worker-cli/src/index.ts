@@ -154,6 +154,114 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 ];
 
+// A subcommand the dispatcher accepts is a leaf an agent is told to descend
+// into, so it owes the same four-field contract as a top-level command. Keeping
+// the children declarative next to `CEAL_COMMANDS` is what lets one gate assert
+// "every advertised route renders its own Effect/Evidence/Result schema/
+// Recovery" instead of patching help per route (issue #1).
+export interface CealSubcommandDefinition {
+	parent: CealCommandDefinition["name"];
+	route: readonly string[];
+	description: string;
+	usage: string;
+	effect: CealCommandDefinition["effect"];
+	evidence: CealCommandDefinition["evidence"];
+	result_schema: string;
+	recovery: string;
+	notes?: readonly string[];
+	options?: readonly string[];
+}
+
+export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
+	{
+		parent: "guide",
+		route: ["status"],
+		description: "Inspect the signed guide and its Codex registration.",
+		usage: "ceal guide status",
+		effect: "read_only",
+		evidence: "surface",
+		result_schema: "ceal.guide.v1",
+		recovery: "Reinstall a signed Ceal worker release, then run 'ceal guide status' again.",
+	},
+	{
+		parent: "guide",
+		route: ["register", "codex"],
+		description: "Link the update-safe signed guide into the configured Codex skill directory.",
+		usage: "ceal guide register codex",
+		effect: "local_write",
+		evidence: "surface",
+		result_schema: "ceal.guide.v1",
+		recovery: "Run 'ceal guide status' to read back the registration this command claims.",
+	},
+	{
+		parent: "session",
+		route: ["enroll"],
+		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
+		usage: "ceal session enroll --gateway <https-url> [--code-stdin]",
+		effect: "local_write",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.session_enrollment.v1",
+		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
+		notes: [
+			"The code is never a command operand: it is read through a hidden terminal",
+			"prompt, or from stdin only for approved non-interactive automation.",
+		],
+		options: [
+			"  --gateway <https-url>   Gateway client endpoint that approved this device.",
+			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
+			"  (default)               On a safe terminal, prompt for the code with hidden input.",
+		],
+	},
+	{
+		parent: "session",
+		route: ["logout"],
+		description: "Revoke the Gateway session, then remove local session and cached state.",
+		usage: "ceal session logout",
+		effect: "local_write",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.session_logout.v1",
+		recovery: "Run 'ceal session' to confirm the local session is gone; a revoke failure preserves local state for a retry.",
+	},
+	{
+		parent: "capabilities",
+		route: ["targets"],
+		description: "Select bounded targets for one discovered capability.",
+		usage: "ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.capabilities.v1",
+		recovery: "Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
+		notes: [
+			"An unfiltered page is permitted: omit --match to request the Gateway's own",
+			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
+			"authoritative and answers 'target_catalog.selection_required' when it needs a",
+			"narrower selection. --match and --cursor are mutually exclusive, and this",
+			"route is always a live query, so it accepts neither --fresh nor a cache.",
+		],
+		options: [
+			"  --capability <id>       Capability returned by 'ceal capabilities'.",
+			"  --profile <profile-ref> Select one assigned Profile for target discovery.",
+			"  --match <text-or-url>   Select current target labels, or an approved source URL.",
+			"  --cursor <opaque>       Continue one Gateway-issued selected target page.",
+			"  --limit <1-64>          Bound one selected target page (default: Gateway choice).",
+		],
+	},
+	{
+		parent: "receipt",
+		route: ["show"],
+		description: "Read the caller's safe Gateway audit receipt for one completed call.",
+		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.receipt.v1",
+		recovery: "Use the request reference returned by a completed 'ceal call', then retry after renewing the client session if needed.",
+		options: [
+			"  <request-ref>           Request reference returned by a completed call.",
+			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
+		],
+	},
+];
+
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
 const TOP_LEVEL_HELP = [
 	"Usage: ceal <command> [options]",
@@ -174,7 +282,12 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
 	const options = args.slice(1);
 	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
-	if (command.name === "session" && isSessionEnrollmentHelp(options)) return writeHelp(commandHelp(command), io);
+	// A help probe on a declared subcommand must render that leaf's own contract
+	// before any command runner sees the route, so `--help` can never be parsed as
+	// an operand of the action it is asking about.
+	const requestedSubcommand = options.length >= 2 && isHelpToken(options[options.length - 1])
+		? findSubcommand(command.name, options.slice(0, -1)) : undefined;
+	if (requestedSubcommand) return writeHelp(subcommandHelp(requestedSubcommand), io);
 	if (!commandAcceptsOptions(command.name, options)) return writeError("invalid_argument", "Invalid ceal command options.", io);
 	return runKnownCommand(command.name, options, io, runtime);
 }
@@ -187,8 +300,13 @@ function commandAcceptsOptions(command: CealCommandDefinition["name"], options: 
 	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt" || command === "observe";
 }
 
-function isSessionEnrollmentHelp(options: readonly string[]): boolean {
-	return options.length === 2 && options[0] === "enroll" && isHelpToken(options[1]);
+function subcommandsOf(parent: CealCommandDefinition["name"]): readonly CealSubcommandDefinition[] {
+	return CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
+}
+
+function findSubcommand(parent: CealCommandDefinition["name"], route: readonly string[]): CealSubcommandDefinition | undefined {
+	return subcommandsOf(parent).find((subcommand) => subcommand.route.length === route.length
+		&& subcommand.route.every((token, index) => token === route[index]));
 }
 
 async function runKnownCommand(
@@ -326,13 +444,18 @@ function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
 }
 
 function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
-	if (args.length !== 1) return writeError("invalid_argument", "Help requires one public command name.", io);
+	if (args.length === 0) return writeError("invalid_argument", "Help requires one public command name.", io);
 	const command = COMMAND_BY_NAME.get(args[0] as CealCommandDefinition["name"]);
-	return command ? writeHelp(commandHelp(command), io) : writeError("unknown_command", "Unknown ceal command.", io);
+	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
+	if (args.length === 1) return writeHelp(commandHelp(command), io);
+	const subcommand = findSubcommand(command.name, args.slice(1));
+	return subcommand ? writeHelp(subcommandHelp(subcommand), io)
+		: writeError("invalid_argument", "Help requires one public command name or subcommand route.", io);
 }
 
 function commandHelp(command: CealCommandDefinition): string {
 	const options = commandHelpOptions(command.name);
+	const subcommands = subcommandsOf(command.name);
 	return [
 		`Usage: ${command.usage}`,
 		"",
@@ -344,37 +467,52 @@ function commandHelp(command: CealCommandDefinition): string {
 		`Result schema: ${command.result_schema}`,
 		`Recovery/readback: ${command.recovery}`,
 		"",
+		...(subcommands.length === 0 ? [] : [
+			"Subcommands:",
+			...subcommandRows(subcommands),
+			`Run: ceal ${command.name} <subcommand> --help for that leaf's own contract.`,
+			"",
+		]),
 		"Options:",
 		...options,
 		"  -h, --help  Show this help without performing work.",
 	].join("\n");
 }
 
+// Align on the widest route so a multi-word route such as `register codex` keeps
+// the two-space column separator that makes each row machine-readable.
+function subcommandRows(subcommands: readonly CealSubcommandDefinition[]): readonly string[] {
+	const width = Math.max(...subcommands.map((subcommand) => subcommand.route.join(" ").length));
+	return subcommands.map((subcommand) => `  ${subcommand.route.join(" ").padEnd(width)}  ${subcommand.description}`);
+}
+
+function subcommandHelp(subcommand: CealSubcommandDefinition): string {
+	return [
+		`Usage: ${subcommand.usage}`,
+		"",
+		subcommand.description,
+		...(subcommand.notes ?? []),
+		"Named options follow required positionals, are order-independent, and may be supplied once.",
+		"",
+		`Effect: ${subcommand.effect}`,
+		`Evidence: ${subcommand.evidence}`,
+		`Result schema: ${subcommand.result_schema}`,
+		`Recovery/readback: ${subcommand.recovery}`,
+		"",
+		"Options:",
+		...(subcommand.options ?? []),
+		"  -h, --help  Show this help without performing work.",
+	].join("\n");
+}
+
 function commandHelpOptions(name: CealCommandDefinition["name"]): readonly string[] {
-	if (name === "guide") return [
-			"  status                 Inspect the signed guide and Codex registration (Effect: read_only).",
-			"  register codex         Link the update-safe signed guide into the configured Codex skill directory (Effect: local_write).",
-		];
 	if (name === "capabilities") return [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
 			"  --detail                Include each capability's full input_contract (default: concise).",
-			"  targets                 Select bounded targets for one discovered capability.",
-			"  targets --capability <id>  Capability returned by 'ceal capabilities'.",
-			"  targets --profile <profile-ref>  Select one assigned Profile for target discovery.",
-			"  targets --match <text-or-url>  Select current target labels, or an approved source URL.",
-			"  targets --cursor <opaque> Continue one Gateway-issued selected target page.",
-			"  targets --limit <1-64>   Bound one selected target page (default: Gateway choice).",
 			"  --endpoint <https-url>  Gateway client endpoint.",
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
 			"  --token-stdin            Read the Gateway-issued client token from stdin.",
-		];
-	if (name === "session") return [
-			"  enroll                 Exchange a pre-approved one-time device-enrollment code for a local session.",
-			"  logout                 Revoke and remove the local session.",
-			"  --gateway <https-url>  Gateway client endpoint.",
-			"  (default)               On a safe terminal, prompt for the device-enrollment code with hidden input.",
-			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
 		];
 	if (name === "call") return [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",

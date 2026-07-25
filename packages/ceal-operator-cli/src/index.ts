@@ -145,6 +145,117 @@ export const CEALCTL_COMMANDS: readonly CealctlCommandDefinition[] = [
 	},
 ];
 
+// Same contract as the worker CLI: an operator route the dispatcher accepts is a
+// leaf, so it renders its own four fields instead of borrowing the parent's.
+export interface CealctlSubcommandDefinition {
+	parent: CealctlCommandDefinition["name"];
+	route: readonly string[];
+	description: string;
+	usage: string;
+	effect: CealctlCommandDefinition["effect"];
+	evidence: CealctlCommandDefinition["evidence"];
+	result_schema: string;
+	recovery: string;
+	options?: readonly string[];
+}
+
+const OPERATOR_SESSION_OPTION = "  --operator-session <name>      Use a named stored admin session." as const;
+const DRY_RUN_OPTION = "  --dry-run                      Validate the replacement without changing Gateway state." as const;
+
+export const CEALCTL_SUBCOMMANDS: readonly CealctlSubcommandDefinition[] = [
+	{
+		parent: "sessions",
+		route: ["use"],
+		description: "Select one stored operator session as current.",
+		usage: "cealctl sessions use <safe-name>",
+		effect: "control_write",
+		evidence: "surface",
+		result_schema: "cealctl.sessions.v1",
+		recovery: "Run 'cealctl sessions' to read back which stored session is current.",
+		options: ["  <safe-name>                    Existing stored operator session name."],
+	},
+	{
+		parent: "access",
+		route: ["show"],
+		description: "Read the current Gateway access registry without changing it.",
+		usage: "cealctl access show [--operator-session <name>]",
+		effect: "read_only",
+		evidence: "host_decision",
+		result_schema: "cealctl.access.v1",
+		recovery: "Run 'cealctl login <admin-url>' when no current session exists, then re-read the registry.",
+		options: [OPERATOR_SESSION_OPTION],
+	},
+	{
+		parent: "access",
+		route: ["apply"],
+		description: "Validate or atomically replace the complete Gateway access registry from stdin.",
+		usage: "cealctl access apply --stdin [--dry-run] [--operator-session <name>]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.access.v1",
+		recovery: "Re-run with '--dry-run' to validate, then read back the applied registry with 'cealctl access show'.",
+		options: [
+			"  --stdin                        Read one ceal.gateway_access_registry.v1 YAML document.",
+			DRY_RUN_OPTION,
+			OPERATOR_SESSION_OPTION,
+		],
+	},
+	{
+		parent: "connectors",
+		route: ["show"],
+		description: "Read the current Profile connector-principal binding registry without changing it.",
+		usage: "cealctl connectors show [--operator-session <name>]",
+		effect: "read_only",
+		evidence: "host_decision",
+		result_schema: "cealctl.profile_connectors.v1",
+		recovery: "Run 'cealctl login <admin-url>' when no current session exists, then re-read the bindings.",
+		options: [OPERATOR_SESSION_OPTION],
+	},
+	{
+		parent: "connectors",
+		route: ["check"],
+		description: "Run one bounded, read-only connector operation check for every active Profile binding.",
+		usage: "cealctl connectors check [--operator-session <name>]",
+		effect: "read_only",
+		evidence: "host_decision",
+		result_schema: "cealctl.profile_connector_check.v1",
+		recovery: "Repair the reported binding with 'cealctl connectors apply', then re-run this check.",
+		options: [OPERATOR_SESSION_OPTION],
+	},
+	{
+		parent: "connectors",
+		route: ["apply"],
+		description: "Validate or atomically replace complete Profile connector-principal bindings from stdin.",
+		usage: "cealctl connectors apply --stdin [--dry-run] [--operator-session <name>]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.profile_connectors.v1",
+		recovery: "Re-run with '--dry-run' to validate, then prove the result with 'cealctl connectors check'.",
+		options: [
+			"  --stdin                        Read one ceal.gateway_profile_connector_registry.v1 YAML document.",
+			DRY_RUN_OPTION,
+			OPERATOR_SESSION_OPTION,
+		],
+	},
+	{
+		parent: "enrollments",
+		route: ["create"],
+		description: "Create one short-lived, one-time device-enrollment code.",
+		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-session <name>]",
+		effect: "control_write",
+		evidence: "host_decision",
+		result_schema: "cealctl.enrollments.v1",
+		recovery: "Create a replacement code if enrollment does not complete before expiry; never re-send an expired code.",
+		options: [
+			"  --client <safe-name>           Existing pre-approved client device name.",
+			"  --profile <safe-name>          Profile name bound by the Gateway.",
+			"  --subject <safe-name>          Existing Subject bound by the Gateway.",
+			"  --instance <safe-name>         Customer instance bound by the Gateway.",
+			OPERATOR_SESSION_OPTION,
+		],
+	},
+];
+
 const COMMAND_BY_NAME = new Map(CEALCTL_COMMANDS.map((command) => [command.name, command]));
 const TOP_LEVEL_HELP = [
 	"Usage: cealctl <command> [options]",
@@ -163,29 +274,7 @@ const COMMAND_HELP_OPTIONS: Partial<Record<CealctlCommandDefinition["name"], rea
 		"  <admin-url>                   Canonical private Gateway base: https://<host>/<org>/<instance>.",
 		"  --session <safe-name>         Local operator session name (default: default).",
 	],
-	sessions: ["  use <safe-name>               Select one stored operator session."],
 	logout: ["  --session <safe-name>         Revoke a named session instead of the current session."],
-	access: [
-		"  show                           Read the current Gateway access registry.",
-		"  apply --stdin                  Read one complete ceal.gateway_access_registry.v1 YAML document from stdin.",
-		"  --dry-run                      Validate the replacement without changing Gateway state.",
-		"  --operator-session <name>      Use a named stored admin session.",
-	],
-	connectors: [
-		"  show                           Read current Profile connector-principal bindings.",
-		"  check                          Run one bounded, read-only operation check for each active Profile binding.",
-		"  apply --stdin                  Read one complete ceal.gateway_profile_connector_registry.v1 YAML document.",
-		"  --dry-run                      Validate the replacement without changing Gateway state.",
-		"  --operator-session <name>      Use a named stored admin session.",
-	],
-	enrollments: [
-		"  create                         Create one short-lived, one-time device-enrollment code.",
-		"  --client <safe-name>          Existing pre-approved client device name.",
-		"  --profile <safe-name>         Profile name bound by the Gateway.",
-		"  --subject <safe-name>         Existing Subject bound by the Gateway.",
-		"  --instance <safe-name>        Customer instance bound by the Gateway.",
-		"  --operator-session <name>     Use a named stored admin session.",
-	],
 };
 
 export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtime: CealctlRuntime = {}): number | Promise<number> {
@@ -197,7 +286,21 @@ export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtim
 	if (!command) return writeError("unknown_command", "Unknown cealctl command.", io);
 	const options = args.slice(1);
 	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
+	// Resolve a subcommand help probe before any runner sees it, so `--help` can
+	// never be taken as the operand of the action it is asking about.
+	const requestedSubcommand = options.length >= 2 && isHelpToken(options[options.length - 1])
+		? findSubcommand(command.name, options.slice(0, -1)) : undefined;
+	if (requestedSubcommand) return writeHelp(subcommandHelp(requestedSubcommand), io);
 	return runKnownCommand(command.name, options, io, runtime);
+}
+
+function subcommandsOf(parent: CealctlCommandDefinition["name"]): readonly CealctlSubcommandDefinition[] {
+	return CEALCTL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
+}
+
+function findSubcommand(parent: CealctlCommandDefinition["name"], route: readonly string[]): CealctlSubcommandDefinition | undefined {
+	return subcommandsOf(parent).find((subcommand) => subcommand.route.length === route.length
+		&& subcommand.route.every((token, index) => token === route[index]));
 }
 
 function runKnownCommand(command: CealctlCommandDefinition["name"], options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): number | Promise<number> {
@@ -228,13 +331,18 @@ function writeReadOnlyCommand(
 }
 
 function writeRequestedHelp(args: readonly string[], io: CealctlIo): number {
-	if (args.length !== 1) return writeError("invalid_argument", "Help requires one public command name.", io);
+	if (args.length === 0) return writeError("invalid_argument", "Help requires one public command name.", io);
 	const command = COMMAND_BY_NAME.get(args[0] as CealctlCommandDefinition["name"]);
-	return command ? writeHelp(commandHelp(command), io) : writeError("unknown_command", "Unknown cealctl command.", io);
+	if (!command) return writeError("unknown_command", "Unknown cealctl command.", io);
+	if (args.length === 1) return writeHelp(commandHelp(command), io);
+	const subcommand = findSubcommand(command.name, args.slice(1));
+	return subcommand ? writeHelp(subcommandHelp(subcommand), io)
+		: writeError("invalid_argument", "Help requires one public command name or subcommand route.", io);
 }
 
 function commandHelp(command: CealctlCommandDefinition): string {
 	const options = COMMAND_HELP_OPTIONS[command.name] ?? [];
+	const subcommands = subcommandsOf(command.name);
 	return [
 		`Usage: ${command.usage}`,
 		"",
@@ -246,8 +354,38 @@ function commandHelp(command: CealctlCommandDefinition): string {
 		"Output: one YAML document on stdout; --json is not supported.",
 		`Recovery/readback: ${command.recovery}`,
 		"",
+		...(subcommands.length === 0 ? [] : [
+			"Subcommands:",
+			...subcommandRows(subcommands),
+			`Run: cealctl ${command.name} <subcommand> --help for that leaf's own contract.`,
+			"",
+		]),
 		"Options:",
 		...options,
+		"  -h, --help  Show this help without performing work.",
+	].join("\n");
+}
+
+// Align on the widest route so every row keeps a two-space column separator.
+function subcommandRows(subcommands: readonly CealctlSubcommandDefinition[]): readonly string[] {
+	const width = Math.max(...subcommands.map((subcommand) => subcommand.route.join(" ").length));
+	return subcommands.map((subcommand) => `  ${subcommand.route.join(" ").padEnd(width)}  ${subcommand.description}`);
+}
+
+function subcommandHelp(subcommand: CealctlSubcommandDefinition): string {
+	return [
+		`Usage: ${subcommand.usage}`,
+		"",
+		subcommand.description,
+		"",
+		`Effect: ${subcommand.effect}`,
+		`Evidence: ${subcommand.evidence}`,
+		`Result schema: ${subcommand.result_schema}`,
+		"Output: one YAML document on stdout; --json is not supported.",
+		`Recovery/readback: ${subcommand.recovery}`,
+		"",
+		"Options:",
+		...(subcommand.options ?? []),
 		"  -h, --help  Show this help without performing work.",
 	].join("\n");
 }
@@ -334,9 +472,6 @@ function runAccess(options: readonly string[], io: CealctlIo, runtime: CealctlRu
 		schema_version: "cealctl.access.v1", command: "cealctl", status: "ready", proof_level: "surface",
 		writes_external: false, next_action: "Run 'cealctl access show' or inspect 'cealctl access --help'.",
 	});
-	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "apply")) {
-		return writeHelp(accessActionHelp(options[0]), io);
-	}
 	const parsed = parseAccessOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid access options.", io);
 	return executeAccess(parsed, io, runtime);
@@ -347,51 +482,11 @@ function runProfileConnectors(options: readonly string[], io: CealctlIo, runtime
 		schema_version: "cealctl.profile_connectors.v1", command: "cealctl", status: "ready", proof_level: "surface",
 		writes_external: false, next_action: "Run 'cealctl connectors show' or inspect 'cealctl connectors --help'.",
 	});
-	if (options.length === 2 && isHelpToken(options[1]) && (options[0] === "show" || options[0] === "check" || options[0] === "apply")) {
-		return writeHelp(profileConnectorActionHelp(options[0]), io);
-	}
 	const parsed = parseProfileConnectorOptions(options);
 	if (!parsed) return writeError("invalid_argument", "Invalid connector options.", io);
 	return executeProfileConnectors(parsed, io, runtime);
 }
 
-function profileConnectorActionHelp(action: "show" | "check" | "apply"): string {
-	if (action === "show") return [
-		"Usage: cealctl connectors show [--operator-session <name>]",
-		"",
-		"Read the current Profile connector-principal binding registry without changing it.",
-		"",
-		"Effect: read_only",
-		"Evidence: host_decision",
-		"Result schema: cealctl.profile_connectors.v1",
-		"  --operator-session <name>  Use a named stored admin session.",
-		"  -h, --help                 Show this help without performing work.",
-	].join("\n");
-	if (action === "check") return [
-		"Usage: cealctl connectors check [--operator-session <name>]",
-		"",
-		"Run one bounded, read-only connector operation check for every active Profile binding.",
-		"",
-		"Effect: read_only",
-		"Evidence: host_decision",
-		"Result schema: cealctl.profile_connector_check.v1",
-		"  --operator-session <name>  Use a named stored admin session.",
-		"  -h, --help                 Show this help without performing work.",
-	].join("\n");
-	return [
-		"Usage: cealctl connectors apply --stdin [--dry-run] [--operator-session <name>]",
-		"",
-		"Validate or atomically replace complete Profile connector-principal bindings from stdin.",
-		"",
-		"Effect: control_write",
-		"Evidence: host_decision",
-		"Result schema: cealctl.profile_connectors.v1",
-		"  --stdin                    Read one ceal.gateway_profile_connector_registry.v1 YAML document.",
-		"  --dry-run                  Validate without changing Gateway state.",
-		"  --operator-session <name>  Use a named stored admin session.",
-		"  -h, --help                 Show this help without performing work.",
-	].join("\n");
-}
 
 async function executeProfileConnectors(
 	parsed: { action: "show" | "check" | "apply"; dryRun: boolean; operatorSession?: string },
@@ -479,32 +574,6 @@ async function readProfileConnectorRegistryFromStdin(runtime: CealctlRuntime) {
 	}
 }
 
-function accessActionHelp(action: "show" | "apply"): string {
-	if (action === "show") return [
-		"Usage: cealctl access show [--operator-session <name>]",
-		"",
-		"Read the current Gateway access registry without changing it.",
-		"",
-		"Effect: read_only",
-		"Evidence: host_decision",
-		"Result schema: cealctl.access.v1",
-		"  --operator-session <name>  Use a named stored admin session.",
-		"  -h, --help                 Show this help without performing work.",
-	].join("\n");
-	return [
-		"Usage: cealctl access apply --stdin [--dry-run] [--operator-session <name>]",
-		"",
-		"Validate or atomically replace the complete Gateway access registry from stdin.",
-		"",
-		"Effect: control_write",
-		"Evidence: host_decision",
-		"Result schema: cealctl.access.v1",
-		"  --stdin                    Read one ceal.gateway_access_registry.v1 YAML document.",
-		"  --dry-run                  Validate without changing Gateway state.",
-		"  --operator-session <name>  Use a named stored admin session.",
-		"  -h, --help                 Show this help without performing work.",
-	].join("\n");
-}
 
 async function executeAccess(
 	parsed: { action: "show" | "apply"; dryRun: boolean; operatorSession?: string },

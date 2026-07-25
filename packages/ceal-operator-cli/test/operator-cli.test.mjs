@@ -10,7 +10,7 @@ import process from "node:process";
 import test from "node:test";
 import { URL } from "node:url";
 import { parseAllDocuments } from "yaml";
-import { CEALCTL_COMMANDS, renderPlainYamlDocument, runCealctlCommand } from "../dist/index.js";
+import { CEALCTL_COMMANDS, CEALCTL_SUBCOMMANDS, renderPlainYamlDocument, runCealctlCommand } from "../dist/index.js";
 import { LocalGatewayOwnerLoginError, loginLocalGatewayOwner } from "../dist/local-gateway-owner-login-client.js";
 import { decodeCealProfileConnectorRegistry } from "../dist/profile-connector-admin-client.js";
 
@@ -34,11 +34,50 @@ test("canonical registry is reachable through stable, read-only help", () => {
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
-	for (const args of [["access", "show", "--help"], ["access", "apply", "--help"], ["connectors", "show", "--help"], ["connectors", "check", "--help"], ["connectors", "apply", "--help"]]) {
-		const result = run(args);
-		assert.equal(result.code, 0);
-		assert.equal(result.stderr, "");
-		assert.match(result.stdout, /^Usage: cealctl (?:access|connectors) (?:show|check|apply)/u);
+});
+
+// An operator route the dispatcher accepts is a leaf the guide tells the caller
+// to read, so it owes its own four fields rather than the parent's.
+test("every declared subcommand renders its own four-field leaf help", () => {
+	for (const subcommand of CEALCTL_SUBCOMMANDS) {
+		const route = [subcommand.parent, ...subcommand.route];
+		for (const args of [[...route, "--help"], [...route, "-h"], ["help", ...route]]) {
+			const result = run(args);
+			assert.equal(result.code, 0, `${args.join(" ")}: ${result.stdout}`);
+			assert.equal(result.stderr, "");
+			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(subcommand.usage)}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Effect: ${subcommand.effect}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Evidence: ${subcommand.evidence}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Result schema: ${subcommand.result_schema}$`, "mu"));
+			assert.match(result.stdout, /^Output: one YAML document on stdout; --json is not supported\.$/mu);
+			assert.match(result.stdout, /^Recovery\/readback: /mu);
+		}
+	}
+});
+
+test("advertised subcommand rows and declared routes stay in sync", () => {
+	for (const command of CEALCTL_COMMANDS) {
+		const declared = CEALCTL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
+		const lines = run([command.name, "--help"]).stdout.split("\n");
+		const advertised = lines.slice(lines.indexOf("Subcommands:") + 1).flatMap((line) => {
+			const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
+			return match ? [match[1]] : [];
+		});
+		if (declared.length === 0) {
+			assert.ok(!lines.includes("Subcommands:"), command.name);
+			continue;
+		}
+		assert.ok(lines.includes("Subcommands:"), command.name);
+		assert.deepEqual(advertised.slice(0, declared.length), declared.map((subcommand) => subcommand.route.join(" ")));
+	}
+});
+
+// A help probe must never reach an action runner as that action's operand.
+test("a help probe never becomes an operator action", async () => {
+	for (const args of [["sessions", "bogus", "--help"], ["help", "access", "bogus"]]) {
+		const result = await asyncRun(args);
+		assert.equal(result.code, 2, args.join(" "));
+		assert.equal(parseYaml(result.stdout).error.kind, "invalid_argument");
 	}
 });
 

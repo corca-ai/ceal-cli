@@ -72,6 +72,32 @@ test("cold-start customer intents select semantic leaves and preserve proof limi
 	for (const scenario of scenarios) exerciseCustomerScenario(scenario);
 });
 
+// The guide's Bootstrap tells an agent to descend and read four fields at the
+// leaf it lands on. Depth-1 help is not enough: assert the same contract for
+// every child route the installed help itself advertises, so a guide-mandated
+// descent can never dead-end in an argument error (corca-ai/ceal-cli#1).
+test("every advertised subcommand route renders its own four-field leaf help", () => {
+	for (const item of CASES) {
+		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
+		assert.match(guide, /`Subcommands:`/u);
+		let advertised = 0;
+		for (const route of parseRoutes(runBinary(item, ["--help"]).stdout)) {
+			for (const child of parseSubcommands(runBinary(item, [route.name, "--help"]).stdout)) {
+				advertised += 1;
+				const childRoute = [route.name, ...child.split(" ")];
+				for (const args of [[...childRoute, "--help"], ["help", ...childRoute]]) {
+					const help = runBinary(item, args).stdout;
+					for (const field of ["Usage:", "Effect:", "Evidence:", "Result schema:", "Recovery/readback:"]) {
+						assert.match(help, new RegExp(`^${field} \\S`, "mu"), `${item.binary} ${args.join(" ")} is missing ${field}`);
+					}
+					assert.match(help, new RegExp(`^Usage: ${item.binary} ${childRoute.join(" ")}`, "mu"));
+				}
+			}
+		}
+		assert.ok(advertised > 0, `${item.binary} advertises no subcommand route to descend into`);
+	}
+});
+
 test("missing matching binary fails closed without a guessed fallback", () => {
 	for (const item of CASES) {
 		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
@@ -114,6 +140,21 @@ function runBinary(item, args) {
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(result.stderr, "");
 	return result;
+}
+
+// Child routes are read from the leaf's own `Subcommands:` block, so the gate
+// follows what the installed binary advertises rather than a repo-side list.
+function parseSubcommands(help) {
+	const lines = help.split("\n");
+	const start = lines.indexOf("Subcommands:");
+	if (start < 0) return [];
+	const rows = [];
+	for (const line of lines.slice(start + 1)) {
+		if (line === "") break;
+		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
+		if (match) rows.push(match[1]);
+	}
+	return rows;
 }
 
 function parseRoutes(help) {

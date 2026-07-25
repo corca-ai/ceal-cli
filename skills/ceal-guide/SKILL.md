@@ -13,7 +13,9 @@ catalog, target inventory, or deployment route.
 
 1. Run `ceal --help` locally. Treat only the displayed families as available.
 2. Select the family whose description matches the task.
-3. Run `ceal <command> --help` before supplying operands or making a claim.
+3. Run `ceal <command> --help` before supplying operands or making a claim. When
+   that help lists a `Subcommands:` route, run `ceal <command> <subcommand>
+   --help` too: the child is its own leaf and carries its own contract.
 4. Read the leaf's `Effect`, `Evidence`, `Result schema`, and
    `Recovery/readback` fields. If any is absent, stop instead of guessing.
 
@@ -55,8 +57,12 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
    is required and how many currently authorized targets exist. When it is
    required, re-read that leaf's help and descend through its target-selection
    child with one discovered capability and a precise text or URL match. Select
-   a small page before calling. Follow an opaque `next_cursor` only with the
-   same discovered capability; never construct, decode, or reuse a cursor.
+   a small page before calling. When that target page returns an opaque
+   `next_cursor`, follow it only with the same discovered capability; never
+   construct, decode, or reuse a target cursor. A capability's own result paging
+   is a separate contract: continue it only through the continuation field its
+   discovered input contract declares, within the bounds that contract states,
+   and read the contract instead of assuming an opaque cursor.
 3. Use Ceal refs returned by the selected page. Do not substitute raw provider
    ids, local paths, or remembered deployment names.
 4. Execute only the route and options exposed by the installed leaf help.

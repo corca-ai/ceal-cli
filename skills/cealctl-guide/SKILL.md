@@ -16,7 +16,9 @@ inventory, deployment route, or release catalog.
    available.
 2. Select the family whose description matches the operator task.
 3. Run `cealctl <command> --help` before supplying operands or authorizing any
-   effect.
+   effect. When that help lists a `Subcommands:` route, run `cealctl <command>
+   <subcommand> --help` too: the child is its own leaf and carries its own
+   effect and recovery contract.
 4. Read the leaf's `Effect`, `Evidence`, `Result schema`, and
    `Recovery/readback` fields. If any is absent, stop instead of guessing.
 

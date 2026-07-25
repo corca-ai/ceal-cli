@@ -9,7 +9,7 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
-import { CEAL_COMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
+import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 
 async function run(args, runtime = {}) {
@@ -54,21 +54,73 @@ test("canonical registry is reachable through stable, read-only help", async () 
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
-	const sessionEnrollmentHelp = await run(["session", "enroll", "--help"]);
-	assert.equal(sessionEnrollmentHelp.code, 0);
-	assert.match(sessionEnrollmentHelp.stdout, /^Usage: ceal session \[enroll --gateway <https-url> \[--code-stdin\] \| logout\]$/mu);
-	assert.equal(sessionEnrollmentHelp.stderr, "");
 	const capabilitiesHelp = await run(["capabilities", "--help"]);
 	for (const option of ["--endpoint", "--profile", "--request-id", "--token-stdin"]) {
 		assert.match(capabilitiesHelp.stdout, new RegExp(option, "u"));
 	}
-	assert.match(capabilitiesHelp.stdout, /targets --profile <profile-ref>/u);
 	const callHelp = await run(["call", "--help"]);
 	assert.match(callHelp.stdout, /select a target for that same capability/u);
 	assert.match(callHelp.stdout, /Do not mix a target returned for another capability/u);
-	const guideHelp = await run(["guide", "--help"]);
-	assert.match(guideHelp.stdout, /status[\s\S]+Effect: read_only/u);
-	assert.match(guideHelp.stdout, /register codex[\s\S]+Effect: local_write/u);
+});
+
+// The guide tells an agent to descend into a route and read that leaf's four
+// fields, so every route the dispatcher accepts as a subcommand owes its own
+// help. Assert the contract from the declared table, not per hand-patched case.
+test("every declared subcommand renders its own four-field leaf help", async () => {
+	for (const subcommand of CEAL_SUBCOMMANDS) {
+		const route = [subcommand.parent, ...subcommand.route];
+		for (const args of [[...route, "--help"], [...route, "-h"], ["help", ...route]]) {
+			const result = await run(args);
+			assert.equal(result.code, 0, `${args.join(" ")}: ${result.stdout}`);
+			assert.equal(result.stderr, "");
+			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(subcommand.usage)}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Effect: ${subcommand.effect}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Evidence: ${subcommand.evidence}$`, "mu"));
+			assert.match(result.stdout, new RegExp(`^Result schema: ${subcommand.result_schema}$`, "mu"));
+			assert.match(result.stdout, /^Recovery\/readback: /mu);
+		}
+	}
+});
+
+// A parent that advertises a subcommand row an agent cannot descend into
+// reintroduces the same dead end from the other side.
+test("advertised subcommand rows and declared routes stay in sync", async () => {
+	for (const command of CEAL_COMMANDS) {
+		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
+		const { stdout } = await run([command.name, "--help"]);
+		const advertised = stdout.split("\n").slice(stdout.split("\n").indexOf("Subcommands:") + 1)
+			.flatMap((line) => {
+				const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
+				return match ? [match[1]] : [];
+			});
+		if (declared.length === 0) {
+			assert.doesNotMatch(stdout, /^Subcommands:$/mu);
+			continue;
+		}
+		assert.match(stdout, /^Subcommands:$/mu);
+		assert.match(stdout, new RegExp(`^Run: ceal ${command.name} <subcommand> --help`, "mu"));
+		assert.deepEqual(advertised.slice(0, declared.length), declared.map((subcommand) => subcommand.route.join(" ")));
+	}
+});
+
+// The reported dead end: a help probe on the target-selection child must answer
+// whether an unfiltered page is in contract instead of erroring.
+test("target selection help states its unfiltered-page bound", async () => {
+	const { code, stdout } = await run(["capabilities", "targets", "--help"]);
+	assert.equal(code, 0);
+	assert.match(stdout, /An unfiltered page is permitted/u);
+	assert.match(stdout, /--limit <1-64>/u);
+	assert.match(stdout, /target_catalog\.selection_required/u);
+	assert.match(stdout, /target_catalog\.next_cursor/u);
+});
+
+// A help probe must never reach a command runner as an operand.
+test("a help probe on an undeclared route stays an argument error", async () => {
+	for (const args of [["guide", "bogus", "--help"], ["help", "capabilities", "bogus"], ["session", "use", "--help"]]) {
+		const result = await run(args);
+		assert.equal(result.code, 2, args.join(" "));
+		assert.match(result.stdout, /^ {2}kind: invalid_argument$/mu);
+	}
 });
 
 test("every public command emits one YAML document without a format flag", async () => {
