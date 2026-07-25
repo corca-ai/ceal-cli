@@ -251,6 +251,35 @@ test("a missing guide asset answers as the requested host", () => {
 	}
 });
 
+// Found on a real host: `~/.claude/skills` linked to a directory that did not
+// exist, so `mkdir -p` failed and the generic advice sent the operator looking
+// for a skill directory that was never there.
+test("a skills directory linked to nothing names the missing target", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-dangling-parent-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	symlinkSync("releases/first", path.join(state, "current"));
+	const missing = path.join(root, "elsewhere", "skills");
+	mkdirSync(path.join(root, ".claude"), { recursive: true });
+	symlinkSync(missing, path.join(root, ".claude", "skills"), "dir");
+	try {
+		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, undefined);
+		const result = store.register("claude");
+		assert.equal(result.status, "unavailable");
+		assert.equal(result.error?.kind, "registration_failed");
+		assert.match(result.error?.message, new RegExp(`${missing.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}', which does not exist`, "u"));
+		assert.match(result.error?.next_action, /Create that directory, or set CLAUDE_CONFIG_DIR/u);
+		assert.doesNotMatch(result.error?.next_action, /existing skill directory/u);
+		// Once the target exists, the same command succeeds through the link.
+		mkdirSync(missing, { recursive: true });
+		const retried = store.register("claude");
+		assert.equal(retried.registered, true);
+		assert.equal(realpathSync(path.join(missing, "ceal-guide")), realpathSync(path.join(state, "current", "guide")));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("a store needs at least one resolvable agent host", () => {
 	assert.equal(createCealAgentGuideStore("/nonexistent/ceal", undefined, undefined, undefined), undefined);
 });

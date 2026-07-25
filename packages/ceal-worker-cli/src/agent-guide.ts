@@ -235,6 +235,12 @@ function registerGuide(
 		return inspectRegistration(guidePath, agent, registrationPath, resolved);
 	} catch {
 		const inspected = inspectRegistration(guidePath, agent, registrationPath, resolved);
+		// Distinguish "the skills directory itself is unusable" from "something
+		// occupies the registration path". Found on a real host whose
+		// `~/.claude/skills` is a link to a directory that does not exist: the
+		// generic advice to retry "without replacing an existing skill directory"
+		// sent the operator looking for a file that was never there.
+		const danglingParent = danglingParentTarget(registrationPath);
 		return {
 			...inspected,
 			status: "unavailable",
@@ -242,8 +248,12 @@ function registerGuide(
 			hosts: withActingHostUnavailable(inspected, agent),
 			error: {
 				kind: "registration_failed",
-				message: `The Ceal guide could not be registered with ${hostRow(agent).label}.`,
-				next_action: "Inspect the reported registration path and retry without replacing an existing skill directory.",
+				message: danglingParent === undefined
+					? `The Ceal guide could not be registered with ${hostRow(agent).label}.`
+					: `The ${hostRow(agent).label} skills directory is a link to '${danglingParent}', which does not exist.`,
+				next_action: danglingParent === undefined
+					? "Inspect the reported registration path and retry without replacing an existing skill directory."
+					: `Create that directory, or set ${hostRow(agent).environmentVariable} to a usable configuration directory, then retry.`,
 			},
 		};
 	}
@@ -278,6 +288,15 @@ function registrationMatches(guidePath: string, registrationPath: string): boole
 	} catch {
 		return false;
 	}
+}
+
+// The target a registration path's own parent link points at, when that parent is
+// a link to nothing. `mkdir -p` cannot create through such a parent, so the
+// failure is about the skills directory, not about the guide or the leaf path.
+function danglingParentTarget(registrationPath: string): string | undefined {
+	const parent = dirname(registrationPath);
+	if (!isDanglingSymlink(parent) || existsSync(parent)) return undefined;
+	try { return readlinkSync(parent); } catch { return undefined; }
 }
 
 function isDanglingSymlink(path: string): boolean {
