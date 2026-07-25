@@ -414,14 +414,18 @@ test("every command answers one success predicate that agrees with its exit code
 	}
 
 	// The Gateway-rejection writer needs a live rejection, so gate its shape
-	// structurally instead: no emitted error object may carry `code` without the
-	// canonical `kind` beside it.
+	// structurally instead: `kind` is the only error key, so no emitted error
+	// object may carry `code` at all.
 	const source = readdirSync(new URL("../src", import.meta.url))
 		.filter((entry) => entry.endsWith(".ts"))
 		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
 	for (const [, body] of source.matchAll(/error: \{([^}]*)\}/gu)) {
 		// `code,` shorthand counts too: the first pass of this gate missed one.
-		if (/\bcode\s*[:,]/u.test(body)) assert.match(body, /\bkind:/u, `error object with code but no kind: ${body.trim()}`);
+		// Match the property key, not a `.code` value expression.
+		// Match a property key at a property boundary, never a `.code` or `: code`
+		// value expression.
+		assert.doesNotMatch(body, /(?:^|,)\s*code\s*[:,]/u, `error objects speak 'kind' only: ${body.trim()}`);
+		assert.match(body, /(?:^|,)\s*kind\s*[:,]/u, `error object without kind: ${body.trim()}`);
 	}
 });
 
@@ -1586,7 +1590,7 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 		], 3, { readSecret: async () => token });
 		assert.equal(payload.status, "unavailable");
 		assert.equal(payload.proof_level, "host_decision");
-		assert.equal(payload.error.code, "gateway_request_failed");
+		assert.equal(payload.error.kind, "gateway_request_failed");
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 	}, (request) => ({
 		ok: false,

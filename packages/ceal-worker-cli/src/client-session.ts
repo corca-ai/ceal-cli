@@ -365,7 +365,6 @@ function writeEnrollmentRejected(code: string, io: CealCliIo): number {
 		proof_level: "host_decision",
 		error: {
 			kind: code,
-			code,
 			message: "The Gateway rejected the device-enrollment code.",
 			next_action: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code.",
 		},

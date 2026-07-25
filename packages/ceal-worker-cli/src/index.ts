@@ -1218,11 +1218,12 @@ function writeGatewayFailure(response: { error: unknown }, io: CealCliIo): numbe
 		proof_level: "host_decision",
 		live_gateway_checked: true,
 		claims_allowed: [failure.denial ? "gateway_denial" : "gateway_rejection"],
-		// `kind` is the one error key every Ceal surface uses; `code` is retained
-		// here for one release because this surface published it first. A caller
-		// that read only `kind` saw discovery failures as no error at all, so a
-		// 36-call sweep lost 16 calls and reported none of them (ceal-cli#2).
-		error: { kind: failure.code, code: failure.code, message: failure.message, next_action: failure.nextAction },
+		// `kind` is the one error key on every Ceal surface. This surface published
+		// `code` first, and a caller that read only `kind` therefore saw discovery
+		// failures as no error at all — a 36-call sweep lost 16 calls and reported
+		// none of them (ceal-cli#2). `code` is gone rather than carried alongside:
+		// one key, no reader left guessing which one a given surface speaks.
+		error: { kind: failure.code, message: failure.message, next_action: failure.nextAction },
 		non_claims: ["No provider action or production audit custody was reached."],
 	});
 	return 3;
