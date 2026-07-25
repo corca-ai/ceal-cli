@@ -88,23 +88,72 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Next Session
 
-1. Make one binary honor one convention: `agent-audit.ts:20` hardcodes `~/.claude`
-   and `~/.codex` for its transcript inventory and ignores
-   `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, which the guide surface now honors, while
+Items 1 and 2 are gated on the Gateway host restoring prod client sessions
+(`invalid_response` on renewal, `request_denied` on enrollment — see Current
+State). Everything from 3 down is local and can proceed today.
+
+1. **Close `corca-ai/ceal-cli#2`, `#3`, `#4` with released-binary proof.** The
+   code shipped in `0.65.9` and was verified live against prod from an identical
+   build minutes before the tag, but the post-release re-run on the installed
+   binary was cut off by the session outage, and only `#4` was confirmed on the
+   released artifact. Re-run the matrix, then close each issue citing what was
+   observed rather than what was implemented:
+   - `#2`: an out-of-contract argument renders `invalid_arguments` with a
+     correction (not a retry); `receipt show` on an unaudited reference renders
+     `audit_event_not_found`; a declared read's unknown outcome carries no write
+     caution; `ok` and `error.kind` answer on capabilities, call, and receipt.
+   - `#3`: `gateway: {instance_ref, profile_ref}` on a completed call, a rejected
+     call, and a receipt — with a `--profile` override to prove the stamp follows
+     the profile the call used, not the session default.
+   - `#4`: already confirmed (`agent: claude`, `agent_source: detected`, a fresh
+     `claude -p` lists `ceal-guide`); still worth one run of the unregistered
+     advisory path, which no live run has exercised.
+2. **Prove multi-profile on the client** once a second real Profile exists on one
+   instance. `eligible_profiles` has had exactly one entry on every instance so
+   far, so `--profile` selection has never been exercised live. This also
+   exercises the discovery cache key, which the effect-gated replay caution now
+   depends on: an entry for another profile must not be trusted.
+3. **Make one binary honor one convention.** `agent-audit.ts:20` hardcodes
+   `~/.claude` and `~/.codex` for its transcript inventory and ignores
+   `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, which the guide surface honors, while
    `observer.ts` declares those HOME-relative paths as fact in its privacy
-   projection. A shared host-root resolver is the small version; the honest
-   minimum is that the declared source and the read path agree. Local only until
-   the next release, which should also carry `74ca61a`.
-2. When the Gateway host restores Slack scope, re-run the two `#633` probes this
-   host owes: the `offset=1001` typed-recovery classification, and a full
-   `message.enumerate` + opaque-cursor round-trip. Post the readback to
-   `corca-ai/ceal#633`.
-3. The release lane, for the next cut: bump the eight version-bearing files the
-   `0.65.6` prep commit (`4275b4a`) touched — `package-lock.json` included, because
-   `npm run check` does not gate the lock but the tagged workflow's
-   `npm ci --ignore-scripts` does, and a stale lock burns the tag before any build
-   step. Then `npm ci` → `npm run check` → commit → push `main` → confirm
-   `origin/main` is that commit → tag → watch → `ceal update` → readback.
+   projection. `CEAL_AGENT_GUIDE_HOSTS` is now the host table with roots and
+   overrides; sharing it is the small version. The honest minimum is that the
+   declared source and the read path agree.
+4. **Make this session's release break unrepeatable.** Two gaps stayed open:
+   - `ceal.version.v1` is frozen only by a comment and a skip in the predicate
+     sweep. A test asserting that document's exact key set would fail loudly, with
+     the reason, the moment someone extends it — which is what `0.65.7` did, and
+     it broke every installed client's `ceal update` because the *installed*
+     generation's installer byte-compared it.
+     The installer no longer whole-document compares, but the installed base
+     still carries the old strict one for a long time.
+   - The publish workflow burns a tag on a transient public-readback failure
+     (`0.65.8`, HTTP 500 after a successful upload), and cannot be retried because
+     cosign re-signs per run while objects are create-or-identical. Retrying the
+     readback a few times before failing would have saved that tag.
+5. **Finish the `#633` probes this host owes**, which need dev (the route exists
+   there only): cursor survival across a Gateway restart — the surface itself
+   declares `gateway_restart_stable: false` — `message_ref` TTL expiry behavior,
+   and a `since`/`until` bounded page. The `offset=1001` classification and the
+   opaque-cursor round-trip are already posted to `corca-ai/ceal#633`.
+6. **Resolve the cross-repo drift `#4` created**, owner-first per the extraction
+   ledger: the legacy compatibility copy of `agent-guide.ts` in `corca-ai/ceal`
+   still types `agent` as the literal `"codex"`, and a recorded capability-matrix
+   procedure there tells an agent to run `guide register codex` after reading
+   `guide status`. Both need the owner change first, then a reviewed sync — not an
+   independent edit in the copy.
+7. **Decide when `code` disappears from the capabilities error.** It is emitted
+   beside the canonical `kind` for one release so an existing reader keeps
+   working. Removing it is a breaking change that needs a deliberate window, and
+   nothing currently records when that window closes.
+
+The release lane, for whichever of these ships next: bump the eight
+version-bearing files the prep commit touches — `package-lock.json` included,
+because `npm run check` does not gate the lock but the tagged workflow's
+`npm ci --ignore-scripts` does — then `npm ci` → `npm run check` → commit → push
+`main` → confirm `origin/main` is that commit → tag → watch → `ceal update` →
+readback. Tags `ceal-v0.65.7` and `ceal-v0.65.8` are burned; do not reuse them.
 
 ## Discuss
 
