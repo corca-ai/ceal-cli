@@ -773,6 +773,15 @@ test("rate-limited calls explain a retryable recovery instead of operator restor
 	});
 });
 
+test("invalid capability arguments ask the caller to correct input instead of retrying the same request", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "invalid_arguments", message: "server-controlled" }), {
+		code: "invalid_arguments",
+		message: "The capability arguments do not satisfy the published input contract.",
+		nextAction: "Correct the capability arguments, then retry the call with a new request ID.",
+		denial: false,
+	});
+});
+
 test("an unavailable continuation asks the agent to rediscover instead of restoring the connector", () => {
 	assert.deepEqual(classifyGatewayFailure({ code: "continuation_not_available", message: "server-controlled" }), {
 		code: "continuation_not_available",
