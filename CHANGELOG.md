@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.65.6 (`ceal-v0.65.6`)
+
+- Register the signed guide with Claude Code, not only Codex. `ceal guide
+  register claude` links the same update-safe guide into
+  `<CLAUDE_CONFIG_DIR|~/.claude>/skills/ceal-guide`, the way `register codex`
+  honors `CODEX_HOME`. In the guide surface the agent host is now one declaration
+  per host, so a route, its leaf help, and its registration path derive from the
+  same table; `ceal observe`'s transcript inventory still reads `~/.claude` and
+  `~/.codex` directly and ignores both overrides.
+- Report every supported agent host from `ceal guide status` and `ceal guide
+  register`. The top-level `agent`, `registration_path`, and `registered` fields
+  of `ceal.guide.v1` still project one host — the Codex host, whether or not its
+  directory resolved — and a new additive `hosts` list carries each advertised
+  host, including one whose configuration directory could not be resolved. The
+  document states that bound in `non_claims` instead of leaving a reader to infer
+  it, and `ceal observe` now names both registration paths in its declared
+  local data sources.
+- Refuse a host configuration directory that is not one absolute path. A
+  relative `CODEX_HOME` was previously joined, which would have built a skill
+  tree under the current working directory and then reported it as a real
+  registration; a colon-separated value would have built one under a literal
+  `dir:`-named path. Both are now refused for either host. This is a behavior
+  change for an existing relative `CODEX_HOME`: `ceal guide status` answers
+  `registration_failed` and exits 3 where it previously exited 0.
+- Keep a declared local write inside the verification probe's throwaway HOME:
+  `npm run probe` now also pins `CLAUDE_CONFIG_DIR` and `XDG_RUNTIME_DIR`, the
+  latter of which kept an operator-real admin Gateway socket reachable from a
+  probe of an effectful operator route.
+
 ## 0.65.5 (`ceal-v0.65.5`)
 
 - Give every subcommand the installed help advertises its own leaf help, so the
