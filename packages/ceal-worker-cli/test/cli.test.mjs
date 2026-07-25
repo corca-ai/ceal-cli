@@ -9,7 +9,7 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
-import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
+import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 
 // Read the child routes a parent leaf advertises, bounded to its own block.
@@ -94,6 +94,31 @@ test("every declared subcommand renders its own four-field leaf help", async () 
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
 		}
 	}
+});
+
+// The invariant issue #1 was missing: acceptance is derived from the same
+// declaration help renders, so an undeclared route cannot be accepted by a
+// runner and a declared route cannot be rejected as unknown.
+test("route acceptance is derived from the declaration", async () => {
+	for (const parent of new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
+		// An undeclared route reaches no runner.
+		const bogus = await run([parent, "bogus-route"], {
+			loadSession: () => assert.fail("an undeclared route must not reach a runner"),
+			inspectAgentGuide: () => assert.fail("an undeclared route must not reach a runner"),
+		});
+		// Refused before any runner work: the runtime hooks above would have failed.
+		// The exit code is the refusing surface's own (2 argument, 3 command error).
+		assert.ok([2, 3].includes(bogus.code), `${parent} bogus-route: ${bogus.code}`);
+		assert.match(bogus.stdout, /^ {2}kind: \w+$/mu);
+		// Every declared route resolves off the same table the help renders from.
+		for (const subcommand of CEAL_SUBCOMMANDS.filter((item) => item.parent === parent)) {
+			const { subcommand: resolved, rest } = splitSubcommandRoute(parent, [...subcommand.route, "--flag", "value"]);
+			assert.deepEqual(resolved?.route, subcommand.route, subcommand.route.join(" "));
+			assert.deepEqual(rest, ["--flag", "value"]);
+		}
+	}
+	// A route declared under a different parent is not accepted here.
+	assert.equal(splitSubcommandRoute("capabilities", ["status"]).subcommand, undefined);
 });
 
 // A parent that advertises a subcommand row an agent cannot descend into

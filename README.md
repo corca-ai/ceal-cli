@@ -134,6 +134,19 @@ npm run check:unit   # build + the four package suites, roughly 14s
 npm run test:release # release-artifact and native-binary suites only
 ```
 
+Probing an installed surface is a read-only question, so route it through the
+declared-effect guard rather than typing the binary at your own `HOME`:
+
+```sh
+npm run probe -- ceal capabilities targets --help
+npm run probe -- cealctl connectors show
+```
+
+The guard resolves the route through the same declaration help renders from,
+refuses any route whose declared effect is not `read_only`, and runs in a
+throwaway `HOME`. `--allow-effect <effect>` opts into a declared write while
+keeping the isolation; nothing in the guard can reach real local state.
+
 The composite extraction verifier still packs all four historical packages,
 installs them into an isolated consumer, and scans the archives for private
 paths and cross-command implementation. It remains deletion-gate evidence only;

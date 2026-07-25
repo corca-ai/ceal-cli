@@ -55,6 +55,19 @@ test("every declared subcommand renders its own four-field leaf help", () => {
 	}
 });
 
+// Acceptance is derived from the same declaration help renders from, so an
+// undeclared operator route reaches no runner and authorizes no effect.
+test("route acceptance is derived from the declaration", async () => {
+	for (const parent of new Set(CEALCTL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
+		const bogus = await asyncRun([parent, "bogus-route"], {
+			readStdin: async () => assert.fail("an undeclared route must not read stdin"),
+			fetchFn: async () => assert.fail("an undeclared route must not reach the network"),
+		});
+		assert.ok([2, 3].includes(bogus.code), `${parent} bogus-route: ${bogus.code}`);
+		assert.match(parseYaml(bogus.stdout).error.kind, /\w/u);
+	}
+});
+
 test("advertised subcommand rows and declared routes stay in sync", () => {
 	for (const command of CEALCTL_COMMANDS) {
 		const declared = CEALCTL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);

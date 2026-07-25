@@ -18,6 +18,7 @@
 		"test": "npm run test:unit && npm run test:release",
 		"check": "npm run build && npm test",
 		"check:unit": "npm run build && npm run test:unit",
+		"probe": "node scripts/probe-surface.mjs",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
 		"release:binaries": "node scripts/build-platform-binaries.mjs",
 		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",

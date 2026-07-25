@@ -296,16 +296,29 @@ export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtim
 // whose `Subcommands:` block names the routes that do exist.
 function helpRequest(command: CealctlCommandDefinition, options: readonly string[]): string | undefined {
 	if (!options.some(isHelpToken)) return undefined;
+	const { subcommand } = splitSubcommandRoute(command.name, options);
+	return subcommand ? subcommandHelp(subcommand) : commandHelp(command);
+}
+
+/**
+ * Splits a command tail into the declared subcommand route its leading
+ * positionals name and the options that follow. Every runner resolves its route
+ * through this one function, so the routes help advertises and the routes a
+ * runner accepts cannot diverge (corca-ai/ceal-cli#1).
+ */
+function splitSubcommandRoute(
+	parent: CealctlCommandDefinition["name"], options: readonly string[],
+): { subcommand?: CealctlSubcommandDefinition; rest: readonly string[] } {
 	const leading: string[] = [];
 	for (const option of options) {
 		if (option.startsWith("-")) break;
 		leading.push(option);
 	}
 	for (let length = leading.length; length > 0; length -= 1) {
-		const subcommand = findSubcommand(command.name, leading.slice(0, length));
-		if (subcommand) return subcommandHelp(subcommand);
+		const subcommand = findSubcommand(parent, leading.slice(0, length));
+		if (subcommand) return { subcommand, rest: options.slice(length) };
 	}
-	return commandHelp(command);
+	return { rest: options };
 }
 
 function subcommandsOf(parent: CealctlCommandDefinition["name"]): readonly CealctlSubcommandDefinition[] {
@@ -451,9 +464,10 @@ async function classifyLoginFailure(kind: string, adminOrigin: string, runtime: 
 
 async function runSessions(options: readonly string[], io: CealctlIo, runtime: CealctlRuntime): Promise<number> {
 	try {
+		const { subcommand, rest } = splitSubcommandRoute("sessions", options);
 		if (options.length === 0) return writeYaml(io.stdout, operatorProfilesPayload(runtime.homeDir));
-		if (options.length === 2 && options[0] === "use" && options[1]) {
-			const session = await selectOperatorSession(options[1], runtime.homeDir);
+		if (subcommand && rest.length === 1 && rest[0]) {
+			const session = await selectOperatorSession(rest[0], runtime.homeDir);
 			return writeYaml(io.stdout, {
 				schema_version: "cealctl.sessions.v1", command: "cealctl", status: "selected",
 				current_session: session.name, session: redactSession(session), raw_token_visible: false, proof_level: "local_state",
@@ -570,11 +584,12 @@ function writeProfileConnectorFailure(action: "show" | "check" | "apply", error:
 }
 
 function parseProfileConnectorOptions(options: readonly string[]): { action: "show" | "check" | "apply"; dryRun: boolean; operatorSession?: string } | null {
-	if (options[0] === "check") {
-		const parsed = parseAccessShowOptions(options.slice(1));
+	const { subcommand, rest } = splitSubcommandRoute("connectors", options);
+	if (subcommand?.route[0] === "check") {
+		const parsed = parseAccessShowOptions(rest);
 		return parsed ? { action: "check", dryRun: false, ...(parsed.operatorSession ? { operatorSession: parsed.operatorSession } : {}) } : null;
 	}
-	return parseAccessOptions(options);
+	return parseAccessOptions(options, "connectors");
 }
 
 async function readProfileConnectorRegistryFromStdin(runtime: CealctlRuntime) {
@@ -634,9 +649,13 @@ async function readAccessRegistryFromStdin(runtime: CealctlRuntime) {
 	}
 }
 
-function parseAccessOptions(options: readonly string[]): { action: "show" | "apply"; dryRun: boolean; operatorSession?: string } | null {
-	if (options[0] === "show") return parseAccessShowOptions(options.slice(1));
-	return options[0] === "apply" ? parseAccessApplyOptions(options.slice(1)) : null;
+function parseAccessOptions(
+	options: readonly string[], parent: "access" | "connectors" = "access",
+): { action: "show" | "apply"; dryRun: boolean; operatorSession?: string } | null {
+	const { subcommand, rest } = splitSubcommandRoute(parent, options);
+	if (!subcommand) return null;
+	if (subcommand.route[0] === "show") return parseAccessShowOptions(rest);
+	return subcommand.route[0] === "apply" ? parseAccessApplyOptions(rest) : null;
 }
 
 function parseAccessShowOptions(options: readonly string[]): { action: "show"; dryRun: false; operatorSession?: string } | null {
@@ -727,8 +746,9 @@ const REQUIRED_ENROLLMENT_CREATE_FLAGS = ["--client", "--profile", "--subject", 
 const SAFE_LOCAL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 function parseEnrollmentCreateOptions(options: readonly string[]): ParsedEnrollmentCreateOptions | null {
-	if (options[0] !== "create") return null;
-	const values = parseNamedValues(options.slice(1), ENROLLMENT_CREATE_FLAGS);
+	const { subcommand, rest } = splitSubcommandRoute("enrollments", options);
+	if (!subcommand) return null;
+	const values = parseNamedValues(rest, ENROLLMENT_CREATE_FLAGS);
 	if (!values || !REQUIRED_ENROLLMENT_CREATE_FLAGS.every((option) => values.has(option))) return null;
 	if (![...values.values()].every((value) => SAFE_LOCAL_NAME.test(value))) return null;
 	return enrollmentOptionsFrom(values);

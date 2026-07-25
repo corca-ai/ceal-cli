@@ -7,6 +7,7 @@ import {
 } from "@corca-ai/ceal";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 import { parseNamedOptions } from "./named-options.js";
+import { splitSubcommandRoute } from "./subcommands.js";
 import { writeYaml } from "./output.js";
 import { CealSessionStoreError } from "./profile-store.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -14,9 +15,14 @@ import type { CealStoredSession } from "./profile-store.js";
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 
 export async function runSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	if (options.length === 0) return showSession(io, runtime);
-	if (options.length === 1 && options[0] === "logout") return runSessionLogout(io, runtime);
-	return enrollSession(options, io, runtime);
+	// Both session routes are resolved from the declared subcommand table, so the
+	// routes help advertises and the routes this runner accepts cannot diverge.
+	const { subcommand, rest } = splitSubcommandRoute("session", options);
+	if (!subcommand) return options.length === 0 ? showSession(io, runtime) : writeEnrollmentInvalidArgument(io);
+	if (subcommand.route[0] === "logout") {
+		return rest.length === 0 ? runSessionLogout(io, runtime) : writeEnrollmentInvalidArgument(io);
+	}
+	return enrollSession(rest, io, runtime);
 }
 
 async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -274,8 +280,7 @@ export function writeClientSessionUnavailable(reason: string, io: CealCliIo): nu
 }
 
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
-	if (options[0] !== "enroll") return { ok: false };
-	const parsed = parseNamedOptions(options.slice(1), new Set(["--gateway"]), new Set(["--code-stdin"]));
+	const parsed = parseNamedOptions(options, new Set(["--gateway"]), new Set(["--code-stdin"]));
 	const gateway = parsed?.values.get("--gateway");
 	if (!parsed || parsed.operands.length !== 0 || !gateway) return { ok: false };
 	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive" };

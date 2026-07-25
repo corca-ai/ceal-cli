@@ -16,6 +16,8 @@ import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discove
 import type { CealStoredSession } from "./profile-store.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
 import { parseNamedOptions } from "./named-options.js";
+import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
+import type { CealSubcommandDefinition } from "./subcommands.js";
 import { createCealObserverServer } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CealClientSessionError, ensureCurrentSession, runSession, writeClientSessionUnavailable } from "./client-session.js";
@@ -32,6 +34,8 @@ import {
 import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 
 export { renderPlainYamlDocument } from "./yaml.js";
+export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
+export type { CealSubcommandDefinition } from "./subcommands.js";
 
 const CEAL_PACKAGE_VERSION = "0.65.5" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
@@ -154,117 +158,6 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 ];
 
-// A subcommand the dispatcher accepts is a leaf an agent is told to descend
-// into, so it owes the same four-field contract as a top-level command. Keeping
-// the children declarative next to `CEAL_COMMANDS` is what lets one gate assert
-// "every advertised route renders its own Effect/Evidence/Result schema/
-// Recovery" instead of patching help per route (issue #1).
-export interface CealSubcommandDefinition {
-	parent: CealCommandDefinition["name"];
-	route: readonly string[];
-	description: string;
-	usage: string;
-	effect: CealCommandDefinition["effect"];
-	evidence: CealCommandDefinition["evidence"];
-	result_schema: string;
-	recovery: string;
-	notes?: readonly string[];
-	options?: readonly string[];
-}
-
-export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
-	{
-		parent: "guide",
-		route: ["status"],
-		description: "Inspect the signed guide and its Codex registration.",
-		usage: "ceal guide status",
-		effect: "read_only",
-		evidence: "surface",
-		result_schema: "ceal.guide.v1",
-		recovery: "Reinstall a signed Ceal worker release, then run 'ceal guide status' again.",
-	},
-	{
-		parent: "guide",
-		route: ["register", "codex"],
-		description: "Link the update-safe signed guide into the configured Codex skill directory.",
-		usage: "ceal guide register codex",
-		effect: "local_write",
-		evidence: "surface",
-		result_schema: "ceal.guide.v1",
-		recovery: "Run 'ceal guide status' to read back the registration this command claims.",
-	},
-	{
-		parent: "session",
-		route: ["enroll"],
-		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
-		usage: "ceal session enroll --gateway <https-url> [--code-stdin]",
-		effect: "local_write",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.session_enrollment.v1",
-		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
-		notes: [
-			"The code is never a command operand: it is read through a hidden terminal",
-			"prompt, or from stdin only for approved non-interactive automation.",
-		],
-		options: [
-			"  --gateway <https-url>   Gateway client endpoint that approved this device.",
-			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
-			"  (default)               On a safe terminal, prompt for the code with hidden input.",
-		],
-	},
-	{
-		parent: "session",
-		route: ["logout"],
-		description: "Revoke the Gateway session, then remove local session and cached state.",
-		usage: "ceal session logout",
-		effect: "local_write",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.session_logout.v1",
-		recovery: "Run 'ceal session' to confirm the local session is gone; a revoke failure preserves local state for a retry.",
-	},
-	{
-		parent: "capabilities",
-		route: ["targets"],
-		description: "Select bounded targets for one discovered capability.",
-		usage: "ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
-		effect: "read_only",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.capabilities.v1",
-		recovery: "Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
-		notes: [
-			"An unfiltered page is permitted: omit --match to request the Gateway's own",
-			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
-			"authoritative: when it needs a narrower selection it answers",
-			"'target_catalog.selection_required' with no targets and no cursor, so follow",
-			"the returned 'next_action' rather than assuming a page is always available.",
-			"--match and --cursor are mutually exclusive. This route is always a live",
-			"query and is never served from the client discovery cache; the catalog-only",
-			"cache flag is rejected here.",
-		],
-		options: [
-			"  --capability <id>       Capability returned by 'ceal capabilities'.",
-			"  --profile <profile-ref> Select one assigned Profile for target discovery.",
-			"  --match <text-or-url>   Select current target labels, or an approved source URL.",
-			"  --cursor <opaque>       Continue one Gateway-issued selected target page.",
-			"  --limit <1-64>          Bound one selected target page (default: Gateway choice).",
-		],
-	},
-	{
-		parent: "receipt",
-		route: ["show"],
-		description: "Read the caller's safe Gateway audit receipt for one completed call.",
-		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
-		effect: "read_only",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.receipt.v1",
-		recovery: "Use the request reference returned by a completed 'ceal call', then retry after renewing the client session if needed.",
-		options: [
-			"  <request-ref>           Request reference returned by a completed call.",
-			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
-		],
-	},
-];
-
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
 const TOP_LEVEL_HELP = [
 	"Usage: ceal <command> [options]",
@@ -306,25 +199,8 @@ function commandAcceptsOptions(command: CealCommandDefinition["name"], options: 
 // parent leaf, whose `Subcommands:` block names the routes that do exist.
 function helpRequest(command: CealCommandDefinition, options: readonly string[]): string | undefined {
 	if (!options.some(isHelpToken)) return undefined;
-	const leading: string[] = [];
-	for (const option of options) {
-		if (option.startsWith("-")) break;
-		leading.push(option);
-	}
-	for (let length = leading.length; length > 0; length -= 1) {
-		const subcommand = findSubcommand(command.name, leading.slice(0, length));
-		if (subcommand) return subcommandHelp(subcommand);
-	}
-	return commandHelp(command);
-}
-
-function subcommandsOf(parent: CealCommandDefinition["name"]): readonly CealSubcommandDefinition[] {
-	return CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
-}
-
-function findSubcommand(parent: CealCommandDefinition["name"], route: readonly string[]): CealSubcommandDefinition | undefined {
-	return subcommandsOf(parent).find((subcommand) => subcommand.route.length === route.length
-		&& subcommand.route.every((token, index) => token === route[index]));
+	const { subcommand } = splitSubcommandRoute(command.name, options);
+	return subcommand ? subcommandHelp(subcommand) : commandHelp(command);
 }
 
 async function runKnownCommand(
@@ -575,11 +451,10 @@ function writeCommands(io: CealCliIo): number {
 	});
 }
 
-const GUIDE_ACTIONS = new Map<string, "status" | "register">([["[]", "status"], ['["status"]', "status"], ['["register","codex"]', "register"]]);
-
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
-	const action = GUIDE_ACTIONS.get(JSON.stringify(options));
-	if (!action) return writeError("invalid_argument", "Invalid guide action.", io);
+	const { subcommand, rest } = splitSubcommandRoute("guide", options);
+	if (rest.length > 0 || (options.length > 0 && !subcommand)) return writeError("invalid_argument", "Invalid guide action.", io);
+	const action = subcommand?.route[0] === "register" ? "register" : "status";
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io);
 	const state = inspect();
@@ -608,7 +483,8 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	// `--detail` (either case) restores the full per-capability input contract
 	// that the concise default omits. Both are stripped before the existing
 	// parsers, which do not know the flags.
-	const wantsFresh = options[0] !== "targets" && options.includes("--fresh");
+	const targets = splitSubcommandRoute("capabilities", options).subcommand !== undefined;
+	const wantsFresh = !targets && options.includes("--fresh");
 	const wantsDetail = options.includes("--detail");
 	const effectiveOptions = options.filter(
 		(option) => option !== "--detail" && !(wantsFresh && option === "--fresh"),
@@ -695,8 +571,9 @@ type ParsedTargetCatalogOptions =
 	| null;
 
 function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
-	if (options[0] !== "targets") return parseCapabilityCatalogOptions(options);
-	return parseTargetCatalogSelection(options.slice(1));
+	const { subcommand, rest } = splitSubcommandRoute("capabilities", options);
+	if (!subcommand) return parseCapabilityCatalogOptions(options);
+	return parseTargetCatalogSelection(rest);
 }
 
 function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
@@ -1117,9 +994,10 @@ function isSafeRequestRef(value: string | undefined): value is string {
 }
 
 function parseReceiptOptions(options: readonly string[]): { requestRef: string; profileRef?: string } | null {
-	if (options[0] !== "show" || !isSafeRequestRef(options[1])) return null;
-	const profile = extractProfileOption(options.slice(2));
-	return profile && profile.remaining.length === 0 ? { requestRef: options[1]!, ...(profile.value ? { profileRef: profile.value } : {}) } : null;
+	const { subcommand, rest } = splitSubcommandRoute("receipt", options);
+	if (!subcommand || !isSafeRequestRef(rest[0])) return null;
+	const profile = extractProfileOption(rest.slice(1));
+	return profile && profile.remaining.length === 0 ? { requestRef: rest[0]!, ...(profile.value ? { profileRef: profile.value } : {}) } : null;
 }
 
 function storedProfileOption(options: readonly string[]): string | null {
