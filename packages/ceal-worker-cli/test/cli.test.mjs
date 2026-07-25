@@ -295,7 +295,7 @@ test("guide status and per-host registration expose one update-safe local skill 
 		assert.equal(status.agent, "codex");
 		assert.deepEqual(status.hosts.map((host) => host.agent), ["codex", "claude"]);
 		// The document says out loud that its top-level fields are one host only.
-		assert.match(status.non_claims.join(" "), /describe only the named agent host/u);
+		assert.match(status.non_claims.join(" "), /describe only the agent host named by 'agent'/u);
 		// The declared route token is what selects the host; the dispatcher passes
 		// it through instead of registering a host of its own choosing.
 		for (const agent of ["codex", "claude"]) {
@@ -337,6 +337,35 @@ test("every declared guide register route names a supported agent host", async (
 	});
 	assert.equal(refused.code, 2);
 	assert.match(refused.stdout, /^ {2}kind: invalid_argument$/mu);
+});
+
+// corca-ai/ceal-cli#4 item 2: nothing in the binary told an agent the guide
+// existed, so following its method was left to chance. The advisory appears on
+// the surface every agent reaches first, and only for an unregistered running
+// host — never as noise on a healthy install.
+test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
+	const guide = (registered, agentSource) => () => ({
+		status: registered ? "registered" : "staged", agent: "claude", agent_source: agentSource,
+		guide_id: "ceal-guide", update_safe: true, registered,
+	});
+	await withGateway(async ({ endpoint }) => {
+		const unregistered = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			inspectAgentGuide: guide(false, "detected"),
+		});
+		assert.equal(unregistered.agent_guide.agent, "claude");
+		assert.match(unregistered.agent_guide.next_action, /ceal guide register claude/u);
+
+		// Registered, undetected host, and a missing guide asset each stay silent.
+		const missingAsset = () => ({ status: "unavailable", agent: "claude", agent_source: "detected", guide_id: "ceal-guide", update_safe: false, registered: false });
+		for (const state of [guide(true, "detected"), guide(false, "default"), missingAsset]) {
+			const quiet = await yamlRun(["capabilities"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				inspectAgentGuide: state,
+			});
+			assert.equal("agent_guide" in quiet, false);
+		}
+	});
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {

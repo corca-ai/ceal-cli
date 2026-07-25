@@ -7,18 +7,34 @@ export type CealAgentGuideHost = "codex" | "claude";
 // default root under HOME, and the human label its errors name. Adding a host
 // means adding a row here plus its `guide register <host>` route — the state
 // projection, conflict handling, and status readback derive from this table.
-// The first row is the default projection for a host-less `guide status`, which
-// is what keeps `ceal.guide.v1`'s top-level fields meaning the same host they
-// have always meant.
+// The first row is the fallback projection for a host-less `guide status` when
+// no host identifies itself; a detected running host wins over table order.
 const CEAL_AGENT_GUIDE_HOSTS: readonly {
 	agent: CealAgentGuideHost;
 	label: string;
 	defaultRoot: string;
 	environmentVariable: string;
+	/** Env markers the host process sets for itself; presence identifies it. */
+	runningMarkers: readonly string[];
 }[] = [
-	{ agent: "codex", label: "Codex", defaultRoot: ".codex", environmentVariable: "CODEX_HOME" },
-	{ agent: "claude", label: "Claude Code", defaultRoot: ".claude", environmentVariable: "CLAUDE_CONFIG_DIR" },
+	{ agent: "codex", label: "Codex", defaultRoot: ".codex", environmentVariable: "CODEX_HOME", runningMarkers: ["CODEX_SANDBOX", "CODEX_THREAD_ID"] },
+	{ agent: "claude", label: "Claude Code", defaultRoot: ".claude", environmentVariable: "CLAUDE_CONFIG_DIR", runningMarkers: ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
 ];
+
+/**
+ * The agent host this process is running inside, when it says so.
+ *
+ * The projection used to default to the first declared host, so a Claude Code
+ * session read `agent: codex` with `registered: false` while its own
+ * registration was live, recorded that in a durable note, and only the
+ * `non_claims` line contradicted it (corca-ai/ceal-cli#4). A reader should not
+ * have to earn the right answer; when the running host is knowable, name it.
+ */
+export function detectCealAgentGuideHost(
+	environment: Record<string, string | undefined>,
+): CealAgentGuideHost | undefined {
+	return CEAL_AGENT_GUIDE_HOSTS.find((host) => host.runningMarkers.some((marker) => environment[marker]))?.agent;
+}
 
 const DEFAULT_AGENT_GUIDE_HOST = CEAL_AGENT_GUIDE_HOSTS[0]!.agent;
 
@@ -44,6 +60,10 @@ export interface CealAgentGuideState {
 	registration_path?: string;
 	update_safe: boolean;
 	registered: boolean;
+	// Whether `agent` names the host this process is running inside, or a
+	// fallback because no host identified itself. A reader that only reads the
+	// top-level fields is right by default when this says `detected`.
+	agent_source?: "detected" | "default";
 	// Additive per-host projection: `agent` and the sibling fields keep naming the
 	// default host so a Codex-only reader of `ceal.guide.v1` is unaffected, while a
 	// reader that knows more than one host reads every advertised host from
@@ -71,7 +91,10 @@ export function createCealAgentGuideStore(
 	homeDirectory: string | undefined,
 	codexHomeDirectory: string | undefined,
 	claudeConfigDirectory?: string | undefined,
+	detectedHost?: CealAgentGuideHost | undefined,
 ): CealAgentGuideStore | undefined {
+	// The host this process runs inside answers "you" better than a table order.
+	const defaultAgent = detectedHost ?? DEFAULT_AGENT_GUIDE_HOST;
 	const overrides: Record<CealAgentGuideHost, string | undefined> = {
 		codex: codexHomeDirectory,
 		claude: claudeConfigDirectory,
@@ -95,20 +118,22 @@ export function createCealAgentGuideStore(
 		guidePath = resolve(releaseDirectory, "..", "..", "current", "guide");
 		assertGuideAvailable(guidePath);
 	} catch {
-		return unavailableStore();
+		return unavailableStore(defaultAgent, detectedHost);
 	}
 	const act = (
 		agent: CealAgentGuideHost | undefined,
 		run: (agent: CealAgentGuideHost, registrationPath: string) => CealAgentGuideState,
 	): CealAgentGuideState => {
-		const target = isCealAgentGuideHost(agent) ? agent : DEFAULT_AGENT_GUIDE_HOST;
+		const target = isCealAgentGuideHost(agent) ? agent : defaultAgent;
 		const host = resolved.get(target)!;
 		if (!host.registrationPath) return hostUnresolvedState(target, guidePath, host.rejectedOverride, resolved);
 		return run(target, host.registrationPath);
 	};
+	const sourced = (state: CealAgentGuideState): CealAgentGuideState =>
+		({ ...state, agent_source: state.agent === detectedHost ? "detected" : "default" });
 	return {
-		inspect: (agent) => act(agent, (target, registrationPath) => inspectRegistration(guidePath, target, registrationPath, resolved)),
-		register: (agent) => act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved)),
+		inspect: (agent) => sourced(act(agent, (target, registrationPath) => inspectRegistration(guidePath, target, registrationPath, resolved))),
+		register: (agent) => sourced(act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved))),
 	};
 }
 
@@ -119,9 +144,11 @@ function hostRow(agent: CealAgentGuideHost): { label: string; environmentVariabl
 // The missing guide asset is shared by every host, but the answer still names
 // the host the operator asked about: an operator running `guide register claude`
 // must not read `agent: codex` back from its own failure.
-function unavailableStore(): CealAgentGuideStore {
-	const state = (agent: CealAgentGuideHost | undefined): CealAgentGuideState =>
-		unavailableState(isCealAgentGuideHost(agent) ? agent : DEFAULT_AGENT_GUIDE_HOST);
+function unavailableStore(defaultAgent: CealAgentGuideHost, detectedHost: CealAgentGuideHost | undefined): CealAgentGuideStore {
+	const state = (agent: CealAgentGuideHost | undefined): CealAgentGuideState => {
+		const target = isCealAgentGuideHost(agent) ? agent : defaultAgent;
+		return { ...unavailableState(target), agent_source: target === detectedHost ? "detected" : "default" };
+	};
 	return { inspect: (agent) => state(agent), register: (agent) => state(agent) };
 }
 

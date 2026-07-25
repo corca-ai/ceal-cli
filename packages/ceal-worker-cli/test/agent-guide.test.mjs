@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createCealAgentGuideStore } from "../dist/agent-guide.js";
+import { createCealAgentGuideStore, detectCealAgentGuideHost } from "../dist/agent-guide.js";
 
 test("Codex guide registration follows the role current pointer across releases", () => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-")));
@@ -19,7 +19,7 @@ test("Codex guide registration follows the role current pointer across releases"
 			status: "staged", agent: "codex", guide_id: "ceal-guide",
 			guide_path: path.join(state, "current", "guide"),
 			registration_path: path.join(codexHome, "skills", "ceal-guide"),
-			update_safe: true, registered: false,
+			update_safe: true, registered: false, agent_source: "default",
 			hosts: [
 				{ agent: "codex", status: "staged", registration_path: path.join(codexHome, "skills", "ceal-guide"), registered: false },
 				{ agent: "claude", status: "staged", registration_path: path.join(claudeConfig, "skills", "ceal-guide"), registered: false },
@@ -275,6 +275,40 @@ test("a skills directory linked to nothing names the missing target", () => {
 		const retried = store.register("claude");
 		assert.equal(retried.registered, true);
 		assert.equal(realpathSync(path.join(missing, "ceal-guide")), realpathSync(path.join(state, "current", "guide")));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// corca-ai/ceal-cli#4: a Claude Code session read `agent: codex` with
+// `registered: false` while its own registration was live, and wrote that into a
+// durable note. The running host identifies itself in the environment, so the
+// summary should name it instead of the first table row.
+test("the projection names the running host when the environment identifies it", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-detect-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	symlinkSync("releases/first", path.join(state, "current"));
+	try {
+		assert.equal(detectCealAgentGuideHost({ CLAUDECODE: "1" }), "claude");
+		assert.equal(detectCealAgentGuideHost({ CLAUDE_CODE_ENTRYPOINT: "cli" }), "claude");
+		assert.equal(detectCealAgentGuideHost({ CODEX_THREAD_ID: "t" }), "codex");
+		assert.equal(detectCealAgentGuideHost({}), undefined);
+
+		const binary = path.join(release, "ceal-linux-arm64");
+		const detected = createCealAgentGuideStore(binary, root, undefined, undefined, "claude");
+		detected.register("claude");
+		const status = detected.inspect();
+		// The host that is running answers first, and says so.
+		assert.equal(status.agent, "claude");
+		assert.equal(status.agent_source, "detected");
+		assert.equal(status.registered, true);
+
+		// With no detection the fallback is unchanged, and marked as a fallback.
+		const undetected = createCealAgentGuideStore(binary, root, undefined, undefined, undefined);
+		assert.equal(undetected.inspect().agent, "codex");
+		assert.equal(undetected.inspect().agent_source, "default");
+		assert.equal(undetected.inspect().registered, false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

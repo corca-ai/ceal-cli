@@ -483,7 +483,7 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 // The top-level fields describe one host; an agent that stops reading there
 // would take a staged default host for "the guide is not registered anywhere".
 const AGENT_GUIDE_PROJECTION_NON_CLAIM =
-	"The top-level status, registration_path, and registered fields describe only the named agent host; read 'hosts' for every supported host.";
+	"The top-level status, registration_path, and registered fields describe only the agent host named by 'agent'; read 'agent_source' to see whether that host was detected as the one running, and 'hosts' for every supported host.";
 
 function writeAgentGuideUnavailable(
 	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
@@ -535,7 +535,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			body: selection.body,
 		});
 		if (!discovery.ok) return writeGatewayFailure(discovery, io);
-		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" });
+		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
@@ -572,6 +572,7 @@ async function serveCapabilityCatalog(
 				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
 				selection, wantsDetail, io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
+				runtime,
 			);
 		}
 	}
@@ -586,7 +587,7 @@ async function serveCapabilityCatalog(
 	if (runtime.saveDiscoveryCache) {
 		await runtime.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> }).catch(() => undefined);
 	}
-	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" });
+	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 }
 
 type ParsedTargetCatalogOptions =
@@ -731,6 +732,7 @@ function writeCapabilitiesAvailable(
 	detail: boolean,
 	io: CealCliIo,
 	provenance: CatalogProvenance,
+	runtime: CealCommandRuntime,
 ): number {
 	const capabilities = detail
 		? discovery.value.capabilities
@@ -773,6 +775,7 @@ function writeCapabilitiesAvailable(
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
 		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection) ? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) } : {}),
 		...(profileSelectionHint(handshake.value) ? { profile_selection: profileSelectionHint(handshake.value) } : {}),
+		...unregisteredGuideAdvisory(runtime),
 	});
 }
 
@@ -801,6 +804,31 @@ function profileSelectionHint(handshake: CealGatewayHandshakeValue): {
 		active_profile_ref: handshake.profile_ref,
 		next_action: "Re-run with '--profile <profile_ref>' to select one of the gateway.eligible_profiles listed above.",
 	};
+}
+
+/**
+ * One advisory on the surface every agent reaches first, and only when the host
+ * running this process has not registered the signed guide.
+ *
+ * Nothing in the binary told an agent the guide existed, so whether it followed
+ * the guide's method or improvised was left to chance — the failure being silent
+ * by construction (corca-ai/ceal-cli#4). This stays absent once registered, and
+ * absent when the running host cannot be identified, so it never becomes noise
+ * on a healthy install.
+ */
+function unregisteredGuideAdvisory(runtime: CealCommandRuntime): Record<string, unknown> {
+	try {
+		const state = runtime.inspectAgentGuide?.();
+		// Only when the guide is present and merely unregistered for this host:
+		// advising `guide register` while the asset itself is missing would send
+		// an agent to a route that cannot succeed.
+		if (!state || state.agent_source !== "detected" || state.registered || state.status !== "staged") return {};
+		return { agent_guide: {
+			status: state.status,
+			agent: state.agent,
+			next_action: `This agent host has not registered the signed Ceal guide, which encodes how to read leaf help and what a result does and does not prove. Run 'ceal guide register ${state.agent}'.`,
+		} };
+	} catch { return {}; }
 }
 
 function capabilityCatalogNextAction(

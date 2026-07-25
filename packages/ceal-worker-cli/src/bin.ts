@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { inspectAgentAudit, inspectAgentSessionEvents } from "./agent-audit.js";
-import { createCealAgentGuideStore } from "./agent-guide.js";
+import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-guide.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { renderPlainYamlDocument, runCealCommand } from "./index.js";
@@ -19,7 +19,7 @@ try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch 
 let receiptSpool: ReturnType<typeof createCealReceiptSpoolStore> | undefined;
 try { receiptSpool = createCealReceiptSpoolStore(process.env.HOME); } catch { receiptSpool = undefined; }
 
-const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR);
+const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR, detectCealAgentGuideHost(process.env));
 const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
 
 void runCealCommand(process.argv.slice(2), {
