@@ -144,16 +144,21 @@ it did not have to, under a less-but-better filter.
   packages, ~3s) and `test:release` (root release-artifact and native-binary
   suites, ~90s) so the iteration gate is reachable by name; record the release
   suite as named gate debt rather than paying it per commit.
-- capability: file `corca-ai/charness` issues for (a) a deterministic
-  bounded-reviewer result read so parents never sleep-poll, and (b) making the
+- capability: filed `corca-ai/charness#455` (deterministic bounded-reviewer
+  result read so parents never sleep-poll) and `corca-ai/charness#456` (making the
   `describe_*`/`scaffold_*` stub the planner's `next_action` for closeout carriers
-  the way it already is for retro artifacts. Structural pattern: improvised
+  the way it already is for retro artifacts). Structural pattern: improvised
   retrieval and prose-first authoring of contract-gated artifacts. Triggering
   instances: 10 sleep calls / 22.7 min, and 13 shape-discovery calls this session.
   Destination: upstream `charness` (plugin source is upstream-owned; not editable
   from this repo).
-- memory: this artifact, plus the dispatcher-derivation residual already written
-  into the #1 close comment so the next reader inherits it without reopening.
+- memory: this artifact, plus the dispatcher-derivation residual written into the
+  #1 close comment. Both landed after this retro: acceptance now derives from the
+  declaration in both CLIs (`splitSubcommandRoute`), and `npm run test:unit` /
+  `check:unit` name the fast gate. A third miss recorded the same day — a
+  verification probe run against the real `HOME` revoked a live Gateway client
+  session — became `npm run probe` plus two always-loaded rules in the `ceal`
+  repo; the same "assume the contract, check later" shape as the zsh miss above.
 
 ## Persisted
 
