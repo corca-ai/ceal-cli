@@ -168,36 +168,41 @@ the tagged workflow's `npm ci --ignore-scripts` does — then `npm ci` →
 tag → watch → `ceal update` → readback. Tags `ceal-v0.65.7` and `ceal-v0.65.8`
 are burned; do not reuse them.
 
-## Discuss
+## Decided
 
-- **Parallel session overlap, unresolved.** `~/ceal-cli` on the Gateway host has
-  two unpushed commits from another session — `7f36a61 fix(worker): preserve
-  invalid argument recovery` and `e5d466e test(worker): cover invalid argument
-  recovery` — branched from `933d189`, so their `origin/main` predates the
-  `0.65.6` release. They add the `invalid_arguments` entry this host's live probe
-  proved missing. Do not reimplement it here; that file is also where
-  `ceal-cli#2`'s items 2 and 3 must land, so one session should own
-  `call-result-output.ts` at a time.
-- A session reaches many **profiles** (`eligible_profiles` + `--profile`) but one
-  **instance**: the endpoint path carries the instance and enrollment material is
-  minted per instance. Cross-instance access from one session would be a design
-  change, not a configuration fix. Worth deciding, since an operator working
-  across dev and prod currently re-enrolls to switch.
-- Client-device naming for email onboarding: operator-named `client_ref` or
-  derived? This host is the first device that would follow the convention.
-- `Subcommands:` grammar has no spec while three test parsers and two sha-pinned
-  guides read it. Deliberately not done — revisit only if a consumer appears
-  outside this repo.
-- `ceal.guide.v1` now refuses a `CLAUDE_CONFIG_DIR` containing `:` as "not one
-  absolute path". Unverified assumption: that Claude Code does not accept a
-  colon-separated config-dir list. If it does, the honest refusal becomes an
-  unnecessary one and the route should resolve the list's first entry instead.
-- `ceal.guide.v1` still projects one host's `status`/`registration_path`/
-  `registered` at the top level beside the full `hosts` list. `#4`'s other
-  suggested direction was to drop that projection entirely and let `hosts` be the
-  only answer. That is a cleaner surface but needs a decision about what
-  top-level `status` then means for the document as a whole — not a mechanical
-  removal like `code` was.
+Nothing here is open. Each line is a decision with its reason, so the next
+session executes rather than re-litigates.
+
+- **One error key, no alias.** `kind` only; `code` is gone from every error
+  object, including `ceal.capabilities.v1` and a rejected enrollment. A
+  deprecation window with no recorded closing date is worse than a clean break,
+  and the structural gate now bans `code` outright.
+- **`hosts` is the only per-host answer** in `ceal.guide.v1`. Top-level `status`
+  describes the document (`available`/`unavailable`, agreeing with `ok`), and the
+  per-host projection is gone along with the `non_claims` sentence that existed
+  to explain which field to trust.
+- **`ceal.version.v1` is frozen**, gated on its exact key set. Unlock condition,
+  recorded on the gate: once no supported client predates `0.65.9` — whose
+  installer field-checks instead of byte-comparing — that document may carry `ok`
+  like every other one, and the gate can go.
+- **A colon-separated `CLAUDE_CONFIG_DIR` stays refused.** No longer an
+  assumption: Claude Code given `CLAUDE_CONFIG_DIR=a:b` finds neither directory's
+  state, so joining it would write a skill tree nothing reads.
+- **No `Subcommands:` grammar spec.** Every parser is in-repo and the gate derives
+  from the declaration table, so a spec would be a second source of truth.
+  Revisit only if a consumer appears outside this repo.
+- **`client_ref` is operator-named, host- or role-shaped** (`client:narnia`,
+  `client:vinc`), not derived. A derived name cannot survive re-enrollment or two
+  devices for one subject, and the prod registry already runs on host-shaped
+  names.
+- **This host stays enrolled against `ceal-prod`.** Prod is where the write
+  capabilities and the wider catalog live; dev is where `message.enumerate`
+  currently lives, so a dev-only probe re-enrolls deliberately rather than the
+  host straddling both.
+- **`ok` means "this command answered what it was asked"**, not "the state is
+  good", and it agrees with the exit code exactly. That is why
+  `session: unconfigured` is `ok: true` while `capabilities` without a session is
+  `ok: false` and exits 3.
 
 ## References
 
