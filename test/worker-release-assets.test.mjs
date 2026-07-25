@@ -141,6 +141,11 @@ test("worker release workflow builds, merges, and signs every contracted release
 	const merge = runStepContaining(parsed.jobs.assemble, "build-worker-release-assets.mjs merge");
 	const inventory = runStepContaining(parsed.jobs["sign-and-publish"], "Unexpected worker release inventory");
 	const signing = bashArray(runStepContaining(parsed.jobs["sign-and-publish"], "cosign sign-blob"), "primary");
+	// The rollback lane re-verifies this same set before moving stable, so it is
+	// a fifth platform-naming site and drifts silently without this assertion.
+	const rollback = parse(readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-worker-stable-rollback.yml"), "utf8"));
+	const rollbackSigning = bashArray(runStepContaining(rollback.jobs.rollback, "cosign verify-blob"), "primary");
+	assert.deepEqual([...rollbackSigning].sort(), [...signing].sort(), "rollback must re-verify the signed set");
 	const manifestLoop = /for platform in ([^;]+); do/u.exec(inventory)?.[1].trim().split(/\s+/u);
 
 	assert.deepEqual([...manifestLoop].sort(), [...platforms].sort(), "manifest check must cover every platform");

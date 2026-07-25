@@ -48,10 +48,18 @@ jobs:
           for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
             [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
           done
+          # Must stay identical to the release lane's signing array: this set is
+          # both what sha256sum -c checks against the tag's SHA256SUMS and what
+          # cosign re-verifies before the stable pointer moves. A platform
+          # missing here fails the checksum pass and, if it did not, would
+          # advance stable on partial signature proof.
           primary=(
             ceal-linux-arm64 ceal-linux-amd64
+            ceal-darwin-arm64 ceal-darwin-amd64
             ceal-worker-release-manifest-linux-arm64.json
             ceal-worker-release-manifest-linux-amd64.json
+            ceal-worker-release-manifest-darwin-arm64.json
+            ceal-worker-release-manifest-darwin-amd64.json
             ceal-guide-SKILL.md THIRD_PARTY_NOTICES.txt SHA256SUMS install-ceal.sh
           )
           readback_dir="$RUNNER_TEMP/ceal-worker-rollback-readback"

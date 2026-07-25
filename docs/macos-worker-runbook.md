@@ -71,18 +71,26 @@ verification to fake an installed acceptance.
 ## 5. Why the CI cutover was not a two-line change
 
 The installer, updater, native builder, and merge tooling did already accept
-the four-platform set, but four release-lane sites named the platforms
+the four-platform set, but five release-lane sites named the platforms
 explicitly and had to be extended together, plus one macOS portability defect:
 
-- `release-contract.json` `native_build_matrix` gates `build-platform-binaries`
-  (`requireTargetPlatform`), so an uncommented darwin runner failed its build
-  leg with `unsupported_platform` and blocked the whole release;
 - `assemble` downloaded and merged two named linux handoffs;
 - `sign-and-publish` pinned an exact linux inventory string, a per-platform
   manifest loop, and the signing array;
+- `ceal-worker-stable-rollback.yml` re-verified only the linux set, so a
+  rollback to a four-platform tag would fail its `sha256sum -c` pass — and, had
+  it passed, would have advanced stable on partial signature proof;
 - the build job verified the handoff archive with `sha256sum`, which macOS
   runners do not ship; it now uses node.
 
-`worker-release-assets.test.mjs` derives all of these from
+`release-contract.json` `native_build_matrix` was extended too, but note what
+it does and does not do: the worker lane's build gate is `resolvePlatform` in
+`build-worker-native-artifact.mjs`, which validates against its own hardcoded
+`linux|darwin` pattern and never reads the contract. `requireTargetPlatform`
+in `build-platform-binaries.mjs` belongs to the frozen `cealctl` lane. The
+contract entry is the declared release surface and the source the tests derive
+from — not the thing that unblocks a darwin build leg.
+
+`worker-release-assets.test.mjs` derives every site above from
 `signed_release_platforms`, so adding or dropping a platform fails the tests
-until every site agrees.
+until all five agree.

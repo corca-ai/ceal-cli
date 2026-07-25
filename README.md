@@ -179,7 +179,8 @@ asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under
 `$CEAL_INSTALL_DIR/.ceal-cli/worker/` (default `~/.local/bin`), and the
 installed `ceal update` re-runs the release-staged installer stable-only.
-All four platforms are built and signed by the tagged CI lane. A Mac checkout
+The tagged CI lane is configured to build and sign all four platforms; no
+four-platform tag has been published yet. A Mac checkout
 can still produce an unsigned local candidate for diagnosis
 ([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)), but the
 installer fail-closes on it, so it is never an install or acceptance path.
