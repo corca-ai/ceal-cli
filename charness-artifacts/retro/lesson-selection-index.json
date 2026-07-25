@@ -1,0 +1,520 @@
+{
+  "schema_version": 1,
+  "kind": "retro-lesson-selection-index",
+  "source": "charness-artifacts/retro/*.md Context/Waste/Next Improvements",
+  "selection_policy": {
+    "advisory": true,
+    "recency_half_life_days": 14,
+    "alpha_base": 0.35,
+    "warmup_n": 5,
+    "recurrence_multiplier": "1 + alpha_t * max(0, source_count - 1)",
+    "alpha_t": "alpha_base * min(1, source_count / warmup_n)"
+  },
+  "as_of_source_date": "2026-07-25",
+  "source_artifact_count": 1,
+  "candidate_count": 13,
+  "top_candidates": [
+    {
+      "candidate_id": "current_focus:f970bedd08ee",
+      "kind": "current_focus",
+      "lesson": "One work unit: resolving corca-ai/ceal-cli#1 (the signed guide's mandated descent was not completable because `capabilities targets` had no leaf help, and the guide demanded an opaque cursor where `message.search` returns an integer offset), through causal review, implementation, resolution critique, release `ceal-v0.65.5`, and issue closeout.",
+      "normalized_key": "one work unit resolving corca ai ceal cli 1 the signed guide s mandated",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Context"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:f77c374cceab",
+      "kind": "next_improvement",
+      "lesson": "file `corca-ai/charness` issues for (a) a deterministic bounded-reviewer result read so parents never sleep-poll, and (b) making the `describe_*`/`scaffold_*` stub the planner's `next_action` for closeout carriers the way it already is for retro artifacts. Structural pattern: improvised retrieval and prose-first authoring of contract-gated artifacts. Triggering instances: 10 sleep calls / 22.7 min, and 13 shape-discovery calls this session. Destination: upstream `charness` (plugin source is upstream-owned; not editable from this repo).",
+      "normalized_key": "file corca ai charness issues for a a deterministic bounded reviewer result read so",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:dd105cf68868",
+      "kind": "next_improvement",
+      "lesson": "gate ladder as written — targeted package tests at commit boundaries, full `npm run check` once at final/pre-release proof; and when the JTBD only completes at delivery, put the whole chain (push → release → runtime readback → close) in one boundary question.",
+      "normalized_key": "gate ladder as written targeted package tests at commit boundaries full npm run check",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:736b80c5a798",
+      "kind": "next_improvement",
+      "lesson": "scaffold or stub any validator-gated artifact *before* drafting its prose (closeout carriers, critique, spec, release notes) — the existing always-loaded template-first rule, applied to the closeout carrier where it was skipped; and when a slice declares a table for a dispatch surface, first enumerate every source that already accepts those routes and every declared schema against its emitter, so critique-found rework folds into slice 1.",
+      "normalized_key": "scaffold or stub any validator gated artifact before drafting its prose closeout carriers critique",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:638f757cc120",
+      "kind": "next_improvement",
+      "lesson": "split `npm test` into `test:unit` (protocol + client + both CLI packages, ~3s) and `test:release` (root release-artifact and native-binary suites, ~90s) so the iteration gate is reachable by name; record the release suite as named gate debt rather than paying it per commit.",
+      "normalized_key": "split npm test into test unit protocol client both cli packages 3s and test",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:53d22e1810c9",
+      "kind": "next_improvement",
+      "lesson": "this artifact, plus the dispatcher-derivation residual already written into the #1 close comment so the next reader inherits it without reopening.",
+      "normalized_key": "this artifact plus the dispatcher derivation residual already written into the 1 close comment",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:1b1d2e89656a",
+      "kind": "repeat_trap",
+      "lesson": "**Additive fix shape.** The declaration was added *beside* the existing acceptance literals rather than replacing them, so two sync gates and three copies of a row parser now exist only to keep two sources agreeing. The counterweight correctly deferred the refactor, but the shape is why the residual risk exists at all.",
+      "normalized_key": "additive fix shape the declaration was added beside the existing acceptance literals rather than",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:1edde0760fcb",
+      "kind": "repeat_trap",
+      "lesson": "**Blind subagent polling (22.7 min, measured).** The five bounded reviewers were the right call, but retrieving their output was improvised each time: sleep, guess, sleep again, then read the transcript by hand. The retrieval path — not the review — was the cost.",
+      "normalized_key": "blind subagent polling 22 7 min measured the five bounded reviewers were the right",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:f2c4e2584a49",
+      "kind": "repeat_trap",
+      "lesson": "**Critique-after-commit rework.** The `--help`-as-operand hazard (a help probe reaching the enrollment runner and prompting for a device-enrollment code) and `cealctl enrollments create`'s wrong `result_schema` were found *after* slice 1 landed, so slice 2 rewrote the dispatch path slice 1 had just written and re-touched the same four files. Both were findable mechanically before writing the table: enumerate every source that already accepts a route (`GUIDE_ACTIONS`, `parseEnrollmentOptions`, `parseReceiptOptions`, `parseAccessOptions`, …) and every declared schema against its emitter.",
+      "normalized_key": "critique after commit rework the help as operand hazard a help probe reaching the",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:03766bb2b0da",
+      "kind": "repeat_trap",
+      "lesson": "**Gate over-running.** Three full `npm run check` runs where the repo rule is targeted gates at commit boundaries and the full gate at final proof. Gate debt: `npm run check` ≈96s is dominated by release-artifact and native-binary tests that cannot observe CLI help behavior; there is no unit-only script, so the cheap loop is not reachable by name.",
+      "normalized_key": "gate over running three full npm run check runs where the repo rule is",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:fbe10ad592df",
+      "kind": "repeat_trap",
+      "lesson": "**Template-last on a validator-gated artifact.** The issue closeout carrier was written as prose, then reverse-engineered against its floor (`JTBD:`, `Root Cause:`, `Debug Artifact:`, `Siblings:` requiring the literal words *decision* and *proof*, `Prevention:`, `Critique: <checked-in path>`, `Behavior:`, `AI-provenance:`, `Manual close reason:`). The always-loaded rule already says use the template first and validate the contract before filling detail; routing through `describe_closeout_draft_shape.py --stub` first would have removed 13 discovery calls and 3 failed validations.",
+      "normalized_key": "template last on a validator gated artifact the issue closeout carrier was written as",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:cc4a9eedf239",
+      "kind": "repeat_trap",
+      "lesson": "**Truncated boundary question.** I offered push-only vs push-and-close, omitting release — and the operator immediately asked why we would not just release. The reporter's JTBD only completes on the installed binary, so the delivery chain (commit → push → release → runtime readback → close) was one decision, not two.",
+      "normalized_key": "truncated boundary question i offered push only vs push and close omitting release and",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "current_focus:f970bedd08ee",
+      "kind": "current_focus",
+      "lesson": "One work unit: resolving corca-ai/ceal-cli#1 (the signed guide's mandated descent was not completable because `capabilities targets` had no leaf help, and the guide demanded an opaque cursor where `message.search` returns an integer offset), through causal review, implementation, resolution critique, release `ceal-v0.65.5`, and issue closeout.",
+      "normalized_key": "one work unit resolving corca ai ceal cli 1 the signed guide s mandated",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Context"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:f77c374cceab",
+      "kind": "next_improvement",
+      "lesson": "file `corca-ai/charness` issues for (a) a deterministic bounded-reviewer result read so parents never sleep-poll, and (b) making the `describe_*`/`scaffold_*` stub the planner's `next_action` for closeout carriers the way it already is for retro artifacts. Structural pattern: improvised retrieval and prose-first authoring of contract-gated artifacts. Triggering instances: 10 sleep calls / 22.7 min, and 13 shape-discovery calls this session. Destination: upstream `charness` (plugin source is upstream-owned; not editable from this repo).",
+      "normalized_key": "file corca ai charness issues for a a deterministic bounded reviewer result read so",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:dd105cf68868",
+      "kind": "next_improvement",
+      "lesson": "gate ladder as written — targeted package tests at commit boundaries, full `npm run check` once at final/pre-release proof; and when the JTBD only completes at delivery, put the whole chain (push → release → runtime readback → close) in one boundary question.",
+      "normalized_key": "gate ladder as written targeted package tests at commit boundaries full npm run check",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:736b80c5a798",
+      "kind": "next_improvement",
+      "lesson": "scaffold or stub any validator-gated artifact *before* drafting its prose (closeout carriers, critique, spec, release notes) — the existing always-loaded template-first rule, applied to the closeout carrier where it was skipped; and when a slice declares a table for a dispatch surface, first enumerate every source that already accepts those routes and every declared schema against its emitter, so critique-found rework folds into slice 1.",
+      "normalized_key": "scaffold or stub any validator gated artifact before drafting its prose closeout carriers critique",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:638f757cc120",
+      "kind": "next_improvement",
+      "lesson": "split `npm test` into `test:unit` (protocol + client + both CLI packages, ~3s) and `test:release` (root release-artifact and native-binary suites, ~90s) so the iteration gate is reachable by name; record the release suite as named gate debt rather than paying it per commit.",
+      "normalized_key": "split npm test into test unit protocol client both cli packages 3s and test",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "next_improvement:53d22e1810c9",
+      "kind": "next_improvement",
+      "lesson": "this artifact, plus the dispatcher-derivation residual already written into the #1 close comment so the next reader inherits it without reopening.",
+      "normalized_key": "this artifact plus the dispatcher derivation residual already written into the 1 close comment",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Next Improvements"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:1b1d2e89656a",
+      "kind": "repeat_trap",
+      "lesson": "**Additive fix shape.** The declaration was added *beside* the existing acceptance literals rather than replacing them, so two sync gates and three copies of a row parser now exist only to keep two sources agreeing. The counterweight correctly deferred the refactor, but the shape is why the residual risk exists at all.",
+      "normalized_key": "additive fix shape the declaration was added beside the existing acceptance literals rather than",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:1edde0760fcb",
+      "kind": "repeat_trap",
+      "lesson": "**Blind subagent polling (22.7 min, measured).** The five bounded reviewers were the right call, but retrieving their output was improvised each time: sleep, guess, sleep again, then read the transcript by hand. The retrieval path — not the review — was the cost.",
+      "normalized_key": "blind subagent polling 22 7 min measured the five bounded reviewers were the right",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:f2c4e2584a49",
+      "kind": "repeat_trap",
+      "lesson": "**Critique-after-commit rework.** The `--help`-as-operand hazard (a help probe reaching the enrollment runner and prompting for a device-enrollment code) and `cealctl enrollments create`'s wrong `result_schema` were found *after* slice 1 landed, so slice 2 rewrote the dispatch path slice 1 had just written and re-touched the same four files. Both were findable mechanically before writing the table: enumerate every source that already accepts a route (`GUIDE_ACTIONS`, `parseEnrollmentOptions`, `parseReceiptOptions`, `parseAccessOptions`, …) and every declared schema against its emitter.",
+      "normalized_key": "critique after commit rework the help as operand hazard a help probe reaching the",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:03766bb2b0da",
+      "kind": "repeat_trap",
+      "lesson": "**Gate over-running.** Three full `npm run check` runs where the repo rule is targeted gates at commit boundaries and the full gate at final proof. Gate debt: `npm run check` ≈96s is dominated by release-artifact and native-binary tests that cannot observe CLI help behavior; there is no unit-only script, so the cheap loop is not reachable by name.",
+      "normalized_key": "gate over running three full npm run check runs where the repo rule is",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:fbe10ad592df",
+      "kind": "repeat_trap",
+      "lesson": "**Template-last on a validator-gated artifact.** The issue closeout carrier was written as prose, then reverse-engineered against its floor (`JTBD:`, `Root Cause:`, `Debug Artifact:`, `Siblings:` requiring the literal words *decision* and *proof*, `Prevention:`, `Critique: <checked-in path>`, `Behavior:`, `AI-provenance:`, `Manual close reason:`). The always-loaded rule already says use the template first and validate the contract before filling detail; routing through `describe_closeout_draft_shape.py --stub` first would have removed 13 discovery calls and 3 failed validations.",
+      "normalized_key": "template last on a validator gated artifact the issue closeout carrier was written as",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:cc4a9eedf239",
+      "kind": "repeat_trap",
+      "lesson": "**Truncated boundary question.** I offered push-only vs push-and-close, omitting release — and the operator immediately asked why we would not just release. The reporter's JTBD only completes on the installed binary, so the delivery chain (commit → push → release → runtime readback → close) was one decision, not two.",
+      "normalized_key": "truncated boundary question i offered push only vs push and close omitting release and",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repeat_trap:14fc9ec67b4b",
+      "kind": "repeat_trap",
+      "lesson": "**zsh word-splitting false alarm.** `for a in \"guide status --help\"; node bin $a` passed each string as one argv (zsh does not word-split unquoted parameters), producing seven bogus `unknown_command` results that read like a real regression until re-checked. One wasted diagnostic cycle.",
+      "normalized_key": "zsh word splitting false alarm for a in guide status help node bin a",
+      "source_count": 1,
+      "latest_source_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+      "latest_source_date": "2026-07-25",
+      "age_days": 0,
+      "recency_weight": 1.0,
+      "alpha": 0.07,
+      "selection_weight": 1.0,
+      "sources": [
+        {
+          "artifact_path": "charness-artifacts/retro/2026-07-25-session-retro.md",
+          "date": "2026-07-25",
+          "section": "Waste"
+        }
+      ]
+    }
+  ]
+}
