@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.65.10 (`ceal-v0.65.10`)
+
+- Preserve session recovery truth at the Gateway boundary. A transport or
+  malformed refresh response is now retryable and says it is not evidence that
+  enrollment is invalid; a typed revoked, expired, replayed, or binding-denied
+  refresh response directs the operator to enroll again. Failed remote logout
+  also preserves the local session for a retry instead of silently destroying
+  recovery material.
+
 ## 0.65.9 (`ceal-v0.65.9`)
 
 Contents identical to `0.65.8`, which never published: its release run lost the

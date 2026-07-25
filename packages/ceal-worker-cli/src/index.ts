@@ -40,7 +40,7 @@ export { renderPlainYamlDocument } from "./yaml.js";
 export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
 export type { CealSubcommandDefinition } from "./subcommands.js";
 
-const CEAL_PACKAGE_VERSION = "0.65.9" as const;
+const CEAL_PACKAGE_VERSION = "0.65.10" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 
