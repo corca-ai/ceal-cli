@@ -1,5 +1,5 @@
 # Session Handoff
-Date: 2026-07-26 (`ceal-v0.65.9` is stable; #2/#3/#4 resolved; prod sessions degraded)
+Date: 2026-07-26 (`ceal-v0.65.9` is stable; unreleased work waiting; prod sessions degraded)
 
 Narnia-owned work only (`@corca-ai/ceal`, the `ceal` worker, `skills/ceal-guide`).
 Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
@@ -7,9 +7,12 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Workflow Trigger
 
-- Mention this file with no other task: invoke `charness:impl` on **Next
-  Session** item 1 and stop at its proof gate. Nothing in item 1 crosses an
-  external boundary; ask before any push, tag, or Gateway write.
+- Mention this file with no other task: work **Next Session** top to bottom,
+  invoking `charness:impl` per item and proving each before moving on. Items 1
+  and 2 need the Gateway host's prod session fix first — if it has not landed,
+  skip to 3 and come back. Commit locally as you go; ask before any push, tag,
+  GitHub write, or Gateway write, and cut the release only when the operator
+  approves publishing.
 
 ## Current State
 
@@ -88,9 +91,11 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Next Session
 
-Items 1 and 2 are gated on the Gateway host restoring prod client sessions
-(`invalid_response` on renewal, `request_denied` on enrollment — see Current
-State). Everything from 3 down is local and can proceed today.
+Work all of it. Items 1–2 are gated on the Gateway host restoring prod client
+sessions (`invalid_response` on renewal, `request_denied` on enrollment — see
+Current State); 3–6 are local and can proceed today. There is **unreleased work
+on `main` already** (see the bottom of this section), so a release is the natural
+closing move once the operator approves it.
 
 1. **Close `corca-ai/ceal-cli#2`, `#3`, `#4` with released-binary proof.** The
    code shipped in `0.65.9` and was verified live against prod from an identical
@@ -120,18 +125,20 @@ State). Everything from 3 down is local and can proceed today.
    projection. `CEAL_AGENT_GUIDE_HOSTS` is now the host table with roots and
    overrides; sharing it is the small version. The honest minimum is that the
    declared source and the read path agree.
-4. **Make this session's release break unrepeatable.** Two gaps stayed open:
+4. **Make this session's release break unrepeatable.** Two gaps stay open:
    - `ceal.version.v1` is frozen only by a comment and a skip in the predicate
      sweep. A test asserting that document's exact key set would fail loudly, with
      the reason, the moment someone extends it — which is what `0.65.7` did, and
-     it broke every installed client's `ceal update` because the *installed*
-     generation's installer byte-compared it.
-     The installer no longer whole-document compares, but the installed base
-     still carries the old strict one for a long time.
+     it broke every installed client's `ceal update`, because the *installed*
+     generation's `install-ceal.sh` byte-compared that document. The shipped
+     installer now field-checks instead, but the installed base carries the strict
+     one for a long time. **Unlock condition to record with the guard**: once no
+     supported client predates `0.65.9`, `ceal.version.v1` may carry `ok` like
+     every other document.
    - The publish workflow burns a tag on a transient public-readback failure
-     (`0.65.8`, HTTP 500 after a successful upload), and cannot be retried because
-     cosign re-signs per run while objects are create-or-identical. Retrying the
-     readback a few times before failing would have saved that tag.
+     (`0.65.8`, HTTP 500 after a successful upload) and cannot be retried, because
+     cosign re-signs per run while published objects are create-or-identical.
+     Retrying the readback a few times before failing would have saved that tag.
 5. **Finish the `#633` probes this host owes**, which need dev (the route exists
    there only): cursor survival across a Gateway restart — the surface itself
    declares `gateway_restart_stable: false` — `message_ref` TTL expiry behavior,
@@ -143,17 +150,23 @@ State). Everything from 3 down is local and can proceed today.
    procedure there tells an agent to run `guide register codex` after reading
    `guide status`. Both need the owner change first, then a reviewed sync — not an
    independent edit in the copy.
-7. **Decide when `code` disappears from the capabilities error.** It is emitted
-   beside the canonical `kind` for one release so an existing reader keeps
-   working. Removing it is a breaking change that needs a deliberate window, and
-   nothing currently records when that window closes.
 
-The release lane, for whichever of these ships next: bump the eight
-version-bearing files the prep commit touches — `package-lock.json` included,
-because `npm run check` does not gate the lock but the tagged workflow's
-`npm ci --ignore-scripts` does — then `npm ci` → `npm run check` → commit → push
-`main` → confirm `origin/main` is that commit → tag → watch → `ceal update` →
-readback. Tags `ceal-v0.65.7` and `ceal-v0.65.8` are burned; do not reuse them.
+### Unreleased on `main`, for whichever release ships next
+
+- `a51b002` — `code` is gone from every error object; `kind` is the only error
+  key, and the structural gate bans `code` outright. **Breaking** for a reader of
+  `error.code` on `ceal.capabilities.v1` or a rejected enrollment; the operator
+  chose no compatibility window over an alias with no closing date. The changelog
+  entry still needs writing at release time, and it should say that plainly.
+- `d65bb1d` — a skills directory that links to nothing names the missing target
+  instead of advising against replacing a directory that was never there.
+
+The release lane: bump the eight version-bearing files the prep commit touches —
+`package-lock.json` included, because `npm run check` does not gate the lock but
+the tagged workflow's `npm ci --ignore-scripts` does — then `npm ci` →
+`npm run check` → commit → push `main` → confirm `origin/main` is that commit →
+tag → watch → `ceal update` → readback. Tags `ceal-v0.65.7` and `ceal-v0.65.8`
+are burned; do not reuse them.
 
 ## Discuss
 
@@ -179,6 +192,12 @@ readback. Tags `ceal-v0.65.7` and `ceal-v0.65.8` are burned; do not reuse them.
   absolute path". Unverified assumption: that Claude Code does not accept a
   colon-separated config-dir list. If it does, the honest refusal becomes an
   unnecessary one and the route should resolve the list's first entry instead.
+- `ceal.guide.v1` still projects one host's `status`/`registration_path`/
+  `registered` at the top level beside the full `hosts` list. `#4`'s other
+  suggested direction was to drop that projection entirely and let `hosts` be the
+  only answer. That is a cleaner surface but needs a decision about what
+  top-level `status` then means for the document as a whole — not a mechanical
+  removal like `code` was.
 
 ## References
 
