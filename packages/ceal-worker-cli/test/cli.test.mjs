@@ -782,6 +782,21 @@ test("invalid capability arguments ask the caller to correct input instead of re
 	});
 });
 
+test("an invalid Gateway call renders caller correction without connector restoration", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun([
+			"call", "message.enumerate", "--target", "target:team-inbox", "limit=101",
+		], 3, {
+			loadSession: async () => storedSession(endpoint),
+			nextRequestId: () => "narnia:invalid-arguments:001",
+		});
+		assert.equal(payload.error.kind, "invalid_arguments");
+		assert.equal(payload.error.next_action, "Correct the capability arguments, then retry the call with a new request ID.");
+		assert.doesNotMatch(payload.error.next_action, /connector|Gateway status|same call/iu);
+		assert.deepEqual(requests.map(({ body }) => body.operation), ["call"]);
+	}, (request) => request.operation === "call" ? invalidArgumentsFailureResponse(request) : failedReadbackResponse(request));
+});
+
 test("an unavailable continuation asks the agent to rediscover instead of restoring the connector", () => {
 	assert.deepEqual(classifyGatewayFailure({ code: "continuation_not_available", message: "server-controlled" }), {
 		code: "continuation_not_available",
@@ -1833,6 +1848,19 @@ function continuationFailureResponse(request) {
 		protocol_version: "1.3.0",
 		error: {
 			code: "continuation_not_available",
+			message: "server-controlled",
+			next_action: "server-controlled",
+		},
+	};
+}
+
+function invalidArgumentsFailureResponse(request) {
+	return {
+		ok: false,
+		request_id: request.request_id,
+		protocol_version: "1.3.0",
+		error: {
+			code: "invalid_arguments",
 			message: "server-controlled",
 			next_action: "server-controlled",
 		},
