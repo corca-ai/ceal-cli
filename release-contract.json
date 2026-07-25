@@ -96,11 +96,15 @@
 	"native_build_matrix": {
 		"platforms": [
 			"linux-arm64",
-			"linux-amd64"
+			"linux-amd64",
+			"darwin-arm64",
+			"darwin-amd64"
 		],
 		"signed_release_platforms": [
 			"linux-arm64",
-			"linux-amd64"
+			"linux-amd64",
+			"darwin-arm64",
+			"darwin-amd64"
 		]
 	},
 	"rollback": {

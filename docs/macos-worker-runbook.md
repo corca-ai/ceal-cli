@@ -1,9 +1,14 @@
 # macOS worker build and acceptance runbook
 
-Operator decision (2026-07-24): darwin artifacts are built manually from a Mac
-checkout instead of macOS CI runners, to control runner cost while the lane
-stabilizes. The `ceal-release.yml` matrix keeps the darwin entries commented
-for the later CI cutover.
+Operator decision (2026-07-25, superseding the 2026-07-24 cost deferral):
+`ceal-release.yml` builds and signs darwin on macOS CI runners, because
+`install-ceal.sh` verifies every asset against its tag-bound OIDC signing
+identity and has no unsigned bypass — a manual Mac build therefore has no
+supported install path and cannot serve a macOS user.
+
+This runbook remains the local diagnostic route for a Mac checkout. It
+produces an unsigned candidate for direct execution only; it is not a release
+path and not an installed-client acceptance.
 
 Prerequisites on the Mac: Node `>=22.19.0` and Xcode command line tools
 (`codesign`). The release archive is fetched from the static Ceal release
@@ -63,7 +68,21 @@ requires a cosign-signed darwin release from the CI lane, because
 `install-ceal.sh` fail-closes on unsigned assets by design — do not bypass its
 verification to fake an installed acceptance.
 
-When darwin CI runners are enabled later, uncomment the two darwin matrix
-entries in `.github/workflows/ceal-release.yml`; no other lane change is
-required (the installer, updater, merge step, and checksum inventory already
-accept the four-platform set).
+## 5. Why the CI cutover was not a two-line change
+
+The installer, updater, native builder, and merge tooling did already accept
+the four-platform set, but four release-lane sites named the platforms
+explicitly and had to be extended together, plus one macOS portability defect:
+
+- `release-contract.json` `native_build_matrix` gates `build-platform-binaries`
+  (`requireTargetPlatform`), so an uncommented darwin runner failed its build
+  leg with `unsupported_platform` and blocked the whole release;
+- `assemble` downloaded and merged two named linux handoffs;
+- `sign-and-publish` pinned an exact linux inventory string, a per-platform
+  manifest loop, and the signing array;
+- the build job verified the handoff archive with `sha256sum`, which macOS
+  runners do not ship; it now uses node.
+
+`worker-release-assets.test.mjs` derives all of these from
+`signed_release_platforms`, so adding or dropping a platform fails the tests
+until every site agrees.

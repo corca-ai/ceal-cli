@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import {
@@ -118,6 +119,50 @@ test("worker release workflow signs only the worker inventory from the locked ar
 	assert.match(workflow, /ceal-release\.yml@refs\/tags\/\$TAG/u);
 	assert.match(workflow, /id-token: write/u);
 	assert.match(workflow, /cosign sign-blob --yes/u);
+});
+
+// The merge tooling is platform-generic, but every workflow site that names a
+// platform is not. A platform present in the contract yet missing from any one
+// of these sites publishes a silently partial inventory, so derive all of them
+// from the contract instead of restating a platform list here.
+test("worker release workflow builds, merges, and signs every contracted release platform", () => {
+	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
+	const parsed = parse(workflow);
+	const contract = JSON.parse(readFileSync(path.join(REPO_ROOT, "release-contract.json"), "utf8"));
+	const platforms = contract.native_build_matrix.signed_release_platforms;
+	assert.deepEqual([...platforms].sort(), ["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
+
+	const built = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
+	assert.deepEqual([...built].sort(), [...platforms].sort(), "every contracted platform needs a build runner");
+
+	const assemble = JSON.stringify(parsed.jobs.assemble.steps);
+	const publish = JSON.stringify(parsed.jobs["sign-and-publish"].steps);
+	for (const platform of platforms) {
+		assert.ok(assemble.includes(`-${platform}`), `assemble must download the ${platform} handoff`);
+		assert.ok(assemble.includes(`handoff/${platform}`), `assemble must merge the ${platform} input`);
+		assert.ok(publish.includes(`ceal-${platform}`), `publish must sign the ${platform} binary`);
+		assert.ok(
+			publish.includes(`ceal-worker-release-manifest-${platform}.json`),
+			`publish must sign the ${platform} manifest`,
+		);
+	}
+});
+
+// The build job is the only one that runs on macOS runners, which ship no GNU
+// coreutils; a sha256sum there fails the darwin legs and blocks every release.
+test("worker release build job uses no GNU-only tool on its macOS runners", () => {
+	const parsed = parse(readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8"));
+	assert.ok(
+		parsed.jobs.build.strategy.matrix.include.some((entry) => entry.runner.startsWith("macos-")),
+		"this guard is only meaningful while a darwin runner exists",
+	);
+	// Whole-line comments are dropped: the guard is about executed commands, and
+	// the step that replaced sha256sum names it while explaining why.
+	const scripts = parsed.jobs.build.steps
+		.flatMap((step) => (step.run ?? "").split("\n"))
+		.filter((line) => !line.trimStart().startsWith("#"))
+		.join("\n");
+	assert.doesNotMatch(scripts, /\bsha256sum\b/u);
 });
 
 test("worker stable rollback re-verifies an immutable public tag before moving the pointer", () => {

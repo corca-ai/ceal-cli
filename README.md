@@ -179,9 +179,10 @@ asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under
 `$CEAL_INSTALL_DIR/.ceal-cli/worker/` (default `~/.local/bin`), and the
 installed `ceal update` re-runs the release-staged installer stable-only.
-macOS artifacts are currently built manually from a Mac checkout
-([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)); the darwin CI
-runner matrix entries exist but stay disabled by operator decision.
+All four platforms are built and signed by the tagged CI lane. A Mac checkout
+can still produce an unsigned local candidate for diagnosis
+([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)), but the
+installer fail-closes on it, so it is never an install or acceptance path.
 
 `release:worker:inputs`, `release:worker:package`, and
 `release:worker:native` accept exactly one `--gateway-handoff-archive`

@@ -43,13 +43,16 @@ jobs:
             runner: ubuntu-24.04-arm
           - platform: linux-amd64
             runner: ubuntu-24.04
-          # darwin runners are intentionally disabled (operator decision,
-          # 2026-07-24): macOS artifacts are built manually from a Mac checkout
-          # to avoid runner cost until the lane stabilizes. Re-enable with:
-          # - platform: darwin-arm64
-          #   runner: macos-15
-          # - platform: darwin-amd64
-          #   runner: macos-15-intel
+          # darwin runners are enabled (operator decision, 2026-07-25): a signed
+          # darwin release is the only supported macOS install path, because
+          # install-ceal.sh verifies every asset against its tag-bound OIDC
+          # signing identity and has no unsigned bypass. A manual Mac build
+          # cannot carry that identity. Every job below that names a platform
+          # must name all four; the merge tooling is already platform-generic.
+          - platform: darwin-arm64
+            runner: macos-15
+          - platform: darwin-amd64
+            runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact tag
@@ -75,7 +78,9 @@ jobs:
             "$GATEWAY_HANDOFF_ORIGIN/$HANDOFF_RELEASE_TAG/$HANDOFF_ARCHIVE" \
             --output "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE"
           expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("gateway-handoff-lock.json","utf8")).archive.sha256')"
-          observed="$(sha256sum "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE" | cut -d' ' -f1)"
+          # This job also runs on macOS runners, which ship no GNU sha256sum;
+          # node is already installed above and is the portable digest source.
+          observed="$(node -p 'require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex")' "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE")"
           [ "$expected" = "$observed" ] \
             || { echo "Gateway handoff archive does not match gateway-handoff-lock.json" >&2; exit 1; }
       - name: Compose the checked worker asset set twice
@@ -121,16 +126,29 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Download exact arm64 build handoff
+      # One named download per signed_release_platforms entry. Each is required:
+      # a missing platform artifact fails this job instead of silently
+      # publishing a partial inventory.
+      - name: Download exact linux-arm64 build handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ceal-worker-release-${{ github.sha }}-linux-arm64
           path: handoff/linux-arm64
-      - name: Download exact amd64 build handoff
+      - name: Download exact linux-amd64 build handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ceal-worker-release-${{ github.sha }}-linux-amd64
           path: handoff/linux-amd64
+      - name: Download exact darwin-arm64 build handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-worker-release-${{ github.sha }}-darwin-arm64
+          path: handoff/darwin-arm64
+      - name: Download exact darwin-amd64 build handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-worker-release-${{ github.sha }}-darwin-amd64
+          path: handoff/darwin-amd64
       - name: Merge one worker release inventory
         id: release-set
         run: |
@@ -139,6 +157,8 @@ jobs:
             --out "$RUNNER_TEMP/dist" \
             --input "$PWD/handoff/linux-arm64" \
             --input "$PWD/handoff/linux-amd64" \
+            --input "$PWD/handoff/darwin-arm64" \
+            --input "$PWD/handoff/darwin-amd64" \
             --json
           (cd "$RUNNER_TEMP/dist" && sha256sum -c SHA256SUMS)
           digest="$(sha256sum "$RUNNER_TEMP/dist/SHA256SUMS" | cut -d' ' -f1)"
@@ -184,10 +204,10 @@ jobs:
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -not -name '.*' -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
-            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
+            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-darwin-amd64 ceal-darwin-arm64 ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-darwin-amd64.json ceal-worker-release-manifest-darwin-arm64.json ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
             || { echo "Unexpected worker release inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)
-          for platform in linux-arm64 linux-amd64; do
+          for platform in linux-arm64 linux-amd64 darwin-arm64 darwin-amd64; do
             manifest="dist/ceal-worker-release-manifest-$platform.json"
             grep -F "\"version\": \"${TAG#ceal-v}\"" "$manifest" >/dev/null
             grep -F "\"platform\": \"$platform\"" "$manifest" >/dev/null
@@ -206,8 +226,11 @@ jobs:
           done
           primary=(
             ceal-linux-arm64 ceal-linux-amd64
+            ceal-darwin-arm64 ceal-darwin-amd64
             ceal-worker-release-manifest-linux-arm64.json
             ceal-worker-release-manifest-linux-amd64.json
+            ceal-worker-release-manifest-darwin-arm64.json
+            ceal-worker-release-manifest-darwin-amd64.json
             ceal-guide-SKILL.md THIRD_PARTY_NOTICES.txt SHA256SUMS install-ceal.sh
           )
           expected=()
