@@ -234,9 +234,12 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 		notes: [
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",
 			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
-			"authoritative and answers 'target_catalog.selection_required' when it needs a",
-			"narrower selection. --match and --cursor are mutually exclusive, and this",
-			"route is always a live query, so it accepts neither --fresh nor a cache.",
+			"authoritative: when it needs a narrower selection it answers",
+			"'target_catalog.selection_required' with no targets and no cursor, so follow",
+			"the returned 'next_action' rather than assuming a page is always available.",
+			"--match and --cursor are mutually exclusive. This route is always a live",
+			"query and is never served from the client discovery cache; the catalog-only",
+			"cache flag is rejected here.",
 		],
 		options: [
 			"  --capability <id>       Capability returned by 'ceal capabilities'.",
@@ -281,13 +284,8 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	const command = COMMAND_BY_NAME.get(args[0] as CealCommandDefinition["name"]);
 	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
 	const options = args.slice(1);
-	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
-	// A help probe on a declared subcommand must render that leaf's own contract
-	// before any command runner sees the route, so `--help` can never be parsed as
-	// an operand of the action it is asking about.
-	const requestedSubcommand = options.length >= 2 && isHelpToken(options[options.length - 1])
-		? findSubcommand(command.name, options.slice(0, -1)) : undefined;
-	if (requestedSubcommand) return writeHelp(subcommandHelp(requestedSubcommand), io);
+	const requestedHelp = helpRequest(command, options);
+	if (requestedHelp !== undefined) return writeHelp(requestedHelp, io);
 	if (!commandAcceptsOptions(command.name, options)) return writeError("invalid_argument", "Invalid ceal command options.", io);
 	return runKnownCommand(command.name, options, io, runtime);
 }
@@ -298,6 +296,26 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
 	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt" || command === "observe";
+}
+
+// A help token anywhere in the tail is a read-only help request, never an
+// operand. Position-sensitive handling let `ceal session enroll --gateway
+// --help` reach the enrollment runner, which prompts for a credential before it
+// can fail — and let a guessed route dead-end at the top of the tree. Resolve
+// the longest declared route the leading positionals name, and fall back to the
+// parent leaf, whose `Subcommands:` block names the routes that do exist.
+function helpRequest(command: CealCommandDefinition, options: readonly string[]): string | undefined {
+	if (!options.some(isHelpToken)) return undefined;
+	const leading: string[] = [];
+	for (const option of options) {
+		if (option.startsWith("-")) break;
+		leading.push(option);
+	}
+	for (let length = leading.length; length > 0; length -= 1) {
+		const subcommand = findSubcommand(command.name, leading.slice(0, length));
+		if (subcommand) return subcommandHelp(subcommand);
+	}
+	return commandHelp(command);
 }
 
 function subcommandsOf(parent: CealCommandDefinition["name"]): readonly CealSubcommandDefinition[] {
@@ -521,10 +539,6 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  key=value               Capability input; repeat only fields in the discovered input contract.",
 			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		];
-	if (name === "receipt") return [
-			"  show <request-ref>      Read the caller's safe Gateway audit receipt on demand.",
-			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
-		];
 	if (name === "observe") return [
 			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
 			"                          Serves cached session/capability/install/guide state and spooled call-outcome metadata.",
@@ -550,6 +564,14 @@ function writeCommands(io: CealCliIo): number {
 		command: "ceal",
 		credential_context: CREDENTIAL_CONTEXT,
 		commands: CEAL_COMMANDS,
+		// Keep the machine-readable inventory at the same depth as installed help:
+		// an agent that parses this document must not see fewer routes than the
+		// prose surface advertises.
+		subcommands: CEAL_SUBCOMMANDS.map((subcommand) => ({
+			parent: subcommand.parent, route: [...subcommand.route], description: subcommand.description,
+			usage: subcommand.usage, effect: subcommand.effect, evidence: subcommand.evidence,
+			result_schema: subcommand.result_schema, recovery: subcommand.recovery,
+		})),
 	});
 }
 

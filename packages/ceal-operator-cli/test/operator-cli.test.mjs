@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -58,28 +58,63 @@ test("every declared subcommand renders its own four-field leaf help", () => {
 test("advertised subcommand rows and declared routes stay in sync", () => {
 	for (const command of CEALCTL_COMMANDS) {
 		const declared = CEALCTL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
-		const lines = run([command.name, "--help"]).stdout.split("\n");
-		const advertised = lines.slice(lines.indexOf("Subcommands:") + 1).flatMap((line) => {
-			const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
-			return match ? [match[1]] : [];
-		});
+		const stdout = run([command.name, "--help"]).stdout;
 		if (declared.length === 0) {
-			assert.ok(!lines.includes("Subcommands:"), command.name);
+			assert.ok(!stdout.split("\n").includes("Subcommands:"), command.name);
 			continue;
 		}
-		assert.ok(lines.includes("Subcommands:"), command.name);
-		assert.deepEqual(advertised.slice(0, declared.length), declared.map((subcommand) => subcommand.route.join(" ")));
+		assert.deepEqual(advertisedSubcommands(stdout), declared.map((subcommand) => subcommand.route.join(" ")));
+		const optionRows = stdout.split("\n").slice(stdout.split("\n").indexOf("Options:") + 1);
+		for (const subcommand of declared) {
+			assert.ok(!optionRows.some((line) => line.startsWith(`  ${subcommand.route[0]} `)), `${command.name}: ${subcommand.route[0]}`);
+		}
 	}
 });
 
-// A help probe must never reach an action runner as that action's operand.
-test("a help probe never becomes an operator action", async () => {
-	for (const args of [["sessions", "bogus", "--help"], ["help", "access", "bogus"]]) {
-		const result = await asyncRun(args);
-		assert.equal(result.code, 2, args.join(" "));
-		assert.equal(parseYaml(result.stdout).error.kind, "invalid_argument");
+// A leaf must not advertise a `Result schema` this package never writes.
+test("declared result schemas exist in the emitting package", () => {
+	const source = readdirSync(new URL("../src", import.meta.url))
+		.filter((entry) => entry.endsWith(".ts"))
+		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
+	for (const definition of [...CEALCTL_COMMANDS, ...CEALCTL_SUBCOMMANDS]) {
+		assert.ok(emitted.has(definition.result_schema), `${definition.name ?? definition.route.join(" ")}: ${definition.result_schema}`);
 	}
 });
+
+// A help token anywhere in the tail is read-only help, never an operand, and a
+// guessed route lands on the parent leaf that names the real routes.
+test("a help token anywhere resolves to the nearest declared leaf", async () => {
+	const cases = [
+		{ args: ["sessions", "bogus", "--help"], usage: "Usage: cealctl sessions" },
+		{ args: ["connectors", "apply", "--stdin", "--help"], usage: "Usage: cealctl connectors apply" },
+		{ args: ["logout", "--session", "--help"], usage: "Usage: cealctl logout" },
+	];
+	for (const { args, usage } of cases) {
+		const result = await asyncRun(args, {
+			readStdin: async () => assert.fail("a help probe must not read stdin"),
+			fetchFn: async () => assert.fail("a help probe must not reach the network"),
+		});
+		assert.equal(result.code, 0, args.join(" "));
+		assert.ok(result.stdout.startsWith(usage), `${args.join(" ")}: ${result.stdout.split("\n")[0]}`);
+	}
+	const named = await asyncRun(["help", "access", "bogus"]);
+	assert.equal(named.code, 2);
+	assert.equal(parseYaml(named.stdout).error.kind, "invalid_argument");
+});
+
+function advertisedSubcommands(help) {
+	const lines = help.split("\n");
+	const start = lines.indexOf("Subcommands:");
+	if (start < 0) return [];
+	const rows = [];
+	for (const line of lines.slice(start + 1)) {
+		if (line === "") break;
+		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
+		if (match) rows.push(match[1]);
+	}
+	return rows;
+}
 
 test("registry apply rejects invalid stdin before session or network access", async () => {
 	let fetchCalls = 0;
@@ -118,6 +153,8 @@ test("commands YAML discovers only the small operator surface", () => {
 	const payload = yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "cealctl.command_discovery.v1");
 	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "login", "sessions", "logout", "access", "connectors", "enrollments", "doctor"]);
+	assert.deepEqual(payload.subcommands.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
+		CEALCTL_SUBCOMMANDS.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")));
 	assert.equal(payload.worker_command_surface_included, false);
 	assert.equal(payload.credential_context, "cealctl_operator_admin_session");
 });

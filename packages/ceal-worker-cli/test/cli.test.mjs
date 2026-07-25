@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -11,6 +11,20 @@ import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand } from "../dist/index.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
+
+// Read the child routes a parent leaf advertises, bounded to its own block.
+function advertisedSubcommands(help) {
+	const lines = help.split("\n");
+	const start = lines.indexOf("Subcommands:");
+	if (start < 0) return [];
+	const rows = [];
+	for (const line of lines.slice(start + 1)) {
+		if (line === "") break;
+		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
+		if (match) rows.push(match[1]);
+	}
+	return rows;
+}
 
 async function run(args, runtime = {}) {
 	let stdout = "";
@@ -88,18 +102,30 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 	for (const command of CEAL_COMMANDS) {
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
 		const { stdout } = await run([command.name, "--help"]);
-		const advertised = stdout.split("\n").slice(stdout.split("\n").indexOf("Subcommands:") + 1)
-			.flatMap((line) => {
-				const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
-				return match ? [match[1]] : [];
-			});
 		if (declared.length === 0) {
 			assert.doesNotMatch(stdout, /^Subcommands:$/mu);
 			continue;
 		}
 		assert.match(stdout, /^Subcommands:$/mu);
 		assert.match(stdout, new RegExp(`^Run: ceal ${command.name} <subcommand> --help`, "mu"));
-		assert.deepEqual(advertised.slice(0, declared.length), declared.map((subcommand) => subcommand.route.join(" ")));
+		assert.deepEqual(advertisedSubcommands(stdout), declared.map((subcommand) => subcommand.route.join(" ")));
+		// A route token left behind in the Options block reads as a flag.
+		const optionRows = stdout.split("\n").slice(stdout.split("\n").indexOf("Options:") + 1);
+		for (const subcommand of declared) {
+			assert.ok(!optionRows.some((line) => line.startsWith(`  ${subcommand.route[0]} `)), `${command.name}: ${subcommand.route[0]}`);
+		}
+	}
+});
+
+// Every declared route must emit a schema the package actually writes, so a
+// leaf cannot advertise a `Result schema` no code produces.
+test("declared result schemas exist in the emitting package", () => {
+	const source = readdirSync(new URL("../src", import.meta.url))
+		.filter((entry) => entry.endsWith(".ts"))
+		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
+	for (const definition of [...CEAL_COMMANDS, ...CEAL_SUBCOMMANDS]) {
+		assert.ok(emitted.has(definition.result_schema), `${definition.name ?? definition.route.join(" ")}: ${definition.result_schema}`);
 	}
 });
 
@@ -114,13 +140,26 @@ test("target selection help states its unfiltered-page bound", async () => {
 	assert.match(stdout, /target_catalog\.next_cursor/u);
 });
 
-// A help probe must never reach a command runner as an operand.
-test("a help probe on an undeclared route stays an argument error", async () => {
-	for (const args of [["guide", "bogus", "--help"], ["help", "capabilities", "bogus"], ["session", "use", "--help"]]) {
-		const result = await run(args);
-		assert.equal(result.code, 2, args.join(" "));
-		assert.match(result.stdout, /^ {2}kind: invalid_argument$/mu);
+// A help token anywhere in the tail is read-only help, never an operand: a
+// guessed or partially typed route must land on a leaf that names the real
+// routes instead of reaching a runner or the top of the tree.
+test("a help token anywhere resolves to the nearest declared leaf", async () => {
+	const cases = [
+		{ args: ["guide", "bogus", "--help"], usage: "Usage: ceal guide [status | register codex]" },
+		{ args: ["capabilities", "targets", "--capability", "message.search", "--help"], usage: "Usage: ceal capabilities targets" },
+		{ args: ["session", "enroll", "--gateway", "--help"], usage: "Usage: ceal session enroll" },
+		{ args: ["call", "message.search", "--help"], usage: "Usage: ceal call <capability-id>" },
+	];
+	for (const { args, usage } of cases) {
+		const result = await run(args, { promptEnrollmentCode: () => assert.fail("a help probe must not read a credential") });
+		assert.equal(result.code, 0, args.join(" "));
+		assert.equal(result.stderr, "");
+		assert.ok(result.stdout.startsWith(usage), `${args.join(" ")}: ${result.stdout.split("\n")[0]}`);
 	}
+	// The explicit `help` verb names a leaf, so an unknown route stays an error.
+	const named = await run(["help", "capabilities", "bogus"]);
+	assert.equal(named.code, 2);
+	assert.match(named.stdout, /^ {2}kind: invalid_argument$/mu);
 });
 
 test("every public command emits one YAML document without a format flag", async () => {
@@ -155,6 +194,15 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
 	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe"]);
+	// An agent that parses this document instead of prose help must see the same
+	// route depth the help surface advertises.
+	assert.deepEqual(payload.subcommands.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
+		CEAL_SUBCOMMANDS.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")));
+	for (const subcommand of payload.subcommands) {
+		for (const field of ["usage", "effect", "evidence", "result_schema", "recovery"]) {
+			assert.match(subcommand[field], /\S/u, `${subcommand.route.join(" ")}.${field}`);
+		}
+	}
 });
 
 test("update is option-free, stable-only, and keeps child execution behind one YAML result", async () => {

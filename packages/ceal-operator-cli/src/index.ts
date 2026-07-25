@@ -244,7 +244,7 @@ export const CEALCTL_SUBCOMMANDS: readonly CealctlSubcommandDefinition[] = [
 		usage: "cealctl enrollments create --client <name> --profile <name> --subject <name> --instance <name> [--operator-session <name>]",
 		effect: "control_write",
 		evidence: "host_decision",
-		result_schema: "cealctl.enrollments.v1",
+		result_schema: "cealctl.enrollment_created.v1",
 		recovery: "Create a replacement code if enrollment does not complete before expiry; never re-send an expired code.",
 		options: [
 			"  --client <safe-name>           Existing pre-approved client device name.",
@@ -285,13 +285,27 @@ export function runCealctlCommand(args: readonly string[], io: CealctlIo, runtim
 	const command = COMMAND_BY_NAME.get(args[0] as CealctlCommandDefinition["name"]);
 	if (!command) return writeError("unknown_command", "Unknown cealctl command.", io);
 	const options = args.slice(1);
-	if (options.length === 1 && isHelpToken(options[0])) return writeHelp(commandHelp(command), io);
-	// Resolve a subcommand help probe before any runner sees it, so `--help` can
-	// never be taken as the operand of the action it is asking about.
-	const requestedSubcommand = options.length >= 2 && isHelpToken(options[options.length - 1])
-		? findSubcommand(command.name, options.slice(0, -1)) : undefined;
-	if (requestedSubcommand) return writeHelp(subcommandHelp(requestedSubcommand), io);
+	const requestedHelp = helpRequest(command, options);
+	if (requestedHelp !== undefined) return writeHelp(requestedHelp, io);
 	return runKnownCommand(command.name, options, io, runtime);
+}
+
+// A help token anywhere in the tail is a read-only help request, never an
+// operand: an operator probing a partially typed line must not reach a runner
+// that authorizes an effect, and a guessed route should land on the parent leaf
+// whose `Subcommands:` block names the routes that do exist.
+function helpRequest(command: CealctlCommandDefinition, options: readonly string[]): string | undefined {
+	if (!options.some(isHelpToken)) return undefined;
+	const leading: string[] = [];
+	for (const option of options) {
+		if (option.startsWith("-")) break;
+		leading.push(option);
+	}
+	for (let length = leading.length; length > 0; length -= 1) {
+		const subcommand = findSubcommand(command.name, leading.slice(0, length));
+		if (subcommand) return subcommandHelp(subcommand);
+	}
+	return commandHelp(command);
 }
 
 function subcommandsOf(parent: CealctlCommandDefinition["name"]): readonly CealctlSubcommandDefinition[] {
@@ -810,6 +824,12 @@ function writeCommands(io: CealctlIo): number {
 		command: "cealctl",
 		credential_context: CEALCTL_CREDENTIAL_CONTEXT,
 		commands: CEALCTL_COMMANDS,
+		// Keep the machine-readable inventory at the same depth as installed help.
+		subcommands: CEALCTL_SUBCOMMANDS.map((subcommand) => ({
+			parent: subcommand.parent, route: [...subcommand.route], description: subcommand.description,
+			usage: subcommand.usage, effect: subcommand.effect, evidence: subcommand.evidence,
+			result_schema: subcommand.result_schema, recovery: subcommand.recovery,
+		})),
 		worker_command_surface_included: false,
 	});
 }

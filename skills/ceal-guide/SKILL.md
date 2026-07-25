@@ -62,7 +62,10 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
    construct, decode, or reuse a target cursor. A capability's own result paging
    is a separate contract: continue it only through the continuation field its
    discovered input contract declares, within the bounds that contract states,
-   and read the contract instead of assuming an opaque cursor.
+   and read the contract instead of assuming an opaque cursor. Re-read that
+   contract with the discovery leaf's detail option when the concise catalog
+   omits it; if it declares no continuation field, report the page as bounded
+   instead of constructing one.
 3. Use Ceal refs returned by the selected page. Do not substitute raw provider
    ids, local paths, or remembered deployment names.
 4. Execute only the route and options exposed by the installed leaf help.
