@@ -1,5 +1,5 @@
 # Session Handoff
-Date: 2026-07-25 (`ceal-v0.65.6` published; guide registered for Claude Code here)
+Date: 2026-07-26 (`ceal-v0.65.9` is stable; #2/#3/#4 resolved; prod sessions degraded)
 
 Narnia-owned work only (`@corca-ai/ceal`, the `ceal` worker, `skills/ceal-guide`).
 Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
@@ -13,12 +13,31 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Current State
 
-- `ceal-v0.65.6` is released (run `30160381336`, all four platforms signed, stable
-  activated), installed here (`ceal version` → `0.65.6`, linux-amd64), and the
-  Claude Code guide host is proven **adopted**, not merely linked: after
-  `ceal guide register claude`, a fresh `claude -p` session lists `ceal-guide`
-  among its skills. `0.65.5`'s leaf-help work stays proven
+- `ceal-v0.65.9` is stable and installed here. It carries the resolutions for
+  `corca-ai/ceal-cli#2`, `#3`, `#4`: one error key (`kind`) and one success
+  predicate (`ok`, meaning "this command answered", agreeing with the exit code)
+  on every surface, `gateway: {instance_ref, profile_ref}` on call and receipt
+  results, the Gateway's own `invalid_arguments` and `audit_event_not_found`
+  preserved, the replay caution gated on the capability's declared effect, and
+  `guide status` naming the **detected** running host with `agent_source`.
+- **`0.65.7` and `0.65.8` are burned.** `0.65.7` published but installed clients
+  could not update to it: `ceal update` runs the *installed* generation's
+  `install-ceal.sh`, which byte-compared the new binary's `ceal version`
+  document, and `0.65.7` added a line to it. `ceal.version.v1` is now frozen —
+  the predicate sweep skips it with that reason recorded — and the installer
+  checks the fields it needs instead of the whole document. `0.65.8` lost its
+  publish readback to a transient HTTP 500 and could not be retried, because
+  cosign re-signs per run while published objects are create-or-identical.
+- The Claude Code guide host stays proven **adopted**: a fresh `claude -p`
+  session lists `ceal-guide`. `0.65.5`'s leaf-help work stays proven
   (`corca-ai/ceal-cli#1`, CLOSED).
+- **prod sessions are currently degraded, Gateway-side.** A worker access token
+  expires after ~15 minutes and renewal answers `invalid_response` — reproduced
+  with the previously installed `0.65.6` binary, so it is not a release
+  regression — and a replacement `enrollments create` answers `request_denied`
+  while the access registry still lists the client and profile as active. Both
+  paths worked at 14:45Z. Recorded for the Gateway host in
+  `oc:~/ceal/handoff-from-narnia-2026-07-26.md` §8.
 - Route **acceptance** derives from `CEAL_SUBCOMMANDS` / `CEALCTL_SUBCOMMANDS`
   via `splitSubcommandRoute` (`packages/ceal-worker-cli/src/subcommands.ts`), so
   adding a route means adding a table entry, nothing else.
