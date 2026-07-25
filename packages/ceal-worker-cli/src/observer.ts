@@ -142,7 +142,7 @@ const PRIVACY_LOCAL_SOURCES = [
 	"~/.ceal/client-discovery-cache.json (cached capability/target catalog)",
 	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
 	"managed worker install layout (generation manifest metadata and staged guide asset presence)",
-	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide (guide registration link inspection; no skill content read)",
+	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide, or the directories CODEX_HOME/CLAUDE_CONFIG_DIR configure (guide registration link inspection; no skill content read)",
 	"~/.claude/projects and ~/.codex/sessions (bounded local transcript scan; fixed-vocabulary metadata only)",
 ] as const;
 
@@ -556,7 +556,14 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   }
   parts.push(section("Discovery cache (" + cache.status + ")", cacheBody));
   parts.push(section("Installed release (" + s.install.status + ")", rows(Object.entries(s.install))));
-  parts.push(section("Agent guide (" + s.guide.status + ")", rows(Object.entries(s.guide).filter(([, v]) => typeof v !== "object"))));
+  // The scalar fields project one host, so a supervisor reading only them would
+  // miss a second host that is still staged or in conflict.
+  let guideBody = rows(Object.entries(s.guide).filter(([, v]) => typeof v !== "object"));
+  if (Array.isArray(s.guide.hosts) && s.guide.hosts.length) {
+    guideBody += "<h2 class=\\"muted\\">Agent hosts</h2>" + s.guide.hosts
+      .map((host) => rows(Object.entries(host))).join("<hr>");
+  }
+  parts.push(section("Agent guide (" + s.guide.status + ")", guideBody));
   let receiptsBody = "";
   if (Array.isArray(s.receipts.entries) && s.receipts.entries.length) {
     receiptsBody += rows(Object.entries(s.receipts).filter(([k]) => k !== "entries" && k !== "non_claim"));

@@ -86,10 +86,18 @@ const home = mkdtempSync(path.join(tmpdir(), "ceal-probe-home-"));
 try {
 	const result = spawnSync(process.execPath, [path.join(ROOT, "packages", target.packageDir, "dist", "bin.js"), command, ...tail], {
 		encoding: "utf8",
-		// Every agent-host override the probed binary honors must point inside the
-		// throwaway HOME, or an inherited override would aim a declared local write
-		// at the operator's real agent configuration directory.
-		env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex"), CLAUDE_CONFIG_DIR: path.join(home, ".claude") },
+		// Every inherited variable that can redirect the probed binary at real
+		// local state is pinned inside the throwaway HOME: the agent-host overrides
+		// (or an inherited one aims a declared local write at the operator's real
+		// agent configuration directory) and XDG_RUNTIME_DIR (or an operator-real
+		// admin Gateway socket stays reachable from a probe).
+		env: {
+			...process.env,
+			HOME: home,
+			CODEX_HOME: path.join(home, ".codex"),
+			CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
+			XDG_RUNTIME_DIR: path.join(home, "run"),
+		},
 	});
 	process.stderr.write(`probe-surface: ${binary} ${name} (effect: ${route.effect}${isHelp ? ", help" : ""}) in throwaway HOME\n`);
 	if (result.stdout) process.stdout.write(result.stdout);

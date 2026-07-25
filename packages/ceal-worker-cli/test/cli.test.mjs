@@ -11,6 +11,7 @@ import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
+import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 
 // Read the child routes a parent leaf advertises, bounded to its own block.
 function advertisedSubcommands(help) {
@@ -293,6 +294,8 @@ test("guide status and per-host registration expose one update-safe local skill 
 		// fields it always did, while `hosts` names every supported host.
 		assert.equal(status.agent, "codex");
 		assert.deepEqual(status.hosts.map((host) => host.agent), ["codex", "claude"]);
+		// The document says out loud that its top-level fields are one host only.
+		assert.match(status.non_claims.join(" "), /describe only the named agent host/u);
 		// The declared route token is what selects the host; the dispatcher passes
 		// it through instead of registering a host of its own choosing.
 		for (const agent of ["codex", "claude"]) {
@@ -315,6 +318,25 @@ test("guide status and per-host registration expose one update-safe local skill 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+// The route table and the agent-host table are two declarations that must agree:
+// a `guide register <host>` route whose token is not a declared host would
+// otherwise reach the store and register a host the operator never named.
+test("every declared guide register route names a supported agent host", async () => {
+	const registerRoutes = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === "guide" && subcommand.route[0] === "register");
+	assert.ok(registerRoutes.length > 0);
+	for (const subcommand of registerRoutes) {
+		assert.equal(subcommand.route.length, 2, subcommand.usage);
+		assert.equal(isCealAgentGuideHost(subcommand.route[1]), true, subcommand.usage);
+	}
+	// The dispatcher refuses an unsupported host instead of falling back to the
+	// default one; no store hook may be reached.
+	const refused = await run(["guide", "register", "gemini"], {
+		registerAgentGuide: () => assert.fail("an unsupported agent host must not reach the store"),
+	});
+	assert.equal(refused.code, 2);
+	assert.match(refused.stdout, /^ {2}kind: invalid_argument$/mu);
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {

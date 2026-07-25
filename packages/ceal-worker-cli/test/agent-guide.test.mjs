@@ -111,6 +111,13 @@ test("guide registration refuses to replace an existing Claude Code skill direct
 		assert.equal(result.error?.kind, "registration_conflict");
 		assert.match(result.error?.message, /Claude Code/u);
 		assert.equal(lstatSync(path.join(root, ".claude", "skills", "ceal-guide")).isDirectory(), true);
+		// A reader that treats `hosts` as the per-host truth must not see the
+		// refusing path reported as "staged", which reads as ready to link.
+		assert.deepEqual(result.hosts.find((host) => host.agent === "claude"), {
+			agent: "claude", status: "unavailable",
+			registration_path: path.join(root, ".claude", "skills", "ceal-guide"), registered: false,
+		});
+		assert.equal(result.hosts.find((host) => host.agent === "codex").status, "staged");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -133,7 +140,112 @@ test("an unresolvable agent host reports the variable that would resolve it", ()
 		assert.equal(result.registration_path, undefined);
 		// The resolvable host is unaffected and stays the default projection.
 		assert.equal(store.inspect().agent, "codex");
-		assert.deepEqual(store.inspect().hosts.map((host) => host.agent), ["codex"]);
+		// Every advertised host stays in `hosts`: dropping the unresolved one would
+		// make a route the help still advertises look unsupported by this build.
+		assert.deepEqual(store.inspect().hosts, [
+			{ agent: "codex", status: "staged", registration_path: path.join(root, "codex", "skills", "ceal-guide"), registered: false },
+			{ agent: "claude", status: "unresolved", registered: false },
+		]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// A relative or list-shaped override must be refused, never joined: joining it
+// would build a skill tree under the current working directory and then report
+// that as a real registration.
+test("a non-absolute or list-shaped host directory is refused, not guessed", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-relative-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	symlinkSync("releases/first", path.join(state, "current"));
+	try {
+		for (const override of [".claude", `${path.join(root, "a")}:${path.join(root, "b")}`]) {
+			const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, override);
+			assert.ok(store);
+			const result = store.register("claude");
+			assert.equal(result.status, "unavailable", override);
+			assert.equal(result.error?.kind, "registration_failed");
+			assert.match(result.error?.next_action, /Set CLAUDE_CONFIG_DIR to one absolute directory path/u);
+			assert.equal(result.registration_path, undefined);
+			assert.equal(existsSync(path.join(process.cwd(), ".claude")), false, "no skill tree under the working directory");
+		}
+		// An empty override is no override: the HOME default still applies.
+		const empty = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, "");
+		assert.equal(empty.inspect("claude").registration_path, path.join(root, ".claude", "skills", "ceal-guide"));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// The Codex host is the default projection whether or not it resolved: a
+// Codex-only reader of ceal.guide.v1 must never be handed another host's path
+// in the top-level fields.
+test("the default projection stays the Codex host even when only Claude resolves", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-default-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	symlinkSync("releases/first", path.join(state, "current"));
+	try {
+		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), undefined, undefined, path.join(root, "claude"));
+		assert.ok(store);
+		const status = store.inspect();
+		assert.equal(status.agent, "codex");
+		assert.equal(status.registration_path, undefined);
+		assert.equal(status.status, "unavailable");
+		assert.match(status.error?.next_action, /CODEX_HOME/u);
+		assert.deepEqual(status.hosts.map((host) => host.status), ["unresolved", "staged"]);
+		assert.equal(store.register("claude").registered, true);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// Only the "existing directory" occupant was gated; the dangling-symlink branch
+// is the one with the non-obvious `existsSync`-is-false behavior.
+test("a foreign file, foreign link, or dangling link is refused without replacement", () => {
+	for (const occupant of ["file", "foreign-link", "dangling-link"]) {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-occupant-")));
+		const state = path.join(root, "install", ".ceal-cli", "worker");
+		const release = createRelease(state, "first");
+		symlinkSync("releases/first", path.join(state, "current"));
+		const registration = path.join(root, ".claude", "skills", "ceal-guide");
+		mkdirSync(path.dirname(registration), { recursive: true });
+		if (occupant === "file") writeFileSync(registration, "operator content\n");
+		if (occupant === "foreign-link") symlinkSync(path.join(root, "install"), registration, "dir");
+		if (occupant === "dangling-link") symlinkSync(path.join(root, "gone"), registration, "dir");
+		try {
+			const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, undefined);
+			const result = store.register("claude");
+			assert.equal(result.status, "unavailable", occupant);
+			assert.equal(result.error?.kind, "registration_conflict", occupant);
+			// The occupant survives untouched: this command never replaces state.
+			if (occupant === "file") assert.equal(readFile(registration), "operator content\n");
+			else assert.equal(readlinkSync(registration), path.join(root, occupant === "foreign-link" ? "install" : "gone"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}
+});
+
+// Caught by probing the built surface: the shared guide-unavailable answer must
+// still name the host the operator asked to register.
+test("a missing guide asset answers as the requested host", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-missing-")));
+	try {
+		const store = createCealAgentGuideStore(path.join(root, "ceal-linux-arm64"), root, undefined, undefined);
+		assert.ok(store);
+		for (const agent of ["codex", "claude"]) {
+			const state = store.register(agent);
+			assert.equal(state.status, "unavailable");
+			assert.equal(state.agent, agent);
+			assert.equal(state.error?.kind, "guide_unavailable");
+			// No guide asset means no path was inspected, so no per-host list is
+			// claimed either.
+			assert.equal(state.hosts, undefined);
+		}
+		// An unnamed host keeps the default projection.
+		assert.equal(store.inspect().agent, "codex");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

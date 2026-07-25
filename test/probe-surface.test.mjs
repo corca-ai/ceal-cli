@@ -55,6 +55,24 @@ test("the escape hatch is explicit and still isolated", () => {
 	assert.doesNotMatch(allowed.stdout, new RegExp(process.env.HOME.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });
 
+// An agent-host override defaults to a path under HOME, so a negative assertion
+// against HOME cannot prove the override itself is pinned. Set a sentinel the
+// throwaway HOME can never contain and assert the reported path positively.
+test("an inherited agent-host override cannot aim a probed write at real state", () => {
+	const sentinel = path.join(path.sep, "tmp", "ceal-probe-sentinel-claude-config");
+	const result = spawnSync(process.execPath, [GUARD, "--allow-effect", "local_write", "ceal", "guide", "register", "claude"], {
+		encoding: "utf8", cwd: ROOT,
+		env: { ...process.env, CLAUDE_CONFIG_DIR: sentinel, XDG_RUNTIME_DIR: sentinel },
+	});
+	assert.match(result.stdout, /^schema_version: ceal\.guide\.v1$/mu);
+	assert.doesNotMatch(result.stdout, new RegExp(sentinel.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+	const reported = /^registration_path: (.+)$/mu.exec(result.stdout);
+	// The route is only reachable with a staged guide beside the binary; when it
+	// is, the path it claims must sit inside the throwaway HOME.
+	if (reported) assert.match(reported[1], /ceal-probe-home-/u);
+	else assert.match(result.stdout, /^ {2}kind: guide_unavailable$/mu);
+});
+
 test("an unknown binary or command is refused before spawning", () => {
 	for (const args of [["nope", "capabilities"], ["ceal", "not-a-command"], ["ceal"]]) {
 		const result = probe(args);

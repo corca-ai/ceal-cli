@@ -11,7 +11,7 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
-import type { CealAgentGuideHost } from "./agent-guide.js";
+import { isCealAgentGuideHost, type CealAgentGuideHost } from "./agent-guide.js";
 import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -458,16 +458,30 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	const action = subcommand?.route[0] === "register" ? "register" : "status";
 	// The route's second token is the agent host, so a new host is one table row
 	// plus one store entry: this dispatcher never learns host names of its own.
-	const agent = action === "register" ? (subcommand?.route[1] as CealAgentGuideHost) : undefined;
+	// The token is validated against the host table rather than cast, so a route
+	// added without its host row is refused here instead of silently registering
+	// the default host or crashing inside the store.
+	let agent: CealAgentGuideHost | undefined;
+	if (action === "register") {
+		const requested = subcommand?.route[1];
+		if (!isCealAgentGuideHost(requested)) return writeError("invalid_argument", "Unsupported guide agent host.", io);
+		agent = requested;
+	}
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
 	const state = inspect(agent);
 	writeYaml(io.stdout, {
 		schema_version: "ceal.guide.v1", command: "ceal", action,
 		effect: action === "status" ? "read_only" : "local_write", ...state,
+		non_claims: [AGENT_GUIDE_PROJECTION_NON_CLAIM],
 	});
 	return state.status === "unavailable" ? 3 : 0;
 }
+
+// The top-level fields describe one host; an agent that stops reading there
+// would take a staged default host for "the guide is not registered anywhere".
+const AGENT_GUIDE_PROJECTION_NON_CLAIM =
+	"The top-level status, registration_path, and registered fields describe only the named agent host; read 'hosts' for every supported host.";
 
 function writeAgentGuideUnavailable(
 	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
@@ -481,6 +495,7 @@ function writeAgentGuideUnavailable(
 			message: "The signed Ceal guide is not available from this command runtime.",
 			next_action: "Reinstall a signed Ceal worker release, then run 'ceal guide status'.",
 		},
+		non_claims: [AGENT_GUIDE_PROJECTION_NON_CLAIM],
 	});
 	return 3;
 }

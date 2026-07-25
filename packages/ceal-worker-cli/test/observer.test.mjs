@@ -115,7 +115,13 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 					},
 				};
 			},
-			inspectAgentGuide: () => ({ status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false }),
+			inspectAgentGuide: () => ({
+				status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false,
+				hosts: [
+					{ agent: "codex", status: "staged", registration_path: "/tmp/codex/skills/ceal-guide", registered: false },
+					{ agent: "claude", status: "registered", registration_path: "/tmp/claude/skills/ceal-guide", registered: true },
+				],
+			}),
 			executablePath: process.execPath,
 			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
 			onObserverListening: (value) => { handle = value; resolve(value); },
@@ -151,6 +157,9 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
 	assert.equal(state.install.status, "unmanaged");
 	assert.equal(state.guide.status, "staged");
+	// The scalar projection names one host, so the per-host list is what a
+	// supervisor reads to see the other host's registration.
+	assert.deepEqual(state.guide.hosts.map((host) => `${host.agent}:${host.status}`), ["codex:staged", "claude:registered"]);
 	assert.equal(state.receipts.status, "spooled");
 	assert.equal(state.receipts.coverage, "ceal-mediated");
 	assert.equal(state.receipts.entry_count, 1);
@@ -201,6 +210,10 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
 	const html = await page.text();
 	assert.match(html, /Ceal Workbench/u);
+	// A second registered host must be visible to a human supervisor, not only in
+	// the JSON projection.
+	assert.match(html, /Agent hosts/u);
+	assert.match(html, /guide\.hosts/u);
 	assert.match(html, /My agent work/u);
 	assert.match(html, /Privacy & retention/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
