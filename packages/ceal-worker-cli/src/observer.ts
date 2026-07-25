@@ -142,7 +142,7 @@ const PRIVACY_LOCAL_SOURCES = [
 	"~/.ceal/client-discovery-cache.json (cached capability/target catalog)",
 	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
 	"managed worker install layout (generation manifest metadata and staged guide asset presence)",
-	"~/.codex/skills/ceal-guide (guide registration link inspection; no skill content read)",
+	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide (guide registration link inspection; no skill content read)",
 	"~/.claude/projects and ~/.codex/sessions (bounded local transcript scan; fixed-vocabulary metadata only)",
 ] as const;
 

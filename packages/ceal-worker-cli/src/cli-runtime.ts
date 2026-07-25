@@ -1,6 +1,6 @@
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
-import type { CealAgentGuideState } from "./agent-guide.js";
+import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 
@@ -39,8 +39,10 @@ export interface CealCommandRuntime {
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
 	removeDiscoveryCache?: () => Promise<void>;
-	inspectAgentGuide?: () => CealAgentGuideState;
-	registerAgentGuide?: () => CealAgentGuideState;
+	// The agent host is the declared `guide register <host>` route token; `status`
+	// omits it and reads the default host projection plus every host's state.
+	inspectAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;
+	registerAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;
 	// Client-local receipt spool (advisory allowlisted call-outcome metadata;
 	// failures never change call behavior). See receipt-spool.ts.
 	recordReceiptSpool?: (entry: CealReceiptSpoolEntry) => void;

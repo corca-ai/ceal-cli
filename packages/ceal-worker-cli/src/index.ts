@@ -11,6 +11,7 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "@corca-ai/ceal";
+import type { CealAgentGuideHost } from "./agent-guide.js";
 import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -114,7 +115,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "guide",
 		description: "Inspect or register the signed agent guide for this installed Ceal release.",
-		usage: "ceal guide [status | register codex]",
+		usage: "ceal guide [status | register codex | register claude]",
 		effect: "read_only_or_local_write",
 		evidence: "surface",
 		result_schema: "ceal.guide.v1",
@@ -455,9 +456,12 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	const { subcommand, rest } = splitSubcommandRoute("guide", options);
 	if (rest.length > 0 || (options.length > 0 && !subcommand)) return writeError("invalid_argument", "Invalid guide action.", io);
 	const action = subcommand?.route[0] === "register" ? "register" : "status";
+	// The route's second token is the agent host, so a new host is one table row
+	// plus one store entry: this dispatcher never learns host names of its own.
+	const agent = action === "register" ? (subcommand?.route[1] as CealAgentGuideHost) : undefined;
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
-	if (!inspect) return writeAgentGuideUnavailable(io);
-	const state = inspect();
+	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
+	const state = inspect(agent);
 	writeYaml(io.stdout, {
 		schema_version: "ceal.guide.v1", command: "ceal", action,
 		effect: action === "status" ? "read_only" : "local_write", ...state,
@@ -465,10 +469,13 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	return state.status === "unavailable" ? 3 : 0;
 }
 
-function writeAgentGuideUnavailable(io: CealCliIo): number {
+function writeAgentGuideUnavailable(
+	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
+): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.guide.v1", command: "ceal", action: "status", effect: "read_only", status: "unavailable",
-		agent: "codex", guide_id: "ceal-guide", registered: false, update_safe: false,
+		schema_version: "ceal.guide.v1", command: "ceal", action,
+		effect: action === "status" ? "read_only" : "local_write", status: "unavailable",
+		agent, guide_id: "ceal-guide", registered: false, update_safe: false,
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available from this command runtime.",

@@ -19,7 +19,7 @@ try { discoveryCache = createCealDiscoveryCacheStore(process.env.HOME); } catch 
 let receiptSpool: ReturnType<typeof createCealReceiptSpoolStore> | undefined;
 try { receiptSpool = createCealReceiptSpoolStore(process.env.HOME); } catch { receiptSpool = undefined; }
 
-const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME);
+const agentGuide = createCealAgentGuideStore(process.execPath, process.env.HOME, process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR);
 const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
 
 void runCealCommand(process.argv.slice(2), {
@@ -37,8 +37,8 @@ void runCealCommand(process.argv.slice(2), {
 	loadDiscoveryCache: discoveryCache ? () => discoveryCache.load() : undefined,
 	saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
 	removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
-	inspectAgentGuide: agentGuide ? () => agentGuide.inspect() : undefined,
-	registerAgentGuide: agentGuide ? () => agentGuide.register() : undefined,
+	inspectAgentGuide: agentGuide ? (agent) => agentGuide.inspect(agent) : undefined,
+	registerAgentGuide: agentGuide ? (agent) => agentGuide.register(agent) : undefined,
 	// The append is synchronous inside the async wrapper; the .catch keeps a
 	// rejected spool write from becoming an unhandled rejection.
 	recordReceiptSpool: receiptSpool ? (entry) => { void receiptSpool.append(entry).catch(() => {}) } : undefined,

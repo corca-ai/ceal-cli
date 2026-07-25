@@ -170,7 +170,7 @@ test("target selection help states its unfiltered-page bound", async () => {
 // routes instead of reaching a runner or the top of the tree.
 test("a help token anywhere resolves to the nearest declared leaf", async () => {
 	const cases = [
-		{ args: ["guide", "bogus", "--help"], usage: "Usage: ceal guide [status | register codex]" },
+		{ args: ["guide", "bogus", "--help"], usage: "Usage: ceal guide [status | register codex | register claude]" },
 		{ args: ["capabilities", "targets", "--capability", "message.search", "--help"], usage: "Usage: ceal capabilities targets" },
 		{ args: ["session", "enroll", "--gateway", "--help"], usage: "Usage: ceal session enroll" },
 		{ args: ["call", "message.search", "--help"], usage: "Usage: ceal call <capability-id>" },
@@ -267,29 +267,51 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 	assert.equal(unavailable.error.kind, "update_unavailable");
 });
 
-test("guide status and Codex registration expose one update-safe local skill path", async () => {
+test("guide status and per-host registration expose one update-safe local skill path", async () => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-guide-runtime-"));
 	const guidePath = path.join(root, "install", ".ceal-cli", "worker", "current", "guide");
-	const registrationPath = path.join(root, "codex", "skills", "ceal-guide");
+	const registrationPaths = { codex: path.join(root, "codex", "skills", "ceal-guide"), claude: path.join(root, "claude", "skills", "ceal-guide") };
 	mkdirSync(guidePath, { recursive: true });
 	writeFileSync(path.join(guidePath, "SKILL.md"), "name: ceal-guide\n");
-	let registered = false;
-	const inspect = () => ({
-		status: registered ? "registered" : "staged", agent: "codex", guide_id: "ceal-guide",
-		guide_path: guidePath, registration_path: registrationPath, update_safe: true, registered,
+	const registered = { codex: false, claude: false };
+	// The store's own contract: the top-level fields project one host and `hosts`
+	// carries every host, so this stub mirrors that shape rather than inventing one.
+	const inspect = (agent = "codex") => ({
+		status: registered[agent] ? "registered" : "staged", agent, guide_id: "ceal-guide",
+		guide_path: guidePath, registration_path: registrationPaths[agent], update_safe: true, registered: registered[agent],
+		hosts: Object.keys(registered).map((host) => ({
+			agent: host, status: registered[host] ? "registered" : "staged",
+			registration_path: registrationPaths[host], registered: registered[host],
+		})),
 	});
 	try {
 		const status = await yamlRun(["guide", "status"], 0, { inspectAgentGuide: inspect });
 		assert.equal(status.status, "staged");
 		assert.equal(status.registered, false);
 		assert.equal(status.effect, "read_only");
-		const result = await yamlRun(["guide", "register", "codex"], 0, {
-			registerAgentGuide: () => { registered = true; return inspect(); },
-		});
-		assert.equal(result.status, "registered");
-		assert.equal(result.action, "register");
-		assert.equal(result.effect, "local_write");
-		assert.equal(result.update_safe, true);
+		// A Codex-only reader of ceal.guide.v1 keeps reading the same top-level
+		// fields it always did, while `hosts` names every supported host.
+		assert.equal(status.agent, "codex");
+		assert.deepEqual(status.hosts.map((host) => host.agent), ["codex", "claude"]);
+		// The declared route token is what selects the host; the dispatcher passes
+		// it through instead of registering a host of its own choosing.
+		for (const agent of ["codex", "claude"]) {
+			const result = await yamlRun(["guide", "register", agent], 0, {
+				registerAgentGuide: (requested) => { registered[requested] = true; return inspect(requested); },
+			});
+			assert.equal(result.status, "registered");
+			assert.equal(result.action, "register");
+			assert.equal(result.agent, agent);
+			assert.equal(result.registration_path, registrationPaths[agent]);
+			assert.equal(result.effect, "local_write");
+			assert.equal(result.update_safe, true);
+		}
+		// With no store at all, a register route still answers as that host.
+		const unavailable = await yamlRun(["guide", "register", "claude"], 3);
+		assert.equal(unavailable.agent, "claude");
+		assert.equal(unavailable.action, "register");
+		assert.equal(unavailable.effect, "local_write");
+		assert.equal(unavailable.error.kind, "guide_unavailable");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
