@@ -738,7 +738,7 @@ function writeCapabilitiesAvailable(
 		? discovery.value.capabilities
 		: discovery.value.capabilities.map(conciseCapability);
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.capabilities.v1", command: "ceal", status: "available", gateway_required: true,
+		schema_version: "ceal.capabilities.v1", command: "ceal", ok: true, status: "available", gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
 		gateway: {
 			profile_ref: handshake.value.profile_ref, membership_ref: handshake.value.membership_ref,
@@ -885,7 +885,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 			return writeReceiptError(failure.code, failure.message, io, failure.nextAction, resolved.session, profileRef);
 		}
 		return writeYaml(io.stdout, {
-			schema_version: "ceal.receipt.v1", status: "verified", request_ref: parsed.requestRef,
+			schema_version: "ceal.receipt.v1", ok: true, status: "verified", request_ref: parsed.requestRef,
 			...gatewayResultIdentity(resolved.session, profileRef),
 			events: readback.value.events.map(projectReceiptEvent),
 		});
@@ -947,7 +947,7 @@ function writeReceiptError(
 	session?: CealStoredSession, profileRef?: string,
 ): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.receipt.v1", status: "error",
+		schema_version: "ceal.receipt.v1", ok: false, status: "error",
 		...gatewayResultIdentity(session ?? null, profileRef),
 		error: {
 			kind, message,
@@ -1132,6 +1132,7 @@ function writeCapabilitiesUnavailable(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
+		ok: false,
 		status: "unavailable",
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
@@ -1169,6 +1170,7 @@ function writeGatewayFailure(response: { error: unknown }, io: CealCliIo): numbe
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
+		ok: false,
 		status: failure.denial ? "denied" : "unavailable",
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
@@ -1176,7 +1178,11 @@ function writeGatewayFailure(response: { error: unknown }, io: CealCliIo): numbe
 		proof_level: "host_decision",
 		live_gateway_checked: true,
 		claims_allowed: [failure.denial ? "gateway_denial" : "gateway_rejection"],
-		error: { code: failure.code, message: failure.message, next_action: failure.nextAction },
+		// `kind` is the one error key every Ceal surface uses; `code` is retained
+		// here for one release because this surface published it first. A caller
+		// that read only `kind` saw discovery failures as no error at all, so a
+		// 36-call sweep lost 16 calls and reported none of them (ceal-cli#2).
+		error: { kind: failure.code, code: failure.code, message: failure.message, next_action: failure.nextAction },
 		non_claims: ["No provider action or production audit custody was reached."],
 	});
 	return 3;
@@ -1186,6 +1192,7 @@ function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
+		ok: false,
 		status: "unavailable",
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,

@@ -67,7 +67,7 @@ export function writeCallCompleted(
 	const eventRefs = Array.isArray(events) ? events.flatMap((event) => event && typeof event === "object" && "event_ref" in event ? [String(event.event_ref)] : []) : [];
 	if (eventRefs.length === 0) return writeCallIncomplete(value, requestId, "audit_readback_missing", io, session, parsed, record);
 	return emitCallResult(io, {
-		schema_version: "ceal.result.v2", status: "completed", capability: parsed.capabilityId,
+		schema_version: "ceal.result.v2", ok: true, status: "completed", capability: parsed.capabilityId,
 		target: parsed.targetRef, ...gatewayResultIdentity(session, parsed.profileRef), data: value.data,
 		receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
 	}, record);
@@ -80,7 +80,7 @@ export function writeCallGatewayFailure(
 	const failure = classifyGatewayFailure(response.error);
 	const proofRefs = typeof response.proof_ref_or_unavailable === "string" ? [response.proof_ref_or_unavailable] : [];
 	emitCallResult(io, {
-		schema_version: "ceal.result.v2", status: failure.denial ? "blocked" : "error",
+		schema_version: "ceal.result.v2", ok: false, status: failure.denial ? "blocked" : "error",
 		capability: parsed.capabilityId, target: parsed.targetRef,
 		...gatewayResultIdentity(session, parsed.profileRef),
 		receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
@@ -94,7 +94,7 @@ export function writeCallIncomplete(
 	session: CealStoredSession, parsed: CealParsedCapabilityCall, record?: CealCallResultRecorder,
 ): number {
 	emitCallResult(io, {
-		schema_version: "ceal.result.v2", status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
+		schema_version: "ceal.result.v2", ok: false, status: "error", capability: parsed.capabilityId, target: parsed.targetRef,
 		...gatewayResultIdentity(session, parsed.profileRef),
 		data: value.data, receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 		error: { kind: reason, message: "The Gateway returned a result but its audit event was not read back.", next_action: "Retry audit readback with the request ID before claiming verified completion." },
@@ -108,7 +108,7 @@ export function writeCallUnavailable(
 ): number {
 	const requestWasIssued = typeof requestId === "string";
 	emitCallResult(io, {
-		schema_version: "ceal.result.v2", status: "error",
+		schema_version: "ceal.result.v2", ok: false, status: "error",
 		...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
 		...gatewayResultIdentity(session, parsed?.profileRef),
 		// A transport failure after the worker has allocated the Gateway request

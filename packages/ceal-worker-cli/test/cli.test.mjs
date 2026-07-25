@@ -368,6 +368,36 @@ test("capabilities points an unregistered running host at the guide, and stays s
 	});
 });
 
+// corca-ai/ceal-cli#2 item 1, the one that cost real data: a client read
+// `error.kind` only, so a discovery failure looked like no error at all and a
+// 36-call sweep silently lost 16 calls. One error key and one success predicate
+// across surfaces is what lets a caller write a single handler.
+test("one error key and one success predicate answer for every surface", async () => {
+	const surfaces = [
+		await yamlRun(["capabilities"], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") }),
+		await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
+			loadSession: async () => storedSession("http://127.0.0.1:9"),
+		}),
+		await yamlRun(["receipt", "show", "ceal:missing:call"], 3, {
+			loadSession: async () => storedSession("http://127.0.0.1:9"),
+		}),
+	];
+	for (const payload of surfaces) {
+		assert.equal(payload.ok, false, payload.schema_version);
+		assert.match(payload.error.kind, /\S/u, `${payload.schema_version} must carry error.kind`);
+	}
+
+	// The Gateway-rejection writer is only reachable with a live rejection, so
+	// gate its shape structurally: no emitted error object may carry `code`
+	// without the canonical `kind` beside it.
+	const source = readdirSync(new URL("../src", import.meta.url))
+		.filter((entry) => entry.endsWith(".ts"))
+		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+	for (const [, body] of source.matchAll(/error: \{([^}]*)\}/gu)) {
+		if (/\bcode:/u.test(body)) assert.match(body, /\bkind:/u, `error object with code but no kind: ${body.trim()}`);
+	}
+});
+
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
 	await withEnrollmentGateway(async ({ endpoint, token }) => {
 		let stored = null;
@@ -599,6 +629,7 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 		});
 		assert.deepEqual(payload, {
 			schema_version: "ceal.receipt.v1",
+			ok: true,
 			status: "verified",
 			request_ref: "narnia:call:1:call",
 			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
@@ -621,6 +652,7 @@ test("a policy-denied receipt retains the error code, non-claims, and negotiated
 		});
 		assert.deepEqual(payload, {
 			schema_version: "ceal.receipt.v1",
+			ok: true,
 			status: "verified",
 			request_ref: "narnia:denied:1:call",
 			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
@@ -789,7 +821,7 @@ test("compatibility result data passes through without a client-side message pro
 	assert.equal(code, 0);
 	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.deepEqual(payload, {
-		schema_version: "ceal.result.v2", status: "completed", capability: "message.get", target: "target:team-inbox",
+		schema_version: "ceal.result.v2", ok: true, status: "completed", capability: "message.get", target: "target:team-inbox",
 		data: {
 			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
 			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
