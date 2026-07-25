@@ -530,7 +530,7 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  --detail                Include each capability's full input_contract (default: concise).",
 			"  --endpoint <https-url>  Gateway client endpoint.",
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
-			"  --token-stdin            Read the Gateway-issued client token from stdin.",
+			"  --token-stdin           Read the Gateway-issued client token from stdin.",
 		];
 	if (name === "call") return [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
