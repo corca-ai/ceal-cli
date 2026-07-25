@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.65.7 (`ceal-v0.65.7`)
+## 0.65.8 (`ceal-v0.65.8`)
+
+- Restore the upgrade path `0.65.7` broke. `ceal update` runs the **installed**
+  generation's `install-ceal.sh`, and that script compared the new binary's
+  `ceal version` document byte for byte. `0.65.7` added one line to it, so every
+  already-installed client failed its own update with `update_failed` — the new
+  release was fine, the upgrade to it was not. `ceal.version.v1` is unchanged
+  again and is now treated as frozen, and the installer checks the fields it
+  depends on instead of the whole document, so this class of break cannot repeat.
+  A client that installed `0.65.7` fresh carries the strict comparison in its own
+  installer and needs one `install-ceal.sh` reinstall to move on; a client on
+  `0.65.6` or earlier updates normally.
+
+## 0.65.7 (`ceal-v0.65.7`, superseded — do not install)
 
 Four reports from a study that uses `ceal` as its only path to organizational
 data. Each one is a case where the surface told an agent less, or worse, than it

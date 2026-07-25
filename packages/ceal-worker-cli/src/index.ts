@@ -40,7 +40,7 @@ export { renderPlainYamlDocument } from "./yaml.js";
 export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
 export type { CealSubcommandDefinition } from "./subcommands.js";
 
-const CEAL_PACKAGE_VERSION = "0.65.7" as const;
+const CEAL_PACKAGE_VERSION = "0.65.8" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 
@@ -433,7 +433,6 @@ function writeVersion(io: CealCliIo): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
-		ok: true,
 		version: CEAL_PACKAGE_VERSION,
 		protocol_version: PROTOCOL_VERSION,
 		supported_gateway_protocol_range: CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE,

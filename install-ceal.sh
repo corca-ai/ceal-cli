@@ -229,11 +229,18 @@ verify_manifest_guide() {
 }
 
 verify_version_output() {
-  binary="$1"; stdout_path="$TMP_DIR/ceal-version.yaml"; stderr_path="$TMP_DIR/ceal-version.stderr"; expected_path="$TMP_DIR/ceal-version.expected.yaml"
+  binary="$1"; stdout_path="$TMP_DIR/ceal-version.yaml"; stderr_path="$TMP_DIR/ceal-version.stderr"; expected_path="$TMP_DIR/ceal-version.expected.yaml" # retained for older callers
   "$binary" version >"$stdout_path" 2>"$stderr_path" || fail "ceal version probe failed"
   [ ! -s "$stderr_path" ] || fail "ceal version probe wrote unexpected stderr"
-  printf '%s\n' "schema_version: ceal.version.v1" "command: ceal" "ok: true" "version: ${VERSION#ceal-v}" "protocol_version: 1.3.0" "supported_gateway_protocol_range:" "  minimum: 1.3.0" "  maximum: 1.3.0" "credential_context: gateway_issued_client_session" > "$expected_path"
-  cmp -s "$stdout_path" "$expected_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  # Check the fields this installer actually depends on, not the whole document.
+  # A byte comparison made `ceal version` unextendable: the installer that runs
+  # during `ceal update` is the *installed* generation's, so any added line broke
+  # every existing client's upgrade path rather than the new release.
+  grep -qx "schema_version: ceal.version.v1" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  grep -qx "command: ceal" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  grep -qx "version: ${VERSION#ceal-v}" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  grep -qx "protocol_version: 1.3.0" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  grep -qx "credential_context: gateway_issued_client_session" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
 }
 
 download_signed_asset() { asset="$1"; download_asset "$asset"; download_asset "$asset.sig"; download_asset "$asset.pem"; }

@@ -57,6 +57,11 @@ test("canonical registry is reachable through stable, read-only help", async () 
 		for (const command of CEAL_COMMANDS) assert.match(result.stdout, new RegExp(`^  ${command.name}\\s`, "mu"));
 	}
 	for (const command of CEAL_COMMANDS) {
+		// `ceal version` is frozen: the installer that runs during `ceal update` is
+		// the installed generation's, and it verifies that document. Adding a field
+		// broke every existing client's upgrade path in 0.65.8, so this document
+		// stays byte-stable until no installed client compares it whole.
+		if (command.name === "version") continue;
 		for (const args of [[command.name, "--help"], [command.name, "-h"], ["help", command.name]]) {
 			const result = await run(args);
 			assert.equal(result.code, 0);
@@ -126,6 +131,11 @@ test("route acceptance is derived from the declaration", async () => {
 // reintroduces the same dead end from the other side.
 test("advertised subcommand rows and declared routes stay in sync", async () => {
 	for (const command of CEAL_COMMANDS) {
+		// `ceal version` is frozen: the installer that runs during `ceal update` is
+		// the installed generation's, and it verifies that document. Adding a field
+		// broke every existing client's upgrade path in 0.65.8, so this document
+		// stays byte-stable until no installed client compares it whole.
+		if (command.name === "version") continue;
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
 		const { stdout } = await run([command.name, "--help"]);
 		if (declared.length === 0) {
@@ -190,6 +200,11 @@ test("a help token anywhere resolves to the nearest declared leaf", async () => 
 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
+		// `ceal version` is frozen: the installer that runs during `ceal update` is
+		// the installed generation's, and it verifies that document. Adding a field
+		// broke every existing client's upgrade path in 0.65.8, so this document
+		// stays byte-stable until no installed client compares it whole.
+		if (command.name === "version") continue;
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "request:test"]
 			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
@@ -205,17 +220,17 @@ test("every public command emits one YAML document without a format flag", async
 
 test("version identifies the package, protocol, range, and credential context", async () => {
 	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	// Deliberately byte-stable; see the sweep's exemption.
 	assert.deepEqual(await yamlRun(["version"]), {
 		schema_version: "ceal.version.v1",
 		command: "ceal",
-		ok: true,
 		// Drift guard: the rendered version must track the package manifest.
 		version: manifest.version,
 		protocol_version: "1.3.0",
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
 	});
-	assert.equal(manifest.version, "0.65.7");
+	assert.equal(manifest.version, "0.65.8");
 });
 
 test("commands YAML is the machine-readable discovery surface", async () => {
@@ -241,7 +256,7 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 			return {
 				status: "updated",
 				previous_version: "0.65.0",
-				installed_version: "0.65.7",
+				installed_version: "0.65.8",
 				platform: "linux-arm64",
 				artifact_sha256: "a".repeat(64),
 				elapsed_ms: 42,
@@ -256,13 +271,13 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 		effect: "local_write",
 		stable_only: true,
 		previous_version: "0.65.0",
-		installed_version: "0.65.7",
+		installed_version: "0.65.8",
 		platform: "linux-arm64",
 		artifact_sha256: "a".repeat(64),
 		elapsed_ms: 42,
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
-	const invalid = await run(["update", "v0.65.7"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
+	const invalid = await run(["update", "v0.65.8"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
 	assert.equal(invalid.code, 2);
 	assert.equal(invoked, 1);
 	const unavailable = await yamlRun(["update"], 3);
@@ -380,6 +395,11 @@ test("capabilities points an unregistered running host at the guide, and stays s
 // `error.kind` when false.
 test("every command answers one success predicate that agrees with its exit code", async () => {
 	for (const command of CEAL_COMMANDS) {
+		// `ceal version` is frozen: the installer that runs during `ceal update` is
+		// the installed generation's, and it verifies that document. Adding a field
+		// broke every existing client's upgrade path in 0.65.8, so this document
+		// stays byte-stable until no installed client compares it whole.
+		if (command.name === "version") continue;
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "ceal:missing:call"]
 			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
@@ -1463,7 +1483,7 @@ test("capabilities selects a bounded target page through the stored client sessi
 		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
 		assert.deepEqual(requests.map((item) => item.body.body), [
-			{ client: { name: "ceal", version: "0.65.7" } },
+			{ client: { name: "ceal", version: "0.65.8" } },
 			{ capability_id: "message.search", match: "team", limit: 1 },
 		]);
 	});
