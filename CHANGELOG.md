@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.65.8 (`ceal-v0.65.8`)
+## 0.65.9 (`ceal-v0.65.9`)
+
+Contents identical to `0.65.8`, which never published: its release run lost the
+public readback to a transient HTTP 500 after uploading, and the retry could not
+succeed because cosign issues a fresh certificate per run while published objects
+are create-or-identical. One clean run per tag is the contract, so the tag was
+burned rather than forced — the same disposition `0.65.2` received.
+
+## 0.65.8 (`ceal-v0.65.8`, never published)
 
 - Restore the upgrade path `0.65.7` broke. `ceal update` runs the **installed**
   generation's `install-ceal.sh`, and that script compared the new binary's
