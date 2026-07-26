@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOOKS_DIR = path.join(REPO_ROOT, ".githooks");
 const RELATIVE_HOOKS_DIR = ".githooks";
+const BLAME_IGNORE_FILE = ".git-blame-ignore-revs";
 const checkOnly = process.argv.includes("--check");
 
 function git(args) {
@@ -25,6 +26,17 @@ function configuredHooksPath() {
 	} catch {
 		// git exits 1 when the key is unset, which is a state, not a failure.
 		return "";
+	}
+}
+
+// The bulk reformat would otherwise attribute most of the tree to itself. GitHub
+// reads this file on its own; a local clone has to be told once.
+function configureBlameIgnore() {
+	if (!existsSync(path.join(REPO_ROOT, BLAME_IGNORE_FILE))) return;
+	try {
+		git(["config", "--local", "blame.ignoreRevsFile", BLAME_IGNORE_FILE]);
+	} catch {
+		// Blame ergonomics are not worth failing an install over.
 	}
 }
 
@@ -55,11 +67,13 @@ for (const entry of readdirSync(HOOKS_DIR)) {
 }
 
 if (current === RELATIVE_HOOKS_DIR) {
+	configureBlameIgnore();
 	console.log(`install-git-hooks: already installed (core.hooksPath=${RELATIVE_HOOKS_DIR}); refreshed hook permissions.`);
 	process.exit(0);
 }
 
 git(["config", "--local", "core.hooksPath", RELATIVE_HOOKS_DIR]);
+configureBlameIgnore();
 console.log(
 	`install-git-hooks: set core.hooksPath=${RELATIVE_HOOKS_DIR}` +
 		(current === "" ? "." : ` (was ${current}).`) +

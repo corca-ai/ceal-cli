@@ -133,7 +133,7 @@ full gate for the last run before pushing or tagging:
 ```sh
 npm run check:unit   # lint + build + the four package suites
 npm run test:release # release-artifact and native-binary suites only
-npm run lint         # Biome, linter only; lint:fix applies the safe fixes
+npm run lint         # biome check: lint + format + import order
 ```
 
 `npm run hooks:install` wires a `pre-push` hook that runs the iteration gate, or
@@ -141,9 +141,11 @@ the full gate for a tag push — a failed release tag cannot be reused.
 `.github/workflows/check.yml` runs the full gate on every push and pull request
 to `main`; the other workflows are release lanes and trigger only on tags.
 
-Biome runs as a linter only. The frozen packages are excluded from it on
-purpose, and the formatter is off because this repository's dense single-line
-style is deliberate.
+`npm run lint` runs `biome check .`, so formatting and import order are gated
+rather than merely suggested; `npm run lint:fix` applies every safe fix. The
+frozen packages are excluded on purpose. Formatting-only commits are listed in
+`.git-blame-ignore-revs` so `git blame` skips them, which `npm run hooks:install`
+configures for the clone.
 
 Probing an installed surface is a read-only question, so route it through the
 declared-effect guard rather than typing the binary at your own `HOME`:

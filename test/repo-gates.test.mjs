@@ -21,7 +21,9 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.match(manifest.scripts["check:unit"], /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm test/u);
-	assert.equal(manifest.scripts.lint, "biome lint .");
+	// `biome check`, not `biome lint`: it also verifies formatting, so an
+	// unformatted commit fails the gate instead of merely drifting.
+	assert.equal(manifest.scripts.lint, "biome check .");
 });
 
 // The frozen packages are compatibility inputs this lane may not originate
@@ -93,6 +95,22 @@ test("the check lane and the release lane pin the same Node", () => {
 	assert.ok(releaseVersions.length > 0, "the release lane must pin a Node version");
 	for (const version of releaseVersions) {
 		assert.equal(version, pinned, "ceal-release.yml and .nvmrc must pin the same Node");
+	}
+});
+
+// The reformat touched 64 files at once, so `git blame` needs to be told to skip
+// it or most of the tree attributes to that single commit.
+test("every formatting-only commit is recorded for git blame to ignore", () => {
+	const revisions = read(".git-blame-ignore-revs")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("#"));
+	assert.ok(revisions.length > 0, ".git-blame-ignore-revs must list the bulk-reformat commit");
+	for (const revision of revisions) {
+		assert.match(revision, /^[0-9a-f]{40}$/u, "each entry must be a full 40-character SHA, which is what git requires");
+		// A typo here fails silently in git, so prove each SHA resolves.
+		const type = execFileSync("git", ["cat-file", "-t", revision], { cwd: ROOT, encoding: "utf8" }).trim();
+		assert.equal(type, "commit", `${revision} must be a commit in this repository`);
 	}
 });
 

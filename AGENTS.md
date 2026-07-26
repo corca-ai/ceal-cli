@@ -56,11 +56,14 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
   quoting a number from a document — the recorded figures went stale unnoticed
   once already, and a stale figure makes an honest run look like a regression
   under the `Boundaries` slow-test rule below.
-- `npm run lint` (Biome) runs inside both gates; `npm run lint:fix` applies the
-  safe fixes. `biome.json` excludes the frozen packages deliberately — do not
-  widen its `includes` to lint code this lane may not edit. The formatter stays
-  off: this repository's dense single-line style is intentional, and enabling it
-  rewrites ~60 files without catching a single defect. Three rules are off for
+- `npm run lint` is `biome check .` — lint, format, and import order — and runs
+  inside both gates; `npm run lint:fix` applies every safe fix. It is `check`
+  rather than `lint` on purpose: an unformatted commit must fail the gate, not
+  merely drift. `biome.json` excludes the frozen packages deliberately — do not
+  widen its `includes` to lint code this lane may not edit. `lineWidth` is 140
+  with tabs, which is this tree's own shape rather than a new house style.
+  Formatting-only commits belong in `.git-blame-ignore-revs`, which
+  `npm run hooks:install` wires into the clone. Three lint rules are off for
   reasons JSON cannot carry, so check here before re-enabling one:
   `noNonNullAssertion` (`options[index]!` after a bounds check is the idiom),
   `useTemplate` (every hit is `.join("\n") + "\n"`, which a template worsens),
