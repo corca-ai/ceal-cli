@@ -1,40 +1,6 @@
+import type { CealGatewayRequestForInput, CealGatewayRequestInput, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
 import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
-import type {
-	CealGatewayRequestForInput,
-	CealGatewayRequestInput,
-	CealGatewayResponseFor,
-} from "@corca-ai/ceal-protocol";
 import type { CealClientTransport } from "./http-transport.js";
-
-export {
-	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
-	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
-	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
-	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
-	CealHttpTransportError,
-	createCealHttpTransport,
-} from "./http-transport.js";
-export {
-	CealEnrollmentClientError,
-	createCealEnrollmentClient,
-} from "./enrollment-client.js";
-export type {
-	CealEnrollmentClient,
-	CreateCealEnrollmentClientOptions,
-} from "./enrollment-client.js";
-export {
-	CealPersonalClientSessionError,
-	createCealPersonalClientSessionClient,
-} from "./personal-client-session-client.js";
-export type {
-	CealPersonalClientSessionClient,
-	CreateCealPersonalClientSessionClientOptions,
-} from "./personal-client-session-client.js";
-export type {
-	CealClientTransport,
-	CealHttpTransportErrorCode,
-	CreateCealHttpTransportOptions,
-} from "./http-transport.js";
 
 export type {
 	CealClientFailure,
@@ -49,6 +15,35 @@ export type {
 	CealProofReferenceOrUnavailable,
 	CealProofUnavailable,
 } from "@corca-ai/ceal-protocol";
+export type {
+	CealEnrollmentClient,
+	CreateCealEnrollmentClientOptions,
+} from "./enrollment-client.js";
+export {
+	CealEnrollmentClientError,
+	createCealEnrollmentClient,
+} from "./enrollment-client.js";
+export type {
+	CealClientTransport,
+	CealHttpTransportErrorCode,
+	CreateCealHttpTransportOptions,
+} from "./http-transport.js";
+export {
+	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
+	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
+	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
+	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
+	CealHttpTransportError,
+	createCealHttpTransport,
+} from "./http-transport.js";
+export type {
+	CealPersonalClientSessionClient,
+	CreateCealPersonalClientSessionClientOptions,
+} from "./personal-client-session-client.js";
+export {
+	CealPersonalClientSessionError,
+	createCealPersonalClientSessionClient,
+} from "./personal-client-session-client.js";
 
 export interface CealClient {
 	request<I extends CealGatewayRequestInput>(input: Readonly<I>): Promise<CealGatewayResponseFor<CealGatewayRequestForInput<I>>>;

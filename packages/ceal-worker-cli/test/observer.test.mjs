@@ -45,11 +45,16 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 			schema_version: "ceal.gateway_discovery.v2",
 			profile_ref: "profile:observer-fixture",
 			membership_ref: "membership:observer-fixture",
-			capabilities: [{
-				capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required",
-				input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
-				evidence_requirement: "gateway_audit",
-			}],
+			capabilities: [
+				{
+					capability_id: "message.search",
+					label: "Search messages",
+					effect: "read",
+					target_requirement: "required",
+					input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
+					evidence_requirement: "gateway_audit",
+				},
+			],
 			targets: [],
 			target_catalog: { target_count: 3, returned_count: 0, complete: false, selection_required: true },
 			host_decision: "accepted",
@@ -80,17 +85,29 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				schemaVersion: "ceal.agent_activity.v1",
 				adapters: [
 					{
-						runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
-						depth: "session_events", sessionCount: 1,
-						sessions: [{
-							sessionRef: "11111111-2222-3333-4444-555555555555", lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048,
-							events: {
-								scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
-								firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
-								// Partial-field usage: only the supplied field may surface.
-								tokenUsage: { source: "event_usage_sum", completeness: "full_transcript", usageEvents: 1, outputTokens: 15 },
+						runtime: "claude",
+						root: "~/.claude",
+						health: "active",
+						coverage: "transcript-observed",
+						depth: "session_events",
+						sessionCount: 1,
+						sessions: [
+							{
+								sessionRef: "11111111-2222-3333-4444-555555555555",
+								lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"),
+								transcriptBytes: 2048,
+								events: {
+									scan: "complete",
+									eventCount: 3,
+									kinds: { user_message: 1, tool_call: 1, assistant_message: 1 },
+									unparsedLines: 0,
+									firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"),
+									lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+									// Partial-field usage: only the supplied field may surface.
+									tokenUsage: { source: "event_usage_sum", completeness: "full_transcript", usageEvents: 1, outputTokens: 15 },
+								},
 							},
-						}],
+						],
 						eventScan: { scannedSessions: 1, sessionLimit: 3 },
 					},
 					{ runtime: "codex", root: "~/.codex", health: "unknown", coverage: "unsupported", note: "The Codex adapter is not implemented yet." },
@@ -103,20 +120,35 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				return {
 					status: "scanned",
 					session: {
-						sessionRef, lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"), transcriptBytes: 2048,
+						sessionRef,
+						lastActivityAt: Date.parse("2026-07-24T00:00:45.000Z"),
+						transcriptBytes: 2048,
 						events: {
-							scan: "complete", eventCount: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsedLines: 0,
-							firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"), lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
+							scan: "complete",
+							eventCount: 3,
+							kinds: { user_message: 1, tool_call: 1, assistant_message: 1 },
+							unparsedLines: 0,
+							firstEventAt: Date.parse("2026-07-24T00:00:40.000Z"),
+							lastScannedEventAt: Date.parse("2026-07-24T00:00:45.000Z"),
 							tokenUsage: {
-								source: "event_usage_sum", completeness: "full_transcript", usageEvents: 1,
-								inputTokens: 5, outputTokens: 15, cacheReadTokens: 100, cacheWriteTokens: 50,
+								source: "event_usage_sum",
+								completeness: "full_transcript",
+								usageEvents: 1,
+								inputTokens: 5,
+								outputTokens: 15,
+								cacheReadTokens: 100,
+								cacheWriteTokens: 50,
 							},
 						},
 					},
 				};
 			},
 			inspectAgentGuide: () => ({
-				status: "staged", agent: "codex", guide_id: "ceal-guide", update_safe: true, registered: false,
+				status: "staged",
+				agent: "codex",
+				guide_id: "ceal-guide",
+				update_safe: true,
+				registered: false,
 				hosts: [
 					{ agent: "codex", status: "staged", registration_path: "/tmp/codex/skills/ceal-guide", registered: false },
 					{ agent: "claude", status: "registered", registration_path: "/tmp/claude/skills/ceal-guide", registered: true },
@@ -124,11 +156,22 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 			}),
 			executablePath: process.execPath,
 			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
-			onObserverListening: (value) => { handle = value; resolve(value); },
-		}).then((code) => { io.exitCode = code; });
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
+		}).then((code) => {
+			io.exitCode = code;
+		});
 	});
 	await handleReady;
-	context.after(async () => { try { await handle.close(); } catch { /* already closed */ } });
+	context.after(async () => {
+		try {
+			await handle.close();
+		} catch {
+			/* already closed */
+		}
+	});
 
 	const doc = parse(io.stdout.join(""));
 	assert.equal(doc.schema_version, "ceal.observe.v1");
@@ -149,9 +192,15 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.session.profile_ref, "profile:observer-fixture");
 	assert.equal(state.discovery_cache.status, "cached");
 	assert.equal(state.discovery_cache.capability_count, 1);
-	assert.deepEqual(state.discovery_cache.capabilities, [{
-		capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required", evidence_requirement: "gateway_audit",
-	}]);
+	assert.deepEqual(state.discovery_cache.capabilities, [
+		{
+			capability_id: "message.search",
+			label: "Search messages",
+			effect: "read",
+			target_requirement: "required",
+			evidence_requirement: "gateway_audit",
+		},
+	]);
 	assert.equal(state.discovery_cache.within_ttl, true);
 	assert.equal(state.discovery_cache.age_ms, 60_000);
 	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
@@ -159,33 +208,50 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.guide.status, "staged");
 	// The scalar projection names one host, so the per-host list is what a
 	// supervisor reads to see the other host's registration.
-	assert.deepEqual(state.guide.hosts.map((host) => `${host.agent}:${host.status}`), ["codex:staged", "claude:registered"]);
+	assert.deepEqual(
+		state.guide.hosts.map((host) => `${host.agent}:${host.status}`),
+		["codex:staged", "claude:registered"],
+	);
 	assert.equal(state.receipts.status, "spooled");
 	assert.equal(state.receipts.coverage, "ceal-mediated");
 	assert.equal(state.receipts.entry_count, 1);
-	assert.deepEqual(state.receipts.entries, [{
-		recorded_at: "2026-07-24T00:00:30.000Z",
-		request_ref: "narnia:observer:1:call",
-		status: "completed",
-		evidence: "readback_verified",
-		capability: "message.search",
-		target: "target:team-inbox",
-		audit_refs: ["gateway-audit:event:777"],
-	}]);
+	assert.deepEqual(state.receipts.entries, [
+		{
+			recorded_at: "2026-07-24T00:00:30.000Z",
+			request_ref: "narnia:observer:1:call",
+			status: "completed",
+			evidence: "readback_verified",
+			capability: "message.search",
+			target: "target:team-inbox",
+			audit_refs: ["gateway-audit:event:777"],
+		},
+	]);
 	assert.match(state.receipts.non_claim, /Gateway audit ledger stays authoritative/u);
 	assert.equal(state.agent_activity.status, "inventoried");
 	assert.deepEqual(state.agent_activity.adapters[0], {
-		runtime: "claude", root: "~/.claude", health: "active", coverage: "transcript-observed",
-		depth: "session_events", session_count: 1,
-		sessions: [{
-			session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048,
-			events: {
-				scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
-				first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
-				// Omitted-not-zero survives the projection: unsupplied fields have no key.
-				token_usage: { source: "event_usage_sum", completeness: "full_transcript", usage_events: 1, output_tokens: 15 },
+		runtime: "claude",
+		root: "~/.claude",
+		health: "active",
+		coverage: "transcript-observed",
+		depth: "session_events",
+		session_count: 1,
+		sessions: [
+			{
+				session_ref: "11111111-2222-3333-4444-555555555555",
+				last_activity_at: "2026-07-24T00:00:45.000Z",
+				transcript_bytes: 2048,
+				events: {
+					scan: "complete",
+					event_count: 3,
+					kinds: { user_message: 1, tool_call: 1, assistant_message: 1 },
+					unparsed_lines: 0,
+					first_event_at: "2026-07-24T00:00:40.000Z",
+					last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+					// Omitted-not-zero survives the projection: unsupplied fields have no key.
+					token_usage: { source: "event_usage_sum", completeness: "full_transcript", usage_events: 1, output_tokens: 15 },
+				},
 			},
-		}],
+		],
 		event_scan: { scanned_sessions: 1, session_limit: 3 },
 	});
 	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
@@ -225,13 +291,24 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(drillBody.runtime, "claude");
 	assert.equal(drillBody.status, "scanned");
 	assert.deepEqual(drillBody.session, {
-		session_ref: "11111111-2222-3333-4444-555555555555", last_activity_at: "2026-07-24T00:00:45.000Z", transcript_bytes: 2048,
+		session_ref: "11111111-2222-3333-4444-555555555555",
+		last_activity_at: "2026-07-24T00:00:45.000Z",
+		transcript_bytes: 2048,
 		events: {
-			scan: "complete", event_count: 3, kinds: { user_message: 1, tool_call: 1, assistant_message: 1 }, unparsed_lines: 0,
-			first_event_at: "2026-07-24T00:00:40.000Z", last_scanned_event_at: "2026-07-24T00:00:45.000Z",
+			scan: "complete",
+			event_count: 3,
+			kinds: { user_message: 1, tool_call: 1, assistant_message: 1 },
+			unparsed_lines: 0,
+			first_event_at: "2026-07-24T00:00:40.000Z",
+			last_scanned_event_at: "2026-07-24T00:00:45.000Z",
 			token_usage: {
-				source: "event_usage_sum", completeness: "full_transcript", usage_events: 1,
-				input_tokens: 5, output_tokens: 15, cache_read_tokens: 100, cache_write_tokens: 50,
+				source: "event_usage_sum",
+				completeness: "full_transcript",
+				usage_events: 1,
+				input_tokens: 5,
+				output_tokens: 15,
+				cache_read_tokens: 100,
+				cache_write_tokens: 50,
 			},
 		},
 	});
@@ -270,10 +347,19 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: () => spoolStore.load(),
-			onObserverListening: (value) => { handle = value; resolve(value); },
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
 		});
 	});
-	context.after(async () => { try { await handle.close(); } catch { /* already closed */ } });
+	context.after(async () => {
+		try {
+			await handle.close();
+		} catch {
+			/* already closed */
+		}
+	});
 	const doc = parse(io.stdout.join(""));
 	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
 	assert.equal(state.receipts.status, "unreadable");
@@ -286,7 +372,10 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	let handle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
-			onObserverListening: (value) => { handle = value; resolve(value); },
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
 		});
 	});
 	const doc = parse(io.stdout.join(""));
@@ -327,12 +416,22 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		loadReceiptSpool: async () => ({
 			entries: [
 				{
-					recordedAt: NOW - 120_000, requestRef: "narnia:sugg:1:call", status: "error",
-					evidence: "not_read_back", auditRefs: [], capabilityId: "message.search", targetRef: "target:team-inbox",
+					recordedAt: NOW - 120_000,
+					requestRef: "narnia:sugg:1:call",
+					status: "error",
+					evidence: "not_read_back",
+					auditRefs: [],
+					capabilityId: "message.search",
+					targetRef: "target:team-inbox",
 				},
 				{
-					recordedAt: NOW - 60_000, requestRef: "narnia:sugg:2:call", status: "error",
-					evidence: "outcome_unknown", auditRefs: [], capabilityId: "message.search", targetRef: "target:team-inbox",
+					recordedAt: NOW - 60_000,
+					requestRef: "narnia:sugg:2:call",
+					status: "error",
+					evidence: "outcome_unknown",
+					auditRefs: [],
+					capabilityId: "message.search",
+					targetRef: "target:team-inbox",
 				},
 			],
 			bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
@@ -350,22 +449,28 @@ test("local suggestions fire deterministically and stay linked to observed evide
 	const state = await buildObserverState(runtime);
 	const byKind = new Map(state.suggestions.entries.map((entry) => [entry.kind, entry]));
 	assert.deepEqual([...byKind.keys()].sort(), [
-		"missing_cache_opportunity", "repeated_failed_work", "stale_collector", "unknown_outcome_receipt",
+		"missing_cache_opportunity",
+		"repeated_failed_work",
+		"stale_collector",
+		"unknown_outcome_receipt",
 	]);
 	// Only the stale collector fires; an inactive (unused) runtime is not advice.
 	assert.deepEqual(byKind.get("stale_collector").evidence, { runtime: "claude", root: "~/.claude", health: "stale" });
 	assert.deepEqual(byKind.get("missing_cache_opportunity").evidence, {
-		session: "present", discovery_cache: "absent",
+		session: "present",
+		discovery_cache: "absent",
 	});
 	assert.match(byKind.get("missing_cache_opportunity").next_action, /ceal capabilities/u);
 	// Rendered entries are newest-first, so the latest failure leads the refs
 	// and anchors the receipt lookup.
 	assert.deepEqual(byKind.get("repeated_failed_work").evidence, {
-		capability: "message.search", request_refs: ["narnia:sugg:2:call", "narnia:sugg:1:call"],
+		capability: "message.search",
+		request_refs: ["narnia:sugg:2:call", "narnia:sugg:1:call"],
 	});
 	assert.match(byKind.get("repeated_failed_work").next_action, /ceal receipt show narnia:sugg:2:call/u);
 	assert.deepEqual(byKind.get("unknown_outcome_receipt").evidence, {
-		request_ref: "narnia:sugg:2:call", capability: "message.search",
+		request_ref: "narnia:sugg:2:call",
+		capability: "message.search",
 	});
 	// Deterministic: the same local state yields the same suggestions.
 	const rerun = await buildObserverState(runtime);
@@ -387,7 +492,10 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		}),
 	});
 	assert.equal(expired.discovery_cache.within_ttl, false);
-	assert.equal(expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"), false);
+	assert.equal(
+		expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"),
+		false,
+	);
 });
 
 function rawRequest(baseUrl, requestPath, headers) {
@@ -407,7 +515,11 @@ function collectingIo() {
 	return {
 		stdout: { write: (chunk) => io.stdout.push(String(chunk)), join: (separator) => io.stdout.join(separator ?? "") },
 		stderr: { write: (chunk) => io.stderr.push(String(chunk)), join: (separator) => io.stderr.join(separator ?? "") },
-		get exitCode() { return io.exitCode; },
-		set exitCode(value) { io.exitCode = value; },
+		get exitCode() {
+			return io.exitCode;
+		},
+		set exitCode(value) {
+			io.exitCode = value;
+		},
 	};
 }

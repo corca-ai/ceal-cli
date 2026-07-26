@@ -8,8 +8,8 @@ import {
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -17,14 +17,10 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
-import {
-	withWorkerReleaseDevelopmentInputs,
-	withWorkerReleaseInputs,
-	WorkerReleaseInputError,
-} from "./worker-release-inputs.mjs";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
+import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-package";
@@ -45,32 +41,36 @@ function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInput
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
 	try {
-		return resolveInputs({ ...options, repoRoot }, ({ inputs, rawInputs }) => {
-			let stage;
-			try {
-				stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
-				const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: rawInputs.protocolTarball, dependencies });
-				const version = resolveVersion(repoRoot, inputs);
-				materializeOutput({ output, repoRoot, inputs, version, packed });
-				return {
-					schema_version: "ceal.worker_release_package_build.v1",
-					ok: true,
-					proof_level: "local_state",
-					writes_external: false,
-					output_dir: output.directory,
-					version,
-					artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
-					consumer_smoke: packed.consumerSmoke,
-					protocol: inputs.protocol,
-					non_claims: [
-						"This is a local packed worker-package proof, not a native binary, signature, tag, upload, installation, or Gateway action.",
-						"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
-					],
-				};
-			} finally {
-				if (stage) rmSync(stage, { recursive: true, force: true });
-			}
-		}, dependencies);
+		return resolveInputs(
+			{ ...options, repoRoot },
+			({ inputs, rawInputs }) => {
+				let stage;
+				try {
+					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
+					const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: rawInputs.protocolTarball, dependencies });
+					const version = resolveVersion(repoRoot, inputs);
+					materializeOutput({ output, repoRoot, inputs, version, packed });
+					return {
+						schema_version: "ceal.worker_release_package_build.v1",
+						ok: true,
+						proof_level: "local_state",
+						writes_external: false,
+						output_dir: output.directory,
+						version,
+						artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
+						consumer_smoke: packed.consumerSmoke,
+						protocol: inputs.protocol,
+						non_claims: [
+							"This is a local packed worker-package proof, not a native binary, signature, tag, upload, installation, or Gateway action.",
+							"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
+						],
+					};
+				} finally {
+					if (stage) rmSync(stage, { recursive: true, force: true });
+				}
+			},
+			dependencies,
+		);
 	} catch (error) {
 		if (error instanceof WorkerReleasePackageError) throw error;
 		if (error instanceof WorkerReleaseInputError) throw new WorkerReleasePackageError(error.code, error.message);
@@ -87,12 +87,20 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 	stagePackedPackage(protocolTarball, dependencyRoot, inputs.protocol.package);
 	compilePackage(clientStage, dependencyRoot, dependencies);
 	const packedClient = packPackage(clientStage, path.join(stage, "packed"), dependencies);
-	if (packedClient.package !== inputs.client.package) fail("worker_package_pack_failed", "Packed client identity does not match the worker release inventory.");
+	if (packedClient.package !== inputs.client.package)
+		fail("worker_package_pack_failed", "Packed client identity does not match the worker release inventory.");
 	stagePackedPackage(packedClient.path, dependencyRoot, inputs.client.package);
 	compilePackage(workerStage, dependencyRoot, dependencies);
 	const packedWorker = packPackage(workerStage, path.join(stage, "packed"), dependencies);
-	if (packedWorker.package !== inputs.worker.package) fail("worker_package_pack_failed", "Packed worker identity does not match the worker release inventory.");
-	const consumer = stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient: packedClient.path, packedWorker: packedWorker.path, inputs });
+	if (packedWorker.package !== inputs.worker.package)
+		fail("worker_package_pack_failed", "Packed worker identity does not match the worker release inventory.");
+	const consumer = stagePackedWorkerConsumer({
+		stage,
+		dependencyRoot,
+		packedClient: packedClient.path,
+		packedWorker: packedWorker.path,
+		inputs,
+	});
 	const consumerSmoke = smokeInstalledWorker({ consumer, dependencies });
 	return {
 		worker: { name: packedWorker.filename, bytes: packedWorker.bytes, sha256: packedWorker.sha256, path: packedWorker.path },
@@ -105,7 +113,11 @@ function stageOwnedPackage(repoRoot, packageRoot, relativePath) {
 	const source = path.join(repoRoot, relativePath);
 	assertRegularTree(source, "unsafe_owned_source");
 	const destination = path.join(packageRoot, path.basename(relativePath));
-	cpSync(source, destination, { recursive: true, dereference: false, filter: (entry) => path.basename(entry) !== "dist" && path.basename(entry) !== "node_modules" });
+	cpSync(source, destination, {
+		recursive: true,
+		dereference: false,
+		filter: (entry) => path.basename(entry) !== "dist" && path.basename(entry) !== "node_modules",
+	});
 	return destination;
 }
 
@@ -143,14 +155,31 @@ function stagePackedPackage(tarball, dependencyRoot, packageName) {
 
 function assertArchiveMembers(tarball) {
 	let members;
-	try { members = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").filter(Boolean); }
-	catch { fail("invalid_packed_dependency", "Packed worker dependency is not a readable archive."); }
-	if (members.length === 0 || members.some((member) => !member.startsWith("package/") || member.includes("\\") || member.split("/").some((part) => part === "." || part === ".."))) {
+	try {
+		members = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+			.trim()
+			.split("\n")
+			.filter(Boolean);
+	} catch {
+		fail("invalid_packed_dependency", "Packed worker dependency is not a readable archive.");
+	}
+	if (
+		members.length === 0 ||
+		members.some(
+			(member) => !member.startsWith("package/") || member.includes("\\") || member.split("/").some((part) => part === "." || part === ".."),
+		)
+	) {
 		fail("invalid_packed_dependency", "Packed worker dependency contains an unsafe archive path.");
 	}
 	let listing;
-	try { listing = execFileSync("tar", ["-tvzf", tarball], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").filter(Boolean); }
-	catch { fail("invalid_packed_dependency", "Packed worker dependency cannot be safely inspected."); }
+	try {
+		listing = execFileSync("tar", ["-tvzf", tarball], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+			.trim()
+			.split("\n")
+			.filter(Boolean);
+	} catch {
+		fail("invalid_packed_dependency", "Packed worker dependency cannot be safely inspected.");
+	}
 	if (listing.length !== members.length || listing.some((line) => !/^[d-]/u.test(line))) {
 		fail("invalid_packed_dependency", "Packed worker dependency may contain links or non-regular entries.");
 	}
@@ -159,7 +188,10 @@ function assertArchiveMembers(tarball) {
 function compilePackage(packageDirectory, dependencyRoot, dependencies) {
 	const compiler = path.join(dependencyRoot, "typescript", "bin", "tsc");
 	try {
-		(dependencies.runCompiler ?? execFileSync)(process.execPath, [compiler, "-p", "tsconfig.build.json"], { cwd: packageDirectory, stdio: "pipe" });
+		(dependencies.runCompiler ?? execFileSync)(process.execPath, [compiler, "-p", "tsconfig.build.json"], {
+			cwd: packageDirectory,
+			stdio: "pipe",
+		});
 	} catch {
 		fail("worker_package_build_failed", "Worker-owned TypeScript source did not compile against the supplied Protocol artifact.");
 	}
@@ -170,19 +202,34 @@ function packPackage(packageDirectory, outputDirectory, dependencies) {
 	let output;
 	try {
 		output = (dependencies.pack ?? spawnSync)("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", outputDirectory], {
-			cwd: packageDirectory, encoding: "utf8", maxBuffer: 1024 * 1024,
+			cwd: packageDirectory,
+			encoding: "utf8",
+			maxBuffer: 1024 * 1024,
 		});
 	} catch {
 		fail("worker_package_pack_failed", "Worker-owned package could not be packed.");
 	}
 	if (output?.status !== 0) fail("worker_package_pack_failed", "Worker-owned package could not be packed.");
 	let metadata;
-	try { metadata = JSON.parse(output.stdout)?.[0]; } catch { fail("worker_package_pack_failed", "Worker package metadata is invalid."); }
-	if (!metadata || typeof metadata.filename !== "string" || typeof metadata.name !== "string") fail("worker_package_pack_failed", "Worker package metadata is invalid.");
+	try {
+		metadata = JSON.parse(output.stdout)?.[0];
+	} catch {
+		fail("worker_package_pack_failed", "Worker package metadata is invalid.");
+	}
+	if (!metadata || typeof metadata.filename !== "string" || typeof metadata.name !== "string")
+		fail("worker_package_pack_failed", "Worker package metadata is invalid.");
 	const artifact = path.join(outputDirectory, metadata.filename);
-	if (!existsSync(artifact) || !lstatSync(artifact).isFile() || lstatSync(artifact).isSymbolicLink()) fail("worker_package_pack_failed", "Worker package output is unsafe.");
+	if (!existsSync(artifact) || !lstatSync(artifact).isFile() || lstatSync(artifact).isSymbolicLink())
+		fail("worker_package_pack_failed", "Worker package output is unsafe.");
 	const bytes = readFileSync(artifact);
-	return { path: artifact, filename: metadata.filename, bytes: bytes.length, sha256: sha256(bytes), package: metadata.name, version: metadata.version };
+	return {
+		path: artifact,
+		filename: metadata.filename,
+		bytes: bytes.length,
+		sha256: sha256(bytes),
+		package: metadata.name,
+		version: metadata.version,
+	};
 }
 
 function stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient, packedWorker, inputs }) {
@@ -193,7 +240,8 @@ function stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient, packed
 	stagePackedPackage(packedClient, modules, inputs.client.package);
 	stagePackedPackage(packedWorker, modules, inputs.worker.package);
 	const workerBin = path.join(modules, ...inputs.worker.package.split("/"), "dist", "bin.js");
-	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink()) fail("consumer_smoke_failed", "Installed worker package did not expose its declared command.");
+	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink())
+		fail("consumer_smoke_failed", "Installed worker package did not expose its declared command.");
 	return { directory, workerBin };
 }
 
@@ -252,7 +300,9 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 			{ name: NOTICE_FILENAME, sha256: sha256(notice) },
 			{ name: MANIFEST_FILENAME, sha256: sha256(manifestBytes) },
 		].sort((left, right) => left.name.localeCompare(right.name));
-		writeFileSync(path.join(staging, "SHA256SUMS"), checksumEntries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", { mode: 0o644 });
+		writeFileSync(path.join(staging, "SHA256SUMS"), checksumEntries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", {
+			mode: 0o644,
+		});
 		publishOutput(staging, output);
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
@@ -264,7 +314,9 @@ function resolveVersion(repoRoot, inputs) {
 	// The worker release versions independently of the pinned Gateway Protocol
 	// artifact: worker and client move together, while the exact protocol pin
 	// is enforced against the supplied artifact by the release-input resolver.
-	const versions = [inputs.worker, inputs.client].map((entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version);
+	const versions = [inputs.worker, inputs.client].map(
+		(entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version,
+	);
 	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
 		fail("version_mismatch", "Worker and client package versions must match exactly.");
 	}
@@ -274,23 +326,29 @@ function resolveVersion(repoRoot, inputs) {
 function inspectOutput(value, repoRoot, force) {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker package output must be an absolute directory.");
 	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory)) fail("unsafe_output", "Worker package output is too broad.");
+	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
+		fail("unsafe_output", "Worker package output is too broad.");
 	assertNoSymlinkComponents(directory, fail, "Worker package output");
 	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("unsafe_output", "Worker package output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink()) fail("output_not_replaceable", "Use --force only with a marked worker package output.");
+	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
+		fail("unsafe_output", "Worker package output must be a regular directory.");
+	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
+		fail("output_not_replaceable", "Use --force only with a marked worker package output.");
 	return { directory, force: true };
 }
 
 function publishOutput(staging, output) {
-	if (!output.force) { renameSync(staging, output.directory); return; }
+	if (!output.force) {
+		renameSync(staging, output.directory);
+		return;
+	}
 	rmSync(output.directory, { recursive: true, force: true });
 	renameSync(staging, output.directory);
 }
 
-
 function assertRegularTree(root, code) {
-	if (!existsSync(root) || !lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink()) fail(code, "Worker package input directory is unsafe.");
+	if (!existsSync(root) || !lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink())
+		fail(code, "Worker package input directory is unsafe.");
 	for (const name of readdirSync(root)) {
 		const entry = path.join(root, name);
 		const stat = lstatSync(entry);
@@ -300,12 +358,19 @@ function assertRegularTree(root, code) {
 }
 
 function readJson(filePath, code) {
-	try { return JSON.parse(readFileSync(filePath, "utf8")); }
-	catch { fail(code, "Worker package input JSON is invalid."); }
+	try {
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		fail(code, "Worker package input JSON is invalid.");
+	}
 }
 
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerReleasePackageError(code, message); }
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerReleasePackageError(code, message);
+}
 
 function parseArgs(argv) {
 	return parseScriptArgs(argv, {
@@ -323,7 +388,9 @@ export function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--force] [--json]");
+			io.log(
+				"usage: node scripts/build-worker-release-package.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--force] [--json]",
+			);
 			return 0;
 		}
 		const result = buildWorkerReleasePackage(parsed.options);
@@ -331,8 +398,14 @@ export function runCli(argv, io = console) {
 		return 0;
 	} catch (error) {
 		const known = error instanceof WorkerReleasePackageError;
-		const payload = { schema_version: "ceal.worker_release_package_build_error.v1", ok: false, error_code: known ? error.code : "worker_package_build_failed", message: known ? error.message : "Could not build worker package." };
-		if (json) io.log(JSON.stringify(payload)); else io.error(payload.message);
+		const payload = {
+			schema_version: "ceal.worker_release_package_build_error.v1",
+			ok: false,
+			error_code: known ? error.code : "worker_package_build_failed",
+			message: known ? error.message : "Could not build worker package.",
+		};
+		if (json) io.log(JSON.stringify(payload));
+		else io.error(payload.message);
 		return 2;
 	}
 }

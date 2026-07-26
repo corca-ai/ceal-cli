@@ -12,8 +12,7 @@ function assertPlainValue(value: unknown, seen: WeakSet<object>): void {
 }
 
 function isPlainScalar(value: unknown): boolean {
-	return value === null || typeof value === "string" || typeof value === "boolean"
-		|| (typeof value === "number" && Number.isFinite(value));
+	return value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
 }
 
 function assertPlainObject(value: object, seen: WeakSet<object>): void {

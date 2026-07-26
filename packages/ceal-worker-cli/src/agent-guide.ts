@@ -17,8 +17,20 @@ const CEAL_AGENT_GUIDE_HOSTS: readonly {
 	/** Env markers the host process sets for itself; presence identifies it. */
 	runningMarkers: readonly string[];
 }[] = [
-	{ agent: "codex", label: "Codex", defaultRoot: ".codex", environmentVariable: "CODEX_HOME", runningMarkers: ["CODEX_SANDBOX", "CODEX_THREAD_ID"] },
-	{ agent: "claude", label: "Claude Code", defaultRoot: ".claude", environmentVariable: "CLAUDE_CONFIG_DIR", runningMarkers: ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
+	{
+		agent: "codex",
+		label: "Codex",
+		defaultRoot: ".codex",
+		environmentVariable: "CODEX_HOME",
+		runningMarkers: ["CODEX_SANDBOX", "CODEX_THREAD_ID"],
+	},
+	{
+		agent: "claude",
+		label: "Claude Code",
+		defaultRoot: ".claude",
+		environmentVariable: "CLAUDE_CONFIG_DIR",
+		runningMarkers: ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"],
+	},
 ];
 
 /**
@@ -30,9 +42,7 @@ const CEAL_AGENT_GUIDE_HOSTS: readonly {
  * `non_claims` line contradicted it (corca-ai/ceal-cli#4). A reader should not
  * have to earn the right answer; when the running host is knowable, name it.
  */
-export function detectCealAgentGuideHost(
-	environment: Record<string, string | undefined>,
-): CealAgentGuideHost | undefined {
+export function detectCealAgentGuideHost(environment: Record<string, string | undefined>): CealAgentGuideHost | undefined {
 	// A nested agent inherits the outer host's markers, so two hosts can look
 	// present at once. Table order would then pick a host that is not the one
 	// running and advise registering it — reinstating the reported bug one level
@@ -135,8 +145,10 @@ export function createCealAgentGuideStore(
 		if (!host.registrationPath) return hostUnresolvedState(target, guidePath, host.rejectedOverride, resolved);
 		return run(target, host.registrationPath);
 	};
-	const sourced = (state: CealAgentGuideState): CealAgentGuideState =>
-		({ ...state, agent_source: state.agent === detectedHost ? "detected" : "default" });
+	const sourced = (state: CealAgentGuideState): CealAgentGuideState => ({
+		...state,
+		agent_source: state.agent === detectedHost ? "detected" : "default",
+	});
 	return {
 		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved))),
 		register: (agent) => sourced(act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved))),
@@ -206,10 +218,7 @@ function assertGuideAvailable(guidePath: string): void {
 	if (!existsSync(skillPath) || !lstatSync(skillPath).isFile()) throw new Error("guide_unavailable");
 }
 
-function hostStates(
-	guidePath: string,
-	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
-): readonly CealAgentGuideHostState[] {
+function hostStates(guidePath: string, resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>): readonly CealAgentGuideHostState[] {
 	return CEAL_AGENT_GUIDE_HOSTS.map((host) => {
 		const registrationPath = resolved.get(host.agent)?.registrationPath;
 		if (!registrationPath) return { agent: host.agent, status: "unresolved", registered: false } satisfies CealAgentGuideHostState;
@@ -277,12 +286,14 @@ function registerGuide(
 			hosts: withActingHostUnavailable(inspected, agent),
 			error: {
 				kind: "registration_failed",
-				message: danglingParent === undefined
-					? `The Ceal guide could not be registered with ${hostRow(agent).label}.`
-					: `The ${hostRow(agent).label} skills directory is a link to '${danglingParent}', which does not exist.`,
-				next_action: danglingParent === undefined
-					? "Inspect the reported registration path and retry without replacing an existing skill directory."
-					: `Create that directory, or set ${hostRow(agent).environmentVariable} to a usable configuration directory, then retry.`,
+				message:
+					danglingParent === undefined
+						? `The Ceal guide could not be registered with ${hostRow(agent).label}.`
+						: `The ${hostRow(agent).label} skills directory is a link to '${danglingParent}', which does not exist.`,
+				next_action:
+					danglingParent === undefined
+						? "Inspect the reported registration path and retry without replacing an existing skill directory."
+						: `Create that directory, or set ${hostRow(agent).environmentVariable} to a usable configuration directory, then retry.`,
 			},
 		};
 	}
@@ -323,9 +334,17 @@ function registrationMatches(guidePath: string, registrationPath: string): boole
 function danglingParentTarget(registrationPath: string): string | undefined {
 	const parent = dirname(registrationPath);
 	if (!isDanglingSymlink(parent) || existsSync(parent)) return undefined;
-	try { return readlinkSync(parent); } catch { return undefined; }
+	try {
+		return readlinkSync(parent);
+	} catch {
+		return undefined;
+	}
 }
 
 function isDanglingSymlink(path: string): boolean {
-	try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+	try {
+		return lstatSync(path).isSymbolicLink();
+	} catch {
+		return false;
+	}
 }

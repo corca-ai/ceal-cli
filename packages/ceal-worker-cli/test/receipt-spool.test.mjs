@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-	RECEIPT_SPOOL_MAX_ENTRIES,
-	RECEIPT_SPOOL_RETENTION_MS,
 	CealReceiptSpoolStoreError,
 	createCealReceiptSpoolStore,
+	RECEIPT_SPOOL_MAX_ENTRIES,
+	RECEIPT_SPOOL_RETENTION_MS,
 	receiptSpoolEntryFromCallResult,
 } from "../dist/receipt-spool.js";
 
@@ -54,7 +54,10 @@ test("receipt spool enforces entry-count and retention bounds on append", async 
 		assert.equal(state.entries.length, RECEIPT_SPOOL_MAX_ENTRIES);
 		assert.equal(state.entries[0].requestRef, "narnia:call:1");
 		assert.equal(state.entries.at(-1).requestRef, `narnia:call:${RECEIPT_SPOOL_MAX_ENTRIES}`);
-		assert.equal(state.entries.some((item) => item.requestRef === "narnia:call:expired"), false);
+		assert.equal(
+			state.entries.some((item) => item.requestRef === "narnia:call:expired"),
+			false,
+		);
 	});
 });
 
@@ -74,7 +77,10 @@ test("receipt spool applies retention on read and drops far-future entries", asy
 		const parsed = JSON.parse(readFileSync(file, "utf8"));
 		parsed.entries.push({
 			recorded_at: new Date(BASE_TIME + 60 * 60 * 1000).toISOString(),
-			request_ref: "narnia:call:future", status: "completed", evidence: "readback_verified", audit_refs: [],
+			request_ref: "narnia:call:future",
+			status: "completed",
+			evidence: "readback_verified",
+			audit_refs: [],
 		});
 		writeFileSync(file, JSON.stringify(parsed), { mode: 0o600 });
 		const state = await createCealReceiptSpoolStore(home, () => BASE_TIME).load();
@@ -111,8 +117,20 @@ test("receipt spool drops individually invalid entries without losing the rest",
 		await store.append(entry());
 		const file = spoolFile(home);
 		const parsed = JSON.parse(readFileSync(file, "utf8"));
-		parsed.entries.push({ recorded_at: "2026-07-24T12:00:01.000Z", request_ref: "free text with spaces", status: "completed", evidence: "readback_verified", audit_refs: [] });
-		parsed.entries.push({ recorded_at: "2026-07-24T12:00:02.000Z", request_ref: "narnia:call:2:call", status: "surprising_status", evidence: "readback_verified", audit_refs: [] });
+		parsed.entries.push({
+			recorded_at: "2026-07-24T12:00:01.000Z",
+			request_ref: "free text with spaces",
+			status: "completed",
+			evidence: "readback_verified",
+			audit_refs: [],
+		});
+		parsed.entries.push({
+			recorded_at: "2026-07-24T12:00:02.000Z",
+			request_ref: "narnia:call:2:call",
+			status: "surprising_status",
+			evidence: "readback_verified",
+			audit_refs: [],
+		});
 		writeFileSync(file, JSON.stringify(parsed), { mode: 0o600 });
 		const state = await store.load();
 		assert.deepEqual(state.entries, [entry()]);
@@ -132,44 +150,77 @@ test("receipt spool refuses an unsafe entry and a symlinked store", async () => 
 });
 
 test("call-result projection keeps only allowlisted metadata and skips receipt-less envelopes", () => {
-	const completed = receiptSpoolEntryFromCallResult({
-		schema_version: "ceal.result.v2",
-		status: "completed",
-		capability: "message.search",
-		target: "target:team-inbox",
-		data: { results: [{ text: "secret provider payload" }] },
-		receipt: { evidence: "readback_verified", request_ref: "narnia:call:1:call", audit_refs: ["gateway-audit:event:001"] },
-	}, BASE_TIME);
+	const completed = receiptSpoolEntryFromCallResult(
+		{
+			schema_version: "ceal.result.v2",
+			status: "completed",
+			capability: "message.search",
+			target: "target:team-inbox",
+			data: { results: [{ text: "secret provider payload" }] },
+			receipt: { evidence: "readback_verified", request_ref: "narnia:call:1:call", audit_refs: ["gateway-audit:event:001"] },
+		},
+		BASE_TIME,
+	);
 	assert.deepEqual(completed, entry());
 	assert.equal(JSON.stringify(completed).includes("secret"), false);
 
-	const blocked = receiptSpoolEntryFromCallResult({
-		schema_version: "ceal.result.v2",
-		status: "blocked",
-		capability: "message.create",
-		target: "target:team-inbox",
-		receipt: { evidence: "not_read_back", request_ref: "narnia:call:2:call", audit_refs: [] },
-		error: { kind: "authorization_denied", message: "long free text", next_action: "more free text" },
-	}, BASE_TIME);
+	const blocked = receiptSpoolEntryFromCallResult(
+		{
+			schema_version: "ceal.result.v2",
+			status: "blocked",
+			capability: "message.create",
+			target: "target:team-inbox",
+			receipt: { evidence: "not_read_back", request_ref: "narnia:call:2:call", audit_refs: [] },
+			error: { kind: "authorization_denied", message: "long free text", next_action: "more free text" },
+		},
+		BASE_TIME,
+	);
 	assert.deepEqual(blocked, {
-		recordedAt: BASE_TIME, requestRef: "narnia:call:2:call", status: "blocked", evidence: "not_read_back",
-		auditRefs: [], capabilityId: "message.create", targetRef: "target:team-inbox", errorKind: "authorization_denied",
+		recordedAt: BASE_TIME,
+		requestRef: "narnia:call:2:call",
+		status: "blocked",
+		evidence: "not_read_back",
+		auditRefs: [],
+		capabilityId: "message.create",
+		targetRef: "target:team-inbox",
+		errorKind: "authorization_denied",
 	});
 
 	// Pre-issue failures carry no receipt and must not be spooled.
-	assert.equal(receiptSpoolEntryFromCallResult({
-		schema_version: "ceal.result.v2", status: "error",
-		error: { kind: "session_unavailable", message: "m", next_action: "n" },
-	}, BASE_TIME), null);
+	assert.equal(
+		receiptSpoolEntryFromCallResult(
+			{
+				schema_version: "ceal.result.v2",
+				status: "error",
+				error: { kind: "session_unavailable", message: "m", next_action: "n" },
+			},
+			BASE_TIME,
+		),
+		null,
+	);
 	// Unsafe refs or unknown vocabulary drop the whole entry rather than spooling free text.
-	assert.equal(receiptSpoolEntryFromCallResult({
-		schema_version: "ceal.result.v2", status: "completed",
-		receipt: { evidence: "readback_verified", request_ref: "free text with spaces", audit_refs: [] },
-	}, BASE_TIME), null);
-	assert.equal(receiptSpoolEntryFromCallResult({
-		schema_version: "ceal.result.v2", status: "completed",
-		receipt: { evidence: "invented_evidence", request_ref: "narnia:call:3:call", audit_refs: [] },
-	}, BASE_TIME), null);
+	assert.equal(
+		receiptSpoolEntryFromCallResult(
+			{
+				schema_version: "ceal.result.v2",
+				status: "completed",
+				receipt: { evidence: "readback_verified", request_ref: "free text with spaces", audit_refs: [] },
+			},
+			BASE_TIME,
+		),
+		null,
+	);
+	assert.equal(
+		receiptSpoolEntryFromCallResult(
+			{
+				schema_version: "ceal.result.v2",
+				status: "completed",
+				receipt: { evidence: "invented_evidence", request_ref: "narnia:call:3:call", audit_refs: [] },
+			},
+			BASE_TIME,
+		),
+		null,
+	);
 });
 
 function spoolFile(home) {

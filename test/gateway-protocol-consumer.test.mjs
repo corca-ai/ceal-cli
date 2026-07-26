@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { GatewayProtocolConsumerError, verifyGatewayProtocolConsumer } from "../scripts/verify-gateway-protocol-consumer.mjs";
 import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixture.mjs";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
 
 test("worker and client build only against a supplied packed Gateway protocol artifact", (context) => {
 	const fixture = makeGatewayProtocolFixture();

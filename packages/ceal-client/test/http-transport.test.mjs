@@ -3,10 +3,10 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
 	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
 	CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER,
-	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CealHttpTransportError,
 	createCealClient,
 	createCealHttpTransport,
@@ -42,10 +42,12 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 	try {
 		const address = server.address();
 		assert.equal(typeof address, "object");
-		const client = createCealClient(createCealHttpTransport({
-			endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
-			accessToken: "gateway-issued-token",
-		}));
+		const client = createCealClient(
+			createCealHttpTransport({
+				endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
+				accessToken: "gateway-issued-token",
+			}),
+		);
 		const response = await client.request(request);
 		assert.equal(response.ok, true);
 		assert.deepEqual(observed, {
@@ -54,7 +56,7 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 			body: { ...request, protocol_version: "1.3.0" },
 		});
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 });
 
@@ -67,35 +69,48 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 	assert.equal(CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER, "x-ceal-audit-timing");
 
 	const observedHeaders = new Map();
-	const client = createCealClient(createCealHttpTransport({
-		endpoint: "https://gateway.example.test/client",
-		accessToken: "gateway-issued-token",
-		fetchFn: async (_endpoint, init) => {
-			const body = JSON.parse(init.body);
-			observedHeaders.set(body.operation, init.headers);
-			if (body.operation === "readback") {
-				return globalThis.Response.json({
-					ok: false, request_id: body.request_id, protocol_version: "1.3.0",
-					proof_ref_or_unavailable: `proof:${body.request_id}`,
-					error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
-				}, { status: 401 });
-			}
-			if (body.operation === "call") return globalThis.Response.json(allowedCallResponse(body));
-			return globalThis.Response.json(handshakeResponse(body));
-		},
-	}));
+	const client = createCealClient(
+		createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "gateway-issued-token",
+			fetchFn: async (_endpoint, init) => {
+				const body = JSON.parse(init.body);
+				observedHeaders.set(body.operation, init.headers);
+				if (body.operation === "readback") {
+					return globalThis.Response.json(
+						{
+							ok: false,
+							request_id: body.request_id,
+							protocol_version: "1.3.0",
+							proof_ref_or_unavailable: `proof:${body.request_id}`,
+							error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
+						},
+						{ status: 401 },
+					);
+				}
+				if (body.operation === "call") return globalThis.Response.json(allowedCallResponse(body));
+				return globalThis.Response.json(handshakeResponse(body));
+			},
+		}),
+	);
 	const response = await client.request(request);
 	assert.equal(response.ok, true);
 	const call = await client.request({
-		request_id: "request:call:header-scope", operation: "call", profile_ref: "profile:test",
+		request_id: "request:call:header-scope",
+		operation: "call",
+		profile_ref: "profile:test",
 		body: {
-			capability_id: "message.search", target_ref: "target:workspace",
-			arguments: { query: "audit timing", limit: 1 }, purpose: "Prove audit timing header scope",
+			capability_id: "message.search",
+			target_ref: "target:workspace",
+			arguments: { query: "audit timing", limit: 1 },
+			purpose: "Prove audit timing header scope",
 		},
 	});
 	assert.equal(call.ok, true);
 	const readback = await client.request({
-		request_id: "request:readback:001", operation: "readback", profile_ref: "profile:test",
+		request_id: "request:readback:001",
+		operation: "readback",
+		profile_ref: "profile:test",
 		body: { request_id: "request:prior:001" },
 	});
 	assert.equal(readback.ok, false);
@@ -129,16 +144,18 @@ test("HTTP transport refuses redirects before the request body can reach another
 	try {
 		const address = redirect.address();
 		assert.equal(typeof address, "object");
-		const client = createCealClient(createCealHttpTransport({
-			endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
-			accessToken: "gateway-issued-token",
-		}));
+		const client = createCealClient(
+			createCealHttpTransport({
+				endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
+				accessToken: "gateway-issued-token",
+			}),
+		);
 		await assert.rejects(client.request(request), hasTransportCode("request_failed"));
 		assert.equal(redirectedRequestReached, false);
 	} finally {
 		await Promise.all([
-			new Promise((resolve, reject) => redirect.close((error) => error ? reject(error) : resolve())),
-			new Promise((resolve, reject) => target.close((error) => error ? reject(error) : resolve())),
+			new Promise((resolve, reject) => redirect.close((error) => (error ? reject(error) : resolve()))),
+			new Promise((resolve, reject) => target.close((error) => (error ? reject(error) : resolve()))),
 		]);
 	}
 });
@@ -193,15 +210,15 @@ test("HTTP transport keeps discovery, allowed call, and policy denial responses 
 	const mismatchedTransport = createCealHttpTransport({
 		endpoint: "https://gateway.example.test/client",
 		accessToken: "safe-token",
-		fetchFn: async () => globalThis.Response.json(allowedCallResponse({
-			...callRequest,
-			request_id: discoveryRequest.request_id,
-		})),
+		fetchFn: async () =>
+			globalThis.Response.json(
+				allowedCallResponse({
+					...callRequest,
+					request_id: discoveryRequest.request_id,
+				}),
+			),
 	});
-	await assert.rejects(
-		createCealClient(mismatchedTransport).request(discoveryRequest),
-		hasTransportCode("invalid_response"),
-	);
+	await assert.rejects(createCealClient(mismatchedTransport).request(discoveryRequest), hasTransportCode("invalid_response"));
 });
 
 test("HTTP transport rejects unsafe endpoints and invalid outbound requests before fetch", async () => {
@@ -213,17 +230,19 @@ test("HTTP transport rejects unsafe endpoints and invalid outbound requests befo
 		"https://gateway.example.test/client#fragment",
 		"file:///tmp/gateway",
 	]) {
-		assert.throws(
-			() => createCealHttpTransport({ endpoint, accessToken: "safe-token" }),
-			hasTransportCode("invalid_configuration"),
-		);
+		assert.throws(() => createCealHttpTransport({ endpoint, accessToken: "safe-token" }), hasTransportCode("invalid_configuration"));
 	}
 	let fetched = false;
-	const client = createCealClient(createCealHttpTransport({
-		endpoint: "http://127.0.0.1:19390/client",
-		accessToken: "safe-token",
-		fetchFn: async () => { fetched = true; throw new Error("must not fetch"); },
-	}));
+	const client = createCealClient(
+		createCealHttpTransport({
+			endpoint: "http://127.0.0.1:19390/client",
+			accessToken: "safe-token",
+			fetchFn: async () => {
+				fetched = true;
+				throw new Error("must not fetch");
+			},
+		}),
+	);
 	await assert.rejects(
 		client.request({ request_id: "request:discover:001", operation: "discover", body: {} }),
 		hasTransportCode("invalid_request"),
@@ -248,21 +267,26 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "response_too_large",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: { payload: token.repeat(20) } }),
+			fetchFn: async () =>
+				globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: { payload: token.repeat(20) } }),
 			maxResponseBytes: 64,
 		},
 		{
 			code: "request_failed",
-			fetchFn: async () => { throw new Error(`provider echoed ${token}`); },
+			fetchFn: async () => {
+				throw new Error(`provider echoed ${token}`);
+			},
 		},
 	];
 	for (const item of cases) {
-		const client = createCealClient(createCealHttpTransport({
-			endpoint: "https://gateway.example.test/client",
-			accessToken: token,
-			fetchFn: item.fetchFn,
-			maxResponseBytes: item.maxResponseBytes,
-		}));
+		const client = createCealClient(
+			createCealHttpTransport({
+				endpoint: "https://gateway.example.test/client",
+				accessToken: token,
+				fetchFn: item.fetchFn,
+				maxResponseBytes: item.maxResponseBytes,
+			}),
+		);
 		await assert.rejects(client.request(request), (error) => {
 			assert.equal(error instanceof CealHttpTransportError, true);
 			assert.equal(error.code, item.code);
@@ -274,12 +298,14 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 });
 
 test("HTTP transport enforces the total request timeout even when injected fetch ignores abort", async () => {
-	const client = createCealClient(createCealHttpTransport({
-		endpoint: "https://gateway.example.test/client",
-		accessToken: "safe-token",
-		timeoutMs: 5,
-		fetchFn: async () => new Promise(() => {}),
-	}));
+	const client = createCealClient(
+		createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "safe-token",
+			timeoutMs: 5,
+			fetchFn: async () => new Promise(() => {}),
+		}),
+	);
 	await assert.rejects(client.request(request), hasTransportCode("request_timeout"));
 });
 
@@ -289,28 +315,29 @@ function hasTransportCode(code) {
 
 function handshakeResponse(input) {
 	return successResponse(input, {
-			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.3.0",
-			supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
-			profile_ref: input.profile_ref,
-			membership_ref: "membership:test",
-			registration_ref: "registration:test",
-			client_ref: "client:test",
-			subject_ref: "subject:test",
-			instance_ref: "instance:test",
-			host_decision: "accepted",
-			proof_level: "host_decision",
-			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		schema_version: "ceal.gateway_handshake.v1",
+		negotiated_protocol_version: "1.3.0",
+		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		profile_ref: input.profile_ref,
+		membership_ref: "membership:test",
+		registration_ref: "registration:test",
+		client_ref: "client:test",
+		subject_ref: "subject:test",
+		instance_ref: "instance:test",
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	});
 }
 
 function discoveryResponse(input) {
 	const selected = input.body.capability_id === "message.search";
 	return successResponse(input, {
-			schema_version: "ceal.gateway_discovery.v2",
-			profile_ref: input.profile_ref,
-			membership_ref: "membership:test",
-			capabilities: [{
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: input.profile_ref,
+		membership_ref: "membership:test",
+		capabilities: [
+			{
 				capability_id: "message.search",
 				label: "Search approved messages",
 				effect: "read",
@@ -322,55 +349,62 @@ function discoveryResponse(input) {
 					limit: { type: "integer", minimum: 1, maximum: 10, default: 5 },
 				},
 				evidence_requirement: "gateway_audit",
-			}],
-			targets: selected ? [{
-				target_ref: "target:workspace",
-				label: "Approved workspace",
-				access: "granted",
-				capability_ids: ["message.search"],
-				capability_access: [matureCapabilityAccess()],
-			}] : [],
-			target_catalog: selected
-				? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
-				: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
-			host_decision: "accepted",
-			proof_level: "host_decision",
-			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+			},
+		],
+		targets: selected
+			? [
+					{
+						target_ref: "target:workspace",
+						label: "Approved workspace",
+						access: "granted",
+						capability_ids: ["message.search"],
+						capability_access: [matureCapabilityAccess()],
+					},
+				]
+			: [],
+		target_catalog: selected
+			? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
+			: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	});
 }
 
 function allowedCallResponse(input) {
 	return successResponse(input, {
-			schema_version: "ceal.gateway_call_result.v1",
-			capability_id: input.body.capability_id,
-			grant_ref: "grant:workspace-message-search",
-			grant_revision: 3,
-			target_ref: input.body.target_ref,
-			data: {
-				schema_version: "ceal.message_search_result.v1",
-				query: { redacted: true, utf8_bytes: 14, empty: false },
-				result_count: 1,
-				results: [{
+		schema_version: "ceal.gateway_call_result.v1",
+		capability_id: input.body.capability_id,
+		grant_ref: "grant:workspace-message-search",
+		grant_revision: 3,
+		target_ref: input.body.target_ref,
+		data: {
+			schema_version: "ceal.message_search_result.v1",
+			query: { redacted: true, utf8_bytes: 14, empty: false },
+			result_count: 1,
+			results: [
+				{
 					ref: "message:result:001",
 					target_ref: input.body.target_ref,
 					created_at: "2026-07-10T00:00:00.000Z",
 					source_label: "Approved workspace",
 					text_preview: "Quarterly plan review is scheduled.",
-				}],
-				coverage: matureSearchCoverage(),
-				minimization: {
-					raw_provider_ids_included: false,
-					raw_messages_included: false,
-					credential_material_included: false,
 				},
+			],
+			coverage: matureSearchCoverage(),
+			minimization: {
+				raw_provider_ids_included: false,
+				raw_messages_included: false,
+				credential_material_included: false,
 			},
-			redaction: {
-				state: "applied",
-				omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"],
-			},
-			host_decision: "accepted",
-			proof_level: "host_decision",
-			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		},
+		redaction: {
+			state: "applied",
+			omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"],
+		},
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	});
 }
 

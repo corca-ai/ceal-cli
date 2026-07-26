@@ -3,11 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-	CealDiscoveryCacheStoreError,
-	createCealDiscoveryCacheStore,
-	discoveryCacheEntryUsable,
-} from "../dist/discovery-cache.js";
+import { CealDiscoveryCacheStoreError, createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 
 const KEY = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
@@ -78,24 +74,38 @@ test("discovery cache read degrades to a miss on any anomaly instead of throwing
 
 test("discovery cache read rejects a foreign discovery schema as a miss", async () => {
 	await withHome(async (home) => {
-		writeFileSync(cacheFile(home), JSON.stringify({
-			schema_version: "ceal.client_discovery_cache.v1",
-			gateway_endpoint: KEY.gatewayEndpoint, profile_ref: KEY.profileRef, membership_ref: KEY.membershipRef,
-			negotiated_protocol_version: KEY.negotiatedProtocolVersion, cached_at: "2026-07-18T12:00:00.000Z",
-			discovery: { schema_version: "ceal.gateway_discovery.v1" },
-		}), { mode: 0o600 });
+		writeFileSync(
+			cacheFile(home),
+			JSON.stringify({
+				schema_version: "ceal.client_discovery_cache.v1",
+				gateway_endpoint: KEY.gatewayEndpoint,
+				profile_ref: KEY.profileRef,
+				membership_ref: KEY.membershipRef,
+				negotiated_protocol_version: KEY.negotiatedProtocolVersion,
+				cached_at: "2026-07-18T12:00:00.000Z",
+				discovery: { schema_version: "ceal.gateway_discovery.v1" },
+			}),
+			{ mode: 0o600 },
+		);
 		assert.equal(await createCealDiscoveryCacheStore(home).load(), null);
 	});
 });
 
 test("discovery cache read rejects a partial current-schema discovery value as a miss", async () => {
 	await withHome(async (home) => {
-		writeFileSync(cacheFile(home), JSON.stringify({
-			schema_version: "ceal.client_discovery_cache.v1",
-			gateway_endpoint: KEY.gatewayEndpoint, profile_ref: KEY.profileRef, membership_ref: KEY.membershipRef,
-			negotiated_protocol_version: KEY.negotiatedProtocolVersion, cached_at: "2026-07-18T12:00:00.000Z",
-			discovery: { schema_version: "ceal.gateway_discovery.v2" },
-		}), { mode: 0o600 });
+		writeFileSync(
+			cacheFile(home),
+			JSON.stringify({
+				schema_version: "ceal.client_discovery_cache.v1",
+				gateway_endpoint: KEY.gatewayEndpoint,
+				profile_ref: KEY.profileRef,
+				membership_ref: KEY.membershipRef,
+				negotiated_protocol_version: KEY.negotiatedProtocolVersion,
+				cached_at: "2026-07-18T12:00:00.000Z",
+				discovery: { schema_version: "ceal.gateway_discovery.v2" },
+			}),
+			{ mode: 0o600 },
+		);
 		assert.equal(await createCealDiscoveryCacheStore(home).load(), null);
 	});
 });
@@ -123,10 +133,19 @@ test("discoveryCacheEntryUsable enforces key match and freshness", () => {
 	assert.equal(discoveryCacheEntryUsable(entry({ cachedAt: now + 10_000 }), KEY, now, 5_000), false, "future stamp is not usable");
 	assert.equal(discoveryCacheEntryUsable(fresh, { ...KEY, profileRef: "profile:other" }, now, 5_000), false, "key mismatch");
 	assert.equal(discoveryCacheEntryUsable(fresh, { ...KEY, negotiatedProtocolVersion: "1.2.0" }, now, 5_000), false, "protocol mismatch");
-	assert.equal(discoveryCacheEntryUsable(entry({
-		cachedAt: now - 1_000,
-		discovery: { ...entry().discovery, membership_ref: "membership:other" },
-	}), KEY, now, 5_000), false, "discovery membership mismatch");
+	assert.equal(
+		discoveryCacheEntryUsable(
+			entry({
+				cachedAt: now - 1_000,
+				discovery: { ...entry().discovery, membership_ref: "membership:other" },
+			}),
+			KEY,
+			now,
+			5_000,
+		),
+		false,
+		"discovery membership mismatch",
+	);
 });
 
 function cacheFile(home) {
@@ -140,5 +159,9 @@ function hasCode(code) {
 
 async function withHome(callback) {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-discovery-cache-"));
-	try { await callback(home); } finally { (await import("node:fs")).rmSync(home, { recursive: true, force: true }); }
+	try {
+		await callback(home);
+	} finally {
+		(await import("node:fs")).rmSync(home, { recursive: true, force: true });
+	}
 }

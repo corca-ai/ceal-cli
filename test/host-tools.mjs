@@ -6,8 +6,6 @@ import { spawnSync } from "node:child_process";
 // Gate on the tool, not on process.platform: the requirement is what is true,
 // and it stays honest if a runner image gains or loses a tool.
 export function requireHostTools(...names) {
-	const missing = names.filter(
-		(name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).status !== 0,
-	);
+	const missing = names.filter((name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).status !== 0);
 	return missing.length === 0 ? false : `host lacks ${missing.join(", ")}`;
 }

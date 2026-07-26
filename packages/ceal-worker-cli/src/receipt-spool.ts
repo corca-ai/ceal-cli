@@ -73,8 +73,12 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 			if (state === null && existsSync(file)) throw new CealReceiptSpoolStoreError("unsafe_store");
 			return state;
 		},
-		async append(entry) { appendEntry(directory, file, entry, now()); },
-		async remove() { removeSpool(file); },
+		async append(entry) {
+			appendEntry(directory, file, entry, now());
+		},
+		async remove() {
+			removeSpool(file);
+		},
 	};
 }
 
@@ -93,8 +97,7 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 	const evidence = receipt.evidence;
 	const status = envelope.status;
 	if (!safeRef(requestRef) || !isSpoolEvidence(evidence) || !isSpoolStatus(status)) return null;
-	const auditRefs = Array.isArray(receipt.audit_refs)
-		? receipt.audit_refs.filter(safeRef).slice(0, MAX_AUDIT_REFS) : [];
+	const auditRefs = Array.isArray(receipt.audit_refs) ? receipt.audit_refs.filter(safeRef).slice(0, MAX_AUDIT_REFS) : [];
 	const error = envelope.error;
 	const errorKind = isRecord(error) && safeRef(error.kind) ? error.kind : undefined;
 	return {
@@ -135,15 +138,21 @@ function readSpool(directory: string, file: string, now: number): CealReceiptSpo
 	if (!existsSync(file)) return null;
 	if (!safeExistingFile(directory, file)) return null;
 	let parsed: unknown;
-	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { return null; }
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		return null;
+	}
 	if (!isRecord(parsed) || parsed.schema_version !== SPOOL_SCHEMA_VERSION || !Array.isArray(parsed.entries)) return null;
 	// Individually invalid or retention-expired entries are dropped instead of
 	// poisoning the whole spool; retention applies on read too, so a dormant
 	// client cannot serve entries past the advertised window.
-	const entries = parsed.entries.flatMap((value) => {
-		const entry = parseEntry(value);
-		return entry && withinRetention(entry.recordedAt, now) ? [entry] : [];
-	}).slice(-RECEIPT_SPOOL_MAX_ENTRIES);
+	const entries = parsed.entries
+		.flatMap((value) => {
+			const entry = parseEntry(value);
+			return entry && withinRetention(entry.recordedAt, now) ? [entry] : [];
+		})
+		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
 	return { entries, bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS } };
 }
 
@@ -158,14 +167,20 @@ const STALE_TEMPORARY_AGE_MS = 60 * 60 * 1000;
 
 function sweepStaleTemporaries(directory: string, now: number): void {
 	let names: string[];
-	try { names = readdirSync(directory); } catch { return; }
+	try {
+		names = readdirSync(directory);
+	} catch {
+		return;
+	}
 	for (const name of names) {
 		if (!/^[.]receipt-spool[.].+[.]tmp$/u.test(name)) continue;
 		const stale = path.join(directory, name);
 		try {
 			const stat = lstatSync(stale);
 			if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
-		} catch { /* best effort; never block the append */ }
+		} catch {
+			/* best effort; never block the append */
+		}
 	}
 }
 
@@ -210,16 +225,19 @@ function parseEntry(value: unknown): CealReceiptSpoolEntry | null {
 
 function isValidEntry(value: unknown): value is CealReceiptSpoolEntry {
 	if (!isRecord(value)) return false;
-	return Number.isFinite(value.recordedAt)
-		&& safeRef(value.requestRef) && isSpoolStatus(value.status) && isSpoolEvidence(value.evidence)
-		&& Array.isArray(value.auditRefs) && value.auditRefs.length <= MAX_AUDIT_REFS && value.auditRefs.every(safeRef)
-		&& (value.capabilityId === undefined || safeRef(value.capabilityId))
-		&& (value.targetRef === undefined || safeRef(value.targetRef))
-		&& (value.errorKind === undefined || safeRef(value.errorKind));
+	return (
+		Number.isFinite(value.recordedAt) &&
+		safeRef(value.requestRef) &&
+		isSpoolStatus(value.status) &&
+		isSpoolEvidence(value.evidence) &&
+		Array.isArray(value.auditRefs) &&
+		value.auditRefs.length <= MAX_AUDIT_REFS &&
+		value.auditRefs.every(safeRef) &&
+		(value.capabilityId === undefined || safeRef(value.capabilityId)) &&
+		(value.targetRef === undefined || safeRef(value.targetRef)) &&
+		(value.errorKind === undefined || safeRef(value.errorKind))
+	);
 }
-
-
-
 
 function isSpoolStatus(value: unknown): value is CealReceiptSpoolEntry["status"] {
 	return typeof value === "string" && SPOOL_STATUSES.has(value);

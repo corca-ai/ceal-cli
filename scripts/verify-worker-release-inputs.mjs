@@ -45,9 +45,9 @@ export function validateWorkerReleaseInputs({ repoRoot = REPO_ROOT, protocolVers
 	return {
 		schema_version: candidate.schema_version,
 		source_repository: candidate.source_repository,
-	packages: candidate.packages,
-	guide: candidate.guide,
-	installer: candidate.installer,
+		packages: candidate.packages,
+		guide: candidate.guide,
+		installer: candidate.installer,
 		protocol: {
 			package: candidate.protocol.package,
 			input: candidate.protocol.input,
@@ -61,30 +61,41 @@ function readInventory(root) {
 	if (!existsSync(file) || lstatSync(file).isSymbolicLink()) {
 		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory must be a regular tracked file.");
 	}
-	try { return JSON.parse(readFileSync(file, "utf8")); }
-	catch { throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory is not valid JSON."); }
+	try {
+		return JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory is not valid JSON.");
+	}
 }
 
 function assertInventoryShape(inventory) {
-	if (!inventory || typeof inventory !== "object"
-		|| inventory.schema_version !== EXPECTED.schema_version
-		|| inventory.source_repository !== EXPECTED.source_repository
-		|| !Array.isArray(inventory.forbidden_paths)) {
+	if (
+		!inventory ||
+		typeof inventory !== "object" ||
+		inventory.schema_version !== EXPECTED.schema_version ||
+		inventory.source_repository !== EXPECTED.source_repository ||
+		!Array.isArray(inventory.forbidden_paths)
+	) {
 		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory does not match the owned-only release contract.");
 	}
 	const selectedPaths = [inventory.packages?.client?.path, inventory.packages?.worker?.path, inventory.guide, inventory.installer];
 	if (selectedPaths.some((entry) => inventory.forbidden_paths.includes(entry))) {
 		throw new WorkerReleaseInputsError("forbidden_input", "Worker release inventory selected a Gateway-owned or legacy path.");
 	}
-	if (inventory.guide !== EXPECTED.guide
-		|| inventory.installer !== EXPECTED.installer
-		|| !sameObject(inventory.protocol, EXPECTED.protocol)
-		|| !sameObject(inventory.packages?.client, EXPECTED.packages.client)
-		|| !sameObject(inventory.packages?.worker, EXPECTED.packages.worker)) {
+	if (
+		inventory.guide !== EXPECTED.guide ||
+		inventory.installer !== EXPECTED.installer ||
+		!sameObject(inventory.protocol, EXPECTED.protocol) ||
+		!sameObject(inventory.packages?.client, EXPECTED.packages.client) ||
+		!sameObject(inventory.packages?.worker, EXPECTED.packages.worker)
+	) {
 		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory does not match the owned-only release contract.");
 	}
 	if (!sameStringSet(inventory.forbidden_paths, EXPECTED.forbidden_paths)) {
-		throw new WorkerReleaseInputsError("invalid_inventory", "Worker release inventory must retain the complete Gateway and legacy exclusion set.");
+		throw new WorkerReleaseInputsError(
+			"invalid_inventory",
+			"Worker release inventory must retain the complete Gateway and legacy exclusion set.",
+		);
 	}
 }
 
@@ -100,20 +111,25 @@ function assertPackage(root, input, protocolVersion, isWorker) {
 		throw new WorkerReleaseInputsError("invalid_package", "Worker release client SDK must remain publishable.");
 	}
 	if (protocolVersion !== undefined && manifest.dependencies?.[EXPECTED.protocol.package] !== protocolVersion) {
-		throw new WorkerReleaseInputsError("protocol_version_mismatch", "Worker release package does not declare the supplied Gateway protocol version exactly.");
+		throw new WorkerReleaseInputsError(
+			"protocol_version_mismatch",
+			"Worker release package does not declare the supplied Gateway protocol version exactly.",
+		);
 	}
 }
 
 function assertRegularDirectory(root, relativePath) {
 	const target = absolutePath(root, relativePath, "unsafe_path");
 	const stat = existsSync(target) ? lstatSync(target) : null;
-	if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new WorkerReleaseInputsError("unsafe_path", "Worker release input must be a regular directory.");
+	if (!stat?.isDirectory() || stat.isSymbolicLink())
+		throw new WorkerReleaseInputsError("unsafe_path", "Worker release input must be a regular directory.");
 }
 
 function assertRegularFile(root, relativePath) {
 	const target = absolutePath(root, relativePath, "unsafe_path");
 	const stat = existsSync(target) ? lstatSync(target) : null;
-	if (!stat?.isFile() || stat.isSymbolicLink()) throw new WorkerReleaseInputsError("unsafe_path", "Worker release file input must be a regular file.");
+	if (!stat?.isFile() || stat.isSymbolicLink())
+		throw new WorkerReleaseInputsError("unsafe_path", "Worker release file input must be a regular file.");
 }
 
 function absolutePath(root, relativePath, code) {
@@ -121,13 +137,17 @@ function absolutePath(root, relativePath, code) {
 		throw new WorkerReleaseInputsError(code, "Worker release input path must be a non-empty relative path.");
 	}
 	const target = path.resolve(root, relativePath);
-	if (!target.startsWith(`${root}${path.sep}`)) throw new WorkerReleaseInputsError(code, "Worker release input path escaped the repository root.");
+	if (!target.startsWith(`${root}${path.sep}`))
+		throw new WorkerReleaseInputsError(code, "Worker release input path escaped the repository root.");
 	return target;
 }
 
 function readJson(file, code) {
-	try { return JSON.parse(readFileSync(file, "utf8")); }
-	catch { throw new WorkerReleaseInputsError(code, "Worker release package manifest is unreadable."); }
+	try {
+		return JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		throw new WorkerReleaseInputsError(code, "Worker release package manifest is unreadable.");
+	}
 }
 
 function sameObject(actual, expected) {
@@ -135,8 +155,11 @@ function sameObject(actual, expected) {
 }
 
 function sameStringSet(actual, expected) {
-	return actual.length === expected.length && actual.every((entry) => typeof entry === "string")
-		&& actual.slice().sort().join("\n") === expected.slice().sort().join("\n");
+	return (
+		actual.length === expected.length &&
+		actual.every((entry) => typeof entry === "string") &&
+		actual.slice().sort().join("\n") === expected.slice().sort().join("\n")
+	);
 }
 
 function isExactVersion(value) {

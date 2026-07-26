@@ -1,7 +1,13 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { AGENT_AUDIT_NON_CLAIMS, type CealAgentAuditSession, type CealAgentAuditState, type CealAgentAuditTokenUsage, type CealAgentSessionEventsLookup } from "./agent-audit.js";
+import {
+	AGENT_AUDIT_NON_CLAIMS,
+	type CealAgentAuditSession,
+	type CealAgentAuditState,
+	type CealAgentAuditTokenUsage,
+	type CealAgentSessionEventsLookup,
+} from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -178,17 +184,21 @@ function observeAgentAudit(runtime: CealObserverRuntime): Record<string, unknown
 			...(adapter.depth === undefined ? {} : { depth: adapter.depth }),
 			...(adapter.inventory === undefined ? {} : { inventory: adapter.inventory }),
 			...(adapter.sessionCount === undefined ? {} : { session_count: adapter.sessionCount }),
-			...(adapter.sessions === undefined ? {} : {
-				sessions: adapter.sessions.map((session) => ({
-					session_ref: session.sessionRef,
-					last_activity_at: new Date(session.lastActivityAt).toISOString(),
-					transcript_bytes: session.transcriptBytes,
-					...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
-				})),
-			}),
-			...(adapter.eventScan === undefined ? {} : {
-				event_scan: { scanned_sessions: adapter.eventScan.scannedSessions, session_limit: adapter.eventScan.sessionLimit },
-			}),
+			...(adapter.sessions === undefined
+				? {}
+				: {
+						sessions: adapter.sessions.map((session) => ({
+							session_ref: session.sessionRef,
+							last_activity_at: new Date(session.lastActivityAt).toISOString(),
+							transcript_bytes: session.transcriptBytes,
+							...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
+						})),
+					}),
+			...(adapter.eventScan === undefined
+				? {}
+				: {
+						event_scan: { scanned_sessions: adapter.eventScan.scannedSessions, session_limit: adapter.eventScan.sessionLimit },
+					}),
 			...(adapter.note === undefined ? {} : { note: adapter.note }),
 		})),
 		non_claims: state.nonClaims,
@@ -249,16 +259,19 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 		coverage: "ceal-mediated",
 		entry_count: spool.entries.length,
 		bounds: { max_entries: spool.bounds.maxEntries, retention_ms: spool.bounds.retentionMs },
-		entries: ordered.slice(-RECEIPT_SPOOL_RENDER_LIMIT).reverse().map((entry) => ({
-			recorded_at: new Date(entry.recordedAt).toISOString(),
-			request_ref: entry.requestRef,
-			status: entry.status,
-			evidence: entry.evidence,
-			...(entry.capabilityId === undefined ? {} : { capability: entry.capabilityId }),
-			...(entry.targetRef === undefined ? {} : { target: entry.targetRef }),
-			...(entry.errorKind === undefined ? {} : { error_kind: entry.errorKind }),
-			...(entry.auditRefs.length === 0 ? {} : { audit_refs: entry.auditRefs }),
-		})),
+		entries: ordered
+			.slice(-RECEIPT_SPOOL_RENDER_LIMIT)
+			.reverse()
+			.map((entry) => ({
+				recorded_at: new Date(entry.recordedAt).toISOString(),
+				request_ref: entry.requestRef,
+				status: entry.status,
+				evidence: entry.evidence,
+				...(entry.capabilityId === undefined ? {} : { capability: entry.capabilityId }),
+				...(entry.targetRef === undefined ? {} : { target: entry.targetRef }),
+				...(entry.errorKind === undefined ? {} : { error_kind: entry.errorKind }),
+				...(entry.auditRefs.length === 0 ? {} : { audit_refs: entry.auditRefs }),
+			})),
 		non_claim: RECEIPT_SPOOL_NON_CLAIM,
 	};
 }
@@ -317,7 +330,9 @@ async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number):
 		capabilities: capabilities.map((capability) => scalarProjection(capability)),
 		cached_target_count: targets.length,
 		...(typeof targetCatalog === "object" && targetCatalog !== null ? { target_catalog: scalarProjection(targetCatalog) } : {}),
-		...(Array.isArray(entry.discovery.non_claims) ? { non_claims: entry.discovery.non_claims.filter((value) => typeof value === "string") } : {}),
+		...(Array.isArray(entry.discovery.non_claims)
+			? { non_claims: entry.discovery.non_claims.filter((value) => typeof value === "string") }
+			: {}),
 	};
 }
 
@@ -366,8 +381,9 @@ function observeGuide(runtime: CealObserverRuntime): Record<string, unknown> {
 // stays allow-by-name because it fronts a store that does hold secrets.
 function scalarProjection(value: unknown): Record<string, unknown> {
 	if (typeof value !== "object" || value === null) return {};
-	return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-		.filter(([, entry]) => ["string", "number", "boolean"].includes(typeof entry)));
+	return Object.fromEntries(
+		Object.entries(value as Record<string, unknown>).filter(([, entry]) => ["string", "number", "boolean"].includes(typeof entry)),
+	);
 }
 
 // Loopback guard, after the agentsview pattern: only direct 127.0.0.1/localhost
@@ -378,9 +394,7 @@ const FORWARDED_HEADERS = ["forwarded", "x-forwarded-for", "x-forwarded-host", "
 
 function hostAllowed(hostHeader: string | undefined): boolean {
 	if (!hostHeader) return false;
-	const host = hostHeader.startsWith("[")
-		? hostHeader.replace(/\]:\d+$/u, "]")
-		: hostHeader.replace(/:\d+$/u, "");
+	const host = hostHeader.startsWith("[") ? hostHeader.replace(/\]:\d+$/u, "]") : hostHeader.replace(/:\d+$/u, "");
 	return ALLOWED_HOSTS.has(host.toLowerCase());
 }
 
@@ -468,14 +482,16 @@ function respondAgentSession(response: ServerResponse, runtime: CealObserverRunt
 	body(lookup.status === "not_found" ? 404 : 200, {
 		...envelope,
 		status: lookup.status,
-		...(session === undefined ? {} : {
-			session: {
-				session_ref: session.sessionRef,
-				last_activity_at: new Date(session.lastActivityAt).toISOString(),
-				transcript_bytes: session.transcriptBytes,
-				...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
-			},
-		}),
+		...(session === undefined
+			? {}
+			: {
+					session: {
+						session_ref: session.sessionRef,
+						last_activity_at: new Date(session.lastActivityAt).toISOString(),
+						transcript_bytes: session.transcriptBytes,
+						...(session.events === undefined ? {} : { events: projectSessionEvents(session.events) }),
+					},
+				}),
 		non_claims: [...AGENT_AUDIT_NON_CLAIMS],
 	});
 }

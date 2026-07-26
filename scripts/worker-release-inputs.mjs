@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,14 @@ const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-handoff-owner";
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const PACKAGE_NAMES = ["@corca-ai/ceal-protocol", "@corca-ai/ceal"];
-const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "clientTarball", "protocolProvenance", "conformanceProof", "handoffManifest", "expectedHandoffSha256"];
+const RAW_HANDOFF_INPUT_KEYS = [
+	"protocolTarball",
+	"clientTarball",
+	"protocolProvenance",
+	"conformanceProof",
+	"handoffManifest",
+	"expectedHandoffSha256",
+];
 
 export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
@@ -37,7 +44,15 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	const conformanceProof = requireRegularAbsoluteFile(options.conformanceProof, "conformance_proof");
 	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
 	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
-	if (new Set([path.dirname(protocolTarball), path.dirname(clientTarball), path.dirname(protocolProvenance), path.dirname(conformanceProof), path.dirname(handoffManifest)]).size !== 1) {
+	if (
+		new Set([
+			path.dirname(protocolTarball),
+			path.dirname(clientTarball),
+			path.dirname(protocolProvenance),
+			path.dirname(conformanceProof),
+			path.dirname(handoffManifest),
+		]).size !== 1
+	) {
 		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
 	}
 	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
@@ -70,7 +85,10 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 		handoff: { filename: path.basename(handoffManifest), sha256: expectedHandoffSha256 },
 		trust_anchor: { kind: "caller_supplied_manifest_sha256", value: expectedHandoffSha256 },
 		forbidden_release_inputs: [...inventory.forbidden_release_inputs],
-		non_claims: [...inventory.non_claims, "This caller-supplied digest binds exact local input bytes; it does not authenticate who supplied that digest or packet."],
+		non_claims: [
+			...inventory.non_claims,
+			"This caller-supplied digest binds exact local input bytes; it does not authenticate who supplied that digest or packet.",
+		],
 	};
 }
 
@@ -82,13 +100,16 @@ export function withWorkerReleaseInputs(options, consume, dependencies = {}) {
 	assertReleaseArchiveInput(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	try {
-		return (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchiveSync)({
-			repoRoot,
-			archiveFile: options.gatewayHandoffArchive,
-		}, {
-			resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
-			consume: ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
-		});
+		return (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchiveSync)(
+			{
+				repoRoot,
+				archiveFile: options.gatewayHandoffArchive,
+			},
+			{
+				resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
+				consume: ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
+			},
+		);
 	} catch (error) {
 		if (error instanceof WorkerGatewayHandoffArchiveError) throw new WorkerReleaseInputError(error.code, error.message);
 		throw error;
@@ -99,13 +120,16 @@ export async function withWorkerReleaseInputsAsync(options, consume, dependencie
 	assertReleaseArchiveInput(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	try {
-		return await (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchive)({
-			repoRoot,
-			archiveFile: options.gatewayHandoffArchive,
-		}, {
-			resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
-			consume: async ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
-		});
+		return await (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchive)(
+			{
+				repoRoot,
+				archiveFile: options.gatewayHandoffArchive,
+			},
+			{
+				resolveInputs: (rawInputs) => resolveWorkerReleaseDevelopmentInputs(rawInputs),
+				consume: async ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
+			},
+		);
 	} catch (error) {
 		if (error instanceof WorkerGatewayHandoffArchiveError) throw new WorkerReleaseInputError(error.code, error.message);
 		throw error;
@@ -139,7 +163,8 @@ function rawInputOptions(repoRoot, options) {
 }
 
 function assertReleaseArchiveInput(options) {
-	if (!options.gatewayHandoffArchive) fail("gateway_handoff_archive_required", "Worker release commands require one lock-bound Gateway handoff archive.");
+	if (!options.gatewayHandoffArchive)
+		fail("gateway_handoff_archive_required", "Worker release commands require one lock-bound Gateway handoff archive.");
 	if (RAW_HANDOFF_INPUT_KEYS.some((key) => options[key] !== undefined)) {
 		fail("input_mode_conflict", "Gateway handoff archive input cannot be combined with raw handoff files or digests.");
 	}
@@ -194,31 +219,47 @@ function assertInventory(inventory, repoRoot) {
 	assertClient(inventory.client, repoRoot);
 	assertGuide(inventory.guide, repoRoot);
 	assertProtocolRequirement(inventory.required_gateway_protocol);
-	if (!Array.isArray(inventory.forbidden_release_inputs) || inventory.forbidden_release_inputs.length === 0
-		|| new Set(inventory.forbidden_release_inputs).size !== inventory.forbidden_release_inputs.length
-		|| inventory.forbidden_release_inputs.some((entry) => typeof entry !== "string" || normalizeRelativePath(entry) !== entry)) {
+	if (
+		!Array.isArray(inventory.forbidden_release_inputs) ||
+		inventory.forbidden_release_inputs.length === 0 ||
+		new Set(inventory.forbidden_release_inputs).size !== inventory.forbidden_release_inputs.length ||
+		inventory.forbidden_release_inputs.some((entry) => typeof entry !== "string" || normalizeRelativePath(entry) !== entry)
+	) {
 		fail("invalid_inventory", "Worker release inventory must declare unique forbidden composite inputs.");
 	}
-	if (inventory.forbidden_release_inputs.some((entry) => [inventory.worker.source_path, inventory.client.source_path, inventory.guide.source_path].some((allowed) => allowed === entry || allowed.startsWith(`${entry}/`)))) {
+	if (
+		inventory.forbidden_release_inputs.some((entry) =>
+			[inventory.worker.source_path, inventory.client.source_path, inventory.guide.source_path].some(
+				(allowed) => allowed === entry || allowed.startsWith(`${entry}/`),
+			),
+		)
+	) {
 		fail("invalid_inventory", "Worker release inventory overlaps an owned input with a forbidden input.");
 	}
-	if (!Array.isArray(inventory.non_claims) || inventory.non_claims.length === 0 || inventory.non_claims.some((entry) => typeof entry !== "string" || entry.length === 0)) {
+	if (
+		!Array.isArray(inventory.non_claims) ||
+		inventory.non_claims.length === 0 ||
+		inventory.non_claims.some((entry) => typeof entry !== "string" || entry.length === 0)
+	) {
 		fail("invalid_inventory", "Worker release inventory must retain explicit non-claims.");
 	}
 }
 
 function assertWorker(worker, repoRoot) {
-	if (!isPlainObject(worker) || worker.package !== "@corca-ai/ceal-worker-cli" || worker.command !== "ceal") fail("invalid_inventory", "Worker release inventory has an invalid worker identity.");
+	if (!isPlainObject(worker) || worker.package !== "@corca-ai/ceal-worker-cli" || worker.command !== "ceal")
+		fail("invalid_inventory", "Worker release inventory has an invalid worker identity.");
 	assertPackageSource(repoRoot, worker.source_path, worker.package, worker.command);
 }
 
 function assertClient(client, repoRoot) {
-	if (!isPlainObject(client) || client.package !== "@corca-ai/ceal") fail("invalid_inventory", "Worker release inventory has an invalid client identity.");
+	if (!isPlainObject(client) || client.package !== "@corca-ai/ceal")
+		fail("invalid_inventory", "Worker release inventory has an invalid client identity.");
 	assertPackageSource(repoRoot, client.source_path, client.package);
 }
 
 function assertGuide(guide, repoRoot) {
-	if (!isPlainObject(guide) || guide.asset !== "ceal-guide-SKILL.md" || guide.source_path !== "skills/ceal-guide/SKILL.md") fail("invalid_inventory", "Worker release inventory has an invalid guide identity.");
+	if (!isPlainObject(guide) || guide.asset !== "ceal-guide-SKILL.md" || guide.source_path !== "skills/ceal-guide/SKILL.md")
+		fail("invalid_inventory", "Worker release inventory has an invalid guide identity.");
 	requireRegularFile(path.join(repoRoot, guide.source_path), "invalid_inventory");
 }
 
@@ -231,32 +272,76 @@ function assertPackageSource(repoRoot, sourcePath, expectedName, command) {
 }
 
 function assertProtocolRequirement(protocol) {
-	if (!isPlainObject(protocol) || protocol.package !== "@corca-ai/ceal-protocol" || protocol.source_repository !== "corca-ai/ceal"
-		|| protocol.source_path !== "packages/ceal-protocol" || protocol.provenance_schema !== PROTOCOL_PROVENANCE_SCHEMA
-		|| protocol.handoff_manifest_schema !== "ceal.repository_extraction_gateway_handoff.v1"
-		|| !sameStrings(protocol.required_exports, [".", "./conformance"])) {
+	if (
+		!isPlainObject(protocol) ||
+		protocol.package !== "@corca-ai/ceal-protocol" ||
+		protocol.source_repository !== "corca-ai/ceal" ||
+		protocol.source_path !== "packages/ceal-protocol" ||
+		protocol.provenance_schema !== PROTOCOL_PROVENANCE_SCHEMA ||
+		protocol.handoff_manifest_schema !== "ceal.repository_extraction_gateway_handoff.v1" ||
+		!sameStrings(protocol.required_exports, [".", "./conformance"])
+	) {
 		fail("invalid_inventory", "Worker release inventory has an invalid Gateway Protocol requirement.");
 	}
 }
 
-function validateHandoffPacket({ inventory, clientTarball, conformanceProof, handoff, proof, protocolTarball, protocolProvenance, provenance }) {
-	if (!isPlainObject(handoff) || handoff.schema_version !== HANDOFF_SCHEMA || handoff.ok !== true
-		|| handoff.proof_level !== "host_decision" || handoff.writes_external !== false) {
+function validateHandoffPacket({
+	inventory,
+	clientTarball,
+	conformanceProof,
+	handoff,
+	proof,
+	protocolTarball,
+	protocolProvenance,
+	provenance,
+}) {
+	if (
+		!isPlainObject(handoff) ||
+		handoff.schema_version !== HANDOFF_SCHEMA ||
+		handoff.ok !== true ||
+		handoff.proof_level !== "host_decision" ||
+		handoff.writes_external !== false
+	) {
 		fail("invalid_handoff_manifest", "Gateway handoff manifest is not a self-consistent producer record.");
 	}
 	const producer = handoff.producer;
-	if (!isPlainObject(producer) || producer.repository !== inventory.required_gateway_protocol.source_repository
-		|| !GIT_OBJECT_ID.test(producer.commit ?? "") || !GIT_OBJECT_ID.test(producer.tree ?? "") || producer.scoped_paths_clean !== true) {
+	if (
+		!isPlainObject(producer) ||
+		producer.repository !== inventory.required_gateway_protocol.source_repository ||
+		!GIT_OBJECT_ID.test(producer.commit ?? "") ||
+		!GIT_OBJECT_ID.test(producer.tree ?? "") ||
+		producer.scoped_paths_clean !== true
+	) {
 		fail("invalid_handoff_manifest", "Gateway handoff producer identity is invalid.");
 	}
 	const records = packageRecords(handoff.packages);
 	const protocol = records.get(inventory.required_gateway_protocol.package);
 	const client = records.get(inventory.client.package);
 	assertHandoffMarker(path.dirname(conformanceProof));
-	assertArtifactBytes({ tarball: protocolTarball, record: protocol, code: "protocol_artifact_mismatch", message: "Gateway Protocol tarball does not match the complete handoff packet." });
-	assertArtifactBytes({ tarball: clientTarball, record: client, code: "client_artifact_mismatch", message: "Gateway client tarball does not match the complete handoff packet." });
-	const protocolManifest = assertPackedPackage({ tarball: protocolTarball, record: protocol, expectedName: inventory.required_gateway_protocol.package, code: "protocol_artifact_mismatch" });
-	const clientManifest = assertPackedPackage({ tarball: clientTarball, record: client, expectedName: inventory.client.package, code: "client_artifact_mismatch" });
+	assertArtifactBytes({
+		tarball: protocolTarball,
+		record: protocol,
+		code: "protocol_artifact_mismatch",
+		message: "Gateway Protocol tarball does not match the complete handoff packet.",
+	});
+	assertArtifactBytes({
+		tarball: clientTarball,
+		record: client,
+		code: "client_artifact_mismatch",
+		message: "Gateway client tarball does not match the complete handoff packet.",
+	});
+	const protocolManifest = assertPackedPackage({
+		tarball: protocolTarball,
+		record: protocol,
+		expectedName: inventory.required_gateway_protocol.package,
+		code: "protocol_artifact_mismatch",
+	});
+	const clientManifest = assertPackedPackage({
+		tarball: clientTarball,
+		record: client,
+		expectedName: inventory.client.package,
+		code: "client_artifact_mismatch",
+	});
 	if (clientManifest.dependencies?.[protocol.name] !== protocolManifest.version) {
 		fail("client_artifact_mismatch", "Gateway client tarball does not declare the supplied Gateway Protocol version.");
 	}
@@ -275,11 +360,21 @@ function packageRecords(value) {
 }
 
 function validatePackageRecord(record) {
-	if (!isPlainObject(record) || typeof record.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(record.version)
-		|| typeof record.filename !== "string" || record.filename !== path.basename(record.filename) || !record.filename.endsWith(".tgz")
-		|| !isSha256(record.sha256) || typeof record.integrity !== "string" || !record.integrity.startsWith("sha512-")
-		|| !Number.isSafeInteger(record.bytes) || record.bytes <= 0 || !sameSortedExports(record.declared_exports)
-		|| !isSha256(record.package_manifest_sha256)) {
+	if (
+		!isPlainObject(record) ||
+		typeof record.version !== "string" ||
+		!/^\d+\.\d+\.\d+$/u.test(record.version) ||
+		typeof record.filename !== "string" ||
+		record.filename !== path.basename(record.filename) ||
+		!record.filename.endsWith(".tgz") ||
+		!isSha256(record.sha256) ||
+		typeof record.integrity !== "string" ||
+		!record.integrity.startsWith("sha512-") ||
+		!Number.isSafeInteger(record.bytes) ||
+		record.bytes <= 0 ||
+		!sameSortedExports(record.declared_exports) ||
+		!isSha256(record.package_manifest_sha256)
+	) {
 		fail("invalid_handoff_manifest", "Gateway handoff package record is invalid.");
 	}
 	return { ...record, declared_exports: [...record.declared_exports] };
@@ -288,7 +383,12 @@ function validatePackageRecord(record) {
 function assertArtifactBytes({ tarball, record, code, message }) {
 	const bytes = readFileSync(tarball);
 	const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-	if (path.basename(tarball) !== record.filename || bytes.length !== record.bytes || sha256(bytes) !== record.sha256 || integrity !== record.integrity) {
+	if (
+		path.basename(tarball) !== record.filename ||
+		bytes.length !== record.bytes ||
+		sha256(bytes) !== record.sha256 ||
+		integrity !== record.integrity
+	) {
 		fail(code, message);
 	}
 }
@@ -296,9 +396,17 @@ function assertArtifactBytes({ tarball, record, code, message }) {
 function assertPackedPackage({ tarball, record, expectedName, code }) {
 	const manifestBytes = readPackedManifestBytes(tarball, code);
 	let manifest;
-	try { manifest = JSON.parse(manifestBytes); } catch { fail(code, "Gateway package tarball has an invalid package manifest."); }
-	if (manifest?.name !== expectedName || manifest?.version !== record.version || sha256(manifestBytes) !== record.package_manifest_sha256
-		|| !sameStrings(exportKeys(manifest.exports), record.declared_exports)) {
+	try {
+		manifest = JSON.parse(manifestBytes);
+	} catch {
+		fail(code, "Gateway package tarball has an invalid package manifest.");
+	}
+	if (
+		manifest?.name !== expectedName ||
+		manifest?.version !== record.version ||
+		sha256(manifestBytes) !== record.package_manifest_sha256 ||
+		!sameStrings(exportKeys(manifest.exports), record.declared_exports)
+	) {
 		fail(code, "Gateway package tarball does not match its complete handoff record.");
 	}
 	return manifest;
@@ -315,12 +423,25 @@ function assertConformanceProof({ handoff, proof, conformanceProof, producer, re
 	const bytes = readFileSync(conformanceProof);
 	const sidecar = handoff.conformance_proof;
 	const digest = handoff.conformance_proof_digest;
-	if (!isPlainObject(sidecar) || sidecar.filename !== path.basename(conformanceProof) || sidecar.bytes !== bytes.length
-		|| !isPlainObject(digest) || digest.algorithm !== "sha256" || digest.canonicalization !== "utf8-json-pretty-v1" || digest.value !== sha256(bytes)) {
+	if (
+		!isPlainObject(sidecar) ||
+		sidecar.filename !== path.basename(conformanceProof) ||
+		sidecar.bytes !== bytes.length ||
+		!isPlainObject(digest) ||
+		digest.algorithm !== "sha256" ||
+		digest.canonicalization !== "utf8-json-pretty-v1" ||
+		digest.value !== sha256(bytes)
+	) {
 		fail("handoff_conformance_mismatch", "Gateway handoff does not bind the conformance-proof sidecar bytes.");
 	}
-	if (!isPlainObject(proof) || proof.schema_version !== CONFORMANCE_PROOF_SCHEMA || proof.ok !== true || proof.proof_level !== "host_decision"
-		|| proof.writes_external !== false || !sameProducer(proof.source_identity, producer)) {
+	if (
+		!isPlainObject(proof) ||
+		proof.schema_version !== CONFORMANCE_PROOF_SCHEMA ||
+		proof.ok !== true ||
+		proof.proof_level !== "host_decision" ||
+		proof.writes_external !== false ||
+		!sameProducer(proof.source_identity, producer)
+	) {
 		fail("invalid_conformance_proof", "Gateway conformance proof does not bind the handoff producer identity.");
 	}
 	if (!Array.isArray(proof.packages) || proof.packages.length !== PACKAGE_NAMES.length) {
@@ -329,30 +450,58 @@ function assertConformanceProof({ handoff, proof, conformanceProof, producer, re
 	for (const name of PACKAGE_NAMES) {
 		const record = records.get(name);
 		const packageProof = proof.packages.find((entry) => entry?.name === name);
-		if (!packageProof || packageProof.name !== name || packageProof.version !== record.version || packageProof.filename !== record.filename
-			|| packageProof.sha256 !== record.sha256 || packageProof.integrity !== record.integrity || packageProof.bytes !== record.bytes
-			|| !sameStrings(packageProof.declared_exports, record.declared_exports) || packageProof.package_manifest_sha256 !== record.package_manifest_sha256
-			|| packageProof.installed_as_regular_directory !== true) {
+		if (
+			!packageProof ||
+			packageProof.name !== name ||
+			packageProof.version !== record.version ||
+			packageProof.filename !== record.filename ||
+			packageProof.sha256 !== record.sha256 ||
+			packageProof.integrity !== record.integrity ||
+			packageProof.bytes !== record.bytes ||
+			!sameStrings(packageProof.declared_exports, record.declared_exports) ||
+			packageProof.package_manifest_sha256 !== record.package_manifest_sha256 ||
+			packageProof.installed_as_regular_directory !== true
+		) {
 			fail("handoff_conformance_mismatch", "Gateway conformance proof does not bind every supplied package record.");
 		}
 	}
 }
 
 function assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer, protocol }) {
-	if (!isPlainObject(provenance) || provenance.schema_version !== PROTOCOL_PROVENANCE_SCHEMA || provenance.proof_level !== "host_decision" || provenance.writes_external !== false
-		|| !sameSourceIdentity(provenance.source, producer) || provenance.source.package_path !== "packages/ceal-protocol") {
+	if (
+		!isPlainObject(provenance) ||
+		provenance.schema_version !== PROTOCOL_PROVENANCE_SCHEMA ||
+		provenance.proof_level !== "host_decision" ||
+		provenance.writes_external !== false ||
+		!sameSourceIdentity(provenance.source, producer) ||
+		provenance.source.package_path !== "packages/ceal-protocol"
+	) {
 		fail("invalid_protocol_provenance", "Gateway Protocol provenance is not a verified handoff record.");
 	}
 	const artifact = provenance.artifact;
-	if (!isPlainObject(artifact) || artifact.package !== protocol.name || artifact.version !== protocol.version || artifact.filename !== protocol.filename
-		|| artifact.sha256 !== protocol.sha256 || artifact.npm_integrity !== protocol.integrity || !sameStrings(artifact.exports, protocol.declared_exports)) {
+	if (
+		!isPlainObject(artifact) ||
+		artifact.package !== protocol.name ||
+		artifact.version !== protocol.version ||
+		artifact.filename !== protocol.filename ||
+		artifact.sha256 !== protocol.sha256 ||
+		artifact.npm_integrity !== protocol.integrity ||
+		!sameStrings(artifact.exports, protocol.declared_exports)
+	) {
 		fail("handoff_provenance_mismatch", "Gateway Protocol provenance does not bind the complete handoff record.");
 	}
 	const bytes = readFileSync(protocolProvenance);
 	const sidecar = handoff.protocol_provenance;
 	const digest = handoff.protocol_provenance_digest;
-	if (!isPlainObject(sidecar) || sidecar.filename !== path.basename(protocolProvenance) || sidecar.bytes !== bytes.length
-		|| !isPlainObject(digest) || digest.algorithm !== "sha256" || digest.canonicalization !== "utf8-json-pretty-v1" || digest.value !== sha256(bytes)) {
+	if (
+		!isPlainObject(sidecar) ||
+		sidecar.filename !== path.basename(protocolProvenance) ||
+		sidecar.bytes !== bytes.length ||
+		!isPlainObject(digest) ||
+		digest.algorithm !== "sha256" ||
+		digest.canonicalization !== "utf8-json-pretty-v1" ||
+		digest.value !== sha256(bytes)
+	) {
 		fail("handoff_provenance_mismatch", "Gateway handoff does not bind the Protocol provenance sidecar bytes.");
 	}
 }
@@ -361,12 +510,21 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 	const requirement = inventory.required_gateway_protocol;
 	const source = provenance.source;
 	const artifact = provenance.artifact;
-	if (source.repository !== requirement.source_repository || source.package_path !== requirement.source_path || artifact.package !== requirement.package
-		|| !sameStrings(artifact.exports, requirement.required_exports) || protocolRecord.name !== requirement.package) {
+	if (
+		source.repository !== requirement.source_repository ||
+		source.package_path !== requirement.source_path ||
+		artifact.package !== requirement.package ||
+		!sameStrings(artifact.exports, requirement.required_exports) ||
+		protocolRecord.name !== requirement.package
+	) {
 		fail("protocol_artifact_mismatch", "Gateway Protocol tarball does not match its provenance record.");
 	}
 	const packageManifest = readPackedManifest(protocolTarball);
-	if (packageManifest?.name !== requirement.package || packageManifest?.version !== artifact.version || !sameStrings(Object.keys(packageManifest?.exports ?? {}).sort(), requirement.required_exports)) {
+	if (
+		packageManifest?.name !== requirement.package ||
+		packageManifest?.version !== artifact.version ||
+		!sameStrings(Object.keys(packageManifest?.exports ?? {}).sort(), requirement.required_exports)
+	) {
 		fail("protocol_artifact_mismatch", "Gateway Protocol tarball does not expose the declared package surface.");
 	}
 	for (const sourcePath of [inventory.client.source_path, inventory.worker.source_path]) {
@@ -388,14 +546,19 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 
 function readPackedManifest(tarball) {
 	const bytes = readPackedManifestBytes(tarball, "invalid_protocol_tarball");
-	try { return JSON.parse(bytes); }
-	catch { fail("invalid_protocol_tarball", "Gateway Protocol input is not a readable package tarball."); }
+	try {
+		return JSON.parse(bytes);
+	} catch {
+		fail("invalid_protocol_tarball", "Gateway Protocol input is not a readable package tarball.");
+	}
 }
 
 function readPackedManifestBytes(tarball, code) {
 	try {
 		return execFileSync("tar", ["-xOzf", tarball, "package/package.json"], {
-			encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1024 * 1024,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			maxBuffer: 1024 * 1024,
 		});
 	} catch {
 		fail(code, "Gateway package input is not a readable package tarball.");
@@ -415,17 +578,27 @@ function requireRegularFile(filePath, code) {
 }
 
 function requireSha256(value, code) {
-	if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) fail(code, "Worker release trust anchor must be one lowercase SHA-256 value.");
+	if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value))
+		fail(code, "Worker release trust anchor must be one lowercase SHA-256 value.");
 	return value;
 }
 
 function readJson(filePath, code) {
-	try { return JSON.parse(readFileSync(filePath, "utf8")); }
-	catch { fail(code, "Worker release input JSON is invalid."); }
+	try {
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		fail(code, "Worker release input JSON is invalid.");
+	}
 }
 
 function normalizeRelativePath(value) {
-	if (typeof value !== "string" || value.length === 0 || path.isAbsolute(value) || value.includes("\\\\") || value.split("/").some((part) => part.length === 0 || part === "." || part === "..")) {
+	if (
+		typeof value !== "string" ||
+		value.length === 0 ||
+		path.isAbsolute(value) ||
+		value.includes("\\\\") ||
+		value.split("/").some((part) => part.length === 0 || part === "." || part === "..")
+	) {
 		fail("invalid_release_input_path", "Worker release input path must be a normalized relative path.");
 	}
 	return value;
@@ -436,31 +609,55 @@ function sameStrings(value, expected) {
 }
 
 function sameSortedExports(value) {
-	return Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === "string" && (entry === "." || entry.startsWith("./")))
-		&& new Set(value).size === value.length && sameStrings([...value].sort(), value);
+	return (
+		Array.isArray(value) &&
+		value.length > 0 &&
+		value.every((entry) => typeof entry === "string" && (entry === "." || entry.startsWith("./"))) &&
+		new Set(value).size === value.length &&
+		sameStrings([...value].sort(), value)
+	);
 }
 
 function exportKeys(exportsField) {
 	if (typeof exportsField === "string" || Array.isArray(exportsField)) return ["."];
 	if (!isPlainObject(exportsField)) return [];
-	return Object.keys(exportsField).filter((key) => key === "." || key.startsWith("./")).sort();
+	return Object.keys(exportsField)
+		.filter((key) => key === "." || key.startsWith("./"))
+		.sort();
 }
 
 function sameProducer(candidate, expected) {
-	return isPlainObject(candidate) && candidate.repository === expected.repository && candidate.commit === expected.commit
-		&& candidate.tree === expected.tree && candidate.scoped_paths_clean === true;
+	return (
+		isPlainObject(candidate) &&
+		candidate.repository === expected.repository &&
+		candidate.commit === expected.commit &&
+		candidate.tree === expected.tree &&
+		candidate.scoped_paths_clean === true
+	);
 }
 
 function sameSourceIdentity(candidate, expected) {
-	return isPlainObject(candidate) && candidate.repository === expected.repository && candidate.commit === expected.commit
-		&& candidate.tree === expected.tree;
+	return (
+		isPlainObject(candidate) &&
+		candidate.repository === expected.repository &&
+		candidate.commit === expected.commit &&
+		candidate.tree === expected.tree
+	);
 }
 
-function isSha256(value) { return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }
+function isSha256(value) {
+	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
 
-function isPlainObject(value) { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerReleaseInputError(code, message); }
+function isPlainObject(value) {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerReleaseInputError(code, message);
+}
 
 function parseArgs(argv) {
 	const parsed = parseScriptArgs(argv, {
@@ -486,8 +683,14 @@ export function runCli(argv, io = console) {
 		return 0;
 	} catch (error) {
 		const known = error instanceof WorkerReleaseInputError;
-		const payload = { schema_version: "ceal.worker_release_input_error.v1", ok: false, error_code: known ? error.code : "worker_release_input_failed", message: known ? error.message : "Worker release inputs could not be verified." };
-		if (json) io.log(JSON.stringify(payload)); else io.error(payload.message);
+		const payload = {
+			schema_version: "ceal.worker_release_input_error.v1",
+			ok: false,
+			error_code: known ? error.code : "worker_release_input_failed",
+			message: known ? error.message : "Worker release inputs could not be verified.",
+		};
+		if (json) io.log(JSON.stringify(payload));
+		else io.error(payload.message);
 		return 2;
 	}
 }

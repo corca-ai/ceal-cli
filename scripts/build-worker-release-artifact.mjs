@@ -2,17 +2,29 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
-import { verifyGatewayProtocolConsumer } from "./verify-gateway-protocol-consumer.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
+import { verifyGatewayProtocolConsumer } from "./verify-gateway-protocol-consumer.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
@@ -60,7 +72,8 @@ export async function buildWorkerReleaseArtifact(options = {}, deps = {}) {
 
 function normalizeOptions(options, deps) {
 	const platform = requirePlatform(options.platform ?? currentPlatform());
-	if (platform !== (deps.currentPlatform ?? currentPlatform)()) fail("platform_mismatch", "Worker artifact must be built on its target platform.");
+	if (platform !== (deps.currentPlatform ?? currentPlatform)())
+		fail("platform_mismatch", "Worker artifact must be built on its target platform.");
 	return {
 		force: options.force === true,
 		outputDirectory: requireOutputDirectory(options.outputDirectory ?? options.out),
@@ -80,7 +93,8 @@ async function verifyConsumer(normalized, deps) {
 			protocolProvenance: normalized.protocolProvenance,
 			keepWorkspace: true,
 		});
-		if (!proof?.ok || !proof.workspace || !path.isAbsolute(proof.workspace)) fail("consumer_proof_failed", "Worker artifact requires a successful isolated packed-consumer proof.");
+		if (!proof?.ok || !proof.workspace || !path.isAbsolute(proof.workspace))
+			fail("consumer_proof_failed", "Worker artifact requires a successful isolated packed-consumer proof.");
 		return proof;
 	} catch (error) {
 		cleanupFailedConsumerWorkspace(error?.workspace);
@@ -100,7 +114,9 @@ function cleanupFailedConsumerWorkspace(workspace) {
 	try {
 		parent = realpathSync(path.dirname(resolved));
 		canonicalTempRoot = realpathSync(tmpdir());
-	} catch { return; }
+	} catch {
+		return;
+	}
 	if (parent !== canonicalTempRoot || !path.basename(resolved).startsWith("ceal-gateway-protocol-consumer-")) return;
 	rmSync(resolved, { recursive: true, force: true });
 }
@@ -110,7 +126,8 @@ function requireWorkerSource(workspace, requestedVersion) {
 	if (manifest?.name !== "@corca-ai/ceal-worker-cli" || !isVersion(manifest.version) || manifest.bin?.ceal !== "./dist/bin.js") {
 		fail("invalid_worker_source", "Packed consumer did not produce the declared worker CLI source.");
 	}
-	if (requestedVersion !== undefined && requestedVersion !== manifest.version) fail("version_mismatch", "Worker artifact version must match the isolated worker package.");
+	if (requestedVersion !== undefined && requestedVersion !== manifest.version)
+		fail("version_mismatch", "Worker artifact version must match the isolated worker package.");
 	return manifest.version;
 }
 
@@ -132,26 +149,48 @@ async function buildArtifact({ normalized, proof, work, workerVersion, deps }) {
 }
 
 async function bundleWorker({ entry, bundlePath }) {
-	await esbuild.build({ bundle: true, entryPoints: [entry], format: "cjs", logLevel: "silent", outfile: bundlePath, platform: "node", target: "node22" });
+	await esbuild.build({
+		bundle: true,
+		entryPoints: [entry],
+		format: "cjs",
+		logLevel: "silent",
+		outfile: bundlePath,
+		platform: "node",
+		target: "node22",
+	});
 }
 
 function createBlob({ bundlePath, blobPath, work }) {
 	const config = path.join(work, "ceal.sea.json");
-	writeFileSync(config, `${JSON.stringify({ main: path.basename(bundlePath), output: path.basename(blobPath), executable: process.execPath, disableExperimentalSEAWarning: true, useCodeCache: false, useSnapshot: false, execArgvExtension: "none" }, null, 2)}\n`);
+	writeFileSync(
+		config,
+		`${JSON.stringify({ main: path.basename(bundlePath), output: path.basename(blobPath), executable: process.execPath, disableExperimentalSEAWarning: true, useCodeCache: false, useSnapshot: false, execArgvExtension: "none" }, null, 2)}\n`,
+	);
 	execFileSync(process.execPath, ["--experimental-sea-config", path.basename(config)], { cwd: work, stdio: "pipe" });
 }
 
-function copyRuntime({ artifactPath }) { copyFileSync(process.execPath, artifactPath); }
+function copyRuntime({ artifactPath }) {
+	copyFileSync(process.execPath, artifactPath);
+}
 
 function injectBlob({ artifactPath, blobPath, postjectCli }) {
-	execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite"], { stdio: "pipe" });
+	execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite"], {
+		stdio: "pipe",
+	});
 }
 
 function smokeArtifact({ artifactPath, version }) {
 	const smokeHome = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-smoke-home-"));
 	try {
-		const result = parse(execFileSync(artifactPath, ["version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, HOME: smokeHome } }));
-		if (result?.command !== "ceal" || result.version !== version) fail("smoke_failed", "Worker artifact identity did not match the isolated worker package.");
+		const result = parse(
+			execFileSync(artifactPath, ["version"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, HOME: smokeHome },
+			}),
+		);
+		if (result?.command !== "ceal" || result.version !== version)
+			fail("smoke_failed", "Worker artifact identity did not match the isolated worker package.");
 		return { ok: true, command: result.command, version: result.version };
 	} finally {
 		rmSync(smokeHome, { recursive: true, force: true });
@@ -165,18 +204,21 @@ function copyGuide({ normalized, proof }) {
 	if (!isRegularFile(source)) fail("invalid_worker_inputs", "Worker guide input is not a regular file.");
 	const name = "ceal-guide-SKILL.md";
 	const bytes = readFileSync(source);
-	if (proof.worker_release_inputs?.guide_sha256 !== sha256(bytes)) fail("guide_drift", "Worker guide changed after the packed-consumer proof.");
+	if (proof.worker_release_inputs?.guide_sha256 !== sha256(bytes))
+		fail("guide_drift", "Worker guide changed after the packed-consumer proof.");
 	writeFileSync(path.join(normalized.outputDirectory, name), bytes, { mode: 0o644 });
 	return { name, bytes: bytes.length, sha256: sha256(bytes) };
 }
 
 function copyInstaller({ normalized, proof }) {
-	if (proof.worker_release_inputs?.installer !== "install-ceal.sh") fail("invalid_worker_inputs", "Packed consumer did not retain the worker installer input.");
+	if (proof.worker_release_inputs?.installer !== "install-ceal.sh")
+		fail("invalid_worker_inputs", "Packed consumer did not retain the worker installer input.");
 	const source = path.join(ROOT, proof.worker_release_inputs.installer);
 	if (!isRegularFile(source)) fail("invalid_worker_inputs", "Worker installer input is not a regular file.");
 	const name = "install-ceal.sh";
 	const bytes = readFileSync(source);
-	if (proof.worker_release_inputs?.installer_sha256 !== sha256(bytes)) fail("installer_drift", "Worker installer changed after the packed-consumer proof.");
+	if (proof.worker_release_inputs?.installer_sha256 !== sha256(bytes))
+		fail("installer_drift", "Worker installer changed after the packed-consumer proof.");
 	writeFileSync(path.join(normalized.outputDirectory, name), bytes, { mode: 0o755 });
 	return { name, bytes: bytes.length, sha256: sha256(bytes) };
 }
@@ -214,20 +256,25 @@ function writeManifest({ normalized, proof, artifact, guide, installer, notices,
 }
 
 function writeChecksums(outputDirectory, entries) {
-	const lines = entries.slice().sort((left, right) => left.name.localeCompare(right.name)).map((entry) => `${entry.sha256}  ${entry.name}`);
+	const lines = entries
+		.slice()
+		.sort((left, right) => left.name.localeCompare(right.name))
+		.map((entry) => `${entry.sha256}  ${entry.name}`);
 	writeFileSync(path.join(outputDirectory, "SHA256SUMS"), `${lines.join("\n")}\n`, { mode: 0o644 });
 }
 
 function requireOutputDirectory(value) {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker artifact output must be an absolute directory.");
 	const output = path.resolve(value);
-	if ([path.parse(output).root, ROOT, path.resolve(ROOT, "..")].includes(output)
-		|| output.startsWith(`${ROOT}${path.sep}`)
-		|| ROOT.startsWith(`${output}${path.sep}`)) fail("unsafe_output", "Refusing a broad or repository-overlapping worker output directory.");
+	if (
+		[path.parse(output).root, ROOT, path.resolve(ROOT, "..")].includes(output) ||
+		output.startsWith(`${ROOT}${path.sep}`) ||
+		ROOT.startsWith(`${output}${path.sep}`)
+	)
+		fail("unsafe_output", "Refusing a broad or repository-overlapping worker output directory.");
 	assertNoSymlinkComponents(output, fail, "Worker artifact output path");
 	return output;
 }
-
 
 function prepareOutput(outputDirectory, force) {
 	if (!existsSync(outputDirectory)) {
@@ -241,14 +288,16 @@ function prepareOutput(outputDirectory, force) {
 		writeFileSync(path.join(outputDirectory, MARKER), "worker release output\n");
 		return;
 	}
-	if (!force || !isRegularFile(path.join(outputDirectory, MARKER))) fail("output_not_replaceable", "Use --force only with a marked worker output directory.");
+	if (!force || !isRegularFile(path.join(outputDirectory, MARKER)))
+		fail("output_not_replaceable", "Use --force only with a marked worker output directory.");
 	rmSync(outputDirectory, { recursive: true, force: true });
 	mkdirSync(outputDirectory, { recursive: true, mode: 0o755 });
 	writeFileSync(path.join(outputDirectory, MARKER), "worker release output\n");
 }
 
 function requireAbsoluteFile(value, code) {
-	if (typeof value !== "string" || !path.isAbsolute(value) || !isRegularFile(value)) fail(code, "Worker artifact requires an absolute regular protocol input.");
+	if (typeof value !== "string" || !path.isAbsolute(value) || !isRegularFile(value))
+		fail(code, "Worker artifact requires an absolute regular protocol input.");
 	return path.resolve(value);
 }
 
@@ -261,7 +310,9 @@ function resolvePostjectCli() {
 	try {
 		const resolved = path.join(path.dirname(REQUIRE.resolve("postject/package.json")), "dist", "cli.js");
 		if (isRegularFile(resolved)) return resolved;
-	} catch { /* normalize below */ }
+	} catch {
+		/* normalize below */
+	}
 	fail("postject_unavailable", "postject is required to build the local worker artifact.");
 }
 
@@ -271,20 +322,32 @@ function currentPlatform() {
 }
 
 function requirePlatform(value) {
-	if (typeof value !== "string" || !/^(linux|darwin)-(amd64|arm64)$/u.test(value)) fail("invalid_platform", "Worker artifact platform is invalid.");
+	if (typeof value !== "string" || !/^(linux|darwin)-(amd64|arm64)$/u.test(value))
+		fail("invalid_platform", "Worker artifact platform is invalid.");
 	return value;
 }
 
 function readJson(file, code) {
-	try { return JSON.parse(readFileSync(file, "utf8")); }
-	catch { fail(code, "Worker artifact source manifest is unreadable."); }
+	try {
+		return JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		fail(code, "Worker artifact source manifest is unreadable.");
+	}
 }
 
-function isVersion(value) { return typeof value === "string" && /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u.test(value); }
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerReleaseArtifactError(code, message); }
+function isVersion(value) {
+	return typeof value === "string" && /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u.test(value);
+}
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerReleaseArtifactError(code, message);
+}
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	process.stderr.write("build-worker-release-artifact is a development-only module; use release:worker:package or release:worker:native with a lock-bound --gateway-handoff-archive.\n");
+	process.stderr.write(
+		"build-worker-release-artifact is a development-only module; use release:worker:package or release:worker:native with a lock-bound --gateway-handoff-archive.\n",
+	);
 	process.exitCode = 2;
 }

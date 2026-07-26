@@ -1,4 +1,4 @@
-import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
+import { CealHttpTransportError, createCealClient, createCealHttpTransport } from "@corca-ai/ceal";
 import type {
 	CealGatewayAuditEvent,
 	CealGatewayCallValue,
@@ -6,39 +6,42 @@ import type {
 	CealGatewayDiscoveryValue,
 	CealGatewayHandshakeValue,
 } from "@corca-ai/ceal-protocol";
+import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
+import { type CealAgentGuideHost, isCealAgentGuideHost } from "./agent-guide.js";
 import {
-	CealHttpTransportError,
-	createCealClient,
-	createCealHttpTransport,
-} from "@corca-ai/ceal";
-import { isCealAgentGuideHost, type CealAgentGuideHost } from "./agent-guide.js";
-import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
-import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
-import type { CealStoredSession } from "./profile-store.js";
-import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
-import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
-import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
-import type { CealSubcommandDefinition } from "./subcommands.js";
-import { createCealObserverServer } from "./observer.js";
-import { writeHelp, writeYaml } from "./output.js";
-import { CealClientSessionError, classifyClientSessionFailure, ensureCurrentSession, isClassifiedClientSessionFailure, runSession, writeClientSessionUnavailable } from "./client-session.js";
-import {
-	classifyGatewayFailure,
-	gatewayFailureCode,
-	gatewayResultIdentity,
 	type CealCallResultRecorder,
 	type CealCapabilityEffect,
 	type CealParsedCapabilityCall,
+	classifyGatewayFailure,
+	gatewayFailureCode,
+	gatewayResultIdentity,
 	writeCallCompleted,
 	writeCallGatewayFailure,
 	writeCallIncomplete,
 	writeCallUnavailable,
 } from "./call-result-output.js";
+import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
+import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
+import {
+	CealClientSessionError,
+	classifyClientSessionFailure,
+	ensureCurrentSession,
+	isClassifiedClientSessionFailure,
+	runSession,
+	writeClientSessionUnavailable,
+} from "./client-session.js";
+import { type CealDiscoveryCacheKey, discoveryCacheEntryUsable } from "./discovery-cache.js";
+import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
+import { createCealObserverServer } from "./observer.js";
+import { writeHelp, writeYaml } from "./output.js";
+import type { CealStoredSession } from "./profile-store.js";
 import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
+import type { CealSubcommandDefinition } from "./subcommands.js";
+import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
 
-export { renderPlainYamlDocument } from "./yaml.js";
-export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
 export type { CealSubcommandDefinition } from "./subcommands.js";
+export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
+export { renderPlainYamlDocument } from "./yaml.js";
 
 const CEAL_PACKAGE_VERSION = "0.65.10" as const;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
@@ -54,15 +57,15 @@ const DEFAULT_DISCOVERY_CACHE_TTL_MS = 300_000;
 // predictable across sessions; --port 0 selects an ephemeral port instead.
 const DEFAULT_OBSERVER_PORT = 52897;
 
-type CatalogProvenance =
-	| { source: "live_discovery" }
-	| { source: "cached_discovery"; cachedAt: number; expiresAt: number };
+type CatalogProvenance = { source: "live_discovery" } | { source: "cached_discovery"; cachedAt: number; expiresAt: number };
 
 // The first call received an explicit authentication rejection, so no provider
 // invocation happened. Keep a failed renewal distinct from a transport loss
 // after a call was actually dispatched.
 class CealKnownPreProviderCallError extends Error {
-	constructor(readonly cause: unknown) { super("The Gateway rejected the call before provider execution."); }
+	constructor(readonly cause: unknown) {
+		super("The Gateway rejected the call before provider execution.");
+	}
 }
 
 export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
@@ -126,7 +129,8 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "capabilities",
 		description: "Discover Gateway-issued capabilities and select bounded targets.",
-		usage: "ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		usage:
+			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -139,7 +143,8 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.result.v2",
-		recovery: "Run 'ceal capabilities', then select a target for that same capability with 'ceal capabilities targets --capability <capability-id>'. Do not mix a target returned for another capability.",
+		recovery:
+			"Run 'ceal capabilities', then select a target for that same capability with 'ceal capabilities targets --capability <capability-id>'. Do not mix a target returned for another capability.",
 	},
 	{
 		name: "receipt",
@@ -148,7 +153,8 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
-		recovery: "Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
+		recovery:
+			"Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
 	},
 	{
 		name: "observe",
@@ -191,7 +197,15 @@ function topLevelHelpRequested(args: readonly string[]): boolean {
 }
 
 function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
-	return options.length === 0 || command === "guide" || command === "capabilities" || command === "session" || command === "call" || command === "receipt" || command === "observe";
+	return (
+		options.length === 0 ||
+		command === "guide" ||
+		command === "capabilities" ||
+		command === "session" ||
+		command === "call" ||
+		command === "receipt" ||
+		command === "observe"
+	);
 }
 
 // A help token anywhere in the tail is a read-only help request, never an
@@ -286,7 +300,14 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		bind_address: "127.0.0.1",
 		effect: "read_only",
 		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
-		data_sources: ["client_session_redacted", "client_discovery_cache", "installed_release_generation", "agent_guide_registration", "receipt_spool_metadata", "agent_runtime_transcript_inventory"],
+		data_sources: [
+			"client_session_redacted",
+			"client_discovery_cache",
+			"installed_release_generation",
+			"agent_guide_registration",
+			"receipt_spool_metadata",
+			"agent_runtime_transcript_inventory",
+		],
 		receipts: "local_spool_metadata",
 		non_claims: [
 			"Cached/local state only; the observer never contacts the Gateway or a provider.",
@@ -302,14 +323,15 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 }
 
 async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	if (!runtime.runStableUpdate) return writeUpdate(io, {
-		status: "unavailable",
-		error: {
-			kind: "update_unavailable",
-			message: "This Ceal command is not running from a verified installed worker release.",
-			next_action: "Install a signed stable worker release, then run 'ceal update' from that installed command.",
-		},
-	});
+	if (!runtime.runStableUpdate)
+		return writeUpdate(io, {
+			status: "unavailable",
+			error: {
+				kind: "update_unavailable",
+				message: "This Ceal command is not running from a verified installed worker release.",
+				next_action: "Install a signed stable worker release, then run 'ceal update' from that installed command.",
+			},
+		});
 	try {
 		return writeUpdate(io, await runtime.runStableUpdate());
 	} catch {
@@ -349,7 +371,8 @@ function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
 	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
 	if (args.length === 1) return writeHelp(commandHelp(command), io);
 	const subcommand = findSubcommand(command.name, args.slice(1));
-	return subcommand ? writeHelp(subcommandHelp(subcommand), io)
+	return subcommand
+		? writeHelp(subcommandHelp(subcommand), io)
 		: writeError("invalid_argument", "Help requires one public command name or subcommand route.", io);
 }
 
@@ -367,12 +390,9 @@ function commandHelp(command: CealCommandDefinition): string {
 		`Result schema: ${command.result_schema}`,
 		`Recovery/readback: ${command.recovery}`,
 		"",
-		...(subcommands.length === 0 ? [] : [
-			"Subcommands:",
-			...subcommandRows(subcommands),
-			`Run: ceal ${command.name} <subcommand> --help for that leaf's own contract.`,
-			"",
-		]),
+		...(subcommands.length === 0
+			? []
+			: ["Subcommands:", ...subcommandRows(subcommands), `Run: ceal ${command.name} <subcommand> --help for that leaf's own contract.`, ""]),
 		"Options:",
 		...options,
 		"  -h, --help  Show this help without performing work.",
@@ -406,7 +426,8 @@ function subcommandHelp(subcommand: CealSubcommandDefinition): string {
 }
 
 function commandHelpOptions(name: CealCommandDefinition["name"]): readonly string[] {
-	if (name === "capabilities") return [
+	if (name === "capabilities")
+		return [
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
 			"  --detail                Include each capability's full input_contract (default: concise).",
@@ -414,14 +435,16 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
 			"  --token-stdin           Read the Gateway-issued client token from stdin.",
 		];
-	if (name === "call") return [
+	if (name === "call")
+		return [
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
 			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
 			"  key=value               Capability input; repeat only fields in the discovered input contract.",
 			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		];
-	if (name === "observe") return [
+	if (name === "observe")
+		return [
 			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
 			"                          Serves cached session/capability/install/guide state and spooled call-outcome metadata.",
 			"                          No admin surface, no provider credentials, no live refresh.",
@@ -451,9 +474,14 @@ function writeCommands(io: CealCliIo): number {
 		// an agent that parses this document must not see fewer routes than the
 		// prose surface advertises.
 		subcommands: CEAL_SUBCOMMANDS.map((subcommand) => ({
-			parent: subcommand.parent, route: [...subcommand.route], description: subcommand.description,
-			usage: subcommand.usage, effect: subcommand.effect, evidence: subcommand.evidence,
-			result_schema: subcommand.result_schema, recovery: subcommand.recovery,
+			parent: subcommand.parent,
+			route: [...subcommand.route],
+			description: subcommand.description,
+			usage: subcommand.usage,
+			effect: subcommand.effect,
+			evidence: subcommand.evidence,
+			result_schema: subcommand.result_schema,
+			recovery: subcommand.recovery,
 		})),
 	});
 }
@@ -477,8 +505,12 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
 	const state = inspect(agent);
 	writeYaml(io.stdout, {
-		schema_version: "ceal.guide.v1", command: "ceal", ok: state.status !== "unavailable", action,
-		effect: action === "status" ? "read_only" : "local_write", ...state,
+		schema_version: "ceal.guide.v1",
+		command: "ceal",
+		ok: state.status !== "unavailable",
+		action,
+		effect: action === "status" ? "read_only" : "local_write",
+		...state,
 	});
 	return state.status === "unavailable" ? 3 : 0;
 }
@@ -488,13 +520,19 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 // `unconfigured` answered correctly, while `ceal capabilities` without a session
 // could not answer at all. That is why `ok` tracks the exit code exactly.
 
-function writeAgentGuideUnavailable(
-	io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex",
-): number {
+function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex"): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.guide.v1", command: "ceal", ok: false, action,
-		effect: action === "status" ? "read_only" : "local_write", status: "unavailable",
-		agent, agent_source: "default", guide_id: "ceal-guide", registered: false, update_safe: false,
+		schema_version: "ceal.guide.v1",
+		command: "ceal",
+		ok: false,
+		action,
+		effect: action === "status" ? "read_only" : "local_write",
+		status: "unavailable",
+		agent,
+		agent_source: "default",
+		guide_id: "ceal-guide",
+		registered: false,
+		update_safe: false,
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available from this command runtime.",
@@ -512,14 +550,13 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	const targets = splitSubcommandRoute("capabilities", options).subcommand !== undefined;
 	const wantsFresh = !targets && options.includes("--fresh");
 	const wantsDetail = options.includes("--detail");
-	const effectiveOptions = options.filter(
-		(option) => option !== "--detail" && !(wantsFresh && option === "--fresh"),
-	);
+	const effectiveOptions = options.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
 	const selection = parseTargetCatalogOptions(effectiveOptions);
 	if (selection === null) return writeCapabilitiesArgumentError(options, targets, io);
-	const resolved = selection.kind === "targets"
-		? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
-		: await resolveGatewayAccess(effectiveOptions, io, runtime);
+	const resolved =
+		selection.kind === "targets"
+			? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
+			: await resolveGatewayAccess(effectiveOptions, io, runtime);
 	if (!resolved.ok) return resolved.exitCode;
 	try {
 		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime);
@@ -572,7 +609,9 @@ async function serveCapabilityCatalog(
 			return writeCapabilitiesAvailable(
 				handshake,
 				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
-				selection, wantsDetail, io,
+				selection,
+				wantsDetail,
+				io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
 				runtime,
 			);
@@ -587,7 +626,9 @@ async function serveCapabilityCatalog(
 	if (!discovery.ok) return writeGatewayFailure(discovery, io);
 	// Cache writes are advisory: a failure just means the next call probes live.
 	if (runtime.saveDiscoveryCache) {
-		await runtime.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> }).catch(() => undefined);
+		await runtime
+			.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> })
+			.catch(() => undefined);
 	}
 	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 }
@@ -625,9 +666,7 @@ function writeCapabilitiesArgumentError(options: readonly string[], targets: boo
 	}
 	// Every option is declared, so the fault is a value, a duplicate, or an
 	// operand. Only the targets route selects a target, so only it may say so.
-	const message = targets
-		? "Invalid capabilities target selection."
-		: "Invalid capabilities options.";
+	const message = targets ? "Invalid capabilities target selection." : "Invalid capabilities options.";
 	return writeError("invalid_argument", message, io, nextAction);
 }
 
@@ -659,11 +698,30 @@ function parseTargetCatalogSelection(options: readonly string[]): ParsedTargetCa
 	return {
 		kind: "targets",
 		...(selection.profileRef ? { profileRef: selection.profileRef } : {}),
-		body: { capability_id: selection.capabilityId, ...(selection.match ? { match: selection.match } : {}), ...(selection.cursor ? { cursor: selection.cursor } : {}), ...(limit ? { limit } : {}) },
+		body: {
+			capability_id: selection.capabilityId,
+			...(selection.match ? { match: selection.match } : {}),
+			...(selection.cursor ? { cursor: selection.cursor } : {}),
+			...(limit ? { limit } : {}),
+		},
 	};
 }
 
-function isValidTargetCatalogSelection(selection: Readonly<{ capabilityId: string | undefined; cursor: string | undefined; match: string | undefined; profileRef: string | undefined; limitText: string | undefined }>): selection is Readonly<{ capabilityId: string; cursor: string | undefined; match: string | undefined; profileRef: string | undefined; limitText: string | undefined }> {
+function isValidTargetCatalogSelection(
+	selection: Readonly<{
+		capabilityId: string | undefined;
+		cursor: string | undefined;
+		match: string | undefined;
+		profileRef: string | undefined;
+		limitText: string | undefined;
+	}>,
+): selection is Readonly<{
+	capabilityId: string;
+	cursor: string | undefined;
+	match: string | undefined;
+	profileRef: string | undefined;
+	limitText: string | undefined;
+}> {
 	if (!validCapabilityId(selection.capabilityId)) return false;
 	if (selection.cursor !== undefined && !isSafeCursor(selection.cursor)) return false;
 	if (selection.match !== undefined && !isSafeTargetMatch(selection.match)) return false;
@@ -672,12 +730,15 @@ function isValidTargetCatalogSelection(selection: Readonly<{ capabilityId: strin
 	return true;
 }
 
-function isSafeCursor(value: string): boolean { return /^cursor:[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u.test(value); }
-function isSafeTargetMatch(value: string): boolean {
-	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048
-		&& !hasControlCharacter(value);
+function isSafeCursor(value: string): boolean {
+	return /^cursor:[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u.test(value);
 }
-function hasControlCharacter(value: string): boolean { return [...value].some((character) => character.codePointAt(0)! <= 0x1f || character.codePointAt(0) === 0x7f); }
+function isSafeTargetMatch(value: string): boolean {
+	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048 && !hasControlCharacter(value);
+}
+function hasControlCharacter(value: string): boolean {
+	return [...value].some((character) => character.codePointAt(0)! <= 0x1f || character.codePointAt(0) === 0x7f);
+}
 function parseTargetPageLimit(value: string): number | undefined {
 	return /^(?:[1-9]|[1-5][0-9]|6[0-4])$/u.test(value) ? Number(value) : undefined;
 }
@@ -692,30 +753,53 @@ interface GatewayAccess {
 
 type GatewayAccessResolution = { ok: true; value: GatewayAccess } | { ok: false; exitCode: number };
 
-async function resolveGatewayAccess(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<GatewayAccessResolution> {
+async function resolveGatewayAccess(
+	options: readonly string[],
+	io: CealCliIo,
+	runtime: CealCommandRuntime,
+): Promise<GatewayAccessResolution> {
 	const selectedProfile = storedProfileOption(options);
-	return selectedProfile ? resolveStoredGatewayAccess(io, runtime, selectedProfile)
-		: options.length === 0 ? resolveStoredGatewayAccess(io, runtime) : resolveExplicitGatewayAccess(options, io, runtime);
+	return selectedProfile
+		? resolveStoredGatewayAccess(io, runtime, selectedProfile)
+		: options.length === 0
+			? resolveStoredGatewayAccess(io, runtime)
+			: resolveExplicitGatewayAccess(options, io, runtime);
 }
 
-async function resolveStoredGatewayAccess(io: CealCliIo, runtime: CealCommandRuntime, selectedProfile?: string): Promise<GatewayAccessResolution> {
+async function resolveStoredGatewayAccess(
+	io: CealCliIo,
+	runtime: CealCommandRuntime,
+	selectedProfile?: string,
+): Promise<GatewayAccessResolution> {
 	if (!runtime.loadSession) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
 	try {
 		const loaded = await runtime.loadSession();
 		const session = loaded ? await ensureCurrentSession(loaded, runtime) : null;
 		if (!session) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
-		return { ok: true, value: {
-			endpoint: session.gatewayEndpoint, profileRef: selectedProfile ?? session.profileRef, accessToken: session.accessToken,
-			storedSession: session, requestId: runtime.nextRequestId?.() ?? "ceal:capabilities",
-		} };
+		return {
+			ok: true,
+			value: {
+				endpoint: session.gatewayEndpoint,
+				profileRef: selectedProfile ?? session.profileRef,
+				accessToken: session.accessToken,
+				storedSession: session,
+				requestId: runtime.nextRequestId?.() ?? "ceal:capabilities",
+			},
+		};
 	} catch (error) {
-		const exitCode = error instanceof CealClientSessionError
-			? writeClientSessionUnavailable(error.code, io) : writeGatewayUnavailable("session_load_failed", io);
+		const exitCode =
+			error instanceof CealClientSessionError
+				? writeClientSessionUnavailable(error.code, io)
+				: writeGatewayUnavailable("session_load_failed", io);
 		return { ok: false, exitCode };
 	}
 }
 
-async function resolveExplicitGatewayAccess(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<GatewayAccessResolution> {
+async function resolveExplicitGatewayAccess(
+	options: readonly string[],
+	io: CealCliIo,
+	runtime: CealCommandRuntime,
+): Promise<GatewayAccessResolution> {
 	const parsed = parseGatewayOptions(options);
 	if (!parsed.ok) return { ok: false, exitCode: writeError("invalid_argument", parsed.message, io) };
 	if (!runtime.readSecret) return { ok: false, exitCode: writeGatewayUnavailable("credential_input_unavailable", io) };
@@ -728,7 +812,9 @@ async function resolveExplicitGatewayAccess(options: readonly string[], io: Ceal
 
 function requestHandshake(client: ReturnType<typeof createCealClient>, access: Pick<GatewayAccess, "profileRef" | "requestId">) {
 	return client.request({
-		request_id: `${access.requestId}:handshake`, operation: "handshake", profile_ref: access.profileRef,
+		request_id: `${access.requestId}:handshake`,
+		operation: "handshake",
+		profile_ref: access.profileRef,
 		body: { client: { name: "ceal", version: CEAL_PACKAGE_VERSION } },
 	});
 }
@@ -745,7 +831,8 @@ async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCo
 }
 
 function shouldRetryAuthentication(
-	response: { ok: boolean; error?: unknown }, session: CealStoredSession | null,
+	response: { ok: boolean; error?: unknown },
+	session: CealStoredSession | null,
 ): session is CealStoredSession {
 	return !response.ok && gatewayFailureCode(response.error) === "authentication_failed" && Boolean(session?.refreshToken);
 }
@@ -770,29 +857,37 @@ function writeCapabilitiesAvailable(
 	provenance: CatalogProvenance,
 	runtime: CealCommandRuntime,
 ): number {
-	const capabilities = detail
-		? discovery.value.capabilities
-		: discovery.value.capabilities.map(conciseCapability);
+	const capabilities = detail ? discovery.value.capabilities : discovery.value.capabilities.map(conciseCapability);
 	return writeYaml(io.stdout, {
-		schema_version: "ceal.capabilities.v1", command: "ceal", ok: true, status: "available", gateway_required: true,
+		schema_version: "ceal.capabilities.v1",
+		command: "ceal",
+		ok: true,
+		status: "available",
+		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
 		gateway: {
-			profile_ref: handshake.value.profile_ref, membership_ref: handshake.value.membership_ref,
-			registration_ref: handshake.value.registration_ref, client_ref: handshake.value.client_ref,
-			subject_ref: handshake.value.subject_ref, instance_ref: handshake.value.instance_ref,
-			negotiated_protocol_version: handshake.value.negotiated_protocol_version, host_decision: handshake.value.host_decision,
+			profile_ref: handshake.value.profile_ref,
+			membership_ref: handshake.value.membership_ref,
+			registration_ref: handshake.value.registration_ref,
+			client_ref: handshake.value.client_ref,
+			subject_ref: handshake.value.subject_ref,
+			instance_ref: handshake.value.instance_ref,
+			negotiated_protocol_version: handshake.value.negotiated_protocol_version,
+			host_decision: handshake.value.host_decision,
 			// Surface the negotiated eligible-Profile catalog so an agent can see
 			// which `--profile <profile_ref>` selections this session may pass
 			// without re-login. Present only when the Gateway negotiated it; the
 			// current selection is `gateway.profile_ref` above.
 			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
-		capabilities, targets: discovery.value.targets,
+		capabilities,
+		targets: discovery.value.targets,
 		// Tell an agent the concise rows omit the input grammar and how to get it,
 		// so a compact default never reads as "this capability has no contract".
 		...(detail ? {} : { capability_detail: "Re-run 'ceal capabilities --detail' for per-capability input_contract." }),
 		target_catalog: discovery.value.target_catalog,
-		proof_level: discovery.value.proof_level, live_gateway_checked: true,
+		proof_level: discovery.value.proof_level,
+		live_gateway_checked: true,
 		// `live_gateway_checked` reports the live handshake (the auth gate, always
 		// run). `catalog_source` reports the resource catalog's provenance
 		// separately: `cached_discovery` means the handshake was live but the
@@ -800,16 +895,17 @@ function writeCapabilitiesAvailable(
 		catalog_source: provenance.source,
 		...(provenance.source === "cached_discovery"
 			? {
-				catalog_cached_at: new Date(provenance.cachedAt).toISOString(),
-				catalog_expires_at: new Date(provenance.expiresAt).toISOString(),
-			}
+					catalog_cached_at: new Date(provenance.cachedAt).toISOString(),
+					catalog_expires_at: new Date(provenance.expiresAt).toISOString(),
+				}
 			: {}),
 		// Only claim a live discovery when one actually ran this invocation.
-		claims_allowed: provenance.source === "cached_discovery"
-			? ["gateway_handshake"] : ["gateway_handshake", "gateway_discovery"],
+		claims_allowed: provenance.source === "cached_discovery" ? ["gateway_handshake"] : ["gateway_handshake", "gateway_discovery"],
 		non_claims: discovery.value.non_claims,
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
-		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection) ? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) } : {}),
+		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection)
+			? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) }
+			: {}),
 		...(profileSelectionHint(handshake.value) ? { profile_selection: profileSelectionHint(handshake.value) } : {}),
 		...unregisteredGuideAdvisory(runtime),
 	});
@@ -861,16 +957,21 @@ function unregisteredGuideAdvisory(runtime: CealCommandRuntime): Record<string, 
 		if (state?.agent_source !== "detected" || state.status !== "available") return {};
 		const host = state.hosts?.find((entry) => entry.agent === state.agent);
 		if (host?.status !== "staged") return {};
-		return { agent_guide: {
-			status: host.status,
-			agent: state.agent,
-			next_action: `This agent host has not registered the signed Ceal guide, which encodes how to read leaf help and what a result does and does not prove. Run 'ceal guide register ${state.agent}'.`,
-		} };
-	} catch { return {}; }
+		return {
+			agent_guide: {
+				status: host.status,
+				agent: state.agent,
+				next_action: `This agent host has not registered the signed Ceal guide, which encodes how to read leaf help and what a result does and does not prove. Run 'ceal guide register ${state.agent}'.`,
+			},
+		};
+	} catch {
+		return {};
+	}
 }
 
 function capabilityCatalogNextAction(
-	catalog: CealGatewayDiscoveryValue["target_catalog"], selection: Exclude<ParsedTargetCatalogOptions, null>,
+	catalog: CealGatewayDiscoveryValue["target_catalog"],
+	selection: Exclude<ParsedTargetCatalogOptions, null>,
 ): string | null {
 	if (catalog.selection_required) return "Run 'ceal capabilities targets --capability <capability-id> --match <name-or-url>'.";
 	if (catalog.next_cursor && selection.kind === "targets") {
@@ -900,7 +1001,9 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 }
 
 async function cachedCapabilityEffect(
-	capabilityId: string, runtime: CealCommandRuntime, key: CealDiscoveryCacheKey,
+	capabilityId: string,
+	runtime: CealCommandRuntime,
+	key: CealDiscoveryCacheKey,
 ): Promise<CealCapabilityEffect | undefined> {
 	try {
 		const entry = await runtime.loadDiscoveryCache?.();
@@ -914,23 +1017,28 @@ async function cachedCapabilityEffect(
 		if (!entry || !discoveryCacheEntryUsable(entry, key, now, ttlMs)) return undefined;
 		const capabilities = (entry.discovery as { capabilities?: unknown }).capabilities;
 		if (!Array.isArray(capabilities)) return undefined;
-		const match = capabilities.find((capability) => capability && typeof capability === "object"
-			&& (capability as { capability_id?: unknown }).capability_id === capabilityId);
+		const match = capabilities.find(
+			(capability) =>
+				capability && typeof capability === "object" && (capability as { capability_id?: unknown }).capability_id === capabilityId,
+		);
 		const effect = match && typeof match === "object" ? (match as { effect?: unknown }).effect : undefined;
 		return effect === "read" || effect === "write" ? effect : undefined;
-	} catch { return undefined; }
+	} catch {
+		return undefined;
+	}
 }
 
 async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseReceiptOptions(options);
 	if (!parsed) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
 	const resolved = await resolveCallSession(runtime);
-	if (!resolved.ok) return writeReceiptError(
-		resolved.reason,
-		"The Gateway receipt could not be read.",
-		io,
-		isClassifiedClientSessionFailure(resolved.reason) ? classifyClientSessionFailure(resolved.reason) : undefined,
-	);
+	if (!resolved.ok)
+		return writeReceiptError(
+			resolved.reason,
+			"The Gateway receipt could not be read.",
+			io,
+			isClassifiedClientSessionFailure(resolved.reason) ? classifyClientSessionFailure(resolved.reason) : undefined,
+		);
 	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {
 		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime);
@@ -942,30 +1050,47 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 			return writeReceiptError(failure.code, failure.message, io, undefined, failure.nextAction, resolved.session, profileRef);
 		}
 		return writeYaml(io.stdout, {
-			schema_version: "ceal.receipt.v1", ok: true, status: "verified", request_ref: parsed.requestRef,
+			schema_version: "ceal.receipt.v1",
+			ok: true,
+			status: "verified",
+			request_ref: parsed.requestRef,
 			...gatewayResultIdentity(resolved.session, profileRef),
 			events: readback.value.events.map(projectReceiptEvent),
 		});
 	} catch (error) {
-		const reason = error instanceof CealClientSessionError ? error.code
-			: error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeReceiptError(reason, "The Gateway receipt could not be read.", io, isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : undefined);
+		const reason =
+			error instanceof CealClientSessionError ? error.code : error instanceof CealHttpTransportError ? error.code : "request_failed";
+		return writeReceiptError(
+			reason,
+			"The Gateway receipt could not be read.",
+			io,
+			isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : undefined,
+		);
 	}
 }
 
-async function requestReceiptReadback(initialSession: CealStoredSession, profileRef: string, requestRef: string, runtime: CealCommandRuntime) {
+async function requestReceiptReadback(
+	initialSession: CealStoredSession,
+	profileRef: string,
+	requestRef: string,
+	runtime: CealCommandRuntime,
+) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let readback = await client.request({
-		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
-		profile_ref: profileRef, body: { request_id: requestRef },
+		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
+		operation: "readback",
+		profile_ref: profileRef,
+		body: { request_id: requestRef },
 	});
 	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	readback = await client.request({
-		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`, operation: "readback",
-		profile_ref: profileRef, body: { request_id: requestRef },
+		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
+		operation: "readback",
+		profile_ref: profileRef,
+		body: { request_id: requestRef },
 	});
 	return { readback, session };
 }
@@ -980,17 +1105,26 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 	// finite number.
 	const gatewayElapsedMs = safeGatewayElapsed(event.gateway_elapsed_ms) ?? safeGatewayElapsed(event.call?.gateway_elapsed_ms);
 	return {
-		ref: event.event_ref, operation: event.operation, outcome: event.outcome,
+		ref: event.event_ref,
+		operation: event.operation,
+		outcome: event.outcome,
 		authorization: event.policy_decision,
 		...(event.error_code === null ? {} : { error_code: event.error_code, non_claims: [...event.non_claims] }),
-		...(event.connector_route_failure ? { connector_route_failure: {
-			connector_kind: event.connector_route_failure.connector_kind,
-			phase: event.connector_route_failure.phase,
-		} } : {}),
-		...(event.grant_snapshot ? {
-			capability: event.grant_snapshot.capability_id, target: event.grant_snapshot.target_ref,
-			grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
-		} : {}),
+		...(event.connector_route_failure
+			? {
+					connector_route_failure: {
+						connector_kind: event.connector_route_failure.connector_kind,
+						phase: event.connector_route_failure.phase,
+					},
+				}
+			: {}),
+		...(event.grant_snapshot
+			? {
+					capability: event.grant_snapshot.capability_id,
+					target: event.grant_snapshot.target_ref,
+					grant: { ref: event.grant_snapshot.grant_ref, revision: event.grant_snapshot.grant_revision },
+				}
+			: {}),
 		...(gatewayElapsedMs === undefined ? {} : { timing: { gateway_elapsed_ms: gatewayElapsedMs } }),
 	};
 }
@@ -1000,21 +1134,34 @@ function safeGatewayElapsed(value: unknown): number | undefined {
 }
 
 function writeReceiptError(
-	kind: string, message: string, io: CealCliIo, sessionFailure?: ReturnType<typeof classifyClientSessionFailure>,
-	nextAction?: string, session?: CealStoredSession, profileRef?: string,
+	kind: string,
+	message: string,
+	io: CealCliIo,
+	sessionFailure?: ReturnType<typeof classifyClientSessionFailure>,
+	nextAction?: string,
+	session?: CealStoredSession,
+	profileRef?: string,
 ): number {
 	writeYaml(io.stdout, {
-		schema_version: "ceal.receipt.v1", ok: false, status: "error",
+		schema_version: "ceal.receipt.v1",
+		ok: false,
+		status: "error",
 		...gatewayResultIdentity(session ?? null, profileRef),
-		error: sessionFailure ? {
-			kind: sessionFailure.kind, retryable: sessionFailure.retryable, message: sessionFailure.message, next_action: sessionFailure.nextAction,
-		} : {
-			kind, message,
-			// Only a session/route problem is fixed by re-checking the session. When
-			// the Gateway answered about the reference itself, pass its answer
-			// through instead of overwriting it with generic advice.
-			next_action: nextAction ?? "Use a receipt reference from a completed call after confirming the client session.",
-		},
+		error: sessionFailure
+			? {
+					kind: sessionFailure.kind,
+					retryable: sessionFailure.retryable,
+					message: sessionFailure.message,
+					next_action: sessionFailure.nextAction,
+				}
+			: {
+					kind,
+					message,
+					// Only a session/route problem is fixed by re-checking the session. When
+					// the Gateway answered about the reference itself, pass its answer
+					// through instead of overwriting it with generic advice.
+					next_action: nextAction ?? "Use a receipt reference from a completed call after confirming the client session.",
+				},
 	});
 	return 3;
 }
@@ -1030,7 +1177,9 @@ function callResultRecorder(runtime: CealCommandRuntime): CealCallResultRecorder
 		try {
 			const entry = receiptSpoolEntryFromCallResult(envelope, runtime.now?.() ?? Date.now());
 			if (entry) record(entry);
-		} catch { /* spool failure must never change call behavior */ }
+		} catch {
+			/* spool failure must never change call behavior */
+		}
 	};
 }
 
@@ -1065,7 +1214,8 @@ async function executeCall(
 		// returned authentication_failed. It is therefore a known pre-provider
 		// rejection, not an unknown call outcome; do not ask an agent to look up
 		// or preserve a receipt for an action the Gateway did not authorize.
-		if (error instanceof CealClientSessionError) return writeCallUnavailable(error.code, io, initialSession, parsed, undefined, undefined, capabilityEffect);
+		if (error instanceof CealClientSessionError)
+			return writeCallUnavailable(error.code, io, initialSession, parsed, undefined, undefined, capabilityEffect);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
 		return writeCallUnavailable(reason, io, initialSession, parsed, requestId, record, capabilityEffect);
 	}
@@ -1087,14 +1237,20 @@ async function resolveCallSession(runtime: CealCommandRuntime): Promise<CallSess
 }
 
 function requestCapability(
-	client: ReturnType<typeof createCealClient>, profileRef: string, parsed: Extract<ParsedCallOptions, { ok: true }>, requestId: string,
+	client: ReturnType<typeof createCealClient>,
+	profileRef: string,
+	parsed: Extract<ParsedCallOptions, { ok: true }>,
+	requestId: string,
 ) {
 	return client.request({
-		request_id: requestId, operation: "call", profile_ref: profileRef,
+		request_id: requestId,
+		operation: "call",
+		profile_ref: profileRef,
 		body: {
-				capability_id: parsed.capabilityId, target_ref: parsed.targetRef,
-				arguments: parsed.arguments,
-				purpose: parsed.purpose,
+			capability_id: parsed.capabilityId,
+			target_ref: parsed.targetRef,
+			arguments: parsed.arguments,
+			purpose: parsed.purpose,
 		},
 	});
 }
@@ -1110,8 +1266,11 @@ async function requestCapabilityCall(
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let call = await requestCapability(client, profileRef, parsed, requestId);
 	if (!shouldRetryAuthentication(call, session)) return { call, client, session };
-	try { session = await ensureCurrentSession(session, runtime, true); }
-	catch (error) { throw new CealKnownPreProviderCallError(error); }
+	try {
+		session = await ensureCurrentSession(session, runtime, true);
+	} catch (error) {
+		throw new CealKnownPreProviderCallError(error);
+	}
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	call = await requestCapability(client, profileRef, parsed, requestId);
 	return { call, client, session };
@@ -1133,7 +1292,11 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
 	return {
-		ok: true, capabilityId, targetRef, arguments: arguments_, ...(profileRef ? { profileRef } : {}),
+		ok: true,
+		capabilityId,
+		targetRef,
+		arguments: arguments_,
+		...(profileRef ? { profileRef } : {}),
 		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
 	};
 }
@@ -1146,12 +1309,14 @@ function parseReceiptOptions(options: readonly string[]): { requestRef: string; 
 	const { subcommand, rest } = splitSubcommandRoute("receipt", options);
 	if (!subcommand || !isSafeRequestRef(rest[0])) return null;
 	const profile = extractProfileOption(rest.slice(1));
-	return profile && profile.remaining.length === 0 ? { requestRef: rest[0]!, ...(profile.value ? { profileRef: profile.value } : {}) } : null;
+	return profile && profile.remaining.length === 0
+		? { requestRef: rest[0]!, ...(profile.value ? { profileRef: profile.value } : {}) }
+		: null;
 }
 
 function storedProfileOption(options: readonly string[]): string | null {
 	const profile = extractProfileOption(options);
-	return profile && profile.remaining.length === 0 ? profile.value ?? null : null;
+	return profile && profile.remaining.length === 0 ? (profile.value ?? null) : null;
 }
 
 function extractProfileOption(options: readonly string[]): { value?: string; remaining: string[] } | null {
@@ -1159,7 +1324,10 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 	let value: string | undefined;
 	for (let index = 0; index < options.length; index += 1) {
 		const option = options[index];
-		if (option !== "--profile") { remaining.push(option!); continue; }
+		if (option !== "--profile") {
+			remaining.push(option!);
+			continue;
+		}
 		const candidate = options[index + 1];
 		if (value !== undefined || !isSafeProfileRef(candidate)) return null;
 		value = candidate;
@@ -1214,9 +1382,7 @@ function writeCapabilitiesUnavailable(io: CealCliIo): number {
 	return 3;
 }
 
-type ParsedGatewayOptions =
-	| { ok: true; endpoint: string; profileRef: string; requestId: string }
-	| { ok: false; message: string };
+type ParsedGatewayOptions = { ok: true; endpoint: string; profileRef: string; requestId: string } | { ok: false; message: string };
 
 function parseGatewayOptions(options: readonly string[]): ParsedGatewayOptions {
 	const parsed = parseNamedOptions(options, new Set(["--endpoint", "--profile", "--request-id"]), new Set(["--token-stdin"]));
@@ -1283,7 +1449,12 @@ function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
 // which route was typed should name that route's help instead: the top-level
 // help does not list a leaf's options, so it cannot answer the question a
 // rejected option raises.
-function writeError(kind: "unknown_command" | "invalid_argument", message: string, io: CealCliIo, nextAction = "Run 'ceal --help'."): number {
+function writeError(
+	kind: "unknown_command" | "invalid_argument",
+	message: string,
+	io: CealCliIo,
+	nextAction = "Run 'ceal --help'.",
+): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.error.v1",
 		command: "ceal",

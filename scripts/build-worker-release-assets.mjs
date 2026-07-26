@@ -5,12 +5,12 @@
 // the one signed release inventory that install-ceal.sh consumes.
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -45,8 +45,10 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			platform: options.platform,
 			repoRoot: options.repoRoot,
 		});
-		if (native?.ok !== true || !PLATFORM_PATTERN.test(native.platform ?? "")) fail("native_build_failed", "Worker release assets require a successful native artifact build.");
-		if (options.version !== undefined && options.version !== native.version) fail("version_mismatch", "Worker release assets version does not match the built worker artifact.");
+		if (native?.ok !== true || !PLATFORM_PATTERN.test(native.platform ?? ""))
+			fail("native_build_failed", "Worker release assets require a successful native artifact build.");
+		if (options.version !== undefined && options.version !== native.version)
+			fail("version_mismatch", "Worker release assets version does not match the built worker artifact.");
 		const binaryName = `ceal-${native.platform}`;
 		const binary = readStagedFile(path.join(nativeOut, binaryName), "native_output_incomplete");
 		if (sha256(binary) !== native.artifact.sha256) fail("native_output_incomplete", "Native worker artifact bytes drifted after its build.");
@@ -125,7 +127,8 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 			const bytes = readStagedFile(path.join(input, name), "merge_input_incomplete");
 			if (sha256(bytes) !== digest) fail("merge_input_incomplete", "Composed worker asset does not match its checksum inventory.");
 			if (SHARED_ASSETS.includes(name)) {
-				if (shared.has(name) && shared.get(name).digest !== digest) fail("merge_shared_drift", `Shared worker release asset ${name} differs between platform sets.`);
+				if (shared.has(name) && shared.get(name).digest !== digest)
+					fail("merge_shared_drift", `Shared worker release asset ${name} differs between platform sets.`);
 				shared.set(name, { bytes, digest, mode: name === INSTALLER_NAME ? 0o755 : 0o644 });
 				continue;
 			}
@@ -136,7 +139,8 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 			platforms.get(platform).set(name, { bytes, digest, mode: name.startsWith("ceal-worker-release-manifest-") ? 0o644 : 0o755 });
 		}
 	}
-	for (const shortName of SHARED_ASSETS) if (!shared.has(shortName)) fail("merge_input_incomplete", `Merged worker release set is missing ${shortName}.`);
+	for (const shortName of SHARED_ASSETS)
+		if (!shared.has(shortName)) fail("merge_input_incomplete", `Merged worker release set is missing ${shortName}.`);
 	for (const [platform, entries] of platforms) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
@@ -145,7 +149,8 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
 		for (const [name, entry] of shared) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
-		for (const entries of platforms.values()) for (const [name, entry] of entries) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
+		for (const entries of platforms.values())
+			for (const [name, entry] of entries) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
 		writeChecksumInventory(staging);
 		publishOutput(staging, output);
 	} catch (error) {
@@ -174,49 +179,66 @@ function readInventory(directory) {
 	const bytes = readStagedFile(path.join(directory, "SHA256SUMS"), "merge_input_incomplete").toString("utf8");
 	const lines = bytes.split("\n").filter(Boolean);
 	const entries = lines.map((line) => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
-	if (lines.length === 0 || entries.some((entry) => entry === null)) fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
+	if (lines.length === 0 || entries.some((entry) => entry === null))
+		fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
 	return entries.map((entry) => [entry[2], entry[1]]);
 }
 
 function writeChecksumInventory(directory) {
-	const names = readdirSync(directory).filter((name) => name !== MARKER && name !== "SHA256SUMS").sort();
+	const names = readdirSync(directory)
+		.filter((name) => name !== MARKER && name !== "SHA256SUMS")
+		.sort();
 	const lines = names.map((name) => `${sha256(readFileSync(path.join(directory, name)))}  ${name}`);
 	writeFileSync(path.join(directory, "SHA256SUMS"), `${lines.join("\n")}\n`, { mode: 0o644 });
 }
 
 function requireAssetDirectory(value) {
-	if (typeof value !== "string" || !path.isAbsolute(value)) fail("merge_inputs_required", "Merged worker asset inputs must be absolute directories.");
+	if (typeof value !== "string" || !path.isAbsolute(value))
+		fail("merge_inputs_required", "Merged worker asset inputs must be absolute directories.");
 	const directory = path.resolve(value);
-	if (!existsSync(directory) || !lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
-	if (!existsSync(path.join(directory, MARKER))) fail("merge_inputs_required", "Merged worker asset input is not a marked composed asset set.");
+	if (!existsSync(directory) || !lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
+		fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
+	if (!existsSync(path.join(directory, MARKER)))
+		fail("merge_inputs_required", "Merged worker asset input is not a marked composed asset set.");
 	return directory;
 }
 
 function readStagedFile(file, code) {
-	if (!existsSync(file) || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink()) fail(code, `Worker release asset input ${path.basename(file)} is unavailable.`);
+	if (!existsSync(file) || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())
+		fail(code, `Worker release asset input ${path.basename(file)} is unavailable.`);
 	return readFileSync(file);
 }
 
 function inspectOutput(value, repoRoot, force) {
-	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker release assets output must be an absolute directory.");
+	if (typeof value !== "string" || !path.isAbsolute(value))
+		fail("invalid_output", "Worker release assets output must be an absolute directory.");
 	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory)) fail("unsafe_output", "Worker release assets output is too broad.");
+	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
+		fail("unsafe_output", "Worker release assets output is too broad.");
 	assertNoSymlinkComponents(directory, fail, "Worker release assets output");
 	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("unsafe_output", "Worker release assets output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink()) fail("output_not_replaceable", "Use --force only with a marked worker release assets output.");
+	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
+		fail("unsafe_output", "Worker release assets output must be a regular directory.");
+	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
+		fail("output_not_replaceable", "Use --force only with a marked worker release assets output.");
 	return { directory, force: true };
 }
 
 function publishOutput(staging, output) {
-	if (!output.force) { renameSync(staging, output.directory); return; }
+	if (!output.force) {
+		renameSync(staging, output.directory);
+		return;
+	}
 	rmSync(output.directory, { recursive: true, force: true });
 	renameSync(staging, output.directory);
 }
 
-
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerReleaseAssetsError(code, message); }
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerReleaseAssetsError(code, message);
+}
 
 function parseArgs(argv) {
 	const [mode, ...rest] = argv;
@@ -225,8 +247,14 @@ function parseArgs(argv) {
 	for (let index = 0; index < rest.length; index += 1) {
 		const arg = rest[index];
 		if (arg === "--help" || arg === "-h") return { help: true, json, mode, options };
-		if (arg === "--json") { json = true; continue; }
-		if (arg === "--force") { options.force = true; continue; }
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
+		if (arg === "--force") {
+			options.force = true;
+			continue;
+		}
 		if (arg === "--input") {
 			const value = rest[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Worker release assets option requires a value.");
@@ -250,7 +278,9 @@ export async function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help || (parsed.mode !== "compose" && parsed.mode !== "merge")) {
-			io.log("usage: node scripts/build-worker-release-assets.mjs compose --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--version <semver>] [--platform <current-platform>] [--force] [--json]\n       node scripts/build-worker-release-assets.mjs merge --out <absolute-dir> --input <composed-dir> [--input <composed-dir> ...] [--force] [--json]");
+			io.log(
+				"usage: node scripts/build-worker-release-assets.mjs compose --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--version <semver>] [--platform <current-platform>] [--force] [--json]\n       node scripts/build-worker-release-assets.mjs merge --out <absolute-dir> --input <composed-dir> [--input <composed-dir> ...] [--force] [--json]",
+			);
 			return parsed.help ? 0 : 2;
 		}
 		const result = parsed.mode === "compose" ? await composeWorkerReleaseAssets(parsed.options) : mergeWorkerReleaseAssetSets(parsed.options);
@@ -258,10 +288,17 @@ export async function runCli(argv, io = console) {
 		return 0;
 	} catch (error) {
 		const known = error instanceof WorkerReleaseAssetsError;
-		const payload = { schema_version: "ceal.worker_release_assets_error.v1", ok: false, error_code: known ? error.code : "worker_release_assets_failed", message: known ? error.message : "Could not prepare worker release assets." };
-		if (json) io.log(JSON.stringify(payload)); else io.error(payload.message);
+		const payload = {
+			schema_version: "ceal.worker_release_assets_error.v1",
+			ok: false,
+			error_code: known ? error.code : "worker_release_assets_failed",
+			message: known ? error.message : "Could not prepare worker release assets.",
+		};
+		if (json) io.log(JSON.stringify(payload));
+		else io.error(payload.message);
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+	process.exitCode = await runCli(process.argv.slice(2));

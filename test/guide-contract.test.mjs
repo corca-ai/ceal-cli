@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
@@ -34,7 +34,10 @@ test("guide packages teach help-driven discovery without command snapshots", () 
 			if (!stableWorkerFlow) assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
 		}
 		if (item.skill === "ceal-guide") {
-			assert.match(guide, /ceal capabilities --profile <profile-ref> --fresh[\s\S]+ceal capabilities targets --profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u);
+			assert.match(
+				guide,
+				/ceal capabilities --profile <profile-ref> --fresh[\s\S]+ceal capabilities targets --profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u,
+			);
 			assert.match(guide, /catalog grant is not backend\s+readiness/u);
 			assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
 		}
@@ -85,7 +88,10 @@ test("every advertised subcommand route renders its own four-field leaf help", (
 			for (const child of parseSubcommands(runBinary(item, [route.name, "--help"]).stdout)) {
 				advertised += 1;
 				const childRoute = [route.name, ...child.split(" ")];
-				for (const args of [[...childRoute, "--help"], ["help", ...childRoute]]) {
+				for (const args of [
+					[...childRoute, "--help"],
+					["help", ...childRoute],
+				]) {
 					const help = runBinary(item, args).stdout;
 					for (const field of ["Usage:", "Effect:", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 						assert.match(help, new RegExp(`^${field} \\S`, "mu"), `${item.binary} ${args.join(" ")} is missing ${field}`);
@@ -128,8 +134,9 @@ function exerciseCustomerScenario(scenario) {
 		...route,
 		help: runBinary(scenario, [route.name, "--help"]).stdout,
 	}));
-	const selected = candidates.find((candidate) => scenario.purpose.test(candidate.description)
-		&& candidate.help.includes(`Result schema: ${scenario.schema}`));
+	const selected = candidates.find(
+		(candidate) => scenario.purpose.test(candidate.description) && candidate.help.includes(`Result schema: ${scenario.schema}`),
+	);
 	assert.ok(selected, `no semantic leaf found for customer prompt: ${scenario.prompt}`);
 	for (const field of ["Usage:", "Effect: read_only", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 		assert.match(selected.help, new RegExp(field, "u"));

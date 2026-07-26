@@ -57,9 +57,15 @@ export function createCealDiscoveryCacheStore(home: string | undefined): CealDis
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, CACHE_FILE);
 	return {
-		async load() { return readCacheEntry(directory, file); },
-		async save(entry) { writeCacheEntry(directory, file, entry); },
-		async remove() { removeCacheEntry(file); },
+		async load() {
+			return readCacheEntry(directory, file);
+		},
+		async save(entry) {
+			writeCacheEntry(directory, file, entry);
+		},
+		async remove() {
+			removeCacheEntry(file);
+		},
 	};
 }
 
@@ -67,27 +73,39 @@ export function createCealDiscoveryCacheStore(home: string | undefined): CealDis
  * Determine whether a cached entry may serve the current request: its key must
  * match the live handshake's identity and it must be within the freshness window.
  */
-export function discoveryCacheEntryUsable(
-	entry: CealDiscoveryCacheEntry, key: CealDiscoveryCacheKey, now: number, ttlMs: number,
-): boolean {
-	return isValidCacheKey(entry.key) && isValidCacheKey(key)
-		&& isValidCachedDiscovery(entry.discovery, entry.key)
-		&& Number.isFinite(entry.cachedAt) && Number.isFinite(now) && Number.isSafeInteger(ttlMs) && ttlMs >= 0
-		&& keysMatch(entry.key, key) && entry.cachedAt <= now && now - entry.cachedAt < ttlMs;
+export function discoveryCacheEntryUsable(entry: CealDiscoveryCacheEntry, key: CealDiscoveryCacheKey, now: number, ttlMs: number): boolean {
+	return (
+		isValidCacheKey(entry.key) &&
+		isValidCacheKey(key) &&
+		isValidCachedDiscovery(entry.discovery, entry.key) &&
+		Number.isFinite(entry.cachedAt) &&
+		Number.isFinite(now) &&
+		Number.isSafeInteger(ttlMs) &&
+		ttlMs >= 0 &&
+		keysMatch(entry.key, key) &&
+		entry.cachedAt <= now &&
+		now - entry.cachedAt < ttlMs
+	);
 }
 
 function keysMatch(a: CealDiscoveryCacheKey, b: CealDiscoveryCacheKey): boolean {
-	return a.gatewayEndpoint === b.gatewayEndpoint
-		&& a.profileRef === b.profileRef
-		&& a.membershipRef === b.membershipRef
-		&& a.negotiatedProtocolVersion === b.negotiatedProtocolVersion;
+	return (
+		a.gatewayEndpoint === b.gatewayEndpoint &&
+		a.profileRef === b.profileRef &&
+		a.membershipRef === b.membershipRef &&
+		a.negotiatedProtocolVersion === b.negotiatedProtocolVersion
+	);
 }
 
 function readCacheEntry(directory: string, file: string): CealDiscoveryCacheEntry | null {
 	if (!existsSync(file)) return null;
 	if (!safeExistingFile(directory, file)) return null;
 	let parsed: unknown;
-	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { return null; }
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		return null;
+	}
 	return parseCacheEntry(parsed);
 }
 
@@ -145,15 +163,18 @@ function serializeEntry(entry: CealDiscoveryCacheEntry): Record<string, unknown>
 }
 
 function validateEntry(entry: CealDiscoveryCacheEntry): void {
-	const usable = isValidCacheKey(entry.key) && Number.isFinite(entry.cachedAt)
-		&& isValidCachedDiscovery(entry.discovery, entry.key);
+	const usable = isValidCacheKey(entry.key) && Number.isFinite(entry.cachedAt) && isValidCachedDiscovery(entry.discovery, entry.key);
 	if (!usable) throw new CealDiscoveryCacheStoreError("unsafe_store");
 }
 
 function isValidCacheKey(value: unknown): value is CealDiscoveryCacheKey {
 	if (!isRecord(value)) return false;
-	return safeEndpoint(value.gatewayEndpoint) && safeRef(value.profileRef)
-		&& safeRef(value.membershipRef) && safeRef(value.negotiatedProtocolVersion);
+	return (
+		safeEndpoint(value.gatewayEndpoint) &&
+		safeRef(value.profileRef) &&
+		safeRef(value.membershipRef) &&
+		safeRef(value.negotiatedProtocolVersion)
+	);
 }
 
 // A cache entry crosses the same untyped disk boundary as a Gateway response.
@@ -168,21 +189,21 @@ function isValidCachedDiscovery(value: unknown, key: CealDiscoveryCacheKey): val
 			profile_ref: key.profileRef,
 			body: {},
 		};
-		const response = decodeCealClientResponse({
-			ok: true,
-			request_id: CACHED_DISCOVERY_REQUEST_ID,
-			protocol_version: CEAL_PROTOCOL_VERSION,
-			proof_ref_or_unavailable: CACHED_DISCOVERY_PROOF_REF,
-			value,
-		}, request);
+		const response = decodeCealClientResponse(
+			{
+				ok: true,
+				request_id: CACHED_DISCOVERY_REQUEST_ID,
+				protocol_version: CEAL_PROTOCOL_VERSION,
+				proof_ref_or_unavailable: CACHED_DISCOVERY_PROOF_REF,
+				value,
+			},
+			request,
+		);
 		return response.ok && response.value.membership_ref === key.membershipRef;
 	} catch {
 		return false;
 	}
 }
-
-
-
 
 function safeRef(value: unknown): value is string {
 	return typeof value === "string" && SAFE_REF.test(value);
@@ -193,9 +214,16 @@ function safeEndpoint(value: unknown): value is string {
 	try {
 		const endpoint = new URL(value);
 		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-		return !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
-			&& (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")));
-	} catch { return false; }
+		return (
+			!endpoint.username &&
+			!endpoint.password &&
+			!endpoint.search &&
+			!endpoint.hash &&
+			(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")))
+		);
+	} catch {
+		return false;
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

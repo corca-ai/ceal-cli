@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readlinkSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -9,8 +21,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
-import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 import { requireHostTools } from "./host-tools.mjs";
+import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install-ceal.sh");
@@ -32,7 +44,10 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.equal(readlinkSync(path.join(install, "cealctl")), ".ceal-cli/current/cealctl-linux-arm64");
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
-		assert.equal(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "install-ceal.sh"), "utf8"), readFileSync(INSTALLER, "utf8"));
+		assert.equal(
+			readFileSync(path.join(install, ".ceal-cli", "worker", "current", "install-ceal.sh"), "utf8"),
+			readFileSync(INSTALLER, "utf8"),
+		);
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "current")).isSymbolicLink(), true);
 		const cosign = readFileSync(log, "utf8");
 		assert.equal(cosign.match(/verify-blob/gu)?.length, 6);
@@ -174,7 +189,11 @@ test("worker installer resolves a reordered, extended, or pretty-printed pointer
 		(body) => JSON.stringify(body, null, 2),
 	]) {
 		withFixture(({ install, release, tools, log }) => {
-			const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: digest(readFileSync(path.join(release, "SHA256SUMS"))) };
+			const body = {
+				schema_version: "ceal.worker_stable_release.v1",
+				tag: TAG,
+				sha256sums_sha256: digest(readFileSync(path.join(release, "SHA256SUMS"))),
+			};
 			writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${render(body)}\n`);
 			const result = run({ install, release, tools, log, version: "stable" });
 			assert.equal(result.status, 0, result.stderr);
@@ -230,7 +249,10 @@ test("worker installer rejects a manifest that does not bind this release, platf
 	withFixture(({ install, release, tools, log }) => {
 		const manifestPath = path.join(release, `ceal-worker-release-manifest-linux-arm64.json`);
 		writeManifest(release, "linux-arm64");
-		writeFileSync(manifestPath, readFileSync(manifestPath, "utf8").replace('  "version": "0.65.0",', '  "version": "9.9.9",\n  "version": "0.65.0",'));
+		writeFileSync(
+			manifestPath,
+			readFileSync(manifestPath, "utf8").replace('  "version": "0.65.0",', '  "version": "9.9.9",\n  "version": "0.65.0",'),
+		);
 		rewriteChecksumsAndSidecars(release);
 		const result = run({ install, release, tools, log, version: TAG });
 		assert.notEqual(result.status, 0);
@@ -295,7 +317,7 @@ simulatedDarwinTest("worker installer installs on a darwin host through the port
 		writeDarwinAssets(release);
 		writeChecksums(release, ["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"]);
 		rewriteSidecars(release);
-		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 2 ;; esac");
+		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 2 ;; esac');
 		const restricted = restrictedTools(tools);
 		const result = run({ install, release, tools, log, version: TAG, restrictedPath: restricted });
 		assert.equal(result.status, 0, result.stderr);
@@ -313,7 +335,9 @@ simulatedDarwinTest("worker installer installs on a darwin host through the port
 // worker source, so this test installs a real packed native artifact through
 // install-ceal.sh, smokes an installed post-allocation receipt, and performs
 // a real option-free `ceal update` against the stable pointer.
-test("real native worker installs through the worker lane and performs an option-free stable update", { skip: process.platform !== "linux" || process.arch !== "x64" }, async (context) => {
+test("real native worker installs through the worker lane and performs an option-free stable update", {
+	skip: process.platform !== "linux" || process.arch !== "x64",
+}, async (context) => {
 	const fixture = packedProtocolFixture(context);
 	const native = path.join(fixture.root, "worker-native-install");
 	const built = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: native, ...fixture });
@@ -322,7 +346,7 @@ test("real native worker installs through the worker lane and performs an option
 	const realTag = `ceal-v${built.version}`;
 	withFixture(({ install, release, tools, log }) => {
 		copyFileSync(path.join(native, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
-		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
+		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac');
 		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform, built.version);
 		writeChecksums(release);
 		writeStablePointer(release, { tag: realTag });
@@ -348,7 +372,13 @@ test("real native worker installs through the worker lane and performs an option
 
 		const updated = spawnSync(installed, ["update"], {
 			encoding: "utf8",
-			env: { ...process.env, CEAL_RELEASE_ORIGIN: "https://release.example.test/releases", COSIGN_LOG: log, FAKE_RELEASE_DIR: release, PATH: `${tools}:${process.env.PATH}` },
+			env: {
+				...process.env,
+				CEAL_RELEASE_ORIGIN: "https://release.example.test/releases",
+				COSIGN_LOG: log,
+				FAKE_RELEASE_DIR: release,
+				PATH: `${tools}:${process.env.PATH}`,
+			},
 		});
 		assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
 		const payload = parse(updated.stdout);
@@ -365,28 +395,40 @@ test("real native worker installs through the worker lane and performs an option
 function writeWorkerSession(home) {
 	const directory = path.join(home, ".ceal");
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	writeFileSync(path.join(directory, "client-session.json"), `${JSON.stringify({
-		schema_version: "ceal.client_session_store.v1",
-		gateway_endpoint: "http://127.0.0.1:1/gateway/client",
-		profile_ref: "profile:installer-fixture",
-		membership_ref: "membership:installer-fixture",
-		registration_ref: "registration:installer-fixture",
-		client_ref: "client:installer-fixture",
-		subject_ref: "subject:installer-fixture",
-		instance_ref: "instance:installer-fixture",
-		access_token: `ceal_personal_${"P".repeat(43)}`,
-		expires_at: "2099-07-14T00:00:00.000Z",
-		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-	}, null, 2)}\n`, { mode: 0o600 });
+	writeFileSync(
+		path.join(directory, "client-session.json"),
+		`${JSON.stringify(
+			{
+				schema_version: "ceal.client_session_store.v1",
+				gateway_endpoint: "http://127.0.0.1:1/gateway/client",
+				profile_ref: "profile:installer-fixture",
+				membership_ref: "membership:installer-fixture",
+				registration_ref: "registration:installer-fixture",
+				client_ref: "client:installer-fixture",
+				subject_ref: "subject:installer-fixture",
+				instance_ref: "instance:installer-fixture",
+				access_token: `ceal_personal_${"P".repeat(43)}`,
+				expires_at: "2099-07-14T00:00:00.000Z",
+				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			},
+			null,
+			2,
+		)}\n`,
+		{ mode: 0o600 },
+	);
 }
 
 function withFixture(callback) {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-installer-"));
 	try {
-		const release = path.join(root, "release"); const tools = path.join(root, "tools"); const install = path.join(root, "install"); const log = path.join(root, "cosign.log");
-		mkdirSync(release); mkdirSync(tools);
+		const release = path.join(root, "release");
+		const tools = path.join(root, "tools");
+		const install = path.join(root, "install");
+		const log = path.join(root, "cosign.log");
+		mkdirSync(release);
+		mkdirSync(tools);
 		writeWorkerBinary(path.join(release, "ceal-linux-arm64"));
 		writeWorkerBinary(path.join(release, "ceal-linux-amd64"));
 		writeFileSync(path.join(release, "ceal-guide-SKILL.md"), "---\nname: ceal-guide\n");
@@ -394,22 +436,58 @@ function withFixture(callback) {
 		copyFileSync(INSTALLER, path.join(release, "install-ceal.sh"));
 		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform);
 		const entries = writeChecksums(release);
-		for (const name of [...entries, "SHA256SUMS"]) { writeFileSync(path.join(release, `${name}.sig`), "signature\n"); writeFileSync(path.join(release, `${name}.pem`), "certificate\n"); }
-		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac");
-		writeTool(path.join(tools, "cosign"), "printf '%s\\n' \"$*\" >> \"$COSIGN_LOG\"\n[ -z \"${COSIGN_FAIL:-}\" ] || exit 1");
-		writeTool(path.join(tools, "curl"), [
-			"url=''", "out=''",
-			"while [ $# -gt 0 ]; do case \"$1\" in -o) shift; out=\"$1\" ;; http*) url=\"$1\" ;; esac; shift; done",
-			"printf '%s\\n' \"$url\" >> \"${CURL_URL_LOG:-/dev/null}\"",
-			"case \"$url\" in *tooling/cosign/v2.6.4/cosign-linux-arm64) cp \"$FAKE_RELEASE_DIR/cosign-linux-arm64\" \"$out\"; exit 0 ;; *github.com*|*api.github.com*) exit 97 ;; esac",
-			"[ -n \"$out\" ] || exit 2", "cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
-		].join("\n"));
+		for (const name of [...entries, "SHA256SUMS"]) {
+			writeFileSync(path.join(release, `${name}.sig`), "signature\n");
+			writeFileSync(path.join(release, `${name}.pem`), "certificate\n");
+		}
+		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac');
+		writeTool(path.join(tools, "cosign"), 'printf \'%s\\n\' "$*" >> "$COSIGN_LOG"\n[ -z "${COSIGN_FAIL:-}" ] || exit 1');
+		writeTool(
+			path.join(tools, "curl"),
+			[
+				"url=''",
+				"out=''",
+				'while [ $# -gt 0 ]; do case "$1" in -o) shift; out="$1" ;; http*) url="$1" ;; esac; shift; done',
+				'printf \'%s\\n\' "$url" >> "${CURL_URL_LOG:-/dev/null}"',
+				'case "$url" in *tooling/cosign/v2.6.4/cosign-linux-arm64) cp "$FAKE_RELEASE_DIR/cosign-linux-arm64" "$out"; exit 0 ;; *github.com*|*api.github.com*) exit 97 ;; esac',
+				'[ -n "$out" ] || exit 2',
+				'cp "$FAKE_RELEASE_DIR/${url##*/}" "$out"',
+			].join("\n"),
+		);
 		return callback({ install, release, tools, log });
-	} finally { rmSync(root, { recursive: true, force: true }); }
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 }
 
-function run({ install, release, tools, log, version, cosignFail = false, restrictedPath = null, token = "", minimumVersion = "", urlLog = "" }) {
-	return spawnSync("/bin/sh", [INSTALLER], { encoding: "utf8", env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: version, CEAL_GITHUB_TOKEN: token, CEAL_RELEASE_ORIGIN: "https://release.example.test/releases", CEAL_MINIMUM_VERSION: minimumVersion, COSIGN_LOG: log, COSIGN_FAIL: cosignFail ? "1" : "", CURL_URL_LOG: urlLog, FAKE_RELEASE_DIR: release, PATH: restrictedPath ?? `${tools}:${process.env.PATH}` } });
+function run({
+	install,
+	release,
+	tools,
+	log,
+	version,
+	cosignFail = false,
+	restrictedPath = null,
+	token = "",
+	minimumVersion = "",
+	urlLog = "",
+}) {
+	return spawnSync("/bin/sh", [INSTALLER], {
+		encoding: "utf8",
+		env: {
+			...process.env,
+			CEAL_INSTALL_DIR: install,
+			CEAL_VERSION: version,
+			CEAL_GITHUB_TOKEN: token,
+			CEAL_RELEASE_ORIGIN: "https://release.example.test/releases",
+			CEAL_MINIMUM_VERSION: minimumVersion,
+			COSIGN_LOG: log,
+			COSIGN_FAIL: cosignFail ? "1" : "",
+			CURL_URL_LOG: urlLog,
+			FAKE_RELEASE_DIR: release,
+			PATH: restrictedPath ?? `${tools}:${process.env.PATH}`,
+		},
+	});
 }
 
 // A darwin host has shasum but neither sha256sum nor flock; the restricted
@@ -422,7 +500,27 @@ function restrictedTools(tools) {
 	// Models a stock Mac: awk is present, python3 is deliberately absent, so an
 	// installer that reaches for python3 again fails here instead of on a
 	// colleague's machine.
-	for (const name of ["sh", "mktemp", "grep", "sed", "sort", "uniq", "wc", "tr", "cut", "cmp", "awk", "chmod", "mkdir", "rmdir", "rm", "ln", "mv", "cp", "readlink"]) {
+	for (const name of [
+		"sh",
+		"mktemp",
+		"grep",
+		"sed",
+		"sort",
+		"uniq",
+		"wc",
+		"tr",
+		"cut",
+		"cmp",
+		"awk",
+		"chmod",
+		"mkdir",
+		"rmdir",
+		"rm",
+		"ln",
+		"mv",
+		"cp",
+		"readlink",
+	]) {
 		const found = resolve(name);
 		assert.notEqual(found, "", `restricted tool ${name} must exist on the test host`);
 		if (!existsSync(path.join(tools, name))) symlinkSync(found, path.join(tools, name));
@@ -434,7 +532,10 @@ function restrictedTools(tools) {
 }
 
 function writeWorkerBinary(file) {
-	writeFileSync(file, "#!/usr/bin/env sh\nif [ \"${1:-}\" = version ]; then printf 'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: gateway_issued_client_session\\n'; exit 0; fi\nif [ \"${1:-}\" = --help ]; then exit 0; fi\nexit 2\n");
+	writeFileSync(
+		file,
+		'#!/usr/bin/env sh\nif [ "${1:-}" = version ]; then printf \'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: gateway_issued_client_session\\n\'; exit 0; fi\nif [ "${1:-}" = --help ]; then exit 0; fi\nexit 2\n',
+	);
 	chmodSync(file, 0o755);
 }
 
@@ -443,7 +544,10 @@ function writeWorkerBinary(file) {
 // downloaded signed SHA256SUMS.
 function writeStablePointer(release, overrides = {}) {
 	const releaseSet = digest(readFileSync(path.join(release, "SHA256SUMS")));
-	writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify({ schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSet, ...overrides })}\n`);
+	writeFileSync(
+		path.join(release, "ceal-worker-stable-release.json"),
+		`${JSON.stringify({ schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSet, ...overrides })}\n`,
+	);
 }
 
 // Mirrors the shape build-worker-release-assets.mjs actually emits. The nested
@@ -470,8 +574,16 @@ function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
 }
 
 function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {
-	const entries = ["THIRD_PARTY_NOTICES.txt", "ceal-guide-SKILL.md", "install-ceal.sh", ...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`])].sort();
-	writeFileSync(path.join(release, "SHA256SUMS"), entries.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
+	const entries = [
+		"THIRD_PARTY_NOTICES.txt",
+		"ceal-guide-SKILL.md",
+		"install-ceal.sh",
+		...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
+	].sort();
+	writeFileSync(
+		path.join(release, "SHA256SUMS"),
+		entries.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n",
+	);
 	return entries;
 }
 
@@ -482,8 +594,31 @@ function writeDarwinAssets(release) {
 	}
 }
 
-function appendChecksum(release, name) { writeFileSync(path.join(release, "SHA256SUMS"), `${digest(readFileSync(path.join(release, name)))}  ${name}\n`, { flag: "a" }); }
-function rewriteSidecars(release) { for (const name of [...readFileSync(path.join(release, "SHA256SUMS"), "utf8").trim().split("\n").map((line) => line.slice(66)), "SHA256SUMS"]) { writeFileSync(path.join(release, `${name}.sig`), "signature\n"); writeFileSync(path.join(release, `${name}.pem`), "certificate\n"); } }
-function rewriteChecksumsAndSidecars(release) { for (const name of writeChecksums(release)) { writeFileSync(path.join(release, `${name}.sig`), "signature\n"); writeFileSync(path.join(release, `${name}.pem`), "certificate\n"); } }
-function writeTool(file, body) { writeFileSync(file, `#!/usr/bin/env sh\nset -eu\n${body}\n`); chmodSync(file, 0o755); }
-function digest(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+function appendChecksum(release, name) {
+	writeFileSync(path.join(release, "SHA256SUMS"), `${digest(readFileSync(path.join(release, name)))}  ${name}\n`, { flag: "a" });
+}
+function rewriteSidecars(release) {
+	for (const name of [
+		...readFileSync(path.join(release, "SHA256SUMS"), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => line.slice(66)),
+		"SHA256SUMS",
+	]) {
+		writeFileSync(path.join(release, `${name}.sig`), "signature\n");
+		writeFileSync(path.join(release, `${name}.pem`), "certificate\n");
+	}
+}
+function rewriteChecksumsAndSidecars(release) {
+	for (const name of writeChecksums(release)) {
+		writeFileSync(path.join(release, `${name}.sig`), "signature\n");
+		writeFileSync(path.join(release, `${name}.pem`), "certificate\n");
+	}
+}
+function writeTool(file, body) {
+	writeFileSync(file, `#!/usr/bin/env sh\nset -eu\n${body}\n`);
+	chmodSync(file, 0o755);
+}
+function digest(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}

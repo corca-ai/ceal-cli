@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -34,13 +34,16 @@ test("isolated worker artifact builder emits only ceal-owned local build assets"
 	writeFileSync(protocolProvenance, "{}\n");
 	const workspace = workerWorkspace(root);
 	const calls = [];
-	const result = await buildWorkerReleaseArtifact({
-		protocolTarball,
-		protocolProvenance,
-		outputDirectory: path.join(root, "output"),
-		platform: "linux-amd64",
-		version: "0.65.0",
-	}, fakeDeps(workspace, calls));
+	const result = await buildWorkerReleaseArtifact(
+		{
+			protocolTarball,
+			protocolProvenance,
+			outputDirectory: path.join(root, "output"),
+			platform: "linux-amd64",
+			version: "0.65.0",
+		},
+		fakeDeps(workspace, calls),
+	);
 	assert.equal(result.ok, true);
 	assert.equal(result.artifact.name, "ceal-linux-amd64");
 	assert.equal(result.artifact.smoke.command, "ceal");
@@ -76,12 +79,22 @@ test("worker artifact builder rejects a symlinked output parent before consumer 
 	symlinkSync(path.join(root, "real"), path.join(root, "linked-output"), "dir");
 	let consumerCalled = false;
 	await assert.rejects(
-		() => buildWorkerReleaseArtifact({
-			protocolTarball,
-			protocolProvenance,
-			outputDirectory: path.join(root, "linked-output", "release"),
-			platform: "linux-amd64",
-		}, { currentPlatform: () => "linux-amd64", resolvePostjectCli: () => "postject.js", verifyConsumer: async () => { consumerCalled = true; } }),
+		() =>
+			buildWorkerReleaseArtifact(
+				{
+					protocolTarball,
+					protocolProvenance,
+					outputDirectory: path.join(root, "linked-output", "release"),
+					platform: "linux-amd64",
+				},
+				{
+					currentPlatform: () => "linux-amd64",
+					resolvePostjectCli: () => "postject.js",
+					verifyConsumer: async () => {
+						consumerCalled = true;
+					},
+				},
+			),
 		(error) => error?.code === "unsafe_output",
 	);
 	assert.equal(consumerCalled, false);
@@ -99,17 +112,25 @@ test("worker artifact builder removes a failed packed-consumer workspace", async
 	const failure = new Error("consumer failed");
 	failure.workspace = workspace;
 	await assert.rejects(
-		() => buildWorkerReleaseArtifact({ protocolTarball, protocolProvenance, outputDirectory: path.join(root, "output"), platform: "linux-amd64" }, {
-			currentPlatform: () => "linux-amd64",
-			resolvePostjectCli: () => "postject.js",
-			verifyConsumer: async () => { throw failure; },
-		}),
+		() =>
+			buildWorkerReleaseArtifact(
+				{ protocolTarball, protocolProvenance, outputDirectory: path.join(root, "output"), platform: "linux-amd64" },
+				{
+					currentPlatform: () => "linux-amd64",
+					resolvePostjectCli: () => "postject.js",
+					verifyConsumer: async () => {
+						throw failure;
+					},
+				},
+			),
 		(error) => error?.code === "consumer_proof_failed",
 	);
 	assert.equal(existsSync(workspace), false);
 });
 
-test("worker artifact builder proves the real packed protocol consumer and SEA output", { skip: process.platform !== "linux" || process.arch !== "x64" }, async (context) => {
+test("worker artifact builder proves the real packed protocol consumer and SEA output", {
+	skip: process.platform !== "linux" || process.arch !== "x64",
+}, async (context) => {
 	const fixture = makeGatewayProtocolFixture();
 	const output = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-integration-test-")));
 	context.after(() => {
@@ -141,11 +162,14 @@ function workerWorkspace(root) {
 	const workspace = path.join(root, "consumer");
 	const source = path.join(workspace, "sources", "ceal-worker-cli");
 	mkdirSync(path.join(source, "dist"), { recursive: true });
-	writeFileSync(path.join(source, "package.json"), JSON.stringify({
-		name: "@corca-ai/ceal-worker-cli",
-		version: "0.65.0",
-		bin: { ceal: "./dist/bin.js" },
-	}));
+	writeFileSync(
+		path.join(source, "package.json"),
+		JSON.stringify({
+			name: "@corca-ai/ceal-worker-cli",
+			version: "0.65.0",
+			bin: { ceal: "./dist/bin.js" },
+		}),
+	);
 	writeFileSync(path.join(source, "dist", "bin.js"), "worker entry\n");
 	return workspace;
 }
@@ -196,4 +220,6 @@ function list(directory) {
 	return readdirSync(directory).sort();
 }
 
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}

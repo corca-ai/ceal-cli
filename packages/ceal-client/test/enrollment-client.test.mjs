@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
-import { createCealEnrollmentClient, CealEnrollmentClientError } from "../dist/index.js";
+import { CealEnrollmentClientError, createCealEnrollmentClient } from "../dist/index.js";
 
 test("enrollment client exchanges one code over the derived loopback route", async () => {
 	const requests = [];
@@ -12,21 +12,23 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		for await (const chunk of request) chunks.push(chunk);
 		requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(JSON.stringify({
-			schema_version: "ceal.enrollment_result.v1",
-			ok: true,
-			profile_ref: "profile:narnia",
-			membership_ref: "membership:narnia",
-			registration_ref: "registration:narnia",
-			client_ref: "client:narnia",
-			subject_ref: "subject:hwidong",
-			instance_ref: "instance:corca",
-			access_token: `ceal_personal_${"B".repeat(43)}`,
-			expires_at: "2026-07-14T00:00:00.000Z",
-			refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-			refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
-			refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
-		}));
+		response.end(
+			JSON.stringify({
+				schema_version: "ceal.enrollment_result.v1",
+				ok: true,
+				profile_ref: "profile:narnia",
+				membership_ref: "membership:narnia",
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				access_token: `ceal_personal_${"B".repeat(43)}`,
+				expires_at: "2026-07-14T00:00:00.000Z",
+				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+				refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+				refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
+			}),
+		);
 	});
 	await listen(server);
 	const address = server.address();
@@ -41,7 +43,9 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		// the client package manifest.
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
-	} finally { await close(server); }
+	} finally {
+		await close(server);
+	}
 });
 
 test("enrollment client rejects plaintext remote, malformed codes, and unsafe responses", async () => {
@@ -65,5 +69,5 @@ function listen(server) {
 }
 
 function close(server) {
-	return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+	return new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }

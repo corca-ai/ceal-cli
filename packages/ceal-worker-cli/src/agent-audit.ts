@@ -1,4 +1,4 @@
-import { type Stats, closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, type Stats } from "node:fs";
 import path from "node:path";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
@@ -30,7 +30,8 @@ const RENDERED_SESSIONS = 10;
 const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.]jsonl$/iu;
 // Codex rollouts live under sessions/YYYY/MM/DD; only the machine-generated
 // rollout grammar is accepted, and only its UUID surfaces as a session_ref.
-const CODEX_ROLLOUT_FILE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]jsonl$/iu;
+const CODEX_ROLLOUT_FILE =
+	/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]jsonl$/iu;
 const CODEX_DATE_SEGMENT = [/^\d{4}$/u, /^\d{2}$/u, /^\d{2}$/u];
 const HEALTH_BASIS = "health derived from newest transcript mtime (active within 24h); not a liveness probe";
 // Event depth is deliberately bounded: only the newest sessions are scanned,
@@ -141,9 +142,10 @@ export function inspectAgentSessionEvents(
 	if ((runtime !== "claude" && runtime !== "codex") || !SESSION_REF.test(sessionRef)) return null;
 	const root = home && path.isAbsolute(home) ? home : null;
 	if (!root) return { status: "unreadable" };
-	const adapter = runtime === "claude"
-		? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
-		: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
+	const adapter =
+		runtime === "claude"
+			? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
+			: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
 	try {
 		lstatSync(adapter.directory);
 	} catch (error) {
@@ -172,10 +174,7 @@ export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 ]);
 
 export function inspectAgentAudit(home: string | undefined, now: number): CealAgentAuditState {
-	const adapters: CealAgentAuditAdapterState[] = [
-		observeClaudeAdapter(home, now),
-		observeCodexAdapter(home, now),
-	];
+	const adapters: CealAgentAuditAdapterState[] = [observeClaudeAdapter(home, now), observeCodexAdapter(home, now)];
 	return {
 		schemaVersion: "ceal.agent_activity.v1",
 		adapters,
@@ -230,16 +229,17 @@ function observeTranscriptAdapter(
 		return base;
 	}
 	const { sessions, partial } = collected;
-	const partialFields = partial
-		? { inventory: "partial" as const, note: `${HEALTH_BASIS}; inventory truncated or partly unreadable` }
-		: {};
+	const partialFields = partial ? { inventory: "partial" as const, note: `${HEALTH_BASIS}; inventory truncated or partly unreadable` } : {};
 	// A partial walk that found nothing proves nothing about inactivity.
 	if (sessions.length === 0) {
 		return partial ? { ...base, ...partialFields } : { ...base, health: "inactive", sessionCount: 0, sessions: [] };
 	}
 	sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-	const rendered = sessions.slice(0, RENDERED_SESSIONS).map(({ transcriptPath, ...session }, index) =>
-		index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session);
+	const rendered = sessions
+		.slice(0, RENDERED_SESSIONS)
+		.map(({ transcriptPath, ...session }, index) =>
+			index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session,
+		);
 	const scannedSessions = rendered.filter((session) => typeof session.events === "object").length;
 	return {
 		...base,
@@ -273,10 +273,7 @@ const USAGE_FIELD_KEYS = ["inputTokens", "outputTokens", "cacheReadTokens", "cac
 // re-opened with O_NOFOLLOW and re-checked as a regular file so the
 // inventory-time symlink refusal cannot be raced. Only classified kind
 // counts, integer totals, and parsed epoch timestamps leave this function.
-function scanSessionEvents(
-	transcriptPath: string,
-	adapter: TranscriptLineAdapter,
-): CealAgentAuditSessionEvents | "unreadable" {
+function scanSessionEvents(transcriptPath: string, adapter: TranscriptLineAdapter): CealAgentAuditSessionEvents | "unreadable" {
 	let descriptor: number;
 	try {
 		descriptor = openSync(transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -293,7 +290,11 @@ function scanSessionEvents(
 		// A byte-truncated read ends in a partial line; scanning it would
 		// misreport a real event as unparsed.
 		if (truncatedBytes) lines.pop();
-		return summarizeEventLines(lines.filter((line) => line.trim() !== ""), truncatedBytes, adapter);
+		return summarizeEventLines(
+			lines.filter((line) => line.trim() !== ""),
+			truncatedBytes,
+			adapter,
+		);
 	} catch {
 		return "unreadable";
 	} finally {
@@ -301,11 +302,7 @@ function scanSessionEvents(
 	}
 }
 
-function summarizeEventLines(
-	lines: string[],
-	truncatedBytes: boolean,
-	adapter: TranscriptLineAdapter,
-): CealAgentAuditSessionEvents {
+function summarizeEventLines(lines: string[], truncatedBytes: boolean, adapter: TranscriptLineAdapter): CealAgentAuditSessionEvents {
 	const kinds: Partial<Record<CealAgentAuditEventKind, number>> = {};
 	let eventCount = 0;
 	let unparsedLines = 0;
@@ -336,13 +333,9 @@ function summarizeEventLines(
 		if (usage && (usage.dedupeKey === undefined || !seenUsageKeys.has(usage.dedupeKey))) {
 			if (usage.dedupeKey !== undefined) seenUsageKeys.add(usage.dedupeKey);
 			usageEvents += 1;
-			usageTotals = adapter.usageSource === "runtime_cumulative_last"
-				? usage.reading
-				: addUsageReadings(usageTotals, usage.reading);
+			usageTotals = adapter.usageSource === "runtime_cumulative_last" ? usage.reading : addUsageReadings(usageTotals, usage.reading);
 		}
-		const timestamp = typeof record.timestamp === "string" && ISO_INSTANT.test(record.timestamp)
-			? Date.parse(record.timestamp)
-			: Number.NaN;
+		const timestamp = typeof record.timestamp === "string" && ISO_INSTANT.test(record.timestamp) ? Date.parse(record.timestamp) : Number.NaN;
 		if (Number.isFinite(timestamp)) {
 			firstEventAt = firstEventAt === undefined ? timestamp : Math.min(firstEventAt, timestamp);
 			lastScannedEventAt = lastScannedEventAt === undefined ? timestamp : Math.max(lastScannedEventAt, timestamp);
@@ -358,14 +351,16 @@ function summarizeEventLines(
 		...(lastScannedEventAt === undefined ? {} : { lastScannedEventAt }),
 		// Omitted, not zero: a session whose runtime supplied no usage shows no
 		// token figures at all.
-		...(usageTotals === undefined ? {} : {
-			tokenUsage: {
-				source: adapter.usageSource,
-				completeness: scan === "complete" ? "full_transcript" as const : "scanned_prefix" as const,
-				usageEvents,
-				...usageTotals,
-			},
-		}),
+		...(usageTotals === undefined
+			? {}
+			: {
+					tokenUsage: {
+						source: adapter.usageSource,
+						completeness: scan === "complete" ? ("full_transcript" as const) : ("scanned_prefix" as const),
+						usageEvents,
+						...usageTotals,
+					},
+				}),
 	};
 }
 
@@ -401,7 +396,14 @@ function usageReading(source: Record<string, unknown>, fields: Record<keyof Toke
 // with a content-item array; runtime bookkeeping lines carry their own types.
 // Classification reads only `type` fields — never text, arguments, or paths.
 const CLAUDE_STATE_TYPES = new Set([
-	"system", "mode", "ai-title", "last-prompt", "attachment", "permission-mode", "queue-operation", "summary",
+	"system",
+	"mode",
+	"ai-title",
+	"last-prompt",
+	"attachment",
+	"permission-mode",
+	"queue-operation",
+	"summary",
 ]);
 
 function classifyClaudeLine(line: Record<string, unknown>): CealAgentAuditEventKind {
@@ -457,7 +459,12 @@ const CLAUDE_LINE_ADAPTER: TranscriptLineAdapter = {
 // event_msg mirrors of user/agent messages count as session_state so one
 // utterance is never counted twice. Classification reads only `type`/`role`.
 const CODEX_STATE_TYPES = new Set([
-	"session_meta", "turn_context", "world_state", "compacted", "event_msg", "inter_agent_communication_metadata",
+	"session_meta",
+	"turn_context",
+	"world_state",
+	"compacted",
+	"event_msg",
+	"inter_agent_communication_metadata",
 ]);
 
 function classifyCodexLine(line: Record<string, unknown>): CealAgentAuditEventKind {
@@ -523,21 +530,42 @@ function collectClaudeSessions(projects: string): { sessions: CollectedSession[]
 	const root = lstatSync(projects);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const project of readdirSync(projects)) {
-		if (examined >= MAX_ENTRIES_EXAMINED) { partial = true; break; }
+		if (examined >= MAX_ENTRIES_EXAMINED) {
+			partial = true;
+			break;
+		}
 		examined += 1;
 		const projectDirectory = path.join(projects, project);
 		let projectStat: Stats;
-		try { projectStat = lstatSync(projectDirectory); } catch { partial = true; continue; }
+		try {
+			projectStat = lstatSync(projectDirectory);
+		} catch {
+			partial = true;
+			continue;
+		}
 		if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) continue;
 		let files: string[];
-		try { files = readdirSync(projectDirectory); } catch { partial = true; continue; }
+		try {
+			files = readdirSync(projectDirectory);
+		} catch {
+			partial = true;
+			continue;
+		}
 		for (const file of files) {
-			if (examined >= MAX_ENTRIES_EXAMINED) { partial = true; break; }
+			if (examined >= MAX_ENTRIES_EXAMINED) {
+				partial = true;
+				break;
+			}
 			examined += 1;
 			if (!SESSION_FILE.test(file)) continue;
 			const transcript = path.join(projectDirectory, file);
 			let stat: Stats;
-			try { stat = lstatSync(transcript); } catch { partial = true; continue; }
+			try {
+				stat = lstatSync(transcript);
+			} catch {
+				partial = true;
+				continue;
+			}
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
 				sessionRef: file.slice(0, -".jsonl".length),
@@ -563,20 +591,36 @@ function collectCodexSessions(sessionsRoot: string): { sessions: CollectedSessio
 	const root = lstatSync(sessionsRoot);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const dayDirectory of codexDayDirectories(sessionsRoot, walk)) {
-		if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+		if (walk.examined >= MAX_ENTRIES_EXAMINED) {
+			walk.partial = true;
+			break;
+		}
 		let files: string[];
-		try { files = readdirSync(dayDirectory); } catch { walk.partial = true; continue; }
+		try {
+			files = readdirSync(dayDirectory);
+		} catch {
+			walk.partial = true;
+			continue;
+		}
 		// Descending name order puts newer rollout stamps first, so a budget
 		// truncation inside one day still keeps its newest sessions.
 		files.sort(descending);
 		for (const file of files) {
-			if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+			if (walk.examined >= MAX_ENTRIES_EXAMINED) {
+				walk.partial = true;
+				break;
+			}
 			walk.examined += 1;
 			const rollout = CODEX_ROLLOUT_FILE.exec(file);
 			if (!rollout) continue;
 			const rolloutPath = path.join(dayDirectory, file);
 			let stat: Stats;
-			try { stat = lstatSync(rolloutPath); } catch { walk.partial = true; continue; }
+			try {
+				stat = lstatSync(rolloutPath);
+			} catch {
+				walk.partial = true;
+				continue;
+			}
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
 				sessionRef: rollout[1].toLowerCase(),
@@ -602,17 +646,33 @@ function codexDayDirectories(sessionsRoot: string, walk: { examined: number; par
 	for (const segment of CODEX_DATE_SEGMENT) {
 		const next: string[] = [];
 		for (const parent of levels) {
-			if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+			if (walk.examined >= MAX_ENTRIES_EXAMINED) {
+				walk.partial = true;
+				break;
+			}
 			let entries: string[];
-			try { entries = readdirSync(parent); } catch { walk.partial = true; continue; }
+			try {
+				entries = readdirSync(parent);
+			} catch {
+				walk.partial = true;
+				continue;
+			}
 			entries.sort(descending);
 			for (const entry of entries) {
-				if (walk.examined >= MAX_ENTRIES_EXAMINED) { walk.partial = true; break; }
+				if (walk.examined >= MAX_ENTRIES_EXAMINED) {
+					walk.partial = true;
+					break;
+				}
 				walk.examined += 1;
 				if (!segment.test(entry)) continue;
 				const child = path.join(parent, entry);
 				let stat: Stats;
-				try { stat = lstatSync(child); } catch { walk.partial = true; continue; }
+				try {
+					stat = lstatSync(child);
+				} catch {
+					walk.partial = true;
+					continue;
+				}
 				if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
 				next.push(child);
 			}

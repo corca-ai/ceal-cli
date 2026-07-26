@@ -48,7 +48,10 @@ test("flags, values, and --json are collected regardless of order", () => {
 // A value option at the end of argv used to read `undefined` and, worse, a
 // missing value must never silently swallow the following option.
 test("a value option with no value is refused", () => {
-	assert.throws(() => parse(["--out"]), (error) => error.code === "invalid_argument" && error.message === "option requires a value");
+	assert.throws(
+		() => parse(["--out"]),
+		(error) => error.code === "invalid_argument" && error.message === "option requires a value",
+	);
 	// The following token IS consumed as the value when present, which is the
 	// documented grammar: `--out --force` sets outputDirectory to "--force".
 	assert.equal(parse(["--out", "--force"]).options.outputDirectory, "--force");
@@ -56,14 +59,20 @@ test("a value option with no value is refused", () => {
 
 test("an unrecognized argument is refused rather than ignored", () => {
 	for (const argv of [["--nope"], ["stray"], ["--out", "/tmp/a", "--nope"]]) {
-		assert.throws(() => parse(argv), (error) => error.code === "invalid_argument" && error.message === "unexpected argument");
+		assert.throws(
+			() => parse(argv),
+			(error) => error.code === "invalid_argument" && error.message === "unexpected argument",
+		);
 	}
 });
 
 // Object.hasOwn, not `in`: an inherited key must not read as a declared option.
 test("prototype keys are not declared options", () => {
 	for (const hostile of ["__proto__", "constructor", "toString"]) {
-		assert.throws(() => parse([hostile]), (error) => error.code === "invalid_argument");
+		assert.throws(
+			() => parse([hostile]),
+			(error) => error.code === "invalid_argument",
+		);
 	}
 });
 

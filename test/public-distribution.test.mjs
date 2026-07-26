@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -42,7 +56,10 @@ legacyInstallerTest("default worker installation creates only ceal and worker-ow
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "current")).isSymbolicLink(), true);
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
-		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "THIRD_PARTY_NOTICES.txt"), "utf8"), /yaml 2[.]9[.]0 \(ISC\)/u);
+		assert.match(
+			readFileSync(path.join(install, ".ceal-cli", "worker", "current", "THIRD_PARTY_NOTICES.txt"), "utf8"),
+			/yaml 2[.]9[.]0 \(ISC\)/u,
+		);
 		assert.match(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "guide", "SKILL.md"), "utf8"), /ceal-guide/u);
 		assert.equal(readFileSync(path.join(install, ".ceal-cli", "worker", "current", "install.sh"), "utf8"), "signed installer asset\n");
 		assert.equal(readdirSync(path.join(install, ".ceal-cli", "worker", "releases")).length, 1);
@@ -51,7 +68,10 @@ legacyInstallerTest("default worker installation creates only ceal and worker-ow
 		assert.equal(log.match(/verify-blob/gu)?.length, 6);
 		assert.match(log, /corca-ai\/ceal-cli/u);
 		assert.match(log, /refs\/tags\/v0[.]65[.]0/u);
-		assert.match(log, /--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]65[.]0/u);
+		assert.match(
+			log,
+			/--certificate-identity\s+https:\/\/github[.]com\/corca-ai\/ceal-cli\/[.]github\/workflows\/cealctl-release[.]yml@refs\/tags\/v0[.]65[.]0/u,
+		);
 	});
 });
 
@@ -130,7 +150,7 @@ legacyInstallerTest("installer rejects an unrecognized role without downloading 
 
 legacyInstallerTest("installer selects the signed amd64 worker artifact on x86_64", () => {
 	withFixture(({ root, release, tools, install, cosignLog }) => {
-		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac");
+		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac');
 		const result = runInstaller({ root, release, tools, install, cosignLog });
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
@@ -140,7 +160,10 @@ legacyInstallerTest("installer selects the signed amd64 worker artifact on x86_6
 });
 
 legacyInstallerTest("installer rejects malformed or misidentified selected-command version YAML", () => {
-	for (const [role, asset, command] of [["worker", "ceal-linux-arm64", "cealctl"], ["operator", "cealctl-linux-arm64", "ceal"]]) {
+	for (const [role, asset, command] of [
+		["worker", "ceal-linux-arm64", "cealctl"],
+		["operator", "cealctl-linux-arm64", "ceal"],
+	]) {
 		withFixture(({ root, release, tools, install, cosignLog }) => {
 			writeBinary(path.join(release, asset), command, "generation-1");
 			writeChecksums(release);
@@ -349,7 +372,17 @@ test("workflow builds from public source and never downloads injected draft bina
 	for (const action of workflow.matchAll(/uses:\s+([^\s]+)/gu)) assert.match(action[1], /@[a-f0-9]{40}$/u);
 });
 
-function runInstaller({ root, release, tools, install, cosignLog, version = "v0.65.0", role = "worker", stableTag = "v0.65.0", minimumVersion }) {
+function runInstaller({
+	root,
+	release,
+	tools,
+	install,
+	cosignLog,
+	version = "v0.65.0",
+	role = "worker",
+	stableTag = "v0.65.0",
+	minimumVersion,
+}) {
 	return spawnSync(INSTALLER, [], {
 		cwd: root,
 		encoding: "utf8",
@@ -402,21 +435,24 @@ function withFixture(callback) {
 			writeFileSync(path.join(release, `${name}.sig`), "signature\n");
 			writeFileSync(path.join(release, `${name}.pem`), "certificate\n");
 		}
-		writeTool(path.join(tools, "uname"), "case \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac");
-		writeTool(path.join(tools, "cosign"), "printf '%s\\n' \"$*\" >> \"$COSIGN_LOG\"");
-		writeTool(path.join(tools, "curl"), [
-			"url=''",
-			"out=''",
-			"while [ $# -gt 0 ]; do",
-			"  case \"$1\" in -o) shift; out=\"$1\" ;; http*) url=\"$1\" ;; esac",
-			"  shift",
-			"done",
-			"case \"$url\" in",
-			"  */releases/latest) printf 'HTTP/2 302\\nlocation: https://github.com/corca-ai/ceal-cli/releases/tag/%s\\n' \"$STABLE_TAG\"; exit 0 ;;",
-			"esac",
-			"[ -n \"$out\" ] || exit 2",
-			"cp \"$FAKE_RELEASE_DIR/${url##*/}\" \"$out\"",
-		].join("\n"));
+		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 2 ;; esac');
+		writeTool(path.join(tools, "cosign"), 'printf \'%s\\n\' "$*" >> "$COSIGN_LOG"');
+		writeTool(
+			path.join(tools, "curl"),
+			[
+				"url=''",
+				"out=''",
+				"while [ $# -gt 0 ]; do",
+				'  case "$1" in -o) shift; out="$1" ;; http*) url="$1" ;; esac',
+				"  shift",
+				"done",
+				'case "$url" in',
+				"  */releases/latest) printf 'HTTP/2 302\\nlocation: https://github.com/corca-ai/ceal-cli/releases/tag/%s\\n' \"$STABLE_TAG\"; exit 0 ;;",
+				"esac",
+				'[ -n "$out" ] || exit 2',
+				'cp "$FAKE_RELEASE_DIR/${url##*/}" "$out"',
+			].join("\n"),
+		);
 		const result = callback({ root, release, tools, install, cosignLog });
 		if (result && typeof result.then === "function") return result.finally(cleanup);
 		cleanup();
@@ -433,14 +469,21 @@ function writePlatformManifest(release, platform) {
 		binary,
 		sha256: digest(readFileSync(path.join(release, name))),
 	});
-	writeFileSync(path.join(release, `ceal-cli-platform-release-manifest-${platform}.json`), `${JSON.stringify({
-		release_version: "0.65.0",
-		platform,
-		guides: {
-			"ceal-guide": guide("ceal-guide-SKILL.md", "ceal"),
-			"cealctl-guide": guide("cealctl-guide-SKILL.md", "cealctl"),
-		},
-	}, null, 2)}\n`);
+	writeFileSync(
+		path.join(release, `ceal-cli-platform-release-manifest-${platform}.json`),
+		`${JSON.stringify(
+			{
+				release_version: "0.65.0",
+				platform,
+				guides: {
+					"ceal-guide": guide("ceal-guide-SKILL.md", "ceal"),
+					"cealctl-guide": guide("cealctl-guide-SKILL.md", "cealctl"),
+				},
+			},
+			null,
+			2,
+		)}\n`,
+	);
 }
 
 function writeChecksums(release) {
@@ -456,14 +499,20 @@ function writeChecksums(release) {
 		"cealctl-linux-arm64",
 		"install.sh",
 	];
-	writeFileSync(path.join(release, "SHA256SUMS"), checksummed.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n");
+	writeFileSync(
+		path.join(release, "SHA256SUMS"),
+		checksummed.map((name) => `${digest(readFileSync(path.join(release, name)))}  ${name}`).join("\n") + "\n",
+	);
 	return checksummed;
 }
 
 function writeBinary(file, command, marker = "generation-1", versionSuffix = "") {
 	const schema = command === "ceal" ? "ceal.version.v1" : "cealctl.version.v1";
 	const credentialContext = command === "ceal" ? "gateway_issued_client_session" : "cealctl_operator_admin_session";
-	writeFileSync(file, `#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`);
+	writeFileSync(
+		file,
+		`#!/usr/bin/env sh\n# ${marker}\ncommand=${command}\nif [ "\${1:-}" = version ]; then printf 'schema_version: ${schema}\\ncommand: %s\\nversion: 0.65.0\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: ${credentialContext}\\n${versionSuffix}' "$command"; exit 0; fi\nif [ "\${1:-}" = --help ]; then echo help; exit 0; fi\nexit 2\n`,
+	);
 	chmodSync(file, 0o755);
 }
 

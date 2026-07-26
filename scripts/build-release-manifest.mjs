@@ -85,10 +85,12 @@ function isExactProtocolRange(range) {
 function assertRollbackContract(rollback) {
 	const source = rollback?.source;
 	const legacy = rollback?.legacy_cealctl_distribution;
-	if (source?.strategy !== "normal_additive_revert"
-		|| !/^[a-f0-9]{40}$/u.test(source.immutable_commit ?? "")
-		|| legacy?.scope !== "cealctl_only"
-		|| legacy.tag_and_release_are_mutable_pointers !== true) {
+	if (
+		source?.strategy !== "normal_additive_revert" ||
+		!/^[a-f0-9]{40}$/u.test(source.immutable_commit ?? "") ||
+		legacy?.scope !== "cealctl_only" ||
+		legacy.tag_and_release_are_mutable_pointers !== true
+	) {
 		throw new CealCliReleaseManifestError("invalid_contract", "Release contract rollback identities are invalid.");
 	}
 }
@@ -128,14 +130,19 @@ function normalizeArtifacts(input, contract) {
 function assertArtifactPackageIdentity(artifactPath, declared) {
 	const manifest = readArtifactPackageManifest(artifactPath);
 	const bin = manifest.bin;
-	if (manifest.name !== declared.package
-		|| manifest.version !== declared.package_version
-		|| !bin
-		|| typeof bin !== "object"
-		|| Array.isArray(bin)
-		|| Object.keys(bin).length !== 1
-		|| bin[declared.command] !== "./dist/bin.js") {
-		throw new CealCliReleaseManifestError("artifact_identity_mismatch", "Release artifact package identity does not match its declared command.");
+	if (
+		manifest.name !== declared.package ||
+		manifest.version !== declared.package_version ||
+		!bin ||
+		typeof bin !== "object" ||
+		Array.isArray(bin) ||
+		Object.keys(bin).length !== 1 ||
+		bin[declared.command] !== "./dist/bin.js"
+	) {
+		throw new CealCliReleaseManifestError(
+			"artifact_identity_mismatch",
+			"Release artifact package identity does not match its declared command.",
+		);
 	}
 }
 

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
-import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
-import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
+import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
+import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
 
 // Read the child routes a parent leaf advertises, bounded to its own block.
 function advertisedSubcommands(help) {
@@ -30,10 +30,22 @@ function advertisedSubcommands(help) {
 async function run(args, runtime = {}) {
 	let stdout = "";
 	let stderr = "";
-	const code = await runCealCommand(args, {
-		stdout: { write: (chunk) => { stdout += String(chunk); } },
-		stderr: { write: (chunk) => { stderr += String(chunk); } },
-	}, runtime);
+	const code = await runCealCommand(
+		args,
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+			stderr: {
+				write: (chunk) => {
+					stderr += String(chunk);
+				},
+			},
+		},
+		runtime,
+	);
 	return { code, stdout, stderr };
 }
 
@@ -64,7 +76,11 @@ test("canonical registry is reachable through stable, read-only help", async () 
 		// compares it whole. CHANGELOG.md records which release proved this; do not
 		// restate a release number here.
 		if (command.name === "version") continue;
-		for (const args of [[command.name, "--help"], [command.name, "-h"], ["help", command.name]]) {
+		for (const args of [
+			[command.name, "--help"],
+			[command.name, "-h"],
+			["help", command.name],
+		]) {
 			const result = await run(args);
 			assert.equal(result.code, 0);
 			assert.equal(result.stderr, "");
@@ -91,7 +107,11 @@ test("canonical registry is reachable through stable, read-only help", async () 
 test("every declared subcommand renders its own four-field leaf help", async () => {
 	for (const subcommand of CEAL_SUBCOMMANDS) {
 		const route = [subcommand.parent, ...subcommand.route];
-		for (const args of [[...route, "--help"], [...route, "-h"], ["help", ...route]]) {
+		for (const args of [
+			[...route, "--help"],
+			[...route, "-h"],
+			["help", ...route],
+		]) {
 			const result = await run(args);
 			assert.equal(result.code, 0, `${args.join(" ")}: ${result.stdout}`);
 			assert.equal(result.stderr, "");
@@ -148,7 +168,10 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 		}
 		assert.match(stdout, /^Subcommands:$/mu);
 		assert.match(stdout, new RegExp(`^Run: ceal ${command.name} <subcommand> --help`, "mu"));
-		assert.deepEqual(advertisedSubcommands(stdout), declared.map((subcommand) => subcommand.route.join(" ")));
+		assert.deepEqual(
+			advertisedSubcommands(stdout),
+			declared.map((subcommand) => subcommand.route.join(" ")),
+		);
 		// A route token left behind in the Options block reads as a flag.
 		const optionRows = stdout.split("\n").slice(stdout.split("\n").indexOf("Options:") + 1);
 		for (const subcommand of declared) {
@@ -162,7 +185,8 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 test("declared result schemas exist in the emitting package", () => {
 	const source = readdirSync(new URL("../src", import.meta.url))
 		.filter((entry) => entry.endsWith(".ts"))
-		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8"))
+		.join("\n");
 	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
 	for (const definition of [...CEAL_COMMANDS, ...CEAL_SUBCOMMANDS]) {
 		assert.ok(emitted.has(definition.result_schema), `${definition.name ?? definition.route.join(" ")}: ${definition.result_schema}`);
@@ -211,9 +235,14 @@ test("every public command emits one YAML document without a format flag", async
 		// compares it whole. CHANGELOG.md records which release proved this; do not
 		// restate a release number here.
 		if (command.name === "version") continue;
-		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
-			: command.name === "receipt" ? ["receipt", "show", "request:test"]
-			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
+		const args =
+			command.name === "call"
+				? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
+				: command.name === "receipt"
+					? ["receipt", "show", "request:test"]
+					: command.name === "observe"
+						? ["observe", "--port", "0"]
+						: [command.name];
 		// The observer intentionally serves until closed; close it right after
 		// its single serving document is written.
 		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
@@ -250,19 +279,28 @@ test("version identifies the package, protocol, range, and credential context", 
 // and this gate can go.
 test("the version document's key set is frozen for older installers", async () => {
 	assert.deepEqual(Object.keys(await yamlRun(["version"])), [
-		"schema_version", "command", "version", "protocol_version",
-		"supported_gateway_protocol_range", "credential_context",
+		"schema_version",
+		"command",
+		"version",
+		"protocol_version",
+		"supported_gateway_protocol_range",
+		"credential_context",
 	]);
 });
 
 test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
-	assert.deepEqual(payload.commands.map((command) => command.name), ["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe"]);
+	assert.deepEqual(
+		payload.commands.map((command) => command.name),
+		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe"],
+	);
 	// An agent that parses this document instead of prose help must see the same
 	// route depth the help surface advertises.
-	assert.deepEqual(payload.subcommands.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
-		CEAL_SUBCOMMANDS.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")));
+	assert.deepEqual(
+		payload.subcommands.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
+		CEAL_SUBCOMMANDS.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
+	);
 	for (const subcommand of payload.subcommands) {
 		for (const field of ["usage", "effect", "evidence", "result_schema", "recovery"]) {
 			assert.match(subcommand[field], /\S/u, `${subcommand.route.join(" ")}.${field}`);
@@ -299,7 +337,12 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 		elapsed_ms: 42,
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
-	const invalid = await run(["update", "v0.65.10"], { runStableUpdate: async () => { invoked += 1; return { status: "updated" }; } });
+	const invalid = await run(["update", "v0.65.10"], {
+		runStableUpdate: async () => {
+			invoked += 1;
+			return { status: "updated" };
+		},
+	});
 	assert.equal(invalid.code, 2);
 	assert.equal(invoked, 1);
 	const unavailable = await yamlRun(["update"], 3);
@@ -311,18 +354,28 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 test("guide status and per-host registration expose one update-safe local skill path", async () => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-guide-runtime-"));
 	const guidePath = path.join(root, "install", ".ceal-cli", "worker", "current", "guide");
-	const registrationPaths = { codex: path.join(root, "codex", "skills", "ceal-guide"), claude: path.join(root, "claude", "skills", "ceal-guide") };
+	const registrationPaths = {
+		codex: path.join(root, "codex", "skills", "ceal-guide"),
+		claude: path.join(root, "claude", "skills", "ceal-guide"),
+	};
 	mkdirSync(guidePath, { recursive: true });
 	writeFileSync(path.join(guidePath, "SKILL.md"), "name: ceal-guide\n");
 	const registered = { codex: false, claude: false };
 	// The store's own contract: the top-level fields project one host and `hosts`
 	// carries every host, so this stub mirrors that shape rather than inventing one.
 	const inspect = (agent = "codex") => ({
-		status: registered[agent] ? "registered" : "staged", agent, guide_id: "ceal-guide",
-		guide_path: guidePath, registration_path: registrationPaths[agent], update_safe: true, registered: registered[agent],
+		status: registered[agent] ? "registered" : "staged",
+		agent,
+		guide_id: "ceal-guide",
+		guide_path: guidePath,
+		registration_path: registrationPaths[agent],
+		update_safe: true,
+		registered: registered[agent],
 		hosts: Object.keys(registered).map((host) => ({
-			agent: host, status: registered[host] ? "registered" : "staged",
-			registration_path: registrationPaths[host], registered: registered[host],
+			agent: host,
+			status: registered[host] ? "registered" : "staged",
+			registration_path: registrationPaths[host],
+			registered: registered[host],
 		})),
 	});
 	try {
@@ -333,14 +386,20 @@ test("guide status and per-host registration expose one update-safe local skill 
 		// A Codex-only reader of ceal.guide.v1 keeps reading the same top-level
 		// fields it always did, while `hosts` names every supported host.
 		assert.equal(status.agent, "codex");
-		assert.deepEqual(status.hosts.map((host) => host.agent), ["codex", "claude"]);
+		assert.deepEqual(
+			status.hosts.map((host) => host.agent),
+			["codex", "claude"],
+		);
 		// No caveat is needed: there is no top-level per-host projection to misread.
 		assert.equal("non_claims" in status, false);
 		// The declared route token is what selects the host; the dispatcher passes
 		// it through instead of registering a host of its own choosing.
 		for (const agent of ["codex", "claude"]) {
 			const result = await yamlRun(["guide", "register", agent], 0, {
-				registerAgentGuide: (requested) => { registered[requested] = true; return inspect(requested); },
+				registerAgentGuide: (requested) => {
+					registered[requested] = true;
+					return inspect(requested);
+				},
 			});
 			assert.equal(result.status, "registered");
 			assert.equal(result.action, "register");
@@ -414,8 +473,11 @@ test("a rejected capabilities option names the option and its own route's help",
 
 test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
 	const guide = (registered, agentSource) => () => ({
-		status: "available", agent: "claude", agent_source: agentSource,
-		guide_id: "ceal-guide", update_safe: true,
+		status: "available",
+		agent: "claude",
+		agent_source: agentSource,
+		guide_id: "ceal-guide",
+		update_safe: true,
 		hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
 	});
 	await withGateway(async ({ endpoint }) => {
@@ -427,7 +489,13 @@ test("capabilities points an unregistered running host at the guide, and stays s
 		assert.match(unregistered.agent_guide.next_action, /ceal guide register claude/u);
 
 		// Registered, undetected host, and a missing guide asset each stay silent.
-		const missingAsset = () => ({ status: "unavailable", agent: "claude", agent_source: "detected", guide_id: "ceal-guide", update_safe: false });
+		const missingAsset = () => ({
+			status: "unavailable",
+			agent: "claude",
+			agent_source: "detected",
+			guide_id: "ceal-guide",
+			update_safe: false,
+		});
 		for (const state of [guide(true, "detected"), guide(false, "default"), missingAsset]) {
 			const quiet = await yamlRun(["capabilities"], 0, {
 				loadSession: async () => storedSession(endpoint),
@@ -454,9 +522,14 @@ test("every command answers one success predicate that agrees with its exit code
 		// compares it whole. CHANGELOG.md records which release proved this; do not
 		// restate a release number here.
 		if (command.name === "version") continue;
-		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
-			: command.name === "receipt" ? ["receipt", "show", "ceal:missing:call"]
-			: command.name === "observe" ? ["observe", "--port", "0"] : [command.name];
+		const args =
+			command.name === "call"
+				? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
+				: command.name === "receipt"
+					? ["receipt", "show", "ceal:missing:call"]
+					: command.name === "observe"
+						? ["observe", "--port", "0"]
+						: [command.name];
 		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
 		const { code, stdout } = await run(args, runtime);
 		const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
@@ -472,7 +545,8 @@ test("every command answers one success predicate that agrees with its exit code
 	// object may carry `code` at all.
 	const source = readdirSync(new URL("../src", import.meta.url))
 		.filter((entry) => entry.endsWith(".ts"))
-		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8"))
+		.join("\n");
 	for (const [, body] of source.matchAll(/error: \{([^}]*)\}/gu)) {
 		// `code,` shorthand counts too: the first pass of this gate missed one.
 		// Match the property key, not a `.code` value expression.
@@ -488,7 +562,9 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 		let stored = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
-			saveSession: async (session) => { stored = session; },
+			saveSession: async (session) => {
+				stored = session;
+			},
 		});
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.raw_token_visible, false);
@@ -505,9 +581,17 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stored = null;
 		const result = await run(["session", "enroll", "--gateway", endpoint], {
 			isInteractiveTerminal: () => true,
-			promptEnrollmentCode: async () => { prompted += 1; return "E".repeat(48); },
-			readSecret: async () => { readStdin += 1; return "must-not-be-read"; },
-			saveSession: async (session) => { stored = session; },
+			promptEnrollmentCode: async () => {
+				prompted += 1;
+				return "E".repeat(48);
+			},
+			readSecret: async () => {
+				readStdin += 1;
+				return "must-not-be-read";
+			},
+			saveSession: async (session) => {
+				stored = session;
+			},
 		});
 		assert.equal(result.code, 0);
 		assert.equal(prompted, 1);
@@ -518,8 +602,14 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let consumed = false;
 		const nonInteractive = await yamlRun(["session", "enroll", "--gateway", endpoint], 3, {
 			isInteractiveTerminal: () => false,
-			promptEnrollmentCode: async () => { consumed = true; return "E".repeat(48); },
-			readSecret: async () => { consumed = true; return "E".repeat(48); },
+			promptEnrollmentCode: async () => {
+				consumed = true;
+				return "E".repeat(48);
+			},
+			readSecret: async () => {
+				consumed = true;
+				return "E".repeat(48);
+			},
 			saveSession: async () => assert.fail("must not save"),
 		});
 		assert.equal(nonInteractive.error.kind, "interactive_enrollment_required");
@@ -529,7 +619,10 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stdinRead = false;
 		const ttyStdin = await yamlRun(["session", "enroll", "--gateway", endpoint, "--code-stdin"], 3, {
 			isInputTerminal: () => true,
-			readSecret: async () => { stdinRead = true; return "E".repeat(48); },
+			readSecret: async () => {
+				stdinRead = true;
+				return "E".repeat(48);
+			},
 			saveSession: async () => assert.fail("must not save"),
 		});
 		assert.equal(ttyStdin.error.kind, "stdin_enrollment_requires_pipe");
@@ -547,26 +640,38 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 		assert.equal(request.url, "/gateway/client/enroll");
 		assert.equal(body.code, code);
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(JSON.stringify({
-			schema_version: "ceal.enrollment_result.v1", ok: false,
-			error: { code: "enrollment_invalid", message: "The supplied material is not a device enrollment.", next_action: "Request approved device enrollment." },
-		}));
+		response.end(
+			JSON.stringify({
+				schema_version: "ceal.enrollment_result.v1",
+				ok: false,
+				error: {
+					code: "enrollment_invalid",
+					message: "The supplied material is not a device enrollment.",
+					next_action: "Request approved device enrollment.",
+				},
+			}),
+		);
 	});
-	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	let saved = false;
 	try {
 		const payload = await yamlRun(["session", "enroll", "--gateway", `http://127.0.0.1:${address.port}/gateway/client`, "--code-stdin"], 3, {
 			readSecret: async () => code,
-			saveSession: async () => { saved = true; },
+			saveSession: async () => {
+				saved = true;
+			},
 		});
 		assert.equal(payload.status, "denied");
 		assert.equal(saved, false);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(code, "u"));
 		assert.match(payload.error.next_action, /organization administrator/u);
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 });
 
@@ -574,15 +679,25 @@ test("capabilities renews an expiring stored session once and persists the rotat
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken, requests }) => {
 		let saved = null;
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint, { accessToken: `ceal_personal_${"O".repeat(43)}`, expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-			saveSession: async (session) => { saved = session; },
+			loadSession: async () =>
+				storedSession(endpoint, {
+					accessToken: `ceal_personal_${"O".repeat(43)}`,
+					expiresAt: "2020-01-01T00:00:00.000Z",
+					refreshToken: oldRefreshToken,
+				}),
+			saveSession: async (session) => {
+				saved = session;
+			},
 			nextRequestId: () => "narnia:renewed:001",
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		});
 		assert.equal(payload.status, "available");
 		assert.equal(saved.accessToken, newAccessToken);
 		assert.equal(saved.refreshToken, newRefreshToken);
-		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`]);
+		assert.deepEqual(
+			requests.map((item) => item.authorization),
+			[`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
+		);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(oldRefreshToken, "u"));
 	});
 });
@@ -590,10 +705,11 @@ test("capabilities renews an expiring stored session once and persists the rotat
 test("capabilities fails closed for malformed absolute refresh expiry before a refresh request", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls }) => {
 		const payload = await yamlRun(["capabilities"], 3, {
-			loadSession: async () => storedSession(endpoint, {
-				expiresAt: "2020-01-01T00:00:00.000Z",
-				refreshTokenAbsoluteExpiresAt: "not-a-date",
-			}),
+			loadSession: async () =>
+				storedSession(endpoint, {
+					expiresAt: "2020-01-01T00:00:00.000Z",
+					refreshTokenAbsoluteExpiresAt: "not-a-date",
+				}),
 			saveSession: async () => {},
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		});
@@ -615,65 +731,86 @@ test("a local session summary does not present an untested refresh credential as
 });
 
 test("renewal transport failure is retryable session state, not an invalid enrollment", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
-		const runtime = {
-			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-			saveSession: async () => assert.fail("an unavailable renewal must not replace local state"),
-		};
-		const capabilities = await yamlRun(["capabilities", "--fresh"], 3, runtime);
-		assert.equal(capabilities.schema_version, "ceal.client_session.v1");
-		assert.equal(capabilities.error.kind, "session_renewal_unavailable");
-		assert.equal(capabilities.error.retryable, true);
-		assert.match(capabilities.error.next_action, /does not establish.*invalid/u);
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken }) => {
+			const runtime = {
+				loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+				saveSession: async () => assert.fail("an unavailable renewal must not replace local state"),
+			};
+			const capabilities = await yamlRun(["capabilities", "--fresh"], 3, runtime);
+			assert.equal(capabilities.schema_version, "ceal.client_session.v1");
+			assert.equal(capabilities.error.kind, "session_renewal_unavailable");
+			assert.equal(capabilities.error.retryable, true);
+			assert.match(capabilities.error.next_action, /does not establish.*invalid/u);
 
-		const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
-		assert.equal(call.error.kind, "session_renewal_unavailable");
-		assert.equal(call.error.retryable, true);
-		assert.equal(Object.hasOwn(call, "receipt"), false);
+			const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
+			assert.equal(call.error.kind, "session_renewal_unavailable");
+			assert.equal(call.error.retryable, true);
+			assert.equal(Object.hasOwn(call, "receipt"), false);
 
-		const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
-		assert.equal(receipt.error.kind, "session_renewal_unavailable");
-		assert.equal(receipt.error.retryable, true);
-	}, { invalidRefreshResponse: true });
+			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
+			assert.equal(receipt.error.kind, "session_renewal_unavailable");
+			assert.equal(receipt.error.retryable, true);
+		},
+		{ invalidRefreshResponse: true },
+	);
 });
 
 test("typed Gateway refresh denial requires reenrollment instead of retry", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
-		const payload = await yamlRun(["capabilities"], 3, {
-			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-			saveSession: async () => assert.fail("a denied refresh must not replace local state"),
-		});
-		assert.equal(payload.error.kind, "refresh_invalid");
-		assert.equal(payload.error.retryable, false);
-		assert.match(payload.error.next_action, /replacement device-enrollment code/u);
-	}, { refreshDeniedCode: "refresh_invalid" });
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken }) => {
+			const payload = await yamlRun(["capabilities"], 3, {
+				loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+				saveSession: async () => assert.fail("a denied refresh must not replace local state"),
+			});
+			assert.equal(payload.error.kind, "refresh_invalid");
+			assert.equal(payload.error.retryable, false);
+			assert.match(payload.error.next_action, /replacement device-enrollment code/u);
+		},
+		{ refreshDeniedCode: "refresh_invalid" },
+	);
 });
 
 test("logout retains local session when Gateway revocation transport is unavailable", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
-		let removed = false;
-		const payload = await yamlRun(["session", "logout"], 3, {
-			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-			removeSession: async () => { removed = true; },
-		});
-		assert.equal(payload.error.kind, "session_revocation_unavailable");
-		assert.equal(payload.error.retryable, true);
-		assert.match(payload.error.next_action, /Keep the local session/u);
-		assert.equal(removed, false);
-	}, { invalidRevokeResponse: true });
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken }) => {
+			let removed = false;
+			const payload = await yamlRun(["session", "logout"], 3, {
+				loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+				removeSession: async () => {
+					removed = true;
+				},
+			});
+			assert.equal(payload.error.kind, "session_revocation_unavailable");
+			assert.equal(payload.error.retryable, true);
+			assert.match(payload.error.next_action, /Keep the local session/u);
+			assert.equal(removed, false);
+		},
+		{ invalidRevokeResponse: true },
+	);
 });
 
 test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
-		let saved = null;
-		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z" }),
-			saveSession: async (session) => { saved = session; }, nextRequestId: () => "narnia:retry:001",
-		});
-		assert.equal(payload.status, "available");
-		assert.equal(saved.accessToken, newAccessToken);
-		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`]);
-	}, { rejectFirstGateway: true });
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
+			let saved = null;
+			const payload = await yamlRun(["capabilities"], 0, {
+				loadSession: async () =>
+					storedSession(endpoint, { refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z" }),
+				saveSession: async (session) => {
+					saved = session;
+				},
+				nextRequestId: () => "narnia:retry:001",
+			});
+			assert.equal(payload.status, "available");
+			assert.equal(saved.accessToken, newAccessToken);
+			assert.deepEqual(
+				requests.map((item) => item.authorization),
+				[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
+			);
+		},
+		{ rejectFirstGateway: true },
+	);
 });
 
 test("session logout revokes the server session before removing the local session", async () => {
@@ -681,7 +818,9 @@ test("session logout revokes the server session before removing the local sessio
 		let removed = false;
 		const payload = await yamlRun(["session", "logout"], 0, {
 			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-			removeSession: async () => { removed = true; },
+			removeSession: async () => {
+				removed = true;
+			},
 		});
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
@@ -694,7 +833,10 @@ test("call invokes one granted capability and independently reads back its audit
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch", "limit=3"], 0, {
 			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let id = 0; return () => `narnia:call:${++id}`; })(),
+			nextRequestId: (() => {
+				let id = 0;
+				return () => `narnia:call:${++id}`;
+			})(),
 		});
 		assert.equal(payload.schema_version, "ceal.result.v2");
 		assert.equal(payload.status, "completed");
@@ -706,7 +848,10 @@ test("call invokes one granted capability and independently reads back its audit
 		assert.equal("usage" in payload, false);
 		assert.equal("profile" in payload, false);
 		assert.equal("audit" in payload, false);
-		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "readback"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["call", "readback"],
+		);
 		assert.equal(requests[0].body.body.arguments.query, "launch");
 	});
 });
@@ -716,27 +861,34 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 		const spooled = [];
 		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
 			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let id = 0; return () => `narnia:spool:${++id}`; })(),
+			nextRequestId: (() => {
+				let id = 0;
+				return () => `narnia:spool:${++id}`;
+			})(),
 			recordReceiptSpool: (entry) => spooled.push(entry),
 			now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 		});
 		assert.equal(payload.status, "completed");
-		assert.deepEqual(spooled, [{
-			recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
-			requestRef: "narnia:spool:1:call",
-			status: "completed",
-			evidence: "readback_verified",
-			auditRefs: ["gateway-audit:event:001"],
-			capabilityId: "message.search",
-			targetRef: "target:team-inbox",
-		}]);
+		assert.deepEqual(spooled, [
+			{
+				recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
+				requestRef: "narnia:spool:1:call",
+				status: "completed",
+				evidence: "readback_verified",
+				auditRefs: ["gateway-audit:event:001"],
+				capabilityId: "message.search",
+				targetRef: "target:team-inbox",
+			},
+		]);
 		// The spooled projection may never carry call arguments or result data.
 		assert.equal(JSON.stringify(spooled).includes("launch"), false);
 	});
 	await withGateway(async ({ endpoint }) => {
 		const broken = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
 			loadSession: async () => storedSession(endpoint),
-			recordReceiptSpool: () => { throw new Error("spool unavailable"); },
+			recordReceiptSpool: () => {
+				throw new Error("spool unavailable");
+			},
 		});
 		assert.equal(broken.status, "completed");
 		assert.equal(broken.receipt.evidence, "readback_verified");
@@ -754,16 +906,18 @@ test("a pre-issue call failure is not spooled while an issued unknown-outcome fa
 		recordReceiptSpool: (entry) => spooled.push(entry),
 		now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 	});
-	assert.deepEqual(spooled, [{
-		recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
-		requestRef: "ceal:call:call",
-		status: "error",
-		evidence: "outcome_unknown",
-		auditRefs: [],
-		capabilityId: "message.search",
-		targetRef: "target:team-inbox",
-		errorKind: "request_failed",
-	}]);
+	assert.deepEqual(spooled, [
+		{
+			recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
+			requestRef: "ceal:call:call",
+			status: "error",
+			evidence: "outcome_unknown",
+			auditRefs: [],
+			capabilityId: "message.search",
+			targetRef: "target:team-inbox",
+			errorKind: "request_failed",
+		},
+	]);
 });
 
 test("receipt keeps audit metadata out of normal results and retrieves a safe projection on demand", async () => {
@@ -778,114 +932,168 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 			status: "verified",
 			request_ref: "narnia:call:1:call",
 			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
-			events: [{
-				ref: "gateway-audit:event:001", operation: "call", outcome: "succeeded", authorization: "allowed",
-				capability: "message.search", target: "target:team-inbox",
-				grant: { ref: "grant:team-inbox-message-search", revision: 4 },
-				timing: { gateway_elapsed_ms: 42 },
-			}],
+			events: [
+				{
+					ref: "gateway-audit:event:001",
+					operation: "call",
+					outcome: "succeeded",
+					authorization: "allowed",
+					capability: "message.search",
+					target: "target:team-inbox",
+					grant: { ref: "grant:team-inbox-message-search", revision: 4 },
+					timing: { gateway_elapsed_ms: 42 },
+				},
+			],
 		});
-		assert.deepEqual(requests.map((item) => item.body.operation), ["readback"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["readback"],
+		);
 	});
 });
 
 test("a policy-denied receipt retains the error code, non-claims, and negotiated Gateway timing", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun(["receipt", "show", "narnia:denied:1:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:denied-receipt:1",
-		});
-		assert.deepEqual(payload, {
-			schema_version: "ceal.receipt.v1",
-			ok: true,
-			status: "verified",
-			request_ref: "narnia:denied:1:call",
-			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
-			events: [{
-				ref: "gateway-audit:event:denied", operation: "call", outcome: "denied", authorization: "denied",
-				error_code: "resource_not_available",
-				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-				timing: { gateway_elapsed_ms: 6892 },
-			}],
-		});
-	}, (request) => policyDeniedReadbackResponse(request));
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["receipt", "show", "narnia:denied:1:call"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:denied-receipt:1",
+			});
+			assert.deepEqual(payload, {
+				schema_version: "ceal.receipt.v1",
+				ok: true,
+				status: "verified",
+				request_ref: "narnia:denied:1:call",
+				gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
+				events: [
+					{
+						ref: "gateway-audit:event:denied",
+						operation: "call",
+						outcome: "denied",
+						authorization: "denied",
+						error_code: "resource_not_available",
+						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+						timing: { gateway_elapsed_ms: 6892 },
+					},
+				],
+			});
+		},
+		(request) => policyDeniedReadbackResponse(request),
+	);
 });
 
 test("a legacy readback without negotiated timing omits the timing block instead of rendering zero", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun(["receipt", "show", "narnia:denied:2:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:denied-receipt:2",
-		});
-		assert.equal(payload.status, "verified");
-		assert.equal("timing" in payload.events[0], false);
-	}, (request) => {
-		const response = policyDeniedReadbackResponse(request);
-		delete response.value.events[0].gateway_elapsed_ms;
-		return response;
-	});
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["receipt", "show", "narnia:denied:2:call"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:denied-receipt:2",
+			});
+			assert.equal(payload.status, "verified");
+			assert.equal("timing" in payload.events[0], false);
+		},
+		(request) => {
+			const response = policyDeniedReadbackResponse(request);
+			delete response.value.events[0].gateway_elapsed_ms;
+			return response;
+		},
+	);
 });
 
 test("a decoder-legal invalid call-detail timing is omitted, not rendered", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun(["receipt", "show", "narnia:call:3:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:receipt:3",
-		});
-		assert.equal(payload.status, "verified");
-		assert.equal("timing" in payload.events[0], false);
-	}, (request) => {
-		const response = readbackResponse(request);
-		response.value.events[0].call.gateway_elapsed_ms = 42.5;
-		return response;
-	});
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["receipt", "show", "narnia:call:3:call"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:receipt:3",
+			});
+			assert.equal(payload.status, "verified");
+			assert.equal("timing" in payload.events[0], false);
+		},
+		(request) => {
+			const response = readbackResponse(request);
+			response.value.events[0].call.gateway_elapsed_ms = 42.5;
+			return response;
+		},
+	);
 });
 
 test("event-level Gateway timing stays authoritative over successful call-detail timing", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun(["receipt", "show", "narnia:call:2:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:receipt:2",
-		});
-		assert.deepEqual(payload.events[0].timing, { gateway_elapsed_ms: 57 });
-	}, (request) => {
-		const response = readbackResponse(request);
-		response.value.events[0].gateway_elapsed_ms = 57;
-		return response;
-	});
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["receipt", "show", "narnia:call:2:call"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:receipt:2",
+			});
+			assert.deepEqual(payload.events[0].timing, { gateway_elapsed_ms: 57 });
+		},
+		(request) => {
+			const response = readbackResponse(request);
+			response.value.events[0].gateway_elapsed_ms = 57;
+			return response;
+		},
+	);
 });
 
 test("stored client Session selects an assigned Profile per request without another login", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const runtime = {
 			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let index = 0; return () => `narnia:profile:${++index}`; })(),
+			nextRequestId: (() => {
+				let index = 0;
+				return () => `narnia:profile:${++index}`;
+			})(),
 		};
 		const capabilities = await yamlRun(["capabilities", "--profile", "profile:ax"], 0, runtime);
 		assert.equal(capabilities.gateway.profile_ref, "profile:ax");
-		const call = await yamlRun([
-			"call", "message.search", "--profile", "profile:ax", "--target", "target:team-inbox", "query=launch",
-		], 0, runtime);
+		const call = await yamlRun(
+			["call", "message.search", "--profile", "profile:ax", "--target", "target:team-inbox", "query=launch"],
+			0,
+			runtime,
+		);
 		assert.equal(call.status, "completed");
 		const receipt = await yamlRun(["receipt", "show", "narnia:profile:3:call", "--profile", "profile:ax"], 0, runtime);
 		assert.equal(receipt.status, "verified");
-		assert.deepEqual(requests.map((item) => item.body.profile_ref), [
-			"profile:ax", "profile:ax", "profile:ax", "profile:ax", "profile:ax",
-		]);
+		assert.deepEqual(
+			requests.map((item) => item.body.profile_ref),
+			["profile:ax", "profile:ax", "profile:ax", "profile:ax", "profile:ax"],
+		);
 	});
 });
 
 test("call refuses to claim completion when audit readback has no verified event", () => {
 	let stdout = "";
-	const code = writeCallCompleted({
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
-		grant_ref: "grant:workspace-file-search", grant_revision: 7, target_ref: "target:workspace",
-		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
-		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-	}, [], "request:missing-readback", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
-		capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search",
-	});
+	const code = writeCallCompleted(
+		{
+			schema_version: "ceal.gateway_call_result.v1",
+			capability_id: "file.search",
+			grant_ref: "grant:workspace-file-search",
+			grant_revision: 7,
+			target_ref: "target:workspace",
+			data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
+			redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["production_audit_not_reached"],
+		},
+		[],
+		"request:missing-readback",
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+			stderr: { write() {} },
+		},
+		null,
+		{
+			capabilityId: "file.search",
+			targetRef: "target:workspace",
+			arguments: {},
+			purpose: "Search",
+		},
+	);
 	assert.equal(code, 3);
 	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.equal(payload.status, "error");
@@ -900,25 +1108,54 @@ test("call refuses to claim completion when audit readback has no verified event
 // records from two instances exactly this way.
 test("every call result names the issuing instance and the profile it used", async () => {
 	const session = {
-		gatewayEndpoint: "https://gateway.example/api/ceal/v1", profileRef: "profile:work",
-		membershipRef: "membership:hwidong-work", registrationRef: "registration:1", clientRef: "client:narnia",
-		subjectRef: "subject:hwidong", instanceRef: "instance:ceal-prod", accessToken: "token",
-		expiresAt: new Date(Date.now() + 600_000).toISOString(), refreshToken: "refresh",
+		gatewayEndpoint: "https://gateway.example/api/ceal/v1",
+		profileRef: "profile:work",
+		membershipRef: "membership:hwidong-work",
+		registrationRef: "registration:1",
+		clientRef: "client:narnia",
+		subjectRef: "subject:hwidong",
+		instanceRef: "instance:ceal-prod",
+		accessToken: "token",
+		expiresAt: new Date(Date.now() + 600_000).toISOString(),
+		refreshToken: "refresh",
 		refreshTokenIdleExpiresAt: new Date(Date.now() + 600_000).toISOString(),
 		refreshTokenAbsoluteExpiresAt: new Date(Date.now() + 600_000).toISOString(),
 	};
 	let stdout = "";
-	const io = { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } };
-	writeCallCompleted({
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
-		grant_ref: "grant:g", grant_revision: 1, target_ref: "target:t",
-		data: { schema_version: "ceal.message_get_result.v1", ref: "message:1" },
-		redaction: { state: "applied", omitted_classes: [] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: [],
-	}, [{ event_ref: "gateway-audit:1" }], "request:1", io, session, {
-		// The per-call override, not the session default, is what answered.
-		capabilityId: "message.get", targetRef: "target:t", arguments: {}, purpose: "Read", profileRef: "profile:kb-study",
-	});
+	const io = {
+		stdout: {
+			write: (chunk) => {
+				stdout += String(chunk);
+			},
+		},
+		stderr: { write() {} },
+	};
+	writeCallCompleted(
+		{
+			schema_version: "ceal.gateway_call_result.v1",
+			capability_id: "message.get",
+			grant_ref: "grant:g",
+			grant_revision: 1,
+			target_ref: "target:t",
+			data: { schema_version: "ceal.message_get_result.v1", ref: "message:1" },
+			redaction: { state: "applied", omitted_classes: [] },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: [],
+		},
+		[{ event_ref: "gateway-audit:1" }],
+		"request:1",
+		io,
+		session,
+		{
+			// The per-call override, not the session default, is what answered.
+			capabilityId: "message.get",
+			targetRef: "target:t",
+			arguments: {},
+			purpose: "Read",
+			profileRef: "profile:kb-study",
+		},
+	);
 	const completed = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.deepEqual(completed.gateway, { instance_ref: "instance:ceal-prod", profile_ref: "profile:kb-study" });
 
@@ -940,7 +1177,8 @@ test("an unknown outcome points at the Gateway's own answer and does not invent 
 	assert.deepEqual(classifyGatewayFailure({ code: "audit_event_not_found" }), {
 		code: "audit_event_not_found",
 		message: "The Gateway has no audited outcome for that request reference.",
-		nextAction: "If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.",
+		nextAction:
+			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.",
 		denial: false,
 	});
 	const receiptLeaf = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "receipt");
@@ -950,27 +1188,59 @@ test("an unknown outcome points at the Gateway's own answer and does not invent 
 
 test("compatibility result data passes through without a client-side message projection", () => {
 	let stdout = "";
-	const code = writeCallCompleted({
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.get",
-		grant_ref: "grant:team-inbox-message-get", grant_revision: 4, target_ref: "target:team-inbox",
-		data: {
-			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
-			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
-			text: "Full authorized message text.", offset: 0,
+	const code = writeCallCompleted(
+		{
+			schema_version: "ceal.gateway_call_result.v1",
+			capability_id: "message.get",
+			grant_ref: "grant:team-inbox-message-get",
+			grant_revision: 4,
+			target_ref: "target:team-inbox",
+			data: {
+				schema_version: "ceal.message_get_result.v1",
+				ref: "message:approved_001",
+				source_label: "Team inbox",
+				source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
+				text: "Full authorized message text.",
+				offset: 0,
+			},
+			redaction: { state: "applied", omitted_classes: ["credential_material"] },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["production_audit_not_reached"],
 		},
-		redaction: { state: "applied", omitted_classes: ["credential_material"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-	}, [{ event_ref: "gateway-audit:get:001" }], "request:get:001", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
-		capabilityId: "message.get", targetRef: "target:team-inbox", arguments: {}, purpose: "Read",
-	});
+		[{ event_ref: "gateway-audit:get:001" }],
+		"request:get:001",
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+			stderr: { write() {} },
+		},
+		null,
+		{
+			capabilityId: "message.get",
+			targetRef: "target:team-inbox",
+			arguments: {},
+			purpose: "Read",
+		},
+	);
 	assert.equal(code, 0);
 	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.deepEqual(payload, {
-		schema_version: "ceal.result.v2", ok: true, status: "completed", capability: "message.get", target: "target:team-inbox",
+		schema_version: "ceal.result.v2",
+		ok: true,
+		status: "completed",
+		capability: "message.get",
+		target: "target:team-inbox",
 		data: {
-			schema_version: "ceal.message_get_result.v1", ref: "message:approved_001", source_label: "Team inbox",
+			schema_version: "ceal.message_get_result.v1",
+			ref: "message:approved_001",
+			source_label: "Team inbox",
 			source: { provider: "slack", url: "https://workspace.slack.com/archives/C0123456789/p1720000000000100" },
-			text: "Full authorized message text.", offset: 0,
+			text: "Full authorized message text.",
+			offset: 0,
 		},
 		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
@@ -978,33 +1248,72 @@ test("compatibility result data passes through without a client-side message pro
 
 test("compatibility result data passes through without a client-side write projection", async () => {
 	let stdout = "";
-	const code = writeCallCompleted({
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.create",
-		grant_ref: "grant:team-inbox-message-create", grant_revision: 4, target_ref: "target:team-inbox",
-		data: {
-			schema_version: "ceal.message_create_result.v1", delivery: "verified",
-			message_ref: "message:created_001", reply_to: "message:approved_001",
+	const code = writeCallCompleted(
+		{
+			schema_version: "ceal.gateway_call_result.v1",
+			capability_id: "message.create",
+			grant_ref: "grant:team-inbox-message-create",
+			grant_revision: 4,
+			target_ref: "target:team-inbox",
+			data: {
+				schema_version: "ceal.message_create_result.v1",
+				delivery: "verified",
+				message_ref: "message:created_001",
+				reply_to: "message:approved_001",
+			},
+			redaction: { state: "applied", omitted_classes: ["message_text", "idempotency_key", "provider_locator", "provider_identity"] },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["production_audit_not_reached"],
 		},
-		redaction: { state: "applied", omitted_classes: ["message_text", "idempotency_key", "provider_locator", "provider_identity"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-	}, [{ event_ref: "gateway-audit:create:001" }], "request:create:001", { stdout: { write: (chunk) => { stdout += String(chunk); } }, stderr: { write() {} } }, null, {
-		capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Reply",
-	});
+		[{ event_ref: "gateway-audit:create:001" }],
+		"request:create:001",
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+			stderr: { write() {} },
+		},
+		null,
+		{
+			capabilityId: "message.create",
+			targetRef: "target:team-inbox",
+			arguments: {},
+			purpose: "Reply",
+		},
+	);
 	assert.equal(code, 0);
 	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	assert.deepEqual(payload.data, {
-		schema_version: "ceal.message_create_result.v1", delivery: "verified", message_ref: "message:created_001", reply_to: "message:approved_001",
+		schema_version: "ceal.message_create_result.v1",
+		delivery: "verified",
+		message_ref: "message:created_001",
+		reply_to: "message:approved_001",
 	});
 });
 
 test("call does not impose a legacy capability-specific operand allowlist", async () => {
-	const payload = await yamlRun([
-		"call", "message.create", "--target", "target:team-inbox",
-		"reply_to=message:approved_001", "text=Approved", "idempotency_key=retry-001", "format=compact",
-	], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") });
+	const payload = await yamlRun(
+		[
+			"call",
+			"message.create",
+			"--target",
+			"target:team-inbox",
+			"reply_to=message:approved_001",
+			"text=Approved",
+			"idempotency_key=retry-001",
+			"format=compact",
+		],
+		3,
+		{ loadSession: async () => storedSession("http://127.0.0.1:9") },
+	);
 	assert.equal(payload.error.kind, "request_failed");
 	assert.deepEqual(payload.receipt, {
-		evidence: "outcome_unknown", request_ref: "ceal:call:call", audit_refs: [],
+		evidence: "outcome_unknown",
+		request_ref: "ceal:call:call",
+		audit_refs: [],
 	});
 	// The effect is unknown here (no discovery cache), so the caution stands.
 	assert.match(payload.error.next_action, /Do not repeat this call yet/u);
@@ -1018,9 +1327,7 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 // write that never existed.
 test("an unknown outcome on a declared read does not warn about repeating a write", async () => {
 	const session = storedSession("http://127.0.0.1:9");
-	const payload = await yamlRun([
-		"call", "message.search", "--target", "target:team-inbox", "query=launch",
-	], 3, {
+	const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
 		loadSession: async () => session,
 		// A real cached entry: the effect lookup trusts the cache only under the
 		// same identity and freshness rules the catalog path uses.
@@ -1034,19 +1341,25 @@ test("an unknown outcome on a declared read does not warn about repeating a writ
 });
 
 test("a rejected call followed by failed session renewal is known pre-provider state, not an unknown receipt", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken, requests }) => {
-		const payload = await yamlRun([
-			"call", "message.search", "--target", "target:team-inbox", "query=launch",
-		], 3, {
-			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-			saveSession: async () => { throw new Error("local store unavailable"); },
-			nextRequestId: () => "narnia:renewal-failed:001",
-		});
-		assert.equal(payload.error.kind, "session_renewal_failed");
-		assert.equal("receipt" in payload, false);
-		assert.doesNotMatch(payload.error.next_action, /Do not repeat this call yet/u);
-		assert.deepEqual(requests.map((request) => request.body.operation), ["call"]);
-	}, { rejectFirstGateway: true });
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, requests }) => {
+			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
+				loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+				saveSession: async () => {
+					throw new Error("local store unavailable");
+				},
+				nextRequestId: () => "narnia:renewal-failed:001",
+			});
+			assert.equal(payload.error.kind, "session_renewal_failed");
+			assert.equal("receipt" in payload, false);
+			assert.doesNotMatch(payload.error.next_action, /Do not repeat this call yet/u);
+			assert.deepEqual(
+				requests.map((request) => request.body.operation),
+				["call"],
+			);
+		},
+		{ rejectFirstGateway: true },
+	);
 });
 
 test("rate-limited calls explain a retryable recovery instead of operator restoration", () => {
@@ -1068,18 +1381,22 @@ test("invalid capability arguments ask the caller to correct input instead of re
 });
 
 test("an invalid Gateway call renders caller correction without connector restoration", async () => {
-	await withGateway(async ({ endpoint, requests }) => {
-		const payload = await yamlRun([
-			"call", "message.enumerate", "--target", "target:team-inbox", "limit=101",
-		], 3, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:invalid-arguments:001",
-		});
-		assert.equal(payload.error.kind, "invalid_arguments");
-		assert.equal(payload.error.next_action, "Correct the capability arguments, then retry the call with a new request ID.");
-		assert.doesNotMatch(payload.error.next_action, /connector|Gateway status|same call/iu);
-		assert.deepEqual(requests.map(({ body }) => body.operation), ["call"]);
-	}, (request) => request.operation === "call" ? invalidArgumentsFailureResponse(request) : failedReadbackResponse(request));
+	await withGateway(
+		async ({ endpoint, requests }) => {
+			const payload = await yamlRun(["call", "message.enumerate", "--target", "target:team-inbox", "limit=101"], 3, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:invalid-arguments:001",
+			});
+			assert.equal(payload.error.kind, "invalid_arguments");
+			assert.equal(payload.error.next_action, "Correct the capability arguments, then retry the call with a new request ID.");
+			assert.doesNotMatch(payload.error.next_action, /connector|Gateway status|same call/iu);
+			assert.deepEqual(
+				requests.map(({ body }) => body.operation),
+				["call"],
+			);
+		},
+		(request) => (request.operation === "call" ? invalidArgumentsFailureResponse(request) : failedReadbackResponse(request)),
+	);
 });
 
 test("an unavailable continuation asks the agent to rediscover instead of restoring the connector", () => {
@@ -1097,7 +1414,8 @@ test("an unavailable resource keeps its own code without claiming an authorizati
 	assert.deepEqual(classifyGatewayFailure({ code: "resource_not_available", message: "server-controlled" }), {
 		code: "resource_not_available",
 		message: "The Gateway reported the requested resource as not available to this client.",
-		nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
+		nextAction:
+			"Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
 		denial: false,
 	});
 });
@@ -1106,103 +1424,156 @@ test("a resource_not_available recovery hint cannot flip the opaque failure into
 	// Precedence suppression: the known-code table wins even when the Gateway
 	// attaches an authorization-flavored recovery kind, so the call surface can
 	// never synthesize an authorization decision from an opaque failure.
-	assert.deepEqual(classifyGatewayFailure({
-		code: "resource_not_available", message: "server-controlled", recovery: { kind: "request_approval" },
-	}), {
-		code: "resource_not_available",
-		message: "The Gateway reported the requested resource as not available to this client.",
-		nextAction: "Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
-		denial: false,
-	});
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "resource_not_available",
+			message: "server-controlled",
+			recovery: { kind: "request_approval" },
+		}),
+		{
+			code: "resource_not_available",
+			message: "The Gateway reported the requested resource as not available to this client.",
+			nextAction:
+				"Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
+			denial: false,
+		},
+	);
 });
 
 test("an opaque resource denial classifies at the call surface and defers disposition to the receipt", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const runtime = {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let index = 0; return () => `narnia:opaque:${++index}`; })(),
-		};
-		const failed = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=roadmap"], 3, runtime);
-		assert.equal(failed.status, "error");
-		assert.equal(failed.error.kind, "resource_not_available");
-		assert.deepEqual(failed.receipt, {
-			evidence: "not_read_back", request_ref: "narnia:opaque:1:call", audit_refs: [],
-		});
-	}, (request) => request.operation === "call"
-		? { ok: false, request_id: request.request_id, protocol_version: "1.3.0", error: { code: "resource_not_available", message: "server-controlled", next_action: "server-controlled" } }
-		: policyDeniedReadbackResponse(request));
+	await withGateway(
+		async ({ endpoint }) => {
+			const runtime = {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: (() => {
+					let index = 0;
+					return () => `narnia:opaque:${++index}`;
+				})(),
+			};
+			const failed = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=roadmap"], 3, runtime);
+			assert.equal(failed.status, "error");
+			assert.equal(failed.error.kind, "resource_not_available");
+			assert.deepEqual(failed.receipt, {
+				evidence: "not_read_back",
+				request_ref: "narnia:opaque:1:call",
+				audit_refs: [],
+			});
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						error: { code: "resource_not_available", message: "server-controlled", next_action: "server-controlled" },
+					}
+				: policyDeniedReadbackResponse(request),
+	);
 });
 
 test("a failed pre-provider call preserves its request ref and receipt exposes the safe failure phase", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const runtime = {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let index = 0; return () => `narnia:failed:${++index}`; })(),
-		};
-		const failed = await yamlRun(["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], 3, runtime);
-		assert.deepEqual(failed.receipt, {
-			evidence: "not_read_back", request_ref: "narnia:failed:1:call", audit_refs: [],
-		});
-		assert.equal(failed.error.kind, "continuation_not_available");
+	await withGateway(
+		async ({ endpoint }) => {
+			const runtime = {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: (() => {
+					let index = 0;
+					return () => `narnia:failed:${++index}`;
+				})(),
+			};
+			const failed = await yamlRun(["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], 3, runtime);
+			assert.deepEqual(failed.receipt, {
+				evidence: "not_read_back",
+				request_ref: "narnia:failed:1:call",
+				audit_refs: [],
+			});
+			assert.equal(failed.error.kind, "continuation_not_available");
 
-		const receipt = await yamlRun(["receipt", "show", "narnia:failed:1:call"], 0, runtime);
-		assert.deepEqual(receipt.events[0], {
-			ref: "gateway-audit:event:failed", operation: "call", outcome: "failed", authorization: "allowed",
-			error_code: "continuation_not_available",
-			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-			capability: "message.get", target: "target:team-inbox",
-			grant: { ref: "grant:team-inbox-message-get", revision: 4 },
-		});
-	}, (request) => request.operation === "call" ? continuationFailureResponse(request) : failedReadbackResponse(request));
+			const receipt = await yamlRun(["receipt", "show", "narnia:failed:1:call"], 0, runtime);
+			assert.deepEqual(receipt.events[0], {
+				ref: "gateway-audit:event:failed",
+				operation: "call",
+				outcome: "failed",
+				authorization: "allowed",
+				error_code: "continuation_not_available",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+				capability: "message.get",
+				target: "target:team-inbox",
+				grant: { ref: "grant:team-inbox-message-get", revision: 4 },
+			});
+		},
+		(request) => (request.operation === "call" ? continuationFailureResponse(request) : failedReadbackResponse(request)),
+	);
 });
 
 test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
-	assert.deepEqual(classifyGatewayFailure({
-		code: "quota_exceeded_v2", message: "server-controlled", next_action: "server-controlled prose",
-		recovery: { kind: "retry", retry_after_ms: 30_000 },
-	}), {
-		code: "quota_exceeded_v2",
-		message: "The Gateway declined the request with a retryable rejection.",
-		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-		denial: false,
-	});
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "quota_exceeded_v2",
+			message: "server-controlled",
+			next_action: "server-controlled prose",
+			recovery: { kind: "retry", retry_after_ms: 30_000 },
+		}),
+		{
+			code: "quota_exceeded_v2",
+			message: "The Gateway declined the request with a retryable rejection.",
+			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+			denial: false,
+		},
+	);
 });
 
 test("receipt projects safe connector route provenance without provider material", async () => {
-	await withGateway(async ({ endpoint }) => {
-		const receipt = await yamlRun(["receipt", "show", "narnia:route:1:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: () => "narnia:route:receipt",
-		});
-		assert.deepEqual(receipt.events[0], {
-			ref: "gateway-audit:event:failed", operation: "call", outcome: "failed", authorization: "not_evaluated",
-			error_code: "connector_unavailable",
-			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-			connector_route_failure: { connector_kind: "notion", phase: "scope_observation" },
-		});
-	}, (request) => connectorFailureReadbackResponse(request));
+	await withGateway(
+		async ({ endpoint }) => {
+			const receipt = await yamlRun(["receipt", "show", "narnia:route:1:call"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:route:receipt",
+			});
+			assert.deepEqual(receipt.events[0], {
+				ref: "gateway-audit:event:failed",
+				operation: "call",
+				outcome: "failed",
+				authorization: "not_evaluated",
+				error_code: "connector_unavailable",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+				connector_route_failure: { connector_kind: "notion", phase: "scope_observation" },
+			});
+		},
+		(request) => connectorFailureReadbackResponse(request),
+	);
 });
 
 test("the known code table wins over a disagreeing recovery class", () => {
-	assert.deepEqual(classifyGatewayFailure({
-		code: "rate_limited", message: "server-controlled", recovery: { kind: "operator_restore" },
-	}), {
-		code: "rate_limited",
-		message: "The Gateway rate quota for this client is temporarily exhausted.",
-		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-		denial: false,
-	});
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "rate_limited",
+			message: "server-controlled",
+			recovery: { kind: "operator_restore" },
+		}),
+		{
+			code: "rate_limited",
+			message: "The Gateway rate quota for this client is temporarily exhausted.",
+			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+			denial: false,
+		},
+	);
 });
 
 test("a non-member recovery kind is never echoed and falls to the generic hint", () => {
-	assert.deepEqual(classifyGatewayFailure({
-		code: "mystery_code", message: "server-controlled", recovery: { kind: "reboot_universe" },
-	}), {
-		code: "gateway_request_failed",
-		message: "The Gateway rejected the capability request.",
-		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
-		denial: false,
-	});
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "mystery_code",
+			message: "server-controlled",
+			recovery: { kind: "reboot_universe" },
+		}),
+		{
+			code: "gateway_request_failed",
+			message: "The Gateway rejected the capability request.",
+			nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+			denial: false,
+		},
+	);
 });
 
 test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
@@ -1216,95 +1587,170 @@ test("write idempotency conflicts explain safe recovery without exposing the ori
 
 test("compatibility link data passes through and unsafe input is left to the Gateway contract", async () => {
 	const sourceUrl = "https://workspace.slack.com/archives/C0123456789/p1720000000000100";
-	await withGateway(async ({ endpoint, requests }) => {
-		const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
-		const payload = await yamlRun(["call", "resource.resolve", "--target", "target:team-inbox", `url=${url}`], 0, {
-			loadSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:resolve:1",
-		});
-		assert.deepEqual(payload.data, {
-			schema_version: "ceal.resource_resolve_result.v1", resource: {
-				ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
-			},
-		});
-		assert.deepEqual(requests[0].body.body.arguments, { url });
-	}, (request) => request.operation === "call" ? success(request, {
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "resource.resolve",
-		grant_ref: "grant:team-inbox-resource-resolve", grant_revision: 4, target_ref: request.body.target_ref,
-		data: { schema_version: "ceal.resource_resolve_result.v1", resource: {
-			ref: "message:approved_001", kind: "message",
-			source: { provider: "slack", url: sourceUrl },
-		} },
-		redaction: { state: "applied", omitted_classes: ["credential_material"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-	}) : readbackResponse(request));
-	const invalid = await yamlRun([
-		"call", "resource.resolve", "--target", "target:team-inbox",
-		"url=https://workspace.slack.com/archives/C0123456789/p1720000000000100?token=forbidden",
-	], 3, { loadSession: async () => storedSession("http://127.0.0.1:9") });
+	await withGateway(
+		async ({ endpoint, requests }) => {
+			const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
+			const payload = await yamlRun(["call", "resource.resolve", "--target", "target:team-inbox", `url=${url}`], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:resolve:1",
+			});
+			assert.deepEqual(payload.data, {
+				schema_version: "ceal.resource_resolve_result.v1",
+				resource: {
+					ref: "message:approved_001",
+					kind: "message",
+					source: { provider: "slack", url: sourceUrl },
+				},
+			});
+			assert.deepEqual(requests[0].body.body.arguments, { url });
+		},
+		(request) =>
+			request.operation === "call"
+				? success(request, {
+						schema_version: "ceal.gateway_call_result.v1",
+						capability_id: "resource.resolve",
+						grant_ref: "grant:team-inbox-resource-resolve",
+						grant_revision: 4,
+						target_ref: request.body.target_ref,
+						data: {
+							schema_version: "ceal.resource_resolve_result.v1",
+							resource: {
+								ref: "message:approved_001",
+								kind: "message",
+								source: { provider: "slack", url: sourceUrl },
+							},
+						},
+						redaction: { state: "applied", omitted_classes: ["credential_material"] },
+						host_decision: "accepted",
+						proof_level: "host_decision",
+						non_claims: ["production_audit_not_reached"],
+					})
+				: readbackResponse(request),
+	);
+	const invalid = await yamlRun(
+		[
+			"call",
+			"resource.resolve",
+			"--target",
+			"target:team-inbox",
+			"url=https://workspace.slack.com/archives/C0123456789/p1720000000000100?token=forbidden",
+		],
+		3,
+		{ loadSession: async () => storedSession("http://127.0.0.1:9") },
+	);
 	assert.equal(invalid.error.kind, "invalid_request");
 });
 
 test("call preserves one request identity across authentication refresh and final audit readback", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
-		let saved = null;
-		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
-			loadSession: async () => storedSession(endpoint, {
-				refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
-			}),
-			saveSession: async (session) => { saved = session; },
-			nextRequestId: (() => { let id = 0; return () => `narnia:retry-call:${++id}`; })(),
-		});
-		assert.equal(payload.status, "completed");
-		assert.equal(payload.capability, "message.search");
-		assert.equal(saved.accessToken, newAccessToken);
-		assert.deepEqual(requests.map((item) => item.body.operation), ["call", "call", "readback"]);
-		assert.deepEqual(requests.map((item) => item.authorization), [
-			`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`,
-		]);
-		assert.equal(requests[0].body.request_id, requests[1].body.request_id);
-		assert.equal(requests[2].body.body.request_id, requests[1].body.request_id);
-	}, { rejectFirstGateway: true });
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
+			let saved = null;
+			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
+				loadSession: async () =>
+					storedSession(endpoint, {
+						refreshToken: oldRefreshToken,
+						refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+					}),
+				saveSession: async (session) => {
+					saved = session;
+				},
+				nextRequestId: (() => {
+					let id = 0;
+					return () => `narnia:retry-call:${++id}`;
+				})(),
+			});
+			assert.equal(payload.status, "completed");
+			assert.equal(payload.capability, "message.search");
+			assert.equal(saved.accessToken, newAccessToken);
+			assert.deepEqual(
+				requests.map((item) => item.body.operation),
+				["call", "call", "readback"],
+			);
+			assert.deepEqual(
+				requests.map((item) => item.authorization),
+				[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
+			);
+			assert.equal(requests[0].body.request_id, requests[1].body.request_id);
+			assert.equal(requests[2].body.body.request_id, requests[1].body.request_id);
+		},
+		{ rejectFirstGateway: true },
+	);
 });
 
 test("call forwards a discovered provider-neutral capability without a CLI command rewrite", async () => {
-	await withGateway(async ({ endpoint, requests }) => {
-		const payload = await yamlRun(["call", "file.search", "--target", "target:workspace", "query=roadmap", "kind=document"], 0, {
-			loadSession: async () => storedSession(endpoint),
-			nextRequestId: (() => { let id = 0; return () => `narnia:generic:${++id}`; })(),
-		});
-		assert.equal(payload.schema_version, "ceal.result.v2");
-		assert.equal(payload.status, "completed");
-		assert.equal(payload.capability, "file.search");
-		assert.equal(payload.target, "target:workspace");
-		assert.deepEqual(requests[0].body.body.arguments, { query: "roadmap", kind: "document" });
-	}, (request) => request.operation === "call" ? success(request, {
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "file.search",
-		grant_ref: "grant:workspace-file-search", grant_revision: 7, target_ref: request.body.target_ref,
-		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
-		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-	}) : success(request, {
-		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
-		events: [{
-			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:generic",
-			request_id: request.body.request_id, profile_ref: request.profile_ref,
-			membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia", client_ref: "client:narnia", client_revision: 1,
-			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-			occurred_at: "2026-07-13T21:00:00.000Z", operation: "call", auth_decision: "allowed",
-			policy_decision: "allowed", outcome: "succeeded", error_code: null,
-			grant_snapshot: {
-				schema_version: "ceal.gateway_authorization_snapshot.v1",
-				capability_id: "file.search", target_ref: "target:workspace",
-				grant_ref: "grant:workspace-file-search", grant_revision: 7,
-			},
-			call: {
-				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "file.search",
-				grant_ref: "grant:workspace-file-search", grant_revision: 7, target_ref: "target:workspace",
-				input_summary: { field_count: 2 }, output_summary: { result_count: 1 },
-			},
-			proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
-		}],
-	}));
+	await withGateway(
+		async ({ endpoint, requests }) => {
+			const payload = await yamlRun(["call", "file.search", "--target", "target:workspace", "query=roadmap", "kind=document"], 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: (() => {
+					let id = 0;
+					return () => `narnia:generic:${++id}`;
+				})(),
+			});
+			assert.equal(payload.schema_version, "ceal.result.v2");
+			assert.equal(payload.status, "completed");
+			assert.equal(payload.capability, "file.search");
+			assert.equal(payload.target, "target:workspace");
+			assert.deepEqual(requests[0].body.body.arguments, { query: "roadmap", kind: "document" });
+		},
+		(request) =>
+			request.operation === "call"
+				? success(request, {
+						schema_version: "ceal.gateway_call_result.v1",
+						capability_id: "file.search",
+						grant_ref: "grant:workspace-file-search",
+						grant_revision: 7,
+						target_ref: request.body.target_ref,
+						data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
+						redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+						host_decision: "accepted",
+						proof_level: "host_decision",
+						non_claims: ["production_audit_not_reached"],
+					})
+				: success(request, {
+						schema_version: "ceal.gateway_audit_readback.v1",
+						request_id: request.body.request_id,
+						events: [
+							{
+								schema_version: "ceal.gateway_audit_event.v1",
+								event_ref: "gateway-audit:event:generic",
+								request_id: request.body.request_id,
+								profile_ref: request.profile_ref,
+								membership_ref: "membership:narnia",
+								membership_revision: 1,
+								registration_ref: "registration:narnia",
+								client_ref: "client:narnia",
+								client_revision: 1,
+								subject_ref: "subject:hwidong",
+								instance_ref: "instance:corca",
+								occurred_at: "2026-07-13T21:00:00.000Z",
+								operation: "call",
+								auth_decision: "allowed",
+								policy_decision: "allowed",
+								outcome: "succeeded",
+								error_code: null,
+								grant_snapshot: {
+									schema_version: "ceal.gateway_authorization_snapshot.v1",
+									capability_id: "file.search",
+									target_ref: "target:workspace",
+									grant_ref: "grant:workspace-file-search",
+									grant_revision: 7,
+								},
+								call: {
+									schema_version: "ceal.gateway_audit_call_detail.v1",
+									capability_id: "file.search",
+									grant_ref: "grant:workspace-file-search",
+									grant_revision: 7,
+									target_ref: "target:workspace",
+									input_summary: { field_count: 2 },
+									output_summary: { result_count: 1 },
+								},
+								proof_level: "host_decision",
+								non_claims: ["production_audit_not_reached"],
+							},
+						],
+					}),
+	);
 });
 
 test("capabilities uses an enrolled session without endpoint or token options", async () => {
@@ -1312,9 +1758,15 @@ test("capabilities uses an enrolled session without endpoint or token options", 
 		const token = `ceal_personal_${"P".repeat(43)}`;
 		const payload = await yamlRun(["capabilities"], 0, {
 			loadSession: async () => ({
-				gatewayEndpoint: endpoint, profileRef: "profile:narnia", registrationRef: "registration:narnia",
-				membershipRef: "membership:narnia", clientRef: "client:narnia", subjectRef: "subject:hwidong", instanceRef: "instance:corca",
-				accessToken: token, expiresAt: "2099-07-14T00:00:00.000Z",
+				gatewayEndpoint: endpoint,
+				profileRef: "profile:narnia",
+				registrationRef: "registration:narnia",
+				membershipRef: "membership:narnia",
+				clientRef: "client:narnia",
+				subjectRef: "subject:hwidong",
+				instanceRef: "instance:corca",
+				accessToken: token,
+				expiresAt: "2099-07-14T00:00:00.000Z",
 				refreshToken: `ceal_refresh_${"R".repeat(43)}`,
 				refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
 				refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
@@ -1322,7 +1774,10 @@ test("capabilities uses an enrolled session without endpoint or token options", 
 			nextRequestId: () => "narnia:stored:001",
 		});
 		assert.equal(payload.status, "available");
-		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${token}`, `Bearer ${token}`]);
+		assert.deepEqual(
+			requests.map((item) => item.authorization),
+			[`Bearer ${token}`, `Bearer ${token}`],
+		);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 	});
 });
@@ -1338,7 +1793,9 @@ test("packaged bin persists an enrolled session with owner-only modes", async ()
 			const sessionPath = path.join(home, ".ceal", "client-session.json");
 			assert.equal(statSync(sessionPath).mode & 0o777, 0o600);
 			assert.equal(JSON.parse(readFileSync(sessionPath, "utf8")).access_token, token);
-		} finally { rmSync(home, { recursive: true, force: true }); }
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -1354,7 +1811,10 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		if (request.url === "/gateway/client/refresh") {
 			refreshRequests.push(body.refresh_token);
-			if (body.refresh_token !== currentRefresh) return response.end(JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }));
+			if (body.refresh_token !== currentRefresh)
+				return response.end(
+					JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }),
+				);
 			if (refreshRequests.length === 1) await delay(100);
 			currentRefresh = secondRefresh;
 			response.writeHead(200, { "content-type": "application/json" });
@@ -1364,20 +1824,31 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		response.writeHead(200, { "content-type": "application/json" });
 		return response.end(JSON.stringify(value));
 	});
-	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	const endpoint = `http://127.0.0.1:${address.port}/gateway/client`;
 	const sessionPath = path.join(home, ".ceal", "client-session.json");
 	try {
 		mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
-		writeFileSync(sessionPath, `${JSON.stringify(serializeStoredSession(storedSession(endpoint, {
-			expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: firstRefresh,
-		})), null, 2)}\n`, { mode: 0o600 });
-		const [first, second] = await Promise.all([
-			runBin(["capabilities"], "", { HOME: home }),
-			runBin(["capabilities"], "", { HOME: home }),
-		]);
+		writeFileSync(
+			sessionPath,
+			`${JSON.stringify(
+				serializeStoredSession(
+					storedSession(endpoint, {
+						expiresAt: "2020-01-01T00:00:00.000Z",
+						refreshToken: firstRefresh,
+					}),
+				),
+				null,
+				2,
+			)}\n`,
+			{ mode: 0o600 },
+		);
+		const [first, second] = await Promise.all([runBin(["capabilities"], "", { HOME: home }), runBin(["capabilities"], "", { HOME: home })]);
 		assert.equal(first.code, 0, first.stderr);
 		assert.equal(second.code, 0, second.stderr);
 		assert.equal(parseYaml(first.stdout).status, "available");
@@ -1385,7 +1856,7 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		assert.deepEqual(refreshRequests, [firstRefresh]);
 		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 		rmSync(home, { recursive: true, force: true });
 	}
 });
@@ -1406,14 +1877,20 @@ test("capabilities reports an honest Gateway-required unavailable surface withou
 });
 
 test("capabilities rejects stray operands in both explicit and target-selection grammars", async () => {
-	const explicit = await yamlRun([
-		"capabilities",
-		"--endpoint", "https://gateway.example.test",
-		"--profile", "profile:narnia",
-		"--request-id", "narnia:grammar:001",
-		"--token-stdin",
-		"unexpected",
-	], 2);
+	const explicit = await yamlRun(
+		[
+			"capabilities",
+			"--endpoint",
+			"https://gateway.example.test",
+			"--profile",
+			"profile:narnia",
+			"--request-id",
+			"narnia:grammar:001",
+			"--token-stdin",
+			"unexpected",
+		],
+		2,
+	);
 	assert.equal(explicit.error.kind, "invalid_argument");
 	const targets = await yamlRun(["capabilities", "targets", "--capability", "message.search", "unexpected"], 2);
 	assert.equal(targets.error.kind, "invalid_argument");
@@ -1429,41 +1906,49 @@ test("capabilities rejects stray operands in both explicit and target-selection 
 test("capabilities performs outbound handshake and discovery with a stdin-only token", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = "ceal_personal_test_token_never_render";
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:acceptance:001",
-			"--token-stdin",
-		], 0, { readSecret: async () => token });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:acceptance:001", "--token-stdin"],
+			0,
+			{ readSecret: async () => token },
+		);
 		assert.equal(payload.status, "available");
 		assert.equal(payload.live_gateway_checked, true);
 		assert.equal(payload.proof_level, "host_decision");
 		assert.equal(payload.gateway.profile_ref, "profile:narnia");
 		assert.equal(payload.gateway.membership_ref, "membership:narnia");
-		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
+		assert.deepEqual(
+			payload.capabilities.map((item) => item.capability_id),
+			["message.search"],
+		);
 		assert.deepEqual(payload.targets, []);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 0, complete: false, selection_required: true });
 		assert.match(payload.next_action, /capabilities targets/u);
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
-		assert.deepEqual(requests.map((item) => item.authorization), [`Bearer ${token}`, `Bearer ${token}`]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
+		assert.deepEqual(
+			requests.map((item) => item.authorization),
+			[`Bearer ${token}`, `Bearer ${token}`],
+		);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 	});
 });
 
 test("capabilities defaults to a concise catalog that omits each per-capability contract body", async () => {
 	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:concise:001",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"C".repeat(43)}` });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:concise:001", "--token-stdin"],
+			0,
+			{ readSecret: async () => `ceal_personal_${"C".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
 		// The concise rows keep everything an agent needs to *select* a capability
 		// (id, label, effect, target requirement) but drop the input grammar body.
-		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
+		assert.deepEqual(
+			payload.capabilities.map((item) => item.capability_id),
+			["message.search"],
+		);
 		for (const capability of payload.capabilities) {
 			assert.equal(Object.hasOwn(capability, "input_contract"), false, "concise default must omit input_contract");
 			assert.equal(Object.hasOwn(capability, "write_contract"), false, "concise default must omit write_contract");
@@ -1477,15 +1962,26 @@ test("capabilities defaults to a concise catalog that omits each per-capability 
 
 test("capabilities --detail restores each capability's full input contract", async () => {
 	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities", "--detail",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:detail:001",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"D".repeat(43)}` });
+		const payload = await yamlRun(
+			[
+				"capabilities",
+				"--detail",
+				"--endpoint",
+				endpoint,
+				"--profile",
+				"profile:narnia",
+				"--request-id",
+				"narnia:detail:001",
+				"--token-stdin",
+			],
+			0,
+			{ readSecret: async () => `ceal_personal_${"D".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
-		assert.deepEqual(payload.capabilities.map((item) => item.capability_id), ["message.search"]);
+		assert.deepEqual(
+			payload.capabilities.map((item) => item.capability_id),
+			["message.search"],
+		);
 		const [capability] = payload.capabilities;
 		assert.equal(Object.hasOwn(capability, "input_contract"), true, "--detail must include input_contract");
 		assert.equal(capability.input_contract.schema_version, "ceal.message_search_input.v1");
@@ -1505,13 +2001,11 @@ test("capabilities negotiates and surfaces the eligible-Profile catalog for --pr
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint, requests }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:profiles:001",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:profiles:001", "--token-stdin"],
+			0,
+			{ readSecret: async () => `ceal_personal_${"S".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
 		// The transport declared the negotiation on the handshake request.
 		assert.equal(requests[0].body.operation, "handshake");
@@ -1534,13 +2028,11 @@ test("capabilities names profile_selection_required with the catalog when more t
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:selection:001",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:selection:001", "--token-stdin"],
+			0,
+			{ readSecret: async () => `ceal_personal_${"S".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
 		assert.equal(payload.profile_selection.code, "profile_selection_required");
 		assert.equal(payload.profile_selection.active_profile_ref, "profile:narnia");
@@ -1558,13 +2050,11 @@ test("capabilities omits profile_selection when a single eligible Profile become
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:selection:single",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:selection:single", "--token-stdin"],
+			0,
+			{ readSecret: async () => `ceal_personal_${"S".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
 		// One selectable Profile activates automatically; no selection hint.
 		assert.deepEqual(payload.gateway.eligible_profiles, eligible);
@@ -1574,13 +2064,11 @@ test("capabilities omits profile_selection when a single eligible Profile become
 
 test("capabilities omits eligible_profiles when the Gateway does not negotiate the catalog", async () => {
 	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:profiles:absent",
-			"--token-stdin",
-		], 0, { readSecret: async () => `ceal_personal_${"S".repeat(43)}` });
+		const payload = await yamlRun(
+			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:profiles:absent", "--token-stdin"],
+			0,
+			{ readSecret: async () => `ceal_personal_${"S".repeat(43)}` },
+		);
 		assert.equal(payload.status, "available");
 		// Older Gateway / non-negotiated response carries no catalog, so the
 		// surface stays absent rather than an empty list.
@@ -1591,31 +2079,26 @@ test("capabilities omits eligible_profiles when the Gateway does not negotiate t
 test("capabilities selects a bounded target page through the stored client session", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
-		const payload = await yamlRun([
-			"capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1",
-		], 0, {
+		const payload = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1"], 0, {
 			loadSession: async () => storedSession(endpoint, { accessToken: token }),
 			nextRequestId: () => "narnia:target-catalog:001",
 		});
 		assert.equal(payload.status, "available");
-		assert.deepEqual(payload.targets.map((item) => item.target_ref), ["target:team-inbox"]);
+		assert.deepEqual(
+			payload.targets.map((item) => item.target_ref),
+			["target:team-inbox"],
+		);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
-		assert.deepEqual(requests.map((item) => item.body.body), [
-			{ client: { name: "ceal", version: "0.65.10" } },
-			{ capability_id: "message.search", match: "team", limit: 1 },
-		]);
+		assert.deepEqual(
+			requests.map((item) => item.body.body),
+			[{ client: { name: "ceal", version: "0.65.10" } }, { capability_id: "message.search", match: "team", limit: 1 }],
+		);
 	});
 });
 
 test("packaged bin reads stdin, completes async discovery, and preserves safe exit behavior", async () => {
 	await withGateway(async ({ endpoint }) => {
-		const args = [
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:bin:001",
-			"--token-stdin",
-		];
+		const args = ["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:bin:001", "--token-stdin"];
 		const success = await runBin(args, "ceal_personal_bin_token_never_render\n");
 		assert.equal(success.code, 0, success.stderr);
 		assert.equal(parseYaml(success.stdout).status, "available");
@@ -1634,31 +2117,41 @@ test("packaged bin reads stdin, completes async discovery, and preserves safe ex
 
 test("Gateway failure output never reflects server-controlled secret text", async () => {
 	const token = "ceal_personal_reflected_token_never_render";
-	await withGateway(async ({ endpoint }) => {
-		const payload = await yamlRun([
-			"capabilities",
-			"--endpoint", endpoint,
-			"--profile", "profile:narnia",
-			"--request-id", "narnia:failure:001",
-			"--token-stdin",
-		], 3, { readSecret: async () => token });
-		assert.equal(payload.status, "unavailable");
-		assert.equal(payload.proof_level, "host_decision");
-		assert.equal(payload.error.kind, "gateway_request_failed");
-		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
-	}, (request) => ({
-		ok: false,
-		request_id: request.request_id,
-		protocol_version: "1.3.0",
-		error: { code: "internal_error", message: token, next_action: token },
-	}));
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(
+				["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:failure:001", "--token-stdin"],
+				3,
+				{ readSecret: async () => token },
+			);
+			assert.equal(payload.status, "unavailable");
+			assert.equal(payload.proof_level, "host_decision");
+			assert.equal(payload.error.kind, "gateway_request_failed");
+			assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+		},
+		(request) => ({
+			ok: false,
+			request_id: request.request_id,
+			protocol_version: "1.3.0",
+			error: { code: "internal_error", message: token, next_action: token },
+		}),
+	);
 });
 
 test("Gateway option and transport failures are redacted YAML", async () => {
 	const secret = "ceal_personal_failure_token_never_render";
 	for (const args of [
 		["capabilities", "--endpoint", "https://gateway.example.test"],
-		["capabilities", "--endpoint", "http://not-loopback.example.test", "--profile", "profile:narnia", "--request-id", "request:1", "--token-stdin"],
+		[
+			"capabilities",
+			"--endpoint",
+			"http://not-loopback.example.test",
+			"--profile",
+			"profile:narnia",
+			"--request-id",
+			"request:1",
+			"--token-stdin",
+		],
 	]) {
 		const expectedCode = args.length === 3 ? 2 : 3;
 		const payload = await yamlRun(args, expectedCode, { readSecret: async () => secret });
@@ -1667,7 +2160,10 @@ test("Gateway option and transport failures are redacted YAML", async () => {
 });
 
 test("JSON modes and unsafe commands fail as redacted YAML", async () => {
-	for (const args of [["version", "--json"], ["version", "--format", "json"]]) {
+	for (const args of [
+		["version", "--json"],
+		["version", "--format", "json"],
+	]) {
 		const payload = await yamlRun(args, 2);
 		assert.equal(payload.error.kind, "invalid_argument");
 	}
@@ -1711,11 +2207,17 @@ test("capabilities probes live and populates the discovery cache when cold", asy
 		assert.equal(payload.status, "available");
 		assert.equal(payload.catalog_source, "live_discovery");
 		assert.deepEqual(payload.claims_allowed, ["gateway_handshake", "gateway_discovery"]);
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 		const entry = cache.entry();
 		assert.ok(entry, "cold probe must populate the cache");
 		assert.deepEqual(entry.key, {
-			gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.3.0",
+			gatewayEndpoint: endpoint,
+			profileRef: "profile:narnia",
+			membershipRef: "membership:narnia",
+			negotiatedProtocolVersion: "1.3.0",
 		});
 		assert.equal(entry.cachedAt, Date.parse("2026-07-18T12:00:00.000Z"));
 		assert.equal(entry.discovery.schema_version, "ceal.gateway_discovery.v2");
@@ -1738,7 +2240,10 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 		assert.equal(payload.catalog_cached_at, new Date(now - 60_000).toISOString());
 		assert.equal(typeof payload.catalog_expires_at, "string");
 		// The discovery probe never ran: only the handshake reached the gateway.
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake"],
+		);
 		// The served catalog is the cached one (target_count 2), not a live re-probe (1).
 		assert.equal(payload.target_catalog.target_count, 2);
 	});
@@ -1750,11 +2255,15 @@ test("capabilities re-probes when the cached entry is past its freshness window"
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 10_000));
 		const payload = await yamlRun(["capabilities"], 0, {
 			loadSession: async () => storedSession(endpoint),
-			now: () => now, discoveryCacheTtlMs: 5_000,
+			now: () => now,
+			discoveryCacheTtlMs: 5_000,
 			...cache.runtime,
 		});
 		assert.equal(payload.catalog_source, "live_discovery");
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 		assert.equal(cache.entry().cachedAt, now, "stale re-probe refreshes the cache stamp");
 		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "cache now holds the live value");
 	});
@@ -1767,10 +2276,15 @@ test("capabilities re-probes when the cached key does not match the handshake id
 		foreign.key.profileRef = "profile:other";
 		const cache = inMemoryDiscoveryCache(foreign);
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
 		});
 		assert.equal(payload.catalog_source, "live_discovery");
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 	});
 });
 
@@ -1779,10 +2293,15 @@ test("capabilities --fresh bypasses a warm cache and probes live", async () => {
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now));
 		const payload = await yamlRun(["capabilities", "--fresh"], 0, {
-			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
 		});
 		assert.equal(payload.catalog_source, "live_discovery");
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "--fresh refreshes the cache");
 	});
 });
@@ -1792,12 +2311,17 @@ test("capabilities degrades to a live probe when the discovery cache read fails"
 		const payload = await yamlRun(["capabilities"], 0, {
 			loadSession: async () => storedSession(endpoint),
 			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
-			loadDiscoveryCache: async () => { throw new Error("cache read boom"); },
+			loadDiscoveryCache: async () => {
+				throw new Error("cache read boom");
+			},
 			saveDiscoveryCache: async () => {},
 		});
 		assert.equal(payload.status, "available");
 		assert.equal(payload.catalog_source, "live_discovery");
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 	});
 });
 
@@ -1808,10 +2332,15 @@ test("capabilities degrades to a live probe when a fresh cache entry has a malfo
 		malformed.discovery = { schema_version: "ceal.gateway_discovery.v2" };
 		const cache = inMemoryDiscoveryCache(malformed);
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint), now: () => now, ...cache.runtime,
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
 		});
 		assert.equal(payload.catalog_source, "live_discovery");
-		assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
 		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "the live discovery replaces the malformed cache value");
 	});
 });
@@ -1822,8 +2351,12 @@ function inMemoryDiscoveryCache(initial = null) {
 		entry: () => current,
 		runtime: {
 			loadDiscoveryCache: async () => current,
-			saveDiscoveryCache: async (value) => { current = value; },
-			removeDiscoveryCache: async () => { current = null; },
+			saveDiscoveryCache: async (value) => {
+				current = value;
+			},
+			removeDiscoveryCache: async () => {
+				current = null;
+			},
 		},
 	};
 }
@@ -1834,16 +2367,23 @@ function cachedEntry(endpoint, cachedAt) {
 		cachedAt,
 		discovery: {
 			schema_version: "ceal.gateway_discovery.v2",
-			profile_ref: "profile:narnia", membership_ref: "membership:narnia",
-			capabilities: [{
-				capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required",
-				input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
-				evidence_requirement: "gateway_audit",
-			}],
+			profile_ref: "profile:narnia",
+			membership_ref: "membership:narnia",
+			capabilities: [
+				{
+					capability_id: "message.search",
+					label: "Search messages",
+					effect: "read",
+					target_requirement: "required",
+					input_contract: { schema_version: "ceal.message_search_input.v1", required: ["query"], query: { type: "string", max_bytes: 512 } },
+					evidence_requirement: "gateway_audit",
+				},
+			],
 			targets: [],
 			// target_count 2 distinguishes this cached value from a live re-probe (1).
 			target_catalog: { target_count: 2, returned_count: 0, complete: false, selection_required: true },
-			host_decision: "accepted", proof_level: "host_decision",
+			host_decision: "accepted",
+			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		},
 	};
@@ -1856,10 +2396,15 @@ async function withGateway(callback, responseFactory = null) {
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		requests.push({ authorization: request.headers.authorization, profiles: request.headers["x-ceal-profiles"], body });
-		const value = responseFactory ? responseFactory(body)
-			: body.operation === "handshake" ? handshakeResponse(body)
-				: body.operation === "discover" ? discoveryResponse(body)
-					: body.operation === "call" ? callResponse(body) : readbackResponse(body);
+		const value = responseFactory
+			? responseFactory(body)
+			: body.operation === "handshake"
+				? handshakeResponse(body)
+				: body.operation === "discover"
+					? discoveryResponse(body)
+					: body.operation === "call"
+						? callResponse(body)
+						: readbackResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
@@ -1872,7 +2417,7 @@ async function withGateway(callback, responseFactory = null) {
 	try {
 		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, requests });
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 }
 
@@ -1882,13 +2427,20 @@ async function runBin(args, stdin, env = {}) {
 	// persists session/discovery state under $HOME/.ceal, so an un-overridden
 	// spawn would leak fixture data into the real store.
 	const isolatedHome = env.HOME === undefined ? mkdtempSync(path.join(tmpdir(), "ceal-bin-isolated-home-")) : null;
-	const child = spawn(process.execPath, [bin, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env, ...(isolatedHome ? { HOME: isolatedHome } : {}) } });
+	const child = spawn(process.execPath, [bin, ...args], {
+		stdio: ["pipe", "pipe", "pipe"],
+		env: { ...process.env, ...env, ...(isolatedHome ? { HOME: isolatedHome } : {}) },
+	});
 	let stdout = "";
 	let stderr = "";
 	child.stdout.setEncoding("utf8");
 	child.stderr.setEncoding("utf8");
-	child.stdout.on("data", (chunk) => { stdout += chunk; });
-	child.stderr.on("data", (chunk) => { stderr += chunk; });
+	child.stdout.on("data", (chunk) => {
+		stdout += chunk;
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += chunk;
+	});
 	child.stdin.end(stdin);
 	try {
 		const code = await new Promise((resolve, reject) => {
@@ -1911,22 +2463,35 @@ async function withEnrollmentGateway(callback) {
 		assert.equal(request.url, "/gateway/client/enroll");
 		assert.equal(body.code, "E".repeat(48));
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(JSON.stringify({
-			schema_version: "ceal.enrollment_result.v1", ok: true,
-			profile_ref: "profile:narnia", membership_ref: "membership:narnia",
-			registration_ref: "registration:narnia", client_ref: "client:narnia",
-			subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-			access_token: token, expires_at: "2099-07-14T00:00:00.000Z",
-			refresh_token: refreshToken,
-			refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-			refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-		}));
+		response.end(
+			JSON.stringify({
+				schema_version: "ceal.enrollment_result.v1",
+				ok: true,
+				profile_ref: "profile:narnia",
+				membership_ref: "membership:narnia",
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				access_token: token,
+				expires_at: "2099-07-14T00:00:00.000Z",
+				refresh_token: refreshToken,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			}),
+		);
 	});
-	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
-	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token }); }
-	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+	try {
+		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token });
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	}
 }
 
 async function withRenewingGateway(callback, options = {}) {
@@ -1951,21 +2516,33 @@ async function withRenewingGateway(callback, options = {}) {
 			}
 			if (options.refreshDeniedCode) {
 				response.writeHead(200, { "content-type": "application/json" });
-				response.end(JSON.stringify({
-					schema_version: "ceal.client_refresh_result.v1", ok: false,
-					error: { code: options.refreshDeniedCode, message: "Gateway rejected refresh.", next_action: "Reenroll." },
-				}));
+				response.end(
+					JSON.stringify({
+						schema_version: "ceal.client_refresh_result.v1",
+						ok: false,
+						error: { code: options.refreshDeniedCode, message: "Gateway rejected refresh.", next_action: "Reenroll." },
+					}),
+				);
 				return;
 			}
 			response.writeHead(200, { "content-type": "application/json" });
-			response.end(JSON.stringify({
-				schema_version: "ceal.client_refresh_result.v1", ok: true,
-				profile_ref: "profile:narnia", membership_ref: "membership:narnia",
-				registration_ref: "registration:narnia", client_ref: "client:narnia",
-				subject_ref: "subject:hwidong", instance_ref: "instance:corca", access_token: newAccessToken,
-				expires_at: "2099-07-14T00:00:00.000Z", refresh_token: newRefreshToken,
-				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z", refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-			}));
+			response.end(
+				JSON.stringify({
+					schema_version: "ceal.client_refresh_result.v1",
+					ok: true,
+					profile_ref: "profile:narnia",
+					membership_ref: "membership:narnia",
+					registration_ref: "registration:narnia",
+					client_ref: "client:narnia",
+					subject_ref: "subject:hwidong",
+					instance_ref: "instance:corca",
+					access_token: newAccessToken,
+					expires_at: "2099-07-14T00:00:00.000Z",
+					refresh_token: newRefreshToken,
+					refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+					refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+				}),
+			);
 			return;
 		}
 		if (request.url === "/gateway/client/revoke") {
@@ -1983,27 +2560,59 @@ async function withRenewingGateway(callback, options = {}) {
 		if (options.rejectFirstGateway && !gatewayRejected) {
 			gatewayRejected = true;
 			response.writeHead(401, { "content-type": "application/json" });
-			response.end(JSON.stringify({ ok: false, request_id: body.request_id, protocol_version: "1.3.0", error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." } }));
+			response.end(
+				JSON.stringify({
+					ok: false,
+					request_id: body.request_id,
+					protocol_version: "1.3.0",
+					error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." },
+				}),
+			);
 			return;
 		}
-		const value = body.operation === "handshake" ? handshakeResponse(body)
-			: body.operation === "discover" ? discoveryResponse(body)
-				: body.operation === "call" ? callResponse(body) : readbackResponse(body);
+		const value =
+			body.operation === "handshake"
+				? handshakeResponse(body)
+				: body.operation === "discover"
+					? discoveryResponse(body)
+					: body.operation === "call"
+						? callResponse(body)
+						: readbackResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
-	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
-	try { await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, oldRefreshToken, newAccessToken, newRefreshToken, requests, revoked, refreshCalls: () => refreshCallCount }); }
-	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+	try {
+		await callback({
+			endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
+			oldRefreshToken,
+			newAccessToken,
+			newRefreshToken,
+			requests,
+			revoked,
+			refreshCalls: () => refreshCallCount,
+		});
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	}
 }
 
 function storedSession(endpoint, overrides = {}) {
 	return {
-		gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia",
-		registrationRef: "registration:narnia", clientRef: "client:narnia", subjectRef: "subject:hwidong", instanceRef: "instance:corca",
-		accessToken: `ceal_personal_${"P".repeat(43)}`, expiresAt: "2099-07-14T00:00:00.000Z",
+		gatewayEndpoint: endpoint,
+		profileRef: "profile:narnia",
+		membershipRef: "membership:narnia",
+		registrationRef: "registration:narnia",
+		clientRef: "client:narnia",
+		subjectRef: "subject:hwidong",
+		instanceRef: "instance:corca",
+		accessToken: `ceal_personal_${"P".repeat(43)}`,
+		expiresAt: "2099-07-14T00:00:00.000Z",
 		refreshToken: `ceal_refresh_${"R".repeat(43)}`,
 		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
 		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
@@ -2013,10 +2622,17 @@ function storedSession(endpoint, overrides = {}) {
 
 function serializeStoredSession(session) {
 	return {
-		schema_version: "ceal.client_session_store.v1", gateway_endpoint: session.gatewayEndpoint,
-		profile_ref: session.profileRef, membership_ref: session.membershipRef, registration_ref: session.registrationRef,
-		client_ref: session.clientRef, subject_ref: session.subjectRef, instance_ref: session.instanceRef,
-		access_token: session.accessToken, expires_at: session.expiresAt, refresh_token: session.refreshToken,
+		schema_version: "ceal.client_session_store.v1",
+		gateway_endpoint: session.gatewayEndpoint,
+		profile_ref: session.profileRef,
+		membership_ref: session.membershipRef,
+		registration_ref: session.registrationRef,
+		client_ref: session.clientRef,
+		subject_ref: session.subjectRef,
+		instance_ref: session.instanceRef,
+		access_token: session.accessToken,
+		expires_at: session.expiresAt,
+		refresh_token: session.refreshToken,
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
 	};
@@ -2024,16 +2640,25 @@ function serializeStoredSession(session) {
 
 function rotatedClientSession(refreshToken) {
 	return {
-		schema_version: "ceal.client_refresh_result.v1", ok: true,
-		profile_ref: "profile:narnia", membership_ref: "membership:narnia", registration_ref: "registration:narnia",
-		client_ref: "client:narnia", subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-		access_token: `ceal_personal_${"N".repeat(43)}`, expires_at: "2099-07-14T00:00:00.000Z",
-		refresh_token: refreshToken, refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+		schema_version: "ceal.client_refresh_result.v1",
+		ok: true,
+		profile_ref: "profile:narnia",
+		membership_ref: "membership:narnia",
+		registration_ref: "registration:narnia",
+		client_ref: "client:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:corca",
+		access_token: `ceal_personal_${"N".repeat(43)}`,
+		expires_at: "2099-07-14T00:00:00.000Z",
+		refresh_token: refreshToken,
+		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
 		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
 	};
 }
 
-function delay(milliseconds) { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
+function delay(milliseconds) {
+	return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
 
 function parseYaml(stdout) {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });
@@ -2069,20 +2694,32 @@ function discoveryResponse(request) {
 		schema_version: "ceal.gateway_discovery.v2",
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
-		capabilities: [{
-			capability_id: "message.search",
-			label: "Search messages",
-			effect: "read",
-			target_requirement: "required",
-			input_contract: {
-				schema_version: "ceal.message_search_input.v1",
-				required: ["query"],
-				query: { type: "string", max_bytes: 512 },
-				limit: { type: "integer", minimum: 1, maximum: 10, default: 5 },
+		capabilities: [
+			{
+				capability_id: "message.search",
+				label: "Search messages",
+				effect: "read",
+				target_requirement: "required",
+				input_contract: {
+					schema_version: "ceal.message_search_input.v1",
+					required: ["query"],
+					query: { type: "string", max_bytes: 512 },
+					limit: { type: "integer", minimum: 1, maximum: 10, default: 5 },
+				},
+				evidence_requirement: "gateway_audit",
 			},
-			evidence_requirement: "gateway_audit",
-		}],
-		targets: selected ? [{ target_ref: "target:team-inbox", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] }] : [],
+		],
+		targets: selected
+			? [
+					{
+						target_ref: "target:team-inbox",
+						label: "Team inbox",
+						access: "granted",
+						capability_ids: ["message.search"],
+						capability_access: [matureCapabilityAccess()],
+					},
+				]
+			: [],
 		target_catalog: selected
 			? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
 			: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
@@ -2094,43 +2731,80 @@ function discoveryResponse(request) {
 
 function callResponse(request) {
 	return success(request, {
-		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search",
-		grant_ref: "grant:team-inbox-message-search", grant_revision: 4, target_ref: request.body.target_ref,
+		schema_version: "ceal.gateway_call_result.v1",
+		capability_id: "message.search",
+		grant_ref: "grant:team-inbox-message-search",
+		grant_revision: 4,
+		target_ref: request.body.target_ref,
 		data: {
-			schema_version: "ceal.message_search_result.v1", query: { redacted: true, utf8_bytes: 6, empty: false },
+			schema_version: "ceal.message_search_result.v1",
+			query: { redacted: true, utf8_bytes: 6, empty: false },
 			result_count: 1,
-			results: [{ ref: "message:msg_001", target_ref: request.body.target_ref, created_at: "2026-07-10T00:00:00.000Z", source_label: "Team inbox", text_preview: "Launch readiness is green." }],
+			results: [
+				{
+					ref: "message:msg_001",
+					target_ref: request.body.target_ref,
+					created_at: "2026-07-10T00:00:00.000Z",
+					source_label: "Team inbox",
+					text_preview: "Launch readiness is green.",
+				},
+			],
 			coverage: matureSearchCoverage(),
 			minimization: { raw_provider_ids_included: false, raw_messages_included: false, credential_material_included: false },
 		},
 		redaction: { state: "applied", omitted_classes: ["query_text", "raw_provider_ids", "raw_messages"] },
-		host_decision: "accepted", proof_level: "host_decision",
+		host_decision: "accepted",
+		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	});
 }
 
 function readbackResponse(request) {
 	return success(request, {
-		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
-		events: [{
-			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:001", request_id: request.body.request_id,
-			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
-			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-			occurred_at: "2026-07-13T21:00:00.000Z",
-			operation: "call", auth_decision: "allowed", policy_decision: "allowed", outcome: "succeeded", error_code: null,
-			grant_snapshot: {
-				schema_version: "ceal.gateway_authorization_snapshot.v1",
-				capability_id: "message.search", target_ref: "target:team-inbox",
-				grant_ref: "grant:team-inbox-message-search", grant_revision: 4,
+		schema_version: "ceal.gateway_audit_readback.v1",
+		request_id: request.body.request_id,
+		events: [
+			{
+				schema_version: "ceal.gateway_audit_event.v1",
+				event_ref: "gateway-audit:event:001",
+				request_id: request.body.request_id,
+				profile_ref: request.profile_ref,
+				membership_ref: "membership:narnia",
+				membership_revision: 1,
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				client_revision: 1,
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				occurred_at: "2026-07-13T21:00:00.000Z",
+				operation: "call",
+				auth_decision: "allowed",
+				policy_decision: "allowed",
+				outcome: "succeeded",
+				error_code: null,
+				grant_snapshot: {
+					schema_version: "ceal.gateway_authorization_snapshot.v1",
+					capability_id: "message.search",
+					target_ref: "target:team-inbox",
+					grant_ref: "grant:team-inbox-message-search",
+					grant_revision: 4,
+				},
+				call: {
+					schema_version: "ceal.gateway_audit_call_detail.v1",
+					capability_id: "message.search",
+					grant_ref: "grant:team-inbox-message-search",
+					grant_revision: 4,
+					target_ref: "target:team-inbox",
+					requested_limit: 5,
+					query_utf8_bytes: 6,
+					result_count: 1,
+					gateway_elapsed_ms: 42,
+					coverage: matureSearchCoverage(),
+				},
+				proof_level: "host_decision",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 			},
-			call: {
-				schema_version: "ceal.gateway_audit_call_detail.v1", capability_id: "message.search",
-				grant_ref: "grant:team-inbox-message-search", grant_revision: 4, target_ref: "target:team-inbox",
-				requested_limit: 5, query_utf8_bytes: 6, result_count: 1, gateway_elapsed_ms: 42,
-				coverage: matureSearchCoverage(),
-			},
-			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		}],
+		],
 	});
 }
 
@@ -2138,16 +2812,32 @@ function readbackResponse(request) {
 // grant snapshot exists, so the negotiated handling time rides on the event.
 function policyDeniedReadbackResponse(request) {
 	return success(request, {
-		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
-		events: [{
-			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:denied", request_id: request.body.request_id,
-			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
-			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-			occurred_at: "2026-07-24T09:00:00.000Z",
-			operation: "call", auth_decision: "allowed", policy_decision: "denied", outcome: "denied",
-			error_code: "resource_not_available", gateway_elapsed_ms: 6892,
-			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		}],
+		schema_version: "ceal.gateway_audit_readback.v1",
+		request_id: request.body.request_id,
+		events: [
+			{
+				schema_version: "ceal.gateway_audit_event.v1",
+				event_ref: "gateway-audit:event:denied",
+				request_id: request.body.request_id,
+				profile_ref: request.profile_ref,
+				membership_ref: "membership:narnia",
+				membership_revision: 1,
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				client_revision: 1,
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				occurred_at: "2026-07-24T09:00:00.000Z",
+				operation: "call",
+				auth_decision: "allowed",
+				policy_decision: "denied",
+				outcome: "denied",
+				error_code: "resource_not_available",
+				gateway_elapsed_ms: 6892,
+				proof_level: "host_decision",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+			},
+		],
 	});
 }
 
@@ -2179,19 +2869,38 @@ function invalidArgumentsFailureResponse(request) {
 
 function failedReadbackResponse(request) {
 	return success(request, {
-		schema_version: "ceal.gateway_audit_readback.v1", request_id: request.body.request_id,
-		events: [{
-			schema_version: "ceal.gateway_audit_event.v1", event_ref: "gateway-audit:event:failed", request_id: request.body.request_id,
-			profile_ref: request.profile_ref, membership_ref: "membership:narnia", membership_revision: 1, registration_ref: "registration:narnia",
-			client_ref: "client:narnia", client_revision: 1, subject_ref: "subject:hwidong", instance_ref: "instance:corca",
-			occurred_at: "2026-07-20T13:00:00.000Z", operation: "call", auth_decision: "allowed", policy_decision: "allowed",
-			outcome: "failed", error_code: "continuation_not_available",
-			grant_snapshot: {
-				schema_version: "ceal.gateway_authorization_snapshot.v1", capability_id: "message.get", target_ref: "target:team-inbox",
-				grant_ref: "grant:team-inbox-message-get", grant_revision: 4,
+		schema_version: "ceal.gateway_audit_readback.v1",
+		request_id: request.body.request_id,
+		events: [
+			{
+				schema_version: "ceal.gateway_audit_event.v1",
+				event_ref: "gateway-audit:event:failed",
+				request_id: request.body.request_id,
+				profile_ref: request.profile_ref,
+				membership_ref: "membership:narnia",
+				membership_revision: 1,
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				client_revision: 1,
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				occurred_at: "2026-07-20T13:00:00.000Z",
+				operation: "call",
+				auth_decision: "allowed",
+				policy_decision: "allowed",
+				outcome: "failed",
+				error_code: "continuation_not_available",
+				grant_snapshot: {
+					schema_version: "ceal.gateway_authorization_snapshot.v1",
+					capability_id: "message.get",
+					target_ref: "target:team-inbox",
+					grant_ref: "grant:team-inbox-message-get",
+					grant_revision: 4,
+				},
+				proof_level: "host_decision",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 			},
-			proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-		}],
+		],
 	});
 }
 

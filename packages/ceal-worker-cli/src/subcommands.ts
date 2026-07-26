@@ -84,11 +84,13 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 		parent: "capabilities",
 		route: ["targets"],
 		description: "Select bounded targets for one discovered capability.",
-		usage: "ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
+		usage:
+			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
-		recovery: "Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
+		recovery:
+			"Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
 		notes: [
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",
 			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
@@ -115,7 +117,8 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
-		recovery: "Use the request reference a 'ceal call' returned; while no audited outcome exists for it the Gateway answers 'audit_event_not_found'.",
+		recovery:
+			"Use the request reference a 'ceal call' returned; while no audited outcome exists for it the Gateway answers 'audit_event_not_found'.",
 		options: [
 			"  <request-ref>           Request reference returned by a call, audited or rejected.",
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
@@ -123,14 +126,14 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 	},
 ];
 
-
 export function subcommandsOf(parent: CealCommandName): readonly CealSubcommandDefinition[] {
 	return CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
 }
 
 export function findSubcommand(parent: CealCommandName, route: readonly string[]): CealSubcommandDefinition | undefined {
-	return subcommandsOf(parent).find((subcommand) => subcommand.route.length === route.length
-		&& subcommand.route.every((token, index) => token === route[index]));
+	return subcommandsOf(parent).find(
+		(subcommand) => subcommand.route.length === route.length && subcommand.route.every((token, index) => token === route[index]),
+	);
 }
 
 /**
@@ -141,7 +144,8 @@ export function findSubcommand(parent: CealCommandName, route: readonly string[]
  * exist, which is the invariant issue #1 was missing.
  */
 export function splitSubcommandRoute(
-	parent: CealCommandName, options: readonly string[],
+	parent: CealCommandName,
+	options: readonly string[],
 ): { subcommand?: CealSubcommandDefinition; rest: readonly string[] } {
 	const leading: string[] = [];
 	for (const option of options) {

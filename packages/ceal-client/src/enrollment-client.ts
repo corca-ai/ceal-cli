@@ -1,8 +1,4 @@
-import {
-	CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
-	decodeCealEnrollmentResponse,
-	type CealEnrollmentResponse,
-} from "@corca-ai/ceal-protocol";
+import { CEAL_ENROLLMENT_EXCHANGE_SCHEMA, type CealEnrollmentResponse, decodeCealEnrollmentResponse } from "@corca-ai/ceal-protocol";
 
 export interface CealEnrollmentClient {
 	exchange(code: string): Promise<CealEnrollmentResponse>;
@@ -51,8 +47,16 @@ export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOp
 				const bytes = await readBounded(response);
 				if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
 				let parsed: unknown;
-				try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { invalidResponse(); }
-				try { return decodeCealEnrollmentResponse(parsed); } catch { invalidResponse(); }
+				try {
+					parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+				} catch {
+					invalidResponse();
+				}
+				try {
+					return decodeCealEnrollmentResponse(parsed);
+				} catch {
+					invalidResponse();
+				}
 			} catch (error) {
 				if (error instanceof CealEnrollmentClientError) throw error;
 				if (controller.signal.aborted) throw new CealEnrollmentClientError("request_timeout");
@@ -66,7 +70,11 @@ export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOp
 
 function enrollmentEndpoint(value: string | URL): URL {
 	let endpoint: URL;
-	try { endpoint = new URL(value); } catch { throw new CealEnrollmentClientError("invalid_configuration"); }
+	try {
+		endpoint = new URL(value);
+	} catch {
+		throw new CealEnrollmentClientError("invalid_configuration");
+	}
 	if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
 		throw new CealEnrollmentClientError("invalid_configuration");
 	}
@@ -101,7 +109,10 @@ async function readBounded(response: Response): Promise<Uint8Array> {
 	}
 	const result = new Uint8Array(total);
 	let offset = 0;
-	for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+	for (const chunk of chunks) {
+		result.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
 	return result;
 }
 

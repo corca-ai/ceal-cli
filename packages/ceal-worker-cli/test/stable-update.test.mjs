@@ -136,13 +136,16 @@ exit 1
 }
 
 function writeWorkerBinary(file, version) {
-	writeFileSync(file, `#!/usr/bin/env sh
+	writeFileSync(
+		file,
+		`#!/usr/bin/env sh
 if [ "\${1:-}" = version ]; then
   printf 'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: ${version}\\n'
   exit 0
 fi
 exit 2
-`);
+`,
+	);
 	chmodSync(file, 0o755);
 }
 

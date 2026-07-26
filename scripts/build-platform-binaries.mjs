@@ -9,8 +9,8 @@ import {
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -72,14 +72,23 @@ export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 		const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
 		writeFileSync(path.join(normalized.outputDir, manifestName), manifestBytes, { mode: 0o644 });
 		writeFileSync(path.join(normalized.outputDir, noticeName), noticeBytes, { mode: 0o644 });
-		const checksummed = [...artifacts.map((item) => ({ name: item.name, sha256: item.sha256 })), ...guides.map((item) => ({ name: item.name, sha256: item.sha256 })), {
-			name: manifestName,
-			sha256: digest(manifestBytes),
-		}, {
-			name: noticeName,
-			sha256: digest(noticeBytes),
-		}].sort((left, right) => left.name.localeCompare(right.name));
-		writeFileSync(path.join(normalized.outputDir, "SHA256SUMS"), checksummed.map((item) => `${item.sha256}  ${item.name}`).join("\n") + "\n", { mode: 0o644 });
+		const checksummed = [
+			...artifacts.map((item) => ({ name: item.name, sha256: item.sha256 })),
+			...guides.map((item) => ({ name: item.name, sha256: item.sha256 })),
+			{
+				name: manifestName,
+				sha256: digest(manifestBytes),
+			},
+			{
+				name: noticeName,
+				sha256: digest(noticeBytes),
+			},
+		].sort((left, right) => left.name.localeCompare(right.name));
+		writeFileSync(
+			path.join(normalized.outputDir, "SHA256SUMS"),
+			checksummed.map((item) => `${item.sha256}  ${item.name}`).join("\n") + "\n",
+			{ mode: 0o644 },
+		);
 		return {
 			schema_version: "ceal.cli_platform_binary_build.v1",
 			ok: true,
@@ -104,9 +113,11 @@ export async function buildCealCliPlatformBinaries(options = {}, deps = {}) {
 
 function buildGuideAssets(normalized, deps) {
 	const guides = normalized.contract.guides;
-	if (!guides || typeof guides !== "object" || Array.isArray(guides)) fail("guide_contract_invalid", "Release contract must declare signed guide assets.");
+	if (!guides || typeof guides !== "object" || Array.isArray(guides))
+		fail("guide_contract_invalid", "Release contract must declare signed guide assets.");
 	return Object.entries(guides).map(([id, candidate]) => {
-		if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) fail("guide_contract_invalid", "Release contract guide entry is invalid.");
+		if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+			fail("guide_contract_invalid", "Release contract guide entry is invalid.");
 		const guide = candidate;
 		const sourcePath = resolveGuideSource(guide.path);
 		const name = requirePattern(guide.asset, "guide asset", /^[a-z][a-z0-9-]{0,63}-SKILL[.]md$/u);
@@ -194,7 +205,8 @@ function assertReleaseVersion(contract, version) {
 function assertPackageIdentities(deps, version) {
 	for (const command of COMMANDS) {
 		const manifest = (deps.readPackageManifest ?? readPackageManifest)(command);
-		if (manifest.version !== version || manifest.bin?.[command.id] !== "./dist/bin.js") fail("version_mismatch", "CLI package identity must match the release contract.");
+		if (manifest.version !== version || manifest.bin?.[command.id] !== "./dist/bin.js")
+			fail("version_mismatch", "CLI package identity must match the release contract.");
 	}
 }
 
@@ -203,7 +215,8 @@ function requireTargetPlatform(contract, platform, deps) {
 	if (!Array.isArray(supported) || !supported.includes(platform)) {
 		fail("unsupported_platform", "Platform must match the release contract native build matrix.");
 	}
-	if (platform !== (deps.currentPlatform ?? currentPlatform)()) fail("platform_mismatch", "Platform binaries must be built on their target architecture.");
+	if (platform !== (deps.currentPlatform ?? currentPlatform)())
+		fail("platform_mismatch", "Platform binaries must be built on their target architecture.");
 	return platform;
 }
 
@@ -243,7 +256,15 @@ function safeMarker(outputDir) {
 async function bundleCommand({ command, bundlePath }) {
 	const entry = path.join(ROOT, "packages", command.packageDir, "dist", "bin.js");
 	if (!existsSync(entry)) fail("build_failed", "Current source build did not produce a required CLI entrypoint.");
-	await esbuild.build({ bundle: true, entryPoints: [entry], format: "cjs", logLevel: "silent", outfile: bundlePath, platform: "node", target: "node22" });
+	await esbuild.build({
+		bundle: true,
+		entryPoints: [entry],
+		format: "cjs",
+		logLevel: "silent",
+		outfile: bundlePath,
+		platform: "node",
+		target: "node22",
+	});
 }
 
 export function buildCurrentSource(options = {}) {
@@ -263,15 +284,23 @@ function runRootBuild(root) {
 
 function createBlob({ bundlePath, blobPath, work, command }) {
 	const config = path.join(work, `${command}.sea.json`);
-	writeFileSync(config, `${JSON.stringify({
-		main: path.basename(bundlePath),
-		output: path.basename(blobPath),
-		executable: process.execPath,
-		disableExperimentalSEAWarning: true,
-		useCodeCache: false,
-		useSnapshot: false,
-		execArgvExtension: "none",
-	}, null, 2)}\n`, { mode: 0o644 });
+	writeFileSync(
+		config,
+		`${JSON.stringify(
+			{
+				main: path.basename(bundlePath),
+				output: path.basename(blobPath),
+				executable: process.execPath,
+				disableExperimentalSEAWarning: true,
+				useCodeCache: false,
+				useSnapshot: false,
+				execArgvExtension: "none",
+			},
+			null,
+			2,
+		)}\n`,
+		{ mode: 0o644 },
+	);
 	execFileSync(process.execPath, ["--experimental-sea-config", path.basename(config)], { cwd: work, stdio: "pipe" });
 }
 
@@ -280,20 +309,24 @@ function copyRuntime({ artifactPath }) {
 }
 
 function injectBlob({ artifactPath, blobPath, postjectCli }) {
-	execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite"], { stdio: "pipe" });
+	execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite"], {
+		stdio: "pipe",
+	});
 }
 
 function smokeBinary({ artifactPath, command, expectedVersion }) {
 	const smokeHome = mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-smoke-home-"));
-	const run = (args) => execFileSync(artifactPath, args, {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, HOME: smokeHome },
-	});
+	const run = (args) =>
+		execFileSync(artifactPath, args, {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, HOME: smokeHome },
+		});
 	try {
 		const version = parse(run(["version"]));
 		const help = run(["--help"]);
-		if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help)) fail("smoke_failed", "Built command identity or help did not match.");
+		if (version.command !== command.id || version.version !== expectedVersion || !help.includes(command.help))
+			fail("smoke_failed", "Built command identity or help did not match.");
 		const discovery = parse(run(["commands"]));
 		const discoveredCommands = Array.isArray(discovery?.commands)
 			? discovery.commands.map((item) => item?.name).filter((name) => typeof name === "string")
@@ -319,9 +352,10 @@ function smokeBinary({ artifactPath, command, expectedVersion }) {
 }
 
 export function assertRequiredCommandDiscovery(discoveredCommands, requiredCommands, command = "CLI") {
-	const missing = Array.isArray(discoveredCommands) && Array.isArray(requiredCommands)
-		? requiredCommands.filter((name) => !discoveredCommands.includes(name))
-		: ["invalid discovery document"];
+	const missing =
+		Array.isArray(discoveredCommands) && Array.isArray(requiredCommands)
+			? requiredCommands.filter((name) => !discoveredCommands.includes(name))
+			: ["invalid discovery document"];
 	if (missing.length > 0) fail("smoke_failed", `Built ${command} command discovery omitted required commands: ${missing.join(", ")}.`);
 }
 
@@ -334,7 +368,9 @@ function buildManifest(normalized, artifacts, guides, notices) {
 		platform: normalized.platform,
 		protocol: normalized.contract.protocol,
 		artifacts: Object.fromEntries(artifacts.map((item) => [item.id, { name: item.name, bytes: item.bytes, sha256: item.sha256 }])),
-		guides: Object.fromEntries(guides.map((item) => [item.id, { name: item.name, binary: item.binary, bytes: item.bytes, sha256: item.sha256 }])),
+		guides: Object.fromEntries(
+			guides.map((item) => [item.id, { name: item.name, binary: item.binary, bytes: item.bytes, sha256: item.sha256 }]),
+		),
 		third_party_notices: notices,
 		signature_policy: {
 			method: "cosign_keyless_blob",
@@ -342,9 +378,7 @@ function buildManifest(normalized, artifacts, guides, notices) {
 			workflow: "corca-ai/ceal-cli/.github/workflows/cealctl-release.yml",
 			workflow_ref: `refs/tags/v${normalized.version}`,
 		},
-		non_claims: [
-			"This manifest does not itself prove a signature, tag, draft release, upload, publication, or installation.",
-		],
+		non_claims: ["This manifest does not itself prove a signature, tag, draft release, upload, publication, or installation."],
 	};
 }
 
@@ -364,7 +398,11 @@ function currentPlatform() {
 }
 
 function readJson(file, label) {
-	try { return JSON.parse(readFileSync(file, "utf8")); } catch { fail("invalid_input", `Invalid ${label}.`); }
+	try {
+		return JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		fail("invalid_input", `Invalid ${label}.`);
+	}
 }
 
 function requirePattern(value, label, pattern) {
@@ -374,7 +412,8 @@ function requirePattern(value, label, pattern) {
 }
 
 function requireString(value, label) {
-	if (typeof value !== "string" || value.length === 0 || value.length > 512 || /[\r\n]/u.test(value)) fail("invalid_argument", `Invalid ${label}.`);
+	if (typeof value !== "string" || value.length === 0 || value.length > 512 || /[\r\n]/u.test(value))
+		fail("invalid_argument", `Invalid ${label}.`);
 	return value;
 }
 
@@ -383,7 +422,9 @@ function digest(bytes) {
 }
 
 function normalizeError(error) {
-	return error instanceof CealCliPlatformBuildError ? error : new CealCliPlatformBuildError("build_failed", "Could not build Ceal CLI platform binaries.");
+	return error instanceof CealCliPlatformBuildError
+		? error
+		: new CealCliPlatformBuildError("build_failed", "Could not build Ceal CLI platform binaries.");
 }
 
 function fail(code, message) {
@@ -398,7 +439,8 @@ function parseArgs(argv) {
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") json = true;
 		else if (arg === "--force") options.force = true;
-		else if (["--version", "--platform", "--out"].includes(arg)) options[arg.slice(2) === "out" ? "outputDir" : arg.slice(2)] = requireString(argv[++index], arg);
+		else if (["--version", "--platform", "--out"].includes(arg))
+			options[arg.slice(2) === "out" ? "outputDir" : arg.slice(2)] = requireString(argv[++index], arg);
 		else fail("invalid_argument", "Unexpected platform build argument.");
 	}
 	return { help: false, json, options };
@@ -418,10 +460,17 @@ export async function runCli(argv, io = console, deps = {}) {
 		return 0;
 	} catch (error) {
 		const normalized = normalizeError(error);
-		const payload = { schema_version: "ceal.cli_platform_binary_build_error.v1", ok: false, error_code: normalized.code, message: normalized.message };
-		if (json) io.log(JSON.stringify(payload)); else io.error(payload.message);
+		const payload = {
+			schema_version: "ceal.cli_platform_binary_build_error.v1",
+			ok: false,
+			error_code: normalized.code,
+			message: normalized.message,
+		};
+		if (json) io.log(JSON.stringify(payload));
+		else io.error(payload.message);
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+	process.exitCode = await runCli(process.argv.slice(2));

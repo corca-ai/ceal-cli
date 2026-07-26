@@ -12,13 +12,28 @@ function fakeTty(overrides = {}) {
 	return {
 		isTTY: true,
 		isRaw: false,
-		setRawMode(mode) { calls.setRawMode.push(mode); this.isRaw = mode; },
-		resume() { calls.resume += 1; },
-		pause() { calls.pause += 1; },
-		on(event, fn) { listeners[event].push(fn); },
-		once(event, fn) { listeners[event].push(fn); },
-		off(event, fn) { listeners[event] = listeners[event].filter((listener) => listener !== fn); },
-		emit(event, ...args) { for (const fn of [...listeners[event]]) fn(...args); },
+		setRawMode(mode) {
+			calls.setRawMode.push(mode);
+			this.isRaw = mode;
+		},
+		resume() {
+			calls.resume += 1;
+		},
+		pause() {
+			calls.pause += 1;
+		},
+		on(event, fn) {
+			listeners[event].push(fn);
+		},
+		once(event, fn) {
+			listeners[event].push(fn);
+		},
+		off(event, fn) {
+			listeners[event] = listeners[event].filter((listener) => listener !== fn);
+		},
+		emit(event, ...args) {
+			for (const fn of [...listeners[event]]) fn(...args);
+		},
 		_calls: calls,
 		_listeners: listeners,
 		...overrides,
@@ -26,7 +41,13 @@ function fakeTty(overrides = {}) {
 }
 
 function fakeStatus() {
-	return { isTTY: true, writes: [], write(chunk) { this.writes.push(chunk); } };
+	return {
+		isTTY: true,
+		writes: [],
+		write(chunk) {
+			this.writes.push(chunk);
+		},
+	};
 }
 
 test("hidden reader returns the typed code and releases the resumed stdin handle", async () => {

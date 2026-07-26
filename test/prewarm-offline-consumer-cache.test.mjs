@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-	consumerDependencyClosure,
-	lockPackages,
-	readConsumerClosure,
-} from "../scripts/prewarm-offline-consumer-cache.mjs";
+import { consumerDependencyClosure, lockPackages, readConsumerClosure } from "../scripts/prewarm-offline-consumer-cache.mjs";
 
 function lockOf(packages) {
 	return { packages };
@@ -70,7 +66,10 @@ test("every pinned version of a colliding name is prewarmed", () => {
 	const shared = closure.filter(({ name }) => name === "shared").map(({ version }) => version);
 	assert.deepEqual(shared, ["1.0.0", "2.0.0"], "both pinned versions must be cached");
 	// The nested version's own edges must be walked too, or `deep` is missed.
-	assert.ok(closure.some(({ name }) => name === "deep"), "a nested version's transitive must be reached");
+	assert.ok(
+		closure.some(({ name }) => name === "deep"),
+		"a nested version's transitive must be reached",
+	);
 });
 
 test("peer and dev edges are followed, and the owned scope never is", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,16 +24,28 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	const otherPlatform = platform.endsWith("arm64") ? platform.replace("arm64", "amd64") : platform.replace("amd64", "arm64");
 	assert.equal(result.platform, platform);
 	assert.deepEqual(result.consumer_smoke, {
-		command: "ceal", installed_from_packed_archives: true, source_or_workspace_fallback_used: false,
+		command: "ceal",
+		installed_from_packed_archives: true,
+		source_or_workspace_fallback_used: false,
 	});
 	assert.equal(result.native_smoke.command, "ceal");
 	assert.equal(result.native_smoke.operator_surface_absent, true);
 	const files = readdirSync(output).sort();
-	assert.deepEqual(files, [
-		".ceal-worker-native-artifact", "SHA256SUMS", "THIRD_PARTY_NOTICES.txt", "ceal-guide-SKILL.md",
-		"ceal-worker-native-artifact-manifest.json", result.artifact.name,
-	].sort());
-	assert.equal(files.some((name) => name.includes("cealctl")), false);
+	assert.deepEqual(
+		files,
+		[
+			".ceal-worker-native-artifact",
+			"SHA256SUMS",
+			"THIRD_PARTY_NOTICES.txt",
+			"ceal-guide-SKILL.md",
+			"ceal-worker-native-artifact-manifest.json",
+			result.artifact.name,
+		].sort(),
+	);
+	assert.equal(
+		files.some((name) => name.includes("cealctl")),
+		false,
+	);
 	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
 	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
@@ -68,10 +80,18 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	});
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => !name.startsWith(".") && name !== "SHA256SUMS")) {
-		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)), true);
+		assert.equal(
+			sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)),
+			true,
+		);
 	}
 	await assert.rejects(
-		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "cross-platform"), platform: otherPlatform, ...fixture }),
+		() =>
+			buildWorkerNativeArtifactFromDevelopmentInputs({
+				outputDirectory: path.join(fixture.root, "cross-platform"),
+				platform: otherPlatform,
+				...fixture,
+			}),
 		hasCode("platform_mismatch"),
 	);
 });
@@ -83,24 +103,47 @@ test("darwin native build removes, injects, then ad-hoc signs in order", async (
 	const fixture = packedProtocolFixture(context);
 	const output = path.join(fixture.root, "worker-native-darwin");
 	const steps = [];
-	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture }, {
-		currentPlatform: () => "darwin-arm64",
-		bundle: async ({ bundlePath }) => writeFileSync(bundlePath, "bundle\n"),
-		createBlob: ({ blobPath }) => writeFileSync(blobPath, "blob\n"),
-		copyRuntime: ({ artifactPath }) => writeFileSync(artifactPath, "runtime\n"),
-		removeMachoSignature: ({ artifactPath }) => { steps.push("remove-signature"); writeFileSync(artifactPath, "unsigned\n"); },
-		injectBlob: ({ artifactPath, platform }) => { steps.push(`inject:${platform}`); writeFileSync(artifactPath, "injected\n"); },
-		signMachoAdhoc: ({ artifactPath }) => { steps.push("adhoc-sign"); writeFileSync(artifactPath, "signed\n"); },
-		resolvePostjectCli: () => "postject-fixture",
-		smoke: ({ artifactPath, version }) => ({ command: "ceal", version, help: true, required_commands: [], operator_surface_absent: true, fixture_artifact: path.basename(artifactPath) }),
-	});
+	const result = await buildWorkerNativeArtifactFromDevelopmentInputs(
+		{ outputDirectory: output, ...fixture },
+		{
+			currentPlatform: () => "darwin-arm64",
+			bundle: async ({ bundlePath }) => writeFileSync(bundlePath, "bundle\n"),
+			createBlob: ({ blobPath }) => writeFileSync(blobPath, "blob\n"),
+			copyRuntime: ({ artifactPath }) => writeFileSync(artifactPath, "runtime\n"),
+			removeMachoSignature: ({ artifactPath }) => {
+				steps.push("remove-signature");
+				writeFileSync(artifactPath, "unsigned\n");
+			},
+			injectBlob: ({ artifactPath, platform }) => {
+				steps.push(`inject:${platform}`);
+				writeFileSync(artifactPath, "injected\n");
+			},
+			signMachoAdhoc: ({ artifactPath }) => {
+				steps.push("adhoc-sign");
+				writeFileSync(artifactPath, "signed\n");
+			},
+			resolvePostjectCli: () => "postject-fixture",
+			smoke: ({ artifactPath, version }) => ({
+				command: "ceal",
+				version,
+				help: true,
+				required_commands: [],
+				operator_surface_absent: true,
+				fixture_artifact: path.basename(artifactPath),
+			}),
+		},
+	);
 	assert.equal(result.ok, true);
 	assert.equal(result.platform, "darwin-arm64");
 	assert.equal(result.artifact.name, "ceal-darwin-arm64");
 	assert.deepEqual(steps, ["remove-signature", "inject:darwin-arm64", "adhoc-sign"]);
 	assert.equal(readFileSync(path.join(output, "ceal-darwin-arm64"), "utf8"), "signed\n");
 	await assert.rejects(
-		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "darwin-cross"), platform: "linux-arm64", ...fixture }, { currentPlatform: () => "darwin-arm64" }),
+		() =>
+			buildWorkerNativeArtifactFromDevelopmentInputs(
+				{ outputDirectory: path.join(fixture.root, "darwin-cross"), platform: "linux-arm64", ...fixture },
+				{ currentPlatform: () => "darwin-arm64" },
+			),
 		hasCode("platform_mismatch"),
 	);
 });
@@ -126,21 +169,29 @@ function writeStoredSession(home, endpoint) {
 	const directory = path.join(home, ".ceal");
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	chmodSync(directory, 0o700);
-	writeFileSync(path.join(directory, "client-session.json"), `${JSON.stringify({
-		schema_version: "ceal.client_session_store.v1",
-		gateway_endpoint: endpoint,
-		profile_ref: "profile:native-fixture",
-		membership_ref: "membership:native-fixture",
-		registration_ref: "registration:native-fixture",
-		client_ref: "client:native-fixture",
-		subject_ref: "subject:native-fixture",
-		instance_ref: "instance:native-fixture",
-		access_token: `ceal_personal_${"P".repeat(43)}`,
-		expires_at: "2099-07-14T00:00:00.000Z",
-		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-	}, null, 2)}\n`, { mode: 0o600 });
+	writeFileSync(
+		path.join(directory, "client-session.json"),
+		`${JSON.stringify(
+			{
+				schema_version: "ceal.client_session_store.v1",
+				gateway_endpoint: endpoint,
+				profile_ref: "profile:native-fixture",
+				membership_ref: "membership:native-fixture",
+				registration_ref: "registration:native-fixture",
+				client_ref: "client:native-fixture",
+				subject_ref: "subject:native-fixture",
+				instance_ref: "instance:native-fixture",
+				access_token: `ceal_personal_${"P".repeat(43)}`,
+				expires_at: "2099-07-14T00:00:00.000Z",
+				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+			},
+			null,
+			2,
+		)}\n`,
+		{ mode: 0o600 },
+	);
 }
 
 async function runArtifact(artifact, args, home) {
@@ -149,8 +200,12 @@ async function runArtifact(artifact, args, home) {
 	let stderr = "";
 	child.stdout.setEncoding("utf8");
 	child.stderr.setEncoding("utf8");
-	child.stdout.on("data", (chunk) => { stdout += chunk; });
-	child.stderr.on("data", (chunk) => { stderr += chunk; });
+	child.stdout.on("data", (chunk) => {
+		stdout += chunk;
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += chunk;
+	});
 	const code = await new Promise((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", resolve);
@@ -164,12 +219,14 @@ async function withFailureGateway(callback) {
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(JSON.stringify({
-			ok: false,
-			request_id: body.request_id,
-			protocol_version: "1.3.0",
-			error: { code: "continuation_not_available", message: "server-controlled", next_action: "server-controlled" },
-		}));
+		response.end(
+			JSON.stringify({
+				ok: false,
+				request_id: body.request_id,
+				protocol_version: "1.3.0",
+				error: { code: "continuation_not_available", message: "server-controlled", next_action: "server-controlled" },
+			}),
+		);
 	});
 	await new Promise((resolve, reject) => {
 		server.once("error", reject);
@@ -177,6 +234,9 @@ async function withFailureGateway(callback) {
 	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("fixture Gateway address unavailable");
-	try { await callback(`http://127.0.0.1:${address.port}/gateway/client`); }
-	finally { await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+	try {
+		await callback(`http://127.0.0.1:${address.port}/gateway/client`);
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	}
 }

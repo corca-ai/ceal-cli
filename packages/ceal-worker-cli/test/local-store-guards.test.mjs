@@ -3,13 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, write
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-	assertDirectory,
-	assertFile,
-	prepareDirectory,
-	removableFile,
-	safeExistingFile,
-} from "../dist/local-store-guards.js";
+import { assertDirectory, assertFile, prepareDirectory, removableFile, safeExistingFile } from "../dist/local-store-guards.js";
 
 class Refused extends Error {}
 function unsafe() {

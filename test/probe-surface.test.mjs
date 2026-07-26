@@ -15,7 +15,12 @@ function probe(args) {
 // The incident this guard exists for: `ceal session logout` sat in a list of
 // otherwise read-only spot checks and revoked a live Gateway client session.
 test("a declared non-read-only route is refused as a probe", () => {
-	for (const args of [["ceal", "session", "logout"], ["ceal", "guide", "register", "codex"], ["ceal", "update"], ["cealctl", "connectors", "apply", "--stdin"]]) {
+	for (const args of [
+		["ceal", "session", "logout"],
+		["ceal", "guide", "register", "codex"],
+		["ceal", "update"],
+		["cealctl", "connectors", "apply", "--stdin"],
+	]) {
 		const result = probe(args);
 		assert.equal(result.status, 2, args.join(" "));
 		assert.match(result.stderr, /refusing '/u);
@@ -61,7 +66,8 @@ test("the escape hatch is explicit and still isolated", () => {
 test("an inherited agent-host override cannot aim a probed write at real state", () => {
 	const sentinel = path.join(path.sep, "tmp", "ceal-probe-sentinel-claude-config");
 	const result = spawnSync(process.execPath, [GUARD, "--allow-effect", "local_write", "ceal", "guide", "register", "claude"], {
-		encoding: "utf8", cwd: ROOT,
+		encoding: "utf8",
+		cwd: ROOT,
 		env: { ...process.env, CLAUDE_CONFIG_DIR: sentinel, XDG_RUNTIME_DIR: sentinel },
 	});
 	assert.match(result.stdout, /^schema_version: ceal\.guide\.v1$/mu);

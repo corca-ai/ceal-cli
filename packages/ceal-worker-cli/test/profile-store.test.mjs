@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createCealSessionStore, CealSessionStoreError } from "../dist/profile-store.js";
+import { CealSessionStoreError, createCealSessionStore } from "../dist/profile-store.js";
 
 const SESSION = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
@@ -66,5 +66,9 @@ function hasCode(code) {
 
 async function withHome(callback) {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-profile-store-"));
-	try { await callback(home); } finally { rmSync(home, { recursive: true, force: true }); }
+	try {
+		await callback(home);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
 }

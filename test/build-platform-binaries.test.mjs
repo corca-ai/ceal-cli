@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, URL } from "node:url";
 import test from "node:test";
+import { fileURLToPath, URL } from "node:url";
 import {
 	assertRequiredCommandDiscovery,
 	buildCealCliPlatformBinaries,
@@ -21,25 +21,39 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 		await withTempDir(async (root) => {
 			const calls = [];
 			const outputDir = path.join(root, "release");
-			const result = await buildCealCliPlatformBinaries({
-				version: "0.65.0",
-				platform,
-				outputDir,
-			}, fakeDeps(calls, platform));
+			const result = await buildCealCliPlatformBinaries(
+				{
+					version: "0.65.0",
+					platform,
+					outputDir,
+				},
+				fakeDeps(calls, platform),
+			);
 			assert.equal(result.ok, true);
 			assert.equal(result.writes_external, false);
-			assert.deepEqual(result.artifacts.map((item) => item.id), ["ceal", "cealctl"]);
-			assert.deepEqual(result.guides.map((item) => item.id), ["ceal-guide", "cealctl-guide"]);
-			assert.deepEqual(result.guides.map((item) => item.binary), ["ceal", "cealctl"]);
-			assert.deepEqual(result.artifacts.map((item) => item.smoke.required_commands), [
-				["update", "session", "guide", "capabilities", "call", "receipt"],
-				["login", "sessions", "logout", "access", "connectors", "enrollments"],
-			]);
-			assert.deepEqual(calls.map((item) => item.kind), [
-				"source",
-				"bundle", "blob", "runtime", "inject", "smoke",
-				"bundle", "blob", "runtime", "inject", "smoke",
-			]);
+			assert.deepEqual(
+				result.artifacts.map((item) => item.id),
+				["ceal", "cealctl"],
+			);
+			assert.deepEqual(
+				result.guides.map((item) => item.id),
+				["ceal-guide", "cealctl-guide"],
+			);
+			assert.deepEqual(
+				result.guides.map((item) => item.binary),
+				["ceal", "cealctl"],
+			);
+			assert.deepEqual(
+				result.artifacts.map((item) => item.smoke.required_commands),
+				[
+					["update", "session", "guide", "capabilities", "call", "receipt"],
+					["login", "sessions", "logout", "access", "connectors", "enrollments"],
+				],
+			);
+			assert.deepEqual(
+				calls.map((item) => item.kind),
+				["source", "bundle", "blob", "runtime", "inject", "smoke", "bundle", "blob", "runtime", "inject", "smoke"],
+			);
 			const manifest = JSON.parse(readFileSync(path.join(outputDir, result.manifest.name), "utf8"));
 			assert.equal(manifest.schema_version, "ceal.cli_platform_release_manifest.v1");
 			assert.equal(manifest.artifact_state, "unsigned_build_output");
@@ -71,7 +85,8 @@ for (const platform of ["linux-arm64", "linux-amd64"]) {
 test("rejects cross-platform builds, version drift, and unsafe replacement", async () => {
 	await withTempDir(async (root) => {
 		await assert.rejects(
-			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "darwin-arm64", outputDir: path.join(root, "unsupported") }, fakeDeps([])),
+			() =>
+				buildCealCliPlatformBinaries({ version: "0.65.0", platform: "darwin-arm64", outputDir: path.join(root, "unsupported") }, fakeDeps([])),
 			hasCode("unsupported_platform"),
 		);
 		await assert.rejects(
@@ -94,11 +109,14 @@ test("rejects cross-platform builds, version drift, and unsafe replacement", asy
 test("builds current source once before bundling either command", async () => {
 	await withTempDir(async (root) => {
 		const calls = [];
-		await buildCealCliPlatformBinaries({
-			version: "0.65.0",
-			platform: "linux-arm64",
-			outputDir: path.join(root, "release"),
-		}, fakeDeps(calls));
+		await buildCealCliPlatformBinaries(
+			{
+				version: "0.65.0",
+				platform: "linux-arm64",
+				outputDir: path.join(root, "release"),
+			},
+			fakeDeps(calls),
+		);
 		assert.equal(calls.filter((item) => item.kind === "source").length, 1);
 		assert.equal(calls[0].kind, "source");
 		assert.equal(calls[1].kind, "bundle");
@@ -153,7 +171,9 @@ test("source build failure precedes release output mutation", async () => {
 		await buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir }, workingDeps);
 		const existingArtifact = readFileSync(path.join(outputDir, "ceal-linux-arm64"));
 		const deps = fakeDeps([]);
-		deps.buildSource = () => { throw new Error("compiler details stay private"); };
+		deps.buildSource = () => {
+			throw new Error("compiler details stay private");
+		};
 		await assert.rejects(
 			() => buildCealCliPlatformBinaries({ version: "0.65.0", platform: "linux-arm64", outputDir, force: true }, deps),
 			hasCode("build_failed"),
@@ -165,14 +185,15 @@ test("source build failure precedes release output mutation", async () => {
 test("CLI reports source build failure as one bounded JSON document", async () => {
 	await withTempDir(async (root) => {
 		const deps = fakeDeps([]);
-		deps.buildSource = () => { throw new Error("sensitive compiler details"); };
+		deps.buildSource = () => {
+			throw new Error("sensitive compiler details");
+		};
 		const lines = [];
-		const status = await runCli([
-			"--version", "0.65.0",
-			"--platform", "linux-arm64",
-			"--out", path.join(root, "release"),
-			"--json",
-		], { log: (line) => lines.push(line), error: (line) => lines.push(line) }, deps);
+		const status = await runCli(
+			["--version", "0.65.0", "--platform", "linux-arm64", "--out", path.join(root, "release"), "--json"],
+			{ log: (line) => lines.push(line), error: (line) => lines.push(line) },
+			deps,
+		);
 		assert.equal(status, 2);
 		assert.equal(lines.length, 1);
 		assert.deepEqual(JSON.parse(lines[0]), {
@@ -186,22 +207,36 @@ test("CLI reports source build failure as one bounded JSON document", async () =
 });
 
 test("rejects platform artifacts that omit required enrollment and agent-guide workflow commands", () => {
-	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
-		["version", "update", "session", "guide", "capabilities", "call", "receipt"],
-		["update", "session", "guide", "capabilities", "call", "receipt"],
-	));
+	assert.doesNotThrow(() =>
+		assertRequiredCommandDiscovery(
+			["version", "update", "session", "guide", "capabilities", "call", "receipt"],
+			["update", "session", "guide", "capabilities", "call", "receipt"],
+		),
+	);
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "session", "capabilities"], ["update", "session", "guide", "capabilities", "call", "receipt"]),
+		() =>
+			assertRequiredCommandDiscovery(
+				["version", "session", "capabilities"],
+				["update", "session", "guide", "capabilities", "call", "receipt"],
+			),
 		hasCode("smoke_failed"),
 	);
-	assert.doesNotThrow(() => assertRequiredCommandDiscovery(
-		["version", "login", "sessions", "logout", "access", "connectors", "enrollments"],
-		["login", "sessions", "logout", "access", "connectors", "enrollments"],
-	));
+	assert.doesNotThrow(() =>
+		assertRequiredCommandDiscovery(
+			["version", "login", "sessions", "logout", "access", "connectors", "enrollments"],
+			["login", "sessions", "logout", "access", "connectors", "enrollments"],
+		),
+	);
 	assert.throws(
-		() => assertRequiredCommandDiscovery(["version", "enrollments"], ["login", "sessions", "logout", "access", "connectors", "enrollments"], "cealctl"),
-		(error) => hasCode("smoke_failed")(error)
-			&& error.message === "Built cealctl command discovery omitted required commands: login, sessions, logout, access, connectors.",
+		() =>
+			assertRequiredCommandDiscovery(
+				["version", "enrollments"],
+				["login", "sessions", "logout", "access", "connectors", "enrollments"],
+				"cealctl",
+			),
+		(error) =>
+			hasCode("smoke_failed")(error) &&
+			error.message === "Built cealctl command discovery omitted required commands: login, sessions, logout, access, connectors.",
 	);
 });
 
@@ -267,7 +302,11 @@ function hasCode(code) {
 
 async function withTempDir(callback) {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-cli-platform-test-")));
-	try { await callback(root); } finally { rmSync(root, { recursive: true, force: true }); }
+	try {
+		await callback(root);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 }
 
 function digest(bytes) {

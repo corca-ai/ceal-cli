@@ -68,18 +68,23 @@ for (const token of tail) {
 }
 let route = definition;
 for (let length = leading.length; length > 0; length -= 1) {
-	const match = subcommands.find((entry) => entry.parent === command
-		&& entry.route.length === length
-		&& entry.route.every((token, index) => token === leading[index]));
-	if (match) { route = match; break; }
+	const match = subcommands.find(
+		(entry) => entry.parent === command && entry.route.length === length && entry.route.every((token, index) => token === leading[index]),
+	);
+	if (match) {
+		route = match;
+		break;
+	}
 }
 
 const name = route.route ? `${command} ${route.route.join(" ")}` : command;
 const isHelp = tail.some((token) => token === "--help" || token === "-h");
 if (!isHelp && !allowed.has(route.effect)) {
-	fail(`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n`
-		+ `  A probe must not change state. Pass --allow-effect ${route.effect} to run it in the\n`
-		+ `  throwaway HOME anyway, or run the installed binary directly and deliberately.`);
+	fail(
+		`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n` +
+			`  A probe must not change state. Pass --allow-effect ${route.effect} to run it in the\n` +
+			`  throwaway HOME anyway, or run the installed binary directly and deliberately.`,
+	);
 }
 
 const home = mkdtempSync(path.join(tmpdir(), "ceal-probe-home-"));

@@ -35,11 +35,12 @@ test("client adds the public protocol version without assuming a Gateway transpo
 });
 
 test("client rejects request identifiers that are unsafe to correlate", async () => {
-	const client = createCealClient({ send: async () => { throw new Error("must not send"); } });
-	await assert.rejects(
-		client.request({ request_id: "contains whitespace", operation: "discover", body: {} }),
-		/redaction-safe identifier/u,
-	);
+	const client = createCealClient({
+		send: async () => {
+			throw new Error("must not send");
+		},
+	});
+	await assert.rejects(client.request({ request_id: "contains whitespace", operation: "discover", body: {} }), /redaction-safe identifier/u);
 });
 
 test("wire DTO ownership stays in protocol while client re-exports the public types", async () => {

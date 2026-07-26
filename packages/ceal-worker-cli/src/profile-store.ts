@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { type Stats, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, type Stats, writeFileSync } from "node:fs";
 import path from "node:path";
 import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
 
@@ -51,17 +51,23 @@ export function createCealSessionStore(home: string | undefined): {
 			return readSessionFile(directory, file);
 		},
 		async save(session) {
-			return withStateLock(directory, async () => { writeSessionFile(directory, file, session); });
+			return withStateLock(directory, async () => {
+				writeSessionFile(directory, file, session);
+			});
 		},
 		async remove() {
-			return withStateLock(directory, async () => { removeSessionFile(directory, file); });
+			return withStateLock(directory, async () => {
+				removeSessionFile(directory, file);
+			});
 		},
 		async withStateLock(action) {
-			return withStateLock(directory, async () => action({
-				load: async () => readSessionFile(directory, file),
-				replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
-				remove: async () => removeSessionFile(directory, file),
-			}));
+			return withStateLock(directory, async () =>
+				action({
+					load: async () => readSessionFile(directory, file),
+					replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
+					remove: async () => removeSessionFile(directory, file),
+				}),
+			);
 		},
 	};
 }
@@ -71,7 +77,11 @@ function readSessionFile(directory: string, file: string): CealStoredSession | n
 	assertDirectory(directory, unsafeSessionStore, true);
 	assertFile(file, unsafeSessionStore, true);
 	let parsed: unknown;
-	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { throw new CealSessionStoreError("invalid_store"); }
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		throw new CealSessionStoreError("invalid_store");
+	}
 	return parseSession(parsed);
 }
 
@@ -108,7 +118,11 @@ async function withStateLock<T>(directory: string, action: () => Promise<T>): Pr
 	try {
 		return await action();
 	} finally {
-		try { release(); } catch { /* A stale lock fails closed and expires within the bounded wait. */ }
+		try {
+			release();
+		} catch {
+			/* A stale lock fails closed and expires within the bounded wait. */
+		}
 	}
 }
 
@@ -116,14 +130,18 @@ async function acquireStateLock(lockPath: string): Promise<() => void> {
 	const deadline = Date.now() + STATE_LOCK_MAX_WAIT_MS;
 	while (true) {
 		const nonce = createStateLock(lockPath);
-		if (nonce) return () => { releaseStateLock(lockPath, nonce); };
+		if (nonce)
+			return () => {
+				releaseStateLock(lockPath, nonce);
+			};
 		await waitForStateLock(lockPath, deadline);
 	}
 }
 
 function createStateLock(lockPath: string): string | null {
-	try { mkdirSync(lockPath, { mode: 0o700 }); }
-	catch (error) {
+	try {
+		mkdirSync(lockPath, { mode: 0o700 });
+	} catch (error) {
 		if (nodeErrorCode(error) === "EEXIST") return null;
 		throw new CealSessionStoreError("unsafe_store");
 	}
@@ -161,7 +179,9 @@ function staleStateLockOwner(lockPath: string): { pid: number; nonce: string } |
 	if (!lock) return null;
 	const ownerPath = path.join(lockPath, STATE_LOCK_OWNER);
 	let owner: Stats;
-	try { owner = lstatSync(ownerPath); } catch {
+	try {
+		owner = lstatSync(ownerPath);
+	} catch {
 		return Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
 	}
 	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) throw new CealSessionStoreError("unsafe_store");
@@ -183,8 +203,10 @@ function readSafeStateLockDirectory(lockPath: string) {
 }
 
 function processMissing(pid: number): boolean {
-	try { process.kill(pid, 0); return false; }
-	catch (error) {
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch (error) {
 		if (nodeErrorCode(error) === "ESRCH") return true;
 		throw new CealSessionStoreError("unsafe_store");
 	}
@@ -198,9 +220,17 @@ function removeStateLock(lockPath: string): boolean {
 function readStateLockOwner(lockPath: string): { pid: number; nonce: string } | null {
 	try {
 		const value = JSON.parse(readFileSync(path.join(lockPath, STATE_LOCK_OWNER), "utf8"));
-		if (!value || typeof value !== "object" || Array.isArray(value)
-			|| typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0
-			|| typeof value.nonce !== "string" || !/^[a-f0-9]{32}$/iu.test(value.nonce)) return null;
+		if (
+			!value ||
+			typeof value !== "object" ||
+			Array.isArray(value) ||
+			typeof value.pid !== "number" ||
+			!Number.isSafeInteger(value.pid) ||
+			value.pid <= 0 ||
+			typeof value.nonce !== "string" ||
+			!/^[a-f0-9]{32}$/iu.test(value.nonce)
+		)
+			return null;
 		return { pid: value.pid, nonce: value.nonce };
 	} catch {
 		return null;
@@ -211,10 +241,9 @@ function nodeErrorCode(error: unknown): string | undefined {
 	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
-function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
-
-
-
+function sleep(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
 
 function serializeSession(session: CealStoredSession): Record<string, unknown> {
 	return {
@@ -238,9 +267,19 @@ function parseSession(value: unknown): CealStoredSession {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new CealSessionStoreError("invalid_store");
 	const record = value as Record<string, unknown>;
 	const expectedKeys = [
-		"access_token", "client_ref", "expires_at", "gateway_endpoint", "instance_ref", "membership_ref", "profile_ref",
-		"refresh_token", "refresh_token_absolute_expires_at", "refresh_token_idle_expires_at", "registration_ref",
-		"schema_version", "subject_ref",
+		"access_token",
+		"client_ref",
+		"expires_at",
+		"gateway_endpoint",
+		"instance_ref",
+		"membership_ref",
+		"profile_ref",
+		"refresh_token",
+		"refresh_token_absolute_expires_at",
+		"refresh_token_idle_expires_at",
+		"registration_ref",
+		"schema_version",
+		"subject_ref",
 	];
 	if (record.schema_version !== "ceal.client_session_store.v1") throw new CealSessionStoreError("invalid_store");
 	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify([...expectedKeys].sort())) {
@@ -286,16 +325,24 @@ function validateSession(value: CandidateSession): void {
 }
 
 function validateBaseSession(value: CandidateSession): void {
-	const valid = typeof value.gatewayEndpoint === "string" && safeEndpoint(value.gatewayEndpoint)
-		&& typeof value.accessToken === "string" && /^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken)
-		&& typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt));
+	const valid =
+		typeof value.gatewayEndpoint === "string" &&
+		safeEndpoint(value.gatewayEndpoint) &&
+		typeof value.accessToken === "string" &&
+		/^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken) &&
+		typeof value.expiresAt === "string" &&
+		Number.isFinite(Date.parse(value.expiresAt));
 	if (!valid) throw new CealSessionStoreError("invalid_store");
 }
 
 function validateRefreshSession(value: CandidateSession): void {
-	const valid = typeof value.refreshToken === "string" && /^ceal_refresh_[A-Za-z0-9_-]{43}$/u.test(value.refreshToken)
-		&& typeof value.refreshTokenIdleExpiresAt === "string" && Number.isFinite(Date.parse(value.refreshTokenIdleExpiresAt))
-		&& typeof value.refreshTokenAbsoluteExpiresAt === "string" && Number.isFinite(Date.parse(value.refreshTokenAbsoluteExpiresAt));
+	const valid =
+		typeof value.refreshToken === "string" &&
+		/^ceal_refresh_[A-Za-z0-9_-]{43}$/u.test(value.refreshToken) &&
+		typeof value.refreshTokenIdleExpiresAt === "string" &&
+		Number.isFinite(Date.parse(value.refreshTokenIdleExpiresAt)) &&
+		typeof value.refreshTokenAbsoluteExpiresAt === "string" &&
+		Number.isFinite(Date.parse(value.refreshTokenAbsoluteExpiresAt));
 	if (!valid) throw new CealSessionStoreError("invalid_store");
 }
 
@@ -311,9 +358,16 @@ function safeEndpoint(value: string): boolean {
 	try {
 		const endpoint = new URL(value);
 		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-		return !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
-			&& (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")));
-	} catch { return false; }
+		return (
+			!endpoint.username &&
+			!endpoint.password &&
+			!endpoint.search &&
+			!endpoint.hash &&
+			(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")))
+		);
+	} catch {
+		return false;
+	}
 }
 
 // Names this store's refusal once so the shared guards can raise it without

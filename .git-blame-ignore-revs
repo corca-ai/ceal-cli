@@ -1,0 +1,9 @@
+# Commits that changed formatting only. `git blame` should attribute the lines
+# they touched to whoever last changed the code, not to the reformat.
+#
+# Enable locally once per clone:
+#   git config --local blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub reads this file automatically.
+
+# Format the tree with Biome, and make the formatter part of the gate
+5b07acf5b50e14f004ef7d95652b8b660079de86

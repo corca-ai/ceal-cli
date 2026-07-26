@@ -13,7 +13,9 @@ type NamedOptionOutcome = "flag" | "value" | "unknown" | "invalid";
  * in this CLI contract, so it and every unknown option-looking token fail.
  */
 export function parseNamedOptions(
-	options: readonly string[], valueOptions: ReadonlySet<string>, flagOptions: ReadonlySet<string>,
+	options: readonly string[],
+	valueOptions: ReadonlySet<string>,
+	flagOptions: ReadonlySet<string>,
 ): ParsedNamedOptions | null {
 	const values = new Map<string, string>();
 	const flags = new Set<string>();
@@ -42,7 +44,9 @@ export function parseNamedOptions(
  * duplicate, or an operand, which the caller still describes in its own terms).
  */
 export function unknownNamedOption(
-	options: readonly string[], valueOptions: ReadonlySet<string>, flagOptions: ReadonlySet<string>,
+	options: readonly string[],
+	valueOptions: ReadonlySet<string>,
+	flagOptions: ReadonlySet<string>,
 ): string | null {
 	for (let index = 0; index < options.length; index += 1) {
 		const option = options[index]!;

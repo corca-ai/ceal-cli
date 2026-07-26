@@ -21,10 +21,7 @@ export interface HiddenInputStatusStream {
 	write(chunk: string): unknown;
 }
 
-export async function readHiddenTerminalEnrollmentCode(
-	stdin: HiddenInputStream,
-	stderr: HiddenInputStatusStream,
-): Promise<string> {
+export async function readHiddenTerminalEnrollmentCode(stdin: HiddenInputStream, stderr: HiddenInputStatusStream): Promise<string> {
 	if (!stdin.isTTY || !stderr.isTTY || typeof stdin.setRawMode !== "function") {
 		throw new Error("interactive_enrollment_required");
 	}
@@ -88,15 +85,24 @@ function acceptHiddenInput(chunk: string | Buffer, state: HiddenInputState): voi
 }
 
 function handleHiddenInputByte(byte: number, state: HiddenInputState): boolean {
-	if (byte === 0x03) { state.fail(new Error("input_cancelled")); return true; }
-	if (byte === 0x0d || byte === 0x0a) { state.finish(); return true; }
+	if (byte === 0x03) {
+		state.fail(new Error("input_cancelled"));
+		return true;
+	}
+	if (byte === 0x0d || byte === 0x0a) {
+		state.finish();
+		return true;
+	}
 	if (byte === 0x08 || byte === 0x7f) {
 		const previous = state.chunks.pop();
 		if (previous) state.bytes -= previous.length;
 		return false;
 	}
 	state.bytes += 1;
-	if (state.bytes > 4096) { state.fail(new Error("stdin_secret_too_large")); return true; }
+	if (state.bytes > 4096) {
+		state.fail(new Error("stdin_secret_too_large"));
+		return true;
+	}
 	state.chunks.push(Buffer.from([byte]));
 	return false;
 }

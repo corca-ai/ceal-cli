@@ -18,16 +18,16 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import {
+	WorkerReleaseInputError,
 	withWorkerReleaseDevelopmentInputsAsync,
 	withWorkerReleaseInputsAsync,
-	WorkerReleaseInputError,
 } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,44 +53,49 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
 	const platform = resolvePlatform(options.platform, dependencies);
 	try {
-		return await resolveInputs({ ...options, repoRoot }, async ({ inputs, rawInputs }) => {
-			let stage;
-			try {
-				stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
-				const packed = prepareWorkerReleaseConsumer({
-					repoRoot,
-					stage,
-					inputs,
-					protocolTarball: rawInputs.protocolTarball,
-					dependencies,
-				});
-				const version = resolveVersion(repoRoot, inputs);
-				const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-				materializeOutput({ output, repoRoot, inputs, version, platform, artifact });
-				return {
-					schema_version: "ceal.worker_native_artifact_build.v1",
-					ok: true,
-					proof_level: "local_state",
-					writes_external: false,
-					output_dir: output.directory,
-					version,
-					platform,
-					artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
-					consumer_smoke: packed.consumerSmoke,
-					native_smoke: artifact.smoke,
-					protocol: inputs.protocol,
-					non_claims: [
-						"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
-						"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
-					],
-				};
-			} finally {
-				if (stage) rmSync(stage, { recursive: true, force: true });
-			}
-		}, dependencies);
+		return await resolveInputs(
+			{ ...options, repoRoot },
+			async ({ inputs, rawInputs }) => {
+				let stage;
+				try {
+					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
+					const packed = prepareWorkerReleaseConsumer({
+						repoRoot,
+						stage,
+						inputs,
+						protocolTarball: rawInputs.protocolTarball,
+						dependencies,
+					});
+					const version = resolveVersion(repoRoot, inputs);
+					const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
+					materializeOutput({ output, repoRoot, inputs, version, platform, artifact });
+					return {
+						schema_version: "ceal.worker_native_artifact_build.v1",
+						ok: true,
+						proof_level: "local_state",
+						writes_external: false,
+						output_dir: output.directory,
+						version,
+						platform,
+						artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
+						consumer_smoke: packed.consumerSmoke,
+						native_smoke: artifact.smoke,
+						protocol: inputs.protocol,
+						non_claims: [
+							"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
+							"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
+						],
+					};
+				} finally {
+					if (stage) rmSync(stage, { recursive: true, force: true });
+				}
+			},
+			dependencies,
+		);
 	} catch (error) {
 		if (error instanceof WorkerNativeArtifactError) throw error;
-		if (error instanceof WorkerReleasePackageError || error instanceof WorkerReleaseInputError) throw new WorkerNativeArtifactError(error.code, error.message);
+		if (error instanceof WorkerReleasePackageError || error instanceof WorkerReleaseInputError)
+			throw new WorkerNativeArtifactError(error.code, error.message);
 		throw new WorkerNativeArtifactError("worker_native_artifact_build_failed", "Could not build the isolated native worker artifact.");
 	}
 }
@@ -102,12 +107,21 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 	const blobPath = path.join(work, "ceal.blob");
 	const artifactPath = path.join(work, `ceal-${platform}`);
 	try {
-		await (dependencies.bundle ?? bundleInstalledWorker)({ workerBin: packed.consumer.workerBin, bundlePath, consumerDirectory: packed.consumer.directory });
+		await (dependencies.bundle ?? bundleInstalledWorker)({
+			workerBin: packed.consumer.workerBin,
+			bundlePath,
+			consumerDirectory: packed.consumer.directory,
+		});
 		(dependencies.createBlob ?? createBlob)({ bundlePath, blobPath, work });
 		(dependencies.copyRuntime ?? copyRuntime)({ artifactPath });
 		chmodSync(artifactPath, 0o755);
 		if (platform.startsWith("darwin-")) (dependencies.removeMachoSignature ?? removeMachoSignature)({ artifactPath });
-		(dependencies.injectBlob ?? injectBlob)({ artifactPath, blobPath, platform, postjectCli: dependencies.resolvePostjectCli?.() ?? resolvePostjectCli() });
+		(dependencies.injectBlob ?? injectBlob)({
+			artifactPath,
+			blobPath,
+			platform,
+			postjectCli: dependencies.resolvePostjectCli?.() ?? resolvePostjectCli(),
+		});
 		if (platform.startsWith("darwin-")) (dependencies.signMachoAdhoc ?? signMachoAdhoc)({ artifactPath });
 		const smoke = (dependencies.smoke ?? smokeArtifact)({ artifactPath, version });
 		const bytes = readFileSync(artifactPath);
@@ -119,7 +133,8 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 }
 
 async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory }) {
-	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink()) fail("worker_native_bundle_failed", "Packed worker consumer entrypoint is unavailable.");
+	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink())
+		fail("worker_native_bundle_failed", "Packed worker consumer entrypoint is unavailable.");
 	try {
 		await esbuild.build({
 			// Pin the bundler's working directory to the staged consumer so its
@@ -141,15 +156,23 @@ async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory 
 
 function createBlob({ bundlePath, blobPath, work }) {
 	const config = path.join(work, "ceal.sea.json");
-	writeFileSync(config, `${JSON.stringify({
-		main: path.basename(bundlePath),
-		output: path.basename(blobPath),
-		executable: process.execPath,
-		disableExperimentalSEAWarning: true,
-		useCodeCache: false,
-		useSnapshot: false,
-		execArgvExtension: "none",
-	}, null, 2)}\n`, { mode: 0o644 });
+	writeFileSync(
+		config,
+		`${JSON.stringify(
+			{
+				main: path.basename(bundlePath),
+				output: path.basename(blobPath),
+				executable: process.execPath,
+				disableExperimentalSEAWarning: true,
+				useCodeCache: false,
+				useSnapshot: false,
+				execArgvExtension: "none",
+			},
+			null,
+			2,
+		)}\n`,
+		{ mode: 0o644 },
+	);
 	try {
 		execFileSync(process.execPath, ["--experimental-sea-config", path.basename(config)], { cwd: work, stdio: "pipe" });
 	} catch {
@@ -164,7 +187,11 @@ function copyRuntime({ artifactPath }) {
 function injectBlob({ artifactPath, blobPath, platform, postjectCli }) {
 	const machoArguments = platform.startsWith("darwin-") ? ["--macho-segment-name", "NODE_SEA"] : [];
 	try {
-		execFileSync(process.execPath, [postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite", ...machoArguments], { stdio: "pipe" });
+		execFileSync(
+			process.execPath,
+			[postjectCli, artifactPath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", SEA_FUSE, "--overwrite", ...machoArguments],
+			{ stdio: "pipe" },
+		);
 	} catch {
 		fail("worker_native_injection_failed", "Native worker SEA blob could not be injected.");
 	}
@@ -190,18 +217,26 @@ function signMachoAdhoc({ artifactPath }) {
 
 function smokeArtifact({ artifactPath, version }) {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-smoke-home-"));
-	const run = (args) => execFileSync(artifactPath, args, {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, HOME: home },
-	});
+	const run = (args) =>
+		execFileSync(artifactPath, args, {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, HOME: home },
+		});
 	try {
 		const identity = parse(run(["version"]));
 		const commands = parse(run(["commands"]));
 		const help = run(["--help"]);
-		const names = Array.isArray(commands?.commands) ? commands.commands.map((entry) => entry?.name).filter((entry) => typeof entry === "string") : [];
-		if (identity?.command !== "ceal" || identity?.version !== version || !help.includes("Usage: ceal <command> [options]")
-			|| REQUIRED_COMMANDS.some((name) => !names.includes(name)) || names.includes("cealctl")) {
+		const names = Array.isArray(commands?.commands)
+			? commands.commands.map((entry) => entry?.name).filter((entry) => typeof entry === "string")
+			: [];
+		if (
+			identity?.command !== "ceal" ||
+			identity?.version !== version ||
+			!help.includes("Usage: ceal <command> [options]") ||
+			REQUIRED_COMMANDS.some((name) => !names.includes(name)) ||
+			names.includes("cealctl")
+		) {
 			fail("worker_native_smoke_failed", "Native worker artifact did not expose the expected worker-only command surface.");
 		}
 		return { command: "ceal", version, help: true, required_commands: [...REQUIRED_COMMANDS], operator_surface_absent: true };
@@ -245,7 +280,9 @@ function materializeOutput({ output, repoRoot, inputs, version, platform, artifa
 			{ name: NOTICE_FILENAME, sha256: sha256(notice) },
 			{ name: MANIFEST_FILENAME, sha256: sha256(manifestBytes) },
 		].sort((left, right) => left.name.localeCompare(right.name));
-		writeFileSync(path.join(staging, "SHA256SUMS"), entries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", { mode: 0o644 });
+		writeFileSync(path.join(staging, "SHA256SUMS"), entries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", {
+			mode: 0o644,
+		});
 		publishOutput(staging, output);
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
@@ -256,7 +293,9 @@ function materializeOutput({ output, repoRoot, inputs, version, platform, artifa
 function resolveVersion(repoRoot, inputs) {
 	// Worker and client version together; the exact protocol pin against the
 	// supplied artifact is enforced by the release-input resolver.
-	const versions = [inputs.worker, inputs.client].map((entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version);
+	const versions = [inputs.worker, inputs.client].map(
+		(entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version,
+	);
 	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
 		fail("version_mismatch", "Worker and client package versions must match exactly.");
 	}
@@ -265,7 +304,8 @@ function resolveVersion(repoRoot, inputs) {
 
 function resolvePlatform(value, dependencies) {
 	const current = (dependencies.currentPlatform ?? currentPlatform)();
-	if (!/^(?:linux|darwin)-(?:arm64|amd64)$/u.test(current)) fail("unsupported_platform", "Native worker artifacts require a supported Linux or macOS host platform.");
+	if (!/^(?:linux|darwin)-(?:arm64|amd64)$/u.test(current))
+		fail("unsupported_platform", "Native worker artifacts require a supported Linux or macOS host platform.");
 	if (value !== undefined && value !== current) fail("platform_mismatch", "Native worker artifacts must be built on their target platform.");
 	return current;
 }
@@ -276,22 +316,28 @@ function currentPlatform() {
 }
 
 function inspectOutput(value, repoRoot, force) {
-	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Native worker artifact output must be an absolute directory.");
+	if (typeof value !== "string" || !path.isAbsolute(value))
+		fail("invalid_output", "Native worker artifact output must be an absolute directory.");
 	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory)) fail("unsafe_output", "Native worker artifact output is too broad.");
+	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
+		fail("unsafe_output", "Native worker artifact output is too broad.");
 	assertNoSymlinkComponents(directory, fail, "Native worker artifact output");
 	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("unsafe_output", "Native worker artifact output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink()) fail("output_not_replaceable", "Use --force only with a marked native worker artifact output.");
+	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
+		fail("unsafe_output", "Native worker artifact output must be a regular directory.");
+	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
+		fail("output_not_replaceable", "Use --force only with a marked native worker artifact output.");
 	return { directory, force: true };
 }
 
 function publishOutput(staging, output) {
-	if (!output.force) { renameSync(staging, output.directory); return; }
+	if (!output.force) {
+		renameSync(staging, output.directory);
+		return;
+	}
 	rmSync(output.directory, { recursive: true, force: true });
 	renameSync(staging, output.directory);
 }
-
 
 function resolvePostjectCli() {
 	try {
@@ -304,12 +350,19 @@ function resolvePostjectCli() {
 }
 
 function readJson(filePath, code) {
-	try { return JSON.parse(readFileSync(filePath, "utf8")); }
-	catch { fail(code, "Worker native artifact input JSON is invalid."); }
+	try {
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		fail(code, "Worker native artifact input JSON is invalid.");
+	}
 }
 
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerNativeArtifactError(code, message); }
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerNativeArtifactError(code, message);
+}
 
 function parseArgs(argv) {
 	return parseScriptArgs(argv, {
@@ -327,7 +380,9 @@ export async function runCli(argv, io = console) {
 	try {
 		const parsed = parseArgs(argv);
 		if (parsed.help) {
-			io.log("usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--platform <current-platform>] [--force] [--json]");
+			io.log(
+				"usage: node scripts/build-worker-native-artifact.mjs --out <absolute-dir> --gateway-handoff-archive <absolute-tar.gz> [--platform <current-platform>] [--force] [--json]",
+			);
 			return 0;
 		}
 		const result = await buildWorkerNativeArtifact(parsed.options);
@@ -335,10 +390,17 @@ export async function runCli(argv, io = console) {
 		return 0;
 	} catch (error) {
 		const known = error instanceof WorkerNativeArtifactError;
-		const payload = { schema_version: "ceal.worker_native_artifact_build_error.v1", ok: false, error_code: known ? error.code : "worker_native_artifact_build_failed", message: known ? error.message : "Could not build native worker artifact." };
-		if (json) io.log(JSON.stringify(payload)); else io.error(payload.message);
+		const payload = {
+			schema_version: "ceal.worker_native_artifact_build_error.v1",
+			ok: false,
+			error_code: known ? error.code : "worker_native_artifact_build_failed",
+			message: known ? error.message : "Could not build native worker artifact.",
+		};
+		if (json) io.log(JSON.stringify(payload));
+		else io.error(payload.message);
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+	process.exitCode = await runCli(process.argv.slice(2));

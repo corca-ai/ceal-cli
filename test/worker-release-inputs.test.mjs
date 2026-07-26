@@ -48,13 +48,31 @@ test("worker release inventory rejects stale sidecars, missing package pair, and
 	fixture.provenance.artifact.exports = [".", "./conformance"];
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, protocolTarball: path.relative(ROOT, fixture.protocolTarball), ...rest(fixture) }), hasCode("protocol_tarball"));
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, handoffManifest: path.join(ROOT, "worker-release-inputs.json") }), hasCode("handoff_layout_mismatch"));
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, expectedHandoffSha256: "0".repeat(64) }), hasCode("handoff_trust_mismatch"));
+	assert.throws(
+		() =>
+			resolveWorkerReleaseDevelopmentInputs({
+				repoRoot: ROOT,
+				protocolTarball: path.relative(ROOT, fixture.protocolTarball),
+				...rest(fixture),
+			}),
+		hasCode("protocol_tarball"),
+	);
+	assert.throws(
+		() =>
+			resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, handoffManifest: path.join(ROOT, "worker-release-inputs.json") }),
+		hasCode("handoff_layout_mismatch"),
+	);
+	assert.throws(
+		() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, expectedHandoffSha256: "0".repeat(64) }),
+		hasCode("handoff_trust_mismatch"),
+	);
 	const missingClient = path.join(fixture.root, "different", path.basename(fixture.clientTarball));
 	mkdirSync(path.dirname(missingClient), { recursive: true });
 	writeFileSync(missingClient, readFileSync(fixture.clientTarball));
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, clientTarball: missingClient }), hasCode("handoff_layout_mismatch"));
+	assert.throws(
+		() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, clientTarball: missingClient }),
+		hasCode("handoff_layout_mismatch"),
+	);
 });
 
 test("worker release inventory rejects Gateway and legacy composite paths", () => {
@@ -93,9 +111,18 @@ function handoffFixture(context) {
 	const producer = { repository: "corca-ai/ceal", commit: "a".repeat(40), tree: "b".repeat(40), scoped_paths_clean: true };
 	writeFileSync(path.join(root, ".ceal-handoff-owner"), "ceal.repository_extraction_gateway_handoff.v1\n");
 	const provenance = {
-		schema_version: "ceal.gateway_protocol_artifact.v1", proof_level: "host_decision", writes_external: false,
+		schema_version: "ceal.gateway_protocol_artifact.v1",
+		proof_level: "host_decision",
+		writes_external: false,
 		source: { repository: producer.repository, commit: producer.commit, tree: producer.tree, package_path: "packages/ceal-protocol" },
-		artifact: { package: protocol.name, version: protocol.version, filename: protocol.filename, sha256: protocol.sha256, npm_integrity: protocol.integrity, exports: protocol.declared_exports },
+		artifact: {
+			package: protocol.name,
+			version: protocol.version,
+			filename: protocol.filename,
+			sha256: protocol.sha256,
+			npm_integrity: protocol.integrity,
+			exports: protocol.declared_exports,
+		},
 	};
 	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
 	const conformanceProof = path.join(root, "gateway-conformance-proof.json");
@@ -143,18 +170,27 @@ function packedPackage(root, { name, exports, dependencies = {}, files }) {
 }
 
 function writeConformanceProof(fixture) {
-	writeFileSync(fixture.conformanceProof, `${JSON.stringify({
-		schema_version: "ceal.repository_extraction_private_gateway_conformance.v1", ok: true, proof_level: "host_decision", writes_external: false,
-		source_identity: fixture.producer,
-		packages: [proofRecord(fixture.protocol), proofRecord(fixture.client)],
-	})}\n`);
+	writeFileSync(
+		fixture.conformanceProof,
+		`${JSON.stringify({
+			schema_version: "ceal.repository_extraction_private_gateway_conformance.v1",
+			ok: true,
+			proof_level: "host_decision",
+			writes_external: false,
+			source_identity: fixture.producer,
+			packages: [proofRecord(fixture.protocol), proofRecord(fixture.client)],
+		})}\n`,
+	);
 }
 
 function writeHandoffManifest(fixture) {
 	const sidecar = readFileSync(fixture.protocolProvenance);
 	const proofBytes = readFileSync(fixture.conformanceProof);
 	const manifest = {
-		schema_version: "ceal.repository_extraction_gateway_handoff.v1", ok: true, proof_level: "host_decision", writes_external: false,
+		schema_version: "ceal.repository_extraction_gateway_handoff.v1",
+		ok: true,
+		proof_level: "host_decision",
+		writes_external: false,
 		producer: fixture.producer,
 		packages: [record(fixture.protocol), record(fixture.client)],
 		conformance_proof: { filename: path.basename(fixture.conformanceProof), bytes: proofBytes.length },
@@ -167,10 +203,27 @@ function writeHandoffManifest(fixture) {
 }
 
 function record(item) {
-	return { name: item.name, version: item.version, filename: item.filename, sha256: item.sha256, integrity: item.integrity, bytes: item.bytes, declared_exports: item.declared_exports, package_manifest_sha256: item.package_manifest_sha256 };
+	return {
+		name: item.name,
+		version: item.version,
+		filename: item.filename,
+		sha256: item.sha256,
+		integrity: item.integrity,
+		bytes: item.bytes,
+		declared_exports: item.declared_exports,
+		package_manifest_sha256: item.package_manifest_sha256,
+	};
 }
 
-function proofRecord(item) { return { ...record(item), installed_as_regular_directory: true }; }
-function rest({ protocolTarball: _protocolTarball, ...fixture }) { return fixture; }
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function hasCode(code) { return (error) => error instanceof WorkerReleaseInputError && error.code === code; }
+function proofRecord(item) {
+	return { ...record(item), installed_as_regular_directory: true };
+}
+function rest({ protocolTarball: _protocolTarball, ...fixture }) {
+	return fixture;
+}
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function hasCode(code) {
+	return (error) => error instanceof WorkerReleaseInputError && error.code === code;
+}

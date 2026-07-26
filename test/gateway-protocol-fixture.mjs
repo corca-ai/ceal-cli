@@ -48,4 +48,6 @@ export function makeGatewayProtocolFixture() {
 	return { root, tarball, provenance, proof };
 }
 
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}

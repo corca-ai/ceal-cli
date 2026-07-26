@@ -28,15 +28,17 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 // edits in. Linting them would surface findings an agent cannot legally act on,
 // and the pressure to "just fix the lint error" is exactly how a frozen copy
 // drifts.
-test("the linter excludes the frozen packages and leaves formatting alone", () => {
+test("the linter and formatter both run, and both exclude the frozen packages", () => {
 	const biome = JSON.parse(read("biome.json"));
-	assert.equal(biome.formatter.enabled, false);
 	assert.equal(biome.linter.enabled, true);
+	assert.equal(biome.formatter.enabled, true);
+	// Tabs and a generous width are the existing tree's shape, not a new house
+	// style: a narrower width would rewrite far more than the long lines that
+	// motivated turning the formatter on.
+	assert.equal(biome.formatter.indentStyle, "tab");
+	assert.equal(biome.formatter.lineWidth, 140);
 	for (const frozen of ["packages/ceal-protocol", "packages/ceal-operator-cli"]) {
-		assert.ok(
-			biome.files.includes.includes(`!${frozen}/**`),
-			`biome.json must exclude the frozen package ${frozen}`,
-		);
+		assert.ok(biome.files.includes.includes(`!${frozen}/**`), `biome.json must exclude the frozen package ${frozen}`);
 	}
 });
 
@@ -118,8 +120,7 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 		recursive: true,
 	});
 
-	const check = () =>
-		spawnSync(process.execPath, ["scripts/install-git-hooks.mjs", "--check"], { cwd: clone, encoding: "utf8" });
+	const check = () => spawnSync(process.execPath, ["scripts/install-git-hooks.mjs", "--check"], { cwd: clone, encoding: "utf8" });
 	// Unset is a state, not a crash: it must exit non-zero and say what to run.
 	const before = check();
 	assert.equal(before.status, 1);
@@ -127,10 +128,7 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 
 	execFileSync(process.execPath, ["scripts/install-git-hooks.mjs"], { cwd: clone, stdio: "pipe" });
 	assert.equal(check().status, 0);
-	assert.equal(
-		execFileSync("git", ["config", "--local", "--get", "core.hooksPath"], { cwd: clone, encoding: "utf8" }).trim(),
-		".githooks",
-	);
+	assert.equal(execFileSync("git", ["config", "--local", "--get", "core.hooksPath"], { cwd: clone, encoding: "utf8" }).trim(), ".githooks");
 	// Re-running is safe: an installed clone stays installed.
 	execFileSync(process.execPath, ["scripts/install-git-hooks.mjs"], { cwd: clone, stdio: "pipe" });
 	assert.equal(check().status, 0);

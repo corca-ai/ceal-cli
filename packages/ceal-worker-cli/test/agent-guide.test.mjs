@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,9 +27,12 @@ test("Codex guide registration follows the role current pointer across releases"
 		const store = createCealAgentGuideStore(path.join(firstRelease, "ceal-linux-arm64"), root, codexHome, claudeConfig);
 		assert.ok(store);
 		assert.deepEqual(store.inspect(), {
-			status: "available", agent: "codex", guide_id: "ceal-guide",
+			status: "available",
+			agent: "codex",
+			guide_id: "ceal-guide",
 			guide_path: path.join(state, "current", "guide"),
-			update_safe: true, agent_source: "default",
+			update_safe: true,
+			agent_source: "default",
 			hosts: [
 				{ agent: "codex", status: "staged", registration_path: path.join(codexHome, "skills", "ceal-guide"), registered: false },
 				{ agent: "claude", status: "staged", registration_path: path.join(claudeConfig, "skills", "ceal-guide"), registered: false },
@@ -72,8 +86,10 @@ test("each agent host registers independently and status reports both", () => {
 		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, claudeConfig);
 		assert.ok(store);
 		// No CODEX_HOME override: the Codex root still derives from HOME.
-		assert.equal(store.inspect("codex").hosts.find((host) => host.agent === "codex").registration_path,
-			path.join(root, ".codex", "skills", "ceal-guide"));
+		assert.equal(
+			store.inspect("codex").hosts.find((host) => host.agent === "codex").registration_path,
+			path.join(root, ".codex", "skills", "ceal-guide"),
+		);
 		const claudeRegistration = path.join(claudeConfig, "skills", "ceal-guide");
 		const registered = store.register("claude");
 		assert.equal(registered.status, "available");
@@ -90,7 +106,10 @@ test("each agent host registers independently and status reports both", () => {
 		// There is no top-level per-host reading left to mistake for the whole answer.
 		assert.equal("registered" in store.inspect(), false);
 		assert.equal(store.register("codex").hosts.find((host) => host.agent === "codex").registered, true);
-		assert.deepEqual(store.inspect().hosts.map((host) => host.registered), [true, true]);
+		assert.deepEqual(
+			store.inspect().hosts.map((host) => host.registered),
+			[true, true],
+		);
 		// Re-registering an already-linked host is idempotent, not a conflict.
 		assert.equal(store.register("claude").status, "available");
 	} finally {
@@ -114,10 +133,15 @@ test("guide registration refuses to replace an existing Claude Code skill direct
 		assert.equal(lstatSync(path.join(root, ".claude", "skills", "ceal-guide")).isDirectory(), true);
 		// A reader that treats `hosts` as the per-host truth must not see the
 		// refusing path reported as "staged", which reads as ready to link.
-		assert.deepEqual(result.hosts.find((host) => host.agent === "claude"), {
-			agent: "claude", status: "unavailable",
-			registration_path: path.join(root, ".claude", "skills", "ceal-guide"), registered: false,
-		});
+		assert.deepEqual(
+			result.hosts.find((host) => host.agent === "claude"),
+			{
+				agent: "claude",
+				status: "unavailable",
+				registration_path: path.join(root, ".claude", "skills", "ceal-guide"),
+				registered: false,
+			},
+		);
 		assert.equal(result.hosts.find((host) => host.agent === "codex").status, "staged");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -173,8 +197,10 @@ test("a non-absolute or list-shaped host directory is refused, not guessed", () 
 		}
 		// An empty override is no override: the HOME default still applies.
 		const empty = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, "");
-		assert.equal(empty.inspect("claude").hosts.find((host) => host.agent === "claude").registration_path,
-			path.join(root, ".claude", "skills", "ceal-guide"));
+		assert.equal(
+			empty.inspect("claude").hosts.find((host) => host.agent === "claude").registration_path,
+			path.join(root, ".claude", "skills", "ceal-guide"),
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -195,7 +221,10 @@ test("the default projection stays the Codex host even when only Claude resolves
 		assert.equal(status.agent, "codex");
 		assert.equal(status.status, "unavailable");
 		assert.match(status.error?.next_action, /CODEX_HOME/u);
-		assert.deepEqual(status.hosts.map((host) => host.status), ["unresolved", "staged"]);
+		assert.deepEqual(
+			status.hosts.map((host) => host.status),
+			["unresolved", "staged"],
+		);
 		assert.equal(store.register("claude").hosts.find((host) => host.agent === "claude").registered, true);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

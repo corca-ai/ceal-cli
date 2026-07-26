@@ -1,6 +1,6 @@
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
-import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
+import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 

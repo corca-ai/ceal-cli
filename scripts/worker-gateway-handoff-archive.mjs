@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { codedErrorClass } from "./lib/coded-error.mjs";
@@ -36,7 +36,8 @@ export function consumeLockedGatewayHandoffArchiveSync(options = {}, dependencie
 	try {
 		if (typeof dependencies.consume !== "function") return { resolution: prepared.resolution, lock: prepared.lock };
 		const result = dependencies.consume(prepared);
-		if (result && typeof result.then === "function") fail("gateway_handoff_archive_async_consumer", "Synchronous Gateway handoff consumption cannot return a promise.");
+		if (result && typeof result.then === "function")
+			fail("gateway_handoff_archive_async_consumer", "Synchronous Gateway handoff consumption cannot return a promise.");
 		return result;
 	} finally {
 		prepared.cleanup();
@@ -58,7 +59,8 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 	const archive = requireRegularAbsoluteFile(options.archiveFile, "invalid_gateway_handoff_archive");
 	const lockPath = requireRegularFile(path.join(repoRoot, "gateway-handoff-lock.json"), "gateway_handoff_lock_missing");
 	const lock = validateLock(readJson(lockPath, "invalid_gateway_handoff_lock"));
-	if (path.basename(archive) !== lock.archive.filename) fail("gateway_handoff_archive_mismatch", "Gateway handoff archive does not match the reviewed lock.");
+	if (path.basename(archive) !== lock.archive.filename)
+		fail("gateway_handoff_archive_mismatch", "Gateway handoff archive does not match the reviewed lock.");
 	const staging = mkdtempSync(path.join(tmpdir(), "ceal-worker-gateway-handoff-"));
 	const copiedArchive = path.join(staging, lock.archive.filename);
 	const extraction = path.join(staging, "packet");
@@ -80,7 +82,11 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 			expectedHandoffSha256: lock.archive.handoff_manifest_sha256,
 		};
 		const resolution = dependencies.resolveInputs?.(rawInputs);
-		if (!resolution || resolution.protocol?.producer?.commit !== lock.gateway.commit || resolution.protocol?.producer?.tree !== lock.gateway.tree) {
+		if (
+			!resolution ||
+			resolution.protocol?.producer?.commit !== lock.gateway.commit ||
+			resolution.protocol?.producer?.tree !== lock.gateway.tree
+		) {
 			fail("gateway_handoff_lock_mismatch", "Gateway handoff archive does not resolve to the locked Gateway producer identity.");
 		}
 		return {
@@ -110,14 +116,27 @@ function validateLock(value) {
 	}
 	const gateway = value.gateway;
 	const archive = value.archive;
-	if (!isRecord(gateway) || gateway.repository !== "corca-ai/ceal" || gateway.workflow_path !== ".github/workflows/gateway-handoff-archive.yml"
-		|| !isGitObject(gateway.commit) || !isGitObject(gateway.tree) || !Number.isSafeInteger(gateway.actions_run_id) || gateway.actions_run_id <= 0
-		|| typeof gateway.tag !== "string" || !/^gateway-handoff-v\d+\.\d+\.\d+$/u.test(gateway.tag)
-		|| gateway.artifact_name !== `ceal-gateway-handoff-${gateway.commit}`) {
+	if (
+		!isRecord(gateway) ||
+		gateway.repository !== "corca-ai/ceal" ||
+		gateway.workflow_path !== ".github/workflows/gateway-handoff-archive.yml" ||
+		!isGitObject(gateway.commit) ||
+		!isGitObject(gateway.tree) ||
+		!Number.isSafeInteger(gateway.actions_run_id) ||
+		gateway.actions_run_id <= 0 ||
+		typeof gateway.tag !== "string" ||
+		!/^gateway-handoff-v\d+\.\d+\.\d+$/u.test(gateway.tag) ||
+		gateway.artifact_name !== `ceal-gateway-handoff-${gateway.commit}`
+	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid immutable producer identity.");
 	}
 	const version = gateway.tag.slice("gateway-handoff-v".length);
-	if (!isRecord(archive) || archive.filename !== `ceal-gateway-handoff-${version}.tar.gz` || !isSha256(archive.sha256) || !isSha256(archive.handoff_manifest_sha256)) {
+	if (
+		!isRecord(archive) ||
+		archive.filename !== `ceal-gateway-handoff-${version}.tar.gz` ||
+		!isSha256(archive.sha256) ||
+		!isSha256(archive.handoff_manifest_sha256)
+	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}
 	return {
@@ -170,7 +189,10 @@ function packetMembers(lock) {
 
 function listArchive(archive) {
 	try {
-		return execFileSync("tar", ["-tzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").filter(Boolean);
+		return execFileSync("tar", ["-tzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+			.trim()
+			.split("\n")
+			.filter(Boolean);
 	} catch {
 		fail("gateway_handoff_archive_invalid", "Gateway handoff archive is not readable.");
 	}
@@ -178,7 +200,10 @@ function listArchive(archive) {
 
 function listArchiveDetails(archive) {
 	try {
-		return execFileSync("tar", ["-tvzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").filter(Boolean);
+		return execFileSync("tar", ["-tvzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+			.trim()
+			.split("\n")
+			.filter(Boolean);
 	} catch {
 		fail("gateway_handoff_archive_invalid", "Gateway handoff archive cannot be safely inspected.");
 	}
@@ -201,17 +226,31 @@ function assertNoSymlinkAncestor(target, code) {
 	let current = path.parse(target).root;
 	for (const part of target.slice(current.length).split(path.sep).filter(Boolean)) {
 		current = path.join(current, part);
-		if (existsSync(current) && lstatSync(current).isSymbolicLink()) fail(code, "Gateway handoff archive path cannot traverse a symbolic link.");
+		if (existsSync(current) && lstatSync(current).isSymbolicLink())
+			fail(code, "Gateway handoff archive path cannot traverse a symbolic link.");
 	}
 }
 
 function readJson(filePath, code) {
-	try { return JSON.parse(readFileSync(filePath, "utf8")); }
-	catch { fail(code, "Gateway handoff lock JSON is invalid."); }
+	try {
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		fail(code, "Gateway handoff lock JSON is invalid.");
+	}
 }
 
-function isRecord(value) { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
-function isGitObject(value) { return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value); }
-function isSha256(value) { return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }
-function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
-function fail(code, message) { throw new WorkerGatewayHandoffArchiveError(code, message); }
+function isRecord(value) {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function isGitObject(value) {
+	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+}
+function isSha256(value) {
+	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+function sha256(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+function fail(code, message) {
+	throw new WorkerGatewayHandoffArchiveError(code, message);
+}

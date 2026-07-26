@@ -5,10 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-	buildCealCliReleaseManifest,
-	CealCliReleaseManifestError,
-} from "../scripts/build-release-manifest.mjs";
+import { buildCealCliReleaseManifest, CealCliReleaseManifestError } from "../scripts/build-release-manifest.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageRoot = existsSync(path.join(repoRoot, "packages")) ? repoRoot : path.resolve(repoRoot, "../..");
@@ -16,12 +13,9 @@ const packageRoot = existsSync(path.join(repoRoot, "packages")) ? repoRoot : pat
 test("one release contract binds package, protocol, binary, and rollback identity", () => {
 	const contract = readJson("release-contract.json");
 	const rootPackage = readJson("package.json");
-	const packages = Object.fromEntries([
-		"ceal-protocol",
-		"ceal-client",
-		"ceal-worker-cli",
-		"ceal-operator-cli",
-	].map((name) => [name, readPackageJson(name)]));
+	const packages = Object.fromEntries(
+		["ceal-protocol", "ceal-client", "ceal-worker-cli", "ceal-operator-cli"].map((name) => [name, readPackageJson(name)]),
+	);
 	// The legacy dual-lane contract stays frozen at its 0.65.0 identity and
 	// binds only the frozen compatibility packages. Worker-owned packages
 	// version independently but move together, keeping the exact protocol pin.
@@ -48,13 +42,21 @@ test("one release contract binds package, protocol, binary, and rollback identit
 	assert.equal(packages["ceal-worker-cli"].bin.ceal, "./dist/bin.js");
 	assert.equal(packages["ceal-operator-cli"].name, contract.artifacts.cealctl.package);
 	assert.equal(packages["ceal-operator-cli"].bin.cealctl, "./dist/bin.js");
-	assert.deepEqual(Object.fromEntries(Object.entries(contract.guides).map(([name, guide]) => [name, {
-		asset: guide.asset,
-		binary: guide.binary,
-	}])), {
-		"ceal-guide": { asset: "ceal-guide-SKILL.md", binary: "ceal" },
-		"cealctl-guide": { asset: "cealctl-guide-SKILL.md", binary: "cealctl" },
-	});
+	assert.deepEqual(
+		Object.fromEntries(
+			Object.entries(contract.guides).map(([name, guide]) => [
+				name,
+				{
+					asset: guide.asset,
+					binary: guide.binary,
+				},
+			]),
+		),
+		{
+			"ceal-guide": { asset: "ceal-guide-SKILL.md", binary: "ceal" },
+			"cealctl-guide": { asset: "cealctl-guide-SKILL.md", binary: "cealctl" },
+		},
+	);
 	assert.deepEqual(contract.rollback.source, {
 		strategy: "normal_additive_revert",
 		immutable_commit: "f458a0bce291123644c84efdbeb48d5255a74c64",
@@ -99,7 +101,10 @@ test("release manifest builder verifies package identities, records separate dig
 	const result = buildCealCliReleaseManifest({
 		repoRoot,
 		outputDir: path.join(outputDir, "release"),
-		artifacts: [{ id: "ceal", path: ceal }, { id: "cealctl", path: cealctl }],
+		artifacts: [
+			{ id: "ceal", path: ceal },
+			{ id: "cealctl", path: cealctl },
+		],
 	});
 	assert.equal(result.ok, true);
 	assert.equal(result.proof_level, "local_state");
@@ -111,22 +116,30 @@ test("release manifest builder verifies package identities, records separate dig
 	const invalid = path.join(outputDir, "not-a-package.tgz");
 	writeFileSync(invalid, "not an npm package archive\n");
 	assert.throws(
-		() => buildCealCliReleaseManifest({
-			repoRoot,
-			outputDir: path.join(outputDir, "invalid-release"),
-			artifacts: [{ id: "ceal", path: invalid }, { id: "cealctl", path: cealctl }],
-		}),
+		() =>
+			buildCealCliReleaseManifest({
+				repoRoot,
+				outputDir: path.join(outputDir, "invalid-release"),
+				artifacts: [
+					{ id: "ceal", path: invalid },
+					{ id: "cealctl", path: cealctl },
+				],
+			}),
 		(error) => error instanceof CealCliReleaseManifestError && error.code === "invalid_artifact",
 	);
 
 	const mislabeled = path.join(outputDir, "mislabeled.tgz");
 	writeArtifactArchive(outputDir, mislabeled, "@corca-ai/ceal-operator-cli", "cealctl");
 	assert.throws(
-		() => buildCealCliReleaseManifest({
-			repoRoot,
-			outputDir: path.join(outputDir, "mislabeled-release"),
-			artifacts: [{ id: "ceal", path: mislabeled }, { id: "cealctl", path: cealctl }],
-		}),
+		() =>
+			buildCealCliReleaseManifest({
+				repoRoot,
+				outputDir: path.join(outputDir, "mislabeled-release"),
+				artifacts: [
+					{ id: "ceal", path: mislabeled },
+					{ id: "cealctl", path: cealctl },
+				],
+			}),
 		(error) => error instanceof CealCliReleaseManifestError && error.code === "artifact_identity_mismatch",
 	);
 });
@@ -135,11 +148,14 @@ function writeArtifactArchive(root, archivePath, packageName, command) {
 	const staging = path.join(root, `staging-${command}-${path.basename(archivePath)}`);
 	const packageDir = path.join(staging, "package");
 	mkdirSync(packageDir, { recursive: true });
-	writeFileSync(path.join(packageDir, "package.json"), `${JSON.stringify({
-		name: packageName,
-		version: "0.65.0",
-		bin: { [command]: "./dist/bin.js" },
-	})}\n`);
+	writeFileSync(
+		path.join(packageDir, "package.json"),
+		`${JSON.stringify({
+			name: packageName,
+			version: "0.65.0",
+			bin: { [command]: "./dist/bin.js" },
+		})}\n`,
+	);
 	execFileSync("tar", ["-czf", archivePath, "-C", staging, "package"]);
 }
 

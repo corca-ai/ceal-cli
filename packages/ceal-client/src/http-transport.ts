@@ -1,8 +1,8 @@
 import {
-	decodeCealClientResponse,
-	decodeCealGatewayRequest,
 	type CealGatewayRequest,
 	type CealGatewayResponseFor,
+	decodeCealClientResponse,
+	decodeCealGatewayRequest,
 } from "@corca-ai/ceal-protocol";
 
 export type CealHttpTransportErrorCode =
@@ -16,7 +16,10 @@ export type CealHttpTransportErrorCode =
 export class CealHttpTransportError extends Error {
 	override readonly name = "CealHttpTransportError";
 
-	constructor(readonly code: CealHttpTransportErrorCode, readonly http_status: number | null = null) {
+	constructor(
+		readonly code: CealHttpTransportErrorCode,
+		readonly http_status: number | null = null,
+	) {
 		super(transportErrorMessage(code));
 	}
 }
@@ -102,9 +105,7 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						// Audit event timing is an additive strict-decoder field. It only
 						// has meaning on readback, so keep the wire negotiation scoped to
 						// that operation rather than expanding every Gateway request.
-						...(wireRequest.operation === "readback"
-							? { [CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER]: "accept" }
-							: {}),
+						...(wireRequest.operation === "readback" ? { [CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER]: "accept" } : {}),
 					},
 					body: JSON.stringify(wireRequest),
 					redirect: "error",
@@ -230,11 +231,17 @@ function boundedInteger(value: number, minimum: number, maximum: number): number
 
 function transportErrorMessage(code: CealHttpTransportErrorCode): string {
 	switch (code) {
-		case "invalid_configuration": return "Ceal HTTP transport configuration is invalid.";
-		case "invalid_request": return "Ceal HTTP transport request is invalid.";
-		case "request_timeout": return "Ceal HTTP transport request timed out.";
-		case "request_failed": return "Ceal HTTP transport request failed.";
-		case "response_too_large": return "Ceal HTTP transport response exceeded the configured limit.";
-		case "invalid_response": return "Ceal HTTP transport received an invalid response.";
+		case "invalid_configuration":
+			return "Ceal HTTP transport configuration is invalid.";
+		case "invalid_request":
+			return "Ceal HTTP transport request is invalid.";
+		case "request_timeout":
+			return "Ceal HTTP transport request timed out.";
+		case "request_failed":
+			return "Ceal HTTP transport request failed.";
+		case "response_too_large":
+			return "Ceal HTTP transport response exceeded the configured limit.";
+		case "invalid_response":
+			return "Ceal HTTP transport received an invalid response.";
 	}
 }

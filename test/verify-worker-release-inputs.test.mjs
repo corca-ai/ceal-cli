@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WorkerReleaseInputsError, validateWorkerReleaseInputs } from "../scripts/verify-worker-release-inputs.mjs";
+import { validateWorkerReleaseInputs, WorkerReleaseInputsError } from "../scripts/verify-worker-release-inputs.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 
