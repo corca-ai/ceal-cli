@@ -57,6 +57,29 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	// The real-binary and installer suites gate themselves on linux-x64, so any
 	// other runner reports green while skipping exactly the proofs that matter.
 	assert.match(Object.values(workflow.jobs)[0]["runs-on"], /ubuntu/u);
+	// Being on ubuntu is the image's promise, not a check. This makes the runner
+	// prove it ran them, so an image change fails loudly instead of going quiet.
+	const gate = Object.values(workflow.jobs)
+		.flatMap((job) => job.steps ?? [])
+		.find((step) => (step.run ?? "").trim() === "npm run check");
+	assert.equal(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS, "1", "the CI gate must require the platform-gated proofs to actually run");
+});
+
+// A bare `process.platform` skip is how the release suite went green on arm64
+// macOS with zero installed-binary proofs: the skip was correct and invisible.
+// The shared helper names the missing proof in the output and carries the
+// strict-runner escape hatch, so a new inline skip must not reintroduce silence.
+test("every platform-gated proof declares its gap through the shared helper", () => {
+	const suites = readdirSync(path.join(ROOT, "test")).filter((name) => name.endsWith(".test.mjs"));
+	for (const suite of suites) {
+		const source = read(path.join("test", suite));
+		const inline = /skip:\s*process\.(?:platform|arch)/u.test(source);
+		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.mjs`);
+	}
+	// The helper is only load-bearing if the two proofs that motivated it use it.
+	for (const suite of ["build-worker-release-artifact.test.mjs", "worker-release-installer.test.mjs"]) {
+		assert.match(read(path.join("test", suite)), /platformProofTest\(/u, `test/${suite} must declare its platform-gated proof`);
+	}
 });
 
 // `npm run check` is not self-sufficient on a cold runner: the packed-consumer

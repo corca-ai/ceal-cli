@@ -57,5 +57,10 @@ jobs:
       # The hook installer is proven inside this gate by test/repo-gates.test.mjs,
       # against a throwaway clone rather than this checkout, so there is no
       # separate CI step re-proving the same seam.
+      # This runner is linux-x64, so the real-binary and installer proofs must
+      # actually run here. Without this they skip themselves and CI stays green
+      # having proved no installed binary at all.
       - name: Run the full gate
         run: npm run check
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: "1"

@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
 import { requireHostTools } from "./host-tools.mjs";
+import { platformProofTest } from "./platform-proof.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -335,62 +336,64 @@ simulatedDarwinTest("worker installer installs on a darwin host through the port
 // worker source, so this test installs a real packed native artifact through
 // install-ceal.sh, smokes an installed post-allocation receipt, and performs
 // a real option-free `ceal update` against the stable pointer.
-test("real native worker installs through the worker lane and performs an option-free stable update", {
-	skip: process.platform !== "linux" || process.arch !== "x64",
-}, async (context) => {
-	const fixture = packedProtocolFixture(context);
-	const native = path.join(fixture.root, "worker-native-install");
-	const built = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: native, ...fixture });
-	assert.equal(built.ok, true);
-	assert.equal(built.platform, "linux-amd64");
-	const realTag = `ceal-v${built.version}`;
-	withFixture(({ install, release, tools, log }) => {
-		copyFileSync(path.join(native, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
-		writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac');
-		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform, built.version);
-		writeChecksums(release);
-		writeStablePointer(release, { tag: realTag });
-		rewriteSidecars(release);
-		const result = run({ install, release, tools, log, version: realTag });
-		assert.equal(result.status, 0, result.stderr);
-		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
-		const installed = path.join(install, "ceal");
-		const version = parse(spawnSync(installed, ["version"], { encoding: "utf8" }).stdout);
-		assert.equal(version.version, built.version);
-		assert.equal(version.protocol_version, "1.3.0");
+platformProofTest(
+	"the real-binary install and option-free stable update proof",
+	"real native worker installs through the worker lane and performs an option-free stable update",
+	async (context) => {
+		const fixture = packedProtocolFixture(context);
+		const native = path.join(fixture.root, "worker-native-install");
+		const built = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: native, ...fixture });
+		assert.equal(built.ok, true);
+		assert.equal(built.platform, "linux-amd64");
+		const realTag = `ceal-v${built.version}`;
+		withFixture(({ install, release, tools, log }) => {
+			copyFileSync(path.join(native, "ceal-linux-amd64"), path.join(release, "ceal-linux-amd64"));
+			writeTool(path.join(tools, "uname"), 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac');
+			for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform, built.version);
+			writeChecksums(release);
+			writeStablePointer(release, { tag: realTag });
+			rewriteSidecars(release);
+			const result = run({ install, release, tools, log, version: realTag });
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
+			const installed = path.join(install, "ceal");
+			const version = parse(spawnSync(installed, ["version"], { encoding: "utf8" }).stdout);
+			assert.equal(version.version, built.version);
+			assert.equal(version.protocol_version, "1.3.0");
 
-		writeWorkerSession(install);
-		const unavailable = spawnSync(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
-			encoding: "utf8",
-			env: { ...process.env, HOME: install },
-		});
-		assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
-		const unavailablePayload = parse(unavailable.stdout);
-		assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
-		assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
-		assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
+			writeWorkerSession(install);
+			const unavailable = spawnSync(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
+				encoding: "utf8",
+				env: { ...process.env, HOME: install },
+			});
+			assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
+			const unavailablePayload = parse(unavailable.stdout);
+			assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
+			assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
+			assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
 
-		const updated = spawnSync(installed, ["update"], {
-			encoding: "utf8",
-			env: {
-				...process.env,
-				CEAL_RELEASE_ORIGIN: "https://release.example.test/releases",
-				COSIGN_LOG: log,
-				FAKE_RELEASE_DIR: release,
-				PATH: `${tools}:${process.env.PATH}`,
-			},
+			const updated = spawnSync(installed, ["update"], {
+				encoding: "utf8",
+				env: {
+					...process.env,
+					CEAL_RELEASE_ORIGIN: "https://release.example.test/releases",
+					COSIGN_LOG: log,
+					FAKE_RELEASE_DIR: release,
+					PATH: `${tools}:${process.env.PATH}`,
+				},
+			});
+			assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
+			const payload = parse(updated.stdout);
+			assert.equal(payload.schema_version, "ceal.update.v1");
+			assert.equal(payload.status, "unchanged");
+			assert.equal(payload.stable_only, true);
+			assert.equal(payload.previous_version, built.version);
+			assert.equal(payload.installed_version, built.version);
+			assert.equal(payload.platform, "linux-amd64");
+			assert.equal(typeof payload.elapsed_ms, "number");
 		});
-		assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
-		const payload = parse(updated.stdout);
-		assert.equal(payload.schema_version, "ceal.update.v1");
-		assert.equal(payload.status, "unchanged");
-		assert.equal(payload.stable_only, true);
-		assert.equal(payload.previous_version, built.version);
-		assert.equal(payload.installed_version, built.version);
-		assert.equal(payload.platform, "linux-amd64");
-		assert.equal(typeof payload.elapsed_ms, "number");
-	});
-});
+	},
+);
 
 function writeWorkerSession(home) {
 	const directory = path.join(home, ".ceal");

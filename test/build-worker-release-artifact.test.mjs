@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildWorkerReleaseArtifact } from "../scripts/build-worker-release-artifact.mjs";
 import { makeGatewayProtocolFixture } from "./gateway-protocol-fixture.mjs";
+import { platformProofTest } from "./platform-proof.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_PACKAGE_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages", "ceal-worker-cli", "package.json"), "utf8")).version;
@@ -128,35 +129,37 @@ test("worker artifact builder removes a failed packed-consumer workspace", async
 	assert.equal(existsSync(workspace), false);
 });
 
-test("worker artifact builder proves the real packed protocol consumer and SEA output", {
-	skip: process.platform !== "linux" || process.arch !== "x64",
-}, async (context) => {
-	const fixture = makeGatewayProtocolFixture();
-	const output = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-integration-test-")));
-	context.after(() => {
-		rmSync(fixture.root, { recursive: true, force: true });
-		rmSync(output, { recursive: true, force: true });
-	});
-	const result = await buildWorkerReleaseArtifact({
-		protocolTarball: fixture.tarball,
-		protocolProvenance: fixture.provenance,
-		outputDirectory: output,
-		platform: "linux-amd64",
-		version: WORKER_PACKAGE_VERSION,
-	});
-	assert.equal(result.proof_level, "local_integration");
-	assert.equal(result.artifact.name, "ceal-linux-amd64");
-	assert.deepEqual(list(output), [
-		".ceal-worker-release-output",
-		"SHA256SUMS",
-		"THIRD_PARTY_NOTICES.txt",
-		"ceal-guide-SKILL.md",
-		"ceal-linux-amd64",
-		"ceal-worker-release-manifest-linux-amd64.json",
-		"install-ceal.sh",
-	]);
-	assert.match(readFileSync(path.join(output, "SHA256SUMS"), "utf8"), /ceal-linux-amd64/u);
-});
+platformProofTest(
+	"the real packed-consumer and SEA proof",
+	"worker artifact builder proves the real packed protocol consumer and SEA output",
+	async (context) => {
+		const fixture = makeGatewayProtocolFixture();
+		const output = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-artifact-integration-test-")));
+		context.after(() => {
+			rmSync(fixture.root, { recursive: true, force: true });
+			rmSync(output, { recursive: true, force: true });
+		});
+		const result = await buildWorkerReleaseArtifact({
+			protocolTarball: fixture.tarball,
+			protocolProvenance: fixture.provenance,
+			outputDirectory: output,
+			platform: "linux-amd64",
+			version: WORKER_PACKAGE_VERSION,
+		});
+		assert.equal(result.proof_level, "local_integration");
+		assert.equal(result.artifact.name, "ceal-linux-amd64");
+		assert.deepEqual(list(output), [
+			".ceal-worker-release-output",
+			"SHA256SUMS",
+			"THIRD_PARTY_NOTICES.txt",
+			"ceal-guide-SKILL.md",
+			"ceal-linux-amd64",
+			"ceal-worker-release-manifest-linux-amd64.json",
+			"install-ceal.sh",
+		]);
+		assert.match(readFileSync(path.join(output, "SHA256SUMS"), "utf8"), /ceal-linux-amd64/u);
+	},
+);
 
 function workerWorkspace(root) {
 	const workspace = path.join(root, "consumer");
