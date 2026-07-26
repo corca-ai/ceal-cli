@@ -1,0 +1,67 @@
+version: 1
+repo: ceal-cli
+language: en
+output_dir: charness-artifacts/quality
+preset_id: portable-defaults
+customized_from: portable-defaults
+preset_lineage:
+  - typescript-quality
+  - monorepo-quality
+coverage_fragile_margin_pp: 1.0
+coverage_floor_policy:
+  min_statements_threshold: 30
+  fail_below_pct: 80.0
+  warn_ceiling_pct: 95.0
+  floor_drift_lock_pp: 1.0
+  exemption_list_path: scripts/coverage-floor-exemptions.txt
+  gate_script_pattern: "*-quality-gate.sh"
+  lefthook_path: lefthook.yml
+  ci_workflow_glob: .github/workflows/*.yml
+specdown_smoke_patterns: []
+recommendation_defaults_version: issue-64
+public_spec_section_exemptions:
+  - Fixed Decisions
+  - HTTP API contract
+  - Server backend stack
+  - Deferred Decisions
+  - Non-Goals
+public_spec_implementation_ref_density_floor: 0.02
+public_spec_implementation_guard_min_lines: 100
+public_spec_pointer_proof_markers:
+  - "proof: pointer"
+  - "proof: pointer-spec"
+  - "executable_proof: pointer"
+  - "public_spec_proof: pointer"
+canonical_markdown_surfaces:
+  - AGENTS.md
+  - CLAUDE.md
+prompt_asset_policy:
+  source_globs: []
+  min_multiline_chars: 400
+  exemption_globs: []
+skill_ergonomics_gate_rules:
+  - code_fence_without_helper_script
+  - dated_incident_in_core
+  - issue_anchor_in_core
+  - long_core
+  - mode_option_pressure_terms
+  - portable_package_dated_incident
+  - portable_package_issue_anchor
+  - portable_helper_path_ambiguity
+  - progressive_disclosure_risk
+runtime_profile_default: default
+concept_paths:
+  - README.md
+  - docs/handoff.md
+# The repo's real gates, per AGENTS.md `## Gates`. Bootstrap deferred these
+# because it looks for eslint/vitest names; this repo gates through npm
+# workspace scripts and `node --test` instead.
+gate_commands:
+  - npm run check:unit
+  - npm run check
+security_commands: []
+skill_ergonomics_skill_paths:
+  - skills/ceal-guide/SKILL.md
+  - skills/cealctl-guide/SKILL.md
+cli_skill_surface_probe_commands:
+  - npm run probe

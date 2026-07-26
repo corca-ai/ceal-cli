@@ -1,4 +1,5 @@
 node_modules/
+.charness/
 packages/*/dist/
 dist/
 *.tgz
