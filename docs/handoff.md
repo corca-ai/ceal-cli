@@ -1,5 +1,6 @@
 # Session Handoff
-Date: 2026-07-26 (`ceal-v0.65.9` is stable; unreleased work waiting; prod sessions degraded)
+Date: 2026-07-26 (`ceal-v0.65.10` is stable; unreleased work waiting; the prod
+session degradation is now classified client-side, Gateway cause still open)
 
 Narnia-owned work only (`@corca-ai/ceal`, the `ceal` worker, `skills/ceal-guide`).
 Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
@@ -16,7 +17,18 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
 
 ## Current State
 
-- `ceal-v0.65.9` is stable and installed here. It carries the resolutions for
+- **`ceal-v0.65.10` is the current release**, cut from another checkout while
+  this one held unpushed work, so it carries none of it. It preserves session
+  recovery truth at the Gateway boundary: a transport or malformed refresh
+  response is retryable and explicitly not evidence of an invalid enrollment,
+  while a typed revoked/expired/replayed/binding-denied response directs a
+  re-enrollment, and a failed remote logout keeps the local session for a retry.
+  `ceal.client_session.v1` replaced `renewal_available` with
+  `renewal_configured` plus `renewal_status`, because a stored refresh
+  credential never proved a live renewal. It also shipped `d65bb1d`, which the
+  previous baton still listed as unreleased.
+- `ceal-v0.65.9` remains the last release proven live. It carries the
+  resolutions for
   `corca-ai/ceal-cli#2`, `#3`, `#4`: one error key (`kind`) and one success
   predicate (`ok`, meaning "this command answered", agreeing with the exit code)
   on every surface, `gateway: {instance_ref, profile_ref}` on call and receipt
@@ -40,7 +52,9 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
   regression — and a replacement `enrollments create` answers `request_denied`
   while the access registry still lists the client and profile as active. Both
   paths worked at 14:45Z. Recorded for the Gateway host in
-  `oc:~/ceal/handoff-from-narnia-2026-07-26.md` §8.
+  `oc:~/ceal/handoff-from-narnia-2026-07-26.md` §8. `0.65.10` changes only how
+  the worker *renders* that failure — retryable, enrollment not implicated — so
+  it removes the misleading advice, not the outage. The Gateway cause is open.
 - Route **acceptance** derives from `CEAL_SUBCOMMANDS` / `CEALCTL_SUBCOMMANDS`
   via `splitSubcommandRoute` (`packages/ceal-worker-cli/src/subcommands.ts`), so
   adding a route means adding a table entry, nothing else.
@@ -101,8 +115,9 @@ closing move once the operator approves it.
    code shipped in `0.65.9` and was verified live against prod from an identical
    build minutes before the tag, but the post-release re-run on the installed
    binary was cut off by the session outage, and only `#4` was confirmed on the
-   released artifact. Re-run the matrix, then close each issue citing what was
-   observed rather than what was implemented:
+   released artifact. Re-run the matrix against the **`0.65.10`** artifact now
+   installed, then close each issue citing what was observed rather than what was
+   implemented:
    - `#2`: an out-of-contract argument renders `invalid_arguments` with a
      correction (not a retry); `receipt show` on an unaudited reference renders
      `audit_event_not_found`; a declared read's unknown outcome carries no write
@@ -153,13 +168,22 @@ closing move once the operator approves it.
 
 ### Unreleased on `main`, for whichever release ships next
 
-- `a51b002` — `code` is gone from every error object; `kind` is the only error
-  key, and the structural gate bans `code` outright. **Breaking** for a reader of
-  `error.code` on `ceal.capabilities.v1` or a rejected enrollment; the operator
-  chose no compatibility window over an alias with no closing date. The changelog
-  entry still needs writing at release time, and it should say that plainly.
-- `d65bb1d` — a skills directory that links to nothing names the missing target
-  instead of advising against replacing a directory that was never there.
+Rebased onto `ceal-v0.65.10`; `npm run check` passes on the result (86/86 on the
+release suite). `d65bb1d` is no longer listed here — it shipped in `0.65.10`.
+
+- `a268e8e` (was `a51b002`) — `code` is gone from every error object; `kind` is
+  the only error key, and the structural gate bans `code` outright. **Breaking**
+  for a reader of `error.code` on `ceal.capabilities.v1` or a rejected
+  enrollment; the operator chose no compatibility window over an alias with no
+  closing date. The changelog entry still needs writing at release time, and it
+  should say that plainly.
+- `c5bc9b7` (was `aaccf65`) — `hosts` is the only per-host answer in
+  `ceal.guide.v1`; the per-host projection and its `non_claims` sentence are
+  gone. **Breaking** for a reader of the top-level per-host fields.
+
+Both are document-shape breaks, and `0.65.10` already broke
+`ceal.client_session.v1` in the same week. Whoever ships next should decide
+whether they go out together in one announced break or separately.
 
 The release lane: bump the eight version-bearing files the prep commit touches —
 `package-lock.json` included, because `npm run check` does not gate the lock but
