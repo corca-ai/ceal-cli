@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { type Stats, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
 const STATE_LOCK_OWNER = "owner.json";
@@ -67,8 +68,8 @@ export function createCealSessionStore(home: string | undefined): {
 
 function readSessionFile(directory: string, file: string): CealStoredSession | null {
 	if (!existsSync(file)) return null;
-	assertDirectory(directory);
-	assertFile(file);
+	assertDirectory(directory, unsafeSessionStore, true);
+	assertFile(file, unsafeSessionStore, true);
 	let parsed: unknown;
 	try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { throw new CealSessionStoreError("invalid_store"); }
 	return parseSession(parsed);
@@ -76,8 +77,8 @@ function readSessionFile(directory: string, file: string): CealStoredSession | n
 
 function writeSessionFile(directory: string, file: string, session: CealStoredSession): void {
 	validateSession(session);
-	prepareDirectory(directory);
-	if (existsSync(file)) assertFile(file);
+	prepareDirectory(directory, unsafeSessionStore, true);
+	if (existsSync(file)) assertFile(file, unsafeSessionStore, true);
 	const temporary = path.join(directory, `.client-session.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
 	try {
 		writeFileSync(temporary, `${JSON.stringify(serializeSession(session), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -96,13 +97,13 @@ function replaceSessionFile(directory: string, file: string, expectedRefreshToke
 
 function removeSessionFile(directory: string, file: string): void {
 	if (!existsSync(file)) return;
-	assertDirectory(directory);
-	assertFile(file);
+	assertDirectory(directory, unsafeSessionStore, true);
+	assertFile(file, unsafeSessionStore, true);
 	rmSync(file);
 }
 
 async function withStateLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
-	prepareDirectory(directory);
+	prepareDirectory(directory, unsafeSessionStore, true);
 	const release = await acquireStateLock(path.join(directory, STATE_LOCK_DIRECTORY));
 	try {
 		return await action();
@@ -212,23 +213,8 @@ function nodeErrorCode(error: unknown): string | undefined {
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)); }
 
-function prepareDirectory(directory: string): void {
-	if (!existsSync(directory)) {
-		try { mkdirSync(directory, { mode: 0o700 }); } catch { throw new CealSessionStoreError("unsafe_store"); }
-	}
-	assertDirectory(directory);
-	chmodSync(directory, 0o700);
-}
 
-function assertDirectory(directory: string): void {
-	const stat = lstatSync(directory);
-	if (stat.isSymbolicLink() || !stat.isDirectory() || (stat.mode & 0o777) !== 0o700) throw new CealSessionStoreError("unsafe_store");
-}
 
-function assertFile(file: string): void {
-	const stat = lstatSync(file);
-	if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o777) !== 0o600) throw new CealSessionStoreError("unsafe_store");
-}
 
 function serializeSession(session: CealStoredSession): Record<string, unknown> {
 	return {
@@ -328,4 +314,10 @@ function safeEndpoint(value: string): boolean {
 		return !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
 			&& (endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")));
 	} catch { return false; }
+}
+
+// Names this store's refusal once so the shared guards can raise it without
+// knowing which store called them.
+function unsafeSessionStore(): never {
+	throw new CealSessionStoreError("unsafe_store");
 }

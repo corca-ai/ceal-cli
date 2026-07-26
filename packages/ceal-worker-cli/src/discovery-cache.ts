@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
+import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost
@@ -113,8 +114,8 @@ function parseCacheEntry(value: unknown): CealDiscoveryCacheEntry | null {
 
 function writeCacheEntry(directory: string, file: string, entry: CealDiscoveryCacheEntry): void {
 	validateEntry(entry);
-	prepareDirectory(directory);
-	if (existsSync(file)) assertFile(file);
+	prepareDirectory(directory, unsafeDiscoveryCache);
+	if (existsSync(file)) assertFile(file, unsafeDiscoveryCache);
 	const temporary = path.join(directory, `.client-discovery-cache.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
 	try {
 		writeFileSync(temporary, `${JSON.stringify(serializeEntry(entry), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -126,11 +127,9 @@ function writeCacheEntry(directory: string, file: string, entry: CealDiscoveryCa
 }
 
 function removeCacheEntry(file: string): void {
-	if (!existsSync(file)) return;
-	const stat = lstatSync(file);
-	// Only remove a plain file we own; leave anything unexpected untouched.
-	if (stat.isSymbolicLink() || !stat.isFile()) return;
-	rmSync(file, { force: true });
+	// removableFile refuses anything that is not a plain file we own, so a
+	// symlink or directory left in the store is never deleted by cleanup.
+	if (removableFile(file)) rmSync(file, { force: true });
 }
 
 function serializeEntry(entry: CealDiscoveryCacheEntry): Record<string, unknown> {
@@ -182,31 +181,8 @@ function isValidCachedDiscovery(value: unknown, key: CealDiscoveryCacheKey): val
 	}
 }
 
-function safeExistingFile(directory: string, file: string): boolean {
-	try {
-		const dir = lstatSync(directory);
-		// Match the session store's directory guarantee (0o700, no symlink): reached
-		// via the explicit-gateway path too, which never runs the session store's
-		// assertDirectory first. A wider-mode dir soft-fails to a live probe.
-		if (dir.isSymbolicLink() || !dir.isDirectory() || (dir.mode & 0o777) !== 0o700) return false;
-		const stat = lstatSync(file);
-		return !stat.isSymbolicLink() && stat.isFile() && (stat.mode & 0o777) === 0o600;
-	} catch { return false; }
-}
 
-function prepareDirectory(directory: string): void {
-	if (!existsSync(directory)) {
-		try { mkdirSync(directory, { mode: 0o700 }); } catch { throw new CealDiscoveryCacheStoreError("unsafe_store"); }
-	}
-	const stat = lstatSync(directory);
-	if (stat.isSymbolicLink() || !stat.isDirectory()) throw new CealDiscoveryCacheStoreError("unsafe_store");
-	chmodSync(directory, 0o700);
-}
 
-function assertFile(file: string): void {
-	const stat = lstatSync(file);
-	if (stat.isSymbolicLink() || !stat.isFile()) throw new CealDiscoveryCacheStoreError("unsafe_store");
-}
 
 function safeRef(value: unknown): value is string {
 	return typeof value === "string" && SAFE_REF.test(value);
@@ -224,4 +200,10 @@ function safeEndpoint(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// Names this store's refusal once so the shared guards can raise it without
+// knowing which store called them.
+function unsafeDiscoveryCache(): never {
+	throw new CealDiscoveryCacheStoreError("unsafe_store");
 }

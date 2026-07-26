@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
 // source ("what did this client's token do"). It records an allowlisted
@@ -117,9 +118,9 @@ function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEnt
 	const entries = [...existing, entry]
 		.filter((candidate) => withinRetention(candidate.recordedAt, Math.max(now, entry.recordedAt)))
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
-	prepareDirectory(directory);
+	prepareDirectory(directory, unsafeReceiptSpool);
 	sweepStaleTemporaries(directory, now);
-	if (existsSync(file)) assertFile(file);
+	if (existsSync(file)) assertFile(file, unsafeReceiptSpool);
 	const temporary = path.join(directory, `.receipt-spool.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
 	try {
 		writeFileSync(temporary, `${JSON.stringify(serializeSpool(entries), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -169,10 +170,9 @@ function sweepStaleTemporaries(directory: string, now: number): void {
 }
 
 function removeSpool(file: string): void {
-	if (!existsSync(file)) return;
-	const stat = lstatSync(file);
-	if (stat.isSymbolicLink() || !stat.isFile()) return;
-	rmSync(file, { force: true });
+	// removableFile refuses anything that is not a plain file we own, so a
+	// symlink or directory left in the store is never deleted by cleanup.
+	if (removableFile(file)) rmSync(file, { force: true });
 }
 
 function serializeSpool(entries: readonly CealReceiptSpoolEntry[]): Record<string, unknown> {
@@ -218,28 +218,8 @@ function isValidEntry(value: unknown): value is CealReceiptSpoolEntry {
 		&& (value.errorKind === undefined || safeRef(value.errorKind));
 }
 
-function safeExistingFile(directory: string, file: string): boolean {
-	try {
-		const dir = lstatSync(directory);
-		if (dir.isSymbolicLink() || !dir.isDirectory() || (dir.mode & 0o777) !== 0o700) return false;
-		const stat = lstatSync(file);
-		return !stat.isSymbolicLink() && stat.isFile() && (stat.mode & 0o777) === 0o600;
-	} catch { return false; }
-}
 
-function prepareDirectory(directory: string): void {
-	if (!existsSync(directory)) {
-		try { mkdirSync(directory, { mode: 0o700 }); } catch { throw new CealReceiptSpoolStoreError("unsafe_store"); }
-	}
-	const stat = lstatSync(directory);
-	if (stat.isSymbolicLink() || !stat.isDirectory()) throw new CealReceiptSpoolStoreError("unsafe_store");
-	chmodSync(directory, 0o700);
-}
 
-function assertFile(file: string): void {
-	const stat = lstatSync(file);
-	if (stat.isSymbolicLink() || !stat.isFile()) throw new CealReceiptSpoolStoreError("unsafe_store");
-}
 
 function isSpoolStatus(value: unknown): value is CealReceiptSpoolEntry["status"] {
 	return typeof value === "string" && SPOOL_STATUSES.has(value);
@@ -255,4 +235,10 @@ function safeRef(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// Names this store's refusal once so the shared guards can raise it without
+// knowing which store called them.
+function unsafeReceiptSpool(): never {
+	throw new CealReceiptSpoolStoreError("unsafe_store");
 }
