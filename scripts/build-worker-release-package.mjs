@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import {
 	withWorkerReleaseDevelopmentInputs,
 	withWorkerReleaseInputs,
@@ -278,7 +279,7 @@ function inspectOutput(value, repoRoot, force) {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker package output must be an absolute directory.");
 	const directory = path.resolve(value);
 	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory)) fail("unsafe_output", "Worker package output is too broad.");
-	assertNoSymlinkComponents(directory);
+	assertNoSymlinkComponents(directory, fail, "Worker package output");
 	if (!existsSync(directory)) return { directory, force: false };
 	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("unsafe_output", "Worker package output must be a regular directory.");
 	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink()) fail("output_not_replaceable", "Use --force only with a marked worker package output.");
@@ -291,13 +292,6 @@ function publishOutput(staging, output) {
 	renameSync(staging, output.directory);
 }
 
-function assertNoSymlinkComponents(value) {
-	let current = path.parse(value).root;
-	for (const part of value.slice(current.length).split(path.sep).filter(Boolean)) {
-		current = path.join(current, part);
-		if (existsSync(current) && lstatSync(current).isSymbolicLink()) fail("unsafe_output", "Worker package output cannot traverse a symbolic link.");
-	}
-}
 
 function assertRegularTree(root, code) {
 	if (!existsSync(root) || !lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink()) fail(code, "Worker package input directory is unsafe.");

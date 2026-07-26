@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { assertNoSymlinkComponents } from "../scripts/lib/safe-output-path.mjs";
+
+class GuardError extends Error {
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+	}
+}
+
+function fail(code, message) {
+	throw new GuardError(code, message);
+}
+
+function scratch(context) {
+	const directory = mkdtempSync(path.join(tmpdir(), "ceal-safe-output-"));
+	context.after(() => rmSync(directory, { recursive: true, force: true }));
+	return directory;
+}
+
+// The regression this guard was rewritten for. Three of five hand-copied
+// versions gated lstatSync behind existsSync, which *follows* the link: a
+// component symlinked to a path that does not exist made existsSync false, the
+// lstat arm never ran, and the write proceeded through the link. A guard that
+// only catches resolvable symlinks is not the guard the release lane needs.
+test("a dangling symlink component is refused, not skipped", (context) => {
+	const root = scratch(context);
+	symlinkSync(path.join(root, "no-such-target"), path.join(root, "dangling"));
+	assert.throws(
+		() => assertNoSymlinkComponents(path.join(root, "dangling", "out"), fail, "Output"),
+		(error) => error instanceof GuardError && error.code === "unsafe_output",
+	);
+});
+
+test("a symlink component that does resolve is refused", (context) => {
+	const root = scratch(context);
+	mkdirSync(path.join(root, "real"));
+	symlinkSync(path.join(root, "real"), path.join(root, "link"));
+	assert.throws(
+		() => assertNoSymlinkComponents(path.join(root, "link", "out"), fail, "Output"),
+		(error) => error instanceof GuardError && error.code === "unsafe_output",
+	);
+	// The final component is checked too, not just the parents.
+	assert.throws(
+		() => assertNoSymlinkComponents(path.join(root, "link"), fail, "Output"),
+		(error) => error instanceof GuardError && error.code === "unsafe_output",
+	);
+});
+
+// A path that does not exist yet is the normal case for an output directory:
+// nothing can be redirected through it, so the walk must stop rather than fail.
+test("a plain path is accepted whether or not it exists yet", (context) => {
+	const root = scratch(context);
+	mkdirSync(path.join(root, "a", "b"), { recursive: true });
+	assertNoSymlinkComponents(path.join(root, "a", "b"), fail, "Output");
+	assertNoSymlinkComponents(path.join(root, "a", "b", "not-created-yet", "deeper"), fail, "Output");
+	writeFileSync(path.join(root, "a", "file"), "x");
+	assertNoSymlinkComponents(path.join(root, "a", "file"), fail, "Output");
+});
+
+// A symlink below the first missing component cannot be reached by a write that
+// had to create the missing parent first, so stopping early stays honest.
+test("the walk stops at the first missing component", (context) => {
+	const root = scratch(context);
+	assertNoSymlinkComponents(path.join(root, "missing", "anything", "at", "all"), fail, "Output");
+});

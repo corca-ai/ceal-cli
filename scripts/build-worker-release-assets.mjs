@@ -9,6 +9,7 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -205,7 +206,7 @@ function inspectOutput(value, repoRoot, force) {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker release assets output must be an absolute directory.");
 	const directory = path.resolve(value);
 	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory)) fail("unsafe_output", "Worker release assets output is too broad.");
-	assertNoSymlinkComponents(directory);
+	assertNoSymlinkComponents(directory, fail, "Worker release assets output");
 	if (!existsSync(directory)) return { directory, force: false };
 	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) fail("unsafe_output", "Worker release assets output must be a regular directory.");
 	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink()) fail("output_not_replaceable", "Use --force only with a marked worker release assets output.");
@@ -218,13 +219,6 @@ function publishOutput(staging, output) {
 	renameSync(staging, output.directory);
 }
 
-function assertNoSymlinkComponents(value) {
-	let current = path.parse(value).root;
-	for (const part of value.slice(current.length).split(path.sep).filter(Boolean)) {
-		current = path.join(current, part);
-		if (existsSync(current) && lstatSync(current).isSymbolicLink()) fail("unsafe_output", "Worker release assets output cannot traverse a symbolic link.");
-	}
-}
 
 function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
 function fail(code, message) { throw new WorkerReleaseAssetsError(code, message); }

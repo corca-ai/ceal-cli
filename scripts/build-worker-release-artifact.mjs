@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { verifyGatewayProtocolConsumer } from "./verify-gateway-protocol-consumer.mjs";
@@ -228,24 +229,10 @@ function requireOutputDirectory(value) {
 	if ([path.parse(output).root, ROOT, path.resolve(ROOT, "..")].includes(output)
 		|| output.startsWith(`${ROOT}${path.sep}`)
 		|| ROOT.startsWith(`${output}${path.sep}`)) fail("unsafe_output", "Refusing a broad or repository-overlapping worker output directory.");
-	assertNoSymlinkComponents(output);
+	assertNoSymlinkComponents(output, fail, "Worker artifact output path");
 	return output;
 }
 
-function assertNoSymlinkComponents(output) {
-	const parsed = path.parse(output);
-	let current = parsed.root;
-	for (const component of output.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
-		current = path.join(current, component);
-		try {
-			if (lstatSync(current).isSymbolicLink()) fail("unsafe_output", "Worker artifact output path must not contain symbolic links.");
-		} catch (error) {
-			if (error instanceof WorkerReleaseArtifactError) throw error;
-			if (error?.code === "ENOENT") return;
-			fail("unsafe_output", "Could not safely inspect worker artifact output path.");
-		}
-	}
-}
 
 function prepareOutput(outputDirectory, force) {
 	if (!existsSync(outputDirectory)) {
