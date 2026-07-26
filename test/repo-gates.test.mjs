@@ -108,7 +108,16 @@ test("every formatting-only commit is recorded for git blame to ignore", () => {
 	assert.ok(revisions.length > 0, ".git-blame-ignore-revs must list the bulk-reformat commit");
 	for (const revision of revisions) {
 		assert.match(revision, /^[0-9a-f]{40}$/u, "each entry must be a full 40-character SHA, which is what git requires");
-		// A typo here fails silently in git, so prove each SHA resolves.
+	}
+
+	// Resolving each SHA is the check that actually catches a typo, since git
+	// ignores an unresolvable entry silently. It only means anything in a full
+	// clone: CI checks out with fetch-depth 1, where an ancestor commit is
+	// genuinely absent rather than wrong. Skipping beats asserting something the
+	// checkout cannot answer — this test failed on CI for exactly that reason.
+	const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { cwd: ROOT, encoding: "utf8" }).trim();
+	if (shallow === "true") return;
+	for (const revision of revisions) {
 		const type = execFileSync("git", ["cat-file", "-t", revision], { cwd: ROOT, encoding: "utf8" }).trim();
 		assert.equal(type, "commit", `${revision} must be a commit in this repository`);
 	}
