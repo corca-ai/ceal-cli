@@ -58,9 +58,11 @@ test("canonical registry is reachable through stable, read-only help", async () 
 	}
 	for (const command of CEAL_COMMANDS) {
 		// `ceal version` is frozen: the installer that runs during `ceal update` is
-		// the installed generation's, and it verifies that document. Adding a field
-		// broke every existing client's upgrade path in 0.65.10, so this document
-		// stays byte-stable until no installed client compares it whole.
+		// the installed generation's, and older generations compare that document
+		// byte for byte, so adding a field there breaks the upgrade path for every
+		// already-installed client. It stays byte-stable until no installed client
+		// compares it whole. CHANGELOG.md records which release proved this; do not
+		// restate a release number here.
 		if (command.name === "version") continue;
 		for (const args of [[command.name, "--help"], [command.name, "-h"], ["help", command.name]]) {
 			const result = await run(args);
@@ -132,9 +134,11 @@ test("route acceptance is derived from the declaration", async () => {
 test("advertised subcommand rows and declared routes stay in sync", async () => {
 	for (const command of CEAL_COMMANDS) {
 		// `ceal version` is frozen: the installer that runs during `ceal update` is
-		// the installed generation's, and it verifies that document. Adding a field
-		// broke every existing client's upgrade path in 0.65.10, so this document
-		// stays byte-stable until no installed client compares it whole.
+		// the installed generation's, and older generations compare that document
+		// byte for byte, so adding a field there breaks the upgrade path for every
+		// already-installed client. It stays byte-stable until no installed client
+		// compares it whole. CHANGELOG.md records which release proved this; do not
+		// restate a release number here.
 		if (command.name === "version") continue;
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === command.name);
 		const { stdout } = await run([command.name, "--help"]);
@@ -201,9 +205,11 @@ test("a help token anywhere resolves to the nearest declared leaf", async () => 
 test("every public command emits one YAML document without a format flag", async () => {
 	for (const command of CEAL_COMMANDS) {
 		// `ceal version` is frozen: the installer that runs during `ceal update` is
-		// the installed generation's, and it verifies that document. Adding a field
-		// broke every existing client's upgrade path in 0.65.10, so this document
-		// stays byte-stable until no installed client compares it whole.
+		// the installed generation's, and older generations compare that document
+		// byte for byte, so adding a field there breaks the upgrade path for every
+		// already-installed client. It stays byte-stable until no installed client
+		// compares it whole. CHANGELOG.md records which release proved this; do not
+		// restate a release number here.
 		if (command.name === "version") continue;
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "request:test"]
@@ -230,15 +236,18 @@ test("version identifies the package, protocol, range, and credential context", 
 		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
 		credential_context: "gateway_issued_client_session",
 	});
-	assert.equal(manifest.version, "0.65.10");
+	// No literal version is asserted here: the drift guard above already pins the
+	// rendered document to the manifest, and a hardcoded number would only force
+	// a test edit on every bump. CHANGELOG.md is where release numbers live.
 });
 
 // `ceal update` runs the *installed* generation's `install-ceal.sh`, and older
-// installers compare this document whole. Adding one field to it in 0.65.7 broke
-// every installed client's upgrade path, so the key set is frozen rather than
-// left to a comment. Unlock condition: once no supported client predates the
-// installer that field-checks instead of byte-comparing (0.65.9), this document
-// may carry `ok` like every other one, and this gate can go.
+// installers compare this document whole. Adding one field to it broke every
+// installed client's upgrade path once, so the key set is frozen rather than
+// left to a comment; CHANGELOG.md records which release proved it. Unlock
+// condition: once no supported client predates the installer that field-checks
+// instead of byte-comparing, this document may carry `ok` like every other one,
+// and this gate can go.
 test("the version document's key set is frozen for older installers", async () => {
 	assert.deepEqual(Object.keys(await yamlRun(["version"])), [
 		"schema_version", "command", "version", "protocol_version",
@@ -374,6 +383,35 @@ test("every declared guide register route names a supported agent host", async (
 // existed, so following its method was left to chance. The advisory appears on
 // the surface every agent reaches first, and only for an unregistered running
 // host — never as noise on a healthy install.
+// corca-ai/ceal-cli#5: every rejected `capabilities` argv reported a failed
+// target selection, so an agent reading the structured error started digging
+// into grants and approval targets when the real fault was an undeclared flag —
+// and the bare catalog route selects no target at all. An agent trusts this
+// document, so it must name the option and point at the help that lists it.
+test("a rejected capabilities option names the option and its own route's help", async () => {
+	// The reporter's first case: a flag that exists nowhere.
+	const bogus = await yamlRun(["capabilities", "--bogus-flag"], 2);
+	assert.equal(bogus.error.kind, "invalid_argument");
+	assert.match(bogus.error.message, /Unknown option '--bogus-flag' for 'ceal capabilities'/u);
+	assert.equal(bogus.error.next_action, "Run 'ceal capabilities --help'.");
+	assert.doesNotMatch(bogus.error.message, /target selection/u);
+
+	// The reporter's second case: a flag that is real, but on the subcommand.
+	const misplaced = await yamlRun(["capabilities", "--capability", "message.search"], 2);
+	assert.match(misplaced.error.message, /Unknown option '--capability' for 'ceal capabilities'/u);
+	assert.equal(misplaced.error.next_action, "Run 'ceal capabilities --help'.");
+	assert.doesNotMatch(misplaced.error.message, /target selection/u);
+
+	// The same option on the route that declares it is not an unknown-option
+	// failure, and only that route may still speak of a target selection.
+	const targets = await yamlRun(["capabilities", "targets", "--bogus-flag"], 2);
+	assert.match(targets.error.message, /Unknown option '--bogus-flag' for 'ceal capabilities targets'/u);
+	assert.equal(targets.error.next_action, "Run 'ceal capabilities targets --help'.");
+	const noCapability = await yamlRun(["capabilities", "targets", "--match", "x"], 2);
+	assert.match(noCapability.error.message, /Invalid capabilities target selection/u);
+	assert.equal(noCapability.error.next_action, "Run 'ceal capabilities targets --help'.");
+});
+
 test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
 	const guide = (registered, agentSource) => () => ({
 		status: "available", agent: "claude", agent_source: agentSource,
@@ -410,9 +448,11 @@ test("capabilities points an unregistered running host at the guide, and stays s
 test("every command answers one success predicate that agrees with its exit code", async () => {
 	for (const command of CEAL_COMMANDS) {
 		// `ceal version` is frozen: the installer that runs during `ceal update` is
-		// the installed generation's, and it verifies that document. Adding a field
-		// broke every existing client's upgrade path in 0.65.10, so this document
-		// stays byte-stable until no installed client compares it whole.
+		// the installed generation's, and older generations compare that document
+		// byte for byte, so adding a field there breaks the upgrade path for every
+		// already-installed client. It stays byte-stable until no installed client
+		// compares it whole. CHANGELOG.md records which release proved this; do not
+		// restate a release number here.
 		if (command.name === "version") continue;
 		const args = command.name === "call" ? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
 			: command.name === "receipt" ? ["receipt", "show", "ceal:missing:call"]

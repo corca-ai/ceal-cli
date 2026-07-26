@@ -50,16 +50,26 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
 
 ## Gates
 
-- `npm run check:unit` (~14s) is the iteration gate; `npm run check` (~95s) is
-  the final one. Prefer the narrow one until closeout.
+- `npm run check:unit` is the iteration gate; `npm run check` is the final one,
+  and the release suite dominates its cost. Prefer the narrow one until
+  closeout. Time them with `time npm run check` on the host in hand rather than
+  quoting a number from a document — the recorded figures went stale unnoticed
+  once already, and a stale figure makes an honest run look like a regression
+  under the `Boundaries` slow-test rule below.
 - `npm run probe -- <binary> <command> [route/options]` is the only sanctioned
   way to poke an installed surface: it refuses any route whose declared effect
   is not `read_only` and uses a throwaway `HOME`. A live readback against the
   real session is a different act — read the declared effect before typing the
   route, and never batch a state change into a list of checks.
-- Route acceptance derives from the `CEAL_SUBCOMMANDS` / `CEALCTL_SUBCOMMANDS`
-  tables in `packages/ceal-worker-cli/src/subcommands.ts`. Adding a route means
-  adding a table entry, nothing else.
+- Route *acceptance* and leaf help derive from a declaration table:
+  `CEAL_SUBCOMMANDS` in `packages/ceal-worker-cli/src/subcommands.ts`, and
+  `CEALCTL_SUBCOMMANDS` in `packages/ceal-operator-cli/src/index.ts` — a frozen
+  package, so a `cealctl` route is not an edit this lane originates.
+  Dispatch is not table-driven. A worker route needs its table entry *and* its
+  branch in the runner: `runSession` treats every non-`logout` session route as
+  enrollment, and `runGuide` treats every non-`register` guide route as status.
+  A table-only row therefore passes `check:unit` — which proves help and
+  refusal, not routing — and misroutes in the shipped binary.
 - Run state-changing commands (commit, push, tag, publish) without output
   filters and read the exit code before retrying. Pipe-trimming is for read-only
   output only.

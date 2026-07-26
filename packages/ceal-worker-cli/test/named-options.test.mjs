@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNamedOptions } from "../dist/named-options.js";
+import { parseNamedOptions, unknownNamedOption } from "../dist/named-options.js";
 
 const VALUE_OPTIONS = new Set(["--target", "--profile"]);
 const FLAG_OPTIONS = new Set(["--fresh", "--detail"]);
@@ -44,4 +44,19 @@ test("named option parser keeps flags separate from values and operands", () => 
 		values: { "--target": "target:team-inbox" }, flags: ["--fresh", "--detail"], operands: ["query=ceal"],
 	});
 	assert.equal(normalized(["--fresh", "--fresh"]), null);
+});
+
+// A refusal that cannot name the offending option pushes the reader toward
+// whatever the caller was about to build instead of the token they typed.
+test("the unknown-option reader names the first undeclared option only", () => {
+	assert.equal(unknownNamedOption(["--target", "target:x"], VALUE_OPTIONS, FLAG_OPTIONS), null);
+	assert.equal(unknownNamedOption(["--bogus"], VALUE_OPTIONS, FLAG_OPTIONS), "--bogus");
+	assert.equal(unknownNamedOption(["--fresh", "--bogus", "--other"], VALUE_OPTIONS, FLAG_OPTIONS), "--bogus");
+	// A declared option's value is consumed, so a value that looks like an
+	// option is not misreported as the unknown one.
+	assert.equal(unknownNamedOption(["--target", "--detail"], VALUE_OPTIONS, FLAG_OPTIONS), null);
+	// Operands are not options, and a grammar whose only fault is a duplicate or
+	// a missing value has no unknown option to name.
+	assert.equal(unknownNamedOption(["query=ceal"], VALUE_OPTIONS, FLAG_OPTIONS), null);
+	assert.equal(unknownNamedOption(["--fresh", "--fresh"], VALUE_OPTIONS, FLAG_OPTIONS), null);
 });

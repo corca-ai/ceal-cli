@@ -33,6 +33,31 @@ export function parseNamedOptions(
 	return { values, flags, operands };
 }
 
+/**
+ * Returns the first option-looking token this grammar does not declare, so a
+ * refusal can name the option instead of blaming whatever the parser was about
+ * to build. `parseNamedOptions` deliberately reports only pass/fail; this reads
+ * the same argv against the same two sets without changing that contract, and
+ * returns null when every `--token` is declared (the failure was a value, a
+ * duplicate, or an operand, which the caller still describes in its own terms).
+ */
+export function unknownNamedOption(
+	options: readonly string[], valueOptions: ReadonlySet<string>, flagOptions: ReadonlySet<string>,
+): string | null {
+	for (let index = 0; index < options.length; index += 1) {
+		const option = options[index]!;
+		if (flagOptions.has(option)) continue;
+		if (valueOptions.has(option)) {
+			// Skip the value so a value that itself looks like an option is not
+			// reported as the unknown one.
+			index += 1;
+			continue;
+		}
+		if (option.startsWith("--")) return option;
+	}
+	return null;
+}
+
 function consumeNamedOption(
 	option: string,
 	following: string | undefined,

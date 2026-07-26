@@ -124,13 +124,13 @@ npm ci
 npm run check
 ```
 
-`npm run check` is the final proof gate and takes roughly 95s; about 80s of that
-is the release-artifact and native-binary suites, which cannot observe CLI or
-client behavior. While iterating, use the fast lane and keep the full gate for
-the last run before pushing or tagging:
+`npm run check` is the final proof gate. Most of its wall clock is the
+release-artifact and native-binary suites, which cannot observe CLI or client
+behavior. While iterating, use the fast lane and keep the full gate for the last
+run before pushing or tagging:
 
 ```sh
-npm run check:unit   # build + the four package suites, roughly 14s
+npm run check:unit   # build + the four package suites
 npm run test:release # release-artifact and native-binary suites only
 ```
 
@@ -191,11 +191,15 @@ signed inventory). Promotion rotates that pointer together with the bootstrap
 copy `releases/worker/stable/install-ceal.sh` used above; the stable lane
 re-verifies every asset — including `install-ceal.sh` itself — from the
 versioned prefix. Until the first stable worker tag is published, these stable
-URLs 404; install an explicit published static tag instead:
+URLs 404; install an explicit published static tag instead. Read the tag to use
+from the newest `ceal-v*` heading in [CHANGELOG.md](CHANGELOG.md) — this README
+does not restate a release number, because a pinned example goes stale silently
+and a stale pin installs a superseded release:
 
 ```sh
-curl -fsSL https://ceal.borca.ai/releases/worker/ceal-v0.65.3/install-ceal.sh \
-  | CEAL_VERSION=ceal-v0.65.3 sh
+TAG=ceal-v<version>   # newest ceal-v* heading in CHANGELOG.md
+curl -fsSL "https://ceal.borca.ai/releases/worker/$TAG/install-ceal.sh" \
+  | CEAL_VERSION="$TAG" sh
 ```
 
 As with any `curl | sh` installer, this initial bootstrap deliberately trusts

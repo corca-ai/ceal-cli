@@ -16,7 +16,7 @@ import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cl
 import { discoveryCacheEntryUsable, type CealDiscoveryCacheKey } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
-import { parseNamedOptions } from "./named-options.js";
+import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
 import type { CealSubcommandDefinition } from "./subcommands.js";
 import { createCealObserverServer } from "./observer.js";
@@ -516,7 +516,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		(option) => option !== "--detail" && !(wantsFresh && option === "--fresh"),
 	);
 	const selection = parseTargetCatalogOptions(effectiveOptions);
-	if (selection === null) return writeError("invalid_argument", "Invalid capabilities target selection.", io);
+	if (selection === null) return writeCapabilitiesArgumentError(options, targets, io);
 	const resolved = selection.kind === "targets"
 		? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
 		: await resolveGatewayAccess(effectiveOptions, io, runtime);
@@ -596,6 +596,40 @@ type ParsedTargetCatalogOptions =
 	| { kind: "catalog" }
 	| { kind: "targets"; profileRef?: string; body: { capability_id: string; match?: string; cursor?: string; limit?: number } }
 	| null;
+
+// Every option each capabilities route declares, including the two this command
+// strips before the older parsers. Kept beside those parsers so a new option
+// cannot be accepted without also becoming nameable in a refusal.
+const CAPABILITIES_CATALOG_VALUE_OPTIONS = new Set(["--endpoint", "--profile", "--request-id"]);
+const CAPABILITIES_CATALOG_FLAG_OPTIONS = new Set(["--token-stdin", "--fresh", "--detail"]);
+const CAPABILITIES_TARGETS_VALUE_OPTIONS = new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]);
+const CAPABILITIES_TARGETS_FLAG_OPTIONS = new Set(["--detail"]);
+
+/**
+ * A rejected `capabilities` argv used to report a failed *target selection*
+ * regardless of what was actually wrong, which sent readers after grants and
+ * approval targets when the real fault was a flag the route does not declare —
+ * and on the bare catalog route, no target selection was even attempted. Name
+ * the unknown option when there is one, and point at the typed route's help.
+ */
+function writeCapabilitiesArgumentError(options: readonly string[], targets: boolean, io: CealCliIo): number {
+	const route = targets ? "ceal capabilities targets" : "ceal capabilities";
+	const nextAction = `Run '${route} --help'.`;
+	const unknown = unknownNamedOption(
+		targets ? splitSubcommandRoute("capabilities", options).rest : options,
+		targets ? CAPABILITIES_TARGETS_VALUE_OPTIONS : CAPABILITIES_CATALOG_VALUE_OPTIONS,
+		targets ? CAPABILITIES_TARGETS_FLAG_OPTIONS : CAPABILITIES_CATALOG_FLAG_OPTIONS,
+	);
+	if (unknown !== null) {
+		return writeError("invalid_argument", `Unknown option '${unknown}' for '${route}'.`, io, nextAction);
+	}
+	// Every option is declared, so the fault is a value, a duplicate, or an
+	// operand. Only the targets route selects a target, so only it may say so.
+	const message = targets
+		? "Invalid capabilities target selection."
+		: "Invalid capabilities options.";
+	return writeError("invalid_argument", message, io, nextAction);
+}
 
 function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
 	const { subcommand, rest } = splitSubcommandRoute("capabilities", options);
@@ -1245,14 +1279,18 @@ function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
 	return 3;
 }
 
-function writeError(kind: "unknown_command" | "invalid_argument", message: string, io: CealCliIo): number {
+// `nextAction` defaults to the top-level help, but a refusal that already knows
+// which route was typed should name that route's help instead: the top-level
+// help does not list a leaf's options, so it cannot answer the question a
+// rejected option raises.
+function writeError(kind: "unknown_command" | "invalid_argument", message: string, io: CealCliIo, nextAction = "Run 'ceal --help'."): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.error.v1",
 		command: "ceal",
 		ok: false,
 		status: "error",
 		credential_context: CREDENTIAL_CONTEXT,
-		error: { kind, message, next_action: "Run 'ceal --help'." },
+		error: { kind, message, next_action: nextAction },
 	});
 	return 2;
 }

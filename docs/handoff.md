@@ -55,13 +55,13 @@ Gateway/`cealctl`/protocol work has its own baton on the Gateway host — see
   `oc:~/ceal/handoff-from-narnia-2026-07-26.md` §8. `0.65.10` changes only how
   the worker *renders* that failure — retryable, enrollment not implicated — so
   it removes the misleading advice, not the outage. The Gateway cause is open.
-- Route **acceptance** derives from `CEAL_SUBCOMMANDS` / `CEALCTL_SUBCOMMANDS`
-  via `splitSubcommandRoute` (`packages/ceal-worker-cli/src/subcommands.ts`), so
-  adding a route means adding a table entry, nothing else.
-- `npm run check:unit` (~14s) is the iteration gate; `npm run check` (~95s) is
-  the final one. `npm run probe -- <binary> <command> …` is the only sanctioned
-  way to poke an installed surface: it refuses any route whose declared effect
-  is not `read_only` and uses a throwaway `HOME`.
+- Route **acceptance** derives from the declaration tables, but dispatch does
+  not — see `AGENTS.md` `## Gates`, which owns that rule and the gate timings.
+  A table-only row passes `check:unit` and still misroutes.
+- `npm run check:unit` is the iteration gate; `npm run check` is the final one.
+  `npm run probe -- <binary> <command> …` is the only sanctioned way to poke an
+  installed surface: it refuses any route whose declared effect is not
+  `read_only` and uses a throwaway `HOME`.
 - Guide registration is host-declared: `CEAL_AGENT_GUIDE_HOSTS` in
   `agent-guide.ts` carries one row per host (label, default root under HOME, env
   override), so a new host is one table row plus its `guide register <host>`
