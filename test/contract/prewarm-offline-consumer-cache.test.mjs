@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumerDependencyClosure, lockPackages, readConsumerClosure } from "../scripts/prewarm-offline-consumer-cache.mjs";
+import { consumerDependencyClosure, lockPackages, readConsumerClosure } from "../../scripts/prewarm-offline-consumer-cache.mjs";
 
 function lockOf(packages) {
 	return { packages };

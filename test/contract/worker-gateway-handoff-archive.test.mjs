@@ -5,8 +5,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveLockedGatewayHandoffArchive, WorkerGatewayHandoffArchiveError } from "../scripts/worker-gateway-handoff-archive.mjs";
-import { resolveWorkerReleaseInputsFromLockedGatewayArchive, WorkerReleaseInputError } from "../scripts/worker-release-inputs.mjs";
+import { resolveLockedGatewayHandoffArchive, WorkerGatewayHandoffArchiveError } from "../../scripts/worker-gateway-handoff-archive.mjs";
+import { resolveWorkerReleaseInputsFromLockedGatewayArchive, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
 
 test("resolves only a lock-bound exact Gateway archive through a disposable packet", (context) => {
 	const fixture = archiveFixture(context);

@@ -11,9 +11,9 @@ import {
 	resolveWorkerReleaseDevelopmentInputs,
 	runCli,
 	WorkerReleaseInputError,
-} from "../scripts/worker-release-inputs.mjs";
+} from "../../scripts/worker-release-inputs.mjs";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 test("worker release inventory accepts one exact complete Gateway handoff", (context) => {
 	const fixture = handoffFixture(context);

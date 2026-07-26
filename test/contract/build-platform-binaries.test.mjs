@@ -12,9 +12,9 @@ import {
 	buildCurrentSource,
 	CealCliPlatformBuildError,
 	runCli,
-} from "../scripts/build-platform-binaries.mjs";
+} from "../../scripts/build-platform-binaries.mjs";
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 for (const platform of ["linux-arm64", "linux-amd64"]) {
 	test(`builds one smoke-checked ceal and cealctl ${platform} set`, async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { codedErrorClass } from "../scripts/lib/coded-error.mjs";
-import { parseScriptArgs } from "../scripts/lib/parse-script-args.mjs";
+import { codedErrorClass } from "../../scripts/lib/coded-error.mjs";
+import { parseScriptArgs } from "../../scripts/lib/parse-script-args.mjs";
 
 function thrower() {
 	return (code, message) => {

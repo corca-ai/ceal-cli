@@ -7,13 +7,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 import {
 	composeWorkerReleaseAssets,
 	mergeWorkerReleaseAssetSets,
 	WorkerReleaseAssetsError,
-} from "../scripts/build-worker-release-assets.mjs";
+} from "../../scripts/build-worker-release-assets.mjs";
 
 // The installer accepts exactly this shape; keep the two allowlists aligned.
 const INSTALLER_ALLOWLIST =

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
 function read(relative) {
@@ -159,4 +159,40 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 	// Re-running is safe: an installed clone stays installed.
 	execFileSync(process.execPath, ["scripts/install-git-hooks.mjs"], { cwd: clone, stdio: "pipe" });
 	assert.equal(check().status, 0);
+});
+
+// The reason this suite exists. `test:release` globs `test/*.test.mjs`, which the
+// pre-push hook never runs for a branch push — it runs `check:unit`. Every
+// repo-contract test written into `test/` was therefore invisible to the hook and
+// first failed on CI, twice in one session. Cheap contract tests live in
+// `test/contract/` and run inside `check:unit`; the expensive release-artifact
+// proofs stay in `test/`. A new file must land in exactly one of the two, because
+// landing in neither is the silent failure this guards.
+test("every test file under test/ belongs to exactly one suite", () => {
+	const scripts = manifest.scripts;
+	assert.equal(scripts["test:contract"], "node --test test/contract/*.test.mjs");
+	assert.match(scripts["test:release"], /^node --test --test-concurrency=1 test\/\*\.test\.mjs$/u);
+	// The two globs are exclusive: test/*.test.mjs cannot match test/contract/*.
+	assert.match(scripts["check:unit"], /npm run test:contract/u);
+	assert.match(scripts.test, /npm run test:contract/u);
+	assert.match(scripts.test, /npm run test:release/u);
+
+	const contract = readdirSync(path.join(ROOT, "test", "contract")).filter((name) => name.endsWith(".test.mjs"));
+	const release = readdirSync(path.join(ROOT, "test")).filter((name) => name.endsWith(".test.mjs"));
+	assert.ok(contract.length > 0 && release.length > 0);
+
+	// Any other directory under test/ would be globbed by neither script.
+	const directories = readdirSync(path.join(ROOT, "test"), { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.map((entry) => entry.name);
+	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory is run by no suite; wire it up or use test/contract/");
+});
+
+// The contract suite only helps if it stays fast enough to sit in the iteration
+// gate. This is a ceiling on the count, not the runtime, because a runtime
+// assertion would be flaky on a loaded machine — but a file that belongs in the
+// release tier is usually obvious by name.
+test("the contract suite stays small enough to run on every push", () => {
+	const contract = readdirSync(path.join(ROOT, "test", "contract")).filter((name) => name.endsWith(".test.mjs"));
+	assert.ok(contract.length <= 20, `test/contract has ${contract.length} files; re-check that each is still cheap`);
 });

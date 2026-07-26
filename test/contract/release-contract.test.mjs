@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildCealCliReleaseManifest, CealCliReleaseManifestError } from "../scripts/build-release-manifest.mjs";
+import { buildCealCliReleaseManifest, CealCliReleaseManifestError } from "../../scripts/build-release-manifest.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const packageRoot = existsSync(path.join(repoRoot, "packages")) ? repoRoot : path.resolve(repoRoot, "../..");
 
 test("one release contract binds package, protocol, binary, and rollback identity", () => {

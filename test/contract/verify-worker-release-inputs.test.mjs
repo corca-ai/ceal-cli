@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateWorkerReleaseInputs, WorkerReleaseInputsError } from "../scripts/verify-worker-release-inputs.mjs";
+import { fileURLToPath } from "node:url";
+import { validateWorkerReleaseInputs, WorkerReleaseInputsError } from "../../scripts/verify-worker-release-inputs.mjs";
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 test("legacy release inventory allows only worker source and a supplied Gateway protocol version", () => {
 	const inputs = validateWorkerReleaseInputs({ repoRoot: REPO_ROOT, protocolVersion: "0.65.0" });
