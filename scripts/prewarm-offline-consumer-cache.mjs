@@ -9,6 +9,11 @@
 // online prewarm derives the exact name@version closure from the committed
 // root package-lock.json and caches it once; run it after `npm ci` on a cold
 // host, before `npm run check` or a release build.
+//
+// Every export here is pure so the closure can be tested without touching the
+// network or the npm cache: the module used to run its whole walk at import
+// time, which left the one script whose failure surfaces as a mid-release
+// ENOTCACHED with no test at all.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -20,45 +25,111 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONSUMER_MANIFESTS = ["packages/ceal-client/package.json", "packages/ceal-worker-cli/package.json"];
 const OWNED_SCOPE = "@corca-ai/";
 
-function lockPackages() {
-	const lock = JSON.parse(readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+// Every dependency field that can put a package into an install. `optional` is
+// included deliberately: npm installs a matching optional dependency rather than
+// skipping it, so an optional transitive that is absent from the cache fails an
+// `--offline` install exactly like a required one. No package in today's closure
+// declares one, which is precisely why omitting it would go unnoticed until a new
+// transitive arrived.
+const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+
+function dependencyNames(record, fields) {
+	const names = new Set();
+	for (const field of fields) {
+		for (const name of Object.keys(record?.[field] ?? {})) names.add(name);
+	}
+	return names;
+}
+
+/**
+ * Indexes the lockfile by bare package name, keeping *every* pinned version.
+ *
+ * Keyed by name because that is what a dependency edge names, but a name can
+ * appear at several nested locations with different versions. Keeping only the
+ * first record silently cached one version and left the other uncached, so an
+ * `--offline` install that resolved the other one failed as ENOTCACHED. There are
+ * no such collisions in the committed lockfile today; this keeps that from being
+ * load-bearing.
+ */
+export function lockPackages(lock) {
 	const byName = new Map();
 	for (const [location, record] of Object.entries(lock.packages ?? {})) {
 		const marker = location.lastIndexOf("node_modules/");
 		if (marker === -1) continue;
 		const name = location.slice(marker + "node_modules/".length);
-		if (!byName.has(name)) byName.set(name, record);
+		if (!byName.has(name)) byName.set(name, new Map());
+		if (record?.version) byName.get(name).set(record.version, record);
 	}
 	return byName;
 }
 
-function consumerDependencyClosure(byName) {
+/**
+ * The full non-@corca name@version set the consumer proofs can resolve against.
+ *
+ * @param byName index from `lockPackages`
+ * @param manifests consumer manifests, as parsed objects
+ * @returns array of `{ name, version }`, sorted for a stable log and diff
+ */
+export function consumerDependencyClosure(byName, manifests) {
 	const queue = [];
-	for (const manifestPath of CONSUMER_MANIFESTS) {
-		const manifest = JSON.parse(readFileSync(path.join(ROOT, manifestPath), "utf8"));
-		for (const name of Object.keys({ ...manifest.dependencies, ...manifest.devDependencies })) {
+	for (const manifest of manifests) {
+		for (const name of dependencyNames(manifest, DEPENDENCY_FIELDS)) {
 			if (!name.startsWith(OWNED_SCOPE)) queue.push(name);
 		}
 	}
-	const closure = new Map();
+	const visited = new Set();
+	const closure = [];
+	const missing = [];
 	while (queue.length > 0) {
 		const name = queue.shift();
-		if (closure.has(name)) continue;
-		const record = byName.get(name);
-		if (!record?.version) {
-			console.error(`prewarm: ${name} is not pinned by package-lock.json`);
-			process.exit(1);
+		if (visited.has(name)) continue;
+		visited.add(name);
+		const versions = byName.get(name);
+		if (!versions || versions.size === 0) {
+			missing.push(name);
+			continue;
 		}
-		closure.set(name, record.version);
-		for (const dependency of Object.keys({ ...record.dependencies, ...record.peerDependencies })) {
-			if (!dependency.startsWith(OWNED_SCOPE)) queue.push(dependency);
+		// Walk every pinned version: each carries its own dependency edges, so
+		// taking one version's edges for another's would miss packages entirely.
+		for (const [version, record] of versions) {
+			closure.push({ name, version });
+			for (const dependency of dependencyNames(record, DEPENDENCY_FIELDS)) {
+				if (!dependency.startsWith(OWNED_SCOPE)) queue.push(dependency);
+			}
 		}
 	}
+	if (missing.length > 0) {
+		const error = new Error(`not pinned by package-lock.json: ${missing.sort().join(", ")}`);
+		error.code = "unpinned_dependency";
+		error.missing = missing.sort();
+		throw error;
+	}
+	closure.sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
 	return closure;
 }
 
-const closure = consumerDependencyClosure(lockPackages());
-for (const [name, version] of closure) {
-	execFileSync("npm", ["cache", "add", `${name}@${version}`], { stdio: "inherit" });
+export function readConsumerClosure(root = ROOT) {
+	const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+	const manifests = CONSUMER_MANIFESTS.map((relative) => JSON.parse(readFileSync(path.join(root, relative), "utf8")));
+	return consumerDependencyClosure(lockPackages(lock), manifests);
 }
-console.log(`Prewarmed offline consumer cache: ${[...closure].map(([name, version]) => `${name}@${version}`).join(", ")}`);
+
+function main() {
+	let closure;
+	try {
+		closure = readConsumerClosure();
+	} catch (error) {
+		if (error?.code !== "unpinned_dependency") throw error;
+		console.error(`prewarm: ${error.message}`);
+		process.exit(1);
+		return;
+	}
+	for (const { name, version } of closure) {
+		execFileSync("npm", ["cache", "add", `${name}@${version}`], { stdio: "inherit" });
+	}
+	console.log(`Prewarmed offline consumer cache: ${closure.map(({ name, version }) => `${name}@${version}`).join(", ")}`);
+}
+
+// Importing this module must not reach the network, so the walk only runs when
+// the file is the entry point.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

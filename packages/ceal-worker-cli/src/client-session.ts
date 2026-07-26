@@ -296,48 +296,80 @@ export function writeClientSessionUnavailable(reason: string, io: CealCliIo): nu
 	return 3;
 }
 
+interface ClientSessionFailureDisposition {
+	retryable: boolean;
+	message: string;
+	nextAction: string;
+}
+
+// A session whose refresh credential can no longer produce a session: the local
+// state is intact but useless, and only a new enrollment moves it forward.
+const NOT_RENEWABLE: ClientSessionFailureDisposition = {
+	retryable: false,
+	message: "The stored Gateway session can no longer be renewed.",
+	nextAction: "Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
+};
+
+/**
+ * Every Gateway denial reason this command surface classifies.
+ *
+ * `classifyClientSessionFailure` and `isClassifiedClientSessionFailure` both
+ * derive from this one table. They used to keep two hand-maintained lists, and
+ * the second one gates whether `call` and `receipt` attach the classification at
+ * all — so a reason added to the classifier but forgotten in the membership list
+ * rendered correctly under `ceal session` while `ceal call` fell through to the
+ * unknown-outcome path and emitted a write caution plus an `outcome_unknown`
+ * receipt for a call the Gateway provably never issued. One table cannot desync.
+ */
+const CLIENT_SESSION_FAILURES: Readonly<Record<string, ClientSessionFailureDisposition>> = {
+	session_renewal_unavailable: {
+		retryable: true,
+		message: "The Gateway did not return a usable response while renewing the stored session.",
+		nextAction: "Wait briefly, then retry the same command. This does not establish that the enrollment or refresh credential is invalid.",
+	},
+	session_revocation_unavailable: {
+		retryable: true,
+		message: "The Gateway did not return a usable response while revoking the stored session.",
+		nextAction: "Wait briefly, then retry 'ceal session logout'. Keep the local session until Gateway revocation succeeds.",
+	},
+	refresh_busy: {
+		retryable: true,
+		message: "Another local Ceal process is changing this session.",
+		nextAction: "Wait briefly, then retry the same command.",
+	},
+	refresh_expired: NOT_RENEWABLE,
+	refresh_invalid: NOT_RENEWABLE,
+	refresh_replayed: NOT_RENEWABLE,
+	refresh_revoked: NOT_RENEWABLE,
+	reenrollment_required: NOT_RENEWABLE,
+	binding_changed: NOT_RENEWABLE,
+};
+
+// An unclassified reason is still reported, but its token is not echoed into the
+// public `kind` field unless it looks like one of our own reason codes: `kind` is
+// a contract field readers branch on, and a Gateway-supplied string of arbitrary
+// shape does not belong in it.
+const UNCLASSIFIED_REASON_KIND = "session_unusable";
+const SAFE_REASON_TOKEN = /^[a-z][a-z0-9_]{0,63}$/u;
+
 export function classifyClientSessionFailure(reason: string): { kind: string; retryable: boolean; message: string; nextAction: string } {
-	if (reason === "session_renewal_unavailable") {
-		return {
-			kind: reason, retryable: true,
-			message: "The Gateway did not return a usable response while renewing the stored session.",
-			nextAction: "Wait briefly, then retry the same command. This does not establish that the enrollment or refresh credential is invalid.",
-		};
-	}
-	if (reason === "session_revocation_unavailable") {
-		return {
-			kind: reason, retryable: true,
-			message: "The Gateway did not return a usable response while revoking the stored session.",
-			nextAction: "Wait briefly, then retry 'ceal session logout'. Keep the local session until Gateway revocation succeeds.",
-		};
-	}
-	if (reason === "refresh_busy") {
-		return {
-			kind: reason, retryable: true,
-			message: "Another local Ceal process is changing this session.",
-			nextAction: "Wait briefly, then retry the same command.",
-		};
-	}
-	if (new Set(["refresh_expired", "refresh_invalid", "refresh_replayed", "refresh_revoked", "reenrollment_required", "binding_changed"]).has(reason)) {
-		return {
-			kind: reason, retryable: false,
-			message: "The stored Gateway session can no longer be renewed.",
-			nextAction: "Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
-		};
-	}
+	const disposition = Object.hasOwn(CLIENT_SESSION_FAILURES, reason) ? CLIENT_SESSION_FAILURES[reason] : undefined;
+	if (disposition) return { kind: reason, ...disposition };
 	return {
-		kind: reason, retryable: false,
+		kind: SAFE_REASON_TOKEN.test(reason) ? reason : UNCLASSIFIED_REASON_KIND,
+		retryable: false,
 		message: "The stored Gateway session could not be used safely.",
 		nextAction: "Run 'ceal session' to inspect local state, then correct the reported local configuration or ask the organization administrator for a replacement device-enrollment code.",
 	};
 }
 
 export function isClassifiedClientSessionFailure(reason: string): boolean {
-	return new Set([
-		"session_renewal_unavailable", "session_revocation_unavailable", "refresh_busy",
-		"refresh_expired", "refresh_invalid", "refresh_replayed", "refresh_revoked",
-		"reenrollment_required", "binding_changed",
-	]).has(reason);
+	return Object.hasOwn(CLIENT_SESSION_FAILURES, reason);
+}
+
+/** The classified reasons, for tests that must prove both readers agree. */
+export function classifiedClientSessionFailureReasons(): readonly string[] {
+	return Object.keys(CLIENT_SESSION_FAILURES);
 }
 
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {

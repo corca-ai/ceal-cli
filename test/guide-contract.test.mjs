@@ -103,8 +103,20 @@ test("missing matching binary fails closed without a guessed fallback", () => {
 		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
 		assert.match(guide, /stop and request installation or update of the matching binary/u);
 		assert.match(guide, /Do not fall\s+back to another guide, another binary, or a guessed command/u);
-		const missing = spawnSync(process.execPath, [path.join(ROOT, "missing", item.binary), "--help"], { encoding: "utf8" });
-		assert.notEqual(missing.status, 0);
+
+		// The rule above is prose, so prove the guide obeys it rather than only
+		// stating it: the sibling binary may be *named* — `ceal-guide` names
+		// `cealctl` to refuse operator work — but never as a command to run,
+		// which is exactly the guessed fallback the rule forbids. This replaces an
+		// assertion that spawned a path which never existed and so only proved
+		// that node exits non-zero on a missing script.
+		const sibling = CASES.find((other) => other.binary !== item.binary);
+		assert.ok(sibling, "the fallback contract needs a sibling binary to be about");
+		assert.doesNotMatch(
+			guide,
+			new RegExp(`\\b${sibling.binary}\\s+(?!--help\\b)[a-z][a-z-]*`, "u"),
+			`${item.skill} must not show a runnable ${sibling.binary} invocation as a fallback`,
+		);
 	}
 });
 
