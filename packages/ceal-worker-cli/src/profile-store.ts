@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { type Stats, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
@@ -159,7 +159,7 @@ function staleStateLockOwner(lockPath: string): { pid: number; nonce: string } |
 	const lock = readSafeStateLockDirectory(lockPath);
 	if (!lock) return null;
 	const ownerPath = path.join(lockPath, STATE_LOCK_OWNER);
-	let owner;
+	let owner: Stats;
 	try { owner = lstatSync(ownerPath); } catch {
 		return Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
 	}

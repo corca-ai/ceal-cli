@@ -343,7 +343,7 @@ export function isClassifiedClientSessionFailure(reason: string): boolean {
 function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
 	const parsed = parseNamedOptions(options, new Set(["--gateway"]), new Set(["--code-stdin"]));
 	const gateway = parsed?.values.get("--gateway");
-	if (!parsed || parsed.operands.length !== 0 || !gateway) return { ok: false };
+	if (parsed?.operands.length !== 0 || !gateway) return { ok: false };
 	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive" };
 }
 

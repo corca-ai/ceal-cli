@@ -96,7 +96,7 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 	const packedWorker = packPackage(workerStage, path.join(stage, "packed"), dependencies);
 	if (packedWorker.package !== inputs.worker.package) fail("worker_package_pack_failed", "Packed worker identity does not match the worker release inventory.");
 	const consumer = stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient: packedClient.path, packedWorker: packedWorker.path, inputs });
-	const consumerSmoke = smokeInstalledWorker({ consumer, inputs, dependencies });
+	const consumerSmoke = smokeInstalledWorker({ consumer, dependencies });
 	return {
 		worker: { name: packedWorker.filename, bytes: packedWorker.bytes, sha256: packedWorker.sha256, path: packedWorker.path },
 		consumerSmoke,
@@ -200,7 +200,7 @@ function stagePackedWorkerConsumer({ stage, dependencyRoot, packedClient, packed
 	return { directory, workerBin };
 }
 
-function smokeInstalledWorker({ consumer, inputs, dependencies }) {
+function smokeInstalledWorker({ consumer, dependencies }) {
 	let output;
 	try {
 		output = (dependencies.runConsumer ?? execFileSync)(process.execPath, [consumer.workerBin, "commands"], {

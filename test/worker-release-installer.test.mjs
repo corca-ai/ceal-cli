@@ -130,7 +130,7 @@ test("worker installer rejects every pointer an origin could choose freely", () 
 	const releaseSetOf = (release) => digest(readFileSync(path.join(release, "SHA256SUMS")));
 	const cases = [
 		// A 64-character non-hex value: proves the character check, not the length check.
-		{ why: "digest is the right length but not hex", pointer: (r) => ({ sha256sums_sha256: "z".repeat(64) }) },
+		{ why: "digest is the right length but not hex", pointer: (_r) => ({ sha256sums_sha256: "z".repeat(64) }) },
 		{ why: "schema_version is not the v1 reader's schema", pointer: () => ({ schema_version: "ceal.worker_stable_release.v2" }) },
 		{ why: "schema_version is absent", pointer: () => ({ schema_version: undefined }) },
 		{ why: "tag is absent", pointer: () => ({ tag: undefined }) },

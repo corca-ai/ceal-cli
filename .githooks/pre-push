@@ -1,0 +1,25 @@
+#!/bin/sh
+# Pre-push gate. CI in this repository runs only on release tags, so a push to a
+# branch carries no automated verification of its own: this hook is the last
+# point where a break is cheap. A tag push is the expensive one — a failed
+# release tag cannot be reused — so tags run the full gate, not the fast one.
+#
+# Installed by `npm run hooks:install`, which points core.hooksPath here.
+# Bypass deliberately and visibly with `git push --no-verify` when a push must
+# land without the gate (a docs-only revert, an emergency).
+set -eu
+
+tagged=0
+while read -r local_ref _local_sha _remote_ref _remote_sha; do
+	case "$local_ref" in
+		refs/tags/*) tagged=1 ;;
+	esac
+done
+
+if [ "$tagged" -eq 1 ]; then
+	echo "pre-push: tag push — running the full gate (npm run check)" >&2
+	npm run check
+else
+	echo "pre-push: running the iteration gate (npm run check:unit)" >&2
+	npm run check:unit
+fi

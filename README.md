@@ -121,18 +121,29 @@ From a generated candidate checkout:
 
 ```sh
 npm ci
+npm run hooks:install   # once per clone: points core.hooksPath at .githooks/
 npm run check
 ```
 
-`npm run check` is the final proof gate. Most of its wall clock is the
-release-artifact and native-binary suites, which cannot observe CLI or client
-behavior. While iterating, use the fast lane and keep the full gate for the last
-run before pushing or tagging:
+`npm run check` is the final proof gate: lint, build, then every suite. Most of
+its wall clock is the release-artifact and native-binary suites, which cannot
+observe CLI or client behavior. While iterating, use the fast lane and keep the
+full gate for the last run before pushing or tagging:
 
 ```sh
-npm run check:unit   # build + the four package suites
+npm run check:unit   # lint + build + the four package suites
 npm run test:release # release-artifact and native-binary suites only
+npm run lint         # Biome, linter only; lint:fix applies the safe fixes
 ```
+
+`npm run hooks:install` wires a `pre-push` hook that runs the iteration gate, or
+the full gate for a tag push — a failed release tag cannot be reused.
+`.github/workflows/check.yml` runs the full gate on every push and pull request
+to `main`; the other workflows are release lanes and trigger only on tags.
+
+Biome runs as a linter only. The frozen packages are excluded from it on
+purpose, and the formatter is off because this repository's dense single-line
+style is deliberate.
 
 Probing an installed surface is a read-only question, so route it through the
 declared-effect guard rather than typing the binary at your own `HOME`:

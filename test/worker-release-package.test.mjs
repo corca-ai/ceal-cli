@@ -32,7 +32,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => name !== ".ceal-worker-release-package" && name !== "SHA256SUMS")) {
-		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64}  /u.test(line) && line.endsWith(`  ${name}`)), true);
+		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)), true);
 	}
 	const packedPaths = execFileSync("tar", ["-tzf", path.join(output, result.artifact.name)], { encoding: "utf8" });
 	assert.match(packedPaths, /^package\/dist\/bin[.]js$/mu);

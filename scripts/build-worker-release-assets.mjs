@@ -5,7 +5,7 @@
 // the one signed release inventory that install-ceal.sh consumes.
 
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -177,7 +177,7 @@ function platformOfAsset(name) {
 function readInventory(directory) {
 	const bytes = readStagedFile(path.join(directory, "SHA256SUMS"), "merge_input_incomplete").toString("utf8");
 	const lines = bytes.split("\n").filter(Boolean);
-	const entries = lines.map((line) => /^([a-f0-9]{64})  (\S+)$/u.exec(line));
+	const entries = lines.map((line) => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
 	if (lines.length === 0 || entries.some((entry) => entry === null)) fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
 	return entries.map((entry) => [entry[2], entry[1]]);
 }

@@ -1,0 +1,30 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+	"files": {
+		"includes": [
+			"**/*.ts",
+			"**/*.mjs",
+			"!**/dist/**",
+			"!**/node_modules/**",
+			"!packages/ceal-protocol/**",
+			"!packages/ceal-operator-cli/**"
+		]
+	},
+	"formatter": { "enabled": false },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"style": {
+				"noNonNullAssertion": "off",
+				"noParameterAssign": "off",
+				"useTemplate": "off"
+			},
+			"suspicious": {
+				"noTemplateCurlyInString": "off",
+				"useBiomeIgnoreFolder": "off"
+			}
+		}
+	}
+}

@@ -56,6 +56,19 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
   quoting a number from a document — the recorded figures went stale unnoticed
   once already, and a stale figure makes an honest run look like a regression
   under the `Boundaries` slow-test rule below.
+- `npm run lint` (Biome) runs inside both gates; `npm run lint:fix` applies the
+  safe fixes. `biome.json` excludes the frozen packages deliberately — do not
+  widen its `includes` to lint code this lane may not edit. The formatter stays
+  off: this repository's dense single-line style is intentional, and enabling it
+  rewrites ~60 files without catching a single defect.
+- `.github/workflows/check.yml` runs the full gate on every push and pull
+  request to `main`. The other workflows are release lanes that trigger only on
+  tags, so they prove nothing about a branch.
+- `npm run hooks:install` points `core.hooksPath` at `.githooks/`, whose
+  `pre-push` runs the iteration gate — or the full gate for a tag push, because
+  a failed release tag cannot be reused. Run it once per clone;
+  `node scripts/install-git-hooks.mjs --check` reports whether this clone is
+  actually enforcing it.
 - `npm run probe -- <binary> <command> [route/options]` is the only sanctioned
   way to poke an installed surface: it refuses any route whose declared effect
   is not `read_only` and uses a throwaway `HOME`. A live readback against the

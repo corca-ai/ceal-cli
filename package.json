@@ -16,8 +16,11 @@
 		"test:unit": "npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test && npm --prefix packages/ceal-worker-cli test && npm --prefix packages/ceal-operator-cli test",
 		"test:release": "node --test --test-concurrency=1 test/*.test.mjs",
 		"test": "npm run test:unit && npm run test:release",
-		"check": "npm run build && npm test",
-		"check:unit": "npm run build && npm run test:unit",
+		"lint": "biome lint .",
+		"lint:fix": "biome lint --write .",
+		"check": "npm run lint && npm run build && npm test",
+		"check:unit": "npm run lint && npm run build && npm run test:unit",
+		"hooks:install": "node scripts/install-git-hooks.mjs",
 		"probe": "node scripts/probe-surface.mjs",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
 		"release:binaries": "node scripts/build-platform-binaries.mjs",
@@ -31,6 +34,7 @@
 		"yaml": "2.9.0"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "2.5.5",
 		"@types/node": "24.6.0",
 		"esbuild": "0.28.1",
 		"postject": "1.0.0-alpha.6",

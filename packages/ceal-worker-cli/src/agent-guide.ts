@@ -138,7 +138,7 @@ export function createCealAgentGuideStore(
 	const sourced = (state: CealAgentGuideState): CealAgentGuideState =>
 		({ ...state, agent_source: state.agent === detectedHost ? "detected" : "default" });
 	return {
-		inspect: (agent) => sourced(act(agent, (target, registrationPath) => inspectRegistration(guidePath, target, registrationPath, resolved))),
+		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved))),
 		register: (agent) => sourced(act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved))),
 	};
 }
@@ -223,10 +223,12 @@ function hostStates(
 	});
 }
 
+// The registration path is deliberately not a parameter: this function reports
+// the whole resolved host set, so a single path could only mislead a reader into
+// thinking the result were scoped to it.
 function inspectRegistration(
 	guidePath: string,
 	agent: CealAgentGuideHost,
-	registrationPath: string,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 ): CealAgentGuideState {
 	return {
@@ -255,14 +257,14 @@ function registerGuide(
 ): CealAgentGuideState {
 	try {
 		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) {
-			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, registrationPath, resolved);
-			return conflictState(guidePath, agent, registrationPath, resolved);
+			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved);
+			return conflictState(guidePath, agent, resolved);
 		}
 		mkdirSync(dirname(registrationPath), { recursive: true, mode: 0o700 });
 		symlinkSync(guidePath, registrationPath, "dir");
-		return inspectRegistration(guidePath, agent, registrationPath, resolved);
+		return inspectRegistration(guidePath, agent, resolved);
 	} catch {
-		const inspected = inspectRegistration(guidePath, agent, registrationPath, resolved);
+		const inspected = inspectRegistration(guidePath, agent, resolved);
 		// Distinguish "the skills directory itself is unusable" from "something
 		// occupies the registration path". Found on a real host whose
 		// `~/.claude/skills` is a link to a directory that does not exist: the
@@ -289,10 +291,9 @@ function registerGuide(
 function conflictState(
 	guidePath: string,
 	agent: CealAgentGuideHost,
-	registrationPath: string,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 ): CealAgentGuideState {
-	const inspected = inspectRegistration(guidePath, agent, registrationPath, resolved);
+	const inspected = inspectRegistration(guidePath, agent, resolved);
 	return {
 		...inspected,
 		status: "unavailable",

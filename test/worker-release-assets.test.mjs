@@ -81,7 +81,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 
 	writeFileSync(path.join(inputs[1], "ceal-guide-SKILL.md"), "drifted guide\n");
 	const driftedSums = readFileSync(path.join(inputs[1], "SHA256SUMS"), "utf8")
-		.replace(/^[a-f0-9]{64}(?=  ceal-guide-SKILL[.]md$)/mu, digest(Buffer.from("drifted guide\n")));
+		.replace(/^[a-f0-9]{64}(?= {2}ceal-guide-SKILL[.]md$)/mu, digest(Buffer.from("drifted guide\n")));
 	writeFileSync(path.join(inputs[1], "SHA256SUMS"), driftedSums);
 	assert.throws(
 		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-drift"), inputs, repoRoot }),
@@ -106,7 +106,7 @@ test("worker release workflow signs only the worker inventory from the locked ar
 	assert.match(workflow, /GATEWAY_HANDOFF_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases\/gateway-handoff/u);
 	assert.match(workflow, /\$GATEWAY_HANDOFF_ORIGIN\/\$HANDOFF_RELEASE_TAG\/\$HANDOFF_ARCHIVE/u);
 	assert.match(workflow, /CEAL_RELEASE_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases/u);
-	assert.match(workflow, /concurrency:\n  group: ceal-worker-release-origin\n  cancel-in-progress: false/u);
+	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_API_TOKEN/u);
 	assert.match(workflow, /wrangler r2 object put[\s\S]+--remote/u);
@@ -198,7 +198,7 @@ test("worker stable rollback re-verifies an immutable public tag before moving t
 	assert.match(workflow, /workflow_dispatch:/u);
 	assert.match(workflow, /Type ROLLBACK to replace the stable pointer/u);
 	assert.match(workflow, /inputs[.]confirmation == 'ROLLBACK'/u);
-	assert.match(workflow, /concurrency:\n  group: ceal-worker-release-origin\n  cancel-in-progress: false/u);
+	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
 	assert.match(workflow, /sha256sum -c SHA256SUMS/u);
 	assert.match(workflow, /cosign verify-blob/u);
 	assert.doesNotMatch(workflow, /cosign sign-blob|gh release/u);

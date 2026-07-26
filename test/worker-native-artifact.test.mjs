@@ -68,7 +68,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	});
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => !name.startsWith(".") && name !== "SHA256SUMS")) {
-		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64}  /u.test(line) && line.endsWith(`  ${name}`)), true);
+		assert.equal(sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)), true);
 	}
 	await assert.rejects(
 		() => buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: path.join(fixture.root, "cross-platform"), platform: otherPlatform, ...fixture }),

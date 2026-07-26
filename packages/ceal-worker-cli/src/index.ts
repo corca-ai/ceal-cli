@@ -225,7 +225,7 @@ async function runKnownCommand(
 
 async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseNamedOptions(options, new Set(["--port"]), new Set());
-	if (!parsed || parsed.operands.length !== 0) return writeError("invalid_argument", "Invalid ceal observe options.", io);
+	if (parsed?.operands.length !== 0) return writeError("invalid_argument", "Invalid ceal observe options.", io);
 	const rawPort = parsed.values.get("--port");
 	let port = DEFAULT_OBSERVER_PORT;
 	if (rawPort !== undefined) {
@@ -645,7 +645,7 @@ function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTarget
 
 function parseTargetCatalogSelection(options: readonly string[]): ParsedTargetCatalogOptions {
 	const parsed = parseNamedOptions(options, new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]), new Set());
-	if (!parsed || parsed.operands.length !== 0) return null;
+	if (parsed?.operands.length !== 0) return null;
 	const selection = {
 		capabilityId: parsed.values.get("--capability"),
 		cursor: parsed.values.get("--cursor"),
@@ -858,9 +858,9 @@ function unregisteredGuideAdvisory(runtime: CealCommandRuntime): Record<string, 
 		// Only when the guide is present and merely unregistered for the host that
 		// is running: advising `guide register` while the asset itself is missing
 		// would send an agent to a route that cannot succeed.
-		if (!state || state.agent_source !== "detected" || state.status !== "available") return {};
+		if (state?.agent_source !== "detected" || state.status !== "available") return {};
 		const host = state.hosts?.find((entry) => entry.agent === state.agent);
-		if (!host || host.status !== "staged") return {};
+		if (host?.status !== "staged") return {};
 		return { agent_guide: {
 			status: host.status,
 			agent: state.agent,
@@ -1220,7 +1220,7 @@ type ParsedGatewayOptions =
 
 function parseGatewayOptions(options: readonly string[]): ParsedGatewayOptions {
 	const parsed = parseNamedOptions(options, new Set(["--endpoint", "--profile", "--request-id"]), new Set(["--token-stdin"]));
-	if (!parsed || parsed.operands.length !== 0 || !parsed.flags.has("--token-stdin")) return invalidGatewayOptions();
+	if (parsed?.operands.length !== 0 || !parsed.flags.has("--token-stdin")) return invalidGatewayOptions();
 	const endpoint = parsed.values.get("--endpoint");
 	const profileRef = parsed.values.get("--profile");
 	const requestId = parsed.values.get("--request-id");

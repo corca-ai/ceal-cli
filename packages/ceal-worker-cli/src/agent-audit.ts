@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
+import { type Stats, closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
@@ -526,7 +526,7 @@ function collectClaudeSessions(projects: string): { sessions: CollectedSession[]
 		if (examined >= MAX_ENTRIES_EXAMINED) { partial = true; break; }
 		examined += 1;
 		const projectDirectory = path.join(projects, project);
-		let projectStat;
+		let projectStat: Stats;
 		try { projectStat = lstatSync(projectDirectory); } catch { partial = true; continue; }
 		if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) continue;
 		let files: string[];
@@ -536,7 +536,7 @@ function collectClaudeSessions(projects: string): { sessions: CollectedSession[]
 			examined += 1;
 			if (!SESSION_FILE.test(file)) continue;
 			const transcript = path.join(projectDirectory, file);
-			let stat;
+			let stat: Stats;
 			try { stat = lstatSync(transcript); } catch { partial = true; continue; }
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
@@ -575,7 +575,7 @@ function collectCodexSessions(sessionsRoot: string): { sessions: CollectedSessio
 			const rollout = CODEX_ROLLOUT_FILE.exec(file);
 			if (!rollout) continue;
 			const rolloutPath = path.join(dayDirectory, file);
-			let stat;
+			let stat: Stats;
 			try { stat = lstatSync(rolloutPath); } catch { walk.partial = true; continue; }
 			if (stat.isSymbolicLink() || !stat.isFile()) continue;
 			sessions.push({
@@ -611,7 +611,7 @@ function codexDayDirectories(sessionsRoot: string, walk: { examined: number; par
 				walk.examined += 1;
 				if (!segment.test(entry)) continue;
 				const child = path.join(parent, entry);
-				let stat;
+				let stat: Stats;
 				try { stat = lstatSync(child); } catch { walk.partial = true; continue; }
 				if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
 				next.push(child);
