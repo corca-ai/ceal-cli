@@ -35,14 +35,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Node from the repository's declared engine
+      # .nvmrc is the single Node pin. A range from engines.node would let this
+      # gate resolve a different major than the release lane builds on, so a
+      # green check would not predict a green release.
+      - name: Install the pinned Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
         with:
-          node-version-file: package.json
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install exactly the locked dependency set
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # `npm run check` is not self-sufficient on a cold runner: the packed
+      # consumer proofs install from the npm cache with --offline, so an
+      # unprewarmed runner fails them as ENOTCACHED rather than as a defect.
+      # The release lane does this too; both must, or they are not the same gate.
+      - name: Prewarm the offline packed-consumer cache
+        run: node scripts/prewarm-offline-consumer-cache.mjs
 
       # The hook installer is proven inside this gate by test/repo-gates.test.mjs,
       # against a throwaway clone rather than this checkout, so there is no

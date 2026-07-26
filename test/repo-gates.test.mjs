@@ -55,6 +55,45 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	assert.match(Object.values(workflow.jobs)[0]["runs-on"], /ubuntu/u);
 });
 
+// `npm run check` is not self-sufficient on a cold runner: the packed-consumer
+// proofs install with --offline, so a runner that skipped the prewarm fails
+// them as ENOTCACHED. This gate ran green locally and red on CI for exactly
+// that reason; pin the ordering so the next lane cannot repeat it.
+test("every CI lane that runs the gate prewarms the offline consumer cache first", () => {
+	for (const file of [".github/workflows/check.yml", ".github/workflows/ceal-release.yml"]) {
+		const steps = Object.values(parse(read(file)).jobs).flatMap((job) => job.steps ?? []);
+		const runs = steps.map((step) => step.run ?? "");
+		const gate = runs.findIndex((run) => run.trim() === "npm run check");
+		if (gate === -1) continue;
+		const prewarm = runs.findIndex((run) => run.includes("prewarm-offline-consumer-cache.mjs"));
+		assert.notEqual(prewarm, -1, `${file} runs the gate without prewarming the offline cache`);
+		assert.ok(prewarm < gate, `${file} must prewarm the offline cache before running the gate`);
+	}
+});
+
+// A range in engines.node would let the check lane resolve a different major
+// than the release lane builds on, and a green check would stop predicting a
+// green release. One pin, asserted equal across both lanes.
+test("the check lane and the release lane pin the same Node", () => {
+	const pinned = read(".nvmrc").trim();
+	assert.match(pinned, /^\d+\.\d+\.\d+$/u);
+	assert.match(manifest.engines.node, /^>=/u);
+
+	const checkSetup = Object.values(parse(read(".github/workflows/check.yml")).jobs)
+		.flatMap((job) => job.steps ?? [])
+		.find((step) => (step.uses ?? "").startsWith("actions/setup-node"));
+	assert.equal(checkSetup.with["node-version-file"], ".nvmrc");
+
+	const releaseVersions = Object.values(parse(read(".github/workflows/ceal-release.yml")).jobs)
+		.flatMap((job) => job.steps ?? [])
+		.filter((step) => (step.uses ?? "").startsWith("actions/setup-node"))
+		.map((step) => String(step.with["node-version"]));
+	assert.ok(releaseVersions.length > 0, "the release lane must pin a Node version");
+	for (const version of releaseVersions) {
+		assert.equal(version, pinned, "ceal-release.yml and .nvmrc must pin the same Node");
+	}
+});
+
 // A checked-in hook enforces nothing on its own: it only runs in clones whose
 // core.hooksPath points at it, which is why the installer ships beside it.
 test("the pre-push hook is checked in and its installer reports honestly", () => {
