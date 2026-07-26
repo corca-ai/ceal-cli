@@ -149,7 +149,7 @@ const PRIVACY_LOCAL_SOURCES = [
 	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
 	"managed worker install layout (generation manifest metadata and staged guide asset presence)",
 	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide, or the directories CODEX_HOME/CLAUDE_CONFIG_DIR configure (guide registration link inspection; no skill content read)",
-	"~/.claude/projects and ~/.codex/sessions (bounded local transcript scan; fixed-vocabulary metadata only)",
+	"~/.claude/projects and ~/.codex/sessions, or the same subdirectories under the roots CLAUDE_CONFIG_DIR/CODEX_HOME configure (bounded local transcript scan; fixed-vocabulary metadata only)",
 ] as const;
 
 function observePrivacy(receipts: Record<string, unknown>): Record<string, unknown> {

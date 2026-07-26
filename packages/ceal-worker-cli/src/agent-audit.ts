@@ -1,5 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, type Stats } from "node:fs";
 import path from "node:path";
+import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-guide.js";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
 // runtimes' native transcript roots, rendered by the observer Workbench
@@ -17,8 +18,6 @@ import path from "node:path";
 // fabricated result; an unimplemented adapter would report `unsupported`,
 // never silence. Neither adapter's coverage claim generalizes to the other.
 
-const CLAUDE_ROOT = ".claude";
-const CODEX_ROOT = ".codex";
 // A transcript newer than this marks the collector `active`; anything older
 // but present is `stale`. Inventory freshness, not a liveness probe.
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -136,16 +135,17 @@ const SESSION_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
  */
 export function inspectAgentSessionEvents(
 	home: string | undefined,
+	overrides: CealAgentHostOverrides,
 	runtime: string,
 	sessionRef: string,
 ): CealAgentSessionEventsLookup | null {
 	if ((runtime !== "claude" && runtime !== "codex") || !SESSION_REF.test(sessionRef)) return null;
-	const root = home && path.isAbsolute(home) ? home : null;
+	const { root } = resolveCealAgentHostRoot(runtime, home, overrides);
 	if (!root) return { status: "unreadable" };
 	const adapter =
 		runtime === "claude"
-			? { directory: path.join(root, CLAUDE_ROOT, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
-			: { directory: path.join(root, CODEX_ROOT, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
+			? { directory: path.join(root, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
+			: { directory: path.join(root, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
 	try {
 		lstatSync(adapter.directory);
 	} catch (error) {
@@ -173,8 +173,11 @@ export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 	"Token figures are runtime-supplied transcript accounting surfaced as integers with explicit source and scan completeness; field semantics are runtime-defined, figures are not comparable across runtimes, and this is not a cost or billing claim. No latency figure is shown because neither runtime supplies one.",
 ]);
 
-export function inspectAgentAudit(home: string | undefined, now: number): CealAgentAuditState {
-	const adapters: CealAgentAuditAdapterState[] = [observeClaudeAdapter(home, now), observeCodexAdapter(home, now)];
+export function inspectAgentAudit(home: string | undefined, overrides: CealAgentHostOverrides, now: number): CealAgentAuditState {
+	const adapters: CealAgentAuditAdapterState[] = [
+		observeHostAdapter("claude", "projects", collectClaudeSessions, CLAUDE_LINE_ADAPTER, home, overrides, now),
+		observeHostAdapter("codex", "sessions", collectCodexSessions, CODEX_LINE_ADAPTER, home, overrides, now),
+	];
 	return {
 		schemaVersion: "ceal.agent_activity.v1",
 		adapters,
@@ -182,14 +185,21 @@ export function inspectAgentAudit(home: string | undefined, now: number): CealAg
 	};
 }
 
-function observeClaudeAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
-	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CLAUDE_ROOT, "projects") : null;
-	return observeTranscriptAdapter("claude", `~/${CLAUDE_ROOT}`, sessionsDirectory, collectClaudeSessions, CLAUDE_LINE_ADAPTER, now);
-}
-
-function observeCodexAdapter(home: string | undefined, now: number): CealAgentAuditAdapterState {
-	const sessionsDirectory = home && path.isAbsolute(home) ? path.join(home, CODEX_ROOT, "sessions") : null;
-	return observeTranscriptAdapter("codex", `~/${CODEX_ROOT}`, sessionsDirectory, collectCodexSessions, CODEX_LINE_ADAPTER, now);
+// The rendered root is the one actually scanned, so an operator who moved a
+// host with `CLAUDE_CONFIG_DIR`/`CODEX_HOME` reads back that directory rather
+// than a default the audit never opened.
+function observeHostAdapter(
+	runtime: "claude" | "codex",
+	sessionsSegment: string,
+	collect: (directory: string) => { sessions: CollectedSession[]; partial: boolean },
+	lines: TranscriptLineAdapter,
+	home: string | undefined,
+	overrides: CealAgentHostOverrides,
+	now: number,
+): CealAgentAuditAdapterState {
+	const { root, displayRoot } = resolveCealAgentHostRoot(runtime, home, overrides);
+	const sessionsDirectory = root ? path.join(root, sessionsSegment) : null;
+	return observeTranscriptAdapter(runtime, displayRoot, sessionsDirectory, collect, lines, now);
 }
 
 /** Inventory row plus the private transcript path consumed by the event scan. */

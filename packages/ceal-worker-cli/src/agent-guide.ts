@@ -53,6 +53,47 @@ export function detectCealAgentGuideHost(environment: Record<string, string | un
 
 const DEFAULT_AGENT_GUIDE_HOST = CEAL_AGENT_GUIDE_HOSTS[0]!.agent;
 
+/** Each host's state-root override, keyed the same way the table declares them. */
+export type CealAgentHostOverrides = Partial<Record<CealAgentGuideHost, string | undefined>>;
+
+export interface ResolvedCealAgentHostRoot {
+	/** The host's state root, or undefined when nothing usable resolves one. */
+	root: string | undefined;
+	/** What to name the root in operator-facing output, override included. */
+	displayRoot: string;
+	rejectedOverride: boolean;
+}
+
+/**
+ * Where a host actually keeps its state.
+ *
+ * Guide registration and the transcript audit both answer questions about the
+ * same directory, so they must agree on where it is. They did not: the audit
+ * hardcoded `~/.claude` and `~/.codex` and never read `CLAUDE_CONFIG_DIR` or
+ * `CODEX_HOME`, so an operator who moved either root got a guide surface that
+ * followed them and an audit that reported the untouched default as empty.
+ */
+export function resolveCealAgentHostRoot(
+	agent: CealAgentGuideHost,
+	homeDirectory: string | undefined,
+	overrides: CealAgentHostOverrides,
+): ResolvedCealAgentHostRoot {
+	const row = hostRow(agent);
+	const override = overrides[agent] || undefined;
+	// An empty override is no override; a relative or list-shaped one is a
+	// refusal, never a guess: `join`ing it would create a skill tree under the
+	// current working directory, or under a literal `dir:`-named path, and then
+	// report it as a real registration. Verified for the colon case: Claude Code
+	// given `CLAUDE_CONFIG_DIR=a:b` finds neither directory's state.
+	const raw = override ?? (homeDirectory ? join(homeDirectory, row.defaultRoot) : undefined);
+	const usable = raw !== undefined && isAbsolute(raw) && !raw.includes(":");
+	return {
+		root: usable ? raw : undefined,
+		displayRoot: override ?? `~/${row.defaultRoot}`,
+		rejectedOverride: raw !== undefined && !usable,
+	};
+}
+
 export function isCealAgentGuideHost(value: string | undefined): value is CealAgentGuideHost {
 	return CEAL_AGENT_GUIDE_HOSTS.some((host) => host.agent === value);
 }
@@ -115,16 +156,10 @@ export function createCealAgentGuideStore(
 	};
 	const resolved = new Map<CealAgentGuideHost, ResolvedGuideHost>();
 	for (const host of CEAL_AGENT_GUIDE_HOSTS) {
-		// An empty override is no override; a relative or list-shaped one is a
-		// refusal, never a guess: `join`ing it would create a skill tree under the
-		// current working directory, or under a literal `dir:`-named path, and then
-		// report it as a real registration. Verified for the colon case: Claude Code
-		// given `CLAUDE_CONFIG_DIR=a:b` finds neither directory's state.
-		const raw = overrides[host.agent] || (homeDirectory ? join(homeDirectory, host.defaultRoot) : undefined);
-		const usable = raw !== undefined && isAbsolute(raw) && !raw.includes(":");
+		const { root, rejectedOverride } = resolveCealAgentHostRoot(host.agent, homeDirectory, overrides);
 		resolved.set(host.agent, {
-			registrationPath: usable ? join(raw, "skills", "ceal-guide") : undefined,
-			rejectedOverride: raw !== undefined && !usable,
+			registrationPath: root ? join(root, "skills", "ceal-guide") : undefined,
+			rejectedOverride,
 		});
 	}
 	if ([...resolved.values()].every((host) => !host.registrationPath)) return undefined;
@@ -155,7 +190,7 @@ export function createCealAgentGuideStore(
 	};
 }
 
-function hostRow(agent: CealAgentGuideHost): { label: string; environmentVariable: string } {
+function hostRow(agent: CealAgentGuideHost): (typeof CEAL_AGENT_GUIDE_HOSTS)[number] {
 	return CEAL_AGENT_GUIDE_HOSTS.find((host) => host.agent === agent)!;
 }
 

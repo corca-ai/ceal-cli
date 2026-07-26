@@ -31,11 +31,15 @@ try {
 	receiptSpool = undefined;
 }
 
+// Guide registration and the transcript audit read the same host roots, so they
+// take the same overrides rather than each deciding where a host lives.
+const agentHostOverrides = { codex: process.env.CODEX_HOME, claude: process.env.CLAUDE_CONFIG_DIR };
+
 const agentGuide = createCealAgentGuideStore(
 	process.execPath,
 	process.env.HOME,
-	process.env.CODEX_HOME,
-	process.env.CLAUDE_CONFIG_DIR,
+	agentHostOverrides.codex,
+	agentHostOverrides.claude,
 	detectCealAgentGuideHost(process.env),
 );
 const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
@@ -68,8 +72,9 @@ void runCealCommand(
 				}
 			: undefined,
 		loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,
-		inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, Date.now()),
-		inspectAgentSession: (runtimeName, sessionRef) => inspectAgentSessionEvents(process.env.HOME, runtimeName, sessionRef),
+		inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now()),
+		inspectAgentSession: (runtimeName, sessionRef) =>
+			inspectAgentSessionEvents(process.env.HOME, agentHostOverrides, runtimeName, sessionRef),
 		runStableUpdate,
 		executablePath: process.execPath,
 		discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
