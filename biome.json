@@ -15,10 +15,9 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"style": {
 				"noNonNullAssertion": "off",
-				"noParameterAssign": "off",
 				"useTemplate": "off"
 			},
 			"suspicious": {

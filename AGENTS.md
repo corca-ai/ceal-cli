@@ -60,7 +60,13 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
   safe fixes. `biome.json` excludes the frozen packages deliberately — do not
   widen its `includes` to lint code this lane may not edit. The formatter stays
   off: this repository's dense single-line style is intentional, and enabling it
-  rewrites ~60 files without catching a single defect.
+  rewrites ~60 files without catching a single defect. Three rules are off for
+  reasons JSON cannot carry, so check here before re-enabling one:
+  `noNonNullAssertion` (`options[index]!` after a bounds check is the idiom),
+  `useTemplate` (every hit is `.join("\n") + "\n"`, which a template worsens),
+  and `noTemplateCurlyInString` (every hit is `${...}` inside a *shell* script
+  string, where it is the shell's syntax and not a JS template). A rule with no
+  findings does not belong in that list — enable it instead.
 - `.github/workflows/check.yml` runs the full gate on every push and pull
   request to `main`. The other workflows are release lanes that trigger only on
   tags, so they prove nothing about a branch.
