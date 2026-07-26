@@ -30,19 +30,18 @@ Narnia 소유 작업만 (`@corca-ai/ceal`, `ceal` 워커, `skills/ceal-guide`, `
   `0.65.9`에 있고 **증명만 남았다**. `ceal guide status`는 라이브로 `agent: claude`를 옳게 답한다.
 - **`ceal-agent#2`는 narnia 몫이 끝났다** — `corca-ai/ceal-agent@474ac96`(record + 검증기 + 16테스트,
   `npm run check` 35 통과, push 완료). **남은 둘은 vinc 소유**: `corca-ai/ceal`의
-  `scripts/verify-ceal-agent-public-closure.mjs` digest 리터럴 제거와 source map 등록.
-  **`~/codes/ceal`에서 그 파일을 고치지 말 것 — 요청만 한다.**
+  `scripts/verify-ceal-agent-public-closure.mjs` digest 리터럴 제거와 source map 등록 — 
+  **`~/codes/ceal`에서 고치지 말 것, 요청만 한다.**
 - **Gateway 레인 전달 노트 2건**(`oc:~/ceal` 신규 untracked; 그 체크아웃의 다른 것은 편집·stage·
-  commit·clean·rebase 전부 금지 — `AGENTS.md ## Host And Lane`):
-  `…-agent-artifact-binding.md`(리터럴 제거 요청), `…-prod-session-and-protocol-consumer.md`
-  (위 prod 관측 + `#6` 요구 + dev 인스턴스 이름 요청).
+  commit·clean·rebase 전부 금지 — `AGENTS.md ## Host And Lane`): `…-agent-artifact-binding.md`,
+  `…-prod-session-and-protocol-consumer.md`(위 prod 관측 + `#6` 요구 + dev 인스턴스 이름 요청).
 - **`@corca-ai/ceal-protocol@0.65.0`은 바이트가 세 벌**(버전 미범프 재빌드). digest만 핀하면 계속
-  깨지니 새로 핀할 땐 producing commit+tree에 묶을 것. 전체 값은 `ceal-agent`의
-  `gateway-artifact-handoff.json`이 소유하며, 그 파일 밖의 축약형은 **식별용이지 핀 값이 아니다**.
+  깨지니 producing commit+tree에 묶을 것. 전체 값은 `ceal-agent`의 `gateway-artifact-handoff.json`이
+  소유하고, 그 밖의 축약형은 **식별용이지 핀 값이 아니다**.
 - **`#6`은 forward 절반이 끝나 있다** — `verify-gateway-protocol-consumer.mjs`는 digest를
-  하드코딩하지 않고 provenance 자기정합성만 본다. ledger의
+  하드코딩하지 않고 provenance 자기정합성만 보며, ledger의
   `clean_ceal_cli_worker_packed_gateway_protocol`은 **resolved**. 남은 구멍은
-  `gateway_protocol_source.rollback_proof`(pending) + 기존 증거가 worker `0e1b256f` 기준이라 낡음.
+  `rollback_proof`(pending) + 기존 증거가 worker `0e1b256f` 기준이라 낡은 것.
 
 ## Next Session
 
@@ -64,13 +63,12 @@ vinc가 client digest의 producing commit을 주면 `ceal-agent#2`의 rollback�
 ## Discuss
 
 - **breaking 둘을 한 번에 announce할지.** `a268e8e`(`error.code` 제거)·`c5bc9b7`(`hosts`만이 per-host
-  답) 모두 reader를 깬다. alias 없는 clean break은 택했고, 남은 결정은 묶어 낼지다. 릴리스가 여기 막혔다.
-- **frozen 사본 sync 방식.** `scripts/build-platform-binaries.mjs`는 `AGENTS.md ## Frozen Paths`가
-  frozen으로 선언했고 `corca-ai/ceal`의 `packaging/ceal-cli-source/`에 미러가 있다. 그 sync가 새
-  `scripts/lib/`를 옮기는지 몰라 막혀 있다 — 소유자 확정 전엔 양쪽 다 편집 금지.
-- **`AGENTS.md`의 내부 호스트명**(`narnia`/`vinc`/`ssh oc`/`~/codes/...`)을 공개 전에 정리할지.
+  답) 모두 reader를 깬다. clean break은 택했고 남은 결정은 묶어 낼지다 — 릴리스가 여기 막혔다.
+- **frozen 사본 sync 방식.** `scripts/build-platform-binaries.mjs`는 frozen이고
+  `corca-ai/ceal`의 `packaging/ceal-cli-source/`에 미러가 있는데, 그 sync가 새 `scripts/lib/`를
+  옮기는지 몰라 막혀 있다 — 소유자 확정 전엔 양쪽 다 편집 금지.
+- **`AGENTS.md`의 내부 호스트명**을 공개 전에 정리할지.
 
 ## References
 
 - [품질 리뷰 — `## Weak`·`## Advisory`만 유효](../charness-artifacts/quality/latest.md)
-- [Issue #1 resolution critique](../charness-artifacts/critique/2026-07-25-issue-1-leaf-help-resolution.md)
