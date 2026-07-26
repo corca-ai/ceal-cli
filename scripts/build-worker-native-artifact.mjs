@@ -22,6 +22,8 @@ import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.mjs";
+import { codedErrorClass } from "./lib/coded-error.mjs";
+import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import {
 	withWorkerReleaseDevelopmentInputsAsync,
 	withWorkerReleaseInputsAsync,
@@ -36,13 +38,7 @@ const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
 const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 const REQUIRED_COMMANDS = Object.freeze(["update", "session", "guide", "capabilities", "call", "receipt"]);
 
-export class WorkerNativeArtifactError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerNativeArtifactError";
-		this.code = code;
-	}
-}
+export const WorkerNativeArtifactError = codedErrorClass("WorkerNativeArtifactError");
 
 export async function buildWorkerNativeArtifact(options = {}, dependencies = {}) {
 	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseInputsAsync);
@@ -316,23 +312,14 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 function fail(code, message) { throw new WorkerNativeArtifactError(code, message); }
 
 function parseArgs(argv) {
-	const options = { force: false };
-	let json = false;
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === "--help" || arg === "-h") return { help: true, json, options };
-		if (arg === "--json") { json = true; continue; }
-		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--platform", "--gateway-handoff-archive"].includes(arg)) {
-			const value = argv[++index];
-			if (typeof value !== "string") fail("invalid_argument", "Native worker artifact option requires a value.");
-			const name = arg === "--out" ? "outputDirectory" : arg === "--platform" ? "platform" : "gatewayHandoffArchive";
-			options[name] = value;
-			continue;
-		}
-		fail("invalid_argument", "Unexpected native worker artifact argument.");
-	}
-	return { help: false, json, options };
+	return parseScriptArgs(argv, {
+		fail,
+		defaults: { force: false },
+		flags: { "--force": "force" },
+		values: { "--out": "outputDirectory", "--platform": "platform", "--gateway-handoff-archive": "gatewayHandoffArchive" },
+		valueMessage: "Native worker artifact option requires a value.",
+		unknownMessage: "Unexpected native worker artifact argument.",
+	});
 }
 
 export async function runCli(argv, io = console) {

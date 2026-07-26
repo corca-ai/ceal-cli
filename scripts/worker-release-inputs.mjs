@@ -5,6 +5,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { codedErrorClass } from "./lib/coded-error.mjs";
+import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import {
 	consumeLockedGatewayHandoffArchive,
 	consumeLockedGatewayHandoffArchiveSync,
@@ -22,13 +24,7 @@ const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const PACKAGE_NAMES = ["@corca-ai/ceal-protocol", "@corca-ai/ceal"];
 const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "clientTarball", "protocolProvenance", "conformanceProof", "handoffManifest", "expectedHandoffSha256"];
 
-export class WorkerReleaseInputError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerReleaseInputError";
-		this.code = code;
-	}
-}
+export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
 export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	assertDevelopmentRawInputs(options);
@@ -467,22 +463,14 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 function fail(code, message) { throw new WorkerReleaseInputError(code, message); }
 
 function parseArgs(argv) {
-	const options = {};
-	let json = false;
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === "--help" || arg === "-h") return { help: true, json, options };
-		if (arg === "--json") { json = true; continue; }
-		if (arg === "--gateway-handoff-archive") {
-			const value = argv[++index];
-			if (typeof value !== "string") fail("invalid_argument", "Worker release input option requires a value.");
-			options.gatewayHandoffArchive = value;
-			continue;
-		}
-		fail("invalid_argument", "Unexpected worker release input argument.");
-	}
-	assertReleaseArchiveInput(options);
-	return { help: false, json, options };
+	const parsed = parseScriptArgs(argv, {
+		fail,
+		values: { "--gateway-handoff-archive": "gatewayHandoffArchive" },
+		valueMessage: "Worker release input option requires a value.",
+		unknownMessage: "Unexpected worker release input argument.",
+	});
+	if (!parsed.help) assertReleaseArchiveInput(parsed.options);
+	return parsed;
 }
 
 export function runCli(argv, io = console) {

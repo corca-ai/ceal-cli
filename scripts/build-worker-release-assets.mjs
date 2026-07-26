@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
+import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -19,13 +20,7 @@ const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
 const SHARED_ASSETS = Object.freeze([GUIDE_ASSET, NOTICE_NAME, INSTALLER_NAME]);
 const PLATFORM_PATTERN = /^(?:linux|darwin)-(?:arm64|amd64)$/u;
 
-export class WorkerReleaseAssetsError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerReleaseAssetsError";
-		this.code = code;
-	}
-}
+export const WorkerReleaseAssetsError = codedErrorClass("WorkerReleaseAssetsError");
 
 export async function composeWorkerReleaseAssets(options = {}, dependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);

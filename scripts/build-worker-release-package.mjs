@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
+import { codedErrorClass } from "./lib/coded-error.mjs";
+import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import {
 	withWorkerReleaseDevelopmentInputs,
 	withWorkerReleaseInputs,
@@ -29,13 +31,7 @@ const MARKER = ".ceal-worker-release-package";
 const MANIFEST_FILENAME = "ceal-worker-release-package-manifest.json";
 const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
 
-export class WorkerReleasePackageError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerReleasePackageError";
-		this.code = code;
-	}
-}
+export const WorkerReleasePackageError = codedErrorClass("WorkerReleasePackageError");
 
 export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
 	return buildWorkerReleasePackageWithInputs(options, dependencies, withWorkerReleaseInputs);
@@ -312,22 +308,14 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 function fail(code, message) { throw new WorkerReleasePackageError(code, message); }
 
 function parseArgs(argv) {
-	const options = { force: false };
-	let json = false;
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === "--help" || arg === "-h") return { help: true, json, options };
-		if (arg === "--json") { json = true; continue; }
-		if (arg === "--force") { options.force = true; continue; }
-		if (["--out", "--gateway-handoff-archive"].includes(arg)) {
-			const value = argv[++index];
-			if (typeof value !== "string") fail("invalid_argument", "Worker package option requires a value.");
-			options[arg === "--out" ? "outputDirectory" : "gatewayHandoffArchive"] = value;
-			continue;
-		}
-		fail("invalid_argument", "Unexpected worker package build argument.");
-	}
-	return { help: false, json, options };
+	return parseScriptArgs(argv, {
+		fail,
+		defaults: { force: false },
+		flags: { "--force": "force" },
+		values: { "--out": "outputDirectory", "--gateway-handoff-archive": "gatewayHandoffArchive" },
+		valueMessage: "Worker package option requires a value.",
+		unknownMessage: "Unexpected worker package build argument.",
+	});
 }
 
 export function runCli(argv, io = console) {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const LOCK_SCHEMA = "ceal.worker_gateway_handoff_lock.v1";
 const HANDOFF_SCHEMA = "ceal.repository_extraction_gateway_handoff.v1";
@@ -14,13 +15,7 @@ const HANDOFF_FILES = [
 	"gateway-protocol-provenance.json",
 ];
 
-export class WorkerGatewayHandoffArchiveError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerGatewayHandoffArchiveError";
-		this.code = code;
-	}
-}
+export const WorkerGatewayHandoffArchiveError = codedErrorClass("WorkerGatewayHandoffArchiveError");
 
 /**
  * Verifies a source-reviewed lock and a locally supplied archive, extracts the

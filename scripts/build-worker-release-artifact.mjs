@@ -12,19 +12,14 @@ import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { verifyGatewayProtocolConsumer } from "./verify-gateway-protocol-consumer.mjs";
+import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
 const MARKER = ".ceal-worker-release-output";
 const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 
-export class WorkerReleaseArtifactError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerReleaseArtifactError";
-		this.code = code;
-	}
-}
+export const WorkerReleaseArtifactError = codedErrorClass("WorkerReleaseArtifactError");
 
 export async function buildWorkerReleaseArtifact(options = {}, deps = {}) {
 	const normalized = normalizeOptions(options, deps);

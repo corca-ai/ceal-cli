@@ -3,6 +3,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INVENTORY_PATH = "release/worker-inputs.json";
@@ -29,13 +30,7 @@ const EXPECTED = Object.freeze({
 	],
 });
 
-export class WorkerReleaseInputsError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.name = "WorkerReleaseInputsError";
-		this.code = code;
-	}
-}
+export const WorkerReleaseInputsError = codedErrorClass("WorkerReleaseInputsError");
 
 export function validateWorkerReleaseInputs({ repoRoot = REPO_ROOT, protocolVersion, inventory } = {}) {
 	const root = path.resolve(repoRoot);

@@ -8,6 +8,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { WorkerReleaseInputsError, validateWorkerReleaseInputs } from "./verify-worker-release-inputs.mjs";
+import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROTOCOL_NAME = "@corca-ai/ceal-protocol";
@@ -15,14 +16,7 @@ const CLIENT_NAME = "@corca-ai/ceal";
 const WORKER_NAME = "@corca-ai/ceal-worker-cli";
 const GATEWAY_REPOSITORY = "corca-ai/ceal";
 
-export class GatewayProtocolConsumerError extends Error {
-	constructor(code, message, workspace = null) {
-		super(message);
-		this.name = "GatewayProtocolConsumerError";
-		this.code = code;
-		this.workspace = workspace;
-	}
-}
+export const GatewayProtocolConsumerError = codedErrorClass("GatewayProtocolConsumerError", ["workspace"]);
 
 export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTarball, protocolProvenance, keepWorkspace = false } = {}) {
 	const root = path.resolve(repoRoot);
