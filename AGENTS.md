@@ -42,6 +42,14 @@ clean, or rebase anything else.
 Symmetrically, `corca-ai/ceal`'s `packaging/ceal-cli-source/` is the frozen copy
 of this repository's source.
 
+The historical dual release lane is frozen the same way, which this section used
+to leave to `README.md` alone: `install.sh`, `scripts/build-platform-binaries.mjs`
+(`release:binaries`), `scripts/build-release-manifest.mjs` (`release:manifest`),
+bare `v*` tags, and `.github/workflows/cealctl-release.yml`. Do not execute,
+amend, or publish them. They are ordinary tracked files here, so nothing stops an
+edit mechanically — the constraint is that `corca-ai/ceal` mirrors them, and a
+one-sided change breaks that copy.
+
 Do not originate an independent edit in a frozen copy on either side: change the
 recorded owner first, then land a reviewed target-derived sync. The authority
 and the deletion gates live in `repository-extraction-migration-ledger.json` in
@@ -95,6 +103,27 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
 - Run state-changing commands (commit, push, tag, publish) without output
   filters and read the exit code before retrying. Pipe-trimming is for read-only
   output only.
+
+## Release And Enrollment Lanes
+
+Both are standing procedures, not session state, so they live here rather than in
+a baton that would restate them every time.
+
+- Release: bump the eight version-bearing files (`package-lock.json` included —
+  `npm run check` does not gate the lock but the tagged workflow's
+  `npm ci --ignore-scripts` does), then `npm ci` → `npm run check` → commit →
+  push `main` → confirm `origin/main` is that commit → tag → watch →
+  `ceal update` → readback. `CHANGELOG.md` owns which tags are burned and why; a
+  burned tag is never reused.
+- Re-enrollment (a worker session binds one instance, so switching is locally
+  destructive): on the Gateway host (`ssh oc`) use the owner copy at
+  `~/ceal/packages/ceal-operator-cli` — the installed `cealctl 0.65.3` there is
+  the other lineage and has no `enrollments` route — then
+  `cealctl login <admin-origin> --session <name>` followed by
+  `cealctl enrollments create --client narnia --profile work --subject hwidong
+  --instance <name> --operator-session <name>`, and locally
+  `ceal session enroll --code-stdin`. A web-shell activation code is not this
+  code: `ceal-ops admin-api invite` can never carry `ceal.client.enroll`.
 
 ## Boundaries
 

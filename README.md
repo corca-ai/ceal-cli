@@ -131,7 +131,7 @@ observe CLI or client behavior. While iterating, use the fast lane and keep the
 full gate for the last run before pushing or tagging:
 
 ```sh
-npm run check:unit   # lint + build + the four package suites
+npm run check:unit   # lint + build + package suites + test/contract
 npm run test:release # release-artifact and native-binary suites only
 npm run lint         # biome check: lint + format + import order
 ```

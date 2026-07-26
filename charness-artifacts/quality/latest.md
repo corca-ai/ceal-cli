@@ -2,6 +2,11 @@
 Date: 2026-07-26
 Title: Quality Review
 
+> **Rolling view; landed findings removed.** The dated record in
+> `history/2026-07-26-quality-review.md` preserves this review as first written.
+> `AGENTS.md ## Gates` now owns gate detail. Every `file:line` below predates a
+> 64-file reformat — re-grep, never paste.
+
 ## Scope
 
 Target boundary: repo-wide question — are the linter, the tests, and `AGENTS.md` actually
@@ -49,34 +54,17 @@ having no gate commands (repaired this turn).
   behavior. `client-session.ts:22-25` falls through to `enrollSession` for any non-`logout`
   session route; `index.ts:464` defaults any non-`register` guide route to `status`. A
   table-only row passes `check:unit` (the help gate) and misroutes.
-- Gate timings are stale and triplicated: `~95s`/`~14s` at `AGENTS.md:53`,
-  `README.md:127,133`, `docs/handoff.md:61`. Measured 124.27s / 22.56s.
-- `packages/ceal-worker-cli/test/cli.test.mjs:136` blames the frozen-version incident on
-  `0.65.10`; `docs/handoff.md:38` records it as `0.65.7`. `0.65.10` is the current good release.
-- `test/guide-contract.test.mjs:106` asserts `node ROOT/missing/<binary> --help` exits non-zero.
-  That path never exists; the assertion tests Node, not the product. The same file needs no
-  release artifact yet pays the `--test-concurrency=1` tax — it belongs in `test:unit`.
+- `test/guide-contract.test.mjs` needs no release artifact yet pays the
+  `--test-concurrency=1` tax at ~8s; it belongs in the contract tier.
 - `cli.test.mjs:1650` runtime-purity denylist omits `node:child_process`, `node:os`, `node:dns`,
   `node:tls`. `stable-update.ts` already imports `spawn` in the same package.
-- `client-session.ts:321` and `:336` hand-maintain two overlapping failure-code sets with
-  no agreement test. A code added to one and not the other makes `ceal call` emit an
-  `outcome_unknown` receipt for a call the Gateway provably never issued.
 - `cli.test.mjs:158-166` and `:433-443` grep `src/*.ts` text as a stand-in for behavior;
   the `error: \{([^}]*)\}` sweep sees only 21 literal sites and truncates at the first `}`.
 
 ## Missing
 
-- No linter or formatter of any kind, and `AGENTS.md` does not say so. Sources are
-  tab-indented by convention only, with no mechanical fixer.
-- No CI gate on `main`. The first workflow run for any change is the **tag** run, so a gate
-  failure surfaces as a burned, non-reusable tag — the `0.65.7`/`0.65.8` loss class already
-  recorded in `docs/handoff.md:38-45`.
-- Maintainer-Local Enforcement: **missing.** `npm run check` is the declared final gate with
-  no checked-in hook, installer, or clone validator — honor-system only.
-- `scripts/prewarm-offline-consumer-cache.mjs` has zero coverage and is not import-shaped
-  (top-level closure walk, lines 60-64). Its walk reads `dependencies`/`peerDependencies` but not
-  `optionalDependencies`, and `lockPackages()` keeps only the first record per bare name —
-  failing as `ENOTCACHED` on a cold release runner.
+- *(Landed after this review: linter/formatter in both gates, branch/PR CI, checked-in
+  pre-push hook plus installer, and prewarm coverage. Removed rather than restated.)*
 - `docs/roadmap.md` and `docs/operator-acceptance.md` do not exist; given the install surface
   and release lane, absent operator-takeover guidance is an operability gap.
   `.agents/retro-adapter.yaml` is likewise missing while `charness-artifacts/retro/` is active.
