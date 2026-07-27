@@ -5,6 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensurePackageBuilt } from "./repo-build.mjs";
 
 // `URL.pathname` is percent-encoded, so a checkout under a path containing a
 // space (or any escaped character) yields "%20" here and every derived path fails
@@ -16,8 +17,9 @@ export function makeGatewayProtocolFixture() {
 	const source = path.join(root, "protocol");
 	const output = path.join(root, "artifacts");
 	mkdirSync(output, { recursive: true, mode: 0o755 });
-	const built = spawnSync("npm", ["--prefix", path.join(REPO_ROOT, "packages", "ceal-protocol"), "run", "build"], { encoding: "utf8" });
-	assert.equal(built.status, 0, built.stderr);
+	// The copy below reads `dist`, so the build has to be finished — and finished by
+	// exactly one process — before this line. `ensurePackageBuilt` owns both.
+	ensurePackageBuilt(path.join("packages", "ceal-protocol"));
 	cpSync(path.join(REPO_ROOT, "packages", "ceal-protocol"), source, {
 		recursive: true,
 		filter: (entry) => path.basename(entry) !== "node_modules",

@@ -32,6 +32,8 @@ public_spec_pointer_proof_markers:
   - "proof: pointer-spec"
   - "executable_proof: pointer"
   - "public_spec_proof: pointer"
+cli_skill_surface_probe_commands:
+  - npm run probe
 canonical_markdown_surfaces:
   - AGENTS.md
   - CLAUDE.md
@@ -49,19 +51,15 @@ skill_ergonomics_gate_rules:
   - portable_package_issue_anchor
   - portable_helper_path_ambiguity
   - progressive_disclosure_risk
+skill_ergonomics_skill_paths:
+  - skills/ceal-guide/SKILL.md
+  - skills/cealctl-guide/SKILL.md
 runtime_profile_default: default
 concept_paths:
   - README.md
   - docs/handoff.md
-# The repo's real gates, per AGENTS.md `## Gates`. Bootstrap deferred these
-# because it looks for eslint/vitest names; this repo gates through npm
-# workspace scripts and `node --test` instead.
+  - docs/operator-acceptance.md
+  - charness-artifacts/quality/latest.md
 gate_commands:
   - npm run check:unit
   - npm run check
-security_commands: []
-skill_ergonomics_skill_paths:
-  - skills/ceal-guide/SKILL.md
-  - skills/cealctl-guide/SKILL.md
-cli_skill_surface_probe_commands:
-  - npm run probe

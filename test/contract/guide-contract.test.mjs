@@ -9,9 +9,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
 
-// This gate needs only `npm run build` output, never a release artifact, so it
+// This gate needs only the workspace build output, never a release artifact, so it
 // belongs in the contract tier the pre-push hook actually runs rather than in the
-// `--test-concurrency=1` release tier where it paid a serialized tax for nothing.
+// release tier that materializes packed and native artifacts for nothing.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
 const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-guide-contract-home-"));
@@ -157,12 +157,23 @@ function exerciseCustomerScenario(scenario) {
 	scenario.assertResult(value);
 }
 
+// Help rendering is a pure function of the argv here — same binary, same isolated
+// HOME, no writes — and the four tests below walk overlapping route trees, so a
+// third of the spawns were re-running an identical process. The cache keeps the
+// assertions untouched and drops the tier's dominant cost.
+const SPAWNS = new Map();
+
 function runBinary(item, args, { allowFailure = false } = {}) {
 	const bin = path.join(BINARY_ROOT, "packages", item.packageDir, "dist", "bin.js");
-	const result = spawnSync(process.execPath, [bin, ...args], {
-		encoding: "utf8",
-		env: { ...process.env, HOME: ISOLATED_HOME },
-	});
+	const key = JSON.stringify([bin, args]);
+	const cached = SPAWNS.get(key);
+	const result =
+		cached ??
+		spawnSync(process.execPath, [bin, ...args], {
+			encoding: "utf8",
+			env: { ...process.env, HOME: ISOLATED_HOME },
+		});
+	SPAWNS.set(key, result);
 	// A cold-start scenario runs in an isolated HOME with no session, and a
 	// surface that cannot answer without one now fails closed. The document is
 	// still the single YAML answer this gate reads.

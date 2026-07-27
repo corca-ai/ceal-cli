@@ -25,9 +25,11 @@ jobs:
   check:
     permissions:
       contents: read
-    # The gate takes ~2 minutes on a warm local host and several suites await an
-    # HTTP server they also close; a wedged one would otherwise hold a runner for
-    # the 6-hour default instead of failing while the cause is still obvious.
+    # Several suites await an HTTP server they also close; a wedged one would
+    # otherwise hold a runner for the 6-hour default instead of failing while the
+    # cause is still obvious. The ceiling is deliberately far above the gate's
+    # real cost — measure that with `time npm run check` rather than reading a
+    # figure here, which is how the last one went stale.
     timeout-minutes: 30
     # The release lane builds on macOS too, so before this matrix existed a
     # macOS-only break first appeared in a tagged run — which is how

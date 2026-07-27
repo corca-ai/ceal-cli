@@ -398,7 +398,7 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 test("every test file under test/ belongs to exactly one suite", () => {
 	const scripts = manifest.scripts;
 	assert.equal(scripts["test:contract"], "node --test test/contract/*.test.mjs");
-	assert.match(scripts["test:release"], /^node --test --test-concurrency=1 test\/\*\.test\.mjs$/u);
+	assert.match(scripts["test:release"], /^node --test test\/\*\.test\.mjs$/u);
 	// The two globs are exclusive: test/*.test.mjs cannot match test/contract/*.
 	assert.match(scripts["check:unit"], /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:contract/u);

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensurePackageBuilt } from "./repo-build.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -74,7 +75,9 @@ export function packedProtocolFixture(context) {
 
 function packPackage(root, sourcePath, declaredExports) {
 	const packageDirectory = path.join(ROOT, sourcePath);
-	execFileSync("npm", ["run", "build"], { cwd: packageDirectory, stdio: "pipe" });
+	// `npm pack` reads `dist`, so the build has to be finished — and finished by
+	// exactly one process — before this line. `ensurePackageBuilt` owns both.
+	ensurePackageBuilt(sourcePath);
 	const packed = JSON.parse(
 		execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], {
 			cwd: packageDirectory,

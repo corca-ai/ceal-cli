@@ -31,6 +31,36 @@ A rule with no findings does not belong in that list. Enable it instead.
 Formatting-only commits belong in `.git-blame-ignore-revs`, which
 `npm run hooks:install` wires into the clone.
 
+## The Release Tier Runs In Parallel, And What Pays For That
+
+`test:release` was pinned to `--test-concurrency=1` from the commit that first
+needed it, with no recorded reason. The reason was real but undeclared: the
+release fixtures shell out to `npm run build`, which emits into the checked-out
+`packages/<name>/dist`, and their `npm pack` reads it back. Two test processes
+building there at once can let a third pack a half-written `dist`. Serializing
+the whole tier hid that race behind a 74s wall clock.
+
+The pin is gone and the race is closed at its source instead. `dist` now has one
+writer: `ensurePackageBuilt` in `test/repo-build.mjs`, an inter-process mutex —
+`mkdir` as the atomic test-and-set — plus an in-process memo. A fixture that
+needs a current `dist` asks for it there rather than building its own.
+
+Three things keep this honest, and none of them is the tier passing, because a
+race that loses is silent:
+
+- `test/contract/repo-build.test.mjs` proves the mutex by running six *concurrent*
+  holders and asserting their enter/exit journal never interleaves. Spawn them
+  synchronously and the assertion goes vacuous — that is how it was first
+  written, and removing the mutex did not turn it red.
+- The same file forbids any other fixture under `test/` from invoking
+  `npm run build` itself, because a new one that did would reintroduce exactly
+  this race and pass its own tests.
+- The stale-lock break exists so a process killed while holding the lock costs
+  the next run a warning rather than a hang.
+
+Do not re-add `--test-concurrency=1` to buy safety for a new fixture. Give the
+shared thing an owner, as `dist` has one.
+
 ## Probing An Installed Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way
