@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "../../packages/ceal-worker-cli/dist/agent-guide.js";
 
 // Contract tier, not release: this needs only `npm run build`, and the guard it
 // proves exists to stop a destructive probe — so the pre-push hook is exactly
@@ -13,6 +16,44 @@ const GUARD = path.join(ROOT, "scripts", "probe-surface.mjs");
 
 function probe(args) {
 	return spawnSync(process.execPath, [GUARD, ...args], { encoding: "utf8", cwd: ROOT });
+}
+
+/**
+ * Run the guard from a node staged in an install-shaped tree.
+ *
+ * The guide store derives its asset from `dirname(realpath(process.execPath))`,
+ * and the guard spawns the probed binary with its own `process.execPath`. Run as
+ * plain `node dist/bin.js`, every `guide register` probe therefore answers
+ * `guide_unavailable` and reports no path at all — which is how this file once
+ * held two isolation assertions that could not fail. Staging the executable is
+ * what makes the registration path exist to be asserted about.
+ */
+function withStagedRelease(run) {
+	const cache = path.join(ROOT, "node_modules", ".cache");
+	mkdirSync(cache, { recursive: true });
+	const stage = mkdtempSync(path.join(cache, "ceal-probe-release-"));
+	try {
+		const binary = path.join(stage, "releases", "probe", "ceal");
+		mkdirSync(path.dirname(binary), { recursive: true });
+		mkdirSync(path.join(stage, "current", "guide"), { recursive: true });
+		writeFileSync(path.join(stage, "current", "guide", "SKILL.md"), "name: ceal-guide\n");
+		// A hardlink keeps the staging free; a symlink cannot work at all, because
+		// the store realpaths the executable before deriving the guide root. The
+		// copy is the cross-device fallback, not the normal path.
+		try {
+			linkSync(process.execPath, binary);
+		} catch {
+			copyFileSync(process.execPath, binary);
+			chmodSync(binary, 0o755);
+		}
+		run((args, environment) => spawnSync(binary, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }));
+	} finally {
+		rmSync(stage, { recursive: true, force: true });
+	}
+}
+
+function registrationPaths(stdout) {
+	return [...stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]);
 }
 
 // The incident this guard exists for: `ceal session logout` sat in a list of
@@ -56,30 +97,50 @@ test("the child's own declared effect decides, not the parent's", () => {
 test("the escape hatch is explicit and still isolated", () => {
 	const refused = probe(["ceal", "guide", "register", "codex"]);
 	assert.equal(refused.status, 2);
-	const allowed = probe(["--allow-effect", "local_write", "ceal", "guide", "register", "codex"]);
-	assert.match(allowed.stderr, /effect: local_write.*throwaway HOME/u);
-	assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu);
-	// The write landed in the throwaway HOME, never the operator's Codex dir.
-	assert.doesNotMatch(allowed.stdout, new RegExp(process.env.HOME.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+	withStagedRelease((run) => {
+		const allowed = run(["--allow-effect", "local_write", "ceal", "guide", "register", "codex"]);
+		assert.match(allowed.stderr, /effect: local_write.*throwaway HOME/u);
+		assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu);
+		// The registration actually happened, so the path below is a real write
+		// target rather than the shape of a failure document.
+		assert.match(allowed.stdout, /^status: available$/mu);
+		assert.match(allowed.stdout, /^ {4}registered: true$/mu);
+		// The write landed in the throwaway HOME, never the operator's Codex dir.
+		for (const reported of registrationPaths(allowed.stdout)) assert.match(reported, /ceal-probe-home-/u);
+	});
 });
 
 // An agent-host override defaults to a path under HOME, so a negative assertion
-// against HOME cannot prove the override itself is pinned. Set a sentinel the
-// throwaway HOME can never contain and assert the reported path positively.
+// against HOME cannot prove the override itself is pinned. Point every declared
+// override at a sentinel the throwaway HOME can never contain, and assert the
+// reported paths positively. Deriving the set from the host table is what makes
+// a newly declared host with an unpinned variable fail here rather than in an
+// operator's real state.
 test("an inherited agent-host override cannot aim a probed write at real state", () => {
-	const sentinel = path.join(path.sep, "tmp", "ceal-probe-sentinel-claude-config");
-	const result = spawnSync(process.execPath, [GUARD, "--allow-effect", "local_write", "ceal", "guide", "register", "claude"], {
-		encoding: "utf8",
-		cwd: ROOT,
-		env: { ...process.env, CLAUDE_CONFIG_DIR: sentinel, XDG_RUNTIME_DIR: sentinel },
-	});
-	assert.match(result.stdout, /^schema_version: ceal\.guide\.v1$/mu);
-	assert.doesNotMatch(result.stdout, new RegExp(sentinel.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-	const reported = /^registration_path: (.+)$/mu.exec(result.stdout);
-	// The route is only reachable with a staged guide beside the binary; when it
-	// is, the path it claims must sit inside the throwaway HOME.
-	if (reported) assert.match(reported[1], /ceal-probe-home-/u);
-	else assert.match(result.stdout, /^ {2}kind: guide_unavailable$/mu);
+	// Unique per run and swept afterwards: a sentinel left behind by a failing
+	// run must not turn the next run's "was never created" claim into a stale
+	// failure that outlives the defect.
+	const sentinel = path.join(tmpdir(), `ceal-probe-sentinel-agent-host-${process.pid}`);
+	assert.ok(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.length > 0);
+	const overrides = Object.fromEntries(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.map((variable) => [variable, sentinel]));
+	try {
+		withStagedRelease((run) => {
+			const result = run(["--allow-effect", "local_write", "ceal", "guide", "register", "claude"], {
+				...overrides,
+				XDG_RUNTIME_DIR: sentinel,
+			});
+			assert.match(result.stdout, /^status: available$/mu);
+			assert.doesNotMatch(result.stdout, new RegExp(sentinel.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+			const reported = registrationPaths(result.stdout);
+			// Every declared host reports a path, and every one of them is throwaway.
+			assert.equal(reported.length, CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.length);
+			for (const host of reported) assert.match(host, /ceal-probe-home-/u);
+			// The strongest form of the claim: the sentinel tree was never created.
+			assert.equal(existsSync(sentinel), false);
+		});
+	} finally {
+		rmSync(sentinel, { recursive: true, force: true });
+	}
 });
 
 test("an unknown binary or command is refused before spawning", () => {

@@ -34,6 +34,16 @@ const CEAL_AGENT_GUIDE_HOSTS: readonly {
 ];
 
 /**
+ * Every environment variable that can redirect a host's state root.
+ *
+ * A caller that must neutralize those roots — the probe guard pinning them
+ * inside a throwaway HOME — has to know the whole set, and a hand-kept copy of
+ * it silently goes stale the moment a host row is added. Derive it here so the
+ * table stays the one declaration.
+ */
+export const CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES: readonly string[] = CEAL_AGENT_GUIDE_HOSTS.map((host) => host.environmentVariable);
+
+/**
  * The agent host this process is running inside, when it says so.
  *
  * The projection used to default to the first declared host, so a Claude Code
