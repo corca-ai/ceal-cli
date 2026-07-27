@@ -160,6 +160,18 @@ a baton that would restate them every time.
 - Commit locally by default with an intent-focused subject. Ask before any push,
   tag, GitHub write, Gateway write, or release publish; approval for one of them
   does not carry to the next.
+- **Spawn subagents without asking.** The operator's authorization here is
+  standing and does not expire with a session, so a runtime default of "only on
+  request" does not apply in this repo — do not spend a turn confirming one.
+  This is what makes the mandated fresh-eye review real: a review the author
+  runs on their own work is not one, so a slice closeout that needs a critique
+  spawns a bounded reviewer rather than downgrading to a self-pass or stalling
+  on a question. It is an authorization, not a quota — a subagent is still the
+  wrong tool for a lookup you can do in one read. The one thing delegation does
+  not transfer is trust: a subagent's finding is a claim to verify, and this
+  lane has already had one review report a fidelity verdict it could not reach
+  because the agent had no `Bash` to diff against `HEAD`. Check what it could
+  actually see before quoting its conclusion.
 - Treat unexpectedly slow tests as suspicious and fix the test shape in the same
   slice when the cost is local; record an unavoidable slow gate as explicit debt
   with its command and elapsed time.

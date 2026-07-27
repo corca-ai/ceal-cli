@@ -1,13 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, type Stats, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
+import { withLocalStoreLock } from "./local-store-lock.js";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
-const STATE_LOCK_OWNER = "owner.json";
 const STATE_LOCK_MAX_WAIT_MS = 30_000;
-const STATE_LOCK_POLL_MS = 25;
-const STATE_LOCK_INITIALIZATION_GRACE_MS = 1_000;
 
 export interface CealStoredSession {
 	gatewayEndpoint: string;
@@ -114,135 +112,19 @@ function removeSessionFile(directory: string, file: string): void {
 
 async function withStateLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
 	prepareDirectory(directory, unsafeSessionStore, true);
-	const release = await acquireStateLock(path.join(directory, STATE_LOCK_DIRECTORY));
-	try {
-		return await action();
-	} finally {
-		try {
-			release();
-		} catch {
-			/* A stale lock fails closed and expires within the bounded wait. */
-		}
-	}
-}
-
-async function acquireStateLock(lockPath: string): Promise<() => void> {
-	const deadline = Date.now() + STATE_LOCK_MAX_WAIT_MS;
-	while (true) {
-		const nonce = createStateLock(lockPath);
-		if (nonce)
-			return () => {
-				releaseStateLock(lockPath, nonce);
-			};
-		await waitForStateLock(lockPath, deadline);
-	}
-}
-
-function createStateLock(lockPath: string): string | null {
-	try {
-		mkdirSync(lockPath, { mode: 0o700 });
-	} catch (error) {
-		if (nodeErrorCode(error) === "EEXIST") return null;
-		throw new CealSessionStoreError("unsafe_store");
-	}
-	const nonce = randomBytes(16).toString("hex");
-	try {
-		writeFileSync(path.join(lockPath, STATE_LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
-		return nonce;
-	} catch {
-		rmSync(lockPath, { recursive: true, force: true });
-		throw new CealSessionStoreError("unsafe_store");
-	}
-}
-
-async function waitForStateLock(lockPath: string, deadline: number): Promise<void> {
-	if (removeStaleStateLock(lockPath)) return;
-	if (Date.now() >= deadline) throw new CealSessionStoreError("refresh_busy");
-	await sleep(STATE_LOCK_POLL_MS);
-}
-
-function releaseStateLock(lockPath: string, nonce: string): void {
-	const owner = readStateLockOwner(lockPath);
-	if (!owner || owner.nonce !== nonce) return;
-	rmSync(lockPath, { recursive: true, force: true });
-}
-
-function removeStaleStateLock(lockPath: string): boolean {
-	const owner = staleStateLockOwner(lockPath);
-	if (owner === "initializing") return false;
-	if (owner === null || processMissing(owner.pid)) return removeStateLock(lockPath);
-	return false;
-}
-
-function staleStateLockOwner(lockPath: string): { pid: number; nonce: string } | "initializing" | null {
-	const lock = readSafeStateLockDirectory(lockPath);
-	if (!lock) return null;
-	const ownerPath = path.join(lockPath, STATE_LOCK_OWNER);
-	let owner: Stats;
-	try {
-		owner = lstatSync(ownerPath);
-	} catch {
-		return Date.now() - lock.mtimeMs < STATE_LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
-	}
-	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) throw new CealSessionStoreError("unsafe_store");
-	const parsed = readStateLockOwner(lockPath);
-	if (!parsed) throw new CealSessionStoreError("unsafe_store");
-	return parsed;
-}
-
-function readSafeStateLockDirectory(lockPath: string) {
-	try {
-		const lock = lstatSync(lockPath);
-		if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) throw new CealSessionStoreError("unsafe_store");
-		return lock;
-	} catch (error) {
-		if (error instanceof CealSessionStoreError) throw error;
-		if (nodeErrorCode(error) === "ENOENT") return null;
-		throw new CealSessionStoreError("unsafe_store");
-	}
-}
-
-function processMissing(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return false;
-	} catch (error) {
-		if (nodeErrorCode(error) === "ESRCH") return true;
-		throw new CealSessionStoreError("unsafe_store");
-	}
-}
-
-function removeStateLock(lockPath: string): boolean {
-	rmSync(lockPath, { recursive: true, force: true });
-	return true;
-}
-
-function readStateLockOwner(lockPath: string): { pid: number; nonce: string } | null {
-	try {
-		const value = JSON.parse(readFileSync(path.join(lockPath, STATE_LOCK_OWNER), "utf8"));
-		if (
-			!value ||
-			typeof value !== "object" ||
-			Array.isArray(value) ||
-			typeof value.pid !== "number" ||
-			!Number.isSafeInteger(value.pid) ||
-			value.pid <= 0 ||
-			typeof value.nonce !== "string" ||
-			!/^[a-f0-9]{32}$/iu.test(value.nonce)
-		)
-			return null;
-		return { pid: value.pid, nonce: value.nonce };
-	} catch {
-		return null;
-	}
-}
-
-function nodeErrorCode(error: unknown): string | undefined {
-	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
-}
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+	// The refresh this guards is a Gateway roundtrip, so a contending process
+	// waits far longer than a local-file writer would before calling it busy.
+	return withLocalStoreLock(
+		{
+			lockPath: path.join(directory, STATE_LOCK_DIRECTORY),
+			maxWaitMs: STATE_LOCK_MAX_WAIT_MS,
+			onUnsafe: unsafeSessionStore,
+			onBusy: () => {
+				throw new CealSessionStoreError("refresh_busy");
+			},
+		},
+		action,
+	);
 }
 
 function serializeSession(session: CealStoredSession): Record<string, unknown> {

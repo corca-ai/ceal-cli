@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -87,6 +88,89 @@ test("receipt spool applies retention on read and drops far-future entries", asy
 		assert.deepEqual(state.entries, [entry()]);
 	});
 });
+
+test("separate ceal processes each keep their receipt when they append at once", async () => {
+	// The regression this pins: appendEntry is a read-modify-write of one file,
+	// so without a cross-process lock every writer reads the same prior state
+	// and the last rename wins — losing the others' receipts silently, which is
+	// the exact under-report `ceal observe` exists to surface. The prior spool
+	// is pre-filled so the read-serialize-write window is wide enough that an
+	// unlocked build loses entries reliably rather than only under load.
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home);
+		const priors = Array.from({ length: 150 }, (_, index) => `narnia:call:prior:${index}`);
+		for (const ref of priors) await store.append(entry({ recordedAt: Date.now(), requestRef: ref }));
+		const refs = Array.from({ length: 6 }, (_, index) => `narnia:call:concurrent:${index}`);
+		// A shared absolute start instant, spun to rather than slept to, lines the
+		// writers up far more tightly than spawn order alone would.
+		const startAt = Date.now() + START_BARRIER_MS;
+		const results = await Promise.all(refs.map((ref) => appendInChildProcess(home, ref, startAt)));
+		for (const result of results) assert.equal(result.code, 0, result.stderr);
+		// Without this, the test degrades silently instead of failing: on a host
+		// slow enough that a child reaches the barrier after it has already
+		// passed, the appends serialize naturally, an unlocked build keeps every
+		// receipt, and the regression proof passes while proving nothing. Each
+		// child reports the margin it still had when it arrived, so a run that
+		// never achieved overlap fails as that, rather than as green.
+		const margins = results.map((result) => Number(result.stdout.trim()));
+		assert.deepEqual(
+			margins.filter((margin) => !(margin >= 0)),
+			[],
+			`writers did not overlap; margins to the shared barrier were ${margins.join(", ")}ms`,
+		);
+		// The count is exact because 150 priors plus 6 concurrent stays under the
+		// entry cap: a lock that kept the six by clobbering the priors would pass
+		// a membership-only assertion.
+		const spooled = new Set((await store.load()).entries.map((item) => item.requestRef));
+		assert.deepEqual(
+			[...priors, ...refs].filter((ref) => !spooled.has(ref)),
+			[],
+		);
+		assert.equal(spooled.size, priors.length + refs.length);
+	});
+});
+
+// Long enough that six `node` cold starts finish before the barrier on a loaded
+// host, short enough not to dominate the suite. The margin assertion above is
+// what catches a host where it was not long enough after all.
+const START_BARRIER_MS = 750;
+
+function appendInChildProcess(home, requestRef, startAt) {
+	const source = `
+		const { createCealReceiptSpoolStore } = await import(${JSON.stringify(new URL("../dist/receipt-spool.js", import.meta.url).href)});
+		const startAt = Number(process.env.SPOOL_START_AT);
+		const store = createCealReceiptSpoolStore(process.env.HOME);
+		// Measured before the wait: this is how much slack this child still had,
+		// and a negative value means it arrived after the gun already went off.
+		const margin = startAt - Date.now();
+		await new Promise((resolve) => setTimeout(resolve, Math.max(0, margin - 20)));
+		while (Date.now() < startAt) {}
+		await store.append({
+			recordedAt: Date.now(),
+			requestRef: process.env.SPOOL_REQUEST_REF,
+			status: "completed",
+			evidence: "readback_verified",
+			auditRefs: [],
+		});
+		process.stdout.write(String(margin));
+	`;
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		env: { ...process.env, HOME: home, SPOOL_REQUEST_REF: requestRef, SPOOL_START_AT: String(startAt) },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.on("data", (chunk) => {
+		stdout += String(chunk);
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += String(chunk);
+	});
+	return new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", (code) => resolve({ code, stdout, stderr }));
+	});
+}
 
 test("receipt spool load reports a present-but-unusable file while append still soft-misses", async () => {
 	// load throws so the observer can render `unreadable` instead of an empty

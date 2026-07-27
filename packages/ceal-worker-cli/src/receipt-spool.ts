@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { withLocalStoreLock } from "./local-store-lock.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
 // source ("what did this client's token do"). It records an allowlisted
@@ -49,7 +50,7 @@ export interface CealReceiptSpoolState {
 
 export class CealReceiptSpoolStoreError extends Error {
 	override readonly name = "CealReceiptSpoolStoreError";
-	constructor(readonly code: "home_unavailable" | "unsafe_store") {
+	constructor(readonly code: "home_unavailable" | "spool_busy" | "unsafe_store") {
 		super(`Ceal receipt spool store ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -74,7 +75,7 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 			return state;
 		},
 		async append(entry) {
-			appendEntry(directory, file, entry, now());
+			await appendEntry(directory, file, entry, now());
 		},
 		async remove() {
 			removeSpool(file);
@@ -112,8 +113,41 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 	};
 }
 
-function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
+// A spool append is a read-modify-write of one file, so two concurrent
+// `ceal call` processes without this lock would each read the same prior state
+// and the later rename would drop the earlier receipt — silently, since a spool
+// failure never changes call behavior. That under-report is precisely what
+// `ceal observe` exists to surface, so it is the loss this lock exists to stop.
+//
+// It narrows the window rather than closing it, and the difference matters to
+// anyone reading the spool as complete. The critical section is one small local
+// write, not the session store's Gateway roundtrip, so the wait is short — but
+// an append that still cannot get in past it raises `spool_busy`, which the
+// recording call site swallows like any other spool failure. A receipt is then
+// lost exactly as before, and nothing counts how often. Closing that would take
+// a durable drop counter the observer can render; it is not this lock's job.
+const SPOOL_LOCK_DIRECTORY = "receipt-spool.lock";
+const SPOOL_LOCK_MAX_WAIT_MS = 5_000;
+
+async function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
 	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
+	prepareDirectory(directory, unsafeReceiptSpool);
+	return withLocalStoreLock(
+		{
+			lockPath: path.join(directory, SPOOL_LOCK_DIRECTORY),
+			maxWaitMs: SPOOL_LOCK_MAX_WAIT_MS,
+			onUnsafe: unsafeReceiptSpool,
+			onBusy: () => {
+				throw new CealReceiptSpoolStoreError("spool_busy");
+			},
+		},
+		async () => {
+			writeAppendedSpool(directory, file, entry, now);
+		},
+	);
+}
+
+function writeAppendedSpool(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
 	const existing = readSpool(directory, file, now)?.entries ?? [];
 	// Size and retention bounds are enforced on every append (and read applies
 	// the same retention window), so the spool cannot grow past its declared
@@ -121,7 +155,6 @@ function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEnt
 	const entries = [...existing, entry]
 		.filter((candidate) => withinRetention(candidate.recordedAt, Math.max(now, entry.recordedAt)))
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
-	prepareDirectory(directory, unsafeReceiptSpool);
 	sweepStaleTemporaries(directory, now);
 	if (existsSync(file)) assertFile(file, unsafeReceiptSpool);
 	const temporary = path.join(directory, `.receipt-spool.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);

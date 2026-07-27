@@ -64,8 +64,18 @@ void runCealCommand(
 		removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
 		inspectAgentGuide: agentGuide ? (agent) => agentGuide.inspect(agent) : undefined,
 		registerAgentGuide: agentGuide ? (agent) => agentGuide.register(agent) : undefined,
-		// The append is synchronous inside the async wrapper; the .catch keeps a
-		// rejected spool write from becoming an unhandled rejection.
+		// The append takes the spool's cross-process lock, so it is genuinely
+		// async now and is not awaited here: a spool write must not delay the
+		// call's own result, which is already on stdout before this runs.
+		//
+		// It can still delay *exit*. Nothing in this binary calls process.exit,
+		// so the loop drains the append's pending poll timers before the process
+		// ends — which is what keeps an uncontended receipt from being lost, and
+		// what makes a wedged lock holder cost this process up to the spool's
+		// bounded wait before it gives up. A crashed holder is reclaimed at once
+		// via the dead-pid path, so that tail needs a *stopped* holder to appear.
+		// The .catch keeps a rejected or contended write from becoming an
+		// unhandled rejection.
 		recordReceiptSpool: receiptSpool
 			? (entry) => {
 					void receiptSpool.append(entry).catch(() => {});
