@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.66.0 (`ceal-v0.66.0`)
+
+The minor names two clean breaks taken together. Both retire a compatibility
+shim that made a reader consult a caveat to know which field was authoritative,
+and neither ships an alias — a deprecation window with no recorded closing date
+is how the ambiguity survives its own fix.
+
+**Breaking: `error.code` is gone; `kind` is the only error key.** `0.65.9` made
+`kind` canonical but kept `code` beside it on the surfaces that had published
+`code` first, so a client still had to know which surface answered to know which
+key to read. Anything reading `error.code` off `ceal.capabilities.v1` or a
+rejected enrollment must read `error.kind`. The structural gate now bans `code`
+outright rather than requiring `kind` next to it.
+
+**Breaking: `hosts` is the only per-host answer in the guide document.**
+`ceal guide status` no longer projects one host's registration into the
+top-level `status`/`registration_path`/`registered` fields. Top-level `status`
+is now about the document — `available` or `unavailable`, agreeing with `ok` and
+the exit code — and per-host registration lives in `hosts` and nowhere else.
+`agent` names the host the document is about: the detected one for `status`, the
+one a route named for `register`. The `non_claims` caveat that told readers
+which fields to distrust is gone because there is nothing left to mistake.
+
+Also in this release:
+
+- The transcript audit follows the same host roots guide registration does. It
+  hardcoded `~/.claude` and `~/.codex` and never read `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME`, so an operator who moved either root got a guide surface that
+  followed the override and an audit that scanned the untouched default and
+  reported it empty. Both resolve through one table now, and the audit renders
+  the root it actually scanned.
+- A rejected `capabilities` argv names the undeclared option instead of
+  reporting a failed target selection (corca-ai/ceal-cli#5). The bare catalog
+  route selects no target at all, so an agent reading the old error went looking
+  for missing grants when the fault was a flag the route does not declare.
+- One `client_session` failure-reason table instead of two hand-maintained
+  lists. A reason known to the classifier but missing from the second list
+  rendered correctly under `ceal session` while `ceal call` emitted an
+  `outcome_unknown` receipt for a call the Gateway never issued. An unclassified
+  non-token reason now reports `session_unusable` rather than echoing the raw
+  string into the public `kind` field.
+- A symlink guard that three of its five copies did not perform. They tested
+  `existsSync(current) && lstatSync(current).isSymbolicLink()`, and `existsSync`
+  *follows* the link, so a component symlinked to a nonexistent path was
+  accepted and then created through — the redirection the guard exists to
+  refuse. One `lstat`-only guard now serves the release scripts.
+- The shipped version is read from each package's own manifest. Three source
+  files retyped it, two of them inlined into request bodies with no gate, so a
+  release that missed one would introduce the client to the Gateway under a
+  version it is not. A release now bumps three manifests and regenerates the
+  lock; a repo gate fails a commit that retypes the version or lets the
+  manifests disagree.
+- The release lane retries its public readbacks. `0.65.8` was burned by a single
+  transient HTTP 500 after upload, and a burned tag is never reused. Transport
+  failures, 429, and 5xx retry; a 404 still returns immediately because that is
+  the signal the uploader acts on. **Unproven until this release runs** — this
+  is the first tagged run to exercise it.
+- Repository gates the release depends on: Biome as lint/format in both gates, a
+  pre-push hook, CI that runs the full gate on every push and pull request to
+  `main`, and an end to the release suite reporting green on hosts where the
+  real-binary and installer proofs silently skip themselves.
+
 ## 0.65.10 (`ceal-v0.65.10`)
 
 - Preserve session recovery truth at the Gateway boundary. A transport or
