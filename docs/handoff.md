@@ -129,7 +129,8 @@ package.json도 결국 같이 동기화했다. repository/homepage/bugs가 `ceal
   [protocol 버전이 바이트를 구분하지 못한다](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md)
   — 아래 `## Closed` 참조. 그리고 [증명/출하 갈림](requests/2026-07-27-to-gateway-lane-proof-ship-divergence.md)
   — vendored 프로토콜과 릴리스가 소비하는 locked artifact가 갈렸고 게이트가 못 잡는다.
-  **넷 다 `oc`에 전달 완료.** 기존 것들:
+  그리고 [정책 렌더링 리턴 패킷](requests/2026-07-27-to-gateway-lane-announcement-policy-return-packet.md).
+  **다섯 다 `oc`에 전달 완료.** 기존 것들:
   [기존 넷](requests/2026-07-27-to-gateway-lane.md), 그리고 오늘의
   [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) — 후자는
   `oc:~/ceal/2026-07-27-from-narnia-blocked-assessment.md`로 이미 전달했다(새 untracked 최상위
