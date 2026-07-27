@@ -1,7 +1,7 @@
 # Session Handoff
-Date: 2026-07-27 — 이전 Next Session **2·3·4번은 끝났고**, 1번만 `vinc` 대기로 남았다.
-로컬 커밋 5개가 push 대기다(`24e4d94`, `efc986b`, `4353e26`, `d47c0e5`, `a30e49d`,
-그리고 문서 커밋). **이 레인은 `corca-ai/ceal-cli`만 다룬다**(`ceal-agent`는 `vinc` 소유).
+Date: 2026-07-27 — 이전 Next Session **2·3·4번과 그 부채 셋까지 끝났고**, 1번만 `vinc`
+대기로 남았다. 로컬 커밋 7개가 push 대기다(`24e4d94` → `a598ad3`).
+**이 레인은 `corca-ai/ceal-cli`만 다룬다**(`ceal-agent`는 `vinc` 소유).
 
 ## Workflow Trigger
 
@@ -37,10 +37,10 @@ Date: 2026-07-27 — 이전 Next Session **2·3·4번은 끝났고**, 1번만 `v
 - **품질 리뷰 기준선**은 [`charness-artifacts/quality/latest.md`](../charness-artifacts/quality/latest.md)
   (2026-07-27). 그 문서의 `## Recommended Next Quality Moves` 상위 세 개는 오늘 전부 닫혔으므로,
   **다음에 그 문서를 읽을 땐 이미 처리된 항목으로 취급할 것** — 리뷰 자체는 재실행되지 않았다.
-- **게이트 측정치** (2026-07-27 narnia): `npm run check` 1:36.63, 통과 **366**개.
-  `check:unit` 22.95s, 통과 **320**개. 이전 baton의 `310`은 `check:unit` 쪽 수치였고
-  풀 게이트 수와 섞여 있었다 — 두 수를 분리해 적는다. 문서의 수치를 인용하지 말고 손에 있는
-  호스트에서 재는 게 규칙이다(`AGENTS.md ## Gates`).
+- **게이트 측정치** (2026-07-27 narnia): `npm run check` 1:38.70, 통과 **382**개.
+  `check:unit` 통과 **336**개. 이전 baton의 `310`은 `check:unit` 쪽 수치였고 풀 게이트 수와
+  섞여 있었다 — 두 수를 분리해 적는다. 문서의 수치를 인용하지 말고 손에 있는 호스트에서 재는
+  게 규칙이다(`AGENTS.md ## Gates`).
 - **`@corca-ai/ceal-protocol@0.65.0`은 바이트가 세 벌**(버전 미범프 재빌드). 새로 핀할 땐
   producing commit+tree에 묶을 것. 전체 값은 위 프롬프트 문서가 표로 들고 있다.
 - **`AGENTS.md`가 187 → 125줄로 재구성됐다.** 설명은 [`docs/gates.md`](gates.md)와
@@ -56,28 +56,31 @@ Date: 2026-07-27 — 이전 Next Session **2·3·4번은 끝났고**, 1번만 `v
    어긋났다. 실패 사유가 "사라진 고정 SHA"에서 "Agent 수용 record와 과거 proof 불일치"로
    **바뀐 것**이 진척이다. 받으면 `verify-gateway-protocol-consumer.mjs`를 현재 `main` 기준으로
    재실행해 새 proof를 남기고, rollback pair를 producing commit+tree에 묶어 리허설한다.
-2. **품질 리뷰 재실행.** 오늘 세 슬라이스가 랜딩했고 `latest.md`는 그 이전 기준선이다.
-   `AGENTS.md` 재구성으로 truth surface도 둘 늘었다. 새로 볼 것 하나가 이미 있다 —
-   `local-store-guards.ts:64-70`의 `existsSync` → `mkdirSync` TOCTOU: 두 프로세스가 **없는**
-   `~/.ceal`을 동시에 만들면 진 쪽이 `EEXIST`를 `unsafe_store`로 오분류한다. 오늘 리뷰가
-   PLAUSIBLE로 올렸고, 실제 도달 시나리오를 구성하지 못했다(enrollment가 먼저 디렉터리를
-   만든다). 선행 결함이지 오늘 슬라이스의 결함이 아니다.
+2. **품질 리뷰 재실행.** 오늘 네 슬라이스가 랜딩했고 `latest.md`는 그 이전 기준선이다.
+   `AGENTS.md` 재구성으로 truth surface도 둘 늘었다. TOCTOU 항목은 **닫혔다** — 리뷰가
+   PLAUSIBLE로 올렸던 것을 6-프로세스 경합 테스트로 재현했고 pre-fix 코드가 20회 중 20회
+   실패했다.
 3. **`corca-ai/ceal#633` 프로브 마무리 — 반드시 마지막.** dev 인스턴스 이름과 Gateway 재시작
    둘 다 `vinc` 몫이라 요청해 뒀다. 남은 프로브: 재시작 후 cursor 생존, `message_ref` TTL 만료,
    `since`/`until` 경계 페이지.
 
 ## Debt
 
-- **spool 영수증 손실은 좁혀졌을 뿐 닫히지 않았다.** `receipt-spool.ts`의 락은 5초 내
-  경합만 막고, 넘어가면 `spool_busy`가 조용히 삼켜져 영수증이 사라진다 — **몇 번 사라졌는지
-  세는 곳이 없다**. 닫으려면 observer가 렌더할 수 있는 durable drop counter가 필요하다.
-- **frozen 사본 sync는 리포 분리 완료까지 대기.** `corca-ai/ceal`의 `packaging/ceal-cli-source/`
-  미러가 `guide-contract.test.mjs`의 `test/contract/` 이동과 새 `scripts/lib/`를 모르지만,
-  기계적으로 깨지는 건 없고 분리가 끝나면 미러 자체가 사라진다. sync 규칙을 만드는 건 곧
-  없어질 것에 대한 투자라 **하지 않기로 했다**(운영자 판단, 2026-07-27).
-- **락의 stale-owner 경로는 테스트가 없다.** `local-store-lock.ts`의 stale 회수, 1초
-  initialization grace, busy deadline, unsafe-lock-directory 거부는 추출 전후 모두 커버리지 0이다.
-  추출이 무동작이라는 근거는 `HEAD` 대비 diff(확인함)이지 게이트가 아니다.
+- **drop count는 언제나 하한이지 총계가 아니다.** 프로세스가 살아남아 세었을 때만 계수된다 —
+  SIGKILL, `HOME` 미설정, 카운터 자체의 실패는 전부 세어지지 않는다. `dropped_appends_are_a_floor`가
+  이걸 페이로드에 명시한다. 더 좁히려면 append를 await하거나 종료 훅이 필요한데, 둘 다 호출
+  결과를 지연시키므로 spool의 기본 규칙과 충돌한다.
+- **관측기 HTML 검사는 소스 형태 검사다.** 페이지가 클라이언트 렌더인데 게이트에 DOM이 없다.
+  분기 **삭제**는 잡고(probe로 확인) **무력화**(`if (false)`)는 못 잡는다 — 죽은 분기에도 식별자가
+  남기 때문. 닫으려면 게이트에 DOM을 들여야 하고 그건 이 슬라이스보다 큰 작업이다.
+- **frozen 사본 sync는 리포 분리 완료까지 대기.** `packaging/ceal-cli-source/` 미러가
+  `guide-contract.test.mjs` 이동과 새 `scripts/lib/`를 모르지만, 기계적으로 깨지는 건 없고
+  분리가 끝나면 미러 자체가 사라진다. sync 규칙 설계는 **하지 않기로 했다**(운영자 판단, 2026-07-27).
+- **미해결 PLAUSIBLE 둘** (2026-07-27 리뷰, 재현 시나리오 미구성):
+  `recordDrop`의 cap 검사는 N개 프로세스가 동시에 통과해 최대 N-1바이트 초과 가능(계수는
+  여전히 유계라 표시상 불일치뿐). `prepareDirectory`의 `mkdir` 오류 순서가 macOS/BSD에서
+  Linux와 같은지는 mac 러너에서만 확인 가능 — 다르면 쓰기 불가 부모에서 `unsafe_store`가
+  더 일찍 난다.
 
 ## References
 
