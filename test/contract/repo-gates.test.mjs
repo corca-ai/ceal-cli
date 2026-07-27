@@ -132,13 +132,15 @@ test("every download in the worker installer is bounded", () => {
 	// Any downloader outside the helper is an unbounded wait, whichever tool it
 	// reaches for. This cannot see `curl` invoked through a variable, so it is a
 	// guard against the accident, not against someone routing around it.
-	const outside = lines.filter((line, index) => index < opens || index > closes);
-	for (const [number, line] of outside.entries()) {
+	// Kept as (line, number) pairs rather than a filtered list, so the failure can
+	// name the real file line rather than an index into a subset of it.
+	for (const [index, line] of lines.entries()) {
+		if (index >= opens && index <= closes) continue;
 		if (/command -v|for tool in|^\s*#/u.test(line)) continue;
 		assert.doesNotMatch(
 			line,
 			/\b(?:curl|wget)\b/u,
-			`install-ceal.sh:${number + 1} downloads outside fetch(); route it through the helper so it is bounded`,
+			`install-ceal.sh:${index + 1} downloads outside fetch(); route it through the helper so it is bounded`,
 		);
 	}
 });
