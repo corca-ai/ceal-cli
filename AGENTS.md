@@ -18,12 +18,19 @@ This file holds only the rules those surfaces do not already carry.
 
 Resolve the lane from `hostname`, never from a document's pronoun.
 
-- `narnia` — this lane. Worker CLI, client SDK, `ceal-guide`, and the Claude and
-  Codex guide hosts. Local checkouts: `~/codes/ceal-cli`, `~/codes/ceal-agent`,
-  and `~/codes/ceal` as a consumer/reference copy.
+- `narnia` — this lane, and it owns **`corca-ai/ceal-cli` only**: worker CLI,
+  client SDK, `ceal-guide`, and the Claude and Codex guide hosts. Local
+  checkouts: `~/codes/ceal-cli`, and `~/codes/ceal` as a consumer/reference copy.
 - `vinc` — the Gateway lane, reachable as `ssh oc`, checkout `~/ceal`. It owns
   Gateway routes, connector execution, Profile policy, audit/receipt custody,
-  `cealctl`, and canonical protocol/conformance.
+  `cealctl`, canonical protocol/conformance, **and `corca-ai/ceal-agent`**.
+
+`ceal-agent` moved to `vinc` on 2026-07-27, after this lane had already landed
+`gateway-artifact-handoff.json` and its verifier there (through
+`corca-ai/ceal-agent@474ac96`). Treat that work as handed over, not as a
+standing narnia responsibility: `~/codes/ceal-agent` on this host is a stale
+checkout of another lane's repository, so do not commit or push from it. An
+`agent` change this lane believes is needed is a request to `vinc`.
 
 Handoff and goal documents are written by whichever host authored them, so
 `this host` in `~/codes/ceal/docs/handoff.md` means **`vinc`**, not the host
