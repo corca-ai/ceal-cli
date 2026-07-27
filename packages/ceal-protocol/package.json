@@ -2,14 +2,14 @@
 	"name": "@corca-ai/ceal-protocol",
 	"version": "0.65.0",
 	"license": "MIT",
-	"description": "Public Ceal protocol contracts and conformance corpus",
+	"description": "Gateway-owned Ceal protocol contracts and conformance corpus",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/corca-ai/ceal-cli.git",
+		"url": "git+https://github.com/corca-ai/ceal.git",
 		"directory": "packages/ceal-protocol"
 	},
-	"homepage": "https://github.com/corca-ai/ceal-cli#readme",
-	"bugs": "https://github.com/corca-ai/ceal-cli/issues",
+	"homepage": "https://github.com/corca-ai/ceal#readme",
+	"bugs": "https://github.com/corca-ai/ceal/issues",
 	"publishConfig": {
 		"access": "public",
 		"registry": "https://registry.npmjs.org"

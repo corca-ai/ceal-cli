@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { URL } from "node:url";
 import {
 	CEAL_PROTOCOL_VERSION,
 	CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE,
 	negotiateCealProtocol,
 } from "../dist/index.js";
+
+test("package metadata identifies the Gateway-owned protocol source while preserving public package access", () => {
+	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	assert.equal(manifest.description, "Gateway-owned Ceal protocol contracts and conformance corpus");
+	assert.deepEqual(manifest.repository, {
+		type: "git",
+		url: "git+https://github.com/corca-ai/ceal.git",
+		directory: "packages/ceal-protocol",
+	});
+	assert.equal(manifest.homepage, "https://github.com/corca-ai/ceal#readme");
+	assert.equal(manifest.bugs, "https://github.com/corca-ai/ceal/issues");
+	assert.equal(manifest.publishConfig.access, "public");
+	assert.equal(manifest.license, "MIT");
+});
 
 test("the declared Gateway range is exactly the protocol this release implements", () => {
 	assert.deepEqual(CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, {

@@ -122,6 +122,112 @@ test("discovery target catalogs make bounded selection and continuation explicit
 	}
 });
 
+test("discovery accepts only the bounded negotiated rate-limit policy shape", () => {
+	const request = envelope("discover", { capability_id: "message.search", match: "Team" });
+	const response = discoveryResponse(request);
+	response.value.targets[0].capability_access[0].rate_limit = {
+		schema_version: "ceal.gateway_rate_limit_policy.v1",
+		counted_unit: "governed_call",
+		scope: "authenticated_principal",
+		window_model: "rolling",
+		max_calls: 3,
+		window_ms: 60_000,
+	};
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+
+	for (const mutate of [
+		(value) => { value.value.targets[0].capability_access[0].rate_limit.counted_unit = "returned_record"; },
+		(value) => { value.value.targets[0].capability_access[0].rate_limit.max_calls = 0; },
+		(value) => { value.value.targets[0].capability_access[0].rate_limit.window_ms = 24 * 60 * 60 * 1000 + 1; },
+		(value) => { value.value.targets[0].capability_access[0].rate_limit.remaining_calls = 1; },
+	]) {
+		const invalid = structuredClone(response);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+});
+
+test("discovery accepts an optional non-authorizing announcement policy and rejects leaks", () => {
+	const request = envelope("discover", {});
+	const response = discoveryResponse(request);
+	response.value.capabilities[0].capability_id = "github.repository.get";
+	response.value.capabilities[0].announcement_policy = announcementPolicy();
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+
+	// Legacy responses omit the negotiated field and remain exactly valid.
+	const legacy = discoveryResponse(request);
+	assert.deepEqual(decodeCealClientResponse(legacy, request), legacy);
+
+	for (const mutate of [
+		(value) => { value.value.capabilities[0].announcement_policy.provider_application_authority.granted_permissions = ["metadata:read", "credential:read"]; },
+		(value) => { value.value.capabilities[0].announcement_policy.scope_statement = "target:private-resource"; },
+		(value) => { value.value.capabilities[0].announcement_policy.scope_statement_kind = "unknown_scope"; },
+		(value) => { value.value.capabilities[0].announcement_policy.non_claims = ["policy_projection_does_not_authorize", "policy_projection_does_not_authorize"]; },
+		(value) => { value.value.capabilities[0].announcement_policy.explicit_request_required = true; },
+		(value) => { value.value.capabilities[0].announcement_policy.provenance_requirement = "invented"; },
+		(value) => { value.value.capabilities[0].announcement_policy.grant_ref = "grant:leak"; },
+	]) {
+		const invalid = structuredClone(response);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+
+	const write = discoveryResponse(request);
+	write.value.capabilities[0] = { ...write.value.capabilities[0], effect: "write", write_contract: { side_effect_class: "append_reply", idempotency: "required", provider_readback: "required" }, announcement_policy: announcementPolicy() };
+	assert.throws(() => decodeCealClientResponse(write, request), hasCode("invalid_client_response"));
+
+	const attestedWrite = discoveryResponse(request);
+	attestedWrite.value.capabilities[0] = {
+		...attestedWrite.value.capabilities[0],
+		capability_id: "github.issue.create",
+		effect: "write",
+		write_contract: {
+			side_effect_class: "append_reply", idempotency: "required", provider_readback: "required",
+			attribution: "requester_event", provenance_binding: "gateway_attested_requester_event_v1",
+		},
+		announcement_policy: writeAnnouncementPolicy(),
+	};
+	assert.deepEqual(decodeCealClientResponse(attestedWrite, request), attestedWrite);
+	for (const mutate of [
+		(value) => { value.value.capabilities[0].write_contract.idempotency = "optional"; },
+		(value) => { value.value.capabilities[0].write_contract.provider_readback = "best_effort"; },
+		(value) => { value.value.capabilities[0].write_contract.attribution = "subject"; },
+		(value) => { delete value.value.capabilities[0].write_contract.provenance_binding; },
+	]) {
+		const invalid = structuredClone(attestedWrite);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+
+	const mismatchedCapability = discoveryResponse(request);
+	mismatchedCapability.value.capabilities[0].announcement_policy = announcementPolicy();
+	assert.throws(() => decodeCealClientResponse(mismatchedCapability, request), hasCode("invalid_client_response"));
+
+	const calendarHardDeny = structuredClone(attestedWrite);
+	calendarHardDeny.value.capabilities[0].capability_id = "calendar.event.create";
+	calendarHardDeny.value.capabilities[0].announcement_policy = {
+		...writeAnnouncementPolicy(),
+		scope_statement_kind: "google_workspace_ceal_drive_or_direct_share",
+		scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
+		provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/calendar.readonly"] },
+	};
+	assert.throws(() => decodeCealClientResponse(calendarHardDeny, request), hasCode("invalid_client_response"));
+});
+
+test("announcement policy accepts only the four bounded provider-application projections", () => {
+	const request = envelope("discover", {});
+	for (const { capabilityId, effect, writeContract, policy } of [
+		{ capabilityId: "github.repository.get", effect: "read", writeContract: undefined, policy: announcementPolicy() },
+		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_app_member_channels_only", scope_statement: "Channels where the installed Slack app is a member; direct and private conversations are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
+		{ capabilityId: "notion.page.get", effect: "read", writeContract: undefined, policy: { ...announcementPolicy(), scope_statement_kind: "notion_connected_logical_area", scope_statement: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", provider_application_authority: { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" } } },
+		{ capabilityId: "drive.file.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share", scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.file"] } } },
+	]) {
+		const response = discoveryResponse(request);
+		response.value.capabilities[0] = { ...response.value.capabilities[0], capability_id: capabilityId, effect, ...(writeContract ? { write_contract: writeContract } : {}), announcement_policy: policy };
+		assert.deepEqual(decodeCealClientResponse(response, request), response);
+	}
+});
+
 test("client response decoder accepts exact operation-correlated Gateway results", () => {
 	const callRequest = envelope("call", {
 		capability_id: "message.search",
@@ -200,6 +306,14 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const preProviderFailure = structuredClone(ambiguousProviderFailure);
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
 	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
+	const preRouteInvalid = structuredClone(preProviderFailure);
+	preRouteInvalid.value.events[0].policy_decision = "not_evaluated";
+	delete preRouteInvalid.value.events[0].grant_snapshot;
+	preRouteInvalid.value.events[0].non_claims = ["provider_execution_not_reached", "production_audit_not_reached"];
+	assert.deepEqual(decodeCealClientResponse(preRouteInvalid, readbackRequest), preRouteInvalid);
+	const forgedPreRouteGrant = structuredClone(preRouteInvalid);
+	forgedPreRouteGrant.value.events[0].grant_snapshot = structuredClone(readback.value.events[0].grant_snapshot);
+	assert.throws(() => decodeCealClientResponse(forgedPreRouteGrant, readbackRequest), hasCode("invalid_client_response"));
 	const routedConnectorFailure = structuredClone(ambiguousProviderFailure);
 	routedConnectorFailure.value.events[0].policy_decision = "not_evaluated";
 	delete routedConnectorFailure.value.events[0].grant_snapshot;
@@ -216,6 +330,17 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	const unsafeConnectorKind = structuredClone(routedConnectorFailure);
 	unsafeConnectorKind.value.events[0].connector_route_failure.connector_kind = "Notion credential";
 	assert.throws(() => decodeCealClientResponse(unsafeConnectorKind, readbackRequest), hasCode("invalid_client_response"));
+	// A throttled scope read is audited under the retryable code and may carry
+	// a bounded cause; an unlisted or zero-information cause stays fail-closed.
+	const throttledConnectorFailure = structuredClone(routedConnectorFailure);
+	throttledConnectorFailure.value.events[0].error_code = "rate_limited";
+	throttledConnectorFailure.value.events[0].connector_route_failure.cause = "provider_throttled";
+	assert.deepEqual(decodeCealClientResponse(throttledConnectorFailure, readbackRequest), throttledConnectorFailure);
+	for (const cause of ["operator_asleep", "unknown"]) {
+		const rejectedCause = structuredClone(throttledConnectorFailure);
+		rejectedCause.value.events[0].connector_route_failure.cause = cause;
+		assert.throws(() => decodeCealClientResponse(rejectedCause, readbackRequest), hasCode("invalid_client_response"));
+	}
 	const unavailableResourceFailure = structuredClone(ambiguousProviderFailure);
 	unavailableResourceFailure.value.events[0].error_code = "resource_not_available";
 	assert.throws(() => decodeCealClientResponse(unavailableResourceFailure, readbackRequest), hasCode("invalid_client_response"));
@@ -339,6 +464,27 @@ test("legacy message fixtures remain safe generic result envelopes", () => {
 	const unsafeSource = structuredClone(response);
 	unsafeSource.value.data.source.url += "?token=forbidden";
 	assert.throws(() => decodeCealClientResponse(unsafeSource, request), hasCode("invalid_client_response"));
+});
+
+test("compact message source_url cells use the same safe HTTPS boundary as source citations", () => {
+	const request = envelope("call", {
+		capability_id: "message.search", target_ref: "target:workspace",
+		arguments: { query: "approved", fields: "ref,source_url" }, purpose: "Find approved messages",
+	});
+	const response = responseEnvelope(request, { ok: true, value: {
+		schema_version: "ceal.gateway_call_result.v1", capability_id: "message.search",
+		grant_ref: "grant:workspace-message-search", grant_revision: 2, target_ref: "target:workspace",
+		data: {
+			schema_version: "ceal.message_search_result.v2", fields: ["ref", "source_url"],
+			rows: [["message:approved_001", "https://workspace.slack.com/archives/C0123456789/p1720000000000100"]],
+		},
+		redaction: { state: "applied", omitted_classes: ["raw_messages"] },
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+	} });
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	const unsafe = structuredClone(response);
+	unsafe.value.data.rows[0][1] += "?token=forbidden";
+	assert.throws(() => decodeCealClientResponse(unsafe, request), hasCode("invalid_client_response"));
 });
 
 test("legacy link fixtures accept only safe URL transport while leaving resource shape to the Gateway", () => {
@@ -675,6 +821,33 @@ function discoveryResponse(request) {
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		},
 	});
+}
+
+function announcementPolicy() {
+	return {
+		schema_version: "ceal.gateway_announcement_policy.v1",
+		scope_statement_kind: "github_app_installation_repositories",
+		scope_statement: "Repositories in the installed GitHub App installation.",
+		provider_application_authority: { kind: "github_app", granted_permissions: ["metadata:read"] },
+		explicit_request_required: false,
+		provenance_requirement: "gateway_receipt_audit",
+		non_claims: ["policy_projection_does_not_authorize", "provider_roundtrip_not_established_by_discovery", "target_specific_scope_not_declared"],
+	};
+}
+
+function writeAnnouncementPolicy() {
+	return {
+		...announcementPolicy(),
+		explicit_request_required: true,
+		provenance_requirement: "explicit_requester_event_gateway_receipt_audit_provider_readback",
+	};
+}
+
+function attestedWriteContract() {
+	return {
+		side_effect_class: "append_reply", idempotency: "required", provider_readback: "required",
+		attribution: "requester_event", provenance_binding: "gateway_attested_requester_event_v1",
+	};
 }
 
 function callResponse(request) {

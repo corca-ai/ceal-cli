@@ -5,7 +5,7 @@ import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validatio
 import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
 export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
-import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
+import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayAnnouncementPolicy, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
 import {
 	assertSafeJsonValue,
 	CealProtocolValidationError,
@@ -72,6 +72,10 @@ export type {
 	CealGatewayAuthorizationSnapshot,
 	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
+	CealGatewayAnnouncementPolicy,
+	CealGatewayAnnouncementPolicyNonClaim,
+	CealGatewayAnnouncementProviderAuthority,
+	CealGatewayAnnouncementScopeStatementKind,
 	CealGatewayCacheOrigin,
 	CealGatewayCallValue,
 	CealGatewayConnectorRouteFailure,
@@ -89,6 +93,7 @@ export type {
 	CealCapabilityReadiness,
 	CealGatewayPolicyDenial,
 	CealGatewayPolicyDenialDecision,
+	CealGatewayRateLimitPolicy,
 	CealGatewayRecovery,
 	CealGatewayRecoveryKind,
 	CealGatewayRequestForInput,
@@ -325,7 +330,7 @@ function validateTargetCatalog(
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	const capability = requireRecord(value);
-	requireExactKeys(capability, ["capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["write_contract"]);
+	requireExactKeys(capability, ["announcement_policy", "capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["announcement_policy", "write_contract"]);
 	requireSafeRef(capability.capability_id);
 	if (seen.has(String(capability.capability_id))
 		|| !["read", "write"].includes(String(capability.effect))
@@ -336,6 +341,120 @@ function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	requireSafeText(capability.label, 128);
 	requireSafeRef(capability.evidence_requirement);
 	validateGenericInputContract(capability.input_contract);
+	if (capability.announcement_policy !== undefined) validateAnnouncementPolicy(capability.announcement_policy, String(capability.capability_id), String(capability.effect), capability.write_contract);
+}
+
+const ANNOUNCEMENT_POLICY_NON_CLAIMS = [
+	"policy_projection_does_not_authorize",
+	"provider_roundtrip_not_established_by_discovery",
+	"target_specific_scope_not_declared",
+] as const;
+
+const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, Readonly<{
+	effect: "read" | "write";
+	scopeStatementKind: string;
+	providerAuthorityKind: string;
+}>>> = Object.freeze({
+	"github.repository.get": { effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" },
+	"github.issue.create": { effect: "write", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" },
+	"message.create": { effect: "write", scopeStatementKind: "slack_app_member_channels_only", providerAuthorityKind: "slack_app" },
+	"notion.page.get": { effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" },
+	"drive.file.update": { effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share", providerAuthorityKind: "google_service_account" },
+});
+
+function validateAnnouncementPolicy(value: unknown, capabilityId: string, effect: string, writeContract: unknown): void {
+	const policy = requireRecord(value);
+	requireExactKeys(policy, ["explicit_request_required", "non_claims", "provenance_requirement", "provider_application_authority", "schema_version", "scope_statement", "scope_statement_kind"]);
+	validateAnnouncementPolicyBase(policy);
+	validateAnnouncementPolicyCapabilityBinding(policy, capabilityId, effect);
+	validateAnnouncementPolicyEffect(policy, effect, writeContract);
+	validateAnnouncementPolicyNonClaims(policy.non_claims);
+	validateAnnouncementProviderAuthority(policy.provider_application_authority);
+}
+
+/**
+ * Reuses the wire decoder's closed announcement-policy contract at a Gateway
+ * emission seam. A false result means omit the optional field; it must not
+ * make an otherwise ordinary discovery response undecodable.
+ */
+export function isCealGatewayAnnouncementPolicy(
+	value: unknown,
+	{ capabilityId, effect, writeContract }: { capabilityId: string; effect: "read" | "write"; writeContract?: unknown },
+): value is CealGatewayAnnouncementPolicy {
+	try {
+		validateAnnouncementPolicy(value, capabilityId, effect, writeContract);
+		return true;
+	} catch { return false; }
+}
+
+function validateAnnouncementPolicyBase(policy: Record<string, unknown>): void {
+	if (policy.schema_version !== "ceal.gateway_announcement_policy.v1" || typeof policy.explicit_request_required !== "boolean") invalidResponse();
+	if (typeof policy.scope_statement_kind !== "string" || ANNOUNCEMENT_SCOPE_STATEMENTS[policy.scope_statement_kind] !== policy.scope_statement) invalidResponse();
+}
+
+const ANNOUNCEMENT_SCOPE_STATEMENTS: Record<string, string> = Object.freeze({
+	github_app_installation_repositories: "Repositories in the installed GitHub App installation.",
+	slack_app_member_channels_only: "Channels where the installed Slack app is a member; direct and private conversations are not declared by this connector.",
+	notion_connected_logical_area: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.",
+	google_workspace_ceal_drive_or_direct_share: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
+});
+
+function validateAnnouncementPolicyCapabilityBinding(policy: Record<string, unknown>, capabilityId: string, effect: string): void {
+	const binding = ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS[capabilityId];
+	if (!binding || binding.effect !== effect || policy.scope_statement_kind !== binding.scopeStatementKind) invalidResponse();
+	const authority = requireRecord(policy.provider_application_authority);
+	if (authority.kind !== binding.providerAuthorityKind) invalidResponse();
+}
+
+function validateAnnouncementPolicyEffect(policy: Record<string, unknown>, effect: string, writeContract: unknown): void {
+	const expected = effect === "write"
+		? { explicitRequestRequired: true, provenanceRequirement: "explicit_requester_event_gateway_receipt_audit_provider_readback" }
+		: { explicitRequestRequired: false, provenanceRequirement: "gateway_receipt_audit" };
+	if (policy.explicit_request_required !== expected.explicitRequestRequired || policy.provenance_requirement !== expected.provenanceRequirement) invalidResponse();
+	if (effect === "write") validateAnnouncementWriteContract(writeContract);
+}
+
+function validateAnnouncementWriteContract(value: unknown): void {
+	const contract = requireRecord(value);
+	if (contract.idempotency !== "required" || contract.provider_readback !== "required"
+		|| contract.attribution !== "requester_event" || contract.provenance_binding !== "gateway_attested_requester_event_v1") invalidResponse();
+}
+
+function validateAnnouncementPolicyNonClaims(value: unknown): void {
+	if (!Array.isArray(value) || value.length === 0 || value.length > ANNOUNCEMENT_POLICY_NON_CLAIMS.length
+		|| new Set(value).size !== value.length
+		|| !value.every((item) => (ANNOUNCEMENT_POLICY_NON_CLAIMS as readonly unknown[]).includes(item))) invalidResponse();
+}
+
+function validateAnnouncementProviderAuthority(value: unknown): void {
+	const authority = requireRecord(value);
+	if (authority.kind === "github_app") {
+		requireExactKeys(authority, ["granted_permissions", "kind"]);
+		validateAnnouncementAuthorityList(authority.granted_permissions, /^([a-z_]{1,64}):(read|write|admin)$/u);
+		if (!Array.isArray(authority.granted_permissions) || authority.granted_permissions.some((item) => typeof item !== "string" || /(?:credential|token|secret|password|api_key)/iu.test(item))) invalidResponse();
+		return;
+	}
+	if (authority.kind === "slack_app") {
+		requireExactKeys(authority, ["kind", "oauth_scope_observation"]);
+		if (authority.oauth_scope_observation !== "not_exposed_by_current_connector") invalidResponse();
+		return;
+	}
+	if (authority.kind === "notion_integration") {
+		requireExactKeys(authority, ["descendant_inventory", "kind", "sharing"]);
+		if (authority.sharing !== "provider_enforced" || authority.descendant_inventory !== "not_enumerable") invalidResponse();
+		return;
+	}
+	if (authority.kind === "google_service_account") {
+		requireExactKeys(authority, ["kind", "requested_api_scopes"]);
+		validateAnnouncementAuthorityList(authority.requested_api_scopes, /^[A-Za-z0-9._:/-]{1,160}$/u);
+		return;
+	}
+	invalidResponse();
+}
+
+function validateAnnouncementAuthorityList(value: unknown, pattern: RegExp): void {
+	if (!Array.isArray(value) || value.length === 0 || value.length > 32 || new Set(value).size !== value.length
+		|| !value.every((item) => typeof item === "string" && pattern.test(item))) invalidResponse();
 }
 
 function validateWriteContract(value: unknown): void {
@@ -410,15 +529,29 @@ function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly
 	const seen = new Set<string>();
 	for (const item of value) {
 		const access = requireRecord(item);
-		requireExactKeys(access, ["capability_id", "grant_ref", "grant_revision", "readiness", "schema_version"]);
+		requireExactKeys(access, ["capability_id", "grant_ref", "grant_revision", "rate_limit", "readiness", "schema_version"], ["rate_limit"]);
 		if (access.schema_version !== "ceal.capability_access.v1"
 			|| !expectedCapabilities.includes(String(access.capability_id))
 			|| seen.has(String(access.capability_id))
 			|| !["ready", "degraded", "unavailable", "unknown"].includes(String(access.readiness))) invalidResponse();
 		requirePrefixedRef(access.grant_ref, "grant:");
 		requireIntegerRange(access.grant_revision, 1, Number.MAX_SAFE_INTEGER);
+		if ("rate_limit" in access) validateRateLimitPolicy(access.rate_limit);
 		seen.add(String(access.capability_id));
 	}
+}
+
+const MAX_RATE_LIMIT_POLICY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function validateRateLimitPolicy(value: unknown): void {
+	const policy = requireRecord(value);
+	requireExactKeys(policy, ["counted_unit", "max_calls", "schema_version", "scope", "window_model", "window_ms"]);
+	if (policy.schema_version !== "ceal.gateway_rate_limit_policy.v1"
+		|| policy.counted_unit !== "governed_call"
+		|| policy.scope !== "authenticated_principal"
+		|| policy.window_model !== "rolling") invalidResponse();
+	requireIntegerRange(policy.max_calls, 1, 10_000);
+	requireIntegerRange(policy.window_ms, 1, MAX_RATE_LIMIT_POLICY_WINDOW_MS);
 }
 
 function validateCallRedaction(value: unknown): void {
@@ -493,21 +626,28 @@ function validateConnectorRouteFailure(value: unknown, event: Record<string, unk
 	if (value === undefined) return;
 	if (!isConnectorRouteFailureEvent(event)) invalidResponse();
 	const failure = requireRecord(value);
-	requireExactKeys(failure, ["connector_kind", "phase", "schema_version"]);
+	requireExactKeys(failure, "cause" in failure
+		? ["cause", "connector_kind", "phase", "schema_version"]
+		: ["connector_kind", "phase", "schema_version"]);
 	if (!isConnectorRouteFailureShape(failure)) invalidResponse();
 	const nonClaims = event.non_claims;
 	if (!Array.isArray(nonClaims) || !nonClaims.includes("provider_execution_not_reached")) invalidResponse();
 }
 
+const CONNECTOR_ROUTE_FAILURE_CODES = ["connector_unavailable", "rate_limited"];
+/** `unknown` carries no recovery information, so it is omitted rather than published. */
+const CONNECTOR_ROUTE_FAILURE_CAUSES = ["provider_throttled", "provider_unavailable", "binding_invalid", "scope_limit_exceeded"];
+
 function isConnectorRouteFailureEvent(event: Record<string, unknown>): boolean {
-	return event.outcome === "failed" && event.error_code === "connector_unavailable"
+	return event.outcome === "failed" && CONNECTOR_ROUTE_FAILURE_CODES.includes(String(event.error_code))
 		&& event.policy_decision === "not_evaluated" && ["call", "discover"].includes(String(event.operation));
 }
 
 function isConnectorRouteFailureShape(failure: Record<string, unknown>): boolean {
 	return failure.schema_version === "ceal.gateway_connector_route_failure.v1"
 		&& typeof failure.connector_kind === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(failure.connector_kind)
-		&& ["scope_observation", "target_selection", "route_resolution"].includes(String(failure.phase));
+		&& ["scope_observation", "target_selection", "route_resolution"].includes(String(failure.phase))
+		&& (failure.cause === undefined || CONNECTOR_ROUTE_FAILURE_CAUSES.includes(String(failure.cause)));
 }
 
 function validateAuthorizationSnapshot(value: unknown, event: Record<string, unknown>): void {

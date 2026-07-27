@@ -139,6 +139,45 @@ export interface CealGatewayDiscoveryCapability {
 	evidence_requirement: string;
 	/** Required for a discovered write capability; absent for a read capability. */
 	write_contract?: CealGatewayWriteContract;
+	/**
+	 * Optional, negotiated, non-authorizing policy explanation for a newer
+	 * client. Its absence means scope is not declared by the Gateway; it never
+	 * changes ordinary discovery, grants, target selection, or call policy.
+	 */
+	announcement_policy?: CealGatewayAnnouncementPolicy;
+}
+
+export type CealGatewayAnnouncementPolicyNonClaim =
+	| "policy_projection_does_not_authorize"
+	| "provider_roundtrip_not_established_by_discovery"
+	| "target_specific_scope_not_declared";
+
+export type CealGatewayAnnouncementScopeStatementKind =
+	| "github_app_installation_repositories"
+	| "slack_app_member_channels_only"
+	| "notion_connected_logical_area"
+	| "google_workspace_ceal_drive_or_direct_share";
+
+/** A deliberately small client-safe projection of the installed app authority. */
+export type CealGatewayAnnouncementProviderAuthority =
+	| { kind: "github_app"; granted_permissions: readonly string[] }
+	| { kind: "slack_app"; oauth_scope_observation: "not_exposed_by_current_connector" }
+	| { kind: "notion_integration"; sharing: "provider_enforced"; descendant_inventory: "not_enumerable" }
+	| { kind: "google_service_account"; requested_api_scopes: readonly string[] };
+
+/**
+ * Gateway-owned policy context for announcement/onboarding rendering. This is
+ * capability-level and intentionally cannot carry target, grant, binding,
+ * credential, evidence, or provider-resource identity.
+ */
+export interface CealGatewayAnnouncementPolicy {
+	schema_version: "ceal.gateway_announcement_policy.v1";
+	scope_statement_kind: CealGatewayAnnouncementScopeStatementKind;
+	scope_statement: string;
+	provider_application_authority: CealGatewayAnnouncementProviderAuthority;
+	explicit_request_required: boolean;
+	provenance_requirement: "gateway_receipt_audit" | "explicit_requester_event_gateway_receipt_audit_provider_readback";
+	non_claims: readonly CealGatewayAnnouncementPolicyNonClaim[];
 }
 
 /** Provider-neutral declaration of a governed mutation's operational boundary. */
@@ -146,10 +185,33 @@ export interface CealGatewayWriteContract {
 	side_effect_class: string;
 	idempotency: "required" | "optional" | "not_required";
 	provider_readback: "required" | "best_effort" | "not_available";
+	/** Present only when an announcement policy may describe this mutation. */
+	attribution?: "subject" | "requester_event";
+	/** Closed Gateway attestation of the requester/event provenance binding. */
+	provenance_binding?: "gateway_attested_requester_event_v1";
 	[key: string]: unknown;
 }
 
 export type CealCapabilityReadiness = "ready" | "degraded" | "unavailable" | "unknown";
+
+/**
+ * A static, bounded description of one Gateway-owned capability quota.
+ *
+ * This is a policy shape, not a live balance: it lets a client choose a page
+ * size and pacing strategy without disclosing another principal's remaining
+ * quota, request history, or provider headers.
+ */
+export interface CealGatewayRateLimitPolicy {
+	schema_version: "ceal.gateway_rate_limit_policy.v1";
+	/** One validated governed capability invocation is charged, independent of result/page size. */
+	counted_unit: "governed_call";
+	/** The bucket belongs to the authenticated Gateway principal for this capability, not a target or returned record. */
+	scope: "authenticated_principal";
+	/** Calls age out individually after `window_ms`; this is not a token bucket. */
+	window_model: "rolling";
+	max_calls: number;
+	window_ms: number;
+}
 
 export interface CealCapabilityAccessDescriptor {
 	schema_version: "ceal.capability_access.v1";
@@ -157,6 +219,8 @@ export interface CealCapabilityAccessDescriptor {
 	grant_ref: string;
 	grant_revision: number;
 	readiness: CealCapabilityReadiness;
+	/** Present only when the client negotiated the additive rate-limit policy projection. */
+	rate_limit?: CealGatewayRateLimitPolicy;
 }
 
 export interface CealGatewayGrantedDiscoveryTarget {
@@ -274,6 +338,13 @@ export interface CealGatewayConnectorRouteFailure {
 	schema_version: "ceal.gateway_connector_route_failure.v1";
 	connector_kind: string;
 	phase: "scope_observation" | "target_selection" | "route_resolution";
+	/**
+	 * Present only when the Gateway classified the failure; an unclassified
+	 * failure omits the key rather than publishing a zero-information value.
+	 * Only `provider_throttled` is cleared by the caller waiting; the others
+	 * need operator or binding repair.
+	 */
+	cause?: "provider_throttled" | "provider_unavailable" | "binding_invalid" | "scope_limit_exceeded";
 }
 
 export interface CealGatewayAuthorizationSnapshot {

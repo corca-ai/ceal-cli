@@ -60,9 +60,14 @@ export function assertSafeJsonArray(value: unknown[], options: SafeJsonOptions, 
 export function assertSafeJsonRecord(record: Record<string, unknown>, options: SafeJsonOptions, depth: number, count: { value: number }): void {
 	const entries = Object.entries(record);
 	if (entries.length > 128) invalidByContext(options);
+	const sourceUrlColumn = options.allowHttpsUrl ? compactSourceUrlColumn(record.fields) : null;
 	for (const [key, child] of entries) {
 		if (key === "credential_material_included" && child !== false) invalidByContext(options);
 		if (!isSafeNegativeMaterialAssertion(key, child)) assertSafeJsonKey(key, options);
+		if (key === "rows" && sourceUrlColumn !== null) {
+			assertSafeJsonCompactRows(child, sourceUrlColumn, options, depth, count);
+			continue;
+		}
 		assertSafeJsonRecordChild(key, child, options, depth, count);
 	}
 }
@@ -72,8 +77,25 @@ export function assertSafeJsonRecordChild(key: string, child: unknown, options: 
 		if (!isSafeResultContent(child, key)) invalidByContext(options);
 		return;
 	}
-	if (key === "url" && options.allowHttpsUrl && isSafeExternalHttpsUrl(child)) return;
+	if ((key === "url" || key === "source_url") && options.allowHttpsUrl && isSafeExternalHttpsUrl(child)) return;
 	assertSafeJsonValue(child, options, depth + 1, count);
+}
+
+function compactSourceUrlColumn(fields: unknown): number | null {
+	if (!Array.isArray(fields)) return null;
+	const index = fields.indexOf("source_url");
+	return index < 0 ? null : index;
+}
+
+function assertSafeJsonCompactRows(value: unknown, sourceUrlColumn: number, options: SafeJsonOptions, depth: number, count: { value: number }): void {
+	if (!Array.isArray(value) || value.length > 128) invalidByContext(options);
+	for (const row of value) {
+		if (!Array.isArray(row) || row.length > 128) invalidByContext(options);
+		for (const [index, cell] of row.entries()) {
+			if (index === sourceUrlColumn && (cell === null || isSafeExternalHttpsUrl(cell))) continue;
+			assertSafeJsonValue(cell, options, depth + 2, count);
+		}
+	}
 }
 
 export function isSafeNegativeMaterialAssertion(key: string, value: unknown): boolean {
