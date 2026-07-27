@@ -1,5 +1,19 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	closeSync,
+	constants,
+	existsSync,
+	fchmodSync,
+	lstatSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import path from "node:path";
 import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
@@ -16,6 +30,17 @@ import { withLocalStoreLock } from "./local-store-lock.js";
 // recording call sites wrap every append and read anomalies degrade to a miss.
 
 const SPOOL_FILE = "receipt-spool.json";
+// Drops are counted in their own file, not in the spool, because a drop is by
+// definition a moment when the spool could not be written. One byte is appended
+// per drop with O_APPEND, which POSIX makes atomic below PIPE_BUF, so the
+// counter needs no lock of its own — the size is the count.
+const DROPS_FILE = "receipt-spool-drops";
+// A pathological caller cannot grow the counter without bound; past this the
+// observer reports "at least" rather than an exact figure, which is the honest
+// reading of a truncated count anyway.
+const MAX_RECORDED_DROPS = 4096;
+const NO_DROPS = { count: 0, atLeast: false } as const;
+const { O_APPEND, O_CREAT, O_NOFOLLOW, O_WRONLY } = constants;
 const SPOOL_SCHEMA_VERSION = "ceal.receipt_spool.v1";
 // Mirrors the protocol's safe-ref grammar: every spooled field must already be
 // a bounded reference/code token, so free text cannot enter the spool.
@@ -46,6 +71,15 @@ export interface CealReceiptSpoolEntry {
 export interface CealReceiptSpoolState {
 	entries: CealReceiptSpoolEntry[];
 	bounds: { maxEntries: number; retentionMs: number };
+	/** Receipt appends this client is known to have lost, and whether more were not counted. */
+	drops: { count: number; atLeast: boolean };
+	/**
+	 * Whether a spool file backs this state. False means every entry this client
+	 * ever tried to record was lost — a much stronger statement than an empty
+	 * history, which retention alone produces, so the two may not be flattened
+	 * into `entries.length === 0`.
+	 */
+	spoolPresent: boolean;
 }
 
 export class CealReceiptSpoolStoreError extends Error {
@@ -59,6 +93,13 @@ export interface CealReceiptSpoolStore {
 	/** Load the spooled entries, or null on any absence/anomaly (soft miss). */
 	load(): Promise<CealReceiptSpoolState | null>;
 	append(entry: CealReceiptSpoolEntry): Promise<void>;
+	/**
+	 * Record that one receipt append was lost. The recording call site swallows
+	 * every append failure so a spool cannot change call behavior, which used to
+	 * mean a lost receipt left no trace at all — the observer then under-reported
+	 * without being able to say so. This must never throw for the same reason.
+	 */
+	recordDrop(): Promise<void>;
 	remove(): Promise<void>;
 }
 
@@ -68,19 +109,49 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 	const file = path.join(directory, SPOOL_FILE);
 	return {
 		async load() {
-			const state = readSpool(directory, file, now());
+			const drops = readDrops(path.join(directory, DROPS_FILE));
+			const state = readSpool(directory, file, now(), drops);
 			// A present-but-unusable file is an anomaly the observer should show
 			// as unreadable, not an empty history; append still soft-misses.
 			if (state === null && existsSync(file)) throw new CealReceiptSpoolStoreError("unsafe_store");
+			// Drops with no spool file is not "no calls yet": the first receipt can
+			// be the one that was lost, and returning null there would let the
+			// observer state the strongest possible false claim — that this client
+			// made no calls — on the strength of a file that failed to be written.
+			if (state === null && drops.count > 0)
+				return {
+					entries: [],
+					bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS },
+					drops,
+					spoolPresent: false,
+				};
 			return state;
 		},
 		async append(entry) {
 			await appendEntry(directory, file, entry, now());
 		},
+		async recordDrop() {
+			recordDrop(directory, path.join(directory, DROPS_FILE));
+		},
 		async remove() {
 			removeSpool(file);
+			removeSpool(path.join(directory, DROPS_FILE));
 		},
 	};
+}
+
+/**
+ * Whether this envelope carried a receipt at all.
+ *
+ * `receiptSpoolEntryFromCallResult` returns null for two unlike reasons: the
+ * call never got a receipt (a pre-issue failure, deliberately not spooled), or
+ * it did and a field fell outside the safe vocabulary. Only the second is a lost
+ * receipt, and it is the loss most likely to happen in practice — it fires on a
+ * Gateway vocabulary the client does not know yet, not on contention. Separating
+ * them is what lets the recorder count one and ignore the other.
+ */
+export function callResultCarriesReceipt(envelope: Record<string, unknown>): boolean {
+	return envelope.schema_version === CALL_RESULT_SCHEMA_VERSION && isRecord(envelope.receipt);
 }
 
 /**
@@ -119,13 +190,13 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 // failure never changes call behavior. That under-report is precisely what
 // `ceal observe` exists to surface, so it is the loss this lock exists to stop.
 //
-// It narrows the window rather than closing it, and the difference matters to
-// anyone reading the spool as complete. The critical section is one small local
-// write, not the session store's Gateway roundtrip, so the wait is short — but
-// an append that still cannot get in past it raises `spool_busy`, which the
-// recording call site swallows like any other spool failure. A receipt is then
-// lost exactly as before, and nothing counts how often. Closing that would take
-// a durable drop counter the observer can render; it is not this lock's job.
+// It narrows the window rather than closing it. The critical section is one
+// small local write, not the session store's Gateway roundtrip, so the wait is
+// short — but an append that still cannot get in past it raises `spool_busy`,
+// which the recording call site swallows like any other spool failure, and the
+// receipt is gone. What changed is that the loss is no longer invisible: the
+// call site records it through `recordDrop`, so `ceal observe` can say the
+// history it is rendering is incomplete instead of quietly under-reporting.
 const SPOOL_LOCK_DIRECTORY = "receipt-spool.lock";
 const SPOOL_LOCK_MAX_WAIT_MS = 5_000;
 
@@ -148,7 +219,7 @@ async function appendEntry(directory: string, file: string, entry: CealReceiptSp
 }
 
 function writeAppendedSpool(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
-	const existing = readSpool(directory, file, now)?.entries ?? [];
+	const existing = readSpool(directory, file, now, NO_DROPS)?.entries ?? [];
 	// Size and retention bounds are enforced on every append (and read applies
 	// the same retention window), so the spool cannot grow past its declared
 	// bounds even if the clock or an old file disagrees.
@@ -167,7 +238,55 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 	}
 }
 
-function readSpool(directory: string, file: string, now: number): CealReceiptSpoolState | null {
+function recordDrop(directory: string, file: string): void {
+	try {
+		prepareDirectory(directory, unsafeReceiptSpool);
+		const existing = dropsFileStat(file);
+		if (existing && existing.size >= MAX_RECORDED_DROPS) return;
+		// O_NOFOLLOW rather than an existence check: `existsSync` follows symlinks
+		// and reports false for a dangling one, so a planted link would have been
+		// created and written through — the one write in this module that could
+		// leave the store, since the spool's own write goes to a random temp name
+		// with `wx` and renames. The kernel refuses the link instead.
+		const handle = openSync(file, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600);
+		try {
+			writeSync(handle, ".");
+			// Shape is checked before the write and mode is repaired right after,
+			// which is the spool's stated write-path contract: refusing a
+			// wrong-mode file here would silently stop counting forever instead.
+			fchmodSync(handle, 0o600);
+		} finally {
+			closeSync(handle);
+		}
+	} catch {
+		/* The drop counter exists to describe a failure; it may not become one. */
+	}
+}
+
+function readDrops(file: string): { count: number; atLeast: boolean } {
+	const stat = dropsFileStat(file);
+	if (!stat) return NO_DROPS;
+	return { count: stat.size, atLeast: stat.size >= MAX_RECORDED_DROPS };
+}
+
+/**
+ * The drops file's stat, or null if it is absent or not a plain file.
+ *
+ * Shape only, deliberately: this is not `safeExistingFile`, whose mode assertions
+ * are a *read* guard. Applying them here would let one drifted mode stop the
+ * counter permanently and silently, which is the failure this counter exists to
+ * make visible.
+ */
+function dropsFileStat(file: string): { size: number } | null {
+	try {
+		const stat = lstatSync(file);
+		return !stat.isSymbolicLink() && stat.isFile() ? { size: stat.size } : null;
+	} catch {
+		return null;
+	}
+}
+
+function readSpool(directory: string, file: string, now: number, drops: { count: number; atLeast: boolean }): CealReceiptSpoolState | null {
 	if (!existsSync(file)) return null;
 	if (!safeExistingFile(directory, file)) return null;
 	let parsed: unknown;
@@ -186,7 +305,7 @@ function readSpool(directory: string, file: string, now: number): CealReceiptSpo
 			return entry && withinRetention(entry.recordedAt, now) ? [entry] : [];
 		})
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
-	return { entries, bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS } };
+	return { entries, bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS }, drops, spoolPresent: true };
 }
 
 function withinRetention(recordedAt: number, now: number): boolean {

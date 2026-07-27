@@ -36,7 +36,7 @@ import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { createCealObserverServer } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
-import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
+import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 import {
 	CEAL_SUBCOMMANDS,
 	type CealSubcommandDefinition,
@@ -1281,12 +1281,18 @@ function writeReceiptError(
 function callResultRecorder(runtime: CealCommandRuntime): CealCallResultRecorder | undefined {
 	const record = runtime.recordReceiptSpool;
 	if (!record) return undefined;
+	const drop = runtime.recordReceiptSpoolDrop;
 	return (envelope) => {
 		try {
 			const entry = receiptSpoolEntryFromCallResult(envelope, runtime.now?.() ?? Date.now());
-			if (entry) record(entry);
+			if (entry) return record(entry);
+			// A receipt this client could not project is a lost receipt, not an
+			// absent one, so it is counted rather than passed over. Without this
+			// the observer renders a short history with nothing marking the gap.
+			if (callResultCarriesReceipt(envelope)) drop?.();
 		} catch {
 			/* spool failure must never change call behavior */
+			drop?.();
 		}
 	};
 }

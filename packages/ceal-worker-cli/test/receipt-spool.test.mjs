@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -172,6 +172,119 @@ function appendInChildProcess(home, requestRef, startAt) {
 	});
 }
 
+test("a lost receipt is counted so the observer can say the history is incomplete", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		// Nothing lost yet: the counter must not exist merely because the spool does.
+		await store.append(entry());
+		assert.deepEqual((await store.load()).drops, { count: 0, atLeast: false });
+		await store.recordDrop();
+		await store.recordDrop();
+		assert.deepEqual((await store.load()).drops, { count: 2, atLeast: false });
+		assert.equal(statSync(dropsFile(home)).mode & 0o777, 0o600);
+		// Drops survive an append, because the append that succeeded says nothing
+		// about the ones that did not.
+		await store.append(entry({ requestRef: "narnia:call:2:call" }));
+		assert.equal((await store.load()).drops.count, 2);
+		// Clearing the spool clears its drop record too: an empty history cannot
+		// carry a warning about entries it no longer claims to have had.
+		await store.remove();
+		assert.equal(existsSync(dropsFile(home)), false);
+	});
+});
+
+test("the drop counter is bounded and never becomes a failure of its own", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
+		writeFileSync(dropsFile(home), ".".repeat(4096), { mode: 0o600 });
+		await store.recordDrop();
+		// No spool file was ever written here, which is the case where every
+		// receipt this client tried to record was lost. Reporting that as "no
+		// calls yet" would be the strongest false claim this page can make, so the
+		// store answers with an empty history that still carries its drop count.
+		const state = await store.load();
+		assert.deepEqual(state.entries, []);
+		assert.deepEqual(state.drops, { count: 4096, atLeast: true }, "past the cap the count is reported as a floor, not grown further");
+	});
+	await withHome(async (home) => {
+		// recordDrop describes a failure, so it may not raise one. A drops path
+		// that is a directory is unwritable in the way a symlinked store would be.
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry());
+		mkdirSync(dropsFile(home), { mode: 0o700, recursive: true });
+		await store.recordDrop();
+		// The spool still reads, and the uncountable drop reads as no count rather
+		// than as a thrown store error that would take `ceal observe` down.
+		const state = await store.load();
+		assert.deepEqual(state.entries, [entry()]);
+		assert.deepEqual(state.drops, { count: 0, atLeast: false });
+	});
+});
+
+test("the drop counter refuses a symlinked path and survives a drifted mode", async () => {
+	await withHome(async (home) => {
+		// existsSync follows symlinks and reports false for a dangling one, so the
+		// check-then-append shape would have created and written the link's target
+		// — the one write in this store that could land outside it. Every other
+		// write here goes to a random temp name with `wx` and renames.
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
+		const outside = path.join(home, "outside-the-store");
+		symlinkSync(outside, dropsFile(home));
+		await store.recordDrop();
+		assert.equal(existsSync(outside), false, "the drop counter must not create the target of a planted symlink");
+	});
+	await withHome(async (home) => {
+		// A drifted mode is repaired, not refused: refusing here would stop the
+		// counter permanently and silently, which is the exact failure it exists
+		// to make visible. This is the spool's stated write-path contract.
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry());
+		await store.recordDrop();
+		chmodSync(dropsFile(home), 0o644);
+		await store.recordDrop();
+		assert.equal((await store.load()).drops.count, 2, "a mode-drifted counter must keep counting rather than go silent");
+		assert.equal(statSync(dropsFile(home)).mode & 0o777, 0o600, "and must be repaired to owner-only");
+	});
+	await withHome(async (home) => {
+		// The counter is read through a shape check, not the read-strictness guard
+		// the spool file uses. That guard also asserts the *directory* is 0o700, so
+		// a widened `~/.ceal` would zero the count on read — restoring the "no calls
+		// yet" claim on a client whose every receipt had in fact been lost.
+		// No spool file: this is the client whose very first receipt was lost, which
+		// is where zeroing the count restores the strongest false claim the page
+		// can make.
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.recordDrop();
+		chmodSync(path.join(home, ".ceal"), 0o755);
+		const state = await store.load();
+		assert.equal(state.drops.count, 1, "a widened store directory must not silently zero the drop count");
+		assert.equal(state.spoolPresent, false);
+	});
+});
+
+test("a real spool emptied by retention is not reported as a spool that never existed", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry());
+		await store.recordDrop();
+		// Same file, read far enough in the future that every entry has aged out.
+		const dormant = createCealReceiptSpoolStore(home, () => BASE_TIME + RECEIPT_SPOOL_RETENTION_MS + 1);
+		const state = await dormant.load();
+		assert.deepEqual(state.entries, []);
+		assert.equal(state.drops.count, 1);
+		assert.equal(state.spoolPresent, true, "the spool file exists; only its window is empty");
+	});
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.recordDrop();
+		const state = await store.load();
+		assert.deepEqual(state.entries, []);
+		assert.equal(state.spoolPresent, false, "no spool file was ever written, which is the far stronger claim");
+	});
+});
+
 test("receipt spool load reports a present-but-unusable file while append still soft-misses", async () => {
 	// load throws so the observer can render `unreadable` instead of an empty
 	// history; append treats the same anomaly as a miss and keeps recording.
@@ -306,6 +419,10 @@ test("call-result projection keeps only allowlisted metadata and skips receipt-l
 		null,
 	);
 });
+
+function dropsFile(home) {
+	return path.join(home, ".ceal", "receipt-spool-drops");
+}
 
 function spoolFile(home) {
 	mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });

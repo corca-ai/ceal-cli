@@ -78,7 +78,15 @@ void runCealCommand(
 		// unhandled rejection.
 		recordReceiptSpool: receiptSpool
 			? (entry) => {
-					void receiptSpool.append(entry).catch(() => {});
+					// The swallow stays — a spool failure may not change a call's
+					// result — but it now leaves a trace, so the observer can report
+					// an incomplete history rather than a quietly short one.
+					void receiptSpool.append(entry).catch(() => receiptSpool.recordDrop());
+				}
+			: undefined,
+		recordReceiptSpoolDrop: receiptSpool
+			? () => {
+					void receiptSpool.recordDrop();
 				}
 			: undefined,
 		loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,

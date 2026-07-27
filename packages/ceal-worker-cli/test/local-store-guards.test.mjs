@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -69,6 +70,60 @@ test("prepareDirectory creates a missing store at 0o700", (context) => {
 	prepareDirectory(directory, unsafe);
 	assert.equal(statSync(directory).mode & 0o777, 0o700);
 });
+
+test("processes racing to create the same missing store all succeed", async (context) => {
+	// This was a check-then-create: both racers passed `existsSync`, and the
+	// loser's EEXIST was reported as `unsafe_store` — a security-shaped refusal
+	// for a race one of them had to lose. For the spool that is a dropped receipt
+	// outside its own lock, because the store directory is prepared before the
+	// lock is taken; for the session store it is a refused write.
+	const root = scratch(context);
+	const directory = path.join(root, "contended");
+	const startAt = Date.now() + 750;
+	const source = `
+		const { prepareDirectory } = await import(${JSON.stringify(new URL("../dist/local-store-guards.js", import.meta.url).href)});
+		const startAt = Number(process.env.GUARD_START_AT);
+		const margin = startAt - Date.now();
+		await new Promise((resolve) => setTimeout(resolve, Math.max(0, margin - 20)));
+		while (Date.now() < startAt) {}
+		prepareDirectory(process.env.GUARD_DIRECTORY, () => {
+			throw new Error("refused as unsafe_store");
+		});
+		process.stdout.write(String(margin));
+	`;
+	const results = await Promise.all(
+		Array.from({ length: 6 }, () => runGuardChild(source, { GUARD_DIRECTORY: directory, GUARD_START_AT: String(startAt) })),
+	);
+	for (const result of results) assert.equal(result.code, 0, result.stderr);
+	// Same guard as the spool's concurrency test: a host too slow to reach the
+	// barrier would serialize the racers and pass without racing anything.
+	const margins = results.map((result) => Number(result.stdout.trim()));
+	assert.deepEqual(
+		margins.filter((margin) => !(margin >= 0)),
+		[],
+		`creators did not overlap; margins to the shared barrier were ${margins.join(", ")}ms`,
+	);
+	assert.equal(statSync(directory).mode & 0o777, 0o700);
+});
+
+function runGuardChild(source, env) {
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		env: { ...process.env, ...env },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.on("data", (chunk) => {
+		stdout += String(chunk);
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += String(chunk);
+	});
+	return new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", (code) => resolve({ code, stdout, stderr }));
+	});
+}
 
 // The strictness difference between the credential store and the cache/spool was
 // previously an undocumented accident of which copy you were reading. It is a

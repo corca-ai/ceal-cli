@@ -61,15 +61,27 @@ export function safeExistingFile(directory: string, file: string): boolean {
  *   is refused instead of repaired. The credential store requires it.
  */
 export function prepareDirectory(directory: string, unsafe: UnsafeStore, requireMode = false): void {
-	if (!existsSync(directory)) {
-		try {
-			mkdirSync(directory, { mode: DIRECTORY_MODE });
-		} catch {
-			unsafe();
-		}
+	// Create unconditionally and classify the error, rather than checking
+	// existence first. The check-then-create form had a window: two processes
+	// starting against a not-yet-created `~/.ceal` both passed the check, and the
+	// loser's `EEXIST` was reported as `unsafe_store` — a refusal naming a
+	// security condition for what is just a race one of them had to lose. For the
+	// spool that meant a silently dropped receipt outside its own lock; for the
+	// session store, a user-visible refusal on a write that should have
+	// succeeded. `EEXIST` is the ordinary case here, not a failure.
+	try {
+		mkdirSync(directory, { mode: DIRECTORY_MODE });
+	} catch (error) {
+		if (nodeErrorCode(error) !== "EEXIST") unsafe();
 	}
+	// A symlink that already pointed somewhere else also raises EEXIST, so the
+	// shape check below is what refuses it — not the create.
 	assertDirectory(directory, unsafe, requireMode);
 	chmodSync(directory, DIRECTORY_MODE);
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
 /** Refuses `directory` unless it is a real directory, and 0o700 if required. */

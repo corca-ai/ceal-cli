@@ -367,6 +367,130 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	await handle.close();
 });
 
+test("an empty retention window is not reported as every receipt having been lost", async (context) => {
+	// Three unlike states share `entries: []`. A spool that exists but whose
+	// entries all aged out of the 30-day window is the common one: those receipts
+	// were recorded, and were rendered for a month. Saying "every receipt this
+	// client tried to record was lost" there would swap the false claim this
+	// counter removed for an equally false one pointing the other way.
+	const io = collectingIo();
+	let handle;
+	await new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			loadReceiptSpool: async () => ({
+				entries: [],
+				bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
+				drops: { count: 2, atLeast: false },
+				spoolPresent: true,
+			}),
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
+		});
+	});
+	context.after(async () => {
+		try {
+			await handle.close();
+		} catch {
+			/* already closed */
+		}
+	});
+	const doc = parse(io.stdout.join(""));
+	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(state.receipts.status, "absent");
+	assert.equal(state.receipts.dropped_appends, 2);
+	assert.match(state.receipts.note, /within the retention window/u);
+	assert.doesNotMatch(state.receipts.note, /every receipt this client tried to record was lost/u);
+	// The count has to reach the page, not just the API: the empty-history branch
+	// used to render the note alone, which is the one branch where the whole
+	// signal is that something is missing.
+	//
+	// Mechanism-only, and deliberately labelled as such: the page renders client
+	// side and this gate has no DOM, so this pins the shape of the branch rather
+	// than the rendered output. A plain `/dropped_appends/` match over the page
+	// would be vacuous — the identifier appears in the script's own source.
+	//
+	// The limit that follows from that, stated rather than papered over: this
+	// catches the branch being deleted (probed) and not the branch being
+	// neutered, because a dead `if (false)` still carries the identifier. Closing
+	// it needs a DOM in this gate, which is a larger move than this slice.
+	const page = await (await fetch(doc.url)).text();
+	const emptyHistoryBranch = /else if \(s\.receipts\.note\)\s*\{([\s\S]*?)\n {2}\}/u.exec(page);
+	assert.ok(emptyHistoryBranch, "the page must still have an empty-history branch to check");
+	assert.match(emptyHistoryBranch[1], /dropped_appends/u, "the empty-history branch must render the drop count, not only the note");
+	await handle.close();
+});
+
+test("ceal observe says the receipt history is incomplete rather than short", async (context) => {
+	// The spool swallows every append failure so a call's result cannot change,
+	// which used to mean a lost receipt left the page rendering a shorter history
+	// as if it were the whole one. The worst case is the first receipt being the
+	// lost one: with no spool file at all, "no calls yet" is the strongest false
+	// claim this page can make.
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-drops-"));
+	context.after(() => rmSync(home, { recursive: true, force: true }));
+	const spoolStore = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
+	await spoolStore.recordDrop();
+	await spoolStore.recordDrop();
+
+	const io = collectingIo();
+	let handle;
+	await new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			loadReceiptSpool: () => spoolStore.load(),
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
+		});
+	});
+	context.after(async () => {
+		try {
+			await handle.close();
+		} catch {
+			/* already closed */
+		}
+	});
+	const doc = parse(io.stdout.join(""));
+	const absent = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(absent.receipts.status, "absent");
+	assert.equal(absent.receipts.dropped_appends, 2);
+	assert.equal(absent.receipts.dropped_appends_capped, false);
+	assert.equal(absent.receipts.dropped_appends_are_a_floor, true);
+	assert.match(absent.receipts.note, /every receipt this client tried to record was lost/u);
+	assert.doesNotMatch(absent.receipts.note, /No spooled call outcomes yet/u);
+
+	// With entries present the count rides alongside them, so a partial history
+	// is not mistaken for a complete one either.
+	await spoolStore.append({
+		recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
+		requestRef: "narnia:call:kept",
+		status: "completed",
+		evidence: "readback_verified",
+		auditRefs: [],
+	});
+	const spooled = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(spooled.receipts.status, "spooled");
+	assert.equal(spooled.receipts.entry_count, 1);
+	assert.equal(spooled.receipts.dropped_appends, 2);
+
+	// A clean spool says nothing about drops at all: rendering a zero would
+	// invite reading this page as provably complete, which it never is.
+	await spoolStore.remove();
+	await spoolStore.append({
+		recordedAt: Date.parse("2026-07-24T00:00:40.000Z"),
+		requestRef: "narnia:call:fresh",
+		status: "completed",
+		evidence: "readback_verified",
+		auditRefs: [],
+	});
+	const clean = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	assert.equal(clean.receipts.status, "spooled");
+	assert.equal("dropped_appends" in clean.receipts, false);
+	await handle.close();
+});
+
 test("ceal observe reports absent stores and rejects invalid ports without serving", async () => {
 	const io = collectingIo();
 	let handle;

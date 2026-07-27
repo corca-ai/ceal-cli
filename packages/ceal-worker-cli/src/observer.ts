@@ -234,6 +234,38 @@ function projectTokenUsage(usage: CealAgentAuditTokenUsage): Record<string, unkn
 	};
 }
 
+// A zero count is omitted rather than rendered: an absent key reads as "nothing
+// to say", while `dropped_appends: 0` invites reading the spool as provably
+// complete, which it is not — a drop is only counted when the client survived to
+// count it.
+function droppedAppends(drops: CealReceiptSpoolState["drops"] | undefined): Record<string, unknown> {
+	// The state arrives from a runtime callback, so the observer treats its shape
+	// as input rather than as something it built. A missing counter is "nothing
+	// to say", not a crash that would take the whole observe page down with it.
+	if (!drops || typeof drops.count !== "number" || drops.count <= 0) return {};
+	return {
+		dropped_appends: drops.count,
+		// Always a floor, never a total. A drop is only counted when the client
+		// survived to count it, so a killed process, an unset HOME, and a failure
+		// of the counter itself all lose receipts without appearing here. Reading
+		// this as exact would be the same over-claim the counter exists to remove.
+		dropped_appends_are_a_floor: true,
+		dropped_appends_capped: drops.atLeast,
+		dropped_appends_note: drops.atLeast
+			? "At least this many receipt appends were lost; the counter stopped at its cap. This history is incomplete."
+			: "At least this many receipt appends were lost and are not in this history. Gateway readback ('ceal receipt show') remains authoritative.",
+	};
+}
+
+// Three unlike states share `entries: []`, and only one of them justifies the
+// strongest sentence. Flattening them would replace the false "no calls yet"
+// this counter was added to remove with an equally false "everything was lost".
+function absentReceiptsNote(spool: CealReceiptSpoolState | null): string {
+	if (!spool || !(spool.drops?.count > 0)) return "No spooled call outcomes yet; entries appear after receipt-bearing 'ceal call' results.";
+	if (!spool.spoolPresent) return "No call outcome could be spooled; every receipt this client tried to record was lost.";
+	return "No call outcomes are within the retention window, and receipt appends were lost as well.";
+}
+
 async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	if (!runtime.loadReceiptSpool) return { status: "unavailable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
 	let spool: CealReceiptSpoolState | null;
@@ -242,10 +274,16 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 	} catch {
 		return { status: "unreadable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
 	}
+	// "No history" and "a history that was lost" are different answers, and only
+	// one of them means this client made no calls — so the store returns a state
+	// with zero entries when it has drops but no spool file, and the `absent`
+	// branch below renders the difference instead of flattening it.
+	const drops = spool ? droppedAppends(spool.drops) : {};
 	if (!spool || spool.entries.length === 0) {
 		return {
 			status: "absent",
-			note: "No spooled call outcomes yet; entries appear after receipt-bearing 'ceal call' results.",
+			note: absentReceiptsNote(spool),
+			...drops,
 			non_claim: RECEIPT_SPOOL_NON_CLAIM,
 		};
 	}
@@ -259,6 +297,7 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 		coverage: "ceal-mediated",
 		entry_count: spool.entries.length,
 		bounds: { max_entries: spool.bounds.maxEntries, retention_ms: spool.bounds.retentionMs },
+		...drops,
 		entries: ordered
 			.slice(-RECEIPT_SPOOL_RENDER_LIMIT)
 			.reverse()
@@ -587,6 +626,12 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       .map((entry) => rows(Object.entries(entry))).join("<hr>");
   } else if (s.receipts.note) {
     receiptsBody += "<p class=\\"muted\\">" + esc(s.receipts.note) + "</p>";
+    // Without this the drop count reaches the JSON and never the human: the
+    // empty-history branch used to render the note alone, which is the one
+    // branch where the whole signal is that something is missing.
+    if (s.receipts.dropped_appends !== undefined) {
+      receiptsBody += rows(Object.entries(s.receipts).filter(([k]) => k.startsWith("dropped_appends")));
+    }
   }
   receiptsBody += "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>";
   parts.push(section("Receipts (" + s.receipts.status + ")", receiptsBody));

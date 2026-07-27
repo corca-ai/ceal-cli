@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -3063,6 +3074,99 @@ function success(request, value) {
 		value,
 	};
 }
+
+test("a receipt this client cannot project is counted, not passed over", async () => {
+	// The likeliest real loss path, and the one contention never causes: a
+	// receipt-bearing result whose fields fall outside the client's safe
+	// vocabulary projects to nothing. Before this it was indistinguishable from
+	// a pre-issue failure that legitimately has no receipt, so the history came
+	// up short with nothing marking the gap. A Gateway that adds a status token
+	// or lengthens a ref would trigger it on every call.
+	await withGateway(async ({ endpoint }) => {
+		const spooled = [];
+		let drops = 0;
+		const runtime = {
+			loadSession: async () => storedSession(endpoint),
+			// Not a safe-ref: spaces and a slash are outside the spool's grammar,
+			// so the receipt is real and the projection still refuses it.
+			nextRequestId: () => "narnia opaque/1",
+			recordReceiptSpool: (entry) => spooled.push(entry),
+			recordReceiptSpoolDrop: () => {
+				drops += 1;
+			},
+		};
+		// The unsafe ref also fails the Gateway's own readback, so this exits 3 —
+		// which is beside the point here: the envelope is receipt-bearing either
+		// way, and that is what the projection refuses.
+		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
+		assert.equal(
+			payload.receipt.request_ref,
+			"narnia opaque/1:call",
+			"the result still carries its receipt; only the local projection failed",
+		);
+		assert.deepEqual(spooled, [], "an unprojectable receipt must not be spooled");
+		assert.equal(drops, 1, "and must be counted as lost");
+	});
+
+	// The other half of the contract: a pre-issue failure has no receipt at all,
+	// which is not a loss and must not inflate the count.
+	await withGateway(
+		async ({ endpoint }) => {
+			let drops = 0;
+			const runtime = {
+				loadSession: async () => storedSession(endpoint),
+				recordReceiptSpool: () => {},
+				recordReceiptSpoolDrop: () => {
+					drops += 1;
+				},
+			};
+			await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
+			assert.equal(drops, 0, "a result that never had a receipt is not a lost one");
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						error: { code: "session_unavailable", message: "server-controlled", next_action: "server-controlled" },
+					}
+				: readbackResponse(request),
+	);
+});
+
+test("a receipt the packaged bin could not spool is counted rather than lost silently", async () => {
+	// The store counts drops and the observer renders them, but neither proves
+	// bin.js actually reports one: its `.catch` is the only place a swallowed
+	// append becomes a recorded drop, and nothing else executes that line. With
+	// the wiring reverted to `.catch(() => {})` every store-level and
+	// observer-level test here still passes.
+	await withGateway(async ({ endpoint }) => {
+		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-drop-"));
+		try {
+			mkdirSync(path.join(home, ".ceal"), { recursive: true, mode: 0o700 });
+			writeFileSync(
+				path.join(home, ".ceal", "client-session.json"),
+				`${JSON.stringify(serializeStoredSession(storedSession(endpoint)), null, 2)}\n`,
+				{ mode: 0o600 },
+			);
+			// A directory where the spool file belongs: the store refuses to write
+			// through it, which is a real append failure rather than an injected one.
+			mkdirSync(path.join(home, ".ceal", "receipt-spool.json"), { mode: 0o700 });
+			const result = await runBin(["call", "message.search", "--target", "target:team-inbox", "query=launch"], "", { HOME: home });
+			// The call itself must be untouched: that is the whole reason the spool
+			// failure is swallowed in the first place.
+			assert.equal(result.code, 0, result.stderr);
+			assert.equal(parseYaml(result.stdout).status, "completed");
+			const drops = path.join(home, ".ceal", "receipt-spool-drops");
+			assert.equal(existsSync(drops), true, "a swallowed spool append must still leave a counted drop");
+			assert.equal(statSync(drops).size, 1);
+			assert.equal(statSync(drops).mode & 0o777, 0o600);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
 
 test("the packaged bin answers an unexpected failure with an error envelope and a failing exit code", async () => {
 	// bin.js's rejection handler is the one surface no input reaches: every
