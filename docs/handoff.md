@@ -6,8 +6,8 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 
 ## Workflow Trigger
 
-- 이 파일만 언급되면 **`## Next Session`을 번호 순서대로**. 1–5는 전부 `vinc` 응답 대기이므로,
-  막힘 없는 코드 일감을 원하면 **6번**(품질 리뷰 3차의 active 카드 둘)으로 간다.
+- 이 파일만 언급되면 **`## Continuation Capability`부터**. `## Next Session`은 1–6이 **전부**
+  `vinc` 응답 대기라 지금 착수할 수 없다 — 답이 오면 그때 번호 순서대로.
 - prod 세션 생사는 `ceal capabilities --fresh`(read_only, 캐시 우회). `npm run probe`는
   **쓰지 말 것** — throwaway `HOME`이라 실세션을 답할 수 없다.
 - 로컬 커밋은 진행하며, push·tag·GitHub write·Gateway write는 매번 따로 승인.
@@ -53,7 +53,7 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
   [공지 준비 리턴 패킷](requests/2026-07-27-to-gateway-lane-announcement-readiness.md).
 - **`prod` 세션은 살아 있다**(2026-07-27T21:15–21:21Z 관측). 미검증은 `enrollments create` →
   `request_denied` 하나뿐(write라 미실행).
-- **게이트**(2026-07-27 narnia): `npm run check` 45.5s, `check:unit` 20.7s. **이 수치를
+- **게이트**(2026-07-27 narnia): `npm run check` 46.8s, `check:unit` 21.3s. **이 수치를
   인용하지 말고 다시 잴 것** — 36코어 호스트 값이고 CI 러너는 코어가 훨씬 적다.
 - **병렬 tier는 아직 narnia에서만 증명됐다.** ubuntu·macOS 러너는 push 후에야 안다.
 
