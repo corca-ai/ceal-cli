@@ -371,18 +371,83 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 	// The page's whole claim is that it names the *fixed* local sources it reads.
 	// A store that adds a file without adding it here does not break a test, it
 	// makes a standing declaration quietly false — which is how the drops counter
-	// shipped unlisted in the first place. Deriving the names from the store
-	// sources means the next one cannot.
-	const sources = readdirSync(new URL("../src", import.meta.url), { recursive: true })
-		.filter((name) => String(name).endsWith(".ts"))
-		.map((name) => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8"))
-		.join("\n");
-	const stateFiles = new Set([...sources.matchAll(/"(client-[a-z-]+\.json|receipt-spool[a-z.-]*)"/gu)].map((match) => match[1]));
-	// Locks are coordination, not a source this page reads, so they are excluded
-	// deliberately rather than by the regex happening to miss them.
-	stateFiles.delete("receipt-spool.lock");
-	stateFiles.delete("client-session.lock");
-	assert.ok(stateFiles.size >= 4, `only ${stateFiles.size} store files found; the sweep is not reaching the stores`);
+	// shipped unlisted in the first place.
+	//
+	// The names therefore come from running the stores and reading the directory
+	// back, not from a filename pattern matched against the sources. A pattern
+	// only sees the files someone chose to name conventionally, which is the one
+	// case that needs no help; the disk shows whatever a store actually wrote.
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-privacy-"));
+	context.after(() => rmSync(home, { recursive: true, force: true }));
+	await createCealSessionStore(home).save({
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:privacy-fixture",
+		membershipRef: "membership:privacy-fixture",
+		registrationRef: "registration:privacy-fixture",
+		clientRef: "client:privacy-fixture",
+		subjectRef: "subject:privacy-fixture",
+		instanceRef: "instance:privacy-fixture",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-07-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	});
+	await createCealDiscoveryCacheStore(home).save({
+		key: {
+			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+			profileRef: "profile:privacy-fixture",
+			membershipRef: "membership:privacy-fixture",
+			negotiatedProtocolVersion: "1.3.0",
+		},
+		cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
+		discovery: {
+			schema_version: "ceal.gateway_discovery.v2",
+			profile_ref: "profile:privacy-fixture",
+			membership_ref: "membership:privacy-fixture",
+			capabilities: [],
+			targets: [],
+			target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+			host_decision: "accepted",
+			proof_level: "host_decision",
+			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		},
+	});
+	const privacySpool = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
+	await privacySpool.append({
+		recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
+		requestRef: "narnia:privacy:1:call",
+		status: "completed",
+		evidence: "readback_verified",
+		auditRefs: [],
+	});
+	await privacySpool.recordDrop();
+	const stateFiles = new Set(
+		// Locks are coordination, not a source this page reads. Temporaries belong
+		// to a write in flight and are gone by the time one finishes.
+		readdirSync(path.join(home, ".ceal")).filter((name) => !name.endsWith(".lock") && !name.endsWith(".tmp")),
+	);
+	assert.ok(stateFiles.size >= 4, `only ${stateFiles.size} store files were written; the sweep is not reaching the stores`);
+	// Reading the disk only sees the stores this test drives, so the store surface
+	// itself is gated too: a new `~/.ceal` store must be exercised above or named
+	// as writing somewhere else, and either way somebody had to look at it.
+	const factories = new Set(
+		readdirSync(new URL("../src", import.meta.url), { recursive: true })
+			.filter((name) => String(name).endsWith(".ts"))
+			.flatMap((name) => [
+				...readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8").matchAll(/export function (createCeal\w*Store)/gu),
+			])
+			.map((match) => match[1]),
+	);
+	const exercised = new Set(["createCealSessionStore", "createCealDiscoveryCacheStore", "createCealReceiptSpoolStore"]);
+	// Registers guides into the agent host's own directory (~/.claude, ~/.codex),
+	// which the transcript-handling line covers rather than the ~/.ceal list.
+	const elsewhere = new Set(["createCealAgentGuideStore"]);
+	assert.deepEqual(
+		[...factories].filter((name) => !exercised.has(name) && !elsewhere.has(name)),
+		[],
+		"a local store is neither exercised by this sweep nor declared as writing outside ~/.ceal",
+	);
 
 	const io = collectingIo();
 	let handle;
@@ -574,45 +639,51 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.equal(await runCealCommand(["observe", "extra"], trailing, {}), 2);
 });
 
-test("local suggestions fire deterministically and stay linked to observed evidence", async () => {
+// The session and spool here come from the real stores rather than hand-rolled
+// object literals. A `.mjs` fixture is invisible to `tsc`, so a literal that
+// drifts from `CealStoredSession` or `CealReceiptSpoolState` keeps passing while
+// the shape it claims to stand in for no longer exists — and both of these had
+// already drifted, missing the whole refresh-token half and `drops`/
+// `spoolPresent` respectively.
+test("local suggestions fire deterministically and stay linked to observed evidence", async (context) => {
 	const NOW = Date.parse("2026-07-24T00:10:00.000Z");
+	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-suggestions-"));
+	context.after(() => rmSync(home, { recursive: true, force: true }));
+	const sessionStore = createCealSessionStore(home);
+	await sessionStore.save({
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:suggestion-fixture",
+		membershipRef: "membership:suggestion-fixture",
+		registrationRef: "registration:suggestion-fixture",
+		clientRef: "client:suggestion-fixture",
+		subjectRef: "subject:suggestion-fixture",
+		instanceRef: "instance:suggestion-fixture",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-07-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	});
+	const spoolStore = createCealReceiptSpoolStore(home, () => NOW);
+	for (const [requestRef, evidence, offset] of [
+		["narnia:sugg:1:call", "not_read_back", 120_000],
+		["narnia:sugg:2:call", "outcome_unknown", 60_000],
+	]) {
+		await spoolStore.append({
+			recordedAt: NOW - offset,
+			requestRef,
+			status: "error",
+			evidence,
+			auditRefs: [],
+			capabilityId: "message.search",
+			targetRef: "target:team-inbox",
+		});
+	}
 	const runtime = {
-		loadSession: async () => ({
-			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
-			profileRef: "profile:suggestion-fixture",
-			membershipRef: "membership:suggestion-fixture",
-			registrationRef: "registration:suggestion-fixture",
-			clientRef: "client:suggestion-fixture",
-			subjectRef: "subject:suggestion-fixture",
-			instanceRef: "instance:suggestion-fixture",
-			accessToken: ACCESS_TOKEN,
-			expiresAt: "2099-07-14T00:00:00.000Z",
-		}),
+		loadSession: () => sessionStore.load(),
 		// No cached catalog at all: the genuinely missing case.
 		loadDiscoveryCache: async () => null,
-		loadReceiptSpool: async () => ({
-			entries: [
-				{
-					recordedAt: NOW - 120_000,
-					requestRef: "narnia:sugg:1:call",
-					status: "error",
-					evidence: "not_read_back",
-					auditRefs: [],
-					capabilityId: "message.search",
-					targetRef: "target:team-inbox",
-				},
-				{
-					recordedAt: NOW - 60_000,
-					requestRef: "narnia:sugg:2:call",
-					status: "error",
-					evidence: "outcome_unknown",
-					auditRefs: [],
-					capabilityId: "message.search",
-					targetRef: "target:team-inbox",
-				},
-			],
-			bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
-		}),
+		loadReceiptSpool: () => spoolStore.load(),
 		inspectAgentAudit: () => ({
 			schemaVersion: "ceal.agent_activity.v1",
 			adapters: [
