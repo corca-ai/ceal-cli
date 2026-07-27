@@ -25,10 +25,23 @@ jobs:
   check:
     permissions:
       contents: read
-    # linux-x64: the release-artifact and installer suites gate themselves on
-    # this platform, so any other runner would report green while skipping the
-    # real-binary and real-installer proofs entirely.
-    runs-on: ubuntu-24.04
+    # The release lane builds on macOS too, so before this matrix existed a
+    # macOS-only break first appeared in a tagged run — which is how
+    # `ceal-v0.66.0` burned on a fixture path that is symlinked on macOS and not
+    # on Linux. The gate now runs where the release runs.
+    #
+    # Only linux-x64 requires the platform-gated proofs: the release-artifact and
+    # installer suites build for that platform and skip themselves elsewhere, so
+    # demanding them on macOS would fail a runner that is correct to skip.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            require_platform_proofs: "1"
+          - runner: macos-15
+            require_platform_proofs: "0"
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out the commit under test
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -57,10 +70,7 @@ jobs:
       # The hook installer is proven inside this gate by test/repo-gates.test.mjs,
       # against a throwaway clone rather than this checkout, so there is no
       # separate CI step re-proving the same seam.
-      # This runner is linux-x64, so the real-binary and installer proofs must
-      # actually run here. Without this they skip themselves and CI stays green
-      # having proved no installed binary at all.
       - name: Run the full gate
         run: npm run check
         env:
-          CEAL_REQUIRE_PLATFORM_PROOFS: "1"
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}

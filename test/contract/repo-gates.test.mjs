@@ -54,15 +54,41 @@ test("a non-tag CI lane runs the full gate on main", () => {
 		Object.values(workflow.jobs).some((job) => job.steps.some((step) => step.run === "npm run check")),
 		"the check workflow must run the same npm run check maintainers run",
 	);
-	// The real-binary and installer suites gate themselves on linux-x64, so any
-	// other runner reports green while skipping exactly the proofs that matter.
-	assert.match(Object.values(workflow.jobs)[0]["runs-on"], /ubuntu/u);
-	// Being on ubuntu is the image's promise, not a check. This makes the runner
-	// prove it ran them, so an image change fails loudly instead of going quiet.
+	// The gate must run everywhere the release lane builds. It did not, and a
+	// fixture path that is symlinked on macOS and not on Linux therefore first
+	// failed in the tagged run that burned ceal-v0.66.0.
+	const runners = Object.values(workflow.jobs).flatMap((job) => (job.strategy?.matrix?.include ?? []).map((entry) => entry.runner));
+	const releaseRunners = Object.values(parse(read(".github/workflows/ceal-release.yml")).jobs).flatMap((job) =>
+		(job.strategy?.matrix?.include ?? []).map((entry) => entry.runner ?? entry.os),
+	);
+	for (const family of ["ubuntu", "macos"]) {
+		assert.ok(
+			runners.some((runner) => String(runner).includes(family)),
+			`the check lane must run on ${family}, because the release lane builds there`,
+		);
+		assert.ok(
+			releaseRunners.some((runner) => String(runner).includes(family)),
+			`expected the release lane to still build on ${family}`,
+		);
+	}
+	// Being on ubuntu is the image's promise, not a check. This makes that runner
+	// prove it ran them, so an image change fails loudly instead of going quiet —
+	// and only that runner, since the proofs build for linux-x64 and a macOS
+	// runner is correct to skip them.
+	const entries = Object.values(workflow.jobs).flatMap((job) => job.strategy?.matrix?.include ?? []);
+	const linux = entries.find((entry) => String(entry.runner).includes("ubuntu"));
+	assert.equal(linux.require_platform_proofs, "1", "the linux gate must require the platform-gated proofs to actually run");
+	for (const entry of entries.filter((candidate) => !String(candidate.runner).includes("ubuntu"))) {
+		assert.equal(entry.require_platform_proofs, "0", `${entry.runner} cannot build the linux-x64 proofs, so it must not be asked to`);
+	}
 	const gate = Object.values(workflow.jobs)
 		.flatMap((job) => job.steps ?? [])
 		.find((step) => (step.run ?? "").trim() === "npm run check");
-	assert.equal(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS, "1", "the CI gate must require the platform-gated proofs to actually run");
+	assert.match(
+		String(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS),
+		/matrix\.require_platform_proofs/u,
+		"the gate step must take the requirement from the matrix rather than pinning one value for every runner",
+	);
 });
 
 // The release procedure used to be "bump the eight version-bearing files by

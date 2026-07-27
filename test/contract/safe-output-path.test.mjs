@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,8 +16,14 @@ function fail(code, message) {
 	throw new GuardError(code, message);
 }
 
+// `realpathSync`, because this guard's whole job is to find symlink components
+// and macOS hands them to every fixture for free: `tmpdir()` there is under
+// `/var/folders/...` and `/var` is a link to `/private/var`. Without this the
+// accept-cases fail on macOS for a reason that has nothing to do with the code
+// under test, and the refuse-cases pass for the wrong one. It burned the
+// `ceal-v0.66.0` tag, since the release lane is the only lane that runs macOS.
 function scratch(context) {
-	const directory = mkdtempSync(path.join(tmpdir(), "ceal-safe-output-"));
+	const directory = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-safe-output-")));
 	context.after(() => rmSync(directory, { recursive: true, force: true }));
 	return directory;
 }

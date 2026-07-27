@@ -1,6 +1,28 @@
 # Changelog
 
-## 0.66.0 (`ceal-v0.66.0`)
+## 0.66.1 (`ceal-v0.66.1`)
+
+Carries everything `0.66.0` intended — including both breaking changes below —
+plus the two fixes that burn taught. `0.66.0` never published: it failed in
+`Build and test source` on both macOS runners, before `assemble` or
+`sign-and-publish` ran, so no object was uploaded and no signature was issued.
+One clean run per tag is the contract, so the tag was burned rather than
+re-pushed.
+
+- `test/contract/safe-output-path.test.mjs` built its fixtures under `tmpdir()`,
+  which on macOS is below `/var/folders/...` where `/var` is a link to
+  `/private/var`. A guard whose entire job is to refuse symlink components
+  therefore refused the fixture path itself, so the two accept-cases failed —
+  and, worse, the refuse-cases had been passing for the wrong reason. The
+  fixtures are `realpath`ed now.
+- The check lane runs on macOS as well as Linux. The release lane builds four
+  platforms; the gate built one, so a macOS-only break could not surface until a
+  tagged run. Only the Linux runner is asked for the platform-gated proofs,
+  since those build for linux-x64 and a macOS runner is correct to skip them. A
+  repo gate now pins that the check lane covers every family the release lane
+  builds on.
+
+## 0.66.0 (`ceal-v0.66.0`, never published)
 
 The minor names two clean breaks taken together. Both retire a compatibility
 shim that made a reader consult a caveat to know which field was authoritative,
