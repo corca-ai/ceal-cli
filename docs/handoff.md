@@ -59,6 +59,29 @@ CI 러너에서 확인)는 push 후 관측이다.
   그건 아무도 못 푸는 상태다. 전자는 이웃한 방기 케이스들과 같은 grace로, 후자는 살아있는
   홀더와 같은 경로(`busy`, 유계)로 보낸다. 모드 검사는 보안 검사라 그대로 거절한다.
 
+### frozen protocol sync (`bbbd733`)
+
+`vinc`의 정책 픽스처를 렌더링하려 했더니 **렌더링 전에 디코더가 거부**했다. 픽스처 두 케이스를
+빌드된 디코더에 통과시켜 확인: negotiated는 `CealProtocolValidationError`, legacy는 통과.
+`validateDiscoveryCapability`의 `requireExactKeys`가 닫힌 키 집합이라 `announcement_policy`가
+없으면 거부한다 — `vinc`의 안전 규칙("예상 밖 shape은 디코더로 거부")이 **예상한 shape에** 걸린 것.
+
+설계 공백이 아니라 **stale frozen 사본**이었다. owner에는 필드·closed authority union·
+`validateAnnouncementPolicy`가 이미 다 있었고, 드리프트 240줄이 전부 단방향이며 이 레인에서
+originate한 편집은 없었다(유일하게 달라 보이던 줄은 owner가 `url`→`url || source_url`로 넓힌 것).
+그래서 CLAUDE.md가 허용하는 경로 그대로 **target-derived sync**를 손편집 없이 복사로 랜딩했다.
+
+**정체성은 인용이 아니라 확인 가능하다**: 소스는 `corca-ai/ceal@69ac63ae1`,
+`packages/ceal-protocol` 트리 `91125f983602012712abc3bc8c886ecb4c8fe406`.
+sync 후 이 리포의 같은 경로가 **같은 tree object로 해시된다**(`git rev-parse HEAD:packages/ceal-protocol`).
+
+package.json도 결국 같이 동기화했다. repository/homepage/bugs가 `ceal-cli`를 가리켜서 사본별
+의도적 차이인 줄 알았는데, **owner의 테스트가 `corca-ai/ceal`로 핀하고 있었다** — packing 픽스처가
+이미 그렇게 덮어쓰고 있었으니 그냥 낡은 것이었다. 내 첫 판단이 틀렸고 게이트가 잡았다.
+
+**남은 문제는 버전이다.** sync 전후 양쪽 다 `0.65.0`인데 검증기가 실질적으로 다르다.
+`vinc`에 문제제기만 써 뒀다(해결책 제시 없이 — 버전 정책은 owner 몫).
+
 ## Next Session
 
 1. **공지 준비(announcement readiness) — 리턴 패킷은 썼고, 공은 `vinc`에 있다.**
@@ -102,7 +125,9 @@ CI 러너에서 확인)는 push 후 관측이다.
   즉시, missing-owner 대조군은 정상 회수). 그리고
   [protocol 아티팩트 정체성 + 레인 사실 정정 둘](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md)
   — **`#6`에 npm은 필요 없다**는 결론(운영자 판단 2026-07-27: 임의 머신 해석 불필요)과,
-  `vinc`가 stale 클론으로 이 레인을 평가한 건·`dist-*` 귀속 오류 정정. 기존 것들:
+  `vinc`가 stale 클론으로 이 레인을 평가한 건·`dist-*` 귀속 오류 정정. 그리고 **미전달 하나**:
+  [protocol 버전이 바이트를 구분하지 못한다](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md)
+  — 아래 `## Closed` 참조. 기존 것들:
   [기존 넷](requests/2026-07-27-to-gateway-lane.md), 그리고 오늘의
   [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) — 후자는
   `oc:~/ceal/2026-07-27-from-narnia-blocked-assessment.md`로 이미 전달했다(새 untracked 최상위
