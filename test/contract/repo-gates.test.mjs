@@ -167,7 +167,14 @@ test("the release lane retries its public readbacks instead of burning the tag",
 // The shared helper names the missing proof in the output and carries the
 // strict-runner escape hatch, so a new inline skip must not reintroduce silence.
 test("every platform-gated proof declares its gap through the shared helper", () => {
-	const suites = readdirSync(path.join(ROOT, "test")).filter((name) => name.endsWith(".test.mjs"));
+	// Recursive: this scanned only the top level, so `test/contract/` was never
+	// covered — and a suite moving down there (guide-contract did) walked out of the
+	// gate silently, into the tier where new tests are most likely to land.
+	const suites = readdirSync(path.join(ROOT, "test"), { recursive: true }).filter((name) => name.endsWith(".test.mjs"));
+	assert.ok(
+		suites.some((suite) => path.dirname(suite) === "contract"),
+		"the scan must reach test/contract/, which is where cheap suites live",
+	);
 	for (const suite of suites) {
 		const source = read(path.join("test", suite));
 		const inline = /skip:\s*process\.(?:platform|arch)/u.test(source);

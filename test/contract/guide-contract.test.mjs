@@ -9,7 +9,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// This gate needs only `npm run build` output, never a release artifact, so it
+// belongs in the contract tier the pre-push hook actually runs rather than in the
+// `--test-concurrency=1` release tier where it paid a serialized tax for nothing.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
 const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-guide-contract-home-"));
 const CASES = [

@@ -102,11 +102,28 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
   `CEAL_SUBCOMMANDS` in `packages/ceal-worker-cli/src/subcommands.ts`, and
   `CEALCTL_SUBCOMMANDS` in `packages/ceal-operator-cli/src/index.ts` — a frozen
   package, so a `cealctl` route is not an edit this lane originates.
-  Dispatch is not table-driven. A worker route needs its table entry *and* its
-  branch in the runner: `runSession` treats every non-`logout` session route as
-  enrollment, and `runGuide` treats every non-`register` guide route as status.
-  A table-only row therefore passes `check:unit` — which proves help and
-  refusal, not routing — and misroutes in the shipped binary.
+  Worker *dispatch* derives from the same table: each runner reads a
+  `CealSubcommandHandlers<parent, …>` table keyed by the declared route joined
+  with spaces (`register codex`), and that `Record` over a literal key union is
+  total, so a row added to `CEAL_SUBCOMMANDS` without a handler fails `tsc` —
+  inside `npm run build`, inside both gates. A worker route still needs its table
+  entry *and* its handler; the difference is that forgetting the handler is now a
+  build failure naming the route rather than a misroute in the shipped binary.
+  Runners used to branch on one token and fall through, so `runSession` sent
+  every non-`logout` session route to enrollment and `runGuide` sent every
+  non-`register` guide route to status. Do not reintroduce a fallthrough
+  `else`: dispatch on the route key, and let the missing case be a type error.
+  That type gate holds only while the table keeps `as const satisfies`, because
+  the keys are read off *literal* route tuples — a row written
+  `route: ["x"] as string[]` contributes no key, demands no handler, and compiles.
+  `dispatchedRouteKeys()` plus its `cli.test.mjs` gate is what catches that, so
+  the two gates are a pair; do not remove one as redundant. Route-dependent
+  behaviour belongs in the handler table too, not in a `boolean` beside it:
+  `capabilities` kept its refusal label and option sets on a `targets` flag that
+  meant "some route matched", which is the same fallthrough where `tsc` is blind.
+  `cealctl` dispatch still falls through this way (`CEALCTL_SUBCOMMANDS` in the
+  frozen operator package), so none of this covers it — that is a request to
+  `corca-ai/ceal`, not an edit this lane originates.
 - Run state-changing commands (commit, push, tag, publish) without output
   filters and read the exit code before retrying. Pipe-trimming is for read-only
   output only.

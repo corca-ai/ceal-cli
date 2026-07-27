@@ -4,8 +4,12 @@ import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-export const REPO_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
+// `URL.pathname` is percent-encoded, so a checkout under a path containing a
+// space (or any escaped character) yields "%20" here and every derived path fails
+// as a confusing ENOENT. `fileURLToPath` is the decoding conversion.
+export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 export function makeGatewayProtocolFixture() {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-test-")));

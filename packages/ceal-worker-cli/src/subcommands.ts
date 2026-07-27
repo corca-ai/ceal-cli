@@ -20,7 +20,12 @@ export interface CealSubcommandDefinition {
 	options?: readonly string[];
 }
 
-export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
+// `as const satisfies` rather than a plain annotation: the annotation still holds
+// (a malformed row is an error here, not at a call site), but the literal route
+// tuples survive, and those literals are what `CealSubcommandRouteKey` turns into
+// the compile-time exhaustiveness a runner's handler table must satisfy. Without
+// them a table-only row type-checks and misroutes in the shipped binary.
+export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "guide",
 		route: ["status"],
@@ -124,7 +129,7 @@ export const CEAL_SUBCOMMANDS: readonly CealSubcommandDefinition[] = [
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
 		],
 	},
-];
+] as const satisfies readonly CealSubcommandDefinition[];
 
 export function subcommandsOf(parent: CealCommandName): readonly CealSubcommandDefinition[] {
 	return CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
@@ -157,4 +162,62 @@ export function splitSubcommandRoute(
 		if (subcommand) return { subcommand, rest: options.slice(length) };
 	}
 	return { rest: options };
+}
+
+/** The declared route as one key: `["register", "codex"]` becomes `register codex`. */
+type JoinRoute<Route extends readonly string[]> = Route extends readonly [
+	infer Head extends string,
+	...infer Tail extends readonly string[],
+]
+	? Tail extends readonly []
+		? Head
+		: `${Head} ${JoinRoute<Tail>}`
+	: never;
+
+/** Every route key one parent declares, as a literal union read off the table. */
+export type CealSubcommandRouteKey<Parent extends CealCommandName> = JoinRoute<
+	Extract<(typeof CEAL_SUBCOMMANDS)[number], { parent: Parent }>["route"]
+>;
+
+/**
+ * A runner's dispatch table: one handler per route the declaration advertises for
+ * that parent. `Record` over the literal key union is the whole point — a route
+ * added to `CEAL_SUBCOMMANDS` without a handler here fails `tsc`, which runs
+ * inside `npm run build` and therefore inside both gates.
+ */
+export type CealSubcommandHandlers<Parent extends CealCommandName, Handler> = Readonly<Record<CealSubcommandRouteKey<Parent>, Handler>>;
+
+/**
+ * Resolves a command tail to the handler its *own* declared route names.
+ *
+ * This exists because every runner used to dispatch by testing one token and
+ * falling through: `runSession` sent every non-`logout` route to enrollment and
+ * `runGuide` sent every non-`register` route to status. Help, acceptance, and the
+ * machine-readable inventory all derived from the table, so a new row passed
+ * `check:unit` — which proves help and refusal, not routing — and then misrouted
+ * in the shipped binary. Dispatch now derives from the same declaration.
+ *
+ * Declaring a route *under* an existing one is only safe where the shorter
+ * route's first operand cannot collide with the new token: `splitSubcommandRoute`
+ * prefers the longest declared prefix, so `receipt show all` would take that argv
+ * away from `receipt show <request-ref>`, which accepts `all` as a reference. The
+ * gate cannot see that — it is a naming decision, not a missing handler.
+ */
+export function resolveSubcommandRoute<Parent extends CealCommandName, Handler>(
+	parent: Parent,
+	options: readonly string[],
+	handlers: CealSubcommandHandlers<Parent, Handler>,
+): { subcommand: CealSubcommandDefinition; handler: Handler; rest: readonly string[] } | undefined {
+	const { subcommand, rest } = splitSubcommandRoute(parent, options);
+	if (!subcommand) return undefined;
+	const handler = (handlers as Readonly<Record<string, Handler>>)[subcommandRouteKey(subcommand)];
+	// Unreachable while the table above type-checks: `handlers` is total over this
+	// parent's declared keys and `splitSubcommandRoute` returns only those rows.
+	// Failing closed rather than throwing keeps the worst case an argument refusal.
+	return handler === undefined ? undefined : { subcommand, handler, rest };
+}
+
+/** The runtime half of `JoinRoute`; the two must agree on the separator. */
+export function subcommandRouteKey(subcommand: CealSubcommandDefinition): string {
+	return subcommand.route.join(" ");
 }

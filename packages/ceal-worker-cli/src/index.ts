@@ -28,6 +28,7 @@ import {
 	ensureCurrentSession,
 	isClassifiedClientSessionFailure,
 	runSession,
+	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
 import { type CealDiscoveryCacheKey, discoveryCacheEntryUsable } from "./discovery-cache.js";
@@ -36,11 +37,18 @@ import { createCealObserverServer } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
-import type { CealSubcommandDefinition } from "./subcommands.js";
-import { CEAL_SUBCOMMANDS, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
+import {
+	CEAL_SUBCOMMANDS,
+	type CealSubcommandDefinition,
+	type CealSubcommandHandlers,
+	findSubcommand,
+	resolveSubcommandRoute,
+	splitSubcommandRoute,
+	subcommandsOf,
+} from "./subcommands.js";
 
-export type { CealSubcommandDefinition } from "./subcommands.js";
-export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
+export type { CealSubcommandDefinition, CealSubcommandHandlers, CealSubcommandRouteKey } from "./subcommands.js";
+export { CEAL_SUBCOMMANDS, resolveSubcommandRoute, splitSubcommandRoute, subcommandRouteKey } from "./subcommands.js";
 export { renderPlainYamlDocument } from "./yaml.js";
 
 // Read from the manifest npm already owns rather than retyped here. The release
@@ -495,21 +503,72 @@ function writeCommands(io: CealCliIo): number {
 	});
 }
 
+type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandRuntime) => number;
+
+// One handler per declared guide route. The `register` rows share a handler that
+// reads its host from its own declared route, so this dispatcher still never
+// learns host names: a new host is one table row, one alias here, and one store
+// entry. What the table cannot express is which handler a route reaches, so
+// naming every route is the compile-time gate — a row added without a handler
+// used to fall through to `status` in the shipped binary.
+const GUIDE_ROUTES: CealSubcommandHandlers<"guide", GuideRouteHandler> = {
+	status: (_subcommand, io, runtime) => runGuideAction("status", undefined, io, runtime),
+	"register codex": runGuideRegister,
+	"register claude": runGuideRegister,
+};
+
+/**
+ * The route keys every runner's dispatch table actually handles, by parent.
+ *
+ * The `Record` totality `tsc` enforces is the first line of defence and not a
+ * complete one: `CealSubcommandRouteKey` reads literal route tuples, so a row
+ * declared as `route: ["x"] as string[]` — or any row built from a non-`const`
+ * value — has no literal key, demands no handler, and still compiles. That row
+ * would advertise its own leaf help, be accepted, and then dead-end in an
+ * argument error, which is the failure issue #1 exists to prevent. Exporting the
+ * keys lets one runtime gate compare dispatch against the declaration and catch
+ * the case the type system structurally cannot.
+ *
+ * A function, not a const: the four tables are defined at different points in
+ * this module, and a top-level object literal would read them in the temporal
+ * dead zone.
+ */
+export function dispatchedRouteKeys(): Readonly<Record<string, readonly string[]>> {
+	return {
+		capabilities: Object.keys(CAPABILITIES_ROUTES),
+		guide: Object.keys(GUIDE_ROUTES),
+		receipt: Object.keys(RECEIPT_ROUTES),
+		session: Object.keys(SESSION_ROUTES),
+	};
+}
+
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
-	const { subcommand, rest } = splitSubcommandRoute("guide", options);
-	if (rest.length > 0 || (options.length > 0 && !subcommand)) return writeError("invalid_argument", "Invalid guide action.", io);
-	const action = subcommand?.route[0] === "register" ? "register" : "status";
-	// The route's second token is the agent host, so a new host is one table row
-	// plus one store entry: this dispatcher never learns host names of its own.
-	// The token is validated against the host table rather than cast, so a route
-	// added without its host row is refused here instead of silently registering
-	// the default host or crashing inside the store.
-	let agent: CealAgentGuideHost | undefined;
-	if (action === "register") {
-		const requested = subcommand?.route[1];
-		if (!isCealAgentGuideHost(requested)) return writeError("invalid_argument", "Unsupported guide agent host.", io);
-		agent = requested;
+	const resolved = resolveSubcommandRoute("guide", options, GUIDE_ROUTES);
+	if (!resolved) {
+		// A bare `ceal guide` is the status route; anything else here is undeclared.
+		return options.length === 0
+			? runGuideAction("status", undefined, io, runtime)
+			: writeError("invalid_argument", "Invalid guide action.", io);
 	}
+	if (resolved.rest.length > 0) return writeError("invalid_argument", "Invalid guide action.", io);
+	return resolved.handler(resolved.subcommand, io, runtime);
+}
+
+function runGuideRegister(subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandRuntime): number {
+	// The route's second token is the agent host, validated against the host table
+	// rather than cast, so a route declared without its host row is refused here
+	// instead of silently registering the default host or crashing inside the store.
+	const requested = subcommand.route[1];
+	if (!isCealAgentGuideHost(requested)) return writeError("invalid_argument", "Unsupported guide agent host.", io);
+	return runGuideAction("register", requested, io, runtime);
+}
+
+function runGuideAction(
+	action: "status" | "register",
+	agent: CealAgentGuideHost | undefined,
+	io: CealCliIo,
+	runtime: CealCommandRuntime,
+): number {
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
 	const state = inspect(agent);
@@ -556,12 +615,12 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	// `--detail` (either case) restores the full per-capability input contract
 	// that the concise default omits. Both are stripped before the existing
 	// parsers, which do not know the flags.
-	const targets = splitSubcommandRoute("capabilities", options).subcommand !== undefined;
-	const wantsFresh = !targets && options.includes("--fresh");
+	const policy = capabilitiesRoutePolicy(options);
+	const wantsFresh = policy.acceptsFresh && options.includes("--fresh");
 	const wantsDetail = options.includes("--detail");
 	const effectiveOptions = options.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
 	const selection = parseTargetCatalogOptions(effectiveOptions);
-	if (selection === null) return writeCapabilitiesArgumentError(options, targets, io);
+	if (selection === null) return writeCapabilitiesArgumentError(options, policy, io);
 	const resolved =
 		selection.kind === "targets"
 			? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
@@ -656,33 +715,73 @@ const CAPABILITIES_TARGETS_VALUE_OPTIONS = new Set(["--capability", "--cursor", 
 const CAPABILITIES_TARGETS_FLAG_OPTIONS = new Set(["--detail"]);
 
 /**
+ * Everything about handling one `capabilities` route that is not the same for
+ * every route. It lives in the handler table rather than in a `targets: boolean`
+ * threaded through three call sites: that boolean read "some declared route
+ * matched" but was consumed as "the targets route", so a second declared route
+ * would have been refused under the targets route's name and option set — the
+ * same fallthrough this slice removed, in a shape `tsc` cannot see.
+ */
+interface CapabilitiesRoutePolicy {
+	/** How a refusal names the route the operator actually typed. */
+	route: string;
+	valueOptions: ReadonlySet<string>;
+	flagOptions: ReadonlySet<string>;
+	/** Only the cacheable catalog case has a discovery cache for `--fresh` to bypass. */
+	acceptsFresh: boolean;
+	/** Only a route that selects a target may report a failed target selection. */
+	selectsTarget: boolean;
+	parse: (rest: readonly string[]) => ParsedTargetCatalogOptions;
+}
+
+// The catalog is the no-route case, so it is the fallback policy rather than a
+// table row; every declared route names its own policy.
+const CAPABILITIES_CATALOG_POLICY: CapabilitiesRoutePolicy = {
+	route: "ceal capabilities",
+	valueOptions: CAPABILITIES_CATALOG_VALUE_OPTIONS,
+	flagOptions: CAPABILITIES_CATALOG_FLAG_OPTIONS,
+	acceptsFresh: true,
+	selectsTarget: false,
+	parse: parseCapabilityCatalogOptions,
+};
+
+const CAPABILITIES_ROUTES: CealSubcommandHandlers<"capabilities", CapabilitiesRoutePolicy> = {
+	targets: {
+		route: "ceal capabilities targets",
+		valueOptions: CAPABILITIES_TARGETS_VALUE_OPTIONS,
+		flagOptions: CAPABILITIES_TARGETS_FLAG_OPTIONS,
+		acceptsFresh: false,
+		selectsTarget: true,
+		parse: parseTargetCatalogSelection,
+	},
+};
+
+function capabilitiesRoutePolicy(options: readonly string[]): CapabilitiesRoutePolicy {
+	return resolveSubcommandRoute("capabilities", options, CAPABILITIES_ROUTES)?.handler ?? CAPABILITIES_CATALOG_POLICY;
+}
+
+/**
  * A rejected `capabilities` argv used to report a failed *target selection*
  * regardless of what was actually wrong, which sent readers after grants and
  * approval targets when the real fault was a flag the route does not declare —
  * and on the bare catalog route, no target selection was even attempted. Name
  * the unknown option when there is one, and point at the typed route's help.
  */
-function writeCapabilitiesArgumentError(options: readonly string[], targets: boolean, io: CealCliIo): number {
-	const route = targets ? "ceal capabilities targets" : "ceal capabilities";
-	const nextAction = `Run '${route} --help'.`;
-	const unknown = unknownNamedOption(
-		targets ? splitSubcommandRoute("capabilities", options).rest : options,
-		targets ? CAPABILITIES_TARGETS_VALUE_OPTIONS : CAPABILITIES_CATALOG_VALUE_OPTIONS,
-		targets ? CAPABILITIES_TARGETS_FLAG_OPTIONS : CAPABILITIES_CATALOG_FLAG_OPTIONS,
-	);
+function writeCapabilitiesArgumentError(options: readonly string[], policy: CapabilitiesRoutePolicy, io: CealCliIo): number {
+	const nextAction = `Run '${policy.route} --help'.`;
+	const rest = resolveSubcommandRoute("capabilities", options, CAPABILITIES_ROUTES)?.rest ?? options;
+	const unknown = unknownNamedOption(rest, policy.valueOptions, policy.flagOptions);
 	if (unknown !== null) {
-		return writeError("invalid_argument", `Unknown option '${unknown}' for '${route}'.`, io, nextAction);
+		return writeError("invalid_argument", `Unknown option '${unknown}' for '${policy.route}'.`, io, nextAction);
 	}
-	// Every option is declared, so the fault is a value, a duplicate, or an
-	// operand. Only the targets route selects a target, so only it may say so.
-	const message = targets ? "Invalid capabilities target selection." : "Invalid capabilities options.";
+	// Every option is declared, so the fault is a value, a duplicate, or an operand.
+	const message = policy.selectsTarget ? "Invalid capabilities target selection." : "Invalid capabilities options.";
 	return writeError("invalid_argument", message, io, nextAction);
 }
 
 function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
-	const { subcommand, rest } = splitSubcommandRoute("capabilities", options);
-	if (!subcommand) return parseCapabilityCatalogOptions(options);
-	return parseTargetCatalogSelection(rest);
+	const resolved = resolveSubcommandRoute("capabilities", options, CAPABILITIES_ROUTES);
+	return resolved ? resolved.handler.parse(resolved.rest) : CAPABILITIES_CATALOG_POLICY.parse(options);
 }
 
 function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
@@ -1314,9 +1413,21 @@ function isSafeRequestRef(value: string | undefined): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
 }
 
+type ReceiptRouteParser = (rest: readonly string[]) => { requestRef: string; profileRef?: string } | null;
+
+// `receipt` declares one route today, so "a declared subcommand means `show`" was
+// still correct — and would have stopped being correct, silently, on the next row.
+const RECEIPT_ROUTES: CealSubcommandHandlers<"receipt", ReceiptRouteParser> = {
+	show: parseReceiptShowOptions,
+};
+
 function parseReceiptOptions(options: readonly string[]): { requestRef: string; profileRef?: string } | null {
-	const { subcommand, rest } = splitSubcommandRoute("receipt", options);
-	if (!subcommand || !isSafeRequestRef(rest[0])) return null;
+	const resolved = resolveSubcommandRoute("receipt", options, RECEIPT_ROUTES);
+	return resolved ? resolved.handler(resolved.rest) : null;
+}
+
+function parseReceiptShowOptions(rest: readonly string[]): { requestRef: string; profileRef?: string } | null {
+	if (!isSafeRequestRef(rest[0])) return null;
 	const profile = extractProfileOption(rest.slice(1));
 	return profile && profile.remaining.length === 0
 		? { requestRef: rest[0]!, ...(profile.value ? { profileRef: profile.value } : {}) }

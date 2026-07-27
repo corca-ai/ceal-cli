@@ -10,19 +10,27 @@ import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { CealSessionStoreError } from "./profile-store.js";
-import { splitSubcommandRoute } from "./subcommands.js";
+import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 
+// One handler per declared session route, keyed by that route. A new row in
+// `CEAL_SUBCOMMANDS` fails to compile until it is named here, which is what stops
+// it from being swallowed by whichever branch happens to be last.
+export const SESSION_ROUTES: CealSubcommandHandlers<"session", SessionRouteHandler> = {
+	enroll: (rest, io, runtime) => enrollSession(rest, io, runtime),
+	logout: (rest, io, runtime) => (rest.length === 0 ? runSessionLogout(io, runtime) : writeEnrollmentInvalidArgument(io)),
+};
+
+type SessionRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => Promise<number> | number;
+
 export async function runSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	// Both session routes are resolved from the declared subcommand table, so the
-	// routes help advertises and the routes this runner accepts cannot diverge.
-	const { subcommand, rest } = splitSubcommandRoute("session", options);
-	if (!subcommand) return options.length === 0 ? showSession(io, runtime) : writeEnrollmentInvalidArgument(io);
-	if (subcommand.route[0] === "logout") {
-		return rest.length === 0 ? runSessionLogout(io, runtime) : writeEnrollmentInvalidArgument(io);
-	}
-	return enrollSession(rest, io, runtime);
+	// Both the routes this runner accepts and the handler each one reaches are
+	// resolved from the declared subcommand table, so help, acceptance, and
+	// dispatch cannot diverge.
+	const resolved = resolveSubcommandRoute("session", options, SESSION_ROUTES);
+	if (!resolved) return options.length === 0 ? showSession(io, runtime) : writeEnrollmentInvalidArgument(io);
+	return resolved.handler(resolved.rest, io, runtime);
 }
 
 async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {

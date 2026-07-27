@@ -11,7 +11,16 @@ import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
-import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
+import {
+	CEAL_COMMANDS,
+	CEAL_SUBCOMMANDS,
+	dispatchedRouteKeys,
+	renderPlainYamlDocument,
+	resolveSubcommandRoute,
+	runCealCommand,
+	splitSubcommandRoute,
+	subcommandRouteKey,
+} from "../dist/index.js";
 
 // The version the worker introduces itself to the Gateway with is derived from
 // the manifest, so asserting a literal here would reintroduce the hand-bumped
@@ -152,6 +161,82 @@ test("route acceptance is derived from the declaration", async () => {
 	}
 	// A route declared under a different parent is not accepted here.
 	assert.equal(splitSubcommandRoute("capabilities", ["status"]).subcommand, undefined);
+});
+
+// Acceptance being table-derived was never the whole invariant: every runner then
+// picked its handler by testing one token and falling through, so `runSession`
+// sent every non-`logout` route to enrollment and `runGuide` sent every
+// non-`register` route to status. A row added to the table alone passed this
+// suite — which proves help and refusal — and misrouted in the shipped binary.
+// Dispatch keys on the route's own declaration now; `tsc` rejects a handler table
+// that is not total over one parent's declared routes, and this proves the
+// resolver those tables are read through does not fall through.
+test("dispatch selects the handler the route itself declares", () => {
+	for (const parent of new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
+		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
+		// A total table whose handlers are distinguishable only by which route they
+		// were registered under: a fallthrough would return a sibling's key.
+		const handlers = Object.fromEntries(declared.map((subcommand) => [subcommandRouteKey(subcommand), () => subcommandRouteKey(subcommand)]));
+		for (const subcommand of declared) {
+			const key = subcommandRouteKey(subcommand);
+			const resolved = resolveSubcommandRoute(parent, [...subcommand.route, "--flag", "value"], handlers);
+			assert.ok(resolved, `${parent} ${key} resolved to no handler`);
+			assert.equal(resolved.handler(), key, `${parent} ${key} reached another route's handler`);
+			assert.deepEqual(resolved.subcommand.route, subcommand.route);
+			assert.deepEqual(resolved.rest, ["--flag", "value"]);
+		}
+		// An undeclared route reaches no handler rather than the nearest one.
+		assert.equal(resolveSubcommandRoute(parent, ["bogus-route"], handlers), undefined);
+		assert.equal(resolveSubcommandRoute(parent, [], handlers), undefined);
+	}
+	// A declared route whose handler is missing fails closed as undeclared instead
+	// of throwing, so the worst case is an argument refusal rather than a crash.
+	assert.equal(resolveSubcommandRoute("session", ["logout"], {}), undefined);
+});
+
+// The type-level totality above is not a complete gate, which is why this one
+// exists at runtime. `CealSubcommandRouteKey` reads *literal* route tuples, so a
+// row declared `route: ["refresh"] as string[]` — or built from any non-`const`
+// value — contributes no key, demands no handler, and compiles clean. Verified by
+// probe: that row builds green, then advertises leaf help, passes acceptance, and
+// dead-ends in `invalid_argument` — issue #1's failure from the other side. This
+// compares dispatch against the declaration where the type system cannot.
+test("every declared route has a handler in the runner that serves it", () => {
+	const dispatched = dispatchedRouteKeys();
+	const parents = new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent));
+	for (const parent of parents) {
+		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent)
+			.map((subcommand) => subcommandRouteKey(subcommand))
+			.sort();
+		assert.deepEqual(
+			[...(dispatched[parent] ?? [])].sort(),
+			declared,
+			`${parent}: the declaration table and the runner's dispatch table disagree`,
+		);
+	}
+	// And no runner dispatches a parent that declares nothing, which would be a
+	// handler for a route no help advertises.
+	for (const parent of Object.keys(dispatched)) {
+		assert.ok(parents.has(parent), `${parent} has a dispatch table but declares no route`);
+	}
+});
+
+// Route keys are the declared tokens joined by a space, so a token containing a
+// space would make two different declarations collide on one key and let a single
+// handler satisfy both — the totality check above would read "covered" while one
+// route has no handler of its own. An empty route is unreachable for the same
+// reason: it joins to "" and `splitSubcommandRoute` never matches it.
+test("every declared route is a non-empty sequence of single-word tokens", () => {
+	for (const subcommand of CEAL_SUBCOMMANDS) {
+		const key = subcommandRouteKey(subcommand);
+		assert.ok(subcommand.route.length > 0, `${subcommand.parent} declares an empty route`);
+		for (const token of subcommand.route) {
+			assert.match(token, /^[a-z][a-z0-9-]*$/u, `${subcommand.parent} ${key} has a token that is not one lowercase word`);
+		}
+	}
+	// Distinct declarations therefore have distinct keys.
+	const keys = CEAL_SUBCOMMANDS.map((subcommand) => `${subcommand.parent} ${subcommandRouteKey(subcommand)}`);
+	assert.equal(new Set(keys).size, keys.length, "two declarations collide on one route key");
 });
 
 // A parent that advertises a subcommand row an agent cannot descend into
