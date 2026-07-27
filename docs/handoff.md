@@ -7,27 +7,28 @@ Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계�
 
 ## Workflow Trigger
 
-- 이 파일이 언급되면 **`## Next Session` 순서대로 착수한다.** 계획은 이미 돌렸으니 다시 계획하지
-  말 것 — 다만 착수 전 그 항목의 원문(`docs/requests/from-gateway-lane/`)과 계획 문서는 읽는다.
+- 이 파일만 언급되면 **`charness:impl`을 첫 착수 가능 항목(현재 2번)으로 시작한다.** 계획은
+  끝났으니 **재계획도 chunked routing도 돌리지 말 것** — 기본 라우팅은 backlog를 다시 랭킹하려
+  들고, 그건 이 순서를 되돌린다. 착수 전엔 그 항목의 원문과 계획 문서만 읽는다.
 - prod 세션 생사 판정에만 `npm run probe`를 못 쓴다(설치 표면 포크는 여전히 probe만).
   `ceal capabilities --fresh`는 **실세션 readback**이라 승인 후에만.
 
 ## Continuation Capability
 
-**지금 막힘 없이 되는 것: 2·3·4, 그리고 5를 브랜치에서.** 6은 1의 답이 있어야 풀린다.
+**지금 막힘 없이 되는 것: 2·3·4, 그리고 5를 브랜치에서.** 6은 1의 답이 와야 풀린다.
 계획 문서의 "뒤집은 판단 셋"을 먼저 읽을 것 — 어제 핸드오프가 셋을 틀렸다.
 
 ## Next Session
 
-1. **`vinc`에 질문 둘**(6이 걸린다): ① `ceal-gateway-handoff-0.66.1.tar.gz`의
-   **`handoff_manifest_sha256`** — readback 노트에 없는데 `worker-gateway-handoff-archive.mjs:138`이
-   요구하고 아카이브 안에서만 계산된다. ② **아카이브 바이트 입수 경로**(run `30311215898`).
+1. **`vinc` 답 대기**(6이 걸린다). 질문 둘(`handoff_manifest_sha256`, 아카이브 입수 경로)은
+   2026-07-28 [전달 완료](requests/2026-07-28-to-gateway-lane-artifact-consumption.md).
+   **답은 `git fetch`로 안 온다** — `oc:~/ceal`의 untracked 노트를 직접 볼 것.
 2. **렌더러 문구 확인·종료** — 이미 `index.ts:965`에 정확히 있고 concise·`--detail` 양쪽에 걸린다.
    **일감이 아니라 확인**이다.
 3. **installed-acceptance result 계약 반환** —
    [요청](requests/from-gateway-lane/2026-07-27-candidate-result-ingress-contract.md).
-   필수 사실 넷·불가 입력 여섯은 원문 그대로. 함정: 다른 답의 "private GitHub Release asset 가능"과
-   합쳐 "release URL이면 된다"로 읽지 말 것(**가변 release 선택은 불가 입력**).
+   필수 사실 넷·불가 입력 여섯은 원문 그대로. 함정: 다른 답의 "private GitHub Release asset
+   가능"과 합쳐 "release URL이면 된다"로 읽지 말 것(**가변 release 선택은 불가 입력**).
 4. **`capability_access` 비추론 테스트** —
    [계약](requests/from-gateway-lane/2026-07-27-gateway-multi-target-selection-contract.md).
    지금 코드는 추론하지 않지만 **아무것도 그걸 붙들지 않는다.** 6과 무관하게 착수 가능.
@@ -48,9 +49,8 @@ Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계�
 - **`gateway-handoff-v0.66.1`을 로컬 대조했다**: tag `c5a44c3f…`, commit `2747f6b1…`, producer
   tree `b6728f2a…` **셋 다 일치**, protocol이 `0.66.1` 선언(0.65.0 사태 이후 처음으로 버전과
   정체성이 일치). **확인 못 한 것**: 아카이브·서명·인증서·cosign — Actions 아티팩트가 필요하다.
-- **protocol subtree `ac602cc1…`는 owner 체크아웃에서 유도했다**(`git rev-parse
-  gateway-handoff-v0.66.1^{commit}:packages/ceal-protocol`) — **아홉 통에 없는 값**이니 pin에
-  넣을 때 근거를 함께 적을 것. owner main(`41f88c1a…`)과 다르다.
+- **protocol subtree `ac602cc1…`는 owner 체크아웃에서 유도했다**(태그 커밋의
+  `packages/ceal-protocol`) — **아홉 통에 없는 값**이니 pin에 넣을 때 근거를 함께 적을 것.
 - **v0.66.1이 `capability_ids`는 받고 `write_request_ref`는 안 받는다**(태그의 protocol
   `index.ts` 205·199행).
 - **레인 간 노트가 `git fetch`로 안 보인다.** `oc`는 자기 remote보다 34 커밋 앞이고 노트는
