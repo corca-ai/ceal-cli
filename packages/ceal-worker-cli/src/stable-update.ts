@@ -7,10 +7,69 @@ import type { CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.j
 
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
+// Every other wait in this CLI is bounded, and this one was not: `ceal update`
+// spawns the staged installer and waits for `close` forever. A release origin
+// that accepts the connection and then goes silent — or a concurrent update
+// holding a resource — left the command with no deadline, no envelope, and
+// nothing to report. An agent cannot distinguish that from slow work.
+//
+// Two bounds rather than one, because the two things being run are not alike.
+// A version readback is a local `exec` of an installed binary with no network in
+// it, so anything past a few seconds is already wrong.
+//
+// The installer's bound is a backstop for a wedged process, not a latency
+// budget: `install-ceal.sh` bounds each of its own downloads on *stalling*
+// rather than on total time, precisely so a slow-but-working link is not cut
+// off, and this number must not quietly undo that. Nineteen signed assets over a
+// link slow enough to be painful and still fine is comfortably more than ten
+// minutes, so ten minutes here would fail installs the inner bounds deliberately
+// allow. A black-holed origin does not reach this deadline at all — it fails at
+// the connect or stall bound, in seconds.
+const VERSION_READBACK_TIMEOUT_MS = 30_000;
+const INSTALLER_TIMEOUT_MS = 30 * 60_000;
+// A process that ignores SIGTERM must not turn a bounded wait back into an
+// unbounded one, so the escalation to SIGKILL is itself on a clock. The grace is
+// not politeness: `install-ceal.sh` traps TERM to roll back a half-staged
+// generation and release its install lock, and that lock is a bare `mkdir` on
+// hosts without `flock` — macOS — where nothing else will ever clear it.
+const TERMINATION_GRACE_MS = 5_000;
+// `exit` fires when the process is gone; `close` additionally waits for every
+// inherited stdio pipe to reach EOF, which a grandchild that outlived it holds
+// open indefinitely. Waiting for `close` therefore reintroduces exactly the hang
+// this deadline exists to stop — on the success path too, not just after a kill.
+// So the result is taken at `exit` plus a short drain for output still in flight.
+const POST_EXIT_DRAIN_MS = 250;
+// After SIGKILL there is nothing left to wait for, so the result is reported
+// without waiting for pipes a surviving grandchild may still hold.
+const POST_KILL_REPORT_MS_DEFAULT = 1_000;
+
+export interface CealStableUpdateDeadlines {
+	/** Bound on one `ceal version` readback of an installed binary. */
+	versionReadbackMs: number;
+	/** Backstop on the staged installer, whose own fetches are bounded inside it. */
+	installerMs: number;
+	/** How long a process gets to honour SIGTERM before it is killed outright. */
+	terminationGraceMs: number;
+	/** How long after SIGKILL the result is reported without waiting for `close`. */
+	postKillReportMs: number;
+}
+
+const DEFAULT_DEADLINES: CealStableUpdateDeadlines = {
+	versionReadbackMs: VERSION_READBACK_TIMEOUT_MS,
+	installerMs: INSTALLER_TIMEOUT_MS,
+	terminationGraceMs: TERMINATION_GRACE_MS,
+	postKillReportMs: POST_KILL_REPORT_MS_DEFAULT,
+};
+
 export function createCealStableUpdateRunner(
 	executablePath: string,
 	environment: NodeJS.ProcessEnv,
+	// Supplied by the caller for the same reason `withLocalStoreLock` takes its
+	// `maxWaitMs` that way: the real bounds are minutes, and a test that had to
+	// wait them out would not be run. `bin.ts` takes the defaults.
+	overrides: Partial<CealStableUpdateDeadlines> = {},
 ): () => Promise<CealStableUpdateResult> {
+	const deadlines = { ...DEFAULT_DEADLINES, ...overrides };
 	return async () => {
 		const startedAt = Date.now();
 		let installed: InstalledWorkerRelease;
@@ -23,7 +82,7 @@ export function createCealStableUpdateRunner(
 				"Install a signed stable worker release, then run 'ceal update' from that installed command.",
 			);
 		}
-		const previous = await readVersion(installed.commandPath);
+		const previous = await readVersion(installed.commandPath, deadlines);
 		if (!previous)
 			return unavailable(
 				"update_readback_failed",
@@ -41,7 +100,17 @@ export function createCealStableUpdateRunner(
 				CEAL_MINIMUM_VERSION: previous.version,
 			},
 			installed.generationDirectory,
+			{ ...deadlines, timeoutMs: deadlines.installerMs },
 		);
+		// Named separately from a failed install because the operator action
+		// differs: a timeout says nothing about whether the release is sound, and
+		// the useful next move is to check the network path rather than to reinstall.
+		if (run.timedOut)
+			return unavailable(
+				"update_failed",
+				"The stable signed worker update did not finish within its deadline and was stopped.",
+				"Check connectivity to the worker release origin, then retry; the installer rolled back whatever it had staged.",
+			);
 		if (run.code !== 0 || run.truncated)
 			return unavailable(
 				"update_failed",
@@ -49,7 +118,7 @@ export function createCealStableUpdateRunner(
 				"Retry once, then reinstall an explicitly approved signed worker release.",
 			);
 		const commandAfterUpdate = join(installed.installDirectory, "ceal");
-		const current = await readVersion(commandAfterUpdate);
+		const current = await readVersion(commandAfterUpdate, deadlines);
 		if (!current)
 			return unavailable(
 				"update_readback_failed",
@@ -159,9 +228,14 @@ function escapePattern(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-async function readVersion(commandPath: string): Promise<{ version: string; platform: CealWorkerPlatform } | null> {
-	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath));
-	if (run.code !== 0 || run.truncated || run.stderr !== "") return null;
+async function readVersion(
+	commandPath: string,
+	deadlines: CealStableUpdateDeadlines,
+): Promise<{ version: string; platform: CealWorkerPlatform } | null> {
+	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath), { ...deadlines, timeoutMs: deadlines.versionReadbackMs });
+	// A readback that had to be killed is not a version, and it reaches the same
+	// `update_readback_failed` envelope as a readback that answered nonsense.
+	if (run.timedOut || run.code !== 0 || run.truncated || run.stderr !== "") return null;
 	try {
 		const payload = parse(run.stdout) as { schema_version?: unknown; command?: unknown; version?: unknown };
 		return parseWorkerVersion(payload, commandPath);
@@ -191,12 +265,60 @@ async function runProcess(
 	args: readonly string[],
 	env: NodeJS.ProcessEnv,
 	cwd: string,
-): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {
+	bounds: { timeoutMs: number; terminationGraceMs: number; postKillReportMs: number },
+): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean; timedOut: boolean }> {
 	return new Promise((resolveResult) => {
-		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+		// `detached` puts the child in its own process group so the whole tree can
+		// be signalled. Signalling only `/bin/sh` does nothing useful: a POSIX shell
+		// does not run a trap while blocked on a foreground child, so a SIGTERM
+		// arriving while it waits on `curl` is merely queued, and the SIGKILL five
+		// seconds later destroys the shell before its rollback ever runs — leaving a
+		// staged generation, a temp directory of downloaded assets, and an install
+		// lock that on macOS nothing clears. Killing the group takes `curl` down,
+		// the shell's wait returns, and the trap runs the way it was written to.
+		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 		let stdout = "";
 		let stderr = "";
 		let truncated = false;
+		let timedOut = false;
+		let settled = false;
+		let exitCode: number | null = null;
+		const timers: NodeJS.Timeout[] = [];
+		const settle = (code: number | null) => {
+			if (settled) return;
+			settled = true;
+			for (const timer of timers) clearTimeout(timer);
+			// Deciding the answer is not the same as being able to return it. A
+			// process holding these pipes keeps the event loop alive, so `ceal update`
+			// would print nothing and sit there having already decided. This was missed
+			// the first time: the envelope arrived on time and the process still hung.
+			//
+			// Not covered by a test, deliberately recorded rather than implied: since
+			// the deadline signals the whole process group, every descendant that
+			// inherited these pipes dies with it, and only something that escaped the
+			// group — a `setsid` — could still hold them. Removing these three lines
+			// keeps the suite green. They stay as the cheap guard against the one
+			// failure mode this whole deadline exists to prevent.
+			child.stdout.destroy();
+			child.stderr.destroy();
+			child.unref();
+			resolveResult({ code, stdout, stderr, truncated, timedOut });
+		};
+		const after = (delay: number, action: () => void) => {
+			const timer = setTimeout(action, delay);
+			// The deadline must not be the reason the process stays alive: an update
+			// that finished has nothing left to wait for.
+			timer.unref();
+			timers.push(timer);
+		};
+		after(bounds.timeoutMs, () => {
+			timedOut = true;
+			signalGroup(child, "SIGTERM");
+			after(bounds.terminationGraceMs, () => {
+				signalGroup(child, "SIGKILL");
+				after(bounds.postKillReportMs, () => settle(null));
+			});
+		});
 		const capture = (stream: "stdout" | "stderr", chunk: Buffer) => {
 			if (truncated) return;
 			const next = (stream === "stdout" ? stdout : stderr) + chunk.toString("utf8");
@@ -209,9 +331,28 @@ async function runProcess(
 		};
 		child.stdout.on("data", (chunk: Buffer) => capture("stdout", chunk));
 		child.stderr.on("data", (chunk: Buffer) => capture("stderr", chunk));
-		child.on("error", () => resolveResult({ code: null, stdout, stderr, truncated }));
-		child.on("close", (code) => resolveResult({ code, stdout, stderr, truncated }));
+		child.on("error", () => settle(null));
+		child.on("exit", (code) => {
+			exitCode = code;
+			after(POST_EXIT_DRAIN_MS, () => settle(exitCode));
+		});
+		child.on("close", (code) => settle(code));
 	});
+}
+
+// Signals the child's whole process group, falling back to the child alone if
+// the group is already gone. `kill` on a departed child is a no-op rather than a
+// throw, but the negated-pid form raises ESRCH once nothing in the group is left.
+function signalGroup(child: ReturnType<typeof spawn>, signal: "SIGTERM" | "SIGKILL"): void {
+	try {
+		if (child.pid !== undefined) process.kill(-child.pid, signal);
+	} catch {
+		try {
+			child.kill(signal);
+		} catch {
+			/* Already gone; the deadline has nothing left to stop. */
+		}
+	}
 }
 
 function digest(bytes: Buffer | string): string {

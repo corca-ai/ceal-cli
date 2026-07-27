@@ -33,6 +33,38 @@ TARGET_NEEDS_LINK_UPDATE=0
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is required"; }
 
+# Every download is bounded, and the reason is not politeness about slow links.
+# `curl` with no deadline waits indefinitely on an origin that completes the
+# connection and then goes silent — a black hole, a hung proxy, a load balancer
+# holding the socket open. `ceal update` runs this script and waits for it, so an
+# unbounded fetch here made that command unbounded too: no envelope, no exit,
+# nothing for an agent to read. Every other wait in this CLI is bounded.
+#
+# The bound is a *stall* bound, not a transfer cap, and that distinction is the
+# whole design. The worker binary is a Node SEA — the runtime plus a blob, over a
+# hundred megabytes — and a flat --max-time large enough for that on a slow link
+# is also large enough to sit in a black hole, while one small enough to catch
+# the black hole hard-fails an install that was working. --speed-limit with
+# --speed-time separates them: a transfer moving at all keeps going however long
+# it takes, and one that stops moving is cut off in seconds. --max-time stays as
+# an absolute backstop set well past any legitimate transfer.
+CURL_CONNECT_TIMEOUT=15
+CURL_STALL_BYTES=1024
+CURL_STALL_SECONDS=30
+CURL_MAX_TIME_ASSET=3600
+CURL_MAX_TIME_POINTER=120
+
+# Route every download through here rather than calling `curl` directly, so one
+# added later cannot quietly reintroduce an unbounded wait.
+fetch() {
+  [ "$#" -ge 2 ] || fail "fetch requires a max-time and a URL"
+  fetch_max_time="$1"; shift
+  curl -fsSL \
+    --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+    --speed-limit "$CURL_STALL_BYTES" --speed-time "$CURL_STALL_SECONDS" \
+    --max-time "$fetch_max_time" "$@"
+}
+
 # macOS ships shasum but not sha256sum; both print "<sha256>  <path>".
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -78,7 +110,7 @@ bootstrap_cosign() {
   cosign_dir="$TMP_DIR/cosign-bootstrap"
   mkdir "$cosign_dir" || fail "Could not create the ephemeral cosign bootstrap directory"
   cosign_url="$RELEASE_ORIGIN/tooling/cosign/$COSIGN_VERSION/cosign-$PLATFORM"
-  curl -fsSL "$cosign_url" -o "$cosign_dir/cosign" || fail "Could not download pinned cosign $COSIGN_VERSION"
+  fetch "$CURL_MAX_TIME_ASSET" "$cosign_url" -o "$cosign_dir/cosign" || fail "Could not download pinned cosign $COSIGN_VERSION"
   [ "$(sha256_of "$cosign_dir/cosign")" = "$cosign_sha256" ] || fail "Pinned cosign $COSIGN_VERSION checksum mismatch; refusing to use it"
   chmod 755 "$cosign_dir/cosign"
   PATH="$cosign_dir:$PATH"; export PATH
@@ -88,7 +120,7 @@ is_tag() { printf '%s\n' "$1" | grep -Eq '^ceal-v(0|[1-9][0-9]*)[.](0|[1-9][0-9]
 
 download_asset() {
   download_name="$1"
-  curl -fsSL "$BASE_URL/$download_name" -o "$TMP_DIR/$download_name" \
+  fetch "$CURL_MAX_TIME_ASSET" "$BASE_URL/$download_name" -o "$TMP_DIR/$download_name" \
     || fail "Could not download signed worker asset $download_name"
 }
 
@@ -96,7 +128,7 @@ download_asset() {
 # immutable tag and its signed SHA256SUMS bytes; every asset is then checked
 # against the exact tag-bound OIDC identity below.
 resolve_stable_release() {
-  curl -fsSL "$WORKER_RELEASE_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
+  fetch "$CURL_MAX_TIME_POINTER" "$WORKER_RELEASE_ORIGIN/stable/ceal-worker-stable-release.json" -o "$TMP_DIR/stable-release.json" \
     || fail "Could not resolve the worker stable release pointer"
   # Extracted by key rather than by position so a later added field does not
   # break an already installed generation. A key that appears more than once is

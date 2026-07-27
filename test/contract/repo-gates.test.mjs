@@ -101,6 +101,48 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	);
 });
 
+// `ceal update` runs this installer and waits for it, so an unbounded fetch here
+// made that command unbounded too — no envelope, no exit, nothing an agent can
+// read. The bound belongs to every download rather than to the three that
+// existed when it was added, so this asserts the shape — one helper, every
+// download through it — as well as the flags. A fourth download calling the
+// network directly is exactly how this regresses, and it would pass a test that
+// only checked the existing three.
+test("every download in the worker installer is bounded", () => {
+	const installer = read("install-ceal.sh");
+	const lines = installer.split("\n");
+	// Bounded by a line that is exactly `}` rather than by the first `}` in the
+	// text: the helper body contains `${...}`, and a non-greedy scan stops inside
+	// it, truncating the helper and failing this test against the wrong region.
+	const opens = lines.findIndex((line) => /^fetch\(\)\s*\{/u.test(line));
+	assert.notEqual(opens, -1, "install-ceal.sh must define the fetch helper every download goes through");
+	const closes = lines.findIndex((line, index) => index > opens && line.trim() === "}");
+	assert.notEqual(closes, -1, "the fetch helper must be closed by a line that is exactly '}'");
+	const helper = lines.slice(opens, closes + 1);
+
+	const helperText = helper.join("\n");
+	assert.match(helperText, /--connect-timeout/u, "fetch must bound how long an origin may take to answer at all");
+	// Stall detection rather than a flat transfer cap: the worker binary is a Node
+	// SEA of well over a hundred megabytes, and a --max-time small enough to catch
+	// a black hole would hard-fail a slow link that is working fine.
+	assert.match(helperText, /--speed-limit/u, "fetch must cut off a transfer that has stopped moving");
+	assert.match(helperText, /--speed-time/u, "fetch must say how long a stall is tolerated");
+	assert.match(helperText, /--max-time/u, "fetch must keep an absolute backstop above the stall bound");
+
+	// Any downloader outside the helper is an unbounded wait, whichever tool it
+	// reaches for. This cannot see `curl` invoked through a variable, so it is a
+	// guard against the accident, not against someone routing around it.
+	const outside = lines.filter((line, index) => index < opens || index > closes);
+	for (const [number, line] of outside.entries()) {
+		if (/command -v|for tool in|^\s*#/u.test(line)) continue;
+		assert.doesNotMatch(
+			line,
+			/\b(?:curl|wget)\b/u,
+			`install-ceal.sh:${number + 1} downloads outside fetch(); route it through the helper so it is bounded`,
+		);
+	}
+});
+
 // The release procedure used to be "bump the eight version-bearing files by
 // hand", and two of those eight were version literals inlined into request
 // bodies with no gate at all — a missed one would introduce the client to the
