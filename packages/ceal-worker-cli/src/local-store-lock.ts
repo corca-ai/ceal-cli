@@ -132,8 +132,16 @@ function staleLockOwner(options: LocalStoreLockOptions): { pid: number; nonce: s
 		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
 	}
 	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) options.onUnsafe();
+	// An owner record with the right shape and the right mode but unreadable
+	// content is a holder that died between creating the file and writing it —
+	// the same abandonment as a missing owner file, and reclaimable on the same
+	// grace. Refusing it outright wedged the store forever instead: a crash
+	// between `openSync(…, "wx")` and its write left a zero-byte `owner.json`,
+	// and from then on every session refresh, enroll, logout, and receipt append
+	// failed as `unsafe_store` with nothing anywhere to clear it. The mode check
+	// above is the security one and still refuses.
 	const parsed = readLockOwner(options.lockPath);
-	if (!parsed) options.onUnsafe();
+	if (!parsed) return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
 	return parsed;
 }
 
@@ -157,6 +165,13 @@ function processMissing(pid: number, options: LocalStoreLockOptions): boolean {
 		return false;
 	} catch (error) {
 		if (nodeErrorCode(error) === "ESRCH") return true;
+		// EPERM is proof the pid *exists*, just under another user — ordinary pid
+		// reuse in a container or a shared host. Reporting that as `unsafe_store`
+		// named a security condition for a recycled pid and left the session store
+		// refusing every write for as long as that process lived. It is a live
+		// holder we cannot signal, so it takes the same path as any other live
+		// holder: keep waiting, and fail as `busy` at the deadline.
+		if (nodeErrorCode(error) === "EPERM") return false;
 		options.onUnsafe();
 	}
 }

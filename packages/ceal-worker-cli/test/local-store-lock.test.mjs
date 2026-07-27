@@ -157,6 +157,66 @@ test("a holder whose lock was reclaimed does not delete its successor's", async 
 	});
 });
 
+// Both cases below used to be permanent `unsafe_store`: a store that refuses
+// every write from then on, with nothing anywhere to clear it. Neither is a
+// security condition — one is a crash, the other is ordinary pid reuse — so both
+// belong on a recoverable path.
+
+test("an owner record that exists but cannot be read is reclaimed, not refused forever", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		// What a crash between `openSync(…, "wx")` and its write leaves behind: the
+		// right shape, the right mode, no content.
+		mkdirSync(lockPath, { mode: 0o700, recursive: true });
+		writeFileSync(path.join(lockPath, "owner.json"), "", { mode: 0o600 });
+		// Past the initialization grace, so this is abandonment rather than a
+		// holder that is mid-write right now.
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, old, old);
+
+		let entered = false;
+		await withLocalStoreLock(options(directory), async () => {
+			entered = true;
+		});
+		assert.equal(entered, true, "a zero-byte owner record wedged the store instead of being reclaimed");
+	});
+	await withStore(async (directory) => {
+		// Within the grace it is a holder mid-write, so it must still be waited for
+		// and refused as busy rather than reclaimed out from under that holder.
+		const lockPath = options(directory).lockPath;
+		mkdirSync(lockPath, { mode: 0o700, recursive: true });
+		writeFileSync(path.join(lockPath, "owner.json"), "", { mode: 0o600 });
+		await assert.rejects(
+			withLocalStoreLock(options(directory), async () => {}),
+			TestBusy,
+		);
+	});
+});
+
+test("a lock owned by a pid this user cannot signal is busy, not unsafe", async () => {
+	await withStore(async (directory) => {
+		// pid 1 exists and is root-owned, so `kill(1, 0)` raises EPERM here. That is
+		// proof the pid is *alive*, which is the ordinary pid-reuse case — reporting
+		// it as unsafe left the session store refusing writes for as long as that
+		// process lived.
+		// Assert the precondition rather than assume it: running as root makes
+		// `kill(1, 0)` succeed, and this test would then quietly prove the
+		// already-covered live-owner path instead of the EPERM one.
+		let signalled = null;
+		try {
+			process.kill(1, 0);
+		} catch (error) {
+			signalled = error.code;
+		}
+		assert.equal(signalled, "EPERM", "this test needs a pid it cannot signal; it is not exercising the EPERM path");
+		writeOwnedLock(options(directory).lockPath, 1);
+		await assert.rejects(
+			withLocalStoreLock(options(directory), async () => {}),
+			TestBusy,
+		);
+	});
+});
+
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {
 	mkdirSync(lockPath, { mode: 0o700, recursive: true });
 	writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid, nonce })}\n`, { mode: ownerMode });
