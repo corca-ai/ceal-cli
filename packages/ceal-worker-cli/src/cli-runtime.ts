@@ -39,6 +39,8 @@ export interface CealCommandRuntime {
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
 	removeDiscoveryCache?: () => Promise<void>;
+	/** Clear the receipt spool and its drop count; session-derived, so logout owns it. */
+	removeReceiptSpool?: () => Promise<void>;
 	// The agent host is the declared `guide register <host>` route token; `status`
 	// omits it and reads the default host projection plus every host's state.
 	inspectAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;

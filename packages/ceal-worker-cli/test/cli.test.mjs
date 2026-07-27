@@ -939,19 +939,44 @@ test("capabilities retries one authentication rejection by rotating a still-curr
 	);
 });
 
-test("session logout revokes the server session before removing the local session", async () => {
+test("session logout revokes the server session before removing every session-derived store", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, revoked }) => {
-		let removed = false;
+		const cleared = [];
 		const payload = await yamlRun(["session", "logout"], 0, {
 			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
 			removeSession: async () => {
-				removed = true;
+				cleared.push("session");
+			},
+			removeDiscoveryCache: async () => {
+				cleared.push("discovery_cache");
+			},
+			// The spool is session-derived — it holds this session's request refs,
+			// audit refs, and capability/target refs for thirty days. Leaving it made
+			// `ceal observe` render a revoked binding's history beside
+			// `Session (absent)`, and the logout path asserted the opposite in a
+			// comment while no test looked.
+			removeReceiptSpool: async () => {
+				cleared.push("receipt_spool");
 			},
 		});
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
-		assert.equal(removed, true);
 		assert.deepEqual(revoked, [oldRefreshToken]);
+		assert.deepEqual(cleared.sort(), ["discovery_cache", "receipt_spool", "session"]);
+	});
+	// A store that refuses to clear may not turn a completed revocation into a
+	// failure: the server session is already gone, and reporting otherwise would
+	// send the operator to revoke something that no longer exists.
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
+		const payload = await yamlRun(["session", "logout"], 0, {
+			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+			removeSession: async () => {},
+			removeReceiptSpool: async () => {
+				throw new Error("spool store is unsafe");
+			},
+		});
+		assert.equal(payload.status, "logged_out");
+		assert.equal(payload.server_session_revoked, true);
 	});
 });
 

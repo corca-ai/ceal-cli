@@ -33,7 +33,7 @@ import {
 } from "./client-session.js";
 import { type CealDiscoveryCacheKey, discoveryCacheEntryUsable } from "./discovery-cache.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
-import { createCealObserverServer } from "./observer.js";
+import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
@@ -317,14 +317,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		bind_address: "127.0.0.1",
 		effect: "read_only",
 		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
-		data_sources: [
-			"client_session_redacted",
-			"client_discovery_cache",
-			"installed_release_generation",
-			"agent_guide_registration",
-			"receipt_spool_metadata",
-			"agent_runtime_transcript_inventory",
-		],
+		data_sources: [...OBSERVER_DATA_SOURCES],
 		receipts: "local_spool_metadata",
 		non_claims: [
 			"Cached/local state only; the observer never contacts the Gateway or a provider.",

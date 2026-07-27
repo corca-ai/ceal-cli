@@ -201,7 +201,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 				const revokeFailure = await revokeClientSession(session);
 				if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
 				await store.remove();
-				await clearDiscoveryCache(runtime);
+				await clearSessionDerivedState(runtime);
 				return writeLoggedOut(io);
 			})
 			.catch((error) => writeClientSessionUnavailable(sessionStoreFailureCode(error), io));
@@ -219,7 +219,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 	} catch {
 		return writeClientSessionUnavailable("session_remove_failed", io);
 	}
-	await clearDiscoveryCache(runtime);
+	await clearSessionDerivedState(runtime);
 	return writeLoggedOut(io);
 }
 
@@ -246,14 +246,24 @@ async function revokeClientSession(session: CealStoredSession): Promise<string |
 	}
 }
 
-// Logout leaves no session-derived local state behind. The discovery cache is
-// advisory, so a removal failure must never block a successful logout.
-async function clearDiscoveryCache(runtime: CealCommandRuntime): Promise<void> {
-	if (!runtime.removeDiscoveryCache) return;
+// Logout leaves no session-derived local state behind, and the receipt spool is
+// session-derived: it holds this session's request refs, audit refs, capability
+// and target refs for thirty days. Leaving it made `ceal observe` render a full
+// month of a revoked binding's history beside `Session (absent)`, while the
+// comment here claimed the opposite. Both stores are advisory, so neither
+// removal may block a successful logout — a logout that half-failed must still
+// report the revocation it did perform.
+async function clearSessionDerivedState(runtime: CealCommandRuntime): Promise<void> {
+	await clearAdvisoryStore(runtime.removeDiscoveryCache);
+	await clearAdvisoryStore(runtime.removeReceiptSpool);
+}
+
+async function clearAdvisoryStore(remove: (() => Promise<void>) | undefined): Promise<void> {
+	if (!remove) return;
 	try {
-		await runtime.removeDiscoveryCache();
+		await remove();
 	} catch {
-		/* advisory cache: ignore */
+		/* advisory local state: never block the logout that already revoked */
 	}
 }
 

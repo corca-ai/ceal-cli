@@ -90,6 +90,7 @@ void runCealCommand(
 				}
 			: undefined,
 		loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,
+		removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
 		inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now()),
 		inspectAgentSession: (runtimeName, sessionRef) =>
 			inspectAgentSessionEvents(process.env.HOME, agentHostOverrides, runtimeName, sessionRef),

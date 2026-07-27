@@ -169,7 +169,7 @@ export function inspectAgentSessionEvents(
 
 export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 	"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
-	"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only.",
+	"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only until an explicit per-session drill-down runs.",
 	"Token figures are runtime-supplied transcript accounting surfaced as integers with explicit source and scan completeness; field semantics are runtime-defined, figures are not comparable across runtimes, and this is not a cost or billing claim. No latency figure is shown because neither runtime supplies one.",
 ]);
 

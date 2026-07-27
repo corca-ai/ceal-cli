@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,7 +7,7 @@ import test from "node:test";
 import { parse } from "yaml";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
-import { buildObserverState } from "../dist/observer.js";
+import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
 
@@ -364,6 +364,59 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
 	assert.equal(state.receipts.status, "unreadable");
 	assert.equal("entries" in state.receipts, false);
+	await handle.close();
+});
+
+test("every ~/.ceal file this client reads is named in the privacy projection", async (context) => {
+	// The page's whole claim is that it names the *fixed* local sources it reads.
+	// A store that adds a file without adding it here does not break a test, it
+	// makes a standing declaration quietly false — which is how the drops counter
+	// shipped unlisted in the first place. Deriving the names from the store
+	// sources means the next one cannot.
+	const sources = readdirSync(new URL("../src", import.meta.url), { recursive: true })
+		.filter((name) => String(name).endsWith(".ts"))
+		.map((name) => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8"))
+		.join("\n");
+	const stateFiles = new Set([...sources.matchAll(/"(client-[a-z-]+\.json|receipt-spool[a-z.-]*)"/gu)].map((match) => match[1]));
+	// Locks are coordination, not a source this page reads, so they are excluded
+	// deliberately rather than by the regex happening to miss them.
+	stateFiles.delete("receipt-spool.lock");
+	stateFiles.delete("client-session.lock");
+	assert.ok(stateFiles.size >= 4, `only ${stateFiles.size} store files found; the sweep is not reaching the stores`);
+
+	const io = collectingIo();
+	let handle;
+	await new Promise((resolve) => {
+		void runCealCommand(["observe", "--port", "0"], io, {
+			onObserverListening: (value) => {
+				handle = value;
+				resolve(value);
+			},
+		});
+	});
+	// Without this the server outlives a failed assertion and the whole run hangs
+	// instead of reporting which file went undeclared.
+	context.after(async () => {
+		try {
+			await handle.close();
+		} catch {
+			/* already closed */
+		}
+	});
+	const doc = parse(io.stdout.join(""));
+	const declared = (await (await fetch(`${doc.url}api/observer/v1/state`)).json()).privacy.local_sources.join("\n");
+	assert.deepEqual(
+		[...stateFiles].filter((name) => !declared.includes(name)),
+		[],
+		"a ~/.ceal file this client reads is missing from the declared privacy sources",
+	);
+	// The `ceal observe` envelope advertises the same fact in its own vocabulary,
+	// and it used to be a second hand-kept list: a source added to one and not the
+	// other goes quietly stale, which is exactly how the drops counter shipped
+	// undeclared. Both now render from `observer.ts`, and this pins that.
+	const envelope = parse(io.stdout.join(""));
+	assert.deepEqual(envelope.data_sources, [...OBSERVER_DATA_SOURCES]);
+	assert.ok(envelope.data_sources.includes("receipt_spool_metadata"));
 	await handle.close();
 });
 

@@ -143,10 +143,25 @@ function buildLocalSuggestions(
 // The privacy projection is declared, not probed: it names the fixed local
 // sources this client reads and the fixed no-forwarding boundary of this page.
 // The only dynamic value is the retention bound echoed from the loaded spool.
+// The vocabulary the `ceal observe` result envelope advertises, kept here beside
+// the privacy projection rather than in the command that prints it. They are two
+// renderings of one fact — what this page reads — and when they lived apart the
+// drops counter reached one of them and not the other. `observer.test.mjs` gates
+// that every ~/.ceal file the stores name appears in both.
+export const OBSERVER_DATA_SOURCES = [
+	"client_session_redacted",
+	"client_discovery_cache",
+	"installed_release_generation",
+	"agent_guide_registration",
+	"receipt_spool_metadata",
+	"agent_runtime_transcript_inventory",
+] as const;
+
 const PRIVACY_LOCAL_SOURCES = [
 	"~/.ceal/client-session.json (session identity; token fields never serialized)",
 	"~/.ceal/client-discovery-cache.json (cached capability/target catalog)",
 	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
+	"~/.ceal/receipt-spool-drops (count only, of receipts this client failed to spool; no per-call data)",
 	"managed worker install layout (generation manifest metadata and staged guide asset presence)",
 	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide, or the directories CODEX_HOME/CLAUDE_CONFIG_DIR configure (guide registration link inspection; no skill content read)",
 	"~/.claude/projects and ~/.codex/sessions, or the same subdirectories under the roots CLAUDE_CONFIG_DIR/CODEX_HOME configure (bounded local transcript scan; fixed-vocabulary metadata only)",
