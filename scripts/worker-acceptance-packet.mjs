@@ -1,0 +1,358 @@
+#!/usr/bin/env node
+// Installed-client acceptance packet.
+//
+// The question this answers is not "does the source build" — `npm run check`
+// owns that — but "is there a real installed release on a real machine that
+// reached a real Gateway". Those are different claims, and a package asset, a
+// source checkout, a catalog row, or a provider name is none of them.
+//
+// So this runs the INSTALLED binary and refuses to run anything else. A
+// checkout-resolved `ceal`, a workspace link, or a binary with no release
+// manifest beside it is a refusal rather than a weaker row: a substitution that
+// silently downgrades the claim is exactly how an announcement ends up
+// asserting an installation nobody performed.
+//
+// Usage:
+//   node scripts/worker-acceptance-packet.mjs
+//   node scripts/worker-acceptance-packet.mjs --capability <id> --target <ref>
+//   node scripts/worker-acceptance-packet.mjs --binary /path/to/ceal --json
+//
+// Without `--capability`/`--target` the live provider row is left as an
+// explicit non-claim. A bounded capability call is a real provider action and
+// is therefore opt-in per run, never a default of a verification command.
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { codedErrorClass } from "./lib/coded-error.mjs";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const LOCK_PATH = "gateway-handoff-lock.json";
+const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
+const SUMS_NAME = "SHA256SUMS";
+
+export const WorkerAcceptanceError = codedErrorClass("WorkerAcceptanceError");
+
+function fail(code, message) {
+	throw new WorkerAcceptanceError(code, message);
+}
+
+/** Resolve the installed binary, refusing every source-shaped substitution. */
+export function resolveInstalledBinary({ repoRoot = REPO_ROOT, binary, env = process.env } = {}) {
+	const candidate = binary ?? which("ceal", env);
+	if (!candidate) fail("binary_not_found", "No 'ceal' on PATH; pass --binary <path> to name the installed release.");
+	if (!existsSync(candidate)) fail("binary_not_found", `No such file: ${candidate}`);
+	// realpath first: the install root is reached through a symlink by design,
+	// and the checks below are about where the bytes actually live.
+	const resolved = realpathSync(candidate);
+	const stat = lstatSync(resolved);
+	if (!stat.isFile()) fail("binary_not_a_file", `${resolved} is not a regular file.`);
+	// A checkout-resolved binary would make every row below describe the source
+	// tree this command is run from, which is the one thing it must not claim.
+	if (isInside(repoRoot, resolved)) {
+		fail(
+			"source_checkout_substitution",
+			`${resolved} is inside the source checkout ${repoRoot}; this command accepts only an installed release.`,
+		);
+	}
+	for (const marker of ["node_modules", "dist", "packages"]) {
+		if (resolved.split(path.sep).includes(marker)) {
+			fail(
+				"workspace_substitution",
+				`${resolved} sits under a '${marker}' directory; a workspace or link substitution is not an installed release.`,
+			);
+		}
+	}
+	return resolved;
+}
+
+function isInside(parent, child) {
+	const relative = path.relative(realpathSync(parent), child);
+	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function which(command, env) {
+	for (const entry of (env.PATH ?? "").split(path.delimiter)) {
+		if (!entry) continue;
+		const candidate = path.join(entry, command);
+		if (existsSync(candidate)) return candidate;
+	}
+	return undefined;
+}
+
+/**
+ * Cross-check the installed bytes against the release manifest beside them.
+ *
+ * Three independent statements must agree: the bytes on disk, the manifest's
+ * declared artifact digest, and the `SHA256SUMS` line. Any one of them alone is
+ * a self-report.
+ */
+export function inspectInstalledRelease(binaryPath) {
+	const directory = path.dirname(binaryPath);
+	const manifestName = readdirSync(directory).find((name) => name.startsWith(MANIFEST_PREFIX) && name.endsWith(".json"));
+	if (!manifestName)
+		fail("release_manifest_missing", `No ${MANIFEST_PREFIX}*.json beside ${binaryPath}; this is not an installed release layout.`);
+	const manifest = JSON.parse(readFileSync(path.join(directory, manifestName), "utf8"));
+	if (manifest.schema_version !== "ceal.worker_release_manifest.v1") {
+		fail("release_manifest_schema", `Unexpected manifest schema: ${manifest.schema_version}`);
+	}
+	const observed = sha256File(binaryPath);
+	if (observed !== manifest.artifact?.sha256) {
+		fail("artifact_digest_mismatch", `Installed bytes ${observed} do not match the manifest's ${manifest.artifact?.sha256}.`);
+	}
+	const sums = readChecksums(path.join(directory, SUMS_NAME));
+	const declared = sums.get(path.basename(binaryPath));
+	if (!declared) fail("checksums_entry_missing", `${SUMS_NAME} has no line for ${path.basename(binaryPath)}.`);
+	if (declared !== observed)
+		fail("checksums_mismatch", `${SUMS_NAME} declares ${declared} for the installed binary but its bytes are ${observed}.`);
+	return { directory, manifestName, manifest, artifactSha256: observed };
+}
+
+function readChecksums(file) {
+	if (!existsSync(file)) fail("checksums_missing", `No ${SUMS_NAME} beside the installed binary.`);
+	const entries = new Map();
+	for (const line of readFileSync(file, "utf8").split("\n")) {
+		if (!line.trim()) continue;
+		const match = /^([0-9a-f]{64}) {2}(\S+)$/u.exec(line);
+		if (!match) fail("checksums_malformed", `Unparseable ${SUMS_NAME} line: ${line}`);
+		entries.set(match[2], match[1]);
+	}
+	return entries;
+}
+
+function sha256File(file) {
+	return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+/**
+ * The Protocol input must be named by immutable producer provenance, not by a
+ * version string. `@corca-ai/ceal-protocol@0.65.0` has been observed with three
+ * different byte sets, so a version-only binding names no particular artifact.
+ */
+export function verifyProtocolProvenance(manifest, { repoRoot = REPO_ROOT } = {}) {
+	const protocol = manifest.protocol;
+	if (!protocol) fail("protocol_input_missing", "The release manifest declares no Gateway protocol input.");
+	const producer = protocol.producer ?? {};
+	for (const field of ["repository", "commit", "tree"]) {
+		if (typeof producer[field] !== "string" || !producer[field]) {
+			fail("protocol_provenance_incomplete", `The protocol input names no producer ${field}; a version alone does not identify an artifact.`);
+		}
+	}
+	for (const [field, value] of Object.entries(protocol)) {
+		if (typeof value === "string" && /^(?:workspace|link|file|portal):/u.test(value)) {
+			fail(
+				"protocol_substitution",
+				`The protocol input's ${field} uses a '${value.split(":")[0]}:' specifier; a source-path substitution is not a Gateway artifact.`,
+			);
+		}
+	}
+	const lockPath = path.join(repoRoot, LOCK_PATH);
+	const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, "utf8")) : undefined;
+	const agreement = lock
+		? {
+				checked_against: LOCK_PATH,
+				commit_matches: lock.gateway?.commit === producer.commit,
+				tree_matches: lock.gateway?.tree === producer.tree,
+			}
+		: { checked_against: null, commit_matches: null, tree_matches: null };
+	if (lock && (!agreement.commit_matches || !agreement.tree_matches)) {
+		fail(
+			"protocol_provenance_disagreement",
+			`The installed release's protocol producer (${producer.commit}) disagrees with ${LOCK_PATH} (${lock.gateway?.commit}).`,
+		);
+	}
+	return {
+		package: protocol.package,
+		version: protocol.version,
+		sha256: protocol.sha256,
+		producer,
+		lock_agreement: agreement,
+	};
+}
+
+function runBinary(binaryPath, args) {
+	const started = Date.now();
+	const result = spawnSync(binaryPath, args, { encoding: "utf8" });
+	return { args, status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", elapsed_ms: Date.now() - started };
+}
+
+// Deliberately not a YAML parser: the packet records a handful of scalar
+// fields, and a real parser here would invite reading structure the CLI never
+// promised to keep stable.
+function scalar(stdout, key) {
+	const match = new RegExp(`^\\s*${key}:[ ]+(.+)$`, "mu").exec(stdout);
+	return match ? match[1].trim() : undefined;
+}
+
+export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability, target, env = process.env } = {}) {
+	const binaryPath = resolveInstalledBinary({ repoRoot, binary, env });
+	const release = inspectInstalledRelease(binaryPath);
+	const protocol = verifyProtocolProvenance(release.manifest, { repoRoot });
+
+	const version = runBinary(binaryPath, ["version"]);
+	if (version.status !== 0) fail("installed_binary_unusable", `'${binaryPath} version' exited ${version.status}.`);
+	const guide = runBinary(binaryPath, ["guide", "status"]);
+	const discovery = runBinary(binaryPath, ["capabilities", "--fresh"]);
+
+	const packet = {
+		schema_version: "ceal.worker_acceptance_packet.v1",
+		installed_client: {
+			binary_path: binaryPath,
+			platform: release.manifest.platform,
+			release_version: release.manifest.version,
+			artifact_sha256: release.artifactSha256,
+			artifact_state: release.manifest.artifact_state,
+			manifest: release.manifestName,
+			digest_agreement: "binary_bytes_manifest_and_sha256sums_agree",
+			reported_version: scalar(version.stdout, "version"),
+			client_protocol_version: scalar(version.stdout, "protocol_version"),
+		},
+		gateway_protocol_input: protocol,
+		guide: {
+			status: scalar(guide.stdout, "status"),
+			exit_code: guide.status,
+			registered_hosts: [...guide.stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]),
+		},
+		gateway_session: {
+			reached: discovery.status === 0,
+			exit_code: discovery.status,
+			elapsed_ms: discovery.elapsed_ms,
+			instance_ref: scalar(discovery.stdout, "instance_ref"),
+			profile_ref: scalar(discovery.stdout, "profile_ref"),
+			negotiated_protocol_version: scalar(discovery.stdout, "negotiated_protocol_version"),
+			host_decision: scalar(discovery.stdout, "host_decision"),
+			catalog_source: scalar(discovery.stdout, "catalog_source"),
+			live_gateway_checked: scalar(discovery.stdout, "live_gateway_checked") === "true",
+			capability_count: [...discovery.stdout.matchAll(/^\s*- capability_id: /gmu)].length,
+		},
+		bounded_capability_call: null,
+		non_claims: [],
+	};
+
+	if (capability && target) {
+		const call = runBinary(binaryPath, ["call", capability, "--target", target]);
+		const requestRef = scalar(call.stdout, "request_ref");
+		let receipt;
+		if (requestRef) {
+			const shown = runBinary(binaryPath, ["receipt", "show", requestRef]);
+			receipt = {
+				readback_status: scalar(shown.stdout, "status"),
+				exit_code: shown.status,
+				elapsed_ms: shown.elapsed_ms,
+				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => match[1]),
+				outcome: scalar(shown.stdout, "outcome"),
+				authorization: scalar(shown.stdout, "authorization"),
+				gateway_elapsed_ms: Number(scalar(shown.stdout, "gateway_elapsed_ms")),
+			};
+		}
+		packet.bounded_capability_call = {
+			capability,
+			target,
+			status: scalar(call.stdout, "status"),
+			exit_code: call.status,
+			elapsed_ms: call.elapsed_ms,
+			evidence: scalar(call.stdout, "evidence"),
+			request_ref: requestRef ?? null,
+			receipt: receipt ?? null,
+		};
+	}
+
+	packet.non_claims = nonClaims(packet);
+	return packet;
+}
+
+// The non-claims are derived from what the run actually reached, so a row that
+// was skipped says so in the packet itself rather than in a covering note that
+// travels separately and goes stale.
+function nonClaims(packet) {
+	const claims = [
+		`Only ${packet.installed_client.platform} is evidenced by this packet; every other platform is unproved by it.`,
+		"No tag, signature, upload, publication, or Gateway configuration change was performed.",
+	];
+	if (!packet.bounded_capability_call) {
+		claims.push("provider_execution_not_reached: no bounded capability call was requested, so no provider action or receipt is claimed.");
+	}
+	if (!packet.gateway_session.reached) {
+		claims.push("gateway_session_not_reached: the installed client did not complete a live discovery on this run.");
+	}
+	if (packet.installed_client.artifact_state !== "signed") {
+		claims.push(
+			`artifact_state is '${packet.installed_client.artifact_state}' in the installed manifest; signature verification is the installer's step and is not re-proved here.`,
+		);
+	}
+	claims.push(
+		"This packet describes one machine. It is not a fresh-device installation proof unless this install was performed fresh for it.",
+	);
+	return claims;
+}
+
+function parseArgs(argv) {
+	const options = { json: false };
+	const valued = { "--binary": "binary", "--capability": "capability", "--target": "target" };
+	for (let index = 0; index < argv.length; index += 1) {
+		const token = argv[index];
+		if (token === "--json") {
+			options.json = true;
+		} else if (valued[token]) {
+			index += 1;
+			if (index >= argv.length) fail("missing_argument_value", `${token} needs a value.`);
+			options[valued[token]] = argv[index];
+		} else {
+			fail("unknown_argument", `Unknown argument: ${token}`);
+		}
+	}
+	if (Boolean(options.capability) !== Boolean(options.target)) {
+		fail("incomplete_call_request", "--capability and --target must be given together; a call needs both.");
+	}
+	return options;
+}
+
+function render(packet) {
+	const lines = [];
+	const client = packet.installed_client;
+	lines.push(`installed:  ${client.release_version} ${client.platform}  ${client.artifact_sha256}`);
+	lines.push(`            ${client.binary_path}`);
+	lines.push(`            digests agree: bytes = manifest = SHA256SUMS`);
+	const producer = packet.gateway_protocol_input.producer;
+	lines.push(
+		`protocol:   ${packet.gateway_protocol_input.package}@${packet.gateway_protocol_input.version} from ${producer.repository}@${producer.commit}`,
+	);
+	lines.push(
+		`            lock agreement: commit=${packet.gateway_protocol_input.lock_agreement.commit_matches} tree=${packet.gateway_protocol_input.lock_agreement.tree_matches}`,
+	);
+	lines.push(`guide:      ${packet.guide.status} (${packet.guide.registered_hosts.length} host paths)`);
+	const session = packet.gateway_session;
+	lines.push(
+		`gateway:    ${session.instance_ref} protocol ${session.negotiated_protocol_version} ${session.host_decision} in ${session.elapsed_ms}ms`,
+	);
+	lines.push(`            ${session.capability_count} capabilities, source ${session.catalog_source}`);
+	const call = packet.bounded_capability_call;
+	if (call) {
+		lines.push(`call:       ${call.capability} -> ${call.status} (${call.evidence}) in ${call.elapsed_ms}ms`);
+		lines.push(`            ${call.request_ref}`);
+		if (call.receipt) {
+			lines.push(
+				`receipt:    ${call.receipt.readback_status} ${call.receipt.authorization}/${call.receipt.outcome} ${call.receipt.audit_refs.join(", ")}`,
+			);
+		}
+	} else {
+		lines.push("call:       not requested");
+	}
+	lines.push("non_claims:");
+	for (const claim of packet.non_claims) lines.push(`  - ${claim}`);
+	return lines.join("\n");
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+	try {
+		const options = parseArgs(process.argv.slice(2));
+		const packet = buildAcceptancePacket(options);
+		process.stdout.write(options.json ? `${JSON.stringify(packet, null, 2)}\n` : `${render(packet)}\n`);
+	} catch (error) {
+		const code = error instanceof WorkerAcceptanceError ? error.code : "unexpected_error";
+		process.stderr.write(`worker-acceptance: ${code}: ${error.message}\n`);
+		process.exit(1);
+	}
+}

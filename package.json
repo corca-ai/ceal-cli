@@ -23,6 +23,7 @@
 		"check:unit": "npm run lint && npm run build && npm run test:unit && npm run test:contract",
 		"hooks:install": "node scripts/install-git-hooks.mjs",
 		"probe": "node scripts/probe-surface.mjs",
+		"accept:worker": "node scripts/worker-acceptance-packet.mjs",
 		"release:manifest": "node scripts/build-release-manifest.mjs",
 		"release:binaries": "node scripts/build-platform-binaries.mjs",
 		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",
