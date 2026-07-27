@@ -132,3 +132,37 @@ breaking 둘, alias 없음:
 
 `@corca-ai/ceal-protocol` 핀은 `0.65.0` 그대로입니다. `ceal-v0.66.0`은 macOS 빌드 실패로
 소각됐고(업로드·서명 전이라 발행물 없음), `0.66.1`이 발행된 캐리어입니다.
+
+## 요청 추가 — `operator-cli.test.mjs`의 `../src` 스윕 둘 (2026-07-27, `narnia`)
+
+`packages/ceal-operator-cli`는 `narnia` 쪽 체크아웃에서 frozen이라 여기서 고칠 수 없는데,
+`narnia`의 `npm run check:unit`이 그 테스트를 돌립니다. 그래서 이 결함의 비용은 `narnia`가
+내고 수정 권한은 `vinc`에 있습니다.
+
+`narnia`는 오늘 자기 트리에서 같은 모양을 셋 찾아 고쳤고(`efc986b`), 그중 하나가
+`packages/ceal-worker-cli`의 `../src` 스윕이었습니다. `operator-cli.test.mjs`가 같은 모양을
+그대로 갖고 있습니다:
+
+- **`:89` `declared result schemas exist in the emitting package`** — `readdirSync(new URL("../src", ...))`
+  가 non-recursive입니다. `src/` 아래로 디렉터리가 하나라도 생기면 그 안의 `schema_version:`
+  리터럴은 `emitted` 집합에 들어오지 않고, 그 스키마를 선언한 leaf는 "이 패키지가 쓰지 않는
+  스키마를 광고한다"로 **거짓 실패**합니다. 반대 방향이 더 나쁩니다 — 파일을 못 읽어 `emitted`가
+  비어도 `CEALCTL_COMMANDS`가 비면 루프가 0회 돌아 **조용히 통과**합니다.
+- **읽은 양에 하한이 없습니다.** `narnia`의 두 스윕은 non-recursive와 별개 정규식 결함으로
+  무효였고, 하한이 있었다면 **둘 다 그 시점에 실패로 드러났을** 자리였습니다. 지금 `src/`는
+  평평한 `.ts` 9개이므로 `assert.ok(files.length >= 9, ...)` 한 줄이면 리네임·이동·확장자
+  변경이 스윕을 조용히 vacuous하게 만드는 걸 막습니다.
+- **`:721` 런타임 순수성 검사**는 `../src/index.ts` **한 파일만** 읽습니다. 이름 그대로라면
+  패키지 전체의 성질인데 파일 하나만 봅니다. `index.ts`에서 `node:fs` 사용을 새 모듈로 옮기면
+  통과합니다.
+
+`narnia`가 쓴 수정 모양(그대로 가져다 쓰셔도 됩니다):
+
+- `readdirSync(dir, { recursive: true })`로 바꾸고 `.ts`만 필터
+- 읽은 파일 수에 `assert.ok(files.length >= <현재 수>, ...)` 하한
+- 순수성 검사는 한 파일이 아니라 스윕한 전체 소스에 적용
+
+`narnia`가 확인한 것과 확인하지 못한 것을 나눠 두면: 위 세 항목은 **소스를 읽어 확인**했고,
+negative probe는 **돌리지 않았습니다** — frozen 트리라 편집해서 실패시켜 볼 수가 없습니다.
+그러니 "이 스윕이 실제로 무엇을 놓치는지"는 `vinc`가 자기 트리에서 한 번 깨 보고 확인하는 게
+맞습니다. `narnia` 쪽에서는 같은 모양이 실제로 무효였다는 것만 확인됐습니다.
