@@ -95,10 +95,14 @@ CI 러너에서 확인)는 push 후 관측이다.
 
 - **열린 이슈는 `#6` 하나**, 완전히 `vinc` 대기(위 2번).
 - **`vinc`에 요청/질문이 걸려 있다.** 프롬프트는 `docs/requests/`가 소유하고 운영자가
-  직접 넣는다. **새로 하나 추가**:
+  직접 넣는다. **새로 둘 추가, 둘 다 `oc`에 전달 완료**:
   [`cealctl` 락 복구 불능 둘](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md)
-  — 오늘 worker에서 고친 결함 둘이 frozen인 `ceal-operator-cli`에 그대로 있고, **operator
-  store의 빌드된 코드로 직접 재현했다**. 아직 전달 안 함. 기존 것들:
+  — worker에서 고친 결함 둘이 frozen인 `ceal-operator-cli`에 그대로 있고, **operator store의
+  빌드된 코드로 직접 재현했다**(zero-byte `owner.json`·pid 1 `EPERM` 둘 다 `unsafe_state_path`
+  즉시, missing-owner 대조군은 정상 회수). 그리고
+  [protocol 아티팩트 정체성 + 레인 사실 정정 둘](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md)
+  — **`#6`에 npm은 필요 없다**는 결론(운영자 판단 2026-07-27: 임의 머신 해석 불필요)과,
+  `vinc`가 stale 클론으로 이 레인을 평가한 건·`dist-*` 귀속 오류 정정. 기존 것들:
   [기존 넷](requests/2026-07-27-to-gateway-lane.md), 그리고 오늘의
   [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) — 후자는
   `oc:~/ceal/2026-07-27-from-narnia-blocked-assessment.md`로 이미 전달했다(새 untracked 최상위
@@ -136,7 +140,8 @@ CI 러너에서 확인)는 push 후 관측이다.
 ## References
 
 - [품질 리뷰 2026-07-27 3차 — 현재 기준선](../charness-artifacts/quality/latest.md)
-- [`cealctl` 락 복구 불능 둘 — 미전달](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md)
+- [`cealctl` 락 복구 불능 둘](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md) ·
+  [protocol 아티팩트 정체성과 레인 사실 정정](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md)
 - [Gateway 레인 요청 넷](requests/2026-07-27-to-gateway-lane.md) ·
   [막힘 판단과 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) ·
   [공지 준비 리턴 패킷](requests/2026-07-27-to-gateway-lane-announcement-readiness.md)
