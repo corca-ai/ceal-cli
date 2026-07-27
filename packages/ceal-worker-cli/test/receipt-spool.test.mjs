@@ -308,6 +308,33 @@ test("receipt spool load reports a present-but-unusable file while append still 
 	});
 });
 
+// The soft-miss above is deliberate for content this store cannot read. A mode
+// bit is not that: the content is valid and the append rewrites the file at 0o600
+// anyway. Treating it as a miss replaced the whole history with a one-entry spool
+// and recorded no drop, because the append succeeded — the silent under-report
+// this module's lock and drop counter exist to prevent, arriving through the one
+// path neither of them watches.
+test("a repairable mode on the spool does not cost the history it holds", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		const earlier = ["req-a", "req-b", "req-c"].map((requestRef) => entry({ requestRef }));
+		for (const item of earlier) await store.append(item);
+		chmodSync(spoolFile(home), 0o644);
+
+		const appended = entry({ requestRef: "req-d" });
+		await store.append(appended);
+		assert.deepEqual(
+			(await store.load()).entries.map((item) => item.requestRef),
+			[...earlier.map((item) => item.requestRef), appended.requestRef],
+			"the earlier receipts were discarded over a mode bit",
+		);
+		// And the write repaired the anomaly rather than propagating it, so `load`
+		// stops reporting the file as unusable.
+		assert.equal(statSync(spoolFile(home)).mode & 0o777, 0o600);
+		assert.equal((await store.load()).drops.count, 0, "no drop was recorded, so a silent loss here would be invisible");
+	});
+});
+
 test("receipt spool drops individually invalid entries without losing the rest", async () => {
 	await withHome(async (home) => {
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);

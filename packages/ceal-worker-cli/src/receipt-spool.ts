@@ -205,7 +205,14 @@ async function appendEntry(directory: string, file: string, entry: CealReceiptSp
 }
 
 function writeAppendedSpool(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
-	const existing = readSpool(directory, file, now, NO_DROPS)?.entries ?? [];
+	// `requireFileMode: false`: this append is about to rewrite the file at 0o600
+	// regardless, so refusing to *read* it over a mode bit would silently replace a
+	// valid history with a one-entry spool — and record no drop, because the append
+	// succeeded. A `chmod` on the spool destroyed thirty days of receipts that way.
+	// Genuinely unusable content still soft-misses, which is the deliberate
+	// behaviour pinned in `receipt-spool.test.mjs`; only the repairable anomaly is
+	// no longer treated as an empty history.
+	const existing = readSpool(directory, file, now, NO_DROPS, false)?.entries ?? [];
 	// Size and retention bounds are enforced on every append (and read applies
 	// the same retention window), so the spool cannot grow past its declared
 	// bounds even if the clock or an old file disagrees.
@@ -269,9 +276,15 @@ function dropsFileStat(file: string): { size: number } | null {
 	}
 }
 
-function readSpool(directory: string, file: string, now: number, drops: { count: number; atLeast: boolean }): CealReceiptSpoolState | null {
+function readSpool(
+	directory: string,
+	file: string,
+	now: number,
+	drops: { count: number; atLeast: boolean },
+	requireFileMode = true,
+): CealReceiptSpoolState | null {
 	if (!existsSync(file)) return null;
-	if (!safeExistingFile(directory, file)) return null;
+	if (!safeExistingFile(directory, file, requireFileMode)) return null;
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(readFileSync(file, "utf8"));

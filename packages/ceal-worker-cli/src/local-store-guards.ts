@@ -42,7 +42,7 @@ function modeOf(stat: { mode: number }): number {
  * Never throws — a store that cannot vouch for the path treats it as absent and
  * falls back to a live probe, which is always correct if slower.
  */
-export function safeExistingFile(directory: string, file: string): boolean {
+export function safeExistingFile(directory: string, file: string, requireFileMode = true): boolean {
 	try {
 		const dir = lstatSync(directory);
 		// The directory guarantee is checked here and not only in the session
@@ -51,7 +51,13 @@ export function safeExistingFile(directory: string, file: string): boolean {
 		// soft-fails to a live probe rather than being trusted.
 		if (dir.isSymbolicLink() || !dir.isDirectory() || modeOf(dir) !== DIRECTORY_MODE) return false;
 		const stat = lstatSync(file);
-		return !stat.isSymbolicLink() && stat.isFile() && modeOf(stat) === FILE_MODE;
+		if (stat.isSymbolicLink() || !stat.isFile()) return false;
+		// `requireFileMode: false` is for a caller that is about to *rewrite* this
+		// file at 0o600 and would otherwise discard its contents over a mode bit.
+		// It stays safe because the directory check above is unconditional: inside a
+		// 0o700 directory nobody else can traverse to the file, let alone replace
+		// it, so a widened file mode exposes nothing and the rewrite repairs it.
+		return !requireFileMode || modeOf(stat) === FILE_MODE;
 	} catch {
 		return false;
 	}
