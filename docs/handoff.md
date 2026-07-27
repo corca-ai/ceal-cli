@@ -1,6 +1,6 @@
 # Session Handoff
 Date: 2026-07-27 — **품질 리뷰가 남긴 이 레인 몫은 전부 닫혔고**, `vinc`의 공지 준비
-요청에 대한 리턴 패킷을 **썼다(전달은 아직)**. 남은 건 전부 `vinc` 대기다. push 상태는 세어서 확인할 것
+요청에 대한 리턴 패킷을 써서 `vinc`에 전달했다. 남은 건 전부 `vinc` 대기다. push 상태는 세어서 확인할 것
 (`git log @{u}..HEAD`).
 **이 레인은 `corca-ai/ceal-cli`만 다룬다**(`ceal-agent`는 `vinc` 소유).
 
@@ -69,7 +69,8 @@ Date: 2026-07-27 — **품질 리뷰가 남긴 이 레인 몫은 전부 닫혔�
   [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) — 후자는
   `oc:~/ceal/2026-07-27-from-narnia-blocked-assessment.md`로 이미 전달했다(새 untracked 최상위
   `*.md` 하나만 추가; tracked 파일 무변경).
-- **공지 준비 리턴 패킷은 아직 `vinc`에 전달되지 않았다** — 운영자 승인 후 같은 방식으로 넣을 것.
+- **공지 준비 리턴 패킷은 전달 완료** — `oc:~/ceal/2026-07-27-from-narnia-announcement-readiness-return-packet.md`
+  (새 untracked 최상위 `*.md` 하나만 추가; tracked 파일 무변경, digest 대조함).
 - **`prod` 세션은 살아 있다**(2026-07-27T21:15–21:21Z 관측). 미검증은 `enrollments create` →
   `request_denied` 하나뿐(write라 미실행).
 - **게이트**(2026-07-27 narnia 재측정): `npm run check` 1:39.76→2:02.25 통과, **394**개;
