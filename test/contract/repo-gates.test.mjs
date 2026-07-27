@@ -65,6 +65,35 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	assert.equal(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS, "1", "the CI gate must require the platform-gated proofs to actually run");
 });
 
+// A release tag that fails cannot be reused, and 0.65.8 was burned by a readback
+// that a couple of retries would have survived. The retry is therefore a release
+// invariant, not a nicety: a single-shot fetch here spends a tag on a 503.
+test("the release lane retries its public readbacks instead of burning the tag", () => {
+	const release = read(".github/workflows/ceal-release.yml");
+	const script = Object.values(parse(release).jobs)
+		.flatMap((job) => job.steps ?? [])
+		.map((step) => step.run ?? "")
+		.find((run) => run.includes("fetch_public()"));
+	assert.ok(script, "the release lane must still define fetch_public");
+	// Transport failures and edge 5xx say nothing about the release, so they retry.
+	assert.match(script, /000\|429\|5\[0-9\]\[0-9\]/u, "fetch_public must retry transient readback failures");
+	// A 404 is real information the uploader acts on, so it must not be retried away.
+	assert.doesNotMatch(script, /000\|404/u, "a 404 must stay actionable rather than being retried as transient");
+	// Object storage is not read-your-write, so a readback that requires 200 waits.
+	assert.match(script, /await_public\(\)/u, "the release lane must define the wait-for-200 readback");
+	for (const readback of ["bootstrap_status", "pointer_status"]) {
+		assert.match(
+			script,
+			new RegExp(`${readback}="\\$\\(await_public `, "u"),
+			`${readback} requires 200, so it must wait rather than fetch once`,
+		);
+	}
+	// The opposite case, and the reason this is not "await everywhere": the first
+	// release has no stable pointer yet, so 404 is a real answer there and waiting
+	// for a 200 that will never come would hang the lane instead of proceeding.
+	assert.match(script, /current_status="\$\(fetch_public /u, "the stable-pointer probe treats 404 as an answer and must not wait for 200");
+});
+
 // A bare `process.platform` skip is how the release suite went green on arm64
 // macOS with zero installed-binary proofs: the skip was correct and invisible.
 // The shared helper names the missing proof in the output and carries the

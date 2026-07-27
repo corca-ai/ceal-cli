@@ -74,7 +74,10 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/gateway-handoff"
+          # Retried for the same reason as the readback below: a transient fetch
+          # failure here burns a tag that cannot be reused.
           curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 3 --retry-connrefused \
             "$GATEWAY_HANDOFF_ORIGIN/$HANDOFF_RELEASE_TAG/$HANDOFF_ARCHIVE" \
             --output "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE"
           expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("gateway-handoff-lock.json","utf8")).archive.sha256')"
@@ -250,11 +253,42 @@ jobs:
           version_url="$CEAL_RELEASE_ORIGIN/worker/$TAG"
           readback_dir="$RUNNER_TEMP/ceal-worker-release-readback"
           mkdir -p "$readback_dir"
+          # A tag that fails here cannot be reused, and 0.65.8 died to a readback
+          # that a couple of retries would have survived. A transport failure or
+          # a 5xx from the edge is not evidence about the release, so retry it;
+          # a 404 is real information (the object is not there yet) and returns
+          # immediately so put_immutable can upload.
           fetch_public() {
             local url="$1"
             local output="$2"
+            local http_code=000
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              http_code="$(curl --silent --show-error --location --output "$output" --write-out '%{http_code}' "${url}?readback=${GITHUB_SHA}-${RANDOM}")" || http_code=000
+              case "$http_code" in
+                000|429|5[0-9][0-9]) ;;
+                *) printf '%s' "$http_code"; return 0 ;;
+              esac
+              echo "::warning::Transient readback HTTP $http_code for $url (attempt $attempt/5); retrying"
+              sleep "$(( attempt * 3 ))"
+            done
+            printf '%s' "$http_code"
+          }
+          # Object storage is not read-your-write here: a just-uploaded object can
+          # answer 404 for a moment. Waiting for that is not the same as accepting
+          # a missing object, so this exhausts its budget and then reports the last
+          # code it saw rather than pretending it got one.
+          await_public() {
+            local url="$1"
+            local output="$2"
             local http_code
-            http_code="$(curl --silent --show-error --location --output "$output" --write-out '%{http_code}' "${url}?readback=${GITHUB_SHA}-${RANDOM}")"
+            local attempt
+            for attempt in 1 2 3 4 5 6; do
+              http_code="$(fetch_public "$url" "$output")"
+              [ "$http_code" = 200 ] && { printf '200'; return 0; }
+              echo "::warning::Waiting for readback of $url (HTTP $http_code, attempt $attempt/6)"
+              sleep "$(( attempt * 3 ))"
+            done
             printf '%s' "$http_code"
           }
           put_immutable() {
@@ -269,7 +303,7 @@ jobs:
                 npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
                   "$CEAL_RELEASE_BUCKET/$version_prefix/$name" --file "$source" --remote \
                   --cache-control "public, max-age=31536000, immutable"
-                http_code="$(fetch_public "$version_url/$name" "$deployed")"
+                http_code="$(await_public "$version_url/$name" "$deployed")"
                 [ "$http_code" = 200 ] || { echo "::error::Expected public readback for $name, got HTTP $http_code"; exit 1; }
                 cmp "$source" "$deployed"
                 ;;
@@ -330,13 +364,13 @@ jobs:
           npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
             "$CEAL_RELEASE_BUCKET/releases/worker/stable/install-ceal.sh" \
             --file "$stable_dir/install-ceal.sh" --remote --cache-control "no-cache, max-age=0"
-          bootstrap_status="$(fetch_public "$stable_url/install-ceal.sh" "$stable_readback/install-ceal.sh")"
+          bootstrap_status="$(await_public "$stable_url/install-ceal.sh" "$stable_readback/install-ceal.sh")"
           [ "$bootstrap_status" = 200 ] || { echo "::error::Expected stable installer readback, got HTTP $bootstrap_status"; exit 1; }
           cmp "$stable_dir/install-ceal.sh" "$stable_readback/install-ceal.sh"
           npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
             "$CEAL_RELEASE_BUCKET/releases/worker/stable/ceal-worker-stable-release.json" \
             --file "$stable_dir/ceal-worker-stable-release.json" --remote --cache-control "no-cache, max-age=0"
-          pointer_status="$(fetch_public "$stable_url/ceal-worker-stable-release.json" "$stable_readback/ceal-worker-stable-release.json")"
+          pointer_status="$(await_public "$stable_url/ceal-worker-stable-release.json" "$stable_readback/ceal-worker-stable-release.json")"
           [ "$pointer_status" = 200 ] || { echo "::error::Expected stable pointer readback, got HTTP $pointer_status"; exit 1; }
           cmp "$stable_dir/ceal-worker-stable-release.json" "$stable_readback/ceal-worker-stable-release.json"
           {
