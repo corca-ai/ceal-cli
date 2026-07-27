@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -3063,3 +3063,64 @@ function success(request, value) {
 		value,
 	};
 }
+
+test("the packaged bin answers an unexpected failure with an error envelope and a failing exit code", async () => {
+	// bin.js's rejection handler is the one surface no input reaches: every
+	// command path inside runCealCommand converts its own failures into a
+	// result envelope, which is why deleting `process.exitCode = 3` there left
+	// the whole gate green. Reaching it needs an injected fault, so the test
+	// runs the real bin.js against a dist whose index.js rejects and asserts
+	// both halves of the contract — the envelope and the exit code.
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-bin-unexpected-"));
+	try {
+		const realDist = fileURLToPath(new URL("../dist", import.meta.url));
+		const stubDist = path.join(root, "dist");
+		mkdirSync(stubDist);
+		for (const name of readdirSync(realDist)) {
+			if (name === "index.js") continue;
+			// bin.js is copied, not linked: ESM resolves a symlinked module's
+			// imports from its realpath, so a linked bin.js would reach straight
+			// past the stub and load the real index.js beside the original.
+			if (name === "bin.js") copyFileSync(path.join(realDist, name), path.join(stubDist, name));
+			else symlinkSync(path.join(realDist, name), path.join(stubDist, name));
+		}
+		// Everything but runCealCommand stays real, including the
+		// renderPlainYamlDocument the handler itself uses to write the envelope.
+		writeFileSync(
+			path.join(stubDist, "index.js"),
+			[
+				`export * from ${JSON.stringify(path.join(realDist, "index.js"))};`,
+				"export function runCealCommand() {",
+				'\treturn Promise.reject(new Error("injected unexpected failure"));',
+				"}",
+			].join("\n"),
+		);
+		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-unexpected-home-"));
+		const child = spawn(process.execPath, [path.join(stubDist, "bin.js"), "capabilities"], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, HOME: home },
+		});
+		let stdout = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		const code = await new Promise((resolve, reject) => {
+			child.once("error", reject);
+			child.once("close", resolve);
+		});
+		rmSync(home, { recursive: true, force: true });
+		const payload = parseYaml(stdout);
+		assert.equal(payload.schema_version, "ceal.error.v1");
+		assert.equal(payload.ok, false);
+		assert.equal(payload.status, "error");
+		assert.equal(payload.error.kind, "unexpected_failure");
+		assert.equal(typeof payload.error.next_action, "string");
+		// The message must stay generic: an injected failure's own text is not
+		// something this envelope may leak to the agent.
+		assert.doesNotMatch(stdout, /injected/u);
+		assert.equal(code, 3);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

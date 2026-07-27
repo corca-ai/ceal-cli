@@ -15,9 +15,41 @@ import {
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.mjs";
 
-// The installer accepts exactly this shape; keep the two allowlists aligned.
-const INSTALLER_ALLOWLIST =
-	/^(THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-(linux|darwin)-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|ceal-(linux|darwin)-(amd64|arm64)|install-ceal[.]sh)$/u;
+// The installer's own allowlist, read out of the shell rather than restated
+// here. It was a hand-copy, and a hand-copy of an allowlist is the shape that
+// passes while the two sides disagree: dropping `darwin` from install-ceal.sh
+// left both this test and the installer green, each checking a different
+// contract. Deriving it means the shell is the single definition and a
+// narrowing there fails here.
+const INSTALLER_ALLOWLIST = installerAllowlist();
+
+function installerAllowlist() {
+	const script = readFileSync(path.join(REPO_ROOT, "install-ceal.sh"), "utf8");
+	// The one `grep -Ev` in verify_checksum_inventory carries the allowlist as
+	// the alternation between the checksum prefix and the anchor.
+	const match = /grep -Evc '\^\[a-f0-9\]\{64\} {2}\((?<allowed>.+)\)\$'/u.exec(script);
+	assert.ok(match?.groups?.allowed, "install-ceal.sh no longer carries a recognizable checksum-inventory allowlist");
+	return new RegExp(`^(${match.groups.allowed})$`, "u");
+}
+
+// Deriving the allowlist proves the two sides agree, not that they agree on the
+// right thing: both would still pass if the shell narrowed to linux, because no
+// fixture here composes a darwin asset. The release matrix is the producer, so
+// it decides what the installer must be able to accept.
+function releasePlatforms() {
+	const workflow = readFileSync(path.join(REPO_ROOT, ".github", "workflows", "ceal-release.yml"), "utf8");
+	const platforms = parse(workflow).jobs?.build?.strategy?.matrix?.include?.map((entry) => entry.platform) ?? [];
+	assert.ok(platforms.length >= 4, `ceal-release.yml build matrix names only ${platforms.length} platforms`);
+	return platforms;
+}
+
+test("the installer's allowlist accepts every platform the release matrix builds", () => {
+	for (const platform of releasePlatforms()) {
+		for (const asset of [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]) {
+			assert.match(asset, INSTALLER_ALLOWLIST, `install-ceal.sh would reject ${asset}, which ceal-release.yml builds`);
+		}
+	}
+});
 
 test("composed worker release assets match the installer's signed inventory contract", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-")));
