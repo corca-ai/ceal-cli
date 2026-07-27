@@ -4,15 +4,19 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensurePackageBuilt } from "./repo-build.mjs";
+import { withBuiltPackages } from "./repo-build.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function packedProtocolFixture(context) {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
-	const protocol = packPackage(root, "packages/ceal-protocol", [".", "./conformance"]);
-	const client = packPackage(root, "packages/ceal-client", ["."]);
+	// Both packs read the shared workspace `dist`, so they happen inside one hold of
+	// the lock that also owns building it — see `test/repo-build.mjs`.
+	const [protocol, client] = withBuiltPackages(["packages/ceal-protocol", "packages/ceal-client"], () => [
+		packPackage(root, "packages/ceal-protocol", [".", "./conformance"]),
+		packPackage(root, "packages/ceal-client", ["."]),
+	]);
 	const producer = { repository: "corca-ai/ceal", commit: "a".repeat(40), tree: "b".repeat(40), scoped_paths_clean: true };
 	writeFileSync(path.join(root, ".ceal-handoff-owner"), "ceal.repository_extraction_gateway_handoff.v1\n");
 	const provenance = {
@@ -75,9 +79,10 @@ export function packedProtocolFixture(context) {
 
 function packPackage(root, sourcePath, declaredExports) {
 	const packageDirectory = path.join(ROOT, sourcePath);
-	// `npm pack` reads `dist`, so the build has to be finished — and finished by
-	// exactly one process — before this line. `ensurePackageBuilt` owns both.
-	ensurePackageBuilt(sourcePath);
+	// Callers must already hold the workspace dist lock: this reads `dist`.
+	// `--ignore-scripts` is not optional here — this package's `prepack` is
+	// `rm -rf dist && tsc`, so without it a pack deletes the shared tree every
+	// other process is reading. `repo-build.test.mjs` gates that flag.
 	const packed = JSON.parse(
 		execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], {
 			cwd: packageDirectory,

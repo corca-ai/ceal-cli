@@ -5,7 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensurePackageBuilt } from "./repo-build.mjs";
+import { withBuiltPackages } from "./repo-build.mjs";
 
 // `URL.pathname` is percent-encoded, so a checkout under a path containing a
 // space (or any escaped character) yields "%20" here and every derived path fails
@@ -17,12 +17,14 @@ export function makeGatewayProtocolFixture() {
 	const source = path.join(root, "protocol");
 	const output = path.join(root, "artifacts");
 	mkdirSync(output, { recursive: true, mode: 0o755 });
-	// The copy below reads `dist`, so the build has to be finished — and finished by
-	// exactly one process — before this line. `ensurePackageBuilt` owns both.
-	ensurePackageBuilt(path.join("packages", "ceal-protocol"));
-	cpSync(path.join(REPO_ROOT, "packages", "ceal-protocol"), source, {
-		recursive: true,
-		filter: (entry) => path.basename(entry) !== "node_modules",
+	// The copy reads the shared workspace `dist`, so it happens inside one hold of
+	// the lock that also owns building it — see `test/repo-build.mjs`. Everything
+	// after this point works on the private copy under `root` and needs no lock.
+	withBuiltPackages(["packages/ceal-protocol"], () => {
+		cpSync(path.join(REPO_ROOT, "packages", "ceal-protocol"), source, {
+			recursive: true,
+			filter: (entry) => path.basename(entry) !== "node_modules",
+		});
 	});
 	const manifestPath = path.join(source, "package.json");
 	const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
