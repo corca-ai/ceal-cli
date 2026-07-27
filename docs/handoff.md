@@ -125,9 +125,9 @@ package.json도 결국 같이 동기화했다. repository/homepage/bugs가 `ceal
   즉시, missing-owner 대조군은 정상 회수). 그리고
   [protocol 아티팩트 정체성 + 레인 사실 정정 둘](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md)
   — **`#6`에 npm은 필요 없다**는 결론(운영자 판단 2026-07-27: 임의 머신 해석 불필요)과,
-  `vinc`가 stale 클론으로 이 레인을 평가한 건·`dist-*` 귀속 오류 정정. 그리고 **미전달 하나**:
+  `vinc`가 stale 클론으로 이 레인을 평가한 건·`dist-*` 귀속 오류 정정. 그리고 **셋째**:
   [protocol 버전이 바이트를 구분하지 못한다](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md)
-  — 아래 `## Closed` 참조. 기존 것들:
+  — 아래 `## Closed` 참조. **셋 다 `oc`에 전달 완료.** 기존 것들:
   [기존 넷](requests/2026-07-27-to-gateway-lane.md), 그리고 오늘의
   [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md) — 후자는
   `oc:~/ceal/2026-07-27-from-narnia-blocked-assessment.md`로 이미 전달했다(새 untracked 최상위
