@@ -1,6 +1,8 @@
 # Session Handoff
 Date: 2026-07-27 — 이전 Next Session **2·3·4번과 그 부채 셋까지 끝났고**, 1번만 `vinc`
-대기로 남았다. 로컬 커밋 7개가 push 대기다(`24e4d94` → `a598ad3`).
+대기로 남았다. **push 대기 없음**: `origin/main`은 `9ed585c`다. 이전 baton이 `24e4d94`를
+push 대기로 적어둔 건 그 시점에 이미 낡은 서술이었다 — push 상태는 문서가 아니라
+`git log origin/main..HEAD`로 확인할 것.
 **이 레인은 `corca-ai/ceal-cli`만 다룬다**(`ceal-agent`는 `vinc` 소유).
 
 ## Workflow Trigger
