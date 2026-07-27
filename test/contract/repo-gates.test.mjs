@@ -246,6 +246,62 @@ test("every workflow pins every action to a full commit SHA", () => {
 	assert.ok(pinned >= 10, `only ${pinned} pinned action refs checked across ${workflows.length} workflows`);
 });
 
+// GitHub's default job timeout is six hours. `check.yml` bounded itself; the
+// release lanes did not, and they are the ones where it matters most — a tag
+// cannot be reused, so a wedged release job turns a burned tag into something
+// discovered hours after the cause stopped being obvious. Asserting across every
+// workflow rather than a hand-kept list is what keeps a newly added lane from
+// inheriting the default silently. Frozen workflows are read here, never edited:
+// if one of them lacks a bound, that is a request to its owner, so it is named
+// as an exemption rather than left to widen the rule for everyone.
+const UNBOUNDED_WORKFLOW_EXEMPTIONS = new Set(["cealctl-release.yml"]);
+
+test("every workflow job this lane owns bounds its own runtime", () => {
+	const directory = path.join(ROOT, ".github/workflows");
+	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
+	assert.ok(workflows.length >= 5, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	let bounded = 0;
+	for (const name of workflows) {
+		if (UNBOUNDED_WORKFLOW_EXEMPTIONS.has(name)) continue;
+		const jobs = Object.entries(parse(read(path.join(".github/workflows", name))).jobs ?? {});
+		// A file that parses to zero jobs would satisfy the loop trivially, which
+		// is how this kind of sweep goes quietly vacuous after a restructure.
+		assert.ok(jobs.length > 0, `${name} declares no jobs; confirm that is real rather than a parse miss`);
+		for (const [job, definition] of jobs) {
+			assert.equal(
+				typeof definition["timeout-minutes"],
+				"number",
+				`${name} job '${job}' has no timeout-minutes, so a wedged run holds a runner for the 6-hour default`,
+			);
+			bounded += 1;
+		}
+	}
+	assert.ok(bounded >= 6, `only ${bounded} jobs checked across ${workflows.length} workflows`);
+});
+
+// `npm run check` skips the release-artifact and installer proofs on a host that
+// cannot build them, and CEAL_REQUIRE_PLATFORM_PROOFS is what turns that skip
+// into a failure on a host that can. `check.yml` set it and the release lane did
+// not, so the lane those proofs exist to describe was the weaker gate of the two
+// — and its failures are the ones that burn a tag.
+test("the release lane demands the platform proofs its own artifacts depend on", () => {
+	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	const gate = Object.values(workflow.jobs)
+		.flatMap((job) => job.steps ?? [])
+		.find(runsFinalGate);
+	assert.ok(gate, "the release workflow must still carry one step that runs the final gate");
+	const requirement = String(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS);
+	assert.match(
+		requirement,
+		/matrix\.platform/u,
+		"the release gate must derive the requirement from the build matrix rather than pinning one value for every runner",
+	);
+	// Pinning "1" everywhere would fail the macOS legs, which are correct to
+	// skip; pinning "0" everywhere would restore the hole. Both halves are named.
+	assert.match(requirement, /'1'/u, "the release gate must demand the proofs somewhere");
+	assert.match(requirement, /'0'/u, "the release gate must still let the runners that cannot build them skip");
+});
+
 // A range in engines.node would let the check lane resolve a different major
 // than the release lane builds on, and a green check would stop predicting a
 // green release. One pin, asserted equal across both lanes.

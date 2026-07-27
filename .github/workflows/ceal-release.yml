@@ -35,6 +35,12 @@ jobs:
   build:
     permissions:
       contents: read
+    # A tag cannot be reused, so a wedged release job is worse than a failed
+    # one: holding a runner for the 6-hour default means the burned tag is
+    # discovered hours after the cause stopped being obvious. These bounds are
+    # the gate's own 30 minutes plus the native build and asset composition
+    # this job does on top of it.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -68,8 +74,15 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prewarm the offline packed-consumer cache
         run: node scripts/prewarm-offline-consumer-cache.mjs
+      # The gate is the same one check.yml runs, so it must be asked for the
+      # same proofs. Without this the linux runners silently skip the
+      # release-artifact and installer proofs, and the release lane — the one
+      # place those proofs describe — is the weaker of the two gates. Only the
+      # linux matrix legs can build them; the macOS legs are correct to skip.
       - name: Build and test source
         run: npm run check
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ startsWith(matrix.platform, 'linux-') && '1' || '0' }}
       - name: Download the locked Gateway handoff archive
         run: |
           set -eu
@@ -121,6 +134,7 @@ jobs:
     needs: build
     permissions:
       contents: read
+    timeout-minutes: 30
     outputs:
       sha256sums_sha256: ${{ steps.release-set.outputs.sha256sums_sha256 }}
     runs-on: ubuntu-24.04
@@ -187,6 +201,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
