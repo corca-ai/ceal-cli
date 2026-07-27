@@ -13,10 +13,13 @@ import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
 // Strictness is a parameter here rather than an accident of which file you are
 // reading. The two shapes that exist, and why:
 //
-//   - The credential store (profile-store) asserts modes on its *read* paths, so
-//     a wrong-mode directory or file is a refusal: nothing has repaired it yet,
-//     and a credential directory that is suddenly group-readable is a reason to
-//     stop rather than to quietly fix.
+//   - The credential store (profile-store) asserts modes on its read paths *and*
+//     before its write, so a wrong-mode directory or file is a refusal either
+//     way: nothing has repaired it yet, and a credential directory that is
+//     suddenly group-readable is a reason to stop rather than to quietly fix.
+//     The consequence is deliberate but sharp — with a drifted-mode
+//     `client-session.json`, both `save` and `remove` refuse, so an operator has
+//     to repair the mode by hand before any route will touch the file again.
 //   - The cache and spool assert only shape before a write and then `chmod` the
 //     result immediately, so mode is enforced a line later. Asking them to
 //     refuse a pre-existing wrong-mode file would break an install that already

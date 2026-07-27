@@ -125,10 +125,11 @@ test("an inherited agent-host override cannot aim a probed write at real state",
 	const overrides = Object.fromEntries(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.map((variable) => [variable, sentinel]));
 	try {
 		withStagedRelease((run) => {
-			const result = run(["--allow-effect", "local_write", "ceal", "guide", "register", "claude"], {
-				...overrides,
-				XDG_RUNTIME_DIR: sentinel,
-			});
+			// Only the agent-host overrides are set. The guard also pins
+			// XDG_RUNTIME_DIR, but no guide route reads it, so including it here
+			// would assert nothing while looking like coverage — the exact shape of
+			// the defect this test was rewritten to remove.
+			const result = run(["--allow-effect", "local_write", "ceal", "guide", "register", "claude"], overrides);
 			assert.match(result.stdout, /^status: available$/mu);
 			assert.doesNotMatch(result.stdout, new RegExp(sentinel.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 			const reported = registrationPaths(result.stdout);

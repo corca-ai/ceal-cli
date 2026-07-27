@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
+import { writeCealLocalStoreFile } from "../dist/local-store-file.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
 
@@ -137,6 +138,35 @@ test("a SIGKILLed writer's temporary is swept by the next save", async (context)
 	utimesSync(orphan, aged, aged);
 	await createCealSessionStore(home).save(SESSION);
 	assert.equal(existsSync(orphan), false);
+});
+
+// The sweep decides what gets deleted, and it matches the prefix as literal text
+// delimited by dots. A prefix carrying a dot would prefix-match a sibling store's
+// temporaries; one carrying a slash would place the temporary outside the
+// directory the sweep scans. Neither is a shape any caller should be able to ask
+// for by accident.
+test("an unsafe temp prefix is refused rather than swept with", async (context) => {
+	const home = withHome(context);
+	const directory = path.join(home, ".ceal");
+	class Refused extends Error {}
+	const unsafe = () => {
+		throw new Refused("unsafe_store");
+	};
+	for (const prefix of ["client-session.v2", "../escape", "client/session", "Client-Session", ""]) {
+		assert.throws(
+			() =>
+				writeCealLocalStoreFile({
+					directory,
+					file: path.join(directory, "target.json"),
+					prefix,
+					contents: "{}\n",
+					unsafe,
+				}),
+			Refused,
+			prefix,
+		);
+	}
+	assert.deepEqual(readdirSync(directory), []);
 });
 
 function runKilledWriter(source, environment) {

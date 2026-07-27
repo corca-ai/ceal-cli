@@ -427,7 +427,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 		// to a write in flight and are gone by the time one finishes.
 		readdirSync(path.join(home, ".ceal")).filter((name) => !name.endsWith(".lock") && !name.endsWith(".tmp")),
 	);
-	assert.ok(stateFiles.size >= 4, `only ${stateFiles.size} store files were written; the sweep is not reaching the stores`);
+	assert.ok(stateFiles.size >= 4, `only ${stateFiles.size} files were written; the stores driven above produce at least four`);
 	// Reading the disk only sees the stores this test drives, so the store surface
 	// itself is gated too: a new `~/.ceal` store must be exercised above or named
 	// as writing somewhere else, and either way somebody had to look at it.
@@ -435,7 +435,11 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 		readdirSync(new URL("../src", import.meta.url), { recursive: true })
 			.filter((name) => String(name).endsWith(".ts"))
 			.flatMap((name) => [
-				...readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8").matchAll(/export function (createCeal\w*Store)/gu),
+				// Both export forms, so moving a factory to `export const` cannot
+				// quietly drop it out of this gate.
+				...readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8").matchAll(
+					/export (?:async )?(?:function|const|let) (createCeal\w*Store)/gu,
+				),
 			])
 			.map((match) => match[1]),
 	);

@@ -47,7 +47,7 @@ cealctl enrollments create --client narnia --profile work --subject hwidong \
 Then locally:
 
 ```
-ceal session enroll --code-stdin
+ceal session enroll --gateway <https-url> --code-stdin
 ```
 
 A web-shell activation code is not this code: `ceal-ops admin-api invite` can

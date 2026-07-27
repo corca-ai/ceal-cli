@@ -56,9 +56,10 @@ actually reached, and this level is `surface`.
 
 ## What Needs The Gateway Lane
 
-`docs/release-and-enrollment.md` describes re-enrollment entirely in commands run
-on the Gateway lane's host, against the owner copy of `cealctl`. A successor
-without that access has no local substitute and no fallback path:
+Re-enrollment ends with one local command, but every step that makes it possible
+runs on the Gateway lane's host against the owner copy of `cealctl`. The local
+step is inert without the code those steps produce, so a successor without that
+access has no substitute and no fallback path:
 
 - issuing an enrollment code (`cealctl enrollments create`) — Gateway lane only
 - any live capability, receipt, or audit readback — requires the session that

@@ -218,7 +218,6 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 		prefix: "receipt-spool",
 		contents: `${JSON.stringify(serializeSpool(entries), null, 2)}\n`,
 		unsafe: unsafeReceiptSpool,
-		now,
 	});
 }
 
