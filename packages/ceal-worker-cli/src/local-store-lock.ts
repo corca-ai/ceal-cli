@@ -90,7 +90,33 @@ function createLock(options: LocalStoreLockOptions): string | null {
 	try {
 		writeFileSync(path.join(options.lockPath, LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
 		return nonce;
-	} catch {
+	} catch (error) {
+		// `EEXIST` here means the directory this process made is gone and a
+		// contender's is in its place: `mkdir` left ours empty, so an owner record
+		// can only be somebody else's claim. That happens when this process is
+		// descheduled past the initialization grace and the contender reclaims the
+		// owner-less directory as abandoned.
+		//
+		// Returning *before* the cleanup below is the fix. That cleanup used to run
+		// unconditionally, so the loser of this race deleted the winner's live lock
+		// and put two writers on one state file. Retrying is also the honest
+		// report: losing a race one contender had to lose is nobody's error, and
+		// `prepareDirectory` in `local-store-guards.ts` already learned that
+		// calling a lost `EEXIST` race `unsafe_store` names a security condition
+		// for an ordinary outcome. The deadline says `busy` instead.
+		if (nodeErrorCode(error) === "EEXIST") return null;
+
+		// Any other failure means no owner record was ever created, so the
+		// directory is still the empty one `mkdir` made and removing it is just
+		// cleaning up after ourselves.
+		//
+		// Still open, and deliberately not guessed at: a contender can replace the
+		// directory in this same window *without* claiming it, and then this write
+		// lands in theirs and succeeds, leaving two processes believing they hold
+		// the lock. Distinguishing that needs a directory identity the filesystem
+		// does not offer — `rmdir` + `mkdir` on the same path reused the inode in
+		// 20 of 20 trials here, so an `ino` comparison reports "still mine" for a
+		// directory somebody else made. It is recorded rather than papered over.
 		rmSync(options.lockPath, { recursive: true, force: true });
 		options.onUnsafe();
 	}

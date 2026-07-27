@@ -15,11 +15,11 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 
 ## Continuation Capability
 
-막힘 없는 코드 일감은 [품질 리뷰 3차](../charness-artifacts/quality/latest.md)
-`## Recommended Next Quality Moves`의 active 카드 둘이다: `ceal update`에 데드라인 주기
-(`stable-update.ts:189-215`, `install-ceal.sh`의 `curl`에 `--max-time` 없음), `createLock`
-실패 정리에 소유권 검사 붙이기(`local-store-lock.ts:93-96`, 모양은 `releaseLock:105-112`).
-**둘 다 읽기만 했고 재현은 안 했다.**
+막힘 없는 코드 일감 하나 남았다: **`ceal update`에 데드라인 주기**
+(`stable-update.ts:189-215`, `install-ceal.sh`의 `curl`에 `--max-time` 없음). 블랙홀 연결이나
+동시 update가 걸리면 envelope 없이 무한 대기한다 — 이 CLI의 다른 모든 대기는 유계다.
+**읽기만 했고 재현은 안 했다.** 증명 경계는 블랙홀 주소를 향해 설치기를 겨눠 유계 실패
+envelope을 확인하는 것. [품질 리뷰 3차](../charness-artifacts/quality/latest.md) 참조.
 
 ## Next Session
 
@@ -41,21 +41,19 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 ## Current State
 
 - **열린 이슈는 `#6` 하나**, 완전히 `vinc` 대기.
-- **protocol 사본의 정체성이 이제 기계가 읽는다.** `protocol-vendor-pin.json`이 셋을 적고
-  게이트가 묶는다: 출처(`corca-ai/ceal@69ac63ae1`, tree `91125f98…`), 지금 사본의 해시,
-  릴리스가 소비하는 locked archive의 subtree(`741cda25…` @ `57e23865…`). 증명/출하 갈림은
-  `diverged`로 **선언**돼 있어 치명적이지 않지만, 사본 re-sync나 lock 범프가 선언을 만료시킨다.
-  **owner(`41f88c1a…`) 대비 뒤처짐은 못 본다**(remote 미접근). 이 상태로 **릴리스 금지** —
-  [게이트 상세](gates.md).
+- **protocol 사본 정체성을 이제 기계가 읽는다.** `protocol-vendor-pin.json`: 출처
+  (`corca-ai/ceal@69ac63ae1`, tree `91125f98…`), 사본 해시, locked archive subtree
+  (`741cda25…` @ `57e23865…`). 갈림은 `diverged`로 **선언**돼 있고 re-sync·lock 범프가 만료시킨다.
+  **owner(`41f88c1a…`) 대비 뒤처짐은 못 본다**. 이 상태로 **릴리스 금지** — [gates.md](gates.md).
 - **`vinc`에 요청/질문 다섯이 걸려 있고 전부 `oc`에 전달 완료.** 프롬프트는 `docs/requests/`가
-  소유하고 운영자가 직접 넣는다. 기존 것들: [넷](requests/2026-07-27-to-gateway-lane.md),
-  [막힘 판단 + 질문 둘](requests/2026-07-27-narnia-blocked-assessment.md),
-  [공지 준비 리턴 패킷](requests/2026-07-27-to-gateway-lane-announcement-readiness.md).
+  소유하고 운영자가 직접 넣는다 — 목록은 `## References`.
 - **`prod` 세션은 살아 있다**(2026-07-27T21:15–21:21Z 관측). 미검증은 `enrollments create` →
   `request_denied` 하나뿐(write라 미실행).
 - **게이트**(2026-07-27 narnia): `npm run check` 46.8s, `check:unit` 21.3s. **이 수치를
   인용하지 말고 다시 잴 것** — 36코어 호스트 값이고 CI 러너는 코어가 훨씬 적다.
-- **병렬 tier는 아직 narnia에서만 증명됐다.** ubuntu·macOS 러너는 push 후에야 안다.
+- **병렬 tier가 CI 러너에서 증명됐다** — `03382ba` run 30261335515, ubuntu-24.04·macos-15
+  **둘 다 success**. 의심하던 둘(`~/.npm/_cacache` 동시 접근, pid 기반 tmp 경로)은 조용했다.
+  품질 리뷰 3차의 active 카드 셋 중 둘이 이걸로 닫혔다.
 
 ## Discuss
 
@@ -67,6 +65,9 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 - **드리프트 게이트가 못 보는 것 둘**: owner 대비 staleness(remote 필요),
   `source.commit`·`shipped.protocol_tree`(로컬 확인 불가한 기록값) — [gates.md](gates.md) 참조.
   CLI 블록(exit 2 경로)은 테스트가 없다.
+- **`createLock`에 남은 경합**(고친 것과 다른 갈래): 경쟁자가 디렉터리를 **claim 없이**
+  갈아치우면 write가 상대 디렉터리에 성공해 둘 다 홀더라고 믿는다. `rmdir`+`mkdir`가 inode를
+  **20/20 재사용**해 `ino` 비교로는 구분 불가 — `local-store-lock.ts` catch 주석에 근거 있음.
 - **`ceal-npm-release` 환경에 변수가 하나도 없다** → bare `v*` 태그를 밀면 첫 게이트에서 거절되며
   버전만 태운다. 이 레인은 bare `v*`를 밀지 않으므로 차단은 아니다.
 - **frozen 사본 sync는 리포 분리 완료까지 대기**(운영자 판단, 2026-07-27). `cealctl-guide`와
@@ -79,6 +80,9 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 - [품질 리뷰 2026-07-27 3차 — 현재 기준선](../charness-artifacts/quality/latest.md)
 - [게이트 상세](gates.md) · [릴리스·재등록 절차](release-and-enrollment.md) ·
   [운영자 수용 천장](operator-acceptance.md)
-- [`cealctl` 락 복구 불능 둘](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md) ·
-  [protocol 아티팩트 정체성](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md) ·
-  [protocol 버전 정체성](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md)
+- `vinc` 대기 요청: [`cealctl` 락 복구 불능 둘](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md) ·
+  [아티팩트 정체성](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md) ·
+  [버전 정체성](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md) ·
+  [기존 넷](requests/2026-07-27-to-gateway-lane.md) ·
+  [막힘 판단](requests/2026-07-27-narnia-blocked-assessment.md) ·
+  [공지 준비](requests/2026-07-27-to-gateway-lane-announcement-readiness.md)

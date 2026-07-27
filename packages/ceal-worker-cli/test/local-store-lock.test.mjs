@@ -217,6 +217,79 @@ test("a lock owned by a pid this user cannot signal is busy, not unsafe", async 
 	});
 });
 
+// The create path's twin of the release-path test above. The destructive window
+// opens between `createLock`'s `mkdir` and its owner write, so the successor is
+// simulated at exactly that seam in a patched copy of the built module. An
+// earlier version spawned a child process and raced it for real; that cost 2.5s
+// of the iteration gate and had a silent false-pass ordering, and it bought
+// nothing, because the code under test never observes the schedule — only the
+// directory state the schedule produces.
+test("a holder that loses the owner-write race does not delete its successor's lock", async () => {
+	// A successor that reclaimed the owner-less directory and fully claimed it.
+	await withStore(async (directory) => {
+		const lockPath = path.join(directory, "test.lock");
+		const { withLocalStoreLock: raced } = await import(
+			successorAtSeam(directory, JSON.stringify({ pid: process.pid, nonce: FOREIGN_NONCE }))
+		);
+		// Refused as busy, not unsafe: losing this race is nobody's error.
+		await assert.rejects(
+			raced(options(directory, { maxWaitMs: 100 }), async () => {}),
+			TestBusy,
+		);
+		assert.equal(existsSync(lockPath), true, "the losing holder deleted the lock its successor was actively holding");
+		assert.equal(JSON.parse(readFileSync(path.join(lockPath, "owner.json"), "utf8")).nonce, FOREIGN_NONCE);
+	});
+
+	// A successor still mid-write of its own record. This case is here because the
+	// first attempt at the fix guarded the cleanup on `readLockOwner` finding a
+	// *valid* record, and a zero-byte one reads as absent — so that guard called
+	// this lock unclaimed and deleted it, while `staleLockOwner` calls the same
+	// state a live holder. The `EEXIST` return does not consult the contents at
+	// all, which is why it is the right shape; this pins that it stays that way.
+	await withStore(async (directory) => {
+		const lockPath = path.join(directory, "test.lock");
+		const { withLocalStoreLock: raced } = await import(successorAtSeam(directory, ""));
+		await assert.rejects(
+			raced(options(directory, { maxWaitMs: 100 }), async () => {}),
+			TestBusy,
+		);
+		assert.equal(existsSync(lockPath), true, "a successor mid-write of its owner record had its lock deleted");
+	});
+});
+
+const FOREIGN_NONCE = "c".repeat(32);
+
+// Patches the built module so that a contender replaces the lock directory in
+// the gap between `mkdir` and the owner write. The anchors are asserted rather
+// than replaced blindly: a no-op patch would leave these tests passing against
+// code they never actually raced. Both ends of the seam are pinned, so moving
+// the nonce generation above the `mkdir` fails here instead of silently
+// relocating the injection to a place where no race exists.
+function successorAtSeam(directory, ownerContent) {
+	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
+	const body = source.slice(source.indexOf("function createLock"));
+	const anchor = 'const nonce = randomBytes(16).toString("hex");';
+	assert.ok(body.includes(anchor), "the create path no longer matches the seam anchor; re-point these tests at the mkdir/owner-write gap");
+	assert.ok(
+		body.indexOf("mkdirSync") < body.indexOf(anchor),
+		"the anchor must sit after the mkdir, or the injected successor races nothing",
+	);
+	assert.ok(body.indexOf(anchor) < body.indexOf("writeFileSync"), "the anchor must sit before the owner write it is meant to lose to");
+
+	const injected = [
+		"{ const __lp = options.lockPath;",
+		"  if (!globalThis.__cealSeam?.has(__lp)) {",
+		"    (globalThis.__cealSeam ??= new Set()).add(__lp);",
+		"    rmSync(__lp, { recursive: true, force: true });",
+		"    mkdirSync(__lp, { mode: 0o700 });",
+		`    writeFileSync(path.join(__lp, "owner.json"), ${JSON.stringify(ownerContent)}, { flag: "wx", mode: 0o600 });`,
+		"  } }\n",
+	].join("\n");
+	const module = path.join(directory, "seam-lock.mjs");
+	writeFileSync(module, source.replace(anchor, injected + anchor));
+	return module;
+}
+
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {
 	mkdirSync(lockPath, { mode: 0o700, recursive: true });
 	writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid, nonce })}\n`, { mode: ownerMode });
