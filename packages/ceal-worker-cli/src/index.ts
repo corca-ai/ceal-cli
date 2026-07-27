@@ -1,5 +1,6 @@
 import { CealHttpTransportError, createCealClient, createCealHttpTransport } from "@corca-ai/ceal";
 import type {
+	CealGatewayAnnouncementPolicy,
 	CealGatewayAuditEvent,
 	CealGatewayCallValue,
 	CealGatewayDiscoveryCapability,
@@ -956,6 +957,38 @@ function shouldRetryAuthentication(
 // The omitted fields (`input_contract`, `write_contract`) are re-fetched by
 // re-running with `--detail`; the concise rows stay a strict subset so nothing
 // the caller needs to *select* a capability is dropped.
+// What a client may show of the Gateway's announcement policy, and nothing else.
+// The Gateway lane authored this list; `schema_version` and
+// `scope_statement_kind` are deliberately absent from it, so a spread of the
+// decoded field would render two values the contract does not permit. The
+// projection is explicit for that reason — it is an allow-list, not a tidy-up.
+const ANNOUNCEMENT_POLICY_NOT_DECLARED = "scope not declared by the Gateway";
+
+function announcementPolicyProjection(policy: CealGatewayAnnouncementPolicy | undefined): unknown {
+	// Absence is a rendered answer, not a missing key. An older Gateway, or any
+	// response this client did not opt into, must read as "the Gateway did not
+	// declare a scope" rather than as no scope statement at all — the two are the
+	// same on screen only if the client stays silent, which is the inference this
+	// wording exists to prevent.
+	if (!policy) return ANNOUNCEMENT_POLICY_NOT_DECLARED;
+	return {
+		scope_statement: policy.scope_statement,
+		provider_application_authority: policy.provider_application_authority,
+		explicit_request_required: policy.explicit_request_required,
+		provenance_requirement: policy.provenance_requirement,
+		non_claims: policy.non_claims,
+	};
+}
+
+function renderedCapability(capability: CealGatewayDiscoveryCapability, detail: boolean): Record<string, unknown> {
+	const projected: Record<string, unknown> = {
+		...capability,
+		announcement_policy: announcementPolicyProjection(capability.announcement_policy),
+	};
+	if (detail) return projected;
+	return conciseCapability(projected as unknown as CealGatewayDiscoveryCapability);
+}
+
 function conciseCapability(capability: CealGatewayDiscoveryCapability): Record<string, unknown> {
 	const { input_contract: _input, write_contract: _write, ...summary } = capability;
 	return summary;
@@ -970,7 +1003,7 @@ function writeCapabilitiesAvailable(
 	provenance: CatalogProvenance,
 	runtime: CealCommandRuntime,
 ): number {
-	const capabilities = detail ? discovery.value.capabilities : discovery.value.capabilities.map(conciseCapability);
+	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",

@@ -1,0 +1,121 @@
+{
+  "schema_version": "ceal.gateway_announcement_policy_discovery_fixture.v1",
+  "purpose": "synthetic_protocol_contract_not_provider_observation",
+  "transport": {
+    "request_header": "x-ceal-announcement-policy",
+    "request_value": "accept",
+    "legacy_or_non_accept_behavior": "announcement_policy omitted and projector not invoked"
+  },
+  "cases": [
+    {
+      "name": "negotiated_github_read",
+      "request": {
+        "request_id": "request:fixture:announcement-policy:negotiated",
+        "protocol_version": "1.3.0",
+        "operation": "discover",
+        "profile_ref": "profile:work",
+        "body": {}
+      },
+      "response": {
+        "ok": true,
+        "request_id": "request:fixture:announcement-policy:negotiated",
+        "protocol_version": "1.3.0",
+        "proof_ref_or_unavailable": "gateway-audit-request:request:fixture:announcement-policy:negotiated",
+        "value": {
+          "schema_version": "ceal.gateway_discovery.v2",
+          "profile_ref": "profile:work",
+          "membership_ref": "membership:fixture-work",
+          "capabilities": [
+            {
+              "capability_id": "github.repository.get",
+              "label": "Get an approved GitHub repository",
+              "effect": "read",
+              "target_requirement": "required",
+              "input_contract": {
+                "schema_version": "ceal.github_repository_get_input.v1",
+                "required": []
+              },
+              "evidence_requirement": "gateway_audit",
+              "announcement_policy": {
+                "schema_version": "ceal.gateway_announcement_policy.v1",
+                "scope_statement_kind": "github_app_installation_repositories",
+                "scope_statement": "Repositories in the installed GitHub App installation.",
+                "provider_application_authority": {
+                  "kind": "github_app",
+                  "granted_permissions": ["metadata:read"]
+                },
+                "explicit_request_required": false,
+                "provenance_requirement": "gateway_receipt_audit",
+                "non_claims": [
+                  "policy_projection_does_not_authorize",
+                  "provider_roundtrip_not_established_by_discovery",
+                  "target_specific_scope_not_declared"
+                ]
+              }
+            }
+          ],
+          "targets": [],
+          "target_catalog": {
+            "target_count": 0,
+            "returned_count": 0,
+            "complete": true,
+            "selection_required": false
+          },
+          "host_decision": "accepted",
+          "proof_level": "host_decision",
+          "non_claims": [
+            "provider_execution_not_reached",
+            "production_audit_not_reached"
+          ]
+        }
+      }
+    },
+    {
+      "name": "legacy_or_non_accept",
+      "request": {
+        "request_id": "request:fixture:announcement-policy:legacy",
+        "protocol_version": "1.3.0",
+        "operation": "discover",
+        "profile_ref": "profile:work",
+        "body": {}
+      },
+      "response": {
+        "ok": true,
+        "request_id": "request:fixture:announcement-policy:legacy",
+        "protocol_version": "1.3.0",
+        "proof_ref_or_unavailable": "gateway-audit-request:request:fixture:announcement-policy:legacy",
+        "value": {
+          "schema_version": "ceal.gateway_discovery.v2",
+          "profile_ref": "profile:work",
+          "membership_ref": "membership:fixture-work",
+          "capabilities": [
+            {
+              "capability_id": "github.repository.get",
+              "label": "Get an approved GitHub repository",
+              "effect": "read",
+              "target_requirement": "required",
+              "input_contract": {
+                "schema_version": "ceal.github_repository_get_input.v1",
+                "required": []
+              },
+              "evidence_requirement": "gateway_audit"
+            }
+          ],
+          "targets": [],
+          "target_catalog": {
+            "target_count": 0,
+            "returned_count": 0,
+            "complete": true,
+            "selection_required": false
+          },
+          "host_decision": "accepted",
+          "proof_level": "host_decision",
+          "non_claims": [
+            "provider_execution_not_reached",
+            "production_audit_not_reached"
+          ]
+        }
+      }
+    }
+  ]
+}

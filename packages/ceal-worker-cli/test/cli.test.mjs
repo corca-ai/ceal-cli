@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	copyFileSync,
 	existsSync,
@@ -1671,6 +1672,138 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 			});
 		},
 		(request) => (request.operation === "call" ? continuationFailureResponse(request) : failedReadbackResponse(request)),
+	);
+});
+
+// The Gateway lane owns this contract and shipped it as an immutable fixture; the
+// bytes are pinned here so a silent edit to the copy cannot quietly relax what
+// these four tests prove. Verified against the digest the request named.
+const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "dfe985de0b0540c0bbf396e9e1e1221f81778ee5e924340417f368cbc577858d";
+const ANNOUNCEMENT_POLICY_ABSENT = "scope not declared by the Gateway";
+
+function announcementPolicyFixtureCase(name) {
+	const bytes = readFileSync(new URL("./fixtures/gateway-announcement-policy-discovery.v1.json", import.meta.url));
+	assert.equal(
+		createHash("sha256").update(bytes).digest("hex"),
+		ANNOUNCEMENT_POLICY_FIXTURE_SHA256,
+		"the pinned announcement-policy fixture no longer matches the bytes the Gateway lane handed over",
+	);
+	const fixture = JSON.parse(bytes.toString("utf8"));
+	const found = fixture.cases.find((item) => item.name === name);
+	assert.ok(found, `fixture case ${name} is missing`);
+	return found;
+}
+
+// Serve the fixture's capability rows verbatim through the ordinary discovery
+// path, so what is under test is this client's rendering of Gateway-authored
+// bytes rather than a locally invented policy shape.
+async function renderFixtureCapabilities(caseName, args) {
+	const capabilities = announcementPolicyFixtureCase(caseName).response.value.capabilities;
+	let payload;
+	await withGateway(
+		async ({ endpoint }) => {
+			payload = await yamlRun(args, 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:policy:001",
+			});
+		},
+		(body) =>
+			body.operation === "handshake"
+				? handshakeResponse(body)
+				: success(body, {
+						schema_version: "ceal.gateway_discovery.v2",
+						profile_ref: body.profile_ref,
+						membership_ref: "membership:narnia",
+						capabilities,
+						targets: [],
+						target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+						host_decision: "accepted",
+						proof_level: "host_decision",
+						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+					}),
+	);
+	return payload;
+}
+
+// 1. Exact rendering of the accepted closed policy shape.
+test("an accepted announcement policy renders exactly the Gateway-authored values and nothing more", async () => {
+	const source = announcementPolicyFixtureCase("negotiated_github_read").response.value.capabilities[0].announcement_policy;
+	for (const args of [["capabilities"], ["capabilities", "--detail"]]) {
+		const payload = await renderFixtureCapabilities("negotiated_github_read", args);
+		const rendered = payload.capabilities[0].announcement_policy;
+		assert.deepEqual(rendered, {
+			scope_statement: source.scope_statement,
+			provider_application_authority: source.provider_application_authority,
+			explicit_request_required: source.explicit_request_required,
+			provenance_requirement: source.provenance_requirement,
+			non_claims: source.non_claims,
+		});
+		// The contract lists five values. `schema_version` and `scope_statement_kind`
+		// are on the wire and are deliberately not among them, so a spread of the
+		// decoded field would render two values the client is not permitted to show.
+		assert.deepEqual(Object.keys(rendered).sort(), [
+			"explicit_request_required",
+			"non_claims",
+			"provenance_requirement",
+			"provider_application_authority",
+			"scope_statement",
+		]);
+	}
+});
+
+// 2. Exact absent-policy fallback.
+test("a legacy or non-accept response renders the exact not-declared wording, not silence", async () => {
+	const source = announcementPolicyFixtureCase("legacy_or_non_accept").response.value.capabilities[0];
+	assert.equal(Object.hasOwn(source, "announcement_policy"), false, "the legacy fixture case must carry no policy");
+	for (const args of [["capabilities"], ["capabilities", "--detail"]]) {
+		const payload = await renderFixtureCapabilities("legacy_or_non_accept", args);
+		// Silence would read as "this capability has no scope restriction", which is
+		// the inference the fixed wording exists to prevent.
+		assert.equal(payload.capabilities[0].announcement_policy, ANNOUNCEMENT_POLICY_ABSENT);
+	}
+});
+
+// 3. No provider-wide inference, no reference leakage, no duplicated readiness.
+test("a rendered policy leaks no reference and does not restate capability readiness", async () => {
+	const payload = await renderFixtureCapabilities("negotiated_github_read", ["capabilities", "--detail"]);
+	const rendered = payload.capabilities[0].announcement_policy;
+	const serialized = JSON.stringify(rendered);
+	// Capability-level policy cannot carry target, grant, binding, credential,
+	// evidence, or audit identity. Assert on the rendered bytes rather than on the
+	// key list, so a nested addition is caught too.
+	for (const forbidden of ["target_ref", "grant_ref", "grant_revision", "binding", "credential", "audit_ref", "evidence_ref", "proof_ref"]) {
+		assert.doesNotMatch(serialized, new RegExp(forbidden, "u"), `announcement policy rendered ${forbidden}`);
+	}
+	// Readiness keeps its own closed vocabulary elsewhere; a policy that repeated
+	// it would give an agent two sources of truth for whether a call can proceed.
+	for (const readiness of ["ready", "degraded", "unavailable", "unknown"]) {
+		assert.equal(Object.hasOwn(rendered, readiness), false);
+	}
+	assert.doesNotMatch(serialized, /"readiness"/u);
+	// The scope statement is the Gateway's exact sentence, not a widened summary.
+	assert.equal(rendered.scope_statement, "Repositories in the installed GitHub App installation.");
+	assert.deepEqual(rendered.provider_application_authority, { kind: "github_app", granted_permissions: ["metadata:read"] });
+});
+
+// 4. Typed retry rendering, independently of policy.
+test("retry_after_ms comes from a typed error recovery and never from an announcement policy", async () => {
+	// A policy is explanatory; it must not become a quota or permission message.
+	const payload = await renderFixtureCapabilities("negotiated_github_read", ["capabilities", "--detail"]);
+	assert.doesNotMatch(JSON.stringify(payload.capabilities[0].announcement_policy), /retry_after_ms/u);
+	// The typed recovery path is the only source of a retry, and it is unchanged.
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "quota_exceeded_v2",
+			message: "server-controlled",
+			next_action: "server-controlled prose",
+			recovery: { kind: "retry", retry_after_ms: 30_000 },
+		}),
+		{
+			code: "quota_exceeded_v2",
+			message: "The Gateway declined the request with a retryable rejection.",
+			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+			denial: false,
+		},
 	);
 });
 
