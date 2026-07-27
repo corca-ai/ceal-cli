@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
-import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { writeCealLocalStoreFile } from "./local-store-file.js";
+import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost
@@ -133,15 +133,13 @@ function parseCacheEntry(value: unknown): CealDiscoveryCacheEntry | null {
 function writeCacheEntry(directory: string, file: string, entry: CealDiscoveryCacheEntry): void {
 	validateEntry(entry);
 	prepareDirectory(directory, unsafeDiscoveryCache);
-	if (existsSync(file)) assertFile(file, unsafeDiscoveryCache);
-	const temporary = path.join(directory, `.client-discovery-cache.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
-	try {
-		writeFileSync(temporary, `${JSON.stringify(serializeEntry(entry), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-		renameSync(temporary, file);
-		chmodSync(file, 0o600);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+	writeCealLocalStoreFile({
+		directory,
+		file,
+		prefix: "client-discovery-cache",
+		contents: `${JSON.stringify(serializeEntry(entry), null, 2)}\n`,
+		unsafe: unsafeDiscoveryCache,
+	});
 }
 
 function removeCacheEntry(file: string): void {

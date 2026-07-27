@@ -1,6 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 
@@ -86,15 +86,14 @@ function readSessionFile(directory: string, file: string): CealStoredSession | n
 function writeSessionFile(directory: string, file: string, session: CealStoredSession): void {
 	validateSession(session);
 	prepareDirectory(directory, unsafeSessionStore, true);
-	if (existsSync(file)) assertFile(file, unsafeSessionStore, true);
-	const temporary = path.join(directory, `.client-session.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
-	try {
-		writeFileSync(temporary, `${JSON.stringify(serializeSession(session), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-		renameSync(temporary, file);
-		chmodSync(file, 0o600);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+	writeCealLocalStoreFile({
+		directory,
+		file,
+		prefix: "client-session",
+		contents: `${JSON.stringify(serializeSession(session), null, 2)}\n`,
+		unsafe: unsafeSessionStore,
+		requireMode: true,
+	});
 }
 
 function replaceSessionFile(directory: string, file: string, expectedRefreshToken: string, session: CealStoredSession): void {

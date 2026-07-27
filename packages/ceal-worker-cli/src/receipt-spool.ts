@@ -1,21 +1,7 @@
-import { randomBytes } from "node:crypto";
-import {
-	chmodSync,
-	closeSync,
-	constants,
-	existsSync,
-	fchmodSync,
-	lstatSync,
-	openSync,
-	readdirSync,
-	readFileSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-	writeSync,
-} from "node:fs";
+import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
-import { assertFile, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { writeCealLocalStoreFile } from "./local-store-file.js";
+import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
@@ -226,16 +212,14 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 	const entries = [...existing, entry]
 		.filter((candidate) => withinRetention(candidate.recordedAt, Math.max(now, entry.recordedAt)))
 		.slice(-RECEIPT_SPOOL_MAX_ENTRIES);
-	sweepStaleTemporaries(directory, now);
-	if (existsSync(file)) assertFile(file, unsafeReceiptSpool);
-	const temporary = path.join(directory, `.receipt-spool.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
-	try {
-		writeFileSync(temporary, `${JSON.stringify(serializeSpool(entries), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-		renameSync(temporary, file);
-		chmodSync(file, 0o600);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+	writeCealLocalStoreFile({
+		directory,
+		file,
+		prefix: "receipt-spool",
+		contents: `${JSON.stringify(serializeSpool(entries), null, 2)}\n`,
+		unsafe: unsafeReceiptSpool,
+		now,
+	});
 }
 
 function recordDrop(directory: string, file: string): void {
@@ -310,30 +294,6 @@ function readSpool(directory: string, file: string, now: number, drops: { count:
 
 function withinRetention(recordedAt: number, now: number): boolean {
 	return recordedAt > now - RECEIPT_SPOOL_RETENTION_MS && recordedAt <= now + FUTURE_SKEW_TOLERANCE_MS;
-}
-
-// A crash between temp write and rename orphans a .tmp file; sweep only our
-// own naming pattern and only well after any live writer would have renamed,
-// so a concurrent append's in-flight temp file is never touched.
-const STALE_TEMPORARY_AGE_MS = 60 * 60 * 1000;
-
-function sweepStaleTemporaries(directory: string, now: number): void {
-	let names: string[];
-	try {
-		names = readdirSync(directory);
-	} catch {
-		return;
-	}
-	for (const name of names) {
-		if (!/^[.]receipt-spool[.].+[.]tmp$/u.test(name)) continue;
-		const stale = path.join(directory, name);
-		try {
-			const stat = lstatSync(stale);
-			if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
-		} catch {
-			/* best effort; never block the append */
-		}
-	}
 }
 
 function removeSpool(file: string): void {

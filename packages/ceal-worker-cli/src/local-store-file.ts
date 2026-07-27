@@ -1,0 +1,91 @@
+import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { assertFile, type UnsafeStore } from "./local-store-guards.js";
+
+// The write half of the local-store contract, next to the shape guards that are
+// its read half: replace a file under HOME without ever exposing a partial or
+// world-readable one, and clean up after a writer that did not survive its own
+// write.
+//
+// This was three hand-copied copies of the same six lines. They had already
+// diverged on the part that matters least visibly and most: only the spool swept
+// the temporaries a crash leaves behind, so the two stores that did not — the
+// credential store among them — kept a 0o600 file holding an access token and a
+// refresh token forever, in the directory the operator has no reason to inspect.
+// One owner is what stops the safest copy from being the one nobody needed.
+
+const FILE_MODE = 0o600;
+
+// A crash between the temp write and the rename orphans a .tmp file; sweep only
+// this store's own naming pattern and only well after any live writer would have
+// renamed, so a concurrent write's in-flight temporary is never touched.
+const STALE_TEMPORARY_AGE_MS = 60 * 60 * 1000;
+
+export interface CealLocalStoreWrite {
+	/** The store directory holding both the temporary and the target file. */
+	directory: string;
+	/** The file being replaced, inside `directory`. */
+	file: string;
+	/** Names this store's temporaries so it never sweeps a sibling store's. */
+	prefix: string;
+	/** Serialized contents, written whole. */
+	contents: string;
+	/** The calling store's own `unsafe_store` refusal. */
+	unsafe: UnsafeStore;
+	/** When true, a pre-existing target whose mode is not 0o600 is refused. */
+	requireMode?: boolean;
+	/** Injected clock; the sweep's only time input. */
+	now?: number;
+}
+
+/**
+ * Replace `file` atomically: sweep this store's stale temporaries, refuse a
+ * target that is not a plain file, write a fresh temporary with `wx` so it can
+ * never adopt a planted path, rename it into place, and hold 0o600.
+ *
+ * The caller still owns its directory: `prepareDirectory` runs before this,
+ * because only the caller knows whether it holds a lock across the write.
+ */
+export function writeCealLocalStoreFile({
+	directory,
+	file,
+	prefix,
+	contents,
+	unsafe,
+	requireMode = false,
+	now = Date.now(),
+}: CealLocalStoreWrite): void {
+	sweepStaleTemporaries(directory, prefix, now);
+	if (existsSync(file)) assertFile(file, unsafe, requireMode);
+	const temporary = path.join(directory, `.${prefix}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+	try {
+		writeFileSync(temporary, contents, { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+		renameSync(temporary, file);
+		chmodSync(file, FILE_MODE);
+	} finally {
+		rmSync(temporary, { force: true });
+	}
+}
+
+function sweepStaleTemporaries(directory: string, prefix: string, now: number): void {
+	let names: string[];
+	try {
+		names = readdirSync(directory);
+	} catch {
+		return;
+	}
+	// Matched as literal text rather than a built regular expression: a prefix is
+	// a caller-supplied string, and the sweep decides what gets deleted.
+	const marker = `.${prefix}.`;
+	for (const name of names) {
+		if (!name.startsWith(marker) || !name.endsWith(".tmp") || name.length <= marker.length + ".tmp".length) continue;
+		const stale = path.join(directory, name);
+		try {
+			const stat = lstatSync(stale);
+			if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
+		} catch {
+			/* best effort; never block the write */
+		}
+	}
+}
