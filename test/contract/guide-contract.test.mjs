@@ -32,7 +32,11 @@ test("guide packages teach help-driven discovery without command snapshots", () 
 		assert.match(guide, new RegExp(`${item.binary} <command> --help`, "u"));
 		assert.doesNotMatch(guide, /--json|--format json/u);
 		const top = runBinary(item, ["--help"]);
-		for (const route of parseRoutes(top.stdout)) {
+		const routes = parseRoutes(top.stdout);
+		// `parseRoutes` is anchored to exactly two leading spaces, so a help-layout
+		// change would return [] and make the snapshot ban below vacuous.
+		assert.ok(routes.length > 0, `${item.binary} --help advertised no route; the help parser is not matching`);
+		for (const route of routes) {
 			const stableWorkerFlow = item.skill === "ceal-guide" && ["capabilities", "call", "receipt"].includes(route.name);
 			if (!stableWorkerFlow) assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
 		}

@@ -14,6 +14,15 @@ function read(relative) {
 	return readFileSync(path.join(ROOT, relative), "utf8");
 }
 
+// Both gates below have to find "the step that runs the final gate", and both used
+// to do it with exact equality after `trim()`. Wrapping the step in a multi-line
+// `run:` — to export one env var, say — then made one of them vacuous and the
+// other fail claiming the lane does not run the gate at all. One line-wise
+// predicate, so the two can no longer disagree about what they are looking at.
+function runsFinalGate(step) {
+	return (step.run ?? "").split("\n").some((line) => line.trim() === "npm run check");
+}
+
 // A lint step that only some entry points run is a lint step maintainers learn
 // to route around. Both gates must carry it, or "green" means different things
 // depending on which command was typed.
@@ -51,7 +60,7 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	assert.deepEqual(workflow.on.push.branches, ["main"]);
 	assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
 	assert.ok(
-		Object.values(workflow.jobs).some((job) => job.steps.some((step) => step.run === "npm run check")),
+		Object.values(workflow.jobs).some((job) => job.steps.some(runsFinalGate)),
 		"the check workflow must run the same npm run check maintainers run",
 	);
 	// The gate must run everywhere the release lane builds. It did not, and a
@@ -83,7 +92,8 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	}
 	const gate = Object.values(workflow.jobs)
 		.flatMap((job) => job.steps ?? [])
-		.find((step) => (step.run ?? "").trim() === "npm run check");
+		.find(runsFinalGate);
+	assert.ok(gate, "the check workflow must still carry one step that runs the final gate");
 	assert.match(
 		String(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS),
 		/matrix\.require_platform_proofs/u,
@@ -115,21 +125,25 @@ test("the shipped version is derived from the manifests, not retyped into source
 	// *current* version rather than any version-shaped string is deliberate: test
 	// fixtures legitimately use arbitrary version strings, and only a literal that
 	// tracks the release is a hand-bumped copy.
-	for (const packageDirectory of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
-		const sourceDirectory = path.join(ROOT, packageDirectory, "src");
-		for (const entry of readdirSync(sourceDirectory, { recursive: true, withFileTypes: true })) {
-			if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
-			const relative = path.join(
-				packageDirectory,
-				"src",
-				path.relative(sourceDirectory, path.join(entry.parentPath ?? entry.path, entry.name)),
-			);
-			assert.doesNotMatch(
-				read(relative),
-				new RegExp(`["']${version.replace(/[.]/gu, "[.]")}["']`, "u"),
-				`${relative} retypes the released version; import it from the package manifest instead`,
-			);
+	// AGENTS.md says "nothing else carries the version", so the sweep has to reach
+	// everything that could: it covered only the two `src` trees, which left the
+	// release scripts, the installer, and the workflows free to retype it.
+	const scanned = [];
+	for (const root of ["packages/ceal-client/src", "packages/ceal-worker-cli/src", "scripts", ".github/workflows"]) {
+		const directory = path.join(ROOT, root);
+		for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true })) {
+			if (!entry.isFile() || /[.](?:map|d[.]ts)$/u.test(entry.name)) continue;
+			scanned.push(path.join(root, path.relative(directory, path.join(entry.parentPath ?? entry.path, entry.name))));
 		}
+	}
+	scanned.push("install-ceal.sh");
+	assert.ok(scanned.length > 20, `only ${scanned.length} files scanned for a retyped version`);
+	for (const relative of scanned) {
+		assert.doesNotMatch(
+			read(relative),
+			new RegExp(`["']${version.replace(/[.]/gu, "[.]")}["']`, "u"),
+			`${relative} retypes the released version; derive it from the package manifest instead`,
+		);
 	}
 });
 
@@ -194,12 +208,42 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 	for (const file of [".github/workflows/check.yml", ".github/workflows/ceal-release.yml"]) {
 		const steps = Object.values(parse(read(file)).jobs).flatMap((job) => job.steps ?? []);
 		const runs = steps.map((step) => step.run ?? "");
-		const gate = runs.findIndex((run) => run.trim() === "npm run check");
-		if (gate === -1) continue;
+		// Asserted rather than skipped: exact equality plus `if (gate === -1) continue`
+		// silently made this whole test vacuous for a lane whose gate step moved to a
+		// multi-line `run:`, which is the failure it exists to prevent.
+		const gate = steps.findIndex(runsFinalGate);
+		assert.notEqual(gate, -1, `${file} no longer runs 'npm run check'; this gate cannot silently stop applying`);
 		const prewarm = runs.findIndex((run) => run.includes("prewarm-offline-consumer-cache.mjs"));
 		assert.notEqual(prewarm, -1, `${file} runs the gate without prewarming the offline cache`);
 		assert.ok(prewarm < gate, `${file} must prewarm the offline cache before running the gate`);
 	}
+});
+
+// A mutable action ref resolves to whatever the tag points at when the lane runs,
+// which for the release lanes is the moment artifacts get signed and published.
+// Two pin assertions already existed, but between them they covered exactly one
+// workflow this lane can edit (`npm-package-stage.yml`) and one it cannot
+// (`cealctl-release.yml`, frozen) — so `check.yml`, `ceal-release.yml`, and
+// `ceal-worker-stable-rollback.yml` were pinned only by habit. A frozen file may
+// be read, so this asserts across every workflow rather than a hand-kept list.
+test("every workflow pins every action to a full commit SHA", () => {
+	const directory = path.join(ROOT, ".github/workflows");
+	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
+	assert.ok(workflows.length >= 5, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	let pinned = 0;
+	for (const name of workflows) {
+		const uses = [...read(path.join(".github/workflows", name)).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
+		// A zero-match file would satisfy the loop below trivially, which is how a
+		// reformat or a flow-style `uses` key turns this kind of sweep vacuous.
+		assert.ok(uses.length > 0, `${name} declares no 'uses:' step; confirm that is real rather than a parse miss`);
+		for (const action of uses) {
+			// A local composite action (`./.github/actions/...`) has no ref to pin.
+			if (action.startsWith("./")) continue;
+			assert.match(action, /@[a-f0-9]{40}$/u, `${name} uses a mutable action ref: ${action}`);
+			pinned += 1;
+		}
+	}
+	assert.ok(pinned >= 10, `only ${pinned} pinned action refs checked across ${workflows.length} workflows`);
 });
 
 // A range in engines.node would let the check lane resolve a different major

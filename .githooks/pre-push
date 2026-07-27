@@ -1,8 +1,10 @@
 #!/bin/sh
-# Pre-push gate. CI in this repository runs only on release tags, so a push to a
-# branch carries no automated verification of its own: this hook is the last
-# point where a break is cheap. A tag push is the expensive one — a failed
-# release tag cannot be reused — so tags run the full gate, not the fast one.
+# Pre-push gate. `check.yml` now runs the full gate on every push to main and
+# every pull request, but a push to any other branch still carries no automated
+# verification of its own, so this hook is the last cheap point for that case —
+# and it is the only one that runs before the push rather than after. A tag push
+# is the expensive one — a failed release tag cannot be reused — so tags run the
+# full gate, not the fast one.
 #
 # Installed by `npm run hooks:install`, which points core.hooksPath here.
 # Bypass deliberately and visibly with `git push --no-verify` when a push must

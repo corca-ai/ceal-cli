@@ -95,9 +95,12 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
   actually enforcing it.
 - `npm run probe -- <binary> <command> [route/options]` is the only sanctioned
   way to poke an installed surface: it refuses any route whose declared effect
-  is not `read_only` and uses a throwaway `HOME`. A live readback against the
-  real session is a different act — read the declared effect before typing the
-  route, and never batch a state change into a list of checks.
+  is not `read_only` — unless the tail carries `--help`/`-h`, which bypasses the
+  effect check because a help token anywhere is read-only help — and it uses a
+  throwaway `HOME`. That bypass is proven for `ceal` only, so do not lean on it
+  for `cealctl`. A live readback against the real session is a different act —
+  read the declared effect before typing the route, and never batch a state
+  change into a list of checks.
 - Route *acceptance* and leaf help derive from a declaration table:
   `CEAL_SUBCOMMANDS` in `packages/ceal-worker-cli/src/subcommands.ts`, and
   `CEALCTL_SUBCOMMANDS` in `packages/ceal-operator-cli/src/index.ts` — a frozen

@@ -27,6 +27,37 @@ import {
 // copy this suite exists to prevent.
 const WORKER_PACKAGE_VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
+// Both source sweeps below assert that nothing bad exists, so under-scanning
+// reads as a pass. `readdirSync` was not recursive, which made the first
+// `src/` subdirectory a silent hole; the file count is asserted for the same
+// reason, because an empty scan would satisfy every sweep trivially.
+function workerSource() {
+	const entries = readdirSync(new URL("../src", import.meta.url), { recursive: true }).filter((entry) => String(entry).endsWith(".ts"));
+	assert.ok(entries.length > 10, `only ${entries.length} source files scanned; the sweep is not reaching src/`);
+	return entries.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
+}
+
+// Extract each `error: { … }` body by matching braces rather than stopping at the
+// first `}`. Three of the emitted error objects interpolate a template, whose `}`
+// closed the old regex early — so the sweep read a prefix, and a `code` key after
+// an interpolation would have passed unseen.
+function errorObjectBodies(source) {
+	const bodies = [];
+	for (const match of source.matchAll(/error:\s*\{/gu)) {
+		let depth = 1;
+		let index = match.index + match[0].length;
+		const start = index;
+		while (index < source.length && depth > 0) {
+			if (source[index] === "{") depth += 1;
+			else if (source[index] === "}") depth -= 1;
+			index += 1;
+		}
+		assert.equal(depth, 0, `unbalanced error object near offset ${match.index}`);
+		bodies.push(source.slice(start, index - 1));
+	}
+	return bodies;
+}
+
 // Read the child routes a parent leaf advertises, bounded to its own block.
 function advertisedSubcommands(help) {
 	const lines = help.split("\n");
@@ -273,10 +304,7 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 // Every declared route must emit a schema the package actually writes, so a
 // leaf cannot advertise a `Result schema` no code produces.
 test("declared result schemas exist in the emitting package", () => {
-	const source = readdirSync(new URL("../src", import.meta.url))
-		.filter((entry) => entry.endsWith(".ts"))
-		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8"))
-		.join("\n");
+	const source = workerSource();
 	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
 	for (const definition of [...CEAL_COMMANDS, ...CEAL_SUBCOMMANDS]) {
 		assert.ok(emitted.has(definition.result_schema), `${definition.name ?? definition.route.join(" ")}: ${definition.result_schema}`);
@@ -633,13 +661,10 @@ test("every command answers one success predicate that agrees with its exit code
 	// The Gateway-rejection writer needs a live rejection, so gate its shape
 	// structurally instead: `kind` is the only error key, so no emitted error
 	// object may carry `code` at all.
-	const source = readdirSync(new URL("../src", import.meta.url))
-		.filter((entry) => entry.endsWith(".ts"))
-		.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8"))
-		.join("\n");
-	for (const [, body] of source.matchAll(/error: \{([^}]*)\}/gu)) {
+	const bodies = errorObjectBodies(workerSource());
+	assert.ok(bodies.length >= 20, `only ${bodies.length} error objects found; the sweep is not reaching the writers`);
+	for (const body of bodies) {
 		// `code,` shorthand counts too: the first pass of this gate missed one.
-		// Match the property key, not a `.code` value expression.
 		// Match a property key at a property boundary, never a `.code` or `: code`
 		// value expression.
 		assert.doesNotMatch(body, /(?:^|,)\s*code\s*[:,]/u, `error objects speak 'kind' only: ${body.trim()}`);

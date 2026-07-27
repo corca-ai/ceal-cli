@@ -5,7 +5,10 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Contract tier, not release: this needs only `npm run build`, and the guard it
+// proves exists to stop a destructive probe — so the pre-push hook is exactly
+// where it belongs. It paid the release tier's serialized tax for 2.0s of work.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GUARD = path.join(ROOT, "scripts", "probe-surface.mjs");
 
 function probe(args) {
