@@ -16,12 +16,16 @@
 //   shipped  — the protocol subtree inside the locked handoff archive that
 //              `gateway-handoff-lock.json` binds a release to consume
 //
-// `source` vs `vendored` is the drift check. `source` vs `shipped` is the
-// proof/ship divergence, which is a real state this lane cannot unilaterally
-// resolve — so it is declarable rather than fatal, but the declaration is bound
-// to the exact commits it was made about. Move either side and the declaration
-// stops matching its own facts and the gate fails, which is the property a bare
-// comment in a document does not have.
+// `source` vs `vendored` is the drift check, and it is fatal. `source` vs
+// `shipped` is the proof/ship divergence, a real state this lane cannot
+// unilaterally resolve — so it is declarable rather than fatal, but the
+// declaration is bound to the facts it was made about: re-sync the copy or bump
+// the handoff lock and it stops matching them and the gate fails. That expiry is
+// the property a comment in a document does not have.
+//
+// Read `docs/gates.md` before trusting this further than it goes. It reaches no
+// remote, so it cannot see the copy falling behind its owner, and `source.commit`
+// and `shipped.protocol_tree` are recorded observations nothing here confirms.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -49,7 +53,15 @@ export const ProtocolVendorPinError = codedErrorClass("ProtocolVendorPinError");
  * Every observed input is injectable so the falsification tests can drive the
  * failure branches without constructing a scratch Git repository per case.
  */
-export function validateProtocolVendorPin({ repoRoot = REPO_ROOT, pin, lock, vendoredTree, vendoredDirty, requestTracked } = {}) {
+export function validateProtocolVendorPin({
+	repoRoot = REPO_ROOT,
+	pin,
+	lock,
+	vendoredTree,
+	vendoredDirty,
+	vendoredHidden,
+	requestTracked,
+} = {}) {
 	const root = path.resolve(repoRoot);
 	const candidate = pin ?? readJson(root, PIN_PATH, "invalid_protocol_vendor_pin");
 	assertPinShape(candidate);
@@ -60,6 +72,21 @@ export function validateProtocolVendorPin({ repoRoot = REPO_ROOT, pin, lock, ven
 			"vendored_tree_mismatch",
 			`${candidate.vendored_path} hashes to ${observedTree}, but the pin records ${candidate.source.tree}. ` +
 				"Either the copy was edited, or a sync landed without updating protocol-vendor-pin.json.",
+		);
+	}
+
+	// `git status` is not the whole story: `update-index --assume-unchanged` and
+	// `--skip-worktree` tell Git to stop looking at a file, and it then reports a
+	// modified frozen copy as clean while `HEAD:` still hashes to the pinned tree.
+	// Both checks above therefore pass over an edited copy. Whoever set the bit
+	// meant to, but the gate's answer has to describe the tree on disk rather than
+	// the tree Git was told to pretend it sees.
+	const hidden = vendoredHidden ?? readVendoredHidden(root, candidate.vendored_path);
+	if (hidden.length > 0) {
+		throw new ProtocolVendorPinError(
+			"vendored_change_hidden",
+			`${hidden.join(", ")} is marked assume-unchanged or skip-worktree, so Git would report an edited copy as clean. ` +
+				`Clear it with \`git update-index --no-assume-unchanged --no-skip-worktree -- ${candidate.vendored_path}\`.`,
 		);
 	}
 
@@ -171,6 +198,21 @@ function assertPinShape(pin) {
 
 function readVendoredTree(root, vendoredPath) {
 	return git(root, ["rev-parse", `HEAD:${vendoredPath}`], "the vendored protocol tree hash");
+}
+
+// `git ls-files -v` prefixes each path with its index state. A lowercase letter
+// means assume-unchanged; `S` means skip-worktree. Anything else is a file Git is
+// still watching.
+function readVendoredHidden(root, vendoredPath) {
+	return git(root, ["ls-files", "-v", "--", vendoredPath], "the vendored protocol index flags")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.filter((line) => {
+			const marker = line[0];
+			return marker === "S" || (marker >= "a" && marker <= "z");
+		})
+		.map((line) => line.slice(1).trim());
 }
 
 function readVendoredDirty(root, vendoredPath) {

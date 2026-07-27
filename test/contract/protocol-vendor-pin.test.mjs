@@ -52,6 +52,7 @@ function expectCode(code, overrides, label = "") {
 				lock: LOCK,
 				vendoredTree: DIVERGED.source.tree,
 				vendoredDirty: [],
+				vendoredHidden: [],
 				...overrides,
 			}),
 		(error) => {
@@ -69,6 +70,7 @@ function expectPass(overrides) {
 		lock: LOCK,
 		vendoredTree: DIVERGED.source.tree,
 		vendoredDirty: [],
+		vendoredHidden: [],
 		...overrides,
 	});
 }
@@ -107,6 +109,15 @@ test("a vendored copy that no longer hashes to its recorded source fails", () =>
 // not the copy this gate checked".
 test("an uncommitted edit inside the vendored copy fails", () => {
 	expectCode("vendored_worktree_dirty", { vendoredDirty: ["M packages/ceal-protocol/src/index.ts"] });
+});
+
+// The one bypass that survived the first draft: `git update-index
+// --assume-unchanged` (and its `--skip-worktree` sibling) tells Git to stop
+// looking at a file, so `git status` calls an edited frozen copy clean while
+// `HEAD:` still hashes to the pinned tree. Both other checks pass over it, which
+// made "the copy on disk matches its record" a claim the gate could not support.
+test("a vendored file Git was told to stop watching fails", () => {
+	expectCode("vendored_change_hidden", { vendoredHidden: ["packages/ceal-protocol/src/index.ts"] });
 });
 
 // The divergence declaration is only worth having if it expires with its own

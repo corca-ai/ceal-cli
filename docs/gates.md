@@ -128,10 +128,15 @@ in either field passes the gate. Confirming them needs the owner checkout
 (`git rev-parse <commit>:packages/ceal-protocol`), which is a separate act from
 running the gate.
 
-The dirty check has one deliberate bypass worth knowing about:
-`git update-index --assume-unchanged` on a file inside the copy hides an edit
-from `git status`, and the gate goes green. That is an explicit act, not an
-accident, so it is recorded rather than defended against.
+The drift check reads the index flags as well as `git status`, and that is not
+belt-and-braces. `git update-index --assume-unchanged` (and `--skip-worktree`)
+tells Git to stop looking at a file: `git status` then calls an edited frozen
+copy clean while `HEAD:` still hashes to the pinned tree, so *both* other checks
+pass over a modified copy. `git ls-files -v` still reports the bit — a lowercase
+marker for assume-unchanged, `S` for skip-worktree — so the gate fails on the
+flag itself rather than on the edit it hides. Setting that bit is a deliberate
+act, but the gate has to describe the tree on disk, not the tree Git was told to
+pretend it sees.
 
 Nothing here consults the live `corca-ai/ceal` remote.
 

@@ -64,9 +64,8 @@ push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리
 
 ## Debt
 
-- **드리프트 게이트가 못 보는 것 셋**: owner 대비 staleness(remote 필요),
-  `source.commit`·`shipped.protocol_tree`(로컬 확인 불가한 기록값),
-  `git update-index --assume-unchanged`(의도적 우회) — 전부 [gates.md](gates.md)에 있다.
+- **드리프트 게이트가 못 보는 것 둘**: owner 대비 staleness(remote 필요),
+  `source.commit`·`shipped.protocol_tree`(로컬 확인 불가한 기록값) — [gates.md](gates.md) 참조.
   CLI 블록(exit 2 경로)은 테스트가 없다.
 - **`ceal-npm-release` 환경에 변수가 하나도 없다** → bare `v*` 태그를 밀면 첫 게이트에서 거절되며
   버전만 태운다. 이 레인은 bare `v*`를 밀지 않으므로 차단은 아니다.
