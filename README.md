@@ -15,6 +15,22 @@ public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
   Stage 5 deletion gate. Do not add a Gateway/operator feature, release
   surface, guide, or command to them; consume the Gateway-issued artifact.
 
+`protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
+subtree the frozen protocol copy was taken from, alongside the protocol subtree
+inside the locked handoff archive a release consumes. `node
+scripts/verify-protocol-vendor-pin.mjs` binds the three offline: the copy drifting
+from its recorded source is a gate failure, while a divergence between the copy
+and the shipped archive is declarable, and a declaration must name a disposition
+owner and a tracked request under `docs/requests/`. Re-syncing the copy or
+bumping `gateway-handoff-lock.json` expires the declaration. A declared
+divergence means what this repository tests is not what a release would ship.
+
+The check reaches no remote, so it cannot see the copy falling behind its owner,
+and `source.commit` and `shipped.protocol_tree` are recorded observations rather
+than locally verified ones — confirming those needs the owner checkout. Whether
+the two protocol trees have converged is likewise the pin author's statement, not
+something the gate observes.
+
 The workspace still contains four historical package directories so packed
 consumer and deletion gates can be proved:
 

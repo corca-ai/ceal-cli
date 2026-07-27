@@ -86,6 +86,13 @@ deletion is authorized — so both copies stay.
   failed release tag cannot be reused. Run it once per clone;
   `node scripts/install-git-hooks.mjs --check` reports whether this clone is
   actually enforcing it.
+- `protocol-vendor-pin.json` records which Gateway commit and subtree the frozen
+  `packages/ceal-protocol` copy came from, and the gate fails when the copy moves
+  without it. Re-sync and re-pin in one commit; a proof/ship divergence is
+  declarable but must name an owner and a tracked request under `docs/requests/`,
+  and re-syncing the copy or bumping the handoff lock expires the declaration.
+  The check reaches no remote, so it says nothing about the copy falling behind
+  its owner — [docs/gates.md](docs/gates.md) says what it does and does not cover.
 - `npm run probe` is the only sanctioned way to poke an installed surface, and it
   refuses any route that is not `read_only`. A live readback against the real
   session is a different act — see [docs/gates.md](docs/gates.md).

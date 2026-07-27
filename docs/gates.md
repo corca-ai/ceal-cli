@@ -61,6 +61,80 @@ race that loses is silent:
 Do not re-add `--test-concurrency=1` to buy safety for a new fixture. Give the
 shared thing an owner, as `dist` has one.
 
+## The Vendored Protocol Copy Has A Recorded Source
+
+`packages/ceal-protocol` is a frozen copy of a tree `corca-ai/ceal` owns. Its
+only correctness claim is "identical to somewhere else", and for most of this
+repository's life nothing recorded where that somewhere else was. A green gate
+therefore said nothing about it, and in one day the copy cost three separate
+sessions: it blocked the announcement-policy renderer, it split what the gate
+tests from what a release ships, and a re-pull hours after a sync found it stale
+again over a single sentence this client would print verbatim.
+
+One of those three is what this gate addresses, and it is worth being exact
+about which: the copy drifting from *its own record*. The copy falling behind the
+*owner* is a different failure, and nothing here can see it — that needs the
+remote, and this check never reaches one.
+
+`protocol-vendor-pin.json` names three identities and
+`scripts/verify-protocol-vendor-pin.mjs` binds them offline, reading local files,
+the Git index, and the working tree:
+
+- **source** — the Gateway commit and `packages/ceal-protocol` subtree this copy
+  was taken from;
+- **vendored** — what `packages/ceal-protocol` hashes to right now;
+- **shipped** — the protocol subtree inside the locked handoff archive that
+  `gateway-handoff-lock.json` binds a release to consume.
+
+*source* against *vendored* is the drift check, and it fails on a committed edit
+(the recorded tree stops matching `HEAD:packages/ceal-protocol`) and on an
+uncommitted one (a committed tree hash cannot see a mid-sync working tree). Both
+are real failures, not shape checks: re-sync the copy and update the pin in the
+same commit, or the gate is correct to be red.
+
+*source* against *shipped* is the proof/ship divergence, and it is a state this
+lane cannot unilaterally resolve — which side moves is the Gateway lane's
+disposition. So it is **declarable rather than fatal**: `shipped.status` may be
+`diverged`, but the declaration must name its reason, its disposition owner, and
+a tracked request under `docs/requests/` that asks for the disposition. Plain
+existence was too weak a check: every path in the tree satisfied it, so a
+one-character edit could keep a dead declaration alive by aiming it at
+`README.md`.
+
+Two things then expire the declaration, and it is worth naming them exactly
+rather than saying "its own facts". **Re-sync the vendored copy** and the drift
+check fails until the pin moves with it. **Bump `gateway-handoff-lock.json`** and
+`shipped_lock_mismatch` fails, because the declaration was made about a shipped
+state that no longer exists. Deleting or untracking the request also fails it.
+That expiry is the point — a note in a document has no such property, and this is
+the third time a note failed to hold this line.
+
+What does *not* expire it: `source.commit` is never compared to anything, and the
+archive's protocol bytes converging with the vendored copy produces no signal at
+all. Convergence is computed from two recorded fields, so it is an author's
+statement, not an observation — the gate cannot notice a real divergence that
+nobody wrote down.
+
+A `diverged` pin is not clearance to release. It says in machine-readable form
+that what this repository tests is not what a release would ship.
+
+Be precise about which of the three the gate can actually check. Only
+`source.tree` is verified locally, against `HEAD:packages/ceal-protocol`. The
+lock supplies `shipped.gateway_commit`, so that one is cross-checked. But
+`source.commit` and `shipped.protocol_tree` are **recorded observations no local
+check can confirm** — neither the working tree nor `gateway-handoff-lock.json`
+carries them, and the archive that would is not in this repository. A wrong value
+in either field passes the gate. Confirming them needs the owner checkout
+(`git rev-parse <commit>:packages/ceal-protocol`), which is a separate act from
+running the gate.
+
+The dirty check has one deliberate bypass worth knowing about:
+`git update-index --assume-unchanged` on a file inside the copy hides an edit
+from `git status`, and the gate goes green. That is an explicit act, not an
+accident, so it is recorded rather than defended against.
+
+Nothing here consults the live `corca-ai/ceal` remote.
+
 ## Probing An Installed Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way

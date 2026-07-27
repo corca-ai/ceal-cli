@@ -88,6 +88,19 @@ gh secret list   -R corca-ai/ceal-cli     # expect CEAL_RELEASE_CLOUDFLARE_API_T
 Both were present on 2026-07-27. The workflow re-checks them at run time and
 fails the job by name if either is empty, so an empty one costs the tag.
 
+Check the proof/ship state too, because it is the one release-blocking fact a
+green gate does not surface. This is offline and needs no Gateway session:
+
+```
+node scripts/verify-protocol-vendor-pin.mjs   # exit 0; read .diverged
+```
+
+`diverged: true` means the protocol bytes this repository tests against are not
+the bytes a release would ship from the locked handoff archive. That is not a
+gate failure — it is a declared state waiting on the Gateway lane — but it is a
+reason not to spend a tag. `docs/gates.md` says what the check does and does not
+cover.
+
 Signing is keyless — cosign uses the workflow's OIDC identity, so there is no
 signing secret to hold and nothing to check beyond the workflow being allowed to
 run under `id-token: write`.

@@ -12,3 +12,4 @@ truth_surfaces:
   - README.md
   - worker-release-inputs.json
   - gateway-handoff-lock.json
+  - protocol-vendor-pin.json
