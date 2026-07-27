@@ -1811,10 +1811,15 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 // authorizes another: `targets[*].capability_ids` and the matching
 // `capability_access` entries must be read independently. The client satisfies
 // this today by passing the Gateway's targets through untouched — but nothing
-// held that shape in place, so a later convenience (filling in a missing entry,
-// collapsing readiness to one value per target, widening a target's ids to the
-// whole catalog) would have landed silently. These serve a partial grant and
-// assert the rendered rows are the served bytes.
+// held that shape in place, so a later convenience (collapsing readiness to one
+// value per target, widening a target's ids to the whole catalog, hoisting one
+// entry's rate limit onto its siblings) would have landed silently. These serve
+// a partial grant and assert the rendered rows are the served bytes.
+//
+// Synthesizing a *missing* access entry is deliberately not among them: the
+// vendored validator requires one entry per granted capability id, so no legal
+// wire body can put the client in that position, and a test for it would prove
+// the decoder rather than the renderer.
 // Targets only ride on a selected catalog query, so this exercises the
 // `capabilities targets --capability <id>` route: two targets that both grant
 // the queried capability while differing in everything else the contract says
@@ -1826,7 +1831,9 @@ function partialGrantDiscoveryTargets() {
 			label: "Engineering",
 			access: "granted",
 			// Granted for two of the three catalog capabilities, and the two differ
-			// in grant identity and readiness.
+			// in grant identity, readiness, and rate limit. `rate_limit` is optional
+			// per entry, so it is the one field a per-target projection could hoist
+			// onto a sibling — or drop — while every other assertion still held.
 			capability_ids: ["message.get", "resource.resolve"],
 			capability_access: [
 				{
@@ -1835,6 +1842,14 @@ function partialGrantDiscoveryTargets() {
 					grant_ref: "grant:engineering-message-get",
 					grant_revision: 4,
 					readiness: "ready",
+					rate_limit: {
+						schema_version: "ceal.gateway_rate_limit_policy.v1",
+						counted_unit: "governed_call",
+						scope: "authenticated_principal",
+						window_model: "rolling",
+						max_calls: 30,
+						window_ms: 60_000,
+					},
 				},
 				{
 					schema_version: "ceal.capability_access.v1",
@@ -1906,8 +1921,13 @@ test("a target's capability access is rendered as served, never widened to the c
 		["capabilities", "targets", "--capability", "message.get", "--detail"],
 	]) {
 		const { payload, targets } = await renderPartialGrantTargets(args);
-		// The whole contract in one assertion: byte-identical rows in both output
-		// modes. `--detail` is a capability-row concern; it must not reach targets.
+		// The whole contract in one assertion: byte-identical rows. Everything
+		// below it is implied by it and is here to name the specific inference,
+		// not to add an independent constraint.
+		//
+		// `--detail` reaches only the capability rows today, so the second
+		// iteration is a forward guard against it growing into the target rows
+		// rather than coverage of a path that currently differs.
 		assert.deepEqual(payload.targets, targets);
 		const engineering = payload.targets[0];
 		// `conversation.thread.get` is in the catalog and is granted on no target.
