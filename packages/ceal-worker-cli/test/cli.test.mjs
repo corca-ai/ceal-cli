@@ -1807,6 +1807,134 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 	);
 });
 
+// The multi-target selection contract says a grant for one capability never
+// authorizes another: `targets[*].capability_ids` and the matching
+// `capability_access` entries must be read independently. The client satisfies
+// this today by passing the Gateway's targets through untouched — but nothing
+// held that shape in place, so a later convenience (filling in a missing entry,
+// collapsing readiness to one value per target, widening a target's ids to the
+// whole catalog) would have landed silently. These serve a partial grant and
+// assert the rendered rows are the served bytes.
+// Targets only ride on a selected catalog query, so this exercises the
+// `capabilities targets --capability <id>` route: two targets that both grant
+// the queried capability while differing in everything else the contract says
+// must be read per capability.
+function partialGrantDiscoveryTargets() {
+	return [
+		{
+			target_ref: "target:engineering",
+			label: "Engineering",
+			access: "granted",
+			// Granted for two of the three catalog capabilities, and the two differ
+			// in grant identity and readiness.
+			capability_ids: ["message.get", "resource.resolve"],
+			capability_access: [
+				{
+					schema_version: "ceal.capability_access.v1",
+					capability_id: "message.get",
+					grant_ref: "grant:engineering-message-get",
+					grant_revision: 4,
+					readiness: "ready",
+				},
+				{
+					schema_version: "ceal.capability_access.v1",
+					capability_id: "resource.resolve",
+					grant_ref: "grant:engineering-resource-resolve",
+					grant_revision: 2,
+					readiness: "degraded",
+				},
+			],
+		},
+		{
+			target_ref: "target:finance",
+			label: "Finance",
+			// The same queried capability on a second target, at a different
+			// readiness and without its sibling's second grant.
+			capability_ids: ["message.get"],
+			access: "granted",
+			capability_access: [
+				{
+					schema_version: "ceal.capability_access.v1",
+					capability_id: "message.get",
+					grant_ref: "grant:finance-message-get",
+					grant_revision: 1,
+					readiness: "unavailable",
+				},
+			],
+		},
+	];
+}
+
+async function renderPartialGrantTargets(args) {
+	const targets = partialGrantDiscoveryTargets();
+	let payload;
+	await withGateway(
+		async ({ endpoint }) => {
+			payload = await yamlRun(args, 0, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:access:001",
+			});
+		},
+		(body) =>
+			body.operation === "handshake"
+				? handshakeResponse(body)
+				: success(body, {
+						schema_version: "ceal.gateway_discovery.v2",
+						profile_ref: body.profile_ref,
+						membership_ref: "membership:narnia",
+						capabilities: ["message.get", "resource.resolve", "conversation.thread.get"].map((id) => ({
+							capability_id: id,
+							label: id,
+							effect: "read",
+							target_requirement: "required",
+							input_contract: { schema_version: "ceal.generic_input.v1", required: [] },
+							evidence_requirement: "gateway_audit",
+						})),
+						targets,
+						target_catalog: { target_count: 2, returned_count: 2, complete: true, selection_required: false },
+						host_decision: "accepted",
+						proof_level: "host_decision",
+						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+					}),
+	);
+	return { payload, targets };
+}
+
+test("a target's capability access is rendered as served, never widened to the catalog", async () => {
+	for (const args of [
+		["capabilities", "targets", "--capability", "message.get"],
+		["capabilities", "targets", "--capability", "message.get", "--detail"],
+	]) {
+		const { payload, targets } = await renderPartialGrantTargets(args);
+		// The whole contract in one assertion: byte-identical rows in both output
+		// modes. `--detail` is a capability-row concern; it must not reach targets.
+		assert.deepEqual(payload.targets, targets);
+		const engineering = payload.targets[0];
+		// `conversation.thread.get` is in the catalog and is granted on no target.
+		// A client that widened ids to the catalog, or synthesized a placeholder
+		// access entry, would tell an agent it may call it here.
+		assert.equal(engineering.capability_ids.includes("conversation.thread.get"), false);
+		assert.doesNotMatch(JSON.stringify(payload.targets), /conversation\.thread\.get/u);
+		// Readiness is per capability, not per target: collapsing these to one
+		// value is the inference that turns a degraded grant into a ready one.
+		assert.deepEqual(
+			engineering.capability_access.map((access) => [access.capability_id, access.readiness, access.grant_ref, access.grant_revision]),
+			[
+				["message.get", "ready", "grant:engineering-message-get", 4],
+				["resource.resolve", "degraded", "grant:engineering-resource-resolve", 2],
+			],
+		);
+		// Nor is access read across targets. The queried capability is `ready` on
+		// one target and `unavailable` on the other, and the second target does not
+		// acquire its sibling's `resource.resolve` grant.
+		assert.deepEqual(payload.targets[1].capability_ids, ["message.get"]);
+		assert.deepEqual(
+			payload.targets[1].capability_access.map((access) => [access.capability_id, access.readiness]),
+			[["message.get", "unavailable"]],
+		);
+	}
+});
+
 test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
 	assert.deepEqual(
 		classifyGatewayFailure({
