@@ -13,6 +13,8 @@ scope, and update it when reality changes it:
   the route/dispatch table are shaped the way they are.
 - [docs/release-and-enrollment.md](docs/release-and-enrollment.md) — the two
   standing procedures, step by step.
+- [docs/operator-acceptance.md](docs/operator-acceptance.md) — what a maintainer
+  can prove without a Gateway session, and what a release tag needs first.
 - `worker-release-inputs.json`, `gateway-handoff-lock.json` — release and
   Gateway-contract inputs.
 

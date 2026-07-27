@@ -4,6 +4,11 @@ Both are standing procedures rather than session state, so they live here rather
 than in a baton that would restate them every session. `AGENTS.md` carries only
 the approval rule that governs them.
 
+Both also assume access a successor may not have.
+[docs/operator-acceptance.md](operator-acceptance.md) says which access each step
+needs and how to check for it before a tag is spent, since a burned tag is the
+expensive way to discover the answer.
+
 ## Release
 
 Bump the three manifests — `package.json`, `packages/ceal-client`, and
