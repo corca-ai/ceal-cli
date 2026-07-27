@@ -1,87 +1,82 @@
 # Session Handoff
-Date: 2026-07-27 — frozen 사본 드리프트 게이트, `createLock` 경합, `ceal update` 데드라인을
-랜딩했다. **막힘 없는 일감은 지금 없다** — 나머지는 전부 `vinc` 대기.
-push 상태·게이트 수치·이슈 상태는 **인용하지 말고 그 자리에서 확인할 것**.
-**이 레인은 `corca-ai/ceal-cli`만 다룬다**(`ceal-agent`는 `vinc` 소유).
+Date: 2026-07-27 — `vinc`의 **답 여섯 통을 뒤늦게 발견**해 리포로 들여왔다
+(`docs/requests/from-gateway-lane/`). 막힘 없는 일감이 넷 생겼고, **하나는 오늘 이 레인이
+랜딩한 것의 심각도를 정정하는 일**이다. 게이트 수치·push·이슈 상태는 다시 확인할 것.
+**이 레인은 `corca-ai/ceal-cli`만 다룬다.**
 
 ## Workflow Trigger
 
-- 이 파일만 언급되면 **`## Continuation Capability`부터**. `## Next Session`은 1–6이 **전부**
-  `vinc` 응답 대기라 지금 착수할 수 없다 — 답이 오면 그때 번호 순서대로.
-- prod 세션 생사는 `ceal capabilities --fresh`(read_only, 캐시 우회). `npm run probe`는
-  throwaway `HOME`이라 실세션을 답할 수 없으니 **쓰지 말 것**.
+- 이 파일이 언급되면 — **다른 지시가 함께 오더라도** — `## Next Session` 전체를 한 판으로
+  **계획하는 것이 먼저다.** 특정 번호부터 바로 구현에 들어가지 말 것. 계획 전에
+  `docs/requests/from-gateway-lane/` 여섯 통을 읽는다(**원문이 authoritative**). 계획 우선은
+  원문이 아니라 **이 레인의 판단**이다: 1의 "acceptance-candidate emission"과 2의 산출물이
+  같은 경로다.
+- prod 세션 생사 판정에만 `npm run probe`를 못 쓴다(throwaway `HOME`) — 설치 표면 포크는
+  여전히 probe가 유일한 승인 경로다. `ceal capabilities --fresh`는 **실세션 readback**이라
+  게이트와 다른 행위다 — 승인 후에만.
 
 ## Continuation Capability
 
-**품질 리뷰 3차의 active 카드 셋이 전부 닫혔다.** 막힘 없는 코드 일감은 지금 없으니,
-[품질 리뷰](../charness-artifacts/quality/latest.md)를 다시 돌려 다음 일감을 뽑거나 `vinc`
-답을 기다린다. passive 카드 둘(게이트 타이밍 기록, SEA 아티팩트 공유)은 `no-gate`로 남아 있다.
+막힘 없는 일감 넷. 1·2는 같은 경로를 건드려 얽혀 있고 3·4는 독립적이지만 **착수 순서는
+계획에서 정한다.** `cealctl`의 lock-recovery만 Gateway가 가져갔다(`## Debt` 참조).
 
 ## Next Session
 
-1. **정책 렌더링 리턴 패킷의 질문 둘** — 부재 문구를 모든 capability 행에 붙일지, 그리고
-   이 레인의 필드 이해가 맞는지. [패킷](requests/2026-07-27-to-gateway-lane-announcement-policy-return-packet.md).
-2. **증명/출하 갈림 처분** — sync를 유지할지 되돌릴지.
-   [요청서](requests/2026-07-27-to-gateway-lane-proof-ship-divergence.md). 답이 오면
-   `protocol-vendor-pin.json`의 `shipped.status`를 `agreed`로 닫거나 사본을 되돌린다.
-3. **새 versioned signed artifact** — 나와야 렌더러가 출하 가능해진다(locked artifact가 필드를
-   거부해서, 그전까지 렌더러는 증명되지만 동작하지 않는다).
-4. **protocol 버전 정책** — owner 결정은 받았다("동일 버전 재빌드는 identity-preserving 아님",
-   artifact tuple을 인용할 것). 새 tuple이 아직 없다.
-5. **`#6` 원장** — `current_stage: 2`, `rollback.rehearsals` 빈 배열. `@corca-ai/ceal-protocol`은
-   npm 404이지만 **운영자 판단(2026-07-27): npm 발행은 `#6`에 필요 없다.**
-6. **`#633` 미관측 축 셋** — 처분 답 없음. dev 재등록은 이 호스트의 prod 바인딩을 파괴하므로
-   명시적 go 없이 시작하지 말 것.
+1. **증명/출하 가드** — [결정](requests/from-gateway-lane/2026-07-27-proof-ship-divergence-decision.md).
+   갈림은 **출하 차단**, sync는 유지, `npm run check`는 **실패**해야 한다. 요구 전문(거부할 표면
+   넷, 개발 전용 명령 조건, 코드 명명)은 원문에. 원문에 없는 것 둘:
+   - 비교는 vendored producer commit/tree **대 handoff lock**이다 — `protocol-vendor-pin.json`의
+     자가 기록 필드에 판정을 걸면 저자 진술을 검증으로 착각한다(`## Debt`).
+   - 심각도를 뒤집으면 `AGENTS.md` 게이트 규칙과 `gates.md`의 "declarable rather than fatal"
+     절이 거짓이 된다 — **같은 슬라이스에서 함께 고칠 것.**
+2. **installed-acceptance result 계약 반환** —
+   [요청](requests/from-gateway-lane/2026-07-27-candidate-result-ingress-contract.md).
+   필수 사실 넷과 **불가 입력 여섯**은 원문 목록 그대로. 원문에 없는 함정: 다른 답의 "바인딩과
+   rollback 쌍이 있으면 private GitHub Release asset 가능"과 합쳐 "release URL이면 된다"로 읽기
+   쉽다 — **아니다**(가변 release 선택은 불가 입력). 계약 반환일 뿐 태그·발행·설치는 미승인.
+3. **복수 capability 선택** —
+   [계약](requests/from-gateway-lane/2026-07-27-gateway-multi-target-selection-contract.md).
+   반복 `--capability` → `capability_ids`, scalar 호환 유지. 원문에 없는 주의: **protocol
+   `1.3.0` 그대로인 additive 변경이므로 동결된 `packages/ceal-protocol`을 건드리지 말 것.**
+4. **렌더러 재검증** — [ack](requests/from-gateway-lane/2026-07-27-announcement-policy-return-ack.md).
+   문구는 정확히 **`scope not declared by the Gateway`**, 모든 capability 행, concise·`--detail`
+   양쪽. attestation 해석도 owner 확인됨. **양쪽 다 가정 말고 확인할 것.**
+5. **`vinc` 대기 — 새 versioned signed artifact.** 답 셋이 하류의 전제로 지목한다.
+6. **`vinc` 대기 — `corca-ai/ceal#633` 미관측 축 셋.** 여섯 통에 처분이 없다. 이 레인이 돌리려면
+   dev 인스턴스명 + Gateway 재시작이 필요하고, **dev 재등록이 prod 바인딩을 파괴하므로 명시적 go
+   없이 시작 금지.**
 
 ## Current State
 
-- **열린 이슈는 `#6` 하나**, 완전히 `vinc` 대기.
-- **protocol 사본 정체성을 이제 기계가 읽는다.** `protocol-vendor-pin.json`: 출처
-  (`corca-ai/ceal@69ac63ae1`, tree `91125f98…`), 사본 해시, locked archive subtree
-  (`741cda25…` @ `57e23865…`). 갈림은 `diverged`로 **선언**돼 있고 re-sync·lock 범프가 만료시킨다.
-  **owner(`41f88c1a…`) 대비 뒤처짐은 못 본다**. 이 상태로 **릴리스 금지** — [gates.md](gates.md).
-- **`vinc`에 요청/질문 다섯이 걸려 있고 전부 `oc`에 전달 완료.** 프롬프트는 `docs/requests/`가
-  소유하고 운영자가 직접 넣는다 — 목록은 `## References`.
-- **`ceal update`가 유계다.** 데드라인 + 프로세스 **그룹** kill(그룹이 아니면 `/bin/sh`가
-  child를 기다리는 동안 trap이 안 돌아 롤백·install lock이 샌다). 설치기 다운로드는 `fetch()`
-  하나를 통과하며 **stall 기준**으로 끊는다(flat `--max-time`은 100MB+ SEA를 죽인다).
-- **`prod` 세션은 살아 있다**(2026-07-27T21:15–21:21Z 관측). 미검증은 `enrollments create` →
-  `request_denied` 하나뿐(write라 미실행).
-- **게이트**(2026-07-27 narnia): `npm run check` 47.2s, `check:unit` 21.3s. **이 수치를
-  인용하지 말고 다시 잴 것** — 36코어 호스트 값이고 CI 러너는 코어가 훨씬 적다.
-- **병렬 tier가 CI 러너에서 증명됐다** — `03382ba` run 30261335515, ubuntu-24.04·macos-15
-  둘 다 success. 의심하던 둘(npm 캐시 동시 접근, pid 기반 tmp 경로)은 조용했다.
+- **답 여섯 통을 `docs/requests/from-gateway-lane/`에 digest 대조 복사했다.** 원본이
+  `oc:~/ceal`의 untracked 파일이라 `git fetch`로 안 보인 게 하루를 잃은 원인 —
+  **앞으로 레인 간 노트는 tracked 커밋으로 push한다**(`vinc` 답과 무관하게).
+- **protocol 트리가 넷이다**: 출하 `741cda25…`(lock `57e23865…`), vendored `91125f98…`,
+  푸시된 owner `41f88c1a…`, `oc` 미푸시 `d1185c92…`. **버전은 정체성이 아니다** — producer tuple을
+  인용, `0.65.0` 단독 금지. `corca-ai/ceal-cli#6`은 레지스트리 발행 불필요(둘 다 owner 결정).
+- **2026-07-27 기준 관측**(인용 말고 다시 잴 것): `check` 47.2s, `check:unit` 21.3s(36코어;
+  CI 러너는 훨씬 적다). CI는 ubuntu-24.04·macos-15 둘 다 green이었다.
 
 ## Discuss
 
-- 2번 처분이 오면 `protocol-vendor-pin.json`을 어느 쪽으로 닫을지는 운영자 판단이 필요하다:
-  사본을 owner로 다시 올릴지, locked artifact 쪽으로 되돌릴지.
+- **미푸시 커밋 하나**(`4bbf795`) — push 승인 필요.
+- 노트를 tracked 커밋으로 주고받자는 제안은 `vinc` 답 대기 중이다.
 
 ## Debt
 
+- **worker `createLock`의 잔여 경합은 이 레인 소유이고 미해결이다.** 경쟁자가 **claim 없이**
+  디렉터리를 갈아치우면 둘 다 홀더라고 믿는다. `rmdir`+`mkdir`가 inode를 **20/20 재사용**해
+  `ino`로는 구분 불가(`local-store-lock.ts` 주석). Gateway가 가져간 건 **cealctl 쪽**이지
+  이 파일이 아니다.
 - **드리프트 게이트가 못 보는 것**: owner 대비 staleness, `source.commit`·`shipped.protocol_tree`
-  (로컬 확인 불가), CLI exit 2 경로 — [gates.md](gates.md).
-- **`createLock`에 남은 경합**: 경쟁자가 디렉터리를 **claim 없이** 갈아치우면 write가 상대
-  디렉터리에 성공해 둘 다 홀더라고 믿는다. `rmdir`+`mkdir`가 inode를 **20/20 재사용**해 `ino`
-  비교로는 구분 불가 — `local-store-lock.ts` 주석에 근거 있음.
-- **update 파이프 해제는 게이트가 없다**(그룹 kill이 자손을 다 죽여 `setsid` 탈출 외엔 재현
-  불가; 세 줄 지워도 초록). 설치기 게이트는 `curl`의 **변수 호출** 우회도 못 잡는다 — 둘 다
-  해당 주석에 적혀 있다.
-- **`ceal-npm-release` 환경에 변수가 없다** → bare `v*` 태그는 첫 게이트에서 거절되며 버전만
-  태운다. 이 레인은 bare `v*`를 밀지 않으므로 차단은 아니다.
-- **frozen 사본 sync는 리포 분리 완료까지 대기**(운영자 판단, 2026-07-27). `cealctl-guide`와
-  `ceal-guide`의 SKILL.md 중복(0.95)도 같은 이유로 `Deferred`.
+  (로컬 확인 불가 — 1번이 여기 판정을 걸면 안 되는 이유), CLI exit 2 경로 — [gates.md](gates.md).
+- **update 파이프 해제는 게이트가 없고**(그룹 kill 때문에 재현 불가), 설치기 게이트는 `curl`
+  **변수 호출** 우회를 못 잡는다 — 둘 다 주석에 근거 있음.
 - 나머지(drop count 하한, 관측기 HTML 검사, PLAUSIBLE 둘)는 품질 리뷰가 소유한다.
-
 
 ## References
 
-- [품질 리뷰 2026-07-27 3차 — 현재 기준선](../charness-artifacts/quality/latest.md)
+- [Gateway 레인 답 여섯](requests/from-gateway-lane/) — **원문이 authoritative**
+- [이 레인의 회신·미해결 요약](requests/2026-07-27-to-gateway-lane-outstanding.md)
 - [게이트 상세](gates.md) · [릴리스·재등록 절차](release-and-enrollment.md) ·
-  [운영자 수용 천장](operator-acceptance.md)
-- `vinc` 대기 요청: [`cealctl` 락 복구 불능 둘](requests/2026-07-27-to-gateway-lane-cealctl-lock-recovery.md) ·
-  [아티팩트 정체성](requests/2026-07-27-to-gateway-lane-protocol-artifact-identity.md) ·
-  [버전 정체성](requests/2026-07-27-to-gateway-lane-protocol-version-identity.md) ·
-  [기존 넷](requests/2026-07-27-to-gateway-lane.md) ·
-  [막힘 판단](requests/2026-07-27-narnia-blocked-assessment.md) ·
-  [공지 준비](requests/2026-07-27-to-gateway-lane-announcement-readiness.md)
+  [운영자 수용 천장](operator-acceptance.md) · [품질 리뷰 3차](../charness-artifacts/quality/latest.md)
