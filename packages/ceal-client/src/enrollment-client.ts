@@ -1,4 +1,5 @@
 import { CEAL_ENROLLMENT_EXCHANGE_SCHEMA, type CealEnrollmentResponse, decodeCealEnrollmentResponse } from "@corca-ai/ceal-protocol";
+import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealEnrollmentClient {
 	exchange(code: string): Promise<CealEnrollmentResponse>;
@@ -39,7 +40,7 @@ export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOp
 					body: JSON.stringify({
 						schema_version: CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
 						code,
-						client: { name: "ceal", version: "0.65.10" },
+						client: { name: "ceal", version: CEAL_CLIENT_VERSION },
 					}),
 					redirect: "error",
 					signal: controller.signal,

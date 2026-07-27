@@ -65,6 +65,48 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	assert.equal(gate.env?.CEAL_REQUIRE_PLATFORM_PROOFS, "1", "the CI gate must require the platform-gated proofs to actually run");
 });
 
+// The release procedure used to be "bump the eight version-bearing files by
+// hand", and two of those eight were version literals inlined into request
+// bodies with no gate at all — a missed one would introduce the client to the
+// Gateway under a version it is not, silently, because nothing reads them back.
+// The versions are derived from the manifests now; this keeps them that way and
+// keeps the manifests agreeing, so a release bumps `package.json` and no more.
+test("the shipped version is derived from the manifests, not retyped into source", () => {
+	const manifests = {
+		root: manifest,
+		client: JSON.parse(read("packages/ceal-client/package.json")),
+		worker: JSON.parse(read("packages/ceal-worker-cli/package.json")),
+	};
+	const version = manifests.root.version;
+	assert.match(version, /^\d+\.\d+\.\d+$/u, "the root manifest must carry an exact version");
+	assert.equal(manifests.client.version, version, "the client manifest must carry the same version as the root");
+	assert.equal(manifests.worker.version, version, "the worker manifest must carry the same version as the root");
+	// The worker depends on the client by exact version; a stale pin here installs
+	// a client whose own handshake version disagrees with the worker's.
+	assert.equal(manifests.worker.dependencies["@corca-ai/ceal"], version, "the worker must depend on this exact client version");
+
+	// No source file may carry the current version as a literal. Matching the
+	// *current* version rather than any version-shaped string is deliberate: test
+	// fixtures legitimately use arbitrary version strings, and only a literal that
+	// tracks the release is a hand-bumped copy.
+	for (const packageDirectory of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
+		const sourceDirectory = path.join(ROOT, packageDirectory, "src");
+		for (const entry of readdirSync(sourceDirectory, { recursive: true, withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+			const relative = path.join(
+				packageDirectory,
+				"src",
+				path.relative(sourceDirectory, path.join(entry.parentPath ?? entry.path, entry.name)),
+			);
+			assert.doesNotMatch(
+				read(relative),
+				new RegExp(`["']${version.replace(/[.]/gu, "[.]")}["']`, "u"),
+				`${relative} retypes the released version; import it from the package manifest instead`,
+			);
+		}
+	}
+});
+
 // A release tag that fails cannot be reused, and 0.65.8 was burned by a readback
 // that a couple of retries would have survived. The retry is therefore a release
 // invariant, not a nicety: a single-shot fetch here spends a tag on a 503.

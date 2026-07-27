@@ -109,12 +109,15 @@ consumer cutover is pending and no deletion is authorized, so both copies stay.
 Both are standing procedures, not session state, so they live here rather than in
 a baton that would restate them every time.
 
-- Release: bump the eight version-bearing files (`package-lock.json` included —
-  `npm run check` does not gate the lock but the tagged workflow's
-  `npm ci --ignore-scripts` does), then `npm ci` → `npm run check` → commit →
-  push `main` → confirm `origin/main` is that commit → tag → watch →
-  `ceal update` → readback. `CHANGELOG.md` owns which tags are burned and why; a
-  burned tag is never reused.
+- Release: bump the three manifests — `package.json`, `packages/ceal-client`,
+  and `packages/ceal-worker-cli` including its exact `@corca-ai/ceal` pin — then
+  `npm i` to regenerate `package-lock.json`, which `npm run check` does not gate
+  but the tagged workflow's `npm ci --ignore-scripts` does. Nothing else carries
+  the version: source reads it from its own manifest, and `repo-gates` fails a
+  commit that retypes it or lets the manifests disagree. Then `npm ci` →
+  `npm run check` → commit → push `main` → confirm `origin/main` is that commit →
+  tag → watch → `ceal update` → readback. `CHANGELOG.md` owns which tags are
+  burned and why; a burned tag is never reused.
 - Re-enrollment (a worker session binds one instance, so switching is locally
   destructive): on the Gateway host (`ssh oc`) use the owner copy at
   `~/ceal/packages/ceal-operator-cli` — the installed `cealctl 0.65.3` there is

@@ -43,7 +43,16 @@ export type { CealSubcommandDefinition } from "./subcommands.js";
 export { CEAL_SUBCOMMANDS, splitSubcommandRoute } from "./subcommands.js";
 export { renderPlainYamlDocument } from "./yaml.js";
 
-const CEAL_PACKAGE_VERSION = "0.65.10" as const;
+// Read from the manifest npm already owns rather than retyped here. The release
+// smoke test compares this against `package.json` by running the built binary,
+// so a drifted literal used to fail a tagged run — late, and only on a host that
+// runs that platform-gated proof. Deriving it removes the drift instead of
+// catching it. `dist` and `src` both sit one level below the package root, and
+// esbuild inlines the JSON when the single-executable binary is bundled, so the
+// specifier resolves identically in source, in `dist`, and inside the artifact.
+import packageJson from "../package.json" with { type: "json" };
+
+const CEAL_PACKAGE_VERSION: string = packageJson.version;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 

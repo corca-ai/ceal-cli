@@ -13,6 +13,11 @@ import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 import { CEAL_COMMANDS, CEAL_SUBCOMMANDS, renderPlainYamlDocument, runCealCommand, splitSubcommandRoute } from "../dist/index.js";
 
+// The version the worker introduces itself to the Gateway with is derived from
+// the manifest, so asserting a literal here would reintroduce the hand-bumped
+// copy this suite exists to prevent.
+const WORKER_PACKAGE_VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+
 // Read the child routes a parent leaf advertises, bounded to its own block.
 function advertisedSubcommands(help) {
 	const lines = help.split("\n");
@@ -316,7 +321,7 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 			return {
 				status: "updated",
 				previous_version: "0.65.0",
-				installed_version: "0.65.10",
+				installed_version: "1.2.3",
 				platform: "linux-arm64",
 				artifact_sha256: "a".repeat(64),
 				elapsed_ms: 42,
@@ -331,13 +336,13 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 		effect: "local_write",
 		stable_only: true,
 		previous_version: "0.65.0",
-		installed_version: "0.65.10",
+		installed_version: "1.2.3",
 		platform: "linux-arm64",
 		artifact_sha256: "a".repeat(64),
 		elapsed_ms: 42,
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
-	const invalid = await run(["update", "v0.65.10"], {
+	const invalid = await run(["update", "v1.2.3"], {
 		runStableUpdate: async () => {
 			invoked += 1;
 			return { status: "updated" };
@@ -2091,7 +2096,7 @@ test("capabilities selects a bounded target page through the stored client sessi
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
 		assert.deepEqual(
 			requests.map((item) => item.body.body),
-			[{ client: { name: "ceal", version: "0.65.10" } }, { capability_id: "message.search", match: "team", limit: 1 }],
+			[{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } }, { capability_id: "message.search", match: "team", limit: 1 }],
 		);
 	});
 });
