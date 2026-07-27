@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
+import { createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
@@ -748,6 +748,60 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"),
 		false,
 	);
+});
+
+// The observer and the store both answer "is this cache entry still fresh", and
+// an operator debugging a cache that never serves reads the observer's answer.
+// While the two were separate copies they disagreed: the store grew a
+// backward-clock guard and the observer did not, so an entry stamped in the
+// future rendered `within_ttl: true` while `capabilities` re-probed on every
+// call. This pins them to one answer across the boundary cases rather than
+// pinning the observer's rendering alone.
+test("the observer and the discovery cache agree on freshness, including a backward clock", async () => {
+	const key = {
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:freshness",
+		membershipRef: "membership:freshness",
+		negotiatedProtocolVersion: "1.3.0",
+	};
+	// A payload the store's own decoder accepts, so the only thing that can make
+	// the two answers differ below is the clock — not entry validity.
+	const discovery = {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: key.profileRef,
+		membership_ref: key.membershipRef,
+		capabilities: [],
+		targets: [],
+		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	};
+	const ttl = 300_000;
+	const now = Date.UTC(2026, 6, 27, 12, 0, 0);
+	const cases = [
+		{ label: "fresh", cachedAt: now - 60_000, usable: true },
+		{ label: "expired", cachedAt: now - 10 * 60_000, usable: false },
+		{ label: "exactly at the ttl boundary", cachedAt: now - ttl, usable: false },
+		{ label: "stamped in the future by a backward clock step", cachedAt: now + 10 * 60_000, usable: false },
+	];
+	for (const scenario of cases) {
+		const entry = { key, cachedAt: scenario.cachedAt, discovery };
+		const state = await buildObserverState({
+			loadDiscoveryCache: async () => entry,
+			discoveryCacheTtlMs: ttl,
+			now: () => now,
+		});
+		assert.equal(
+			state.discovery_cache.within_ttl,
+			discoveryCacheEntryUsable(entry, key, now, ttl),
+			`${scenario.label}: the observer and the store disagree about freshness`,
+		);
+		assert.equal(state.discovery_cache.within_ttl, scenario.usable, scenario.label);
+		// A negative age is not a thing to render at an operator; `within_ttl` is
+		// what carries the anomaly.
+		assert.ok(state.discovery_cache.age_ms >= 0, `${scenario.label}: rendered a negative age`);
+	}
 });
 
 function rawRequest(baseUrl, requestPath, headers) {

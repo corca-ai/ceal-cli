@@ -9,7 +9,7 @@ import {
 	type CealAgentSessionEventsLookup,
 } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
-import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
+import { type CealDiscoveryCacheEntry, discoveryCacheFreshness } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
@@ -366,7 +366,9 @@ async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number):
 	}
 	if (!entry) return { status: "absent" };
 	const ttl = runtime.discoveryCacheTtlMs ?? 300_000;
-	const age = Math.max(0, now - entry.cachedAt);
+	// Freshness is the store's judgement, not a second copy of it — see
+	// `discoveryCacheFreshness`.
+	const { ageMs: age, withinTtl } = discoveryCacheFreshness(entry.cachedAt, now, ttl);
 	const capabilities = Array.isArray(entry.discovery.capabilities) ? entry.discovery.capabilities : [];
 	const targets = Array.isArray(entry.discovery.targets) ? entry.discovery.targets : [];
 	const targetCatalog = entry.discovery.target_catalog;
@@ -375,7 +377,7 @@ async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number):
 		cached_at: new Date(entry.cachedAt).toISOString(),
 		age_ms: age,
 		ttl_ms: ttl,
-		within_ttl: age < ttl,
+		within_ttl: withinTtl,
 		gateway_endpoint: entry.key.gatewayEndpoint,
 		profile_ref: entry.key.profileRef,
 		membership_ref: entry.key.membershipRef,

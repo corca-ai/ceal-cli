@@ -185,6 +185,18 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 ];
 
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
+
+// Read a command's recovery line by the name it is about. A positional index is
+// how the wrong one shipped: `CEAL_COMMANDS[2].recovery` meant `session` when it
+// was written, then `update` was inserted above it, and a logged-out
+// `ceal capabilities` began telling the operator to reinstall the binary instead
+// of to get a session. Nothing caught it, because an index is still valid after
+// it starts pointing somewhere else.
+function commandRecovery(name: CealCommandDefinition["name"]): string {
+	const command = COMMAND_BY_NAME.get(name);
+	if (!command) throw new Error(`no ceal command is named ${name}`);
+	return command.recovery;
+}
 const TOP_LEVEL_HELP = [
 	"Usage: ceal <command> [options]",
 	"",
@@ -1495,7 +1507,7 @@ function writeCapabilitiesUnavailable(io: CealCliIo): number {
 		error: {
 			kind: "client_session_unavailable",
 			message: "No Gateway-issued client session is configured for this client.",
-			next_action: CEAL_COMMANDS[2].recovery,
+			next_action: commandRecovery("session"),
 		},
 	});
 	return 3;

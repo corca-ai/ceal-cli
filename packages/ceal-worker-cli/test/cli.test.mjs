@@ -243,6 +243,23 @@ test("dispatch selects the handler the route itself declares", () => {
 // probe: that row builds green, then advertises leaf help, passes acceptance, and
 // dead-ends in `invalid_argument` — issue #1's failure from the other side. This
 // compares dispatch against the declaration where the type system cannot.
+// A positional index into either declaration table is valid forever and correct
+// only until somebody inserts a row above it. That is not hypothetical here:
+// `CEAL_COMMANDS[2].recovery` was `session` when written and became `update` when
+// `update` was added, so the logged-out `capabilities` envelope sent operators to
+// reinstall the binary. Look rows up by name; the tables are small and the names
+// are a literal union, so nothing is lost.
+test("no source file reaches into a declaration table by position", () => {
+	// `workerSource()` asserts the sweep actually reached src/, so this cannot pass
+	// by scanning nothing.
+	const offenders = workerSource()
+		.split("\n")
+		// Comments may name the defect; code may not commit it.
+		.filter((line) => !/^\s*(?:\/\/|\*)/u.test(line))
+		.filter((line) => /\b(?:CEAL_COMMANDS|CEAL_SUBCOMMANDS)\s*\[\s*\d/u.test(line));
+	assert.deepEqual(offenders, [], "look the row up by name instead — a positional index survives a reordering silently");
+});
+
 test("every declared route has a handler in the runner that serves it", () => {
 	const dispatched = dispatchedRouteKeys();
 	const parents = new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent));
@@ -2023,7 +2040,13 @@ test("capabilities reports an honest Gateway-required unavailable surface withou
 	assert.equal(payload.live_gateway_checked, false);
 	assert.deepEqual(payload.capabilities, []);
 	assert.deepEqual(payload.claims_allowed, []);
-	assert.equal(typeof payload.error.next_action, "string");
+	// Which recovery, not merely that there is one. `typeof … === "string"` was the
+	// assertion here, and under it this envelope told a logged-out operator to
+	// reinstall the binary for a year — the source read `CEAL_COMMANDS[2]`, which
+	// meant `session` until `update` was inserted above it. Deriving the expected
+	// text from the table is what makes a future reordering fail here.
+	assert.equal(payload.error.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
+	assert.match(payload.error.next_action, /device-enrollment code/u);
 	assert.equal(Object.hasOwn(payload, "next_actions"), false);
 });
 

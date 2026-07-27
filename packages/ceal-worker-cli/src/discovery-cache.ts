@@ -78,14 +78,30 @@ export function discoveryCacheEntryUsable(entry: CealDiscoveryCacheEntry, key: C
 		isValidCacheKey(entry.key) &&
 		isValidCacheKey(key) &&
 		isValidCachedDiscovery(entry.discovery, entry.key) &&
-		Number.isFinite(entry.cachedAt) &&
-		Number.isFinite(now) &&
-		Number.isSafeInteger(ttlMs) &&
-		ttlMs >= 0 &&
 		keysMatch(entry.key, key) &&
-		entry.cachedAt <= now &&
-		now - entry.cachedAt < ttlMs
+		discoveryCacheFreshness(entry.cachedAt, now, ttlMs).withinTtl
 	);
+}
+
+/**
+ * The single owner of "is this cached entry still fresh", and of the age an
+ * operator is shown for it.
+ *
+ * `observer.ts` renders the same judgement, and while the two were separate
+ * copies they drifted: this one grew the `cachedAt <= now` guard and the
+ * observer's did not, so after a backward clock step an entry stamped in the
+ * future was reported `within_ttl: true` while `capabilities` treated it as a
+ * miss and re-probed the Gateway on every call. An operator asking why the cache
+ * never serves was told, by the tool built to answer that, that it was fresh.
+ */
+export function discoveryCacheFreshness(cachedAt: number, now: number, ttlMs: number): { ageMs: number; withinTtl: boolean } {
+	const sane = Number.isFinite(cachedAt) && Number.isFinite(now) && Number.isSafeInteger(ttlMs) && ttlMs >= 0;
+	return {
+		// Clamped, because a negative age is not a thing to render at an operator.
+		// `withinTtl` is what carries the anomaly, and it refuses the entry.
+		ageMs: sane ? Math.max(0, now - cachedAt) : 0,
+		withinTtl: sane && cachedAt <= now && now - cachedAt < ttlMs,
+	};
 }
 
 function keysMatch(a: CealDiscoveryCacheKey, b: CealDiscoveryCacheKey): boolean {
