@@ -1,13 +1,12 @@
 # Session Handoff
-Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계획 검토를 끝냈다**(독립 두 판 +
-로컬 대조). 아래 순서가 그 결과이고 근거·상세는
+Date: 2026-07-28 — 계획 순서의 **2·3·4를 끝냈다.** 남은 건 5·6·1이고, 근거·상세는
 [계획 문서](../charness-artifacts/impl/2026-07-28-post-v0.66.1-plan.md)가 소유한다. 기다리던
-**`gateway-handoff-v0.66.1`이 나왔다.** 게이트 수치·push·이슈는 다시 확인할 것.
+**`gateway-handoff-v0.66.1`이 나왔다.** push·이슈는 다시 확인할 것.
 **이 레인은 `corca-ai/ceal-cli`만 다룬다.**
 
 ## Workflow Trigger
 
-- 이 파일만 언급되면 **`charness:impl`을 첫 착수 가능 항목(현재 2번)으로 시작한다.** 계획은
+- 이 파일만 언급되면 **`charness:impl`을 첫 착수 가능 항목(현재 5번)으로 시작한다.** 계획은
   끝났으니 **재계획도 chunked routing도 돌리지 말 것** — 기본 라우팅은 backlog를 다시 랭킹하려
   들고, 그건 이 순서를 되돌린다. 착수 전엔 그 항목의 원문과 계획 문서만 읽는다.
 - prod 세션 생사 판정에만 `npm run probe`를 못 쓴다(설치 표면 포크는 여전히 probe만).
@@ -15,23 +14,27 @@ Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계�
 
 ## Continuation Capability
 
-**지금 막힘 없이 되는 것: 2·3·4, 그리고 5를 브랜치에서.** 6은 1의 답이 와야 풀린다.
-계획 문서의 "뒤집은 판단 셋"을 먼저 읽을 것 — 어제 핸드오프가 셋을 틀렸다.
+**지금 막힘 없이 되는 것: 5를 브랜치에서.** 6은 1의 답이 와야 풀린다.
+계획 문서의 "뒤집은 판단 셋"을 먼저 읽을 것.
 
 ## Next Session
 
 1. **`vinc` 답 대기**(6이 걸린다). 질문 둘(`handoff_manifest_sha256`, 아카이브 입수 경로)은
    2026-07-28 [전달 완료](requests/2026-07-28-to-gateway-lane-artifact-consumption.md).
-   **답은 `git fetch`로 안 온다** — `oc:~/ceal`의 untracked 노트를 직접 볼 것.
-2. **렌더러 문구 확인·종료** — 이미 `index.ts:965`에 정확히 있고 concise·`--detail` 양쪽에 걸린다.
-   **일감이 아니라 확인**이다.
-3. **installed-acceptance result 계약 반환** —
-   [요청](requests/from-gateway-lane/2026-07-27-candidate-result-ingress-contract.md).
-   필수 사실 넷·불가 입력 여섯은 원문 그대로. 함정: 다른 답의 "private GitHub Release asset
-   가능"과 합쳐 "release URL이면 된다"로 읽지 말 것(**가변 release 선택은 불가 입력**).
-4. **`capability_access` 비추론 테스트** —
-   [계약](requests/from-gateway-lane/2026-07-27-gateway-multi-target-selection-contract.md).
-   지금 코드는 추론하지 않지만 **아무것도 그걸 붙들지 않는다.** 6과 무관하게 착수 가능.
+   3번의 답장에도 질문이 하나 더 붙었다(sanitize 시 `instance_ref`/`profile_ref` 중 무엇이
+   필요한가). **답은 `git fetch`로 안 온다** — `oc:~/ceal`의 untracked 노트를 직접 볼 것.
+2. ~~렌더러 문구~~ **확인 완료**(2026-07-28). `index.ts:965`에 정확히 있고 projection이 concise
+   벗기기보다 먼저 걸려 양쪽 출력에 남는다. 기존 테스트 둘이 이미 양쪽 모드를 순회한다.
+3. ~~installed-acceptance result 계약 반환~~ **전달 완료** —
+   [답장](requests/2026-07-28-to-gateway-lane-installed-acceptance-result-contract.md).
+   조사 중 **초안이 틀렸던 걸 잡았다**: 릴리스는 이미 있다(`ceal-v0.66.1`, 이 호스트에 설치됨).
+   튜플을 막는 건 부재가 아니라 **승인**이다 — 패킷 생성이 `capabilities --fresh`를 돌린다.
+   darwin은 CI가 서명까지 하되 **설치 레그가 없는 것**이 진짜 공백. 우리 쪽 결함도 하나
+   보고했다: 패킷이 `binary_path`·`registered_hosts`·`instance_ref`/`profile_ref`를 그대로
+   싣는다 — **sanitize projection이 미구현 부채**로 남았다.
+4. ~~`capability_access` 비추론 테스트~~ **완료**(`61084c4`+`2d0b823`).
+   `capabilities targets --capability` 경로에서만 관측 가능하다(bare 경로는 targets가 0개로
+   강제된다). 카탈로그 확장·readiness 뭉갬·`rate_limit` hoist 세 뮤테이션으로 무는 것 확인.
 5. **증명/출하 가드를 치명적으로** —
    [결정](requests/from-gateway-lane/2026-07-27-proof-ship-divergence-decision.md).
    **`main`에 바로 올리지 말고 브랜치에서** 6이 뒤따를 수 있을 때 함께 넣는다(`## Discuss`).
@@ -59,7 +62,11 @@ Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계�
 
 ## Discuss
 
-- **미푸시 커밋 넷** — push 승인 필요.
+- **미푸시 커밋 여섯**(`git log @{u}..HEAD`로 잰 값) — push 승인 필요. 이전 핸드오프의 "넷"은
+  당시에도 틀렸다. 세지 말고 잴 것.
+- **`accept:worker` 1회 실행 승인이 3번을 실제로 푼다.** `capabilities --fresh`(실세션 readback)만
+  걸려 있고, 그게 `linux-amd64` 튜플을 만든다. 다만 이 호스트 설치본은
+  `artifact_state: unsigned_build_candidate`(로컬 빌드)라 서명 릴리스 설치 증거는 아니다.
 - 5를 언제 `main`에 넣을지 판단이 필요하다: 넣는 순간 6이 끝날 때까지 `main`이 붉고 6은 `vinc`
   답에 걸려 있다. 붉은 `main`은 `--no-verify` 습관을 만들고 그게 동결 경로를 지키는 유일한 장치를 끈다.
 
@@ -69,8 +76,11 @@ Date: 2026-07-28 — `vinc`의 답·계약 **아홉 통**을 들여왔고 **계�
   모든 검사가 통과한다. `capability_ids`를 손으로 푸는 사람의 자연스러운 다음 수라 특히 위험하다.
 - **worker `createLock`의 잔여 경합은 이 레인 소유이고 미해결**(claim 없는 디렉터리 교체, inode
   20/20 재사용). Gateway가 가져간 건 **cealctl 쪽**이다.
-- **CI에 macOS 설치 레그가 없다**(`require_platform_proofs: "0"`). Mac 설치·핸드셰이크 증거는 이
-  레인 손에 호스트가 없다.
+- **CI에 macOS 설치 레그가 없다.** 빌드·서명은 네 플랫폼 다 된다(`ceal-release.yml:50-61`);
+  없는 건 darwin 릴리스를 **설치해서** 패킷을 돌리는 레그다. `require_platform_proofs: "0"`은
+  릴리스·설치기 **테스트 스위트** 얘기라 이 공백의 근거로 인용하면 틀린다.
+- **acceptance 패킷 sanitize 미구현**: `binary_path`·`registered_hosts`·`instance_ref`/
+  `profile_ref`가 그대로 실린다. 외부로 나가는 레코드로 커밋하기 전에 allow-list projection 필요.
 - 나머지(가드가 수렴을 관측 못 하는 한계, update 파이프 해제 미게이트, 설치기 `curl` 변수 호출
   우회, drop count 하한, 관측기 HTML 검사)는 해당 주석·[gates.md](gates.md)·품질 리뷰가 소유한다.
 
