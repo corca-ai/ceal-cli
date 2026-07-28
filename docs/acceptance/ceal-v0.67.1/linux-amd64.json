@@ -33,7 +33,7 @@
   "gateway_session": {
     "reached": true,
     "exit_code": 0,
-    "elapsed_ms": 12339,
+    "elapsed_ms": 10184,
     "instance_ref": "instance:ceal-prod",
     "profile_ref": "profile:work",
     "negotiated_protocol_version": "1.3.0",
@@ -42,11 +42,29 @@
     "live_gateway_checked": true,
     "capability_count": 20
   },
-  "bounded_capability_call": null,
+  "bounded_capability_call": {
+    "capability": "github.repository.get",
+    "target": "target:github-repository:f6c8ecf29847edd47d0bdb9d",
+    "status": "completed",
+    "exit_code": 0,
+    "elapsed_ms": 9359,
+    "evidence": "readback_verified",
+    "request_ref": "ceal:9663d0e6-239d-4267-a04a-895d8893a0ea:call",
+    "receipt": {
+      "readback_status": "verified",
+      "exit_code": 0,
+      "elapsed_ms": 1130,
+      "audit_refs": [
+        "gateway-audit:0d1f2928-d61c-4c36-b090-baf3b50d18fa"
+      ],
+      "outcome": "succeeded",
+      "authorization": "allowed",
+      "gateway_elapsed_ms": 7772
+    }
+  },
   "non_claims": [
     "Only linux-amd64 is evidenced by this packet; every other platform is unproved by it.",
     "No tag, signature, upload, publication, or Gateway configuration change was performed.",
-    "provider_execution_not_reached: no bounded capability call was requested, so no provider action or receipt is claimed.",
     "artifact_state is 'unsigned_build_candidate' because the release manifest is written at asset-composition time, before signing; it does not mean the installed artifact is unsigned. Cosign verification is the installer's step, and this command does not re-prove it.",
     "This packet describes one machine. It is not a fresh-device installation proof unless this install was performed fresh for it.",
     "This record is a sanitized projection: the emitting host's binary path and local agent registration paths are omitted by allow-list, so it describes an installation without locating one."
