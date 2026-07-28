@@ -69,6 +69,11 @@ export type CealGatewayHandshakeRequest = CealGatewayRequestEnvelope<"handshake"
  */
 export interface CealGatewayDiscoverBody {
 	capability_id?: string;
+	/**
+	 * Additive multi-capability target selection. Each returned target still
+	 * carries only the capability-specific grants it actually has.
+	 */
+	capability_ids?: string[];
 	match?: string;
 	cursor?: string;
 	limit?: number;

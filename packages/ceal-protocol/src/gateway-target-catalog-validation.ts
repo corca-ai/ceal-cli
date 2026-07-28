@@ -11,7 +11,7 @@ export function validateGatewayTargetCatalog(context: GatewayTargetCatalogValida
 	const catalog = requireTargetCatalog(context, value);
 	validateTargetCatalogCounts(context, catalog, targets);
 	validateTargetCatalogPaging(context, catalog);
-	validateTargetCatalogRequest(context, catalog, targets, capabilityIds, request.capability_id);
+	validateTargetCatalogRequest(context, catalog, targets, capabilityIds, requestedCapabilityIds(request), request.capability_ids !== undefined);
 }
 
 function requireTargetCatalog(context: GatewayTargetCatalogValidationContext, value: unknown): CealGatewayTargetCatalog {
@@ -42,13 +42,32 @@ function validateTargetCatalogPaging(context: GatewayTargetCatalogValidationCont
 	if (catalog.next_cursor === undefined) context.invalidResponse();
 }
 
-function validateTargetCatalogRequest(context: GatewayTargetCatalogValidationContext, catalog: CealGatewayTargetCatalog, targets: readonly Record<string, unknown>[], capabilityIds: ReadonlySet<string>, capabilityId: string | undefined): void {
-	if (!capabilityId) return validateUnselectedTargetCatalog(context, catalog, targets);
-	if (!capabilityIds.has(capabilityId)) context.invalidResponse();
+function validateTargetCatalogRequest(context: GatewayTargetCatalogValidationContext, catalog: CealGatewayTargetCatalog, targets: readonly Record<string, unknown>[], capabilityIds: ReadonlySet<string>, requestedIds: readonly string[], isPluralSelection: boolean): void {
+	if (requestedIds.length === 0) return validateUnselectedTargetCatalog(context, catalog, targets);
+	validateSelectedCapabilityProjection(context, capabilityIds, requestedIds, isPluralSelection);
 	if (catalog.selection_required) return;
 	for (const target of targets) {
-		if (!Array.isArray(target.capability_ids) || !target.capability_ids.includes(capabilityId)) context.invalidResponse();
+		if (!isValidSelectedTargetProjection(target.capability_ids, requestedIds, isPluralSelection)) context.invalidResponse();
 	}
+}
+
+function validateSelectedCapabilityProjection(context: GatewayTargetCatalogValidationContext, actual: ReadonlySet<string>, requested: readonly string[], isPluralSelection: boolean): void {
+	if (isPluralSelection ? !sameCapabilityIds(actual, requested) : requested.some((capabilityId) => !actual.has(capabilityId))) {
+		context.invalidResponse();
+	}
+}
+
+function isValidSelectedTargetProjection(value: unknown, requested: readonly string[], isPluralSelection: boolean): boolean {
+	return Array.isArray(value) && value.some((capabilityId) => requested.includes(capabilityId))
+		&& (!isPluralSelection || value.every((capabilityId) => requested.includes(capabilityId)));
+}
+
+function sameCapabilityIds(actual: ReadonlySet<string>, expected: readonly string[]): boolean {
+	return actual.size === expected.length && expected.every((capabilityId) => actual.has(capabilityId));
+}
+
+function requestedCapabilityIds(request: Readonly<CealGatewayDiscoverBody>): readonly string[] {
+	return request.capability_ids ?? (request.capability_id === undefined ? [] : [request.capability_id]);
 }
 
 function validateUnselectedTargetCatalog(context: GatewayTargetCatalogValidationContext, catalog: CealGatewayTargetCatalog, targets: readonly unknown[]): void {

@@ -4,21 +4,19 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "69ac63ae1af1e550d2f7d87a957257b652d4e2e6",
-		"tree": "91125f983602012712abc3bc8c886ecb4c8fe406"
+		"commit": "2747f6b17a115a3fce0cf2da1527461e07a851de",
+		"tree": "ac602cc1c07c38502a6adaf315671ca0912b0df8"
 	},
 	"shipped": {
 		"lock_file": "gateway-handoff-lock.json",
-		"status": "diverged",
-		"gateway_commit": "57e23865c4f96f703d7976600abe298b505eedfd",
-		"protocol_tree": "741cda2555903623723324e7a16006d4c669c3cc",
-		"reason": "The vendored copy was synced forward to render the Gateway announcement policy; the locked handoff archive the release consumes still carries an older protocol tree. Which side moves is the Gateway lane's disposition, not this lane's.",
-		"disposition_owner": "vinc",
-		"disposition_request": "docs/requests/2026-07-27-to-gateway-lane-proof-ship-divergence.md"
+		"status": "agreed",
+		"gateway_commit": "2747f6b17a115a3fce0cf2da1527461e07a851de",
+		"protocol_tree": "ac602cc1c07c38502a6adaf315671ca0912b0df8"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
 		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` and `shipped.protocol_tree` are recorded observations that no local check can confirm: neither the working tree nor gateway-handoff-lock.json carries them. Confirming them needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
-		"A `diverged` status is a declared and fact-bound state, not clearance to release: what this repository tests is not what a release would ship."
+		"`agreed` means the proof and shipment identities converged when this pin was written. It is not evidence that any release was built, installed, or accepted against the locked archive.",
+		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.66.1^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). It appears in none of the Gateway lane's handoff notes, which state the producer tree of the whole commit rather than the protocol subtree."
 	]
 }

@@ -42,6 +42,7 @@ test("Gateway request decoder accepts the four exact semantic operations", () =>
 		envelope("handshake", { client: { name: "ceal", version: "0.65.0" } }),
 		envelope("discover", {}),
 		envelope("discover", { capability_id: "message.search", match: "Team inbox", limit: 1 }),
+		envelope("discover", { capability_ids: ["message.get", "message.search"], match: "Team inbox", limit: 1 }),
 		envelope("discover", { capability_id: "message.search", cursor: "cursor:continuation_001" }),
 		envelope("call", {
 			capability_id: "message.search",
@@ -62,6 +63,10 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 		{ ...envelope("discover", {}), extra: true },
 		envelope("discover", { unexpected: true }),
 		envelope("discover", { match: "Team inbox" }),
+		envelope("discover", { capability_id: "message.search", capability_ids: ["message.get"], match: "Team inbox" }),
+		envelope("discover", { capability_ids: [], match: "Team inbox" }),
+		envelope("discover", { capability_ids: ["message.get", "message.get"], match: "Team inbox" }),
+		envelope("discover", { capability_ids: ["message.get", "bad capability"], match: "Team inbox" }),
 		envelope("discover", { capability_id: "message.search", match: "Team inbox", cursor: "cursor:continuation_001" }),
 		envelope("discover", { capability_id: "message.search", cursor: "not-a-cursor" }),
 		envelope("discover", { capability_id: "message.search", limit: 65 }),
@@ -120,6 +125,28 @@ test("discovery target catalogs make bounded selection and continuation explicit
 		mutate(invalid);
 		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
 	}
+});
+
+test("multi-capability discovery rejects an unrequested capability or grant projection", () => {
+	const request = envelope("discover", { capability_ids: ["message.search"], match: "Team" });
+	const response = discoveryResponse(request);
+	response.value.targets = [{
+		...response.value.targets[0],
+		capability_ids: ["message.search", "message.get"],
+		capability_access: [
+			...response.value.targets[0].capability_access,
+			{ ...matureCapabilityAccess(), capability_id: "message.get", grant_ref: "grant:workspace-message-get" },
+		],
+	}];
+	response.value.capabilities.push({
+		capability_id: "message.get",
+		label: "Read one message",
+		effect: "read",
+		target_requirement: "required",
+		input_contract: { schema_version: "ceal.message_get_input.v1", required: ["ref"], ref: { type: "string" } },
+		evidence_requirement: "gateway_audit",
+	});
+	assert.throws(() => decodeCealClientResponse(response, request), hasCode("invalid_client_response"));
 });
 
 test("discovery accepts only the bounded negotiated rate-limit policy shape", () => {
@@ -218,7 +245,7 @@ test("announcement policy accepts only the four bounded provider-application pro
 	const request = envelope("discover", {});
 	for (const { capabilityId, effect, writeContract, policy } of [
 		{ capabilityId: "github.repository.get", effect: "read", writeContract: undefined, policy: announcementPolicy() },
-		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_app_member_channels_only", scope_statement: "Channels where the installed Slack app is a member; direct and private conversations are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
+		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_app_member_channels_only", scope_statement: "Public or private channels where the installed Slack app is a member; direct messages, multi-person direct messages, and requester membership are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
 		{ capabilityId: "notion.page.get", effect: "read", writeContract: undefined, policy: { ...announcementPolicy(), scope_statement_kind: "notion_connected_logical_area", scope_statement: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", provider_application_authority: { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" } } },
 		{ capabilityId: "drive.file.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share", scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.file"] } } },
 	]) {
@@ -790,7 +817,7 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 });
 
 function discoveryResponse(request) {
-	const selected = request.body.capability_id === "message.search";
+	const selected = request.body.capability_id === "message.search" || request.body.capability_ids?.includes("message.search") === true;
 	return responseEnvelope(request, {
 		ok: true,
 			value: {

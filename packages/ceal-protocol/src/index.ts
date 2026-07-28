@@ -202,9 +202,10 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 }
 
 function validateDiscoveryRequestBody(body: Record<string, unknown>): void {
-	requireExactKeys(body, ["capability_id", "cursor", "limit", "match"], ["capability_id", "cursor", "limit", "match"]);
+	requireExactKeys(body, ["capability_id", "capability_ids", "cursor", "limit", "match"], ["capability_id", "capability_ids", "cursor", "limit", "match"]);
 	const selection = {
 		capabilityId: body.capability_id,
+		capabilityIds: body.capability_ids,
 		cursor: body.cursor,
 		match: body.match,
 		limit: body.limit,
@@ -213,19 +214,30 @@ function validateDiscoveryRequestBody(body: Record<string, unknown>): void {
 	validateDiscoverySelectorDependencies(selection);
 }
 
-function validateDiscoverySelectorValues(selection: Readonly<{ capabilityId: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
+function validateDiscoverySelectorValues(selection: Readonly<{ capabilityId: unknown; capabilityIds: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
 	if (selection.capabilityId !== undefined) requireSafeRef(selection.capabilityId);
+	if (selection.capabilityIds !== undefined) validateDiscoveryCapabilityIds(selection.capabilityIds);
 	if (selection.cursor !== undefined) requirePrefixedRef(selection.cursor, "cursor:");
 	if (selection.match !== undefined) requireTargetSelector(selection.match);
 	if (selection.limit === undefined) return;
 	if (typeof selection.limit !== "number" || !Number.isSafeInteger(selection.limit) || selection.limit < 1 || selection.limit > 64) invalidRequest();
 }
 
-function validateDiscoverySelectorDependencies(selection: Readonly<{ capabilityId: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
+function validateDiscoverySelectorDependencies(selection: Readonly<{ capabilityId: unknown; capabilityIds: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
+	if (selection.capabilityId !== undefined && selection.capabilityIds !== undefined) invalidRequest();
 	if (selection.cursor !== undefined || selection.match !== undefined || selection.limit !== undefined) {
-		if (selection.capabilityId === undefined) invalidRequest();
+		if (selection.capabilityId === undefined && selection.capabilityIds === undefined) invalidRequest();
 	}
 	if (selection.cursor !== undefined && selection.match !== undefined) invalidRequest();
+}
+
+function validateDiscoveryCapabilityIds(value: unknown): void {
+	if (!Array.isArray(value) || value.length < 1 || value.length > 8) invalidRequest();
+	const ids = value.map((id) => {
+		requireSafeRef(id);
+		return String(id);
+	});
+	if (new Set(ids).size !== ids.length) invalidRequest();
 }
 
 function requireTargetSelector(value: unknown): void {
@@ -394,7 +406,7 @@ function validateAnnouncementPolicyBase(policy: Record<string, unknown>): void {
 
 const ANNOUNCEMENT_SCOPE_STATEMENTS: Record<string, string> = Object.freeze({
 	github_app_installation_repositories: "Repositories in the installed GitHub App installation.",
-	slack_app_member_channels_only: "Channels where the installed Slack app is a member; direct and private conversations are not declared by this connector.",
+	slack_app_member_channels_only: "Public or private channels where the installed Slack app is a member; direct messages, multi-person direct messages, and requester membership are not declared by this connector.",
 	notion_connected_logical_area: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.",
 	google_workspace_ceal_drive_or_direct_share: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
 });
