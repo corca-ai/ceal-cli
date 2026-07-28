@@ -139,12 +139,35 @@ function validateLock(value) {
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}
-	return {
-		gateway: { ...gateway },
-		archive: { ...archive },
-		protocol: { filename: `corca-ai-ceal-protocol-${version}.tgz` },
-		client: { filename: `corca-ai-ceal-${version}.tgz` },
-	};
+	// The two package tarball names used to be derived from the handoff tag, on
+	// the assumption that the tag version, the Protocol version, and the Client
+	// version were one number. They are not: the archive carries a Protocol and a
+	// Client that version independently, and deriving both from the tag made a
+	// genuine pair unconsumable — the lock expected `corca-ai-ceal-<tag>.tgz` and
+	// the archive held the Client's own version. The lock now declares the pair,
+	// so the consumer reads what was reviewed instead of recomputing a guess.
+	//
+	// The tag still names the Protocol version, because the handoff is cut per
+	// Protocol release; that one is checked rather than assumed.
+	const protocol = requirePackageBinding(value.protocol, "@corca-ai/ceal-protocol", "corca-ai-ceal-protocol");
+	const client = requirePackageBinding(value.client, "@corca-ai/ceal", "corca-ai-ceal");
+	if (protocol.version !== version) {
+		fail("invalid_gateway_handoff_lock", "Gateway handoff lock's Protocol version does not match the handoff tag it was cut from.");
+	}
+	return { gateway: { ...gateway }, archive: { ...archive }, protocol, client };
+}
+
+function requirePackageBinding(value, expectedPackage, tarballPrefix) {
+	if (
+		!isRecord(value) ||
+		value.package !== expectedPackage ||
+		typeof value.version !== "string" ||
+		!/^\d+\.\d+\.\d+$/u.test(value.version) ||
+		value.filename !== `${tarballPrefix}-${value.version}.tgz`
+	) {
+		fail("invalid_gateway_handoff_lock", `Gateway handoff lock does not bind ${expectedPackage} to an exact package version and tarball.`);
+	}
+	return { package: value.package, version: value.version, filename: value.filename };
 }
 
 function assertArchiveLockBinding(archive, lock) {

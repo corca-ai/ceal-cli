@@ -10,6 +10,16 @@
     "actions_run_id": 30340718927,
     "artifact_name": "ceal-gateway-handoff-0261f0a4456e075c0254a76cf3e953dc58daca39"
   },
+  "protocol": {
+    "package": "@corca-ai/ceal-protocol",
+    "version": "0.67.0",
+    "filename": "corca-ai-ceal-protocol-0.67.0.tgz"
+  },
+  "client": {
+    "package": "@corca-ai/ceal",
+    "version": "0.69.0",
+    "filename": "corca-ai-ceal-0.69.0.tgz"
+  },
   "archive": {
     "filename": "ceal-gateway-handoff-0.67.0.tar.gz",
     "sha256": "94093501eb1f50e4fdaa77b48e86194915fcf26f9a392dd69c024c3738c280fb",
