@@ -155,6 +155,22 @@ test("worker release workflow signs only the worker inventory from the locked ar
 	assert.doesNotMatch(workflow, /cealctl-guide/u);
 	assert.match(workflow, /GATEWAY_HANDOFF_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases\/gateway-handoff/u);
 	assert.match(workflow, /\$GATEWAY_HANDOFF_ORIGIN\/\$HANDOFF_RELEASE_TAG\/\$HANDOFF_ARCHIVE/u);
+	// The two literals above must name the archive the lock binds. Nothing else
+	// checks this, and the failure mode is the expensive one: the download
+	// succeeds against a stale origin path, the digest comparison fails, and the
+	// tag is burned. One clean run per tag is the contract, so this has to fail in
+	// the gate rather than in the release.
+	const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-handoff-lock.json"), "utf8"));
+	assert.match(
+		workflow,
+		new RegExp(`HANDOFF_RELEASE_TAG: ${lock.gateway.tag.replaceAll(".", "[.]")}\\n`, "u"),
+		"the release workflow's handoff tag must be the one gateway-handoff-lock.json binds",
+	);
+	assert.match(
+		workflow,
+		new RegExp(`HANDOFF_ARCHIVE: ${lock.archive.filename.replaceAll(".", "[.]")}\\n`, "u"),
+		"the release workflow's handoff archive must be the one gateway-handoff-lock.json binds",
+	);
 	assert.match(workflow, /CEAL_RELEASE_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases/u);
 	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
