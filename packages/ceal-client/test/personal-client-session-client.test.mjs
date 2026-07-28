@@ -82,3 +82,107 @@ test("personal-client session client rejects unsafe endpoints and token drift be
 	);
 	assert.equal(fetched, false);
 });
+
+// Same shape of gap as the enrollment client: the guards that make this safe to
+// point at an arbitrary endpoint carried no coverage. Each case asserts its own
+// refusal code rather than merely that something threw.
+const SESSION_ENDPOINT = "https://gateway.example/api/ceal/v1";
+
+function neverCalled() {
+	return async () => assert.fail("a refusal must happen before any request");
+}
+
+test("session client construction refuses an unusable transport or timeout", () => {
+	assert.throws(
+		() => createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: "not-a-function" }),
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_configuration",
+	);
+	for (const timeoutMs of [0, -1, 2.5, 120_001, Number.NaN]) {
+		assert.throws(
+			() => createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: neverCalled(), timeoutMs }),
+			(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_configuration",
+			`timeoutMs ${String(timeoutMs)} must be refused`,
+		);
+	}
+	assert.throws(
+		() => createCealPersonalClientSessionClient({ endpoint: "not a url", fetchFn: neverCalled() }),
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_configuration",
+	);
+});
+
+function sessionRespondWith({ body, contentType = "application/json", contentLength, stream }) {
+	return async () =>
+		new Response(stream ?? body, {
+			status: 200,
+			headers: {
+				"content-type": contentType,
+				...(contentLength === undefined ? {} : { "content-length": String(contentLength) }),
+			},
+		});
+}
+
+test("a session response this client cannot trust is invalid_response on both routes", async () => {
+	const cases = [
+		[{ body: "{}", contentType: "text/html" }, "a non-JSON content type"],
+		[{ body: "{oops" }, "a malformed JSON body"],
+		[{ body: '{"unexpected":true}' }, "well-formed JSON of the wrong shape"],
+		[{ body: "{}", contentLength: "abc" }, "an unparseable content-length"],
+		[{ body: "{}", contentLength: 64 * 1024 + 1 }, "a declared length over the cap"],
+	];
+	// Both routes share the request path, so both must refuse identically; a
+	// guard that only covered `refresh` would leave revocation trusting bytes.
+	for (const route of ["refresh", "revoke"]) {
+		for (const [options, why] of cases) {
+			const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: sessionRespondWith(options) });
+			await assert.rejects(
+				() => client[route](REFRESH),
+				(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+				`${route}: ${why} must be invalid_response`,
+			);
+		}
+	}
+});
+
+test("an undeclared oversized session body is refused mid-stream and cancelled", async () => {
+	let cancelled = false;
+	const stream = new ReadableStream({
+		pull(controller) {
+			controller.enqueue(new Uint8Array(32 * 1024));
+		},
+		cancel() {
+			cancelled = true;
+		},
+	});
+	const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: sessionRespondWith({ stream }) });
+	await assert.rejects(
+		() => client.refresh(REFRESH),
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+	);
+	assert.equal(cancelled, true, "the oversized body must be cancelled, not drained");
+});
+
+test("a session timeout and a transport failure are told apart", async () => {
+	const timedOut = createCealPersonalClientSessionClient({
+		endpoint: SESSION_ENDPOINT,
+		timeoutMs: 1,
+		fetchFn: (_url, init) =>
+			new Promise((_resolve, reject) => {
+				init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+			}),
+	});
+	await assert.rejects(
+		() => timedOut.refresh(REFRESH),
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "request_timeout",
+	);
+
+	const broken = createCealPersonalClientSessionClient({
+		endpoint: SESSION_ENDPOINT,
+		fetchFn: async () => {
+			throw new Error("connection reset");
+		},
+	});
+	await assert.rejects(
+		() => broken.revoke(REFRESH),
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "request_failed",
+	);
+});
