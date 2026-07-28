@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.67.0 (`ceal-v0.67.0`)
+## 0.67.1 (`ceal-v0.67.1`)
+
+Carries everything `0.67.0` intended, plus the fix its burn taught.
+
+`0.67.0` never published: the `linux-arm64` leg failed in `Build and test
+source`, before `assemble` or `sign-and-publish` ran, so no object was uploaded
+and no signature was issued. The release lane asked every `linux-*` leg for the
+platform proofs, but those proofs build a SEA and run an installer for
+`linux-x64` — on `linux-arm64` they cannot run, and the flag turned a correct
+skip into a hard failure. The flag had landed after `ceal-v0.66.1`, so `0.67.0`
+was the first release to execute it, and `check.yml` has no arm64 leg, so nothing
+before the tag could have caught it. The demand is now `linux-amd64` exactly, and
+a contract test fails on any prefix match over platforms. One clean run per tag
+is the contract, so the tag was burned rather than re-pushed.
+
+## 0.67.0 (`ceal-v0.67.0`, never published)
 
 The first release built against the `gateway-handoff-v0.66.1` artifact, and the
 first that can be installed to produce installed-client acceptance evidence for

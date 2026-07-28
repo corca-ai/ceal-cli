@@ -172,6 +172,22 @@ test("worker release workflow signs only the worker inventory from the locked ar
 		"the release workflow's handoff archive must be the one gateway-handoff-lock.json binds",
 	);
 	assert.match(workflow, /CEAL_RELEASE_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases/u);
+	// The platform proofs build a SEA and run an installer for
+	// PLATFORM_PROOF_PLATFORM, so demanding them anywhere else converts a correct
+	// skip into a hard failure. `startsWith(matrix.platform, 'linux-')` did
+	// exactly that on the linux-arm64 leg and burned ceal-v0.67.0 — the first
+	// release after the flag landed. No check.yml leg is arm64, so this gate is
+	// the only thing between that mistake and another burned tag.
+	assert.match(
+		workflow,
+		/CEAL_REQUIRE_PLATFORM_PROOFS: \$\{\{ matrix[.]platform == 'linux-amd64' && '1' \|\| '0' \}\}/u,
+		"the release lane must demand platform proofs only on the leg that can run them",
+	);
+	assert.doesNotMatch(
+		workflow,
+		/CEAL_REQUIRE_PLATFORM_PROOFS: \$\{\{ startsWith\(/u,
+		"a prefix match over platforms demands proofs on legs that cannot run them",
+	);
 	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_API_TOKEN/u);

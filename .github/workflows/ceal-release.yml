@@ -82,12 +82,18 @@ jobs:
       # The gate is the same one check.yml runs, so it must be asked for the
       # same proofs. Without this the linux runners silently skip the
       # release-artifact and installer proofs, and the release lane — the one
-      # place those proofs describe — is the weaker of the two gates. Only the
-      # linux matrix legs can build them; the macOS legs are correct to skip.
+      # place those proofs describe — is the weaker of the two gates.
+      #
+      # `linux-amd64` exactly, not `linux-*`. The proofs build a SEA and run an
+      # installer for PLATFORM_PROOF_PLATFORM (`linux-x64`), so on the
+      # `linux-arm64` leg they cannot run at all and the flag converts a correct
+      # skip into a hard failure. That is what burned ceal-v0.67.0: the flag
+      # landed after ceal-v0.66.1, so v0.67.0 was the first release to run it,
+      # and no check.yml leg is arm64 so nothing else could have caught it.
       - name: Build and test source
         run: npm run check
         env:
-          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ startsWith(matrix.platform, 'linux-') && '1' || '0' }}
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.platform == 'linux-amd64' && '1' || '0' }}
       - name: Download the locked Gateway handoff archive
         run: |
           set -eu
