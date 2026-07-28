@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -51,6 +52,7 @@ test("Gateway request decoder accepts the four exact semantic operations", () =>
 			purpose: "Find an approved workspace document",
 		}),
 		envelope("readback", { request_id: "request:call:001" }),
+		envelope("readback", { write_request_ref: "gateway-write-request:123e4567-e89b-12d3-a456-426614174000" }),
 	];
 
 	for (const request of requests) assert.deepEqual(decodeCealGatewayRequest(request), request);
@@ -80,6 +82,7 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 		envelope("call", { capability_id: "message.search", target_ref: "target:test", arguments: { authToken: "opaque-auth-secret" }, purpose: "Search" }),
 		envelope("call", { capability_id: "message.search", target_ref: "target:test", arguments: { nested: { policy_decision: "allowed" } }, purpose: "Search" }),
 		envelope("readback", { request_id: "contains whitespace" }),
+		envelope("readback", { write_request_ref: "gateway-write-request:not-a-uuid" }),
 		{ ...envelope("discover", {}), protocol_version: "latest" },
 		{ ...envelope("discover", {}), profile_ref: "profile with spaces" },
 	];
@@ -101,6 +104,39 @@ test("Gateway request decoder rejects malformed, extra, unsafe, and authority-be
 		})),
 		hasCode("invalid_gateway_request"),
 	);
+});
+
+test("write receipt readback validates a bound, redacted receipt and rejects raw or inconsistent projections", () => {
+	const writeRequestRef = "gateway-write-request:123e4567-e89b-12d3-a456-426614174000";
+	const request = envelope("readback", { write_request_ref: writeRequestRef });
+	const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
+	const receipt = {
+		schema_version: "ceal.gateway_write_request_receipt.v1",
+		write_request_sha256: sha256(writeRequestRef),
+		source_kind: "authenticated_registered_client",
+		source_evidence_sha256: sha256("client-binding"),
+		admission_context_sha256: sha256("admission"),
+		idempotency_claim_sha256: sha256("idempotency"),
+		normalized_mutation_sha256: sha256("mutation"),
+		provider_state: "verified",
+		provider_readback: "verified",
+		provider_result_sha256: sha256("provider-result"),
+	};
+	const response = responseEnvelope(request, {
+		ok: true,
+		value: { schema_version: "ceal.gateway_write_receipt_readback.v1", receipt },
+	});
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	for (const mutate of [
+		(value) => { value.value.receipt.write_request_sha256 = sha256("different"); },
+		(value) => { value.value.receipt.write_request_ref = writeRequestRef; },
+		(value) => { value.value.receipt.provider_readback = "outcome_unknown"; },
+		(value) => { value.value.receipt.source_evidence_sha256 = "not-a-digest"; },
+	]) {
+		const invalid = structuredClone(response);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
 });
 
 test("discovery target catalogs make bounded selection and continuation explicit", () => {
@@ -241,18 +277,33 @@ test("discovery accepts an optional non-authorizing announcement policy and reje
 	assert.throws(() => decodeCealClientResponse(calendarHardDeny, request), hasCode("invalid_client_response"));
 });
 
-test("announcement policy accepts only the four bounded provider-application projections", () => {
+test("announcement policy accepts each exact declared provider capability projection", () => {
 	const request = envelope("discover", {});
 	for (const { capabilityId, effect, writeContract, policy } of [
 		{ capabilityId: "github.repository.get", effect: "read", writeContract: undefined, policy: announcementPolicy() },
-		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_app_member_channels_only", scope_statement: "Public or private channels where the installed Slack app is a member; direct messages, multi-person direct messages, and requester membership are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
-		{ capabilityId: "notion.page.get", effect: "read", writeContract: undefined, policy: { ...announcementPolicy(), scope_statement_kind: "notion_connected_logical_area", scope_statement: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", provider_application_authority: { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" } } },
+		...(["github.repository.search", "github.issue.get", "github.pull_request.get", "github.workflow_run.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: announcementPolicy() }))),
+		...(["message.search", "message.enumerate", "message.get", "resource.resolve", "conversation.thread.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("slack_public_app_member_channels_only", "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" }) }))),
+		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_public_app_member_channels_only", scope_statement: "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
+		...(["notion.search", "notion.page.get", "resource.resolve"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("notion_connected_logical_area", "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" }) }))),
+		...(["calendar.availability", "calendar.event.search", "calendar.event.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_calendar_read_only", "Approved Calendar availability and event reads only; Calendar mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/calendar.readonly"] }) }))),
+		{ capabilityId: "drive.file.search", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_metadata", "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.metadata.readonly"] }) },
+		{ capabilityId: "sheets.values.read", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_sheet_ranges", "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] }) },
 		{ capabilityId: "drive.file.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share", scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.file"] } } },
 	]) {
 		const response = discoveryResponse(request);
 		response.value.capabilities[0] = { ...response.value.capabilities[0], capability_id: capabilityId, effect, ...(writeContract ? { write_contract: writeContract } : {}), announcement_policy: policy };
 		assert.deepEqual(decodeCealClientResponse(response, request), response);
 	}
+});
+
+test("announcement policy binds an ambiguous capability ID to its exact provider authority", () => {
+	const request = envelope("discover", {});
+	const response = discoveryResponse(request);
+	response.value.capabilities[0] = {
+		...response.value.capabilities[0], capability_id: "resource.resolve", effect: "read",
+		announcement_policy: readAnnouncementPolicy("slack_public_app_member_channels_only", "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" }),
+	};
+	assert.throws(() => decodeCealClientResponse(response, request), hasCode("invalid_client_response"));
 });
 
 test("client response decoder accepts exact operation-correlated Gateway results", () => {
@@ -860,6 +911,10 @@ function announcementPolicy() {
 		provenance_requirement: "gateway_receipt_audit",
 		non_claims: ["policy_projection_does_not_authorize", "provider_roundtrip_not_established_by_discovery", "target_specific_scope_not_declared"],
 	};
+}
+
+function readAnnouncementPolicy(scopeStatementKind, scopeStatement, providerApplicationAuthority) {
+	return { ...announcementPolicy(), scope_statement_kind: scopeStatementKind, scope_statement: scopeStatement, provider_application_authority: providerApplicationAuthority };
 }
 
 function writeAnnouncementPolicy() {

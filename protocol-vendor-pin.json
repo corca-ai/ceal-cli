@@ -4,19 +4,19 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "2747f6b17a115a3fce0cf2da1527461e07a851de",
-		"tree": "ac602cc1c07c38502a6adaf315671ca0912b0df8"
+		"commit": "0261f0a4456e075c0254a76cf3e953dc58daca39",
+		"tree": "58d7d6398a521d99a7a1b9f736e332015b93c252"
 	},
 	"shipped": {
 		"lock_file": "gateway-handoff-lock.json",
 		"status": "agreed",
-		"gateway_commit": "2747f6b17a115a3fce0cf2da1527461e07a851de",
-		"protocol_tree": "ac602cc1c07c38502a6adaf315671ca0912b0df8"
+		"gateway_commit": "0261f0a4456e075c0254a76cf3e953dc58daca39",
+		"protocol_tree": "58d7d6398a521d99a7a1b9f736e332015b93c252"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
 		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` and `shipped.protocol_tree` are recorded observations that no local check can confirm: neither the working tree nor gateway-handoff-lock.json carries them. Confirming them needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
 		"`agreed` means the proof and shipment identities converged when this pin was written. It is not evidence that any release was built, installed, or accepted against the locked archive.",
-		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.66.1^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). It appears in none of the Gateway lane's handoff notes, which state the producer tree of the whole commit rather than the protocol subtree."
+		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.67.0^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). The Gateway lane's handoff notes state the producer tree of the whole commit rather than the protocol subtree."
 	]
 }

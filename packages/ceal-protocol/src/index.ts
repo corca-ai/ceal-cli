@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS } from "./gateway-response-types.js";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
@@ -5,7 +6,7 @@ import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validatio
 import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
 export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
-import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayAnnouncementPolicy, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayReadbackRequest, CealGatewayRequest } from "./gateway-response-types.js";
+import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayAnnouncementPolicy, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayAuditReadbackRequest, CealGatewayReadbackRequest, CealGatewayRequest, CealGatewayWriteReceiptRequest } from "./gateway-response-types.js";
 import {
 	assertSafeJsonValue,
 	CealProtocolValidationError,
@@ -72,6 +73,7 @@ export type {
 	CealGatewayAuthorizationSnapshot,
 	CealGatewayAuditCallDetail,
 	CealGatewayAuditReadbackValue,
+	CealGatewayAuditReadbackRequest,
 	CealGatewayAnnouncementPolicy,
 	CealGatewayAnnouncementPolicyNonClaim,
 	CealGatewayAnnouncementProviderAuthority,
@@ -89,6 +91,9 @@ export type {
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
 	CealGatewayWriteContract,
+	CealGatewayWriteReceiptReadbackValue,
+	CealGatewayWriteReceiptRequest,
+	CealGatewayWriteRequestReceipt,
 	CealCapabilityAccessDescriptor,
 	CealCapabilityReadiness,
 	CealGatewayPolicyDenial,
@@ -196,8 +201,14 @@ function validateRequestBody(operation: CealClientOperation, bodyValue: unknown)
 			requireJsonByteSize(body.arguments, MAX_ARGUMENT_BYTES, invalidRequest);
 			return;
 		case "readback":
-			requireExactKeys(body, ["request_id"]);
-			requireSafeRef(body.request_id);
+			if (Object.hasOwn(body, "request_id")) {
+				requireExactKeys(body, ["request_id"]);
+				requireSafeRef(body.request_id);
+				return;
+			}
+			requireExactKeys(body, ["write_request_ref"]);
+			requirePrefixedRef(body.write_request_ref, "gateway-write-request:");
+			if (!/^gateway-write-request:[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(body.write_request_ref)) invalidRequest();
 	}
 }
 
@@ -274,7 +285,8 @@ function validateOperationSuccessResponse(response: Record<string, unknown>, exp
 			return;
 		case "readback":
 			validateHostProofReference(response);
-			validateAuditReadbackValue(response.value, expectedRequest);
+			if (isAuditReadbackRequest(expectedRequest)) validateAuditReadbackValue(response.value, expectedRequest);
+			else validateWriteReceiptReadbackValue(response.value, expectedRequest as CealGatewayWriteReceiptRequest);
 	}
 }
 
@@ -362,16 +374,34 @@ const ANNOUNCEMENT_POLICY_NON_CLAIMS = [
 	"target_specific_scope_not_declared",
 ] as const;
 
-const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, Readonly<{
+const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly Readonly<{
 	effect: "read" | "write";
 	scopeStatementKind: string;
 	providerAuthorityKind: string;
-}>>> = Object.freeze({
-	"github.repository.get": { effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" },
-	"github.issue.create": { effect: "write", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" },
-	"message.create": { effect: "write", scopeStatementKind: "slack_app_member_channels_only", providerAuthorityKind: "slack_app" },
-	"notion.page.get": { effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" },
-	"drive.file.update": { effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share", providerAuthorityKind: "google_service_account" },
+}>[]>> = Object.freeze({
+	"github.repository.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"github.repository.search": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"github.issue.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"github.pull_request.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"github.workflow_run.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"github.issue.create": [{ effect: "write", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"message.search": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
+	"message.enumerate": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
+	"message.get": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
+	"resource.resolve": [
+		{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" },
+		{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" },
+	],
+	"conversation.thread.get": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
+	"message.create": [{ effect: "write", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
+	"notion.search": [{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" }],
+	"notion.page.get": [{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" }],
+	"calendar.availability": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
+	"calendar.event.search": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
+	"calendar.event.get": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
+	"drive.file.search": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_metadata", providerAuthorityKind: "google_service_account" }],
+	"sheets.values.read": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_sheet_ranges", providerAuthorityKind: "google_service_account" }],
+	"drive.file.update": [{ effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share", providerAuthorityKind: "google_service_account" }],
 });
 
 function validateAnnouncementPolicy(value: unknown, capabilityId: string, effect: string, writeContract: unknown): void {
@@ -406,16 +436,18 @@ function validateAnnouncementPolicyBase(policy: Record<string, unknown>): void {
 
 const ANNOUNCEMENT_SCOPE_STATEMENTS: Record<string, string> = Object.freeze({
 	github_app_installation_repositories: "Repositories in the installed GitHub App installation.",
-	slack_app_member_channels_only: "Public or private channels where the installed Slack app is a member; direct messages, multi-person direct messages, and requester membership are not declared by this connector.",
+	slack_public_app_member_channels_only: "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.",
 	notion_connected_logical_area: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.",
 	google_workspace_ceal_drive_or_direct_share: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
+	google_workspace_calendar_read_only: "Approved Calendar availability and event reads only; Calendar mutation is not declared.",
+	google_workspace_ceal_drive_or_direct_share_metadata: "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.",
+	google_workspace_ceal_drive_or_direct_share_sheet_ranges: "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.",
 });
 
 function validateAnnouncementPolicyCapabilityBinding(policy: Record<string, unknown>, capabilityId: string, effect: string): void {
-	const binding = ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS[capabilityId];
-	if (!binding || binding.effect !== effect || policy.scope_statement_kind !== binding.scopeStatementKind) invalidResponse();
+	const bindings = ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS[capabilityId];
 	const authority = requireRecord(policy.provider_application_authority);
-	if (authority.kind !== binding.providerAuthorityKind) invalidResponse();
+	if (!bindings?.some((binding) => binding.effect === effect && policy.scope_statement_kind === binding.scopeStatementKind && authority.kind === binding.providerAuthorityKind)) invalidResponse();
 }
 
 function validateAnnouncementPolicyEffect(policy: Record<string, unknown>, effect: string, writeContract: unknown): void {
@@ -576,7 +608,7 @@ function validateCallRedaction(value: unknown): void {
 	for (const omittedClass of redaction.omitted_classes) requireSafeRef(omittedClass);
 }
 
-function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>): void {
+function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayAuditReadbackRequest>): void {
 	const readback = requireRecord(value);
 	requireExactKeys(readback, ["events", "request_id", "schema_version"]);
 	const targetRequestId = readback.request_id;
@@ -585,7 +617,7 @@ function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<Ce
 	for (const event of readback.events) validateAuditEvent(event, expectedRequest, targetRequestId as string);
 }
 
-function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewayReadbackRequest>, targetRequestId: string): void {
+function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewayAuditReadbackRequest>, targetRequestId: string): void {
 	const event = requireRecord(value);
 	requireExactKeys(event, [
 		"auth_decision",
@@ -633,6 +665,36 @@ function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewa
 	const providerWasReached = event.operation === "call" && event.error_code === "wrong_resource_kind";
 	validateHostNonClaims(event.non_claims, providerMayBeReached, providerWasReached);
 }
+
+function validateWriteReceiptReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayWriteReceiptRequest>): void {
+	const projection = requireRecord(value);
+	requireExactKeys(projection, ["receipt", "schema_version"]);
+	if (projection.schema_version !== "ceal.gateway_write_receipt_readback.v1") invalidResponse();
+	const receipt = requireRecord(projection.receipt);
+	requireExactKeys(receipt, [
+		"admission_context_sha256", "idempotency_claim_sha256", "normalized_mutation_sha256", "provider_readback", "provider_result_sha256",
+		"provider_state", "purpose_sha256", "schema_version", "source_evidence_sha256", "source_kind", "write_request_sha256",
+	], ["admission_context_sha256", "provider_result_sha256", "purpose_sha256"]);
+	if (!isValidWriteReceipt(receipt, expectedRequest.body.write_request_ref)) invalidResponse();
+	for (const key of ["write_request_sha256", "source_evidence_sha256", "idempotency_claim_sha256", "normalized_mutation_sha256", "purpose_sha256", "admission_context_sha256", "provider_result_sha256"]) {
+		if (receipt[key] !== undefined && (typeof receipt[key] !== "string" || !/^[a-f0-9]{64}$/u.test(receipt[key]))) invalidResponse();
+	}
+}
+
+function isValidWriteReceipt(receipt: Record<string, unknown>, writeRequestRef: string): boolean {
+	if (receipt.schema_version !== "ceal.gateway_write_request_receipt.v1") return false;
+	if (!["authenticated_registered_client", "agent_lease_admission", "provider_authenticated_event"].includes(String(receipt.source_kind))) return false;
+	if (!["outcome_unknown", "verified"].includes(String(receipt.provider_state))) return false;
+	if (!["outcome_unknown", "verified"].includes(String(receipt.provider_readback))) return false;
+	if ((receipt.provider_state === "verified") !== (receipt.provider_readback === "verified")) return false;
+	return receipt.write_request_sha256 === sha256(writeRequestRef);
+}
+
+function isAuditReadbackRequest(request: Readonly<CealGatewayReadbackRequest>): request is CealGatewayAuditReadbackRequest {
+	return Object.hasOwn(request.body, "request_id");
+}
+
+function sha256(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
 
 function validateConnectorRouteFailure(value: unknown, event: Record<string, unknown>): void {
 	if (value === undefined) return;

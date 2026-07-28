@@ -30,8 +30,8 @@ env:
   # lock, and a mismatch is not a soft failure: the download succeeds, the digest
   # comparison below fails, and the tag is burned and cannot be reused. The
   # contract tier pins them against the lock for exactly that reason.
-  HANDOFF_RELEASE_TAG: gateway-handoff-v0.66.1
-  HANDOFF_ARCHIVE: ceal-gateway-handoff-0.66.1.tar.gz
+  HANDOFF_RELEASE_TAG: gateway-handoff-v0.67.0
+  HANDOFF_ARCHIVE: ceal-gateway-handoff-0.67.0.tar.gz
   CEAL_RELEASE_ORIGIN: https://ceal.borca.ai/releases
   CEAL_RELEASE_BUCKET: ceal-release
   GATEWAY_HANDOFF_ORIGIN: https://ceal.borca.ai/releases/gateway-handoff

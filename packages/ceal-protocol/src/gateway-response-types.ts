@@ -81,7 +81,15 @@ export interface CealGatewayDiscoverBody {
 
 export type CealGatewayDiscoverRequest = CealGatewayRequestEnvelope<"discover", CealGatewayDiscoverBody>;
 export type CealGatewayCallRequest = CealGatewayRequestEnvelope<"call", { capability_id: string; target_ref: string; arguments: unknown; purpose: string }>;
-export type CealGatewayReadbackRequest = CealGatewayRequestEnvelope<"readback", { request_id: string }>;
+/** Reads the Gateway journal entry for one earlier request made by this binding. */
+export type CealGatewayAuditReadbackRequest = CealGatewayRequestEnvelope<"readback", { request_id: string }>;
+/**
+ * Reads one redacted provider-write receipt. The opaque reference is accepted
+ * only as a lookup capability: it must never be echoed in a response, journal,
+ * or receipt projection.
+ */
+export type CealGatewayWriteReceiptRequest = CealGatewayRequestEnvelope<"readback", { write_request_ref: string }>;
+export type CealGatewayReadbackRequest = CealGatewayAuditReadbackRequest | CealGatewayWriteReceiptRequest;
 export type CealGatewayRequest = CealGatewayHandshakeRequest | CealGatewayDiscoverRequest | CealGatewayCallRequest | CealGatewayReadbackRequest;
 
 export type CealGatewayHostNonClaim = "provider_execution_not_reached" | "production_audit_not_reached";
@@ -159,9 +167,12 @@ export type CealGatewayAnnouncementPolicyNonClaim =
 
 export type CealGatewayAnnouncementScopeStatementKind =
 	| "github_app_installation_repositories"
-	| "slack_app_member_channels_only"
+	| "slack_public_app_member_channels_only"
 	| "notion_connected_logical_area"
-	| "google_workspace_ceal_drive_or_direct_share";
+	| "google_workspace_ceal_drive_or_direct_share"
+	| "google_workspace_calendar_read_only"
+	| "google_workspace_ceal_drive_or_direct_share_metadata"
+	| "google_workspace_ceal_drive_or_direct_share_sheet_ranges";
 
 /** A deliberately small client-safe projection of the installed app authority. */
 export type CealGatewayAnnouncementProviderAuthority =
@@ -375,12 +386,33 @@ export interface CealGatewayAuditReadbackValue {
 	events: CealGatewayAuditEvent[];
 }
 
+/** Content-free, binding-scoped projection of a Gateway-owned provider write. */
+export interface CealGatewayWriteRequestReceipt {
+	schema_version: "ceal.gateway_write_request_receipt.v1";
+	write_request_sha256: string;
+	source_kind: "authenticated_registered_client" | "agent_lease_admission" | "provider_authenticated_event";
+	source_evidence_sha256: string;
+	purpose_sha256?: string;
+	admission_context_sha256?: string;
+	idempotency_claim_sha256: string;
+	normalized_mutation_sha256: string;
+	provider_state: "outcome_unknown" | "verified";
+	provider_readback: "outcome_unknown" | "verified";
+	provider_result_sha256?: string;
+}
+
+export interface CealGatewayWriteReceiptReadbackValue {
+	schema_version: "ceal.gateway_write_receipt_readback.v1";
+	receipt: CealGatewayWriteRequestReceipt;
+}
+
 export type CealGatewayResponseFor<R extends CealGatewayRequest> =
 	R extends CealGatewayHandshakeRequest ? CealClientSuccess<CealGatewayHandshakeValue> | CealClientFailure
 		: R extends CealGatewayDiscoverRequest ? CealClientSuccess<CealGatewayDiscoveryValue> | CealClientFailure
 			: R extends CealGatewayCallRequest ? CealClientSuccess<CealGatewayCallValue> | CealGatewayPolicyDenial | CealClientFailure
-				: R extends CealGatewayReadbackRequest ? CealClientSuccess<CealGatewayAuditReadbackValue> | CealClientFailure
-					: never;
+				: R extends CealGatewayAuditReadbackRequest ? CealClientSuccess<CealGatewayAuditReadbackValue> | CealClientFailure
+					: R extends CealGatewayWriteReceiptRequest ? CealClientSuccess<CealGatewayWriteReceiptReadbackValue> | CealClientFailure
+						: never;
 
 type WithoutProtocol<T> = T extends CealGatewayRequest ? Omit<T, "protocol_version"> : never;
 
@@ -390,5 +422,6 @@ export type CealGatewayRequestForInput<I extends CealGatewayRequestInput> =
 	I extends { operation: "handshake" } ? CealGatewayHandshakeRequest
 		: I extends { operation: "discover" } ? CealGatewayDiscoverRequest
 			: I extends { operation: "call" } ? CealGatewayCallRequest
-				: I extends { operation: "readback" } ? CealGatewayReadbackRequest
+			: I extends { operation: "readback"; body: { request_id: string } } ? CealGatewayAuditReadbackRequest
+				: I extends { operation: "readback"; body: { write_request_ref: string } } ? CealGatewayWriteReceiptRequest
 					: never;
