@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.67.0 (`ceal-v0.67.0`)
+
+The first release built against the `gateway-handoff-v0.66.1` artifact, and the
+first that can be installed to produce installed-client acceptance evidence for
+it. Every release before this one is refused by `npm run accept:worker` now, by
+design: the lock moved and their protocol producer did not.
+
+- **Consumed the signed `v0.66.1` Gateway handoff.** The archive was fetched from
+  the immutable release origin and all five digests recomputed locally — archive,
+  the `gateway-artifact-handoff.json` inside it, both package tarballs, and the
+  six-member inventory. `gateway-handoff-lock.json` now binds Gateway commit
+  `2747f6b1…`, the frozen `packages/ceal-protocol` copy was re-synced to the
+  tagged subtree `ac602cc1…`, and `protocol-vendor-pin.json` re-pinned — one
+  commit, because the verifier fires `shipped_lock_mismatch` the moment the lock
+  moves without the pin.
+- **A proof/ship protocol divergence is now fatal.** It fails
+  `proof_shipment_protocol_divergence`, names both immutable identities, and is
+  refused independently by the release, packing, native-artifact,
+  release-artifact, and acceptance-packet paths rather than only reddening a test
+  command. The verdict compares the pin's `source.commit` against the lock's
+  `gateway.commit` — not the pin's own two tree fields, which are both
+  author-written. `npm run check:protocol-dev` is the development-only path while
+  a divergence is open, and its output stamps itself `development_only`.
+- **A throttled call now carries the Gateway's own retry wait**
+  (`error.retry_after_ms`) instead of dropping it. The protocol has validated
+  `recovery.retry_after_ms` all along; this renderer discarded it, so an agent had
+  to binary-search a safe pace against prose (corca-ai/ceal#642). Absence stays
+  absent — the number is the Gateway's or it is not there, never a locally
+  invented backoff. The quota axis itself rides on
+  `targets[*].capability_access[*].rate_limit`, whose `counted_unit` says whether
+  the quota counts calls or records.
+- **The acceptance packet has a sanitized external form**
+  (`ceal.worker_acceptance_result.v1`, `--sanitized`): an allow-list projection
+  that omits the emitting host's binary path and local agent registration paths,
+  reduces those paths to a count, and keeps `instance_ref`/`profile_ref` as
+  Gateway-issued identifiers being returned to the Gateway that issued them.
+- **A target's capability access is held to the multi-target selection contract.**
+  A grant for one capability never authorizes another: `capability_ids` and the
+  matching `capability_access` entries are rendered as served, never widened to
+  the catalog, collapsed to one readiness per target, or hoisted between
+  siblings.
+- Every consumer now declares the locked protocol version exactly. A loose range
+  would have satisfied `npm ci` by switching off the check that a shipped package
+  declares the protocol the lock binds.
+- The release workflow reads the archive the lock names, and a contract test
+  fails whenever its handoff tag or filename disagrees with
+  `gateway-handoff-lock.json` — a stale literal there downloads the wrong archive
+  and burns a tag.
+
 ## 0.66.1 (`ceal-v0.66.1`)
 
 Carries everything `0.66.0` intended — including both breaking changes below —
