@@ -21,7 +21,7 @@
 		"lint:fix": "biome check --write .",
 		"check": "npm run lint && npm run build && npm test",
 		"check:unit": "npm run lint && npm run build && npm run test:unit && npm run test:contract",
-		"check:protocol-dev": "npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test && node scripts/verify-protocol-vendor-pin.mjs --development",
+		"check:protocol-dev": "node scripts/verify-protocol-vendor-pin.mjs --development && npm --prefix packages/ceal-protocol test && npm --prefix packages/ceal-client test",
 		"hooks:install": "node scripts/install-git-hooks.mjs",
 		"probe": "node scripts/probe-surface.mjs",
 		"accept:worker": "node scripts/worker-acceptance-packet.mjs",

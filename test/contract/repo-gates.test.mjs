@@ -244,6 +244,24 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 	}
 });
 
+// Requirement 3 of the proof/ship divergence decision says worker release,
+// packing, acceptance-candidate emission, and immutable provenance must reject a
+// divergent state independently of which test command ran. Those call sites are
+// behaviourally unfalsifiable while the live pin is converged — every suite would
+// stay green if someone deleted them — so they are pinned by source shape. This
+// is weaker than a behavioural test and is here because it is the only thing that
+// fails when the call is removed.
+test("every release, packing, and acceptance path still asserts protocol shippability", () => {
+	const read = (relativePath) => readFileSync(path.join(ROOT, relativePath), "utf8");
+	for (const [file, why] of [
+		["scripts/worker-release-inputs.mjs", "the chokepoint every release, packing, and native-artifact path funnels through"],
+		["scripts/worker-acceptance-packet.mjs", "acceptance-candidate emission"],
+		["scripts/build-worker-release-artifact.mjs", "writes a release manifest and provenance without traversing the chokepoint"],
+	]) {
+		assert.match(read(file), /assertShippableProtocolVendorPin\(/u, `${file} must assert shippability: ${why}`);
+	}
+});
+
 // `npm run check` is not self-sufficient on a cold runner: the packed-consumer
 // proofs install with --offline, so a runner that skipped the prewarm fails
 // them as ENOTCACHED. This gate ran green locally and red on CI for exactly

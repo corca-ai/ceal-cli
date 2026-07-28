@@ -35,10 +35,12 @@ const DIVERGED = Object.freeze({
 		protocol_tree: "c".repeat(40),
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
-		// A real tracked request, because the gate now requires one; which request
-		// does not matter to the fixture, only that it is tracked and under
-		// docs/requests/.
-		disposition_request: "docs/requests/2026-07-27-to-gateway-lane-proof-ship-divergence.md",
+		// A real tracked file, because the gate now requires one. It points at a
+		// received Gateway-lane decision rather than at this lane's own outbound
+		// request: an outbound request about a resolved divergence is a candidate
+		// for archiving, and archiving it would turn three tests red for a reason
+		// unrelated to the code.
+		disposition_request: "docs/requests/from-gateway-lane/2026-07-27-proof-ship-divergence-decision.md",
 	},
 	non_claims: ["fixture"],
 });
@@ -267,4 +269,32 @@ test("a pin whose commits and trees disagree about convergence is rejected", () 
 	const contradictory = clone(DIVERGED);
 	contradictory.source.commit = LOCK.gateway.commit;
 	expectCode("invalid_protocol_vendor_pin", { pin: contradictory, vendoredTree: contradictory.source.tree });
+});
+
+// The reverse must not be rejected the same way. Two Gateway commits can carry a
+// byte-identical protocol subtree, and a pin that records that is honest. It is
+// still unshippable — the lock binds the other commit and nothing here can check
+// the byte-identity claim — but it has to fail as a divergence, not as a lying
+// pin. Otherwise the only way to a green gate is to write a false `source.commit`,
+// which is the one field the whole verdict rests on.
+test("an identical subtree under a different Gateway commit is a divergence, not a lying pin", () => {
+	const identicalSubtree = clone(DIVERGED);
+	identicalSubtree.shipped.protocol_tree = identicalSubtree.source.tree;
+	const injected = {
+		pin: identicalSubtree,
+		lock: LOCK,
+		vendoredTree: identicalSubtree.source.tree,
+		vendoredDirty: [],
+		vendoredHidden: [],
+	};
+	// It is a well-formed pin: `validateProtocolVendorPin` accepts it and reports
+	// the divergence rather than rejecting the shape.
+	assert.equal(validateProtocolVendorPin({ repoRoot: ROOT, ...injected }).diverged, true);
+	assert.throws(
+		() => assertShippableProtocolVendorPin({ repoRoot: ROOT, ...injected }),
+		(error) => {
+			assert.equal(error.code, "proof_shipment_protocol_divergence");
+			return true;
+		},
+	);
 });

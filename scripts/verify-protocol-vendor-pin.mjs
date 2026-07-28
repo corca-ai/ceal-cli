@@ -17,10 +17,13 @@
 //              `gateway-handoff-lock.json` binds a release to consume
 //
 // `source` vs `vendored` is the drift check, and it is fatal. `source` vs
-// `shipped` is the proof/ship divergence, a real state this lane cannot
-// unilaterally resolve — so it is declarable rather than fatal, but the
-// declaration is bound to the facts it was made about: re-sync the copy or bump
-// the handoff lock and it stops matching them and the gate fails. That expiry is
+// `shipped` is the proof/ship divergence, and it is fatal too: the Gateway owner
+// ruled it ship-blocking for every worker release, acceptance packet, and claim
+// that a green protocol test proves shipped worker behavior. A divergence may
+// still be *declared*, which is what keeps `--development` motion legal, but a
+// declaration is a quarantine rather than a clearance. It stays bound to the
+// facts it was made about: re-sync the copy or bump the handoff lock and it
+// stops matching them and the gate fails for that reason instead. That expiry is
 // the property a comment in a document does not have.
 //
 // Read `docs/gates.md` before trusting this further than it goes. It reaches no
@@ -118,14 +121,23 @@ export function validateProtocolVendorPin({
 	// honest and worth stating: `source.commit` is still self-recorded, so this
 	// makes divergence detectable without making convergence observable.
 	const converged = candidate.source.commit === lockedCommit;
-	// The recorded trees must not contradict that verdict, or the pin would carry
-	// two answers and a reader would not know which one the gate used.
-	if (converged !== (candidate.shipped.protocol_tree === candidate.source.tree)) {
+	// The consistency check is deliberately one-directional. One Gateway commit
+	// has exactly one `packages/ceal-protocol` subtree, so a pin naming the same
+	// commit on both sides while recording two different trees is contradicting
+	// itself and no reader could tell which half to believe.
+	//
+	// The reverse is NOT a contradiction and must not be treated as one: two
+	// different Gateway commits can carry a byte-identical protocol subtree, and
+	// a pin recording that is being honest. Rejecting it would have made the only
+	// green pin one that records a false `source.commit` — the guard pressuring a
+	// falsification of its own authoritative field. That state is still not
+	// shippable, because the lock binds a different commit, but it fails as a
+	// divergence rather than as a lying pin.
+	if (converged && candidate.shipped.protocol_tree !== candidate.source.tree) {
 		throw new ProtocolVendorPinError(
 			"invalid_protocol_vendor_pin",
-			`The pin's recorded trees and its Gateway commits disagree about convergence: source.commit ${candidate.source.commit} ` +
-				`vs ${candidate.shipped.lock_file} ${lockedCommit}, source.tree ${candidate.source.tree} vs shipped.protocol_tree ` +
-				`${candidate.shipped.protocol_tree}.`,
+			`The pin names Gateway commit ${candidate.source.commit} on both sides but records two different protocol subtrees ` +
+				`(source.tree ${candidate.source.tree}, shipped.protocol_tree ${candidate.shipped.protocol_tree}). One commit has one subtree.`,
 		);
 	}
 	if (candidate.shipped.status === "agreed" && !converged) {
@@ -193,7 +205,8 @@ export function assertShippableProtocolVendorPin(options = {}) {
 		`The vendored protocol copy was taken from Gateway commit ${result.source.commit}, but ${result.shipped.lock_file} binds ` +
 			`${result.shipped.gateway_commit} for shipment. What this repository tests is not what a release would ship, so this is ` +
 			"not a releasable worker input. Consume a Gateway artifact whose lock and pin name the same commit, or stop at " +
-			"development-only proof (`npm run check:protocol-dev`).",
+			"development-only proof (`npm run check:protocol-dev`). This is refused even when the two commits carry a byte-identical " +
+			"protocol subtree: nothing here can verify that claim, and the lock is what a release actually consumes.",
 	);
 }
 

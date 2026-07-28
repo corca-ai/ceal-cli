@@ -31,9 +31,11 @@ release or an installed worker and says so in its own output.
 
 The check reaches no remote, so it cannot see the copy falling behind its owner,
 and `source.commit` and `shipped.protocol_tree` are recorded observations rather
-than locally verified ones — confirming those needs the owner checkout. Whether
-the two protocol trees have converged is likewise the pin author's statement, not
-something the gate observes.
+than locally verified ones — confirming those needs the owner checkout. The
+divergence verdict compares `source.commit` against the lock's `gateway.commit`
+rather than the pin's two tree fields, so it is not computed entirely from
+author-written values — but `source.commit` is still self-recorded, which makes a
+divergence detectable without making convergence observable.
 
 The workspace still contains four historical package directories so packed
 consumer and deletion gates can be proved:

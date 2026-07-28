@@ -25,6 +25,7 @@ import { parse } from "yaml";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import { verifyGatewayProtocolConsumer } from "./verify-gateway-protocol-consumer.mjs";
+import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
@@ -34,6 +35,19 @@ const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 export const WorkerReleaseArtifactError = codedErrorClass("WorkerReleaseArtifactError");
 
 export async function buildWorkerReleaseArtifact(options = {}, deps = {}) {
+	// This module's CLI is refused as development-only, but the exported function
+	// still writes a real release manifest, provenance, and SHA256SUMS — and it
+	// resolves its protocol input directly rather than through
+	// `resolveWorkerReleaseDevelopmentInputs`, so it does not inherit that
+	// chokepoint's refusal. The owner decision covers "immutable provenance"
+	// explicitly and asks for rejection independently of which path ran, so the
+	// assertion is repeated here rather than assumed.
+	try {
+		assertShippableProtocolVendorPin({ repoRoot: options.repoRoot ?? ROOT });
+	} catch (error) {
+		if (error instanceof ProtocolVendorPinError) throw new WorkerReleaseArtifactError(error.code, error.message);
+		throw error;
+	}
 	const normalized = normalizeOptions(options, deps);
 	const proof = await verifyConsumer(normalized, deps);
 	try {
