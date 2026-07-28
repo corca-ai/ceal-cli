@@ -21,6 +21,7 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
+import { buildAcceptanceRecord, readInstalledReleaseFacts } from "../dist/acceptance-record.js";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
 import {
@@ -393,7 +394,10 @@ test("every public command emits one YAML document without a format flag", async
 		// The observer intentionally serves until closed; close it right after
 		// its single serving document is written.
 		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
-		const failing = ["call", "receipt", "guide", "update", "capabilities"].includes(command.name);
+		// `acceptance` joins the failing set for the same reason `capabilities`
+		// is in it: with no Gateway session there is nothing live to evidence, so
+		// the honest answer is its own schema with ok:false rather than a record.
+		const failing = ["call", "receipt", "guide", "update", "capabilities", "acceptance"].includes(command.name);
 		const payload = await yamlRun(args, failing ? 3 : 0, runtime);
 		assert.equal(payload.schema ?? payload.schema_version, command.result_schema);
 		if (payload.command !== undefined) assert.equal(payload.command, "ceal");
@@ -440,7 +444,7 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 	assert.equal(payload.schema_version, "ceal.commands.v1");
 	assert.deepEqual(
 		payload.commands.map((command) => command.name),
-		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe"],
+		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe", "acceptance"],
 	);
 	// An agent that parses this document instead of prose help must see the same
 	// route depth the help surface advertises.
@@ -3635,4 +3639,85 @@ test("the packaged bin answers an unexpected failure with an error envelope and 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+// The record this emits leaves the machine, so the property under test is not
+// "the fields are right" but "the host is absent". It is built by allow-list for
+// that reason, and these drive the builder directly: requiring an installed
+// release to test the leak-prevention would mean no gate at all on a machine
+// without one.
+function acceptanceParts(overrides = {}) {
+	return {
+		release: {
+			platform: "linux-amd64",
+			release_version: "0.68.0",
+			artifact_sha256: "a".repeat(64),
+			artifact_state: "unsigned_build_candidate",
+			manifest: "ceal-worker-release-manifest-linux-amd64.json",
+			digest_agreement: "binary_bytes_manifest_and_sha256sums_agree",
+			protocol: { package: "@corca-ai/ceal-protocol", producer: { repository: "corca-ai/ceal" } },
+		},
+		reportedVersion: "0.68.0",
+		clientProtocolVersion: "1.3.0",
+		guide: { status: "available", registered_host_count: 2 },
+		session: {
+			instance_ref: "instance:ceal-prod",
+			profile_ref: "profile:work",
+			negotiated_protocol_version: "1.3.0",
+			host_decision: "accepted",
+			catalog_source: "live_discovery",
+			capability_count: 20,
+			elapsed_ms: 1234,
+		},
+		receipt: null,
+		...overrides,
+	};
+}
+
+test("the emitted acceptance record never carries a host path, however the parts arrive", () => {
+	const parts = acceptanceParts();
+	// Fields that do not belong in the record are handed in anyway: the builder
+	// must not pass them through just because a caller supplied them.
+	parts.release.binary_path = "/home/someone/.local/bin/ceal";
+	parts.guide.registered_hosts = ["/home/someone/.claude/skills"];
+	parts.session.access_token = "ceal_personal_secret";
+	const record = buildAcceptanceRecord(parts);
+	const serialized = JSON.stringify(record);
+	assert.doesNotMatch(serialized, /\/home\/someone|binary_path|registered_hosts|access_token|secret/u);
+	// The evidence it exists to carry survives.
+	assert.equal(record.installed_client.artifact_sha256, "a".repeat(64));
+	assert.equal(record.installed_client.digest_agreement, "binary_bytes_manifest_and_sha256sums_agree");
+	assert.equal(record.guide.registered_host_count, 2);
+	assert.equal(record.gateway_session.instance_ref, "instance:ceal-prod");
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	assert.equal(record.emitted_by, "installed_client");
+});
+
+test("the record states what it did not do, including that it called no provider", () => {
+	const withoutCall = buildAcceptanceRecord(acceptanceParts());
+	const claims = withoutCall.non_claims.join("\n");
+	assert.match(claims, /performed no provider call/u);
+	assert.match(claims, /provider_execution_not_reached/u);
+	// An installed host carries no handoff lock, so the producer tuple is the
+	// manifest's own statement. Saying so is the difference between evidence and
+	// a self-report presented as evidence.
+	assert.match(claims, /No handoff lock is present on an installed host/u);
+	assert.match(claims, /artifact_state is 'unsigned_build_candidate'/u);
+	assert.match(claims, /does not mean the installed artifact is unsigned/u);
+
+	// With a read-back receipt the provider-execution non-claim is dropped,
+	// because one did happen — under `ceal call`, not under this command.
+	const withCall = buildAcceptanceRecord(
+		acceptanceParts({ receipt: { request_ref: "ceal:x:call", readback_status: "verified", events: [] } }),
+	);
+	assert.doesNotMatch(withCall.non_claims.join("\n"), /provider_execution_not_reached/u);
+	assert.match(withCall.non_claims.join("\n"), /performed no provider call/u);
+});
+
+test("a build tree is refused as an installed release rather than described as one", () => {
+	// The running binary in a dev checkout has no release layout beside it, which
+	// is exactly the substitution this command must not narrate.
+	const reading = readInstalledReleaseFacts(fileURLToPath(new URL("../dist/bin.js", import.meta.url)));
+	assert.equal(reading.ok, false);
+	assert.equal(reading.code, "release_manifest_missing");
 });

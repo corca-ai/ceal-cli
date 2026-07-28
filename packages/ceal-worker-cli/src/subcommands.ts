@@ -129,6 +129,22 @@ export const CEAL_SUBCOMMANDS = [
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
 		],
 	},
+	{
+		parent: "acceptance",
+		route: ["emit"],
+		description: "Emit installed-client acceptance evidence for this exact installed release.",
+		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.worker_acceptance_result.v1",
+		recovery:
+			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; a build tree is refused because it is not an installed release.",
+		notes: [
+			"Measures the running binary, so there is no --binary option to substitute.",
+			"Performs a live discovery. It never performs a provider call; --request-ref reads back a receipt 'ceal call' already produced.",
+			"Emits no filesystem paths, so the record describes an installation without locating one.",
+		],
+	},
 ] as const satisfies readonly CealSubcommandDefinition[];
 
 export function subcommandsOf(parent: CealCommandName): readonly CealSubcommandDefinition[] {

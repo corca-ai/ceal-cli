@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.68.0 (`ceal-v0.68.0`)
+
+Adds `ceal acceptance emit`, so an installed release can produce its own
+acceptance evidence.
+
+Until now that record came from `scripts/worker-acceptance-packet.mjs`, which
+means a source checkout — and the Gateway lane's ingress contract refuses a
+source checkout as an input, while a colleague on a fresh machine has no
+checkout to run it from. Producing evidence therefore required cloning the
+repository first, which made "does the release work on this platform" and "can
+an ordinary user run this" two different questions with only the first one
+answerable. The new command measures the running binary, so there is no
+`--binary` to substitute and no repository to clone.
+
+- Requires the same three statements to agree before it says anything: the bytes
+  on disk, the release manifest's declared artifact digest, and the `SHA256SUMS`
+  line. A build tree has no release layout beside it and is refused rather than
+  described as an installation.
+- **Performs no provider call.** A verification command that takes a real
+  provider action as a side effect is how an evidence run becomes an unlogged
+  one. `--request-ref` reads back the receipt of a call `ceal call` already made,
+  which is a read.
+- Assembled by allow-list, so the emitting host's filesystem paths and local
+  agent registration paths are never included — the record describes an
+  installation without locating one. Registration paths become a count.
+- States what it did not reach, including that an installed host carries no
+  handoff lock, so the protocol producer tuple is the release manifest's own
+  statement and is not cross-checked there.
+- Failures speak the command's own result schema with `ok: false`, as
+  `ceal capabilities` does, so a caller parses one shape.
+
+The repository script keeps its role for maintainer runs, where the lock is
+present and the producer tuple can be cross-checked.
+
 ## 0.67.1 (`ceal-v0.67.1`)
 
 Carries everything `0.67.0` intended, plus the fix its burn taught.

@@ -8,6 +8,7 @@ import type {
 	CealGatewayHandshakeValue,
 } from "@corca-ai/ceal-protocol";
 import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
+import { buildAcceptanceRecord, readInstalledReleaseFacts } from "./acceptance-record.js";
 import { type CealAgentGuideHost, isCealAgentGuideHost } from "./agent-guide.js";
 import {
 	type CealCallResultRecorder,
@@ -89,7 +90,7 @@ class CealKnownPreProviderCallError extends Error {
 export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe";
+	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe" | "acceptance";
 	description: string;
 	usage: string;
 	effect: "read_only" | "local_write" | "read_only_or_local_write";
@@ -183,6 +184,16 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		result_schema: "ceal.observe.v1",
 		recovery: "Open the printed 127.0.0.1 URL in a local browser; stop the observer with Ctrl-C.",
 	},
+	{
+		name: "acceptance",
+		description: "Emit installed-client acceptance evidence for this exact installed release.",
+		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
+		effect: "read_only",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.worker_acceptance_result.v1",
+		recovery:
+			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; an installed release is required and a build tree is refused.",
+	},
 ];
 
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
@@ -234,7 +245,8 @@ function commandAcceptsOptions(command: CealCommandDefinition["name"], options: 
 		command === "session" ||
 		command === "call" ||
 		command === "receipt" ||
-		command === "observe"
+		command === "observe" ||
+		command === "acceptance"
 	);
 }
 
@@ -264,7 +276,112 @@ async function runKnownCommand(
 	if (command === "call") return runCall(options, io, runtime);
 	if (command === "receipt") return runReceipt(options, io, runtime);
 	if (command === "observe") return runObserve(options, io, runtime);
+	if (command === "acceptance") return runAcceptance(options, io, runtime);
 	return runCapabilities(options, io, runtime);
+}
+
+// The whole point of this route is that a stranger on their own machine can
+// produce the same evidence a maintainer produces from a checkout. So it takes
+// no `--binary`: it measures `process.execPath`, which for the shipped SEA is
+// the installed artifact itself. Run from a build tree there is no release
+// layout beside it, and the refusal below is the correct answer rather than a
+// weaker record.
+async function runAcceptance(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const resolvedRoute = resolveSubcommandRoute("acceptance", options, ACCEPTANCE_ROUTES);
+	// A bare `ceal acceptance` is the emit route, as a bare `ceal guide` is
+	// status: the parent has one job, and making a reader type its only child
+	// buys nothing. Options with no route token land here too and are parsed by
+	// the emitter, so `ceal acceptance --request-ref <ref>` works.
+	if (!resolvedRoute) return emitAcceptanceRecord(options, io, runtime);
+	return resolvedRoute.handler(resolvedRoute.rest, io, runtime);
+}
+
+async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	const parsed = parseNamedOptions(rest, new Set(["--request-ref", "--profile"]), new Set());
+	if (parsed?.operands.length !== 0)
+		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
+	const requestRef = parsed.values.get("--request-ref");
+	const profileOption = parsed.values.get("--profile");
+
+	const reading = readInstalledReleaseFacts(process.execPath);
+	if (!reading.ok) return writeAcceptanceRefusal(reading.code, reading.message, io);
+
+	const access = await resolveStoredGatewayAccess(io, runtime, profileOption);
+	if (!access.ok) {
+		return writeAcceptanceRefusal(
+			"gateway_session_unavailable",
+			"No current Gateway session, so no live evidence can be produced.",
+			io,
+			"Run 'ceal session enroll --gateway <https-url>' with a code from the organization administrator, then re-run.",
+		);
+	}
+
+	const startedAt = Date.now();
+	try {
+		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime);
+		if (!handshake.ok) return writeAcceptanceGatewayFailure(handshake.error, io);
+		const discovery = await client.request({
+			request_id: `${access.value.requestId}:discover`,
+			operation: "discover",
+			profile_ref: access.value.profileRef,
+			body: {},
+		});
+		if (!discovery.ok) return writeAcceptanceGatewayFailure(discovery.error, io);
+
+		// Read back a receipt only when one is named. This command never calls a
+		// provider, so the bounded row is evidence of an act that already happened
+		// under its own command and its own audit event.
+		let receipt: Record<string, unknown> | null = null;
+		if (requestRef !== undefined) {
+			const readback = await requestReceiptReadback(
+				access.value.storedSession as CealStoredSession,
+				access.value.profileRef,
+				requestRef,
+				runtime,
+			);
+			if (!readback.readback.ok) return writeAcceptanceGatewayFailure(readback.readback.error, io);
+			receipt = { request_ref: requestRef, readback_status: "verified", events: readback.readback.value.events };
+		}
+
+		const guide = runtime.inspectAgentGuide?.();
+		return writeYaml(
+			io.stdout,
+			buildAcceptanceRecord({
+				release: reading.facts,
+				reportedVersion: CEAL_PACKAGE_VERSION,
+				clientProtocolVersion: PROTOCOL_VERSION,
+				guide: {
+					status: guide?.status ?? "unavailable",
+					registered_host_count: guide?.hosts?.filter((host) => host.registration_path).length ?? 0,
+				},
+				session: {
+					instance_ref: handshake.value.instance_ref,
+					profile_ref: handshake.value.profile_ref,
+					negotiated_protocol_version: handshake.value.negotiated_protocol_version,
+					host_decision: discovery.value.host_decision,
+					catalog_source: "live_discovery",
+					capability_count: discovery.value.capabilities.length,
+					elapsed_ms: Date.now() - startedAt,
+				},
+				receipt,
+			}),
+		);
+	} catch {
+		return writeAcceptanceRefusal(
+			"gateway_unreachable",
+			"The Gateway could not be reached for live evidence.",
+			io,
+			"Check network reachability and retry.",
+		);
+	}
+}
+
+// Keeps the Gateway's own safe failure vocabulary while staying inside this
+// command's result schema, so a caller never has to switch parsers to read why
+// the evidence run stopped.
+function writeAcceptanceGatewayFailure(error: unknown, io: CealCliIo): number {
+	const failure = classifyGatewayFailure(error);
+	return writeAcceptanceRefusal(failure.code, failure.message, io, failure.nextAction);
 }
 
 async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -466,6 +583,12 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  key=value               Capability input; repeat only fields in the discovered input contract.",
 			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		];
+	if (name === "acceptance")
+		return [
+			"  --request-ref <ref>     'receipt.request_ref' from a completed 'ceal call'; embeds its verified receipt.",
+			"  --profile <profile-ref> Select one assigned Profile for this read without re-login.",
+			"                          Emits no host paths. Performs a live discovery; never performs a provider call.",
+		];
 	if (name === "observe")
 		return [
 			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
@@ -517,6 +640,16 @@ type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, r
 // entry. What the table cannot express is which handler a route reaches, so
 // naming every route is the compile-time gate — a row added without a handler
 // used to fall through to `status` in the shipped binary.
+// One route today, declared through the same table as every other parent so the
+// compile-time exhaustiveness check covers it: adding a row to CEAL_SUBCOMMANDS
+// without a handler here is a `tsc` failure, which is what stops a shipped
+// binary from advertising a route it cannot serve.
+type AcceptanceRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => Promise<number>;
+
+const ACCEPTANCE_ROUTES: CealSubcommandHandlers<"acceptance", AcceptanceRouteHandler> = {
+	emit: (rest, io, runtime) => emitAcceptanceRecord(rest, io, runtime),
+};
+
 const GUIDE_ROUTES: CealSubcommandHandlers<"guide", GuideRouteHandler> = {
 	status: (_subcommand, io, runtime) => runGuideAction("status", undefined, io, runtime),
 	"register codex": runGuideRegister,
@@ -541,6 +674,7 @@ const GUIDE_ROUTES: CealSubcommandHandlers<"guide", GuideRouteHandler> = {
  */
 export function dispatchedRouteKeys(): Readonly<Record<string, readonly string[]>> {
 	return {
+		acceptance: Object.keys(ACCEPTANCE_ROUTES),
 		capabilities: Object.keys(CAPABILITIES_ROUTES),
 		guide: Object.keys(GUIDE_ROUTES),
 		receipt: Object.keys(RECEIPT_ROUTES),
@@ -1613,6 +1747,30 @@ function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
 // which route was typed should name that route's help instead: the top-level
 // help does not list a leaf's options, so it cannot answer the question a
 // rejected option raises.
+// The refusals this route can reach are about the installed layout, not about
+// arguments, so they carry their own codes rather than being flattened into
+// `invalid_argument`. A caller pasting the result into an evidence thread should
+// see which of the three digest statements disagreed.
+function writeAcceptanceRefusal(kind: string, message: string, io: CealCliIo, nextAction?: string): number {
+	writeYaml(io.stdout, {
+		// The command's own schema covers its failures too, the way
+		// `ceal capabilities` does. A caller parses one shape and reads `ok`;
+		// switching schemas on failure would make the unhappy path the one nobody
+		// wrote a reader for.
+		schema_version: "ceal.worker_acceptance_result.v1",
+		command: "ceal",
+		ok: false,
+		status: "error",
+		credential_context: CREDENTIAL_CONTEXT,
+		error: {
+			kind,
+			message,
+			next_action: nextAction ?? "Install a signed release with the published installer, then run 'ceal acceptance emit' from that install.",
+		},
+	});
+	return 3;
+}
+
 function writeError(
 	kind: "unknown_command" | "invalid_argument",
 	message: string,
