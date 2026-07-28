@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.69.0 (`ceal-v0.69.0`)
+
+The first worker release built against `gateway-handoff-v0.67.0`, and the first
+that ships the Protocol/Client pair as a pair.
+
+- **Consumes the signed `v0.67.0` pair.** Protocol `0.67.0` and Client `0.69.0`,
+  producer `corca-ai/ceal@0261f0a4…`, archive `94093501…`. Every digest was
+  recomputed locally before the lock moved, and the lock rebind, vendored
+  re-sync to protocol subtree `58d7d639…`, re-pin, and version declarations
+  landed in one commit so `main` never carried a proof/ship divergence.
+- **The handoff lock now declares the package pair.** It previously derived both
+  tarball names from the handoff tag, which assumed the tag version, the
+  Protocol version, and the Client version were one number. They are not: this
+  artifact carries Protocol `0.67.0` beside Client `0.69.0`, and the old
+  consumer looked for a Client tarball named after the tag and failed the
+  inventory check. Every fixture used one version for both packages, so the
+  fixtures agreed with the bug; the regression test now gives the fixture a
+  Client version deliberately different from the tag.
+- **The vendored decoder binds the full announcement-policy matrix** — twenty
+  capabilities, including `resource.resolve` with distinct provider-bound
+  entries, Calendar, Drive search, and Sheets. The previous copy bound five,
+  which made any policy outside that set fail `validateDiscoveryCapability` and
+  take the whole discovery response down with it. The `x-ceal-announcement-policy`
+  header is still not sent; enabling it is a separate, evidenced step.
+- Client refusal paths are covered: unusable transport, out-of-range timeout,
+  unparseable endpoint, embedded credentials, query or fragment, plaintext to a
+  non-loopback host, non-HTTP scheme, malformed enrollment code, non-JSON
+  content type, malformed JSON, well-formed JSON of the wrong shape, unparseable
+  or oversized `content-length`, an undeclared oversized body refused mid-stream
+  and cancelled rather than buffered, and timeout told apart from transport
+  failure — the last set run against both session routes.
+- `biome` now refuses bare web globals in `.mjs`. The idiom was already
+  `globalThis.Response` throughout these tests, and nothing local caught the
+  drift because `biome` knows those globals; another lane's stricter harness
+  found it after consuming the commit.
+
 ## 0.68.0 (`ceal-v0.68.0`)
 
 Adds `ceal acceptance emit`, so an installed release can produce its own
