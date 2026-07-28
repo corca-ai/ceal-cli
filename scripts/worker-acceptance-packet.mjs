@@ -291,8 +291,16 @@ function nonClaims(packet) {
 		claims.push("gateway_session_not_reached: the installed client did not complete a live discovery on this run.");
 	}
 	if (packet.installed_client.artifact_state !== "signed") {
+		// This reads as "the artifact is unsigned" unless the timing is spelled
+		// out, and this record travels to another lane as announcement evidence.
+		// The manifest is written when the asset set is composed, before the
+		// release job signs anything, and a manifest cannot honestly declare a
+		// signature over bytes that include itself. So the field describes the
+		// composed candidate and says nothing either way about the installed
+		// artifact, which the installer does verify before accepting it.
 		claims.push(
-			`artifact_state is '${packet.installed_client.artifact_state}' in the installed manifest; signature verification is the installer's step and is not re-proved here.`,
+			`artifact_state is '${packet.installed_client.artifact_state}' because the release manifest is written at asset-composition time, before signing; ` +
+				"it does not mean the installed artifact is unsigned. Cosign verification is the installer's step, and this command does not re-prove it.",
 		);
 	}
 	claims.push(
