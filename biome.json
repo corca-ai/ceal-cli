@@ -6,7 +6,7 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**/*.ts", "**/*.mjs", "!**/dist/**", "!**/node_modules/**", "!packages/ceal-protocol/**", "!packages/ceal-operator-cli/**"]
+		"includes": ["**/*.ts", "**/*.mjs", "!**/dist", "!**/node_modules", "!packages/ceal-protocol", "!packages/ceal-operator-cli"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -31,9 +31,32 @@
 				"useTemplate": "off"
 			},
 			"suspicious": {
-				"noTemplateCurlyInString": "off",
-				"useBiomeIgnoreFolder": "off"
+				"noTemplateCurlyInString": "off"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.mjs"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"Response": "Use globalThis.Response; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
+									"Request": "Use globalThis.Request; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
+									"Headers": "Use globalThis.Headers; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
+									"ReadableStream": "Use globalThis.ReadableStream; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
+									"WritableStream": "Use globalThis.WritableStream; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
+									"TransformStream": "Use globalThis.TransformStream; a bare web global fails the Gateway lane's lint. See docs/gates.md."
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	]
 }

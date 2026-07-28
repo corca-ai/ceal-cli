@@ -26,7 +26,26 @@ re-enabling one:
 - `noTemplateCurlyInString` — every hit is `${...}` inside a *shell* script
   string, where it is the shell's own syntax and not a JS template.
 
-A rule with no findings does not belong in that list. Enable it instead.
+A rule with no findings does not belong in that list. Enable it instead —
+`useBiomeIgnoreFolder` sat in it undocumented while the list said "three", and
+its four findings were a fixable preference for `!**/dist` over `!**/dist/**`.
+The exclusion syntax moved and the rule is on; the count above is now true.
+
+`noRestrictedGlobals` is on for `**/*.mjs` only, denying `Response`, `Request`,
+`Headers`, `ReadableStream`, `WritableStream`, and `TransformStream`. It is not a style preference. The
+Gateway lane mirrors this source into a harness whose lint does not know those
+names, so a bare reference passes here and fails there — which is exactly what
+happened: four references in new client tests broke that lane's gate after it
+had already consumed the commit. The idiom this enforces, `globalThis.Response`,
+was already established two lines away in the same file and in nine places in
+`http-transport.test.mjs`; nothing local caught the drift because `biome` knows
+these globals perfectly well.
+
+It is scoped to `.mjs` deliberately. In TypeScript, `Response` is usually a
+*type* annotation rather than a runtime global read, and `globalThis.Response`
+is not a substitute there — denying it repo-wide flags four correct type
+positions in `ceal-client`. The list grows when the other lane's gate names
+another global, not by guessing which ones it might dislike.
 
 Formatting-only commits belong in `.git-blame-ignore-revs`, which
 `npm run hooks:install` wires into the clone.

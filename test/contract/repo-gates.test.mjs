@@ -48,8 +48,15 @@ test("the linter and formatter both run, and both exclude the frozen packages", 
 	// motivated turning the formatter on.
 	assert.equal(biome.formatter.indentStyle, "tab");
 	assert.equal(biome.formatter.lineWidth, 140);
+	// The thing that must hold is that the frozen package is excluded, not which
+	// spelling biome prefers this year. Pinning the literal `!<path>/**` made a
+	// correct migration to `!<path>` — biome's own fixable preference — look like
+	// a removed exclusion.
 	for (const frozen of ["packages/ceal-protocol", "packages/ceal-operator-cli"]) {
-		assert.ok(biome.files.includes.includes(`!${frozen}/**`), `biome.json must exclude the frozen package ${frozen}`);
+		assert.ok(
+			biome.files.includes.some((pattern) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
+			`biome.json must exclude the frozen package ${frozen}`,
+		);
 	}
 });
 
