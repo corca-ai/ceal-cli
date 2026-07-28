@@ -23,6 +23,13 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
    clone도 `node`도 불필요하다. 결과를 `docs/acceptance/ceal-v0.69.0/darwin-arm64.yaml`로 커밋.
 2. **v2 픽스처** `d7c8ae0f…`의 릴리스 경계 인계, 그리고 sanitize 시 `instance_ref`/
    `profile_ref` 필요 여부(기본값 **유지**로 구현돼 있음).
+3. **provenance seam 답.** Agent lease/event/requester를 Gateway audit event에 묶는
+   계약이 **없다.** `receipt.request_ref` ↔ audit `request_id` 결합만 있고, 그건 사후
+   조인이라 Agent 자기 로그만큼만 믿을 수 있다. 제안(`ceal.request_provenance.v1`,
+   audit 영속화·receipt 반환, 선택적 caller-supplied `--request-ref`)은 패킷 §5와
+   `oc:~/ceal`의 `2026-07-29-from-narnia-…-provenance-seam-request.md`에 있다.
+   **세 조각 중 protocol/Gateway 둘은 `vinc` 소유라 이 레인 혼자 못 낸다.**
+   답이 오면 이 레인은 `ceal call`의 `--agent-lease` 등 옵션만 붙이면 된다.
 
 ## Unblocked Now
 
@@ -48,6 +55,14 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
   blob `d2d99610…`, sha256 `7995ff66…`. 서명 설치 → guide → 실세션(`instance:ceal-prod`,
   20 capability) → bounded read → receipt `verified`/`succeeded`/`allowed`.
   [반환 패킷](requests/2026-07-28-to-gateway-lane-v0.69.0-released-and-evidenced.md).
+- **`ceal-agent` 소비 패킷 반환**(2026-07-29, `dfd3405` 푸시됨):
+  [packet](requests/2026-07-29-to-ceal-agent-lane-source-owner-consumption-packet.json).
+  current `0.69.0` + rollback `0.68.0`의 signed envelope, 설치 선택, embedded
+  provenance, CLI 계약, seam 상태를 pin 가능한 JSON 하나로 묶었다. **새 기능 없음.**
+  `ceal-agent`가 "Actions artifact의 `artifact_state: unsigned_build_candidate`이라
+  서명본이 없다"고 읽었던 건 오독이다 — 그 필드는 compose 시점 자기 서술이라 **게시본
+  manifest에도 같은 값이 남는다.** 서명 판정은 오직 `.pem`/`.sig` sidecar다. 다시 물어올
+  질문이라 패킷 맨 앞에 교정으로 박아뒀다.
 - **`ceal acceptance emit`**(0.68.0부터): 설치본이 체크아웃 없이 레코드를 만든다. `--binary`가
   없고(실행 중 바이너리를 잰다), **provider 호출을 하지 않으며**(`--request-ref`는 읽기).
 - **브랜치 `client-protocol-0.67.0-sync` @ `fd771d46…`는 소임을 다했다.** `main`이 이제 그
@@ -68,6 +83,12 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
   projection 없이 통과시켜서 `membership_ref`·`subject_ref`가 실린다. 게이트웨이가 발급한
   식별자를 게이트웨이에 돌려주는 것이라 유출은 아니지만, 레코드 자신의 "assembled by
   allow-list" 문구가 그 가지에 대해선 과장이다. 게이트웨이에도 보고했다.
+- **signed release manifest에 client 패키지가 없다.**
+  `ceal-worker-release-manifest-<platform>.json`은 protocol만 기록한다. `@corca-ai/ceal`
+  수치는 릴리스 커밋의 lock → archive digest → `gateway-artifact-handoff.json`으로
+  **전이적으로만** 커버된다. 소비자는 그걸 signed-manifest 사실이 아니라 source-owner
+  주장으로 pin해야 한다. manifest 스키마 추가는 릴리스에 영향을 주는 변경이라 패킷 안에서
+  하지 않았다.
 - **레코드가 두 형식이다**: 리포 스크립트는 JSON, 설치형 명령은 YAML(모든 공개 명령이 YAML
   한 문서라는 게이트 때문). 같은 스키마에 형식 둘은 소비자에게 지저분하다.
 - **요구 3에 행위 테스트가 없다.** 다섯 경로의 발산 거부는 `repo-gates.test.mjs`의 소스 형태
