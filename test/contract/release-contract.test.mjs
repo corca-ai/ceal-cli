@@ -17,14 +17,31 @@ test("one release contract binds package, protocol, binary, and rollback identit
 		["ceal-protocol", "ceal-client", "ceal-worker-cli", "ceal-operator-cli"].map((name) => [name, readPackageJson(name)]),
 	);
 	// The legacy dual-lane contract stays frozen at its 0.65.0 identity and
-	// binds only the frozen compatibility packages. Worker-owned packages
-	// version independently but move together, keeping the exact protocol pin.
+	// binds only `ceal-operator-cli`. Worker-owned packages version
+	// independently but move together.
 	assert.equal(contract.release_version, "0.65.0");
-	for (const name of ["ceal-protocol", "ceal-operator-cli"]) assert.equal(packages[name].version, contract.release_version);
+	assert.equal(packages["ceal-operator-cli"].version, contract.release_version);
 	assert.equal(packages["ceal-client"].version, rootPackage.version);
 	assert.equal(packages["ceal-worker-cli"].version, rootPackage.version);
-	assert.equal(packages["ceal-client"].dependencies["@corca-ai/ceal-protocol"], contract.protocol.package_version);
-	assert.equal(packages["ceal-worker-cli"].dependencies["@corca-ai/ceal-protocol"], contract.protocol.package_version);
+	// `ceal-protocol` is a frozen copy of a Gateway-owned package, so its version
+	// is whatever the locked handoff artifact ships — it stopped tracking the
+	// legacy release version when the v0.66.1 artifact was consumed. The contract
+	// records that version as descriptive metadata only.
+	assert.equal(contract.protocol.package_version, packages["ceal-protocol"].version);
+	// Every consumer declares that exact version, including the frozen
+	// `ceal-operator-cli`, whose own release version stays at 0.65.0. A loose
+	// range here would be worse than a stale one: the release input verifier
+	// fails `protocol_version_mismatch` unless the declared dependency equals the
+	// protocol version in the locked handoff artifact, and that cross-check is
+	// what stops a worker release from shipping a package that declares one
+	// protocol while the lock binds another.
+	for (const name of ["ceal-client", "ceal-worker-cli", "ceal-operator-cli"]) {
+		assert.equal(
+			packages[name].dependencies["@corca-ai/ceal-protocol"],
+			contract.protocol.package_version,
+			`${name} must declare the locked protocol version exactly`,
+		);
+	}
 	assert.equal(packages["ceal-worker-cli"].dependencies["@corca-ai/ceal"], packages["ceal-client"].version);
 	assert.equal(packages["ceal-protocol"].name, contract.protocol.package);
 	assert.equal(packages["ceal-client"].name, contract.client.package);

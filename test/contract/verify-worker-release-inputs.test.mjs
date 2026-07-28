@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { validateWorkerReleaseInputs, WorkerReleaseInputsError } from "../../scripts/verify-worker-release-inputs.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
+// The supplied version has to be the one the worker packages declare, because
+// that agreement is exactly what this validator checks. Reading it from the
+// vendored copy keeps the next artifact consumption from failing here for a
+// reason unrelated to the code under test.
+const VENDORED_PROTOCOL_VERSION = JSON.parse(
+	readFileSync(new URL("../../packages/ceal-protocol/package.json", import.meta.url), "utf8"),
+).version;
+
 test("legacy release inventory allows only worker source and a supplied Gateway protocol version", () => {
-	const inputs = validateWorkerReleaseInputs({ repoRoot: REPO_ROOT, protocolVersion: "0.65.0" });
+	const inputs = validateWorkerReleaseInputs({ repoRoot: REPO_ROOT, protocolVersion: VENDORED_PROTOCOL_VERSION });
 	assert.equal(inputs.source_repository, "corca-ai/ceal-cli");
 	assert.deepEqual(inputs.packages, {
 		client: { path: "packages/ceal-client", name: "@corca-ai/ceal" },
@@ -16,7 +25,7 @@ test("legacy release inventory allows only worker source and a supplied Gateway 
 	assert.deepEqual(inputs.protocol, {
 		package: "@corca-ai/ceal-protocol",
 		input: "gateway_artifact_only",
-		version: "0.65.0",
+		version: VENDORED_PROTOCOL_VERSION,
 	});
 });
 

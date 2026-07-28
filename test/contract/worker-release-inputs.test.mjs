@@ -15,6 +15,14 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+// The synthetic handoff below stands in for a real Gateway artifact, and the
+// resolver rejects it unless the worker packages declare the supplied protocol
+// version exactly (`protocol_version_mismatch`). So the fixture has to speak the
+// vendored copy's version rather than a literal: hard-coding one makes every
+// future artifact consumption fail here for a reason that has nothing to do with
+// the code under test.
+const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages/ceal-protocol/package.json"), "utf8")).version;
+
 test("worker release inventory accepts one exact complete Gateway handoff", (context) => {
 	const fixture = handoffFixture(context);
 	const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
@@ -105,7 +113,7 @@ function handoffFixture(context) {
 	const client = packedPackage(root, {
 		name: "@corca-ai/ceal",
 		exports: { ".": "./dist/index.js" },
-		dependencies: { "@corca-ai/ceal-protocol": "0.65.0" },
+		dependencies: { "@corca-ai/ceal-protocol": VENDORED_PROTOCOL_VERSION },
 		files: { "dist/index.js": "export const client = true;\n" },
 	});
 	const producer = { repository: "corca-ai/ceal", commit: "a".repeat(40), tree: "b".repeat(40), scoped_paths_clean: true };
@@ -148,10 +156,11 @@ function handoffFixture(context) {
 function packedPackage(root, { name, exports, dependencies = {}, files }) {
 	const staging = path.join(root, `staging-${name.replaceAll("/", "-").replaceAll("@", "")}`, "package");
 	mkdirSync(path.join(staging, "dist"), { recursive: true });
-	const manifest = { name, version: "0.65.0", type: "module", exports, dependencies };
+	const manifest = { name, version: VENDORED_PROTOCOL_VERSION, type: "module", exports, dependencies };
 	writeFileSync(path.join(staging, "package.json"), `${JSON.stringify(manifest)}\n`);
 	for (const [relativePath, contents] of Object.entries(files)) writeFileSync(path.join(staging, relativePath), contents);
-	const filename = name === "@corca-ai/ceal" ? "corca-ai-ceal-0.65.0.tgz" : "corca-ai-ceal-protocol-0.65.0.tgz";
+	const filename =
+		name === "@corca-ai/ceal" ? `corca-ai-ceal-${VENDORED_PROTOCOL_VERSION}.tgz` : `corca-ai-ceal-protocol-${VENDORED_PROTOCOL_VERSION}.tgz`;
 	const tarball = path.join(root, filename);
 	execFileSync("tar", ["-czf", tarball, "-C", path.dirname(staging), "package"]);
 	const bytes = readFileSync(tarball);
