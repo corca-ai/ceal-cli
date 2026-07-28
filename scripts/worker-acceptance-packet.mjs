@@ -27,6 +27,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCK_PATH = "gateway-handoff-lock.json";
@@ -187,6 +188,17 @@ function scalar(stdout, key) {
 }
 
 export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability, target, env = process.env } = {}) {
+	// Acceptance-candidate emission is one of the paths the Gateway owner made
+	// ship-blocking on a proof/ship divergence, and it must refuse on its own
+	// rather than on the strength of some test command having passed earlier. It
+	// runs before the binary is even resolved: a packet that described a real
+	// install would be the most convincing possible evidence for bytes the lock
+	// does not bind, so the refusal has to come before anything is measured.
+	try {
+		assertShippableProtocolVendorPin({ repoRoot });
+	} catch (error) {
+		fail(error instanceof ProtocolVendorPinError ? error.code : "protocol_vendor_pin_verification_failed", error.message);
+	}
 	const binaryPath = resolveInstalledBinary({ repoRoot, binary, env });
 	const release = inspectInstalledRelease(binaryPath);
 	const protocol = verifyProtocolProvenance(release.manifest, { repoRoot });

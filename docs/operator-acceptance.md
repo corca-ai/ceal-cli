@@ -88,18 +88,22 @@ gh secret list   -R corca-ai/ceal-cli     # expect CEAL_RELEASE_CLOUDFLARE_API_T
 Both were present on 2026-07-27. The workflow re-checks them at run time and
 fails the job by name if either is empty, so an empty one costs the tag.
 
-Check the proof/ship state too, because it is the one release-blocking fact a
-green gate does not surface. This is offline and needs no Gateway session:
+The proof/ship state no longer needs a separate look to avoid a wasted tag: it is
+a gate failure. A green `npm run check` already means the protocol bytes this
+repository tests against are the bytes a release would ship from the locked
+handoff archive. To read it directly, offline and with no Gateway session:
 
 ```
-node scripts/verify-protocol-vendor-pin.mjs   # exit 0; read .diverged
+node scripts/verify-protocol-vendor-pin.mjs   # exit 0 only when shippable
 ```
 
-`diverged: true` means the protocol bytes this repository tests against are not
-the bytes a release would ship from the locked handoff archive. That is not a
-gate failure — it is a declared state waiting on the Gateway lane — but it is a
-reason not to spend a tag. `docs/gates.md` says what the check does and does not
-cover.
+A non-zero exit with `proof_shipment_protocol_divergence` names the vendored
+copy's Gateway commit and the one the lock binds, and it blocks the release,
+packing, and acceptance-packet paths independently of whether any test ran. While
+it is failing, `npm run check:protocol-dev` still exercises the protocol and
+client suites — its output is stamped `proof_level: development_only` and must
+not be cited as release or installed-worker evidence. `docs/gates.md` says what
+the check does and does not cover.
 
 Signing is keyless — cosign uses the workflow's OIDC identity, so there is no
 signing secret to hold and nothing to check beyond the workflow being allowed to

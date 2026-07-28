@@ -88,11 +88,15 @@ deletion is authorized — so both copies stay.
   actually enforcing it.
 - `protocol-vendor-pin.json` records which Gateway commit and subtree the frozen
   `packages/ceal-protocol` copy came from, and the gate fails when the copy moves
-  without it. Re-sync and re-pin in one commit; a proof/ship divergence is
-  declarable but must name an owner and a tracked request under `docs/requests/`,
-  and re-syncing the copy or bumping the handoff lock expires the declaration.
-  The check reaches no remote, so it says nothing about the copy falling behind
-  its owner — [docs/gates.md](docs/gates.md) says what it does and does not cover.
+  without it. Re-sync and re-pin in one commit. A proof/ship divergence is
+  **fatal** (`proof_shipment_protocol_divergence`) and blocks release, packing,
+  and acceptance-packet paths on its own; it may still be declared with an owner
+  and a tracked request under `docs/requests/`, but a declaration quarantines
+  rather than clears, and re-syncing the copy or bumping the handoff lock expires
+  it. `npm run check:protocol-dev` is the development-only path while it fails,
+  and its output is not release or installed-worker proof. The check reaches no
+  remote, so it says nothing about the copy falling behind its owner —
+  [docs/gates.md](docs/gates.md) says what it does and does not cover.
 - `npm run probe` is the only sanctioned way to poke an installed surface, and it
   refuses any route that is not `read_only`. A live readback against the real
   session is a different act — see [docs/gates.md](docs/gates.md).

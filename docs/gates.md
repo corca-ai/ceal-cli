@@ -92,14 +92,37 @@ uncommitted one (a committed tree hash cannot see a mid-sync working tree). Both
 are real failures, not shape checks: re-sync the copy and update the pin in the
 same commit, or the gate is correct to be red.
 
-*source* against *shipped* is the proof/ship divergence, and it is a state this
-lane cannot unilaterally resolve — which side moves is the Gateway lane's
-disposition. So it is **declarable rather than fatal**: `shipped.status` may be
-`diverged`, but the declaration must name its reason, its disposition owner, and
-a tracked request under `docs/requests/` that asks for the disposition. Plain
-existence was too weak a check: every path in the tree satisfied it, so a
-one-character edit could keep a dead declaration alive by aiming it at
-`README.md`.
+*source* against *shipped* is the proof/ship divergence, and it is **fatal**. The
+Gateway owner ruled it ship-blocking for every worker release, installed-acceptance
+packet, and claim that a green protocol test proves shipped worker behavior, so
+`assertShippableProtocolVendorPin` fails `proof_shipment_protocol_divergence` and
+names both immutable identities. The verdict compares `source.commit` against the
+lock's `gateway.commit` — deliberately not the pin's two tree fields, which are
+both author-written and would make the verdict a statement about the pin rather
+than a check of anything. The residual limit is worth stating plainly:
+`source.commit` is itself self-recorded, so this makes divergence *detectable*
+without making convergence *observable*.
+
+A divergence is still declarable, and the declaration still has to name its
+reason, its disposition owner, and a tracked request under `docs/requests/` — but
+a declaration is now a **quarantine, not a clearance**. It records why the state
+exists; it does not let anything ship. Plain existence was too weak a check for
+the request: every path in the tree satisfied it, so a one-character edit could
+keep a dead declaration alive by aiming it at `README.md`.
+
+Development motion survives that: `npm run check:protocol-dev` runs the protocol
+and client suites plus `verify-protocol-vendor-pin.mjs --development`, which
+reports the pin without the shippability assertion and stamps its own output
+`proof_level: development_only` with the non-claim spelled out. It is not release
+proof and not installed-worker proof, and no release, acceptance, or announcement
+path calls it.
+
+The refusal does not depend on which test command ran. `worker-release-inputs.mjs`
+asserts shippability inside `resolveWorkerReleaseDevelopmentInputs`, the single
+chokepoint every release, packing, and native-artifact path funnels through, and
+`worker-acceptance-packet.mjs` asserts it before it resolves the installed binary
+— a packet describing a real install is the most convincing possible evidence for
+bytes the lock does not bind, so the refusal comes before anything is measured.
 
 Two things then expire the declaration, and it is worth naming them exactly
 rather than saying "its own facts". **Re-sync the vendored copy** and the drift
@@ -109,14 +132,13 @@ state that no longer exists. Deleting or untracking the request also fails it.
 That expiry is the point — a note in a document has no such property, and this is
 the third time a note failed to hold this line.
 
-What does *not* expire it: `source.commit` is never compared to anything, and the
-archive's protocol bytes converging with the vendored copy produces no signal at
-all. Convergence is computed from two recorded fields, so it is an author's
-statement, not an observation — the gate cannot notice a real divergence that
-nobody wrote down.
+What does *not* expire it: the archive's protocol bytes converging with the
+vendored copy produces no signal by itself. The gate still cannot notice a real
+divergence that nobody wrote down — `source.commit` is compared to the lock, but
+nothing confirms that `source.commit` is where the bytes actually came from.
 
-A `diverged` pin is not clearance to release. It says in machine-readable form
-that what this repository tests is not what a release would ship.
+A `diverged` pin is not clearance to release, and since the guard became fatal it
+cannot be mistaken for one: it fails the gate rather than annotating it.
 
 Be precise about which of the three the gate can actually check. Only
 `source.tree` is verified locally, against `HEAD:packages/ceal-protocol`. The

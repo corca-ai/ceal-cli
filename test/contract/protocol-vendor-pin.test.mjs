@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { ProtocolVendorPinError, validateProtocolVendorPin } from "../../scripts/verify-protocol-vendor-pin.mjs";
+import {
+	assertShippableProtocolVendorPin,
+	ProtocolVendorPinError,
+	validateProtocolVendorPin,
+} from "../../scripts/verify-protocol-vendor-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-handoff-lock.json"), "utf8"));
@@ -90,6 +94,9 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 	const converged = clone(DIVERGED);
 	converged.shipped.status = "agreed";
 	converged.shipped.protocol_tree = converged.source.tree;
+	// Convergence is decided by the commits, so a converged fixture has to move
+	// both: matching trees alone would now be a pin contradicting itself.
+	converged.source.commit = LOCK.gateway.commit;
 	// An `agreed` pin has no open question, so it needs no reason, owner, or request.
 	converged.shipped.reason = undefined;
 	converged.shipped.disposition_owner = undefined;
@@ -139,6 +146,7 @@ test("a status that contradicts the recorded trees fails in both directions", ()
 
 	const claimsDivergence = clone(DIVERGED);
 	claimsDivergence.shipped.protocol_tree = claimsDivergence.source.tree;
+	claimsDivergence.source.commit = LOCK.gateway.commit;
 	expectCode("stale_divergence_record", { pin: claimsDivergence });
 });
 
@@ -211,4 +219,52 @@ test("the repository's own pin agrees with the lock it was written about", () =>
 		pin.shipped.protocol_tree !== pin.source.tree,
 		"the declared status and the recorded trees must agree",
 	);
+});
+
+// The ship gate itself, on the live pin. This is the assertion that keeps
+// `npm run check` from returning green while what the repository tests is not
+// what a release would ship, so it is deliberately not written as "throws
+// because diverged": that form would go red on the day the divergence is
+// resolved, which is the outcome the whole guard exists to ask for. It asserts
+// shippability, and a divergence makes it fail on its own.
+test("the repository's vendored protocol is shippable against the lock it carries", () => {
+	const result = assertShippableProtocolVendorPin({ repoRoot: ROOT });
+	assert.equal(result.diverged, false);
+	// The verdict must come from the one identity the pin does not author.
+	assert.equal(result.source.commit, LOCK.gateway.commit);
+});
+
+// Fatality lives here, in the fixture tier, for the reason the header gives.
+test("a diverged pin is refused as a release input, however well declared", () => {
+	// DIVERGED is a complete, correctly declared divergence: reason, owner, and a
+	// tracked request all present, and `validateProtocolVendorPin` accepts it.
+	// That acceptance is what lets development continue; it is not clearance.
+	assert.equal(expectPass({}).diverged, true);
+	assert.throws(
+		() =>
+			assertShippableProtocolVendorPin({
+				repoRoot: ROOT,
+				pin: DIVERGED,
+				lock: LOCK,
+				vendoredTree: DIVERGED.source.tree,
+				vendoredDirty: [],
+				vendoredHidden: [],
+			}),
+		(error) => {
+			assert.equal(error.code, "proof_shipment_protocol_divergence");
+			// The owner decision requires the failure to name both immutable
+			// identities, so a reader can tell which side has to move.
+			assert.match(error.message, new RegExp(DIVERGED.source.commit, "u"));
+			assert.match(error.message, new RegExp(LOCK.gateway.commit, "u"));
+			return true;
+		},
+	);
+});
+
+// A pin that recorded converged commits alongside two different trees would be
+// carrying two answers, and the gate would silently use one of them.
+test("a pin whose commits and trees disagree about convergence is rejected", () => {
+	const contradictory = clone(DIVERGED);
+	contradictory.source.commit = LOCK.gateway.commit;
+	expectCode("invalid_protocol_vendor_pin", { pin: contradictory, vendoredTree: contradictory.source.tree });
 });

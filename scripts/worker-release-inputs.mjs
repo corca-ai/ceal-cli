@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 import {
 	consumeLockedGatewayHandoffArchive,
 	consumeLockedGatewayHandoffArchiveSync,
@@ -33,11 +34,34 @@ const RAW_HANDOFF_INPUT_KEYS = [
 
 export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
+// Re-raised as this module's error type so a caller catching WorkerReleaseInputError
+// sees the refusal rather than an unrelated exception escaping the release lane.
+// The code is carried through unchanged: `proof_shipment_protocol_divergence` is
+// the stable name the Gateway owner decision asked for.
+function assertShippableProtocolVendorPinFor(repoRoot) {
+	try {
+		return assertShippableProtocolVendorPin({ repoRoot });
+	} catch (error) {
+		if (error instanceof ProtocolVendorPinError) throw new WorkerReleaseInputError(error.code, error.message);
+		throw error;
+	}
+}
+
 export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	assertDevelopmentRawInputs(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const inventory = readInventory(options.inventoryPath ?? path.join(repoRoot, INPUTS_FILENAME));
 	assertInventory(inventory, repoRoot);
+	// Every worker release, packing, and native-artifact path funnels through
+	// here — the locked-archive variants and the development ones alike — so this
+	// is where the proof/ship divergence stops being someone else's test result.
+	// The owner decision requires these paths to reject a divergent state
+	// independently of which test command ran, and a guard that only reddened
+	// `npm run check` would leave a release able to build from bytes the lock
+	// does not bind. The development variants are covered deliberately: building
+	// a release package is packing, not the development-only protocol proof the
+	// decision carves out.
+	assertShippableProtocolVendorPinFor(repoRoot);
 	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
 	const clientTarball = requireRegularAbsoluteFile(options.clientTarball, "client_tarball");
 	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");

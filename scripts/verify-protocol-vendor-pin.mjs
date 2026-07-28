@@ -110,7 +110,24 @@ export function validateProtocolVendorPin({
 		);
 	}
 
-	const converged = candidate.shipped.protocol_tree === candidate.source.tree;
+	// The divergence verdict is decided by `source.commit` against the lock's
+	// `gateway.commit`, not by the pin's own two tree fields. Both trees are
+	// author-written, so a verdict computed from them is a statement about the
+	// pin rather than a check of anything; `lock.gateway.commit` is the one
+	// identity here that the pin does not get to write. The residual limit is
+	// honest and worth stating: `source.commit` is still self-recorded, so this
+	// makes divergence detectable without making convergence observable.
+	const converged = candidate.source.commit === lockedCommit;
+	// The recorded trees must not contradict that verdict, or the pin would carry
+	// two answers and a reader would not know which one the gate used.
+	if (converged !== (candidate.shipped.protocol_tree === candidate.source.tree)) {
+		throw new ProtocolVendorPinError(
+			"invalid_protocol_vendor_pin",
+			`The pin's recorded trees and its Gateway commits disagree about convergence: source.commit ${candidate.source.commit} ` +
+				`vs ${candidate.shipped.lock_file} ${lockedCommit}, source.tree ${candidate.source.tree} vs shipped.protocol_tree ` +
+				`${candidate.shipped.protocol_tree}.`,
+		);
+	}
 	if (candidate.shipped.status === "agreed" && !converged) {
 		throw new ProtocolVendorPinError(
 			"undeclared_divergence",
@@ -154,6 +171,30 @@ export function validateProtocolVendorPin({
 		diverged: !converged,
 		non_claims: candidate.non_claims,
 	};
+}
+
+/**
+ * The ship gate. `validateProtocolVendorPin` answers "is this pin internally
+ * honest", which stays true of a correctly declared divergence — that is what
+ * lets development continue on the synced decoder. This answers the different
+ * question a release must ask: may these bytes be shipped at all.
+ *
+ * The Gateway owner's decision makes the divergence ship-blocking for every
+ * worker release, installed-acceptance packet, and claim that a green protocol
+ * test proves shipped worker behavior. A declaration is a quarantine, not a
+ * clearance, so every one of those paths calls this rather than trusting that
+ * some test command ran.
+ */
+export function assertShippableProtocolVendorPin(options = {}) {
+	const result = validateProtocolVendorPin(options);
+	if (!result.diverged) return result;
+	throw new ProtocolVendorPinError(
+		"proof_shipment_protocol_divergence",
+		`The vendored protocol copy was taken from Gateway commit ${result.source.commit}, but ${result.shipped.lock_file} binds ` +
+			`${result.shipped.gateway_commit} for shipment. What this repository tests is not what a release would ship, so this is ` +
+			"not a releasable worker input. Consume a Gateway artifact whose lock and pin name the same commit, or stop at " +
+			"development-only proof (`npm run check:protocol-dev`).",
+	);
 }
 
 function assertPinShape(pin) {
@@ -278,8 +319,30 @@ function isNonEmptyString(value) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	// `--development` is the escape hatch the owner decision asks for, and it is
+	// deliberately not the default: a bare run is the ship gate. It reports the
+	// same pin without the shippability assertion, and says in its own output
+	// that it proves nothing about a release or an installed worker, so the
+	// answer cannot be pasted somewhere as evidence that it is not.
+	const development = process.argv.slice(2).includes("--development");
 	try {
-		console.log(JSON.stringify(validateProtocolVendorPin(), null, 2));
+		const result = development ? validateProtocolVendorPin() : assertShippableProtocolVendorPin();
+		console.log(
+			JSON.stringify(
+				development
+					? {
+							...result,
+							proof_level: "development_only",
+							non_claims: [
+								...result.non_claims,
+								"This is development-only protocol proof. It is not release proof, not installed-worker proof, and must not be used by a release, acceptance, or announcement path.",
+							],
+						}
+					: result,
+				null,
+				2,
+			),
+		);
 	} catch (error) {
 		console.error(
 			JSON.stringify({

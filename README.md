@@ -18,12 +18,16 @@ public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
 `protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
 subtree the frozen protocol copy was taken from, alongside the protocol subtree
 inside the locked handoff archive a release consumes. `node
-scripts/verify-protocol-vendor-pin.mjs` binds the three offline: the copy drifting
-from its recorded source is a gate failure, while a divergence between the copy
-and the shipped archive is declarable, and a declaration must name a disposition
-owner and a tracked request under `docs/requests/`. Re-syncing the copy or
-bumping `gateway-handoff-lock.json` expires the declaration. A declared
-divergence means what this repository tests is not what a release would ship.
+scripts/verify-protocol-vendor-pin.mjs` binds the three offline, and both
+failures are fatal: the copy drifting from its recorded source, and a divergence
+between the copy and the shipped archive. The second fails
+`proof_shipment_protocol_divergence`, because it means what this repository tests
+is not what a release would ship. A divergence may still be declared — naming a
+disposition owner and a tracked request under `docs/requests/` — but a
+declaration is a quarantine, not a clearance, and re-syncing the copy or bumping
+`gateway-handoff-lock.json` expires it. `npm run check:protocol-dev` is the
+development-only path that keeps working meanwhile; it proves nothing about a
+release or an installed worker and says so in its own output.
 
 The check reaches no remote, so it cannot see the copy falling behind its owner,
 and `source.commit` and `shipped.protocol_tree` are recorded observations rather
