@@ -16,6 +16,7 @@
 //   node scripts/worker-acceptance-packet.mjs
 //   node scripts/worker-acceptance-packet.mjs --capability <id> --target <ref>
 //   node scripts/worker-acceptance-packet.mjs --binary /path/to/ceal --json
+//   node scripts/worker-acceptance-packet.mjs --sanitized   # external record
 //
 // Without `--capability`/`--target` the live provider row is left as an
 // explicit non-claim. A bounded capability call is a real provider action and
@@ -300,12 +301,86 @@ function nonClaims(packet) {
 	return claims;
 }
 
+/**
+ * The external form of the packet, for a record another lane reads.
+ *
+ * The packet itself is a local diagnostic and carries things that have no
+ * business leaving this machine: the operator's absolute filesystem path, and
+ * the local agent registration paths. This is an allow-list rather than a
+ * delete-list for the same reason the announcement policy renderer is — a field
+ * added to the packet later must not travel by default just because nobody
+ * remembered to strip it.
+ *
+ * What is deliberately KEPT: `instance_ref` and `profile_ref`. Both are
+ * Gateway-issued identifiers being returned to the Gateway that issued them, so
+ * withholding them protects nobody and costs the record its binding to a
+ * session. `registered_hosts` becomes a count: the number is the evidence
+ * ("guide registration reached N hosts"), the paths are the leak.
+ */
+export function sanitizedAcceptanceRecord(packet) {
+	const client = packet.installed_client;
+	const session = packet.gateway_session;
+	const call = packet.bounded_capability_call;
+	return {
+		schema_version: "ceal.worker_acceptance_result.v1",
+		installed_client: {
+			platform: client.platform,
+			release_version: client.release_version,
+			artifact_sha256: client.artifact_sha256,
+			artifact_state: client.artifact_state,
+			manifest: client.manifest,
+			digest_agreement: client.digest_agreement,
+			reported_version: client.reported_version,
+			client_protocol_version: client.client_protocol_version,
+		},
+		gateway_protocol_input: packet.gateway_protocol_input,
+		guide: {
+			status: packet.guide.status,
+			exit_code: packet.guide.exit_code,
+			registered_host_count: packet.guide.registered_hosts.length,
+		},
+		gateway_session: {
+			reached: session.reached,
+			exit_code: session.exit_code,
+			elapsed_ms: session.elapsed_ms,
+			instance_ref: session.instance_ref,
+			profile_ref: session.profile_ref,
+			negotiated_protocol_version: session.negotiated_protocol_version,
+			host_decision: session.host_decision,
+			catalog_source: session.catalog_source,
+			live_gateway_checked: session.live_gateway_checked,
+			capability_count: session.capability_count,
+		},
+		bounded_capability_call: call
+			? {
+					capability: call.capability,
+					target: call.target,
+					status: call.status,
+					exit_code: call.exit_code,
+					elapsed_ms: call.elapsed_ms,
+					evidence: call.evidence,
+					request_ref: call.request_ref,
+					receipt: call.receipt,
+				}
+			: null,
+		non_claims: [
+			...packet.non_claims,
+			"This record is a sanitized projection: the emitting host's binary path and local agent registration paths are omitted by allow-list, so it describes an installation without locating one.",
+		],
+	};
+}
+
 function parseArgs(argv) {
-	const options = { json: false };
+	const options = { json: false, sanitized: false };
 	const valued = { "--binary": "binary", "--capability": "capability", "--target": "target" };
 	for (let index = 0; index < argv.length; index += 1) {
 		const token = argv[index];
 		if (token === "--json") {
+			options.json = true;
+		} else if (token === "--sanitized") {
+			// The external record is JSON by construction: it exists to be written to a
+			// file another lane reads by digest, not to be eyeballed.
+			options.sanitized = true;
 			options.json = true;
 		} else if (valued[token]) {
 			index += 1;
@@ -361,7 +436,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 	try {
 		const options = parseArgs(process.argv.slice(2));
 		const packet = buildAcceptancePacket(options);
-		process.stdout.write(options.json ? `${JSON.stringify(packet, null, 2)}\n` : `${render(packet)}\n`);
+		const emitted = options.sanitized ? sanitizedAcceptanceRecord(packet) : packet;
+		process.stdout.write(options.json ? `${JSON.stringify(emitted, null, 2)}\n` : `${render(packet)}\n`);
 	} catch (error) {
 		const code = error instanceof WorkerAcceptanceError ? error.code : "unexpected_error";
 		process.stderr.write(`worker-acceptance: ${code}: ${error.message}\n`);

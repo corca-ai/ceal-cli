@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	inspectInstalledRelease,
 	resolveInstalledBinary,
+	sanitizedAcceptanceRecord,
 	verifyProtocolProvenance,
 	WorkerAcceptanceError,
 } from "../../scripts/worker-acceptance-packet.mjs";
@@ -132,4 +133,81 @@ test("a protocol producer disagreeing with the handoff lock is refused", (contex
 
 	writeFileSync(path.join(root, "gateway-handoff-lock.json"), JSON.stringify({ gateway: { commit: "d".repeat(40), tree: "t".repeat(40) } }));
 	assert.throws(() => verifyProtocolProvenance(manifest, { repoRoot: root }), code("protocol_provenance_disagreement"));
+});
+
+// A packet shaped like a real one, with the three host-local fields populated.
+// Built by hand rather than by running the command: the projection is what is
+// under test, and requiring an installed release to test it would mean the
+// leak-prevention had no gate at all on a machine without one.
+function packetFixture() {
+	return {
+		schema_version: "ceal.worker_acceptance_packet.v1",
+		installed_client: {
+			binary_path: "/home/someone/.local/bin/ceal",
+			platform: "linux-amd64",
+			release_version: "0.66.1",
+			artifact_sha256: "a".repeat(64),
+			artifact_state: "signed",
+			manifest: "ceal-worker-release-manifest-linux-amd64.json",
+			digest_agreement: "binary_bytes_manifest_and_sha256sums_agree",
+			reported_version: "0.66.1",
+			client_protocol_version: "1.3.0",
+		},
+		gateway_protocol_input: { package: "@corca-ai/ceal-protocol", producer: { repository: "corca-ai/ceal" } },
+		guide: { status: "registered", exit_code: 0, registered_hosts: ["/home/someone/.claude/skills", "/home/someone/.codex/skills"] },
+		gateway_session: {
+			reached: true,
+			exit_code: 0,
+			elapsed_ms: 120,
+			instance_ref: "instance:corca",
+			profile_ref: "profile:narnia",
+			negotiated_protocol_version: "1.3.0",
+			host_decision: "accepted",
+			catalog_source: "live_discovery",
+			live_gateway_checked: true,
+			capability_count: 9,
+		},
+		bounded_capability_call: null,
+		non_claims: ["fixture non-claim"],
+	};
+}
+
+// The defect this projection exists to fix: the packet carries the operator's
+// absolute binary path and their local agent registration paths, and the record
+// the Gateway lane reads must describe an installation without locating one.
+test("the sanitized record omits every host-local path and keeps the Gateway's own refs", () => {
+	const packet = packetFixture();
+	const record = sanitizedAcceptanceRecord(packet);
+	const serialized = JSON.stringify(record);
+
+	// Assert on the rendered bytes, not the key list, so a nested reintroduction
+	// is caught too.
+	assert.doesNotMatch(serialized, /\/home\/someone/u, "the record leaked a host filesystem path");
+	assert.equal(Object.hasOwn(record.installed_client, "binary_path"), false);
+	assert.equal(Object.hasOwn(record.guide, "registered_hosts"), false);
+	// The count is the evidence; the paths were the leak.
+	assert.equal(record.guide.registered_host_count, 2);
+
+	// Gateway-issued identifiers are returned to the Gateway that issued them.
+	assert.equal(record.gateway_session.instance_ref, "instance:corca");
+	assert.equal(record.gateway_session.profile_ref, "profile:narnia");
+
+	// The evidence the record exists to carry survives intact.
+	assert.equal(record.installed_client.artifact_sha256, packet.installed_client.artifact_sha256);
+	assert.equal(record.installed_client.digest_agreement, packet.installed_client.digest_agreement);
+	assert.deepEqual(record.gateway_protocol_input, packet.gateway_protocol_input);
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	// The packet's own non-claims travel, plus one naming the omission.
+	assert.equal(record.non_claims[0], "fixture non-claim");
+	assert.match(record.non_claims.at(-1), /sanitized projection/u);
+});
+
+// An allow-list is only an allow-list if a new packet field does not ride along.
+test("a field added to the packet does not travel into the record by default", () => {
+	const packet = packetFixture();
+	packet.installed_client.operator_home = "/home/someone";
+	packet.gateway_session.raw_access_token = "ceal_personal_secret";
+	packet.invented_top_level = { path: "/home/someone/secret" };
+	const serialized = JSON.stringify(sanitizedAcceptanceRecord(packet));
+	assert.doesNotMatch(serialized, /operator_home|raw_access_token|invented_top_level|secret/u);
 });
