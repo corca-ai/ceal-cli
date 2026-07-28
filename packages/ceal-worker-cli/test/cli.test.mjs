@@ -1803,6 +1803,9 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 			message: "The Gateway declined the request with a retryable rejection.",
 			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
 			denial: false,
+			// The wait travels with the classification now (corca-ai/ceal#642); an
+			// unknown code degrading by recovery class keeps the Gateway's number.
+			retryAfterMs: 30_000,
 		},
 	);
 });
@@ -1955,6 +1958,79 @@ test("a target's capability access is rendered as served, never widened to the c
 	}
 });
 
+// corca-ai/ceal#642: a throttled caller could not learn a safe pace, so agents
+// binary-searched it. The wait was on the wire the whole time — the renderer
+// dropped it. The known-code table wins over a disagreeing recovery class, which
+// is exactly how `rate_limited` used to lose the number sitting beside it.
+// The classifier carrying the value is only half of it; the number has to reach
+// the document an agent actually reads. This drives a throttled call through the
+// ordinary CLI path and asserts the rendered YAML.
+test("a throttled call renders the Gateway's wait in its error document", async () => {
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=x"], 3, {
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:throttle:001",
+			});
+			assert.equal(payload.ok, false);
+			assert.equal(payload.status, "error");
+			assert.equal(payload.error.kind, "rate_limited");
+			assert.equal(payload.error.retry_after_ms, 45_000);
+			// The prose stays this client's; only the number is the Gateway's.
+			assert.equal(payload.error.message, "The Gateway rate quota for this client is temporarily exhausted.");
+		},
+		(body) =>
+			body.operation === "handshake"
+				? handshakeResponse(body)
+				: body.operation === "discover"
+					? discoveryResponse(body)
+					: {
+							ok: false,
+							request_id: body.request_id,
+							protocol_version: "1.3.0",
+							proof_ref_or_unavailable: `audit:${body.request_id}`,
+							error: {
+								code: "rate_limited",
+								message: "server-controlled",
+								next_action: "server-controlled prose",
+								recovery: { kind: "retry", retry_after_ms: 45_000 },
+							},
+						},
+	);
+});
+
+test("a throttle carries the Gateway's own wait instead of making the caller guess one", () => {
+	const throttled = classifyGatewayFailure({
+		code: "rate_limited",
+		message: "server-controlled",
+		next_action: "server-controlled prose",
+		recovery: { kind: "retry", retry_after_ms: 45_000 },
+	});
+	// The table still owns the words; only the number comes from the Gateway.
+	assert.equal(throttled.code, "rate_limited");
+	assert.equal(throttled.message, "The Gateway rate quota for this client is temporarily exhausted.");
+	assert.equal(throttled.retryAfterMs, 45_000);
+
+	// Absence must stay absent. A default would be a locally invented backoff
+	// presented as the Gateway's, and pacing against it is the same guess in a
+	// more confident costume.
+	const silent = classifyGatewayFailure({ code: "rate_limited", message: "x", next_action: "y", recovery: { kind: "retry" } });
+	assert.equal(Object.hasOwn(silent, "retryAfterMs"), false);
+	const noRecovery = classifyGatewayFailure({ code: "rate_limited", message: "x", next_action: "y" });
+	assert.equal(Object.hasOwn(noRecovery, "retryAfterMs"), false);
+
+	// A value the protocol would never have passed is not rendered either.
+	for (const bad of [-1, 1.5, "45000", null]) {
+		const rejected = classifyGatewayFailure({
+			code: "rate_limited",
+			message: "x",
+			next_action: "y",
+			recovery: { kind: "retry", retry_after_ms: bad },
+		});
+		assert.equal(Object.hasOwn(rejected, "retryAfterMs"), false, `retry_after_ms ${JSON.stringify(bad)} must not render`);
+	}
+});
+
 test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
 	assert.deepEqual(
 		classifyGatewayFailure({
@@ -1968,6 +2044,9 @@ test("an unknown failure code degrades by its typed recovery class, never by ser
 			message: "The Gateway declined the request with a retryable rejection.",
 			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
 			denial: false,
+			// The wait travels with the classification now (corca-ai/ceal#642); an
+			// unknown code degrading by recovery class keeps the Gateway's number.
+			retryAfterMs: 30_000,
 		},
 	);
 });

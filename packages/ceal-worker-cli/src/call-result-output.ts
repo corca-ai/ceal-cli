@@ -113,7 +113,15 @@ export function writeCallGatewayFailure(
 			target: parsed.targetRef,
 			...gatewayResultIdentity(session, parsed.profileRef),
 			receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
-			error: { kind: failure.denial ? "authorization_denied" : failure.code, message: failure.message, next_action: failure.nextAction },
+			error: {
+				kind: failure.denial ? "authorization_denied" : failure.code,
+				message: failure.message,
+				next_action: failure.nextAction,
+				// Present only when the Gateway supplied it, so absence stays a
+				// readable "the Gateway named no wait" rather than a zero an agent
+				// would pace against.
+				...(failure.retryAfterMs === undefined ? {} : { retry_after_ms: failure.retryAfterMs }),
+			},
 		},
 		record,
 	);
@@ -203,6 +211,17 @@ interface SafeGatewayFailure {
 	message: string;
 	nextAction: string;
 	denial: boolean;
+	/**
+	 * The Gateway's own wait, in milliseconds, when it supplied one.
+	 *
+	 * corca-ai/ceal#642: a throttled caller had no way to learn a safe pace, so
+	 * agents binary-searched it — three calls, throttle, guess, repeat. The
+	 * protocol has carried `recovery.retry_after_ms` all along and this renderer
+	 * dropped it, so even a Gateway that answered the question precisely came out
+	 * as the prose "wait briefly". Absent stays absent: this is the Gateway's
+	 * number or nothing, never a locally invented backoff.
+	 */
+	retryAfterMs?: number;
 }
 
 const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "code">>> = Object.freeze({
@@ -325,13 +344,29 @@ function gatewayRecoveryKind(error: unknown): string | null {
 	return typeof kind === "string" && Object.hasOwn(GATEWAY_RECOVERY_HINTS, kind) ? kind : null;
 }
 
+// Read independently of the recovery *kind*. The known-code table wins over a
+// disagreeing recovery class, so a `rate_limited` code takes its message from
+// the table and would otherwise discard the wait that arrived beside it — which
+// is the exact case #642 reports. The protocol validator already bounds this
+// value; anything it would have rejected never reaches here.
+function gatewayRetryAfterMs(error: unknown): number | undefined {
+	if (!error || typeof error !== "object" || !("recovery" in error)) return undefined;
+	const recovery = (error as { recovery?: unknown }).recovery;
+	if (!recovery || typeof recovery !== "object" || !("retry_after_ms" in recovery)) return undefined;
+	const wait = (recovery as { retry_after_ms?: unknown }).retry_after_ms;
+	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 ? wait : undefined;
+}
+
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
 	const hint = typeof code === "string" && Object.hasOwn(GATEWAY_FAILURE_HINTS, code) ? GATEWAY_FAILURE_HINTS[code] : undefined;
-	if (typeof code === "string" && hint) return { code, ...hint };
+	const retryAfterMs = gatewayRetryAfterMs(error);
+	const wait = retryAfterMs === undefined ? {} : { retryAfterMs };
+	if (typeof code === "string" && hint) return { code, ...hint, ...wait };
 	const kind = gatewayRecoveryKind(error);
-	if (typeof code === "string" && kind) return { code, ...GATEWAY_RECOVERY_HINTS[kind] };
+	if (typeof code === "string" && kind) return { code, ...GATEWAY_RECOVERY_HINTS[kind], ...wait };
 	return {
+		...wait,
 		code: "gateway_request_failed",
 		message: "The Gateway rejected the capability request.",
 		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
