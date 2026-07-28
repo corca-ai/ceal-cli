@@ -112,7 +112,7 @@ test("session client construction refuses an unusable transport or timeout", () 
 
 function sessionRespondWith({ body, contentType = "application/json", contentLength, stream }) {
 	return async () =>
-		new Response(stream ?? body, {
+		new globalThis.Response(stream ?? body, {
 			status: 200,
 			headers: {
 				"content-type": contentType,
@@ -145,7 +145,7 @@ test("a session response this client cannot trust is invalid_response on both ro
 
 test("an undeclared oversized session body is refused mid-stream and cancelled", async () => {
 	let cancelled = false;
-	const stream = new ReadableStream({
+	const stream = new globalThis.ReadableStream({
 		pull(controller) {
 			controller.enqueue(new Uint8Array(32 * 1024));
 		},

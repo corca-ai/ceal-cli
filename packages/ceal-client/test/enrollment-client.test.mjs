@@ -134,7 +134,7 @@ test("a malformed enrollment code never reaches the network", async () => {
 
 function respondWith({ body, contentType = "application/json", contentLength, stream }) {
 	return async () =>
-		new Response(stream ?? body, {
+		new globalThis.Response(stream ?? body, {
 			status: 200,
 			headers: {
 				"content-type": contentType,
@@ -165,7 +165,7 @@ test("an undeclared body over the cap is refused mid-stream rather than buffered
 	// No content-length, so the only defence is the running total while reading.
 	// A client that trusted the header alone would buffer this to exhaustion.
 	let cancelled = false;
-	const stream = new ReadableStream({
+	const stream = new globalThis.ReadableStream({
 		pull(controller) {
 			controller.enqueue(new Uint8Array(32 * 1024));
 		},
