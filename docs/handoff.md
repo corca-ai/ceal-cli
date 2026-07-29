@@ -21,9 +21,15 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
    **이게 오면 공지 문구에서 Mac을 뺄 이유가 사라진다. 그 전엔 반드시 빼야 한다.**
    받는 법: 터미널 2줄(설치·`session enroll`) 뒤 `ceal acceptance emit --request-ref <ref>`.
    clone도 `node`도 불필요하다. 결과를 `docs/acceptance/ceal-v0.69.0/darwin-arm64.yaml`로 커밋.
-2. **v2 픽스처** `d7c8ae0f…`의 릴리스 경계 인계, 그리고 sanitize 시 `instance_ref`/
+2. **`gateway-handoff-v0.68.0` 아카이브의 release origin 게시.** 지금 이 아카이브는
+   **30일짜리 Actions artifact로만 존재한다.** `.github/workflows/ceal-release.yml`은
+   `$GATEWAY_HANDOFF_ORIGIN/<tag>/<archive>`에서 받는데 그 경로는 **현재 404**다.
+   lock/vendor는 끝났지만 **이 상태로는 어떤 worker 릴리스도 태그 즉시 죽는다**(그리고
+   태그는 재사용 불가). `vinc` 소유. 2026-07-28에 이미 같은 요청을 보냈다
+   ([publish-handoff-archive-to-release-origin](requests/2026-07-28-to-gateway-lane-publish-handoff-archive-to-release-origin.md)).
+3. **v2 픽스처** `d7c8ae0f…`의 릴리스 경계 인계, 그리고 sanitize 시 `instance_ref`/
    `profile_ref` 필요 여부(기본값 **유지**로 구현돼 있음).
-3. **provenance seam 답.** Agent lease/event/requester를 Gateway audit event에 묶는
+4. **provenance seam 답.** Agent lease/event/requester를 Gateway audit event에 묶는
    계약이 **없다.** `receipt.request_ref` ↔ audit `request_id` 결합만 있고, 그건 사후
    조인이라 Agent 자기 로그만큼만 믿을 수 있다. 제안(`ceal.request_provenance.v1`,
    audit 영속화·receipt 반환, 선택적 caller-supplied `--request-ref`)은 패킷 §5와
@@ -33,6 +39,14 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
 
 ## Unblocked Now
 
+- **`ceal session adopt` 구현.** 이게 지금 이 레인의 차단 과제다(게이트웨이 요청:
+  `oc:~/ceal/2026-07-29-to-narnia-verified-email-first-device-consumer-unblock.md`).
+  protocol이 도착했으니 private schema를 발명할 이유가 없다 — Gateway 소유 decoder만 쓴다.
+  착수 전에 **HPKE 결정**을 먼저 받아라: 요구 스위트는
+  `DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/AES-256-GCM`인데 **Node 22에 네이티브 HPKE가 없다.**
+  프리미티브(Ed25519·X25519 `diffieHellman`·`hkdfSync`·AES-256-GCM)는 전부 있으니 RFC 9180
+  base mode를 직접 조립할 수는 있으나, 그건 **서명 릴리스에 자작 암호를 넣는 것**이다.
+  대안은 의존성 추가인데 현재 번들 런타임 의존성은 `yaml` 하나뿐이다. 운영자 결정 사항.
 - **`x-ceal-announcement-policy: v2` 활성화가 이제 가능하다.** vendored `0.67.0` 디코더가
   **capability 20개 전부**를 바인딩한다(`resource.resolve`가 provider별 2항목, Calendar,
   Drive search, Sheets 포함) — 라이브 카탈로그의 20개와 같은 집합이다. 제가 보고했던 차단
@@ -44,9 +58,17 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
 - **릴리스**: `ceal-v0.69.0` 게시, stable 포인터가 `0.68.0` → `0.69.0`으로 이동.
   `ceal-v0.67.0`은 **탔다**(linux-arm64, 미발행 — 핀 금지). `0.67.1`·`0.68.0`은 게시돼 있고
   `v0.66.1`을 소비한다.
-- **lock은 `gateway-handoff-v0.67.0`**: producer `0261f0a4…`, tree `db220375…`, protocol
-  subtree `58d7d639…`, archive `94093501…`, manifest `01aa64fd…`. 다섯 digest 전부 로컬
-  재계산. pin은 `agreed`.
+- **lock은 이제 `gateway-handoff-v0.68.0`**(2026-07-29, `cfa6c28`): producer `844b19ce…`,
+  tree `0771d062…`, protocol subtree `eea361e5…`, archive `8928840a…`, manifest
+  `b0bd766a…`. archive는 로컬에서 sha256·cosign(게이트웨이 태그 identity) 둘 다 재검증했고
+  vendored subtree는 `HEAD:packages/ceal-protocol`이 `eea361e5…`로 정확히 일치한다.
+  pin은 `agreed`. **`@corca-ai/ceal-protocol@0.68.0`이 `device-enrollment`를 root export로
+  싣는다**(15개 심볼 확인) — `ceal session adopt`의 전제가 갖춰졌다.
+  소비 dependency 셋(client·worker-cli·**frozen operator-cli**)은 계약 테스트가 요구하는
+  대로 함께 `0.68.0`으로 올렸다. operator-cli의 버전 단언 수정은 sync의 파생 결과이지
+  독립 편집이 아니다(테스트 주석이 그 선례를 이미 적어두고 있다).
+- **이전 lock `gateway-handoff-v0.67.0`**: producer `0261f0a4…`, protocol subtree
+  `58d7d639…`, archive `94093501…`. **게시된 `ceal-v0.69.0` 바이너리가 담은 건 이쪽이다.**
 - **lock이 이제 Protocol/Client 쌍을 선언한다.** 이전엔 두 tarball 이름을 handoff 태그에서
   유도해서, Protocol 0.67.0 + Client 0.69.0인 진짜 쌍을 **소비할 수 없었다.** 게이트웨이가
   packer에서 푼 결합이 우리 소비자에도 있었고, **모든 픽스처가 두 패키지에 같은 버전을 써서
@@ -89,6 +111,12 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
   **전이적으로만** 커버된다. 소비자는 그걸 signed-manifest 사실이 아니라 source-owner
   주장으로 pin해야 한다. manifest 스키마 추가는 릴리스에 영향을 주는 변경이라 패킷 안에서
   하지 않았다.
+- **`@corca-ai/ceal@0.69.0`이 두 개의 서로 다른 tarball을 가리킨다.** `v0.67.0` handoff의
+  것은 `085839e1…`(게시된 `ceal-v0.69.0` 바이너리가 담은 것), `v0.68.0` handoff의 것은
+  `50405db9…`다. protocol dependency가 `0.67.0`→`0.68.0`으로 바뀌었는데 client 버전은 안
+  올랐다. 버전 문자열이 더 이상 바이트를 식별하지 못한다 — `ceal-agent`에 보낸 패킷은
+  게시된 릴리스 기준이라 여전히 맞지만, 다음 릴리스는 같은 이름의 다른 바이트를 담는다.
+  `vinc`에 알려야 한다.
 - **레코드가 두 형식이다**: 리포 스크립트는 JSON, 설치형 명령은 YAML(모든 공개 명령이 YAML
   한 문서라는 게이트 때문). 같은 스키마에 형식 둘은 소비자에게 지저분하다.
 - **요구 3에 행위 테스트가 없다.** 다섯 경로의 발산 거부는 `repo-gates.test.mjs`의 소스 형태
