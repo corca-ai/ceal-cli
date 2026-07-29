@@ -425,6 +425,49 @@ test("the release lane demands the platform proofs its own artifacts depend on",
 	assert.match(requirement, /'0'/u, "the release gate must still let the runners that cannot build them skip");
 });
 
+// The release legs share one commit, so running the full gate on all four
+// re-proved the same source three extra times — and two of those runs were
+// macOS minutes, which bill at ten times Linux. Skipping them is safe only
+// while the remaining set keeps two properties, and a later edit could drop
+// either one without any run turning red, because a skipped step reports
+// success. Both are asserted here rather than left to the comment.
+test("the release lane still validates its source on the platforms that can prove it", () => {
+	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	const entries = Object.values(workflow.jobs).flatMap((job) => job.strategy?.matrix?.include ?? []);
+	const validating = entries.filter((entry) => String(entry.validate_source) === "1");
+	assert.ok(validating.length > 0, "at least one release leg must run the full gate; a tag is otherwise built from unproven source");
+
+	// The platform-gated proofs only run where CEAL_REQUIRE_PLATFORM_PROOFS is
+	// '1'. If that leg ever stops validating source, the release-artifact and
+	// installer suites stop running anywhere in the release lane at all.
+	assert.ok(
+		validating.some((entry) => entry.platform === "linux-amd64"),
+		"linux-amd64 is the only leg that can run the platform-gated proofs, so it must keep running the gate",
+	);
+	// `ceal-v0.66.0` burned on a break that only appears on macOS. One macOS leg
+	// must still reach the gate before anything is signed.
+	assert.ok(
+		validating.some((entry) => String(entry.runner ?? entry.os).includes("macos")),
+		"one macOS leg must still validate source, because a macOS-only break has burned a tag before",
+	);
+
+	// Every leg must answer the question, so a newly added platform cannot
+	// inherit "skip" by leaving the field out.
+	for (const entry of entries) {
+		assert.match(
+			String(entry.validate_source),
+			/^[01]$/u,
+			`release leg '${entry.platform}' must declare validate_source explicitly rather than defaulting to a skip`,
+		);
+	}
+
+	// The skip is only sound because composition compiles and smoke-tests the
+	// binary by itself. If that stopped being true, a skipped leg would ship a
+	// binary nothing had built from checked source.
+	const compile = read("scripts/build-worker-release-package.mjs");
+	assert.match(compile, /tsconfig\.build\.json/u, "composition must still run its own compiler for the legs that skip the gate");
+});
+
 // A range in engines.node would let the check lane resolve a different major
 // than the release lane builds on, and a green check would stop predicting a
 // green release. One pin, asserted equal across both lanes.

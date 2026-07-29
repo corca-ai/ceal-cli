@@ -52,8 +52,10 @@ jobs:
         include:
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
+            validate_source: "0"
           - platform: linux-amd64
             runner: ubuntu-24.04
+            validate_source: "1"
           # darwin runners are enabled (operator decision, 2026-07-25): a signed
           # darwin release is the only supported macOS install path, because
           # install-ceal.sh verifies every asset against its tag-bound OIDC
@@ -62,8 +64,10 @@ jobs:
           # must name all four; the merge tooling is already platform-generic.
           - platform: darwin-arm64
             runner: macos-15
+            validate_source: "1"
           - platform: darwin-amd64
             runner: macos-15-intel
+            validate_source: "0"
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact tag
@@ -78,6 +82,7 @@ jobs:
       - name: Install exact dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prewarm the offline packed-consumer cache
+        if: matrix.validate_source == '1'
         run: node scripts/prewarm-offline-consumer-cache.mjs
       # The gate is the same one check.yml runs, so it must be asked for the
       # same proofs. Without this the linux runners silently skip the
@@ -90,7 +95,20 @@ jobs:
       # skip into a hard failure. That is what burned ceal-v0.67.0: the flag
       # landed after ceal-v0.66.1, so v0.67.0 was the first release to run it,
       # and no check.yml leg is arm64 so nothing else could have caught it.
+      #
+      # `validate_source` runs this once per architecture family rather than
+      # once per platform. The source is identical on all four legs, so three of
+      # the four runs were re-proving the same commit; the two that remain are
+      # the one that can run the platform proofs (`linux-amd64`) and one macOS
+      # leg, so a macOS-only source break still fails before anything is signed.
+      #
+      # This does not weaken what the skipped legs prove about themselves. The
+      # composition below is self-sufficient: it stages an isolated consumer and
+      # runs its own `tsc` (scripts/build-worker-release-package.mjs), then
+      # builds the SEA and runs its native smoke test. A leg that skips the gate
+      # still compiles, links, and executes its own binary.
       - name: Build and test source
+        if: matrix.validate_source == '1'
         run: npm run check
         env:
           CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.platform == 'linux-amd64' && '1' || '0' }}
