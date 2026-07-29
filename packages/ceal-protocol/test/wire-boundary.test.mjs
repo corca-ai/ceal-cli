@@ -242,13 +242,18 @@ test("discovery accepts an optional non-authorizing announcement policy and reje
 	const attestedWrite = discoveryResponse(request);
 	attestedWrite.value.capabilities[0] = {
 		...attestedWrite.value.capabilities[0],
-		capability_id: "github.issue.create",
+		capability_id: "sheets.values.update",
 		effect: "write",
 		write_contract: {
 			side_effect_class: "append_reply", idempotency: "required", provider_readback: "required",
 			attribution: "requester_event", provenance_binding: "gateway_attested_requester_event_v1",
 		},
-		announcement_policy: writeAnnouncementPolicy(),
+		announcement_policy: {
+			...writeAnnouncementPolicy(),
+			scope_statement_kind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges",
+			scope_statement: "Bounded values updates in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.",
+			provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets"] },
+		},
 	};
 	assert.deepEqual(decodeCealClientResponse(attestedWrite, request), attestedWrite);
 	for (const mutate of [
@@ -283,12 +288,11 @@ test("announcement policy accepts each exact declared provider capability projec
 		{ capabilityId: "github.repository.get", effect: "read", writeContract: undefined, policy: announcementPolicy() },
 		...(["github.repository.search", "github.issue.get", "github.pull_request.get", "github.workflow_run.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: announcementPolicy() }))),
 		...(["message.search", "message.enumerate", "message.get", "resource.resolve", "conversation.thread.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("slack_public_app_member_channels_only", "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" }) }))),
-		{ capabilityId: "message.create", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "slack_public_app_member_channels_only", scope_statement: "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", provider_application_authority: { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" } } },
 		...(["notion.search", "notion.page.get", "resource.resolve"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("notion_connected_logical_area", "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" }) }))),
 		...(["calendar.availability", "calendar.event.search", "calendar.event.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_calendar_read_only", "Approved Calendar availability and event reads only; Calendar mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/calendar.readonly"] }) }))),
 		{ capabilityId: "drive.file.search", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_metadata", "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.metadata.readonly"] }) },
 		{ capabilityId: "sheets.values.read", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_sheet_ranges", "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] }) },
-		{ capabilityId: "drive.file.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share", scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.file"] } } },
+		{ capabilityId: "sheets.values.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges", scope_statement: "Bounded values updates in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets"] } } },
 	]) {
 		const response = discoveryResponse(request);
 		response.value.capabilities[0] = { ...response.value.capabilities[0], capability_id: capabilityId, effect, ...(writeContract ? { write_contract: writeContract } : {}), announcement_policy: policy };

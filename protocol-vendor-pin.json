@@ -4,19 +4,20 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "0261f0a4456e075c0254a76cf3e953dc58daca39",
-		"tree": "58d7d6398a521d99a7a1b9f736e332015b93c252"
+		"commit": "844b19cef64599ea41efb7d46c66df74f7bf583c",
+		"tree": "eea361e5a085251719a872411bb297316bdf00b2"
 	},
 	"shipped": {
 		"lock_file": "gateway-handoff-lock.json",
 		"status": "agreed",
-		"gateway_commit": "0261f0a4456e075c0254a76cf3e953dc58daca39",
-		"protocol_tree": "58d7d6398a521d99a7a1b9f736e332015b93c252"
+		"gateway_commit": "844b19cef64599ea41efb7d46c66df74f7bf583c",
+		"protocol_tree": "eea361e5a085251719a872411bb297316bdf00b2"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
 		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` and `shipped.protocol_tree` are recorded observations that no local check can confirm: neither the working tree nor gateway-handoff-lock.json carries them. Confirming them needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
 		"`agreed` means the proof and shipment identities converged when this pin was written. It is not evidence that any release was built, installed, or accepted against the locked archive.",
-		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.67.0^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). The Gateway lane's handoff notes state the producer tree of the whole commit rather than the protocol subtree."
+		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.68.0^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). The Gateway lane's handoff notes state the producer tree of the whole commit rather than the protocol subtree.",
+		"The archive this pin ships against exists only as a 30-day GitHub Actions artifact. It is not published under the Gateway handoff release origin that .github/workflows/ceal-release.yml downloads from, so a green pin here does not make a worker release runnable."
 	]
 }

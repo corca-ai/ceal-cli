@@ -49,6 +49,7 @@ export type {
 	CealEnrollmentResponse,
 	CealEnrollmentResult,
 } from "./enrollment.js";
+export * from "./device-enrollment.js";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 	CEAL_CLIENT_REFRESH_RESULT_SCHEMA,
@@ -384,7 +385,6 @@ const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly 
 	"github.issue.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"github.pull_request.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"github.workflow_run.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
-	"github.issue.create": [{ effect: "write", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"message.search": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
 	"message.enumerate": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
 	"message.get": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
@@ -393,7 +393,6 @@ const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly 
 		{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" },
 	],
 	"conversation.thread.get": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
-	"message.create": [{ effect: "write", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
 	"notion.search": [{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" }],
 	"notion.page.get": [{ effect: "read", scopeStatementKind: "notion_connected_logical_area", providerAuthorityKind: "notion_integration" }],
 	"calendar.availability": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
@@ -401,7 +400,7 @@ const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly 
 	"calendar.event.get": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
 	"drive.file.search": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_metadata", providerAuthorityKind: "google_service_account" }],
 	"sheets.values.read": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_sheet_ranges", providerAuthorityKind: "google_service_account" }],
-	"drive.file.update": [{ effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share", providerAuthorityKind: "google_service_account" }],
+	"sheets.values.update": [{ effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges", providerAuthorityKind: "google_service_account" }],
 });
 
 function validateAnnouncementPolicy(value: unknown, capabilityId: string, effect: string, writeContract: unknown): void {
@@ -442,6 +441,7 @@ const ANNOUNCEMENT_SCOPE_STATEMENTS: Record<string, string> = Object.freeze({
 	google_workspace_calendar_read_only: "Approved Calendar availability and event reads only; Calendar mutation is not declared.",
 	google_workspace_ceal_drive_or_direct_share_metadata: "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.",
 	google_workspace_ceal_drive_or_direct_share_sheet_ranges: "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.",
+	google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges: "Bounded values updates in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.",
 });
 
 function validateAnnouncementPolicyCapabilityBinding(policy: Record<string, unknown>, capabilityId: string, effect: string): void {

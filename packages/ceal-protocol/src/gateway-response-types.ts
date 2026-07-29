@@ -172,7 +172,8 @@ export type CealGatewayAnnouncementScopeStatementKind =
 	| "google_workspace_ceal_drive_or_direct_share"
 	| "google_workspace_calendar_read_only"
 	| "google_workspace_ceal_drive_or_direct_share_metadata"
-	| "google_workspace_ceal_drive_or_direct_share_sheet_ranges";
+	| "google_workspace_ceal_drive_or_direct_share_sheet_ranges"
+	| "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges";
 
 /** A deliberately small client-safe projection of the installed app authority. */
 export type CealGatewayAnnouncementProviderAuthority =
