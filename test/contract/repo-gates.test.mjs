@@ -425,6 +425,36 @@ test("the release lane demands the platform proofs its own artifacts depend on",
 	assert.match(requirement, /'0'/u, "the release gate must still let the runners that cannot build them skip");
 });
 
+// A release tag cannot be reused, so the dry-run dispatch exists to exercise
+// this workflow without spending one. That is only true while it cannot
+// publish, and "cannot publish" is a property of two `if:` conditions that
+// nothing else would notice losing — a dispatch that started signing would look
+// like a successful run. Both halves are asserted: which jobs are push-only, and
+// that no other job reaches a publishing tool.
+test("the release lane's dispatch is a dry run that cannot sign, upload, or move stable", () => {
+	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	assert.ok(workflow.on.workflow_dispatch !== undefined, "the release lane must keep a dispatch that can be exercised without a tag");
+	assert.deepEqual(workflow.on.push.tags, ["ceal-v*.*.*"], "the publishing trigger stays tag-only");
+
+	const pushOnly = Object.entries(workflow.jobs).filter(([, job]) => String(job.if ?? "").includes("github.event_name == 'push'"));
+	const dispatchable = Object.entries(workflow.jobs).filter(([name]) => !pushOnly.some(([guarded]) => guarded === name));
+	assert.ok(pushOnly.length >= 2, "the jobs that write to the release origin must be gated on the push event");
+
+	// Every tool that mutates the origin or mints a signature must live behind
+	// that gate. Checking the tools rather than the job names is what keeps this
+	// true after a restructure that moves a step to a different job.
+	const publishing = /cosign sign-blob|wrangler r2 object put|gh release/u;
+	for (const [name, job] of dispatchable) {
+		const steps = (job.steps ?? []).map((step) => `${step.run ?? ""}\n${step.uses ?? ""}`).join("\n");
+		assert.doesNotMatch(steps, publishing, `job '${name}' runs on a dispatch, so it must not sign, upload, or move the stable pointer`);
+	}
+	const guarded = pushOnly
+		.flatMap(([, job]) => job.steps ?? [])
+		.map((step) => step.run ?? "")
+		.join("\n");
+	assert.match(guarded, publishing, "the push-only jobs must still be the ones that publish");
+});
+
 // The release legs share one commit, so running the full gate on all four
 // re-proved the same source three extra times — and two of those runs were
 // macOS minutes, which bill at ten times Linux. Skipping them is safe only

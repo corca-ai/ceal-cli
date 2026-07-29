@@ -9,11 +9,21 @@ name: Ceal worker release
 # The tag push is the stable-release approval: only maintainers can push
 # ceal-v* tags in this repository. The immutable versioned object set is fully
 # read back and verified before one mutable stable pointer is advanced.
+#
+# `workflow_dispatch` is a DRY RUN and can never publish. It exists because a
+# release tag cannot be reused, so before this trigger the first execution of any
+# change to this file was a real tag — the change either worked or burned the
+# tag. A dispatch builds, composes, and verifies exactly what a tag would, then
+# stops: the two jobs that sign, upload, and move the stable pointer are gated on
+# the push event, and a dispatch reaches neither. It shares the writer lane's
+# concurrency group on purpose, so a dry run and a real release cannot interleave
+# against the same origin.
 
 on:
   push:
     tags:
       - "ceal-v*.*.*"
+  workflow_dispatch:
 
 permissions: {}
 
@@ -131,10 +141,20 @@ jobs:
       - name: Compose the checked worker asset set twice
         env:
           TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -eu
-          version="${TAG#ceal-v}"
+          # On a tag the version is the tag, which is the identity the whole
+          # release is bound to. A dispatch has no tag — `github.ref_name` is the
+          # branch — so it composes against the repository's own version instead.
+          # That output is never published, and deriving it from the branch name
+          # would fail the composer's semver check for no reason.
+          if [ "$EVENT" = push ]; then
+            version="${TAG#ceal-v}"
+          else
+            version="$(node -p 'require("./package.json").version')"
+          fi
           for output in dist-a dist-b; do
             node scripts/build-worker-release-assets.mjs compose \
               --out "$RUNNER_TEMP/$output" \
@@ -161,6 +181,9 @@ jobs:
 
   assemble:
     needs: build
+    # Push only. This is where the dry run stops: everything above it proves the
+    # build, and everything from here down writes to the release origin.
+    if: github.event_name == 'push'
     permissions:
       contents: read
     timeout-minutes: 30
@@ -227,6 +250,11 @@ jobs:
 
   sign-and-publish:
     needs: assemble
+    # Stated again rather than inherited through `needs`: a skipped dependency
+    # already prevents this job, but the signing identity and the origin
+    # credentials are named here, and the condition that keeps a dispatch away
+    # from them belongs next to them.
+    if: github.event_name == 'push'
     permissions:
       contents: read
       id-token: write
