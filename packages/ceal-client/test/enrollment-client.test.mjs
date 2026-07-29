@@ -4,6 +4,14 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CealEnrollmentClientError, createCealEnrollmentClient } from "../dist/index.js";
+import {
+	abortingFetch,
+	brokenFetch,
+	mustNotFetch,
+	oversizedStreamFetch,
+	responseFetch,
+	UNTRUSTED_RESPONSE_CASES,
+} from "./client-response-test-support.mjs";
 
 test("enrollment client exchanges one code over the derived loopback route", async () => {
 	const requests = [];
@@ -79,10 +87,6 @@ function close(server) {
 const VALID_CODE = "A".repeat(48);
 const ENDPOINT = "https://gateway.example/api/ceal/v1";
 
-function neverFetch() {
-	return async () => assert.fail("a refusal must happen before any request");
-}
-
 test("construction refuses an unusable transport or timeout before any request", () => {
 	assert.throws(
 		() => createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: /** @type {never} */ ("not-a-function") }),
@@ -92,7 +96,7 @@ test("construction refuses an unusable transport or timeout before any request",
 	// to clamp: silently clamping would let a caller believe it set a deadline.
 	for (const timeoutMs of [0, -1, 1.5, 120_001, Number.NaN, Number.MAX_SAFE_INTEGER]) {
 		assert.throws(
-			() => createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: neverFetch(), timeoutMs }),
+			() => createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: mustNotFetch(), timeoutMs }),
 			(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_configuration",
 			`timeoutMs ${String(timeoutMs)} must be refused`,
 		);
@@ -110,19 +114,19 @@ test("the endpoint is refused before it can be dialled", () => {
 	];
 	for (const [endpoint, why] of refused) {
 		assert.throws(
-			() => createCealEnrollmentClient({ endpoint, fetchFn: neverFetch() }),
+			() => createCealEnrollmentClient({ endpoint, fetchFn: mustNotFetch() }),
 			(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_configuration",
 			`${why} must be refused`,
 		);
 	}
 	// Loopback over plaintext is the one allowed exception, for local Gateways.
 	for (const endpoint of ["http://127.0.0.1:8080/api", "http://[::1]:8080/api"]) {
-		assert.doesNotThrow(() => createCealEnrollmentClient({ endpoint, fetchFn: neverFetch() }));
+		assert.doesNotThrow(() => createCealEnrollmentClient({ endpoint, fetchFn: mustNotFetch() }));
 	}
 });
 
 test("a malformed enrollment code never reaches the network", async () => {
-	const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: neverFetch() });
+	const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: mustNotFetch() });
 	for (const code of ["", "short", `${"A".repeat(31)}`, "A".repeat(257), `${"A".repeat(40)} space`, "has/slash".padEnd(40, "A")]) {
 		await assert.rejects(
 			() => client.exchange(code),
@@ -132,27 +136,9 @@ test("a malformed enrollment code never reaches the network", async () => {
 	}
 });
 
-function respondWith({ body, contentType = "application/json", contentLength, stream }) {
-	return async () =>
-		new globalThis.Response(stream ?? body, {
-			status: 200,
-			headers: {
-				"content-type": contentType,
-				...(contentLength === undefined ? {} : { "content-length": String(contentLength) }),
-			},
-		});
-}
-
 test("a response this client cannot trust is invalid_response, not a parsed guess", async () => {
-	const cases = [
-		[{ body: "{}", contentType: "text/plain" }, "a non-JSON content type"],
-		[{ body: "{not json" }, "a malformed JSON body"],
-		[{ body: '{"unexpected":true}' }, "well-formed JSON of the wrong shape"],
-		[{ body: "{}", contentLength: "not-a-number" }, "an unparseable content-length"],
-		[{ body: "{}", contentLength: 64 * 1024 + 1 }, "a declared length over the cap"],
-	];
-	for (const [options, why] of cases) {
-		const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: respondWith(options) });
+	for (const [options, why] of UNTRUSTED_RESPONSE_CASES) {
+		const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: responseFetch(options) });
 		await assert.rejects(
 			() => client.exchange(VALID_CODE),
 			(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_response",
@@ -164,31 +150,20 @@ test("a response this client cannot trust is invalid_response, not a parsed gues
 test("an undeclared body over the cap is refused mid-stream rather than buffered whole", async () => {
 	// No content-length, so the only defence is the running total while reading.
 	// A client that trusted the header alone would buffer this to exhaustion.
-	let cancelled = false;
-	const stream = new globalThis.ReadableStream({
-		pull(controller) {
-			controller.enqueue(new Uint8Array(32 * 1024));
-		},
-		cancel() {
-			cancelled = true;
-		},
-	});
-	const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: respondWith({ stream }) });
+	const oversized = oversizedStreamFetch();
+	const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: oversized.fetchFn });
 	await assert.rejects(
 		() => client.exchange(VALID_CODE),
 		(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_response",
 	);
-	assert.equal(cancelled, true, "the oversized body must be cancelled, not drained");
+	assert.equal(oversized.wasCancelled(), true, "the oversized body must be cancelled, not drained");
 });
 
 test("a timeout and a transport failure are told apart", async () => {
 	const timedOut = createCealEnrollmentClient({
 		endpoint: ENDPOINT,
 		timeoutMs: 1,
-		fetchFn: (_url, init) =>
-			new Promise((_resolve, reject) => {
-				init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-			}),
+		fetchFn: abortingFetch,
 	});
 	await assert.rejects(
 		() => timedOut.exchange(VALID_CODE),
@@ -197,9 +172,7 @@ test("a timeout and a transport failure are told apart", async () => {
 
 	const broken = createCealEnrollmentClient({
 		endpoint: ENDPOINT,
-		fetchFn: async () => {
-			throw new Error("connection reset");
-		},
+		fetchFn: brokenFetch,
 	});
 	await assert.rejects(
 		() => broken.exchange(VALID_CODE),
