@@ -108,6 +108,60 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	);
 });
 
+// macOS minutes bill at ten times Linux minutes, so the macOS leg is most of
+// this lane's cost and skipping it for prose is worth real money. The danger is
+// not the skip, it is the filter widening later: one `packages/` or `scripts/`
+// entry added to the allowlist would silently return this repository to the
+// state that burned `ceal-v0.66.0`, and nothing else would notice, because a
+// skipped job reports success. So the allowlist is asserted, not just its
+// existence.
+test("the check lane may skip the macOS gate only for documentation-only changes", () => {
+	const workflow = parse(read(".github/workflows/check.yml"));
+	const conditional = Object.entries(workflow.jobs).filter(([, job]) => typeof job.if === "string");
+	assert.equal(conditional.length, 1, "exactly one check job may be conditional; every other leg must run unconditionally");
+	const [name, job] = conditional[0];
+	const runners = (job.strategy?.matrix?.include ?? []).map((entry) => String(entry.runner));
+	assert.ok(
+		runners.length > 0 && runners.every((runner) => runner.includes("macos")),
+		`only the macOS leg may be conditional, but '${name}' runs on ${runners.join(", ") || "no declared runner"}`,
+	);
+
+	// The condition must be the classifier's answer rather than anything a
+	// commit message or an actor could set.
+	assert.match(job.if, /needs\.scope\.outputs\.code == 'true'/u, `'${name}' must run whenever the scope job reports code`);
+	assert.ok([job.needs].flat().includes("scope"), `'${name}' must depend on the scope job it reads`);
+
+	const classify = (workflow.jobs.scope?.steps ?? []).map((step) => step.run ?? "").join("\n");
+	assert.ok(classify.includes("git diff --name-only"), "the scope job must classify from the actual changed paths");
+	// Read the allowlist out of the classifier and prove the code directories are
+	// not in it. Matching the pattern text would pass on a regex that happens to
+	// contain the right characters, so this runs it against real paths instead.
+	const pattern = /grep -vE '\^\(([^']+)\)'/u.exec(classify);
+	assert.ok(pattern, "the scope job must exclude documentation with one readable allowlist pattern");
+	const documentation = new RegExp(`^(${pattern[1]})`, "u");
+	for (const file of ["docs/handoff.md", "charness-artifacts/x.md", "README.md", "CLAUDE.md"]) {
+		assert.ok(documentation.test(file), `${file} is documentation and should not force the macOS gate`);
+	}
+	for (const file of [
+		"packages/ceal-worker-cli/src/index.ts",
+		"scripts/build-worker-release-assets.mjs",
+		"test/contract/repo-gates.test.mjs",
+		".github/workflows/check.yml",
+		"install-ceal.sh",
+		"package.json",
+		"gateway-handoff-lock.json",
+		"skills/ceal-guide/SKILL.md",
+	]) {
+		assert.ok(!documentation.test(file), `${file} can change what a release builds, so it must run the macOS gate`);
+	}
+	// Fail-open would be the expensive mistake here; fail-closed is the dangerous
+	// one. Every branch that cannot classify must run the lane.
+	assert.ok(
+		classify.includes("decide_code") && !/echo "code=false"[\s\S]*decide_code/u.test(classify),
+		"the classifier must resolve every uncertain case to running the gate",
+	);
+});
+
 // `ceal update` runs this installer and waits for it, so an unbounded fetch here
 // made that command unbounded too — no envelope, no exit, nothing an agent can
 // read. The bound belongs to every download rather than to the three that

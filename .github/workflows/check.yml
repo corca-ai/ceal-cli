@@ -5,6 +5,19 @@ name: Check
 # failed release tag cannot be reused. This gate runs the same `npm run check`
 # a maintainer runs locally, on every push to main and every pull request, so a
 # break is found while it is still cheap to fix.
+#
+# macOS minutes bill at ten times Linux minutes, so the macOS leg is roughly
+# 85-90% of this lane's cost while being the shorter of the two jobs. Since
+# 2026-07-20 about 57% of the commits on main touched documentation only, and
+# for those the macOS leg can prove nothing the Linux leg does not. `scope`
+# classifies the change and `check-native` runs only when code moved. The filter
+# is an allowlist of documentation paths and fails toward running: anything it
+# cannot classify with certainty is treated as code.
+#
+# The axis matters. An earlier proposal was to run macOS only for "native"
+# paths, and that would not have caught the break this leg exists for:
+# `ceal-v0.66.0` burned on a *test fixture* path that is symlinked on macOS and
+# not on Linux, which no native-path filter would have selected.
 
 on:
   push:
@@ -22,6 +35,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Deliberately its own job rather than a first step of the gate: a step could
+  # only skip work on a runner that had already been billed for booting, and on
+  # macOS that minute is the expensive one.
+  scope:
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - name: Check out with enough history to diff
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          # The push range can span several commits, and a shallow clone would
+          # make `git diff` fail against a base it never fetched — which this
+          # step would then have to treat as unclassifiable.
+          fetch-depth: 0
+
+      - name: Classify the change as documentation-only or code
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          # Every exit path that is not "these exact files, all documentation"
+          # ends up here, so an unknown range, a first push, a force push, and a
+          # manual dispatch all run the full lane.
+          decide_code() { echo "code=true" >> "$GITHUB_OUTPUT"; echo "Running the native gate: $1"; exit 0; }
+
+          case "$EVENT" in
+            pull_request)
+              git fetch --no-tags --depth=0 origin "$BASE_REF" >/dev/null 2>&1 || decide_code "could not fetch the base ref"
+              base="$(git merge-base "origin/$BASE_REF" "$HEAD_SHA")" || decide_code "no merge base with $BASE_REF"
+              ;;
+            push)
+              case "$BEFORE" in
+                ""|0000000000000000000000000000000000000000) decide_code "no previous commit to diff against" ;;
+              esac
+              git cat-file -e "$BEFORE^{commit}" 2>/dev/null || decide_code "the previous commit is not in this clone"
+              base="$BEFORE"
+              ;;
+            *) decide_code "$EVENT carries no diff range" ;;
+          esac
+
+          changed="$(git diff --name-only "$base" "$HEAD_SHA")" || decide_code "the diff could not be computed"
+          [ -n "$changed" ] || decide_code "the range reports no files, which should not happen"
+          echo "Changed files:"
+          printf '%s\n' "$changed" | sed 's/^/  /'
+
+          # An allowlist, not a denylist: a path that is not named here is code.
+          # `docs/` and `charness-artifacts/` hold prose and coordination
+          # artifacts, and the root markdown files are the operating surfaces.
+          # Nothing under `packages/`, `scripts/`, `test/`, `.github/`, or any
+          # tracked release input can reach this branch.
+          undocumented="$(printf '%s\n' "$changed" | grep -vE '^(docs/|charness-artifacts/|[^/]+\.md$)' || true)"
+          if [ -n "$undocumented" ]; then
+            decide_code "these paths are not documentation: $(printf '%s' "$undocumented" | tr '\n' ' ')"
+          fi
+          echo "code=false" >> "$GITHUB_OUTPUT"
+          echo "Documentation-only change; skipping the native gate."
+
+  # Runs on every change, including documentation-only ones. It is the cheap leg
+  # and it is the one that carries the platform-gated proofs, so it stays
+  # unconditional.
   check:
     permissions:
       contents: read
@@ -31,11 +113,6 @@ jobs:
     # real cost — measure that with `time npm run check` rather than reading a
     # figure here, which is how the last one went stale.
     timeout-minutes: 30
-    # The release lane builds on macOS too, so before this matrix existed a
-    # macOS-only break first appeared in a tagged run — which is how
-    # `ceal-v0.66.0` burned on a fixture path that is symlinked on macOS and not
-    # on Linux. The gate now runs where the release runs.
-    #
     # Only linux-x64 requires the platform-gated proofs: the release-artifact and
     # installer suites build for that platform and skip themselves elsewhere, so
     # demanding them on macOS would fail a runner that is correct to skip.
@@ -45,8 +122,6 @@ jobs:
         include:
           - runner: ubuntu-24.04
             require_platform_proofs: "1"
-          - runner: macos-15
-            require_platform_proofs: "0"
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out the commit under test
@@ -73,9 +148,55 @@ jobs:
       - name: Prewarm the offline packed-consumer cache
         run: node scripts/prewarm-offline-consumer-cache.mjs
 
-      # The hook installer is proven inside this gate by test/repo-gates.test.mjs,
-      # against a throwaway clone rather than this checkout, so there is no
-      # separate CI step re-proving the same seam.
+      # The hook installer is proven inside this gate by
+      # test/contract/repo-gates.test.mjs, against a throwaway clone rather than
+      # this checkout, so there is no separate CI step re-proving the same seam.
+      - name: Run the full gate
+        run: npm run check
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}
+
+  # The release lane builds on macOS too, so before a macOS leg existed a
+  # macOS-only break first appeared in a tagged run — which is how `ceal-v0.66.0`
+  # burned. The gate still runs where the release runs; it just stops doing so
+  # for changes that cannot move any code the release builds.
+  #
+  # The steps below are duplicated from `check` on purpose. Three gates in
+  # test/contract/repo-gates.test.mjs read `job.steps` literally — that the gate
+  # runs `npm run check`, that the prewarm precedes it, and that the requirement
+  # comes from the matrix. Folding these into a local composite action would move
+  # the steps out of the parsed job and make all three silently vacuous.
+  check-native:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            require_platform_proofs: "0"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out the commit under test
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install exactly the locked dependency set
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prewarm the offline packed-consumer cache
+        run: node scripts/prewarm-offline-consumer-cache.mjs
+
       - name: Run the full gate
         run: npm run check
         env:
