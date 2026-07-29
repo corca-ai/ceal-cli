@@ -77,6 +77,30 @@ export const CEAL_SUBCOMMANDS = [
 	},
 	{
 		parent: "session",
+		route: ["adopt"],
+		description: "Adopt this device as a first device using a verified mailbox, with no operator-issued code.",
+		usage: "ceal session adopt --gateway <https-url> --email <address>",
+		effect: "local_write",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.session_adoption.v1",
+		recovery:
+			"Run 'ceal session' to confirm whether a session exists; every failure of this command leaves the store untouched, so it is always safe to start again.",
+		notes: [
+			"The mailbox is verified by the employee in a browser. This command never opens",
+			"the verifier, submits its form, or handles the mailbox token.",
+			"Compare both printed fingerprints against the verification page before",
+			"confirming. If either differs, stop.",
+			"Device keys live in this process only. Interrupting the command discards them",
+			"and requires a fresh adoption; nothing partial is left on disk.",
+			"The wait is paced by the Gateway alone and stops at the challenge's expiry.",
+		],
+		options: [
+			"  --gateway <https-url>   Gateway client endpoint your organization published.",
+			"  --email <address>       Mailbox that received the invitation.",
+		],
+	},
+	{
+		parent: "session",
 		route: ["logout"],
 		description: "Revoke the Gateway session, then remove local session and cached state.",
 		usage: "ceal session logout",

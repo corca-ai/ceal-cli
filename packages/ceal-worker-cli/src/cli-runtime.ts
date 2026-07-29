@@ -1,3 +1,4 @@
+import type { CealDeviceAdoptionClient } from "@corca-ai/ceal";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
@@ -66,5 +67,19 @@ export interface CealCommandRuntime {
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;
+	/**
+	 * Injectable wait, so the adoption poll loop can be driven without a test
+	 * spending the Gateway's own retry interval in real time. Absent in the
+	 * shipped binary, which uses a real timer. The clock is the existing `now`.
+	 */
+	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
+	/**
+	 * Adoption transport factory. The Protocol requires an https origin for this
+	 * flow, so a loopback test server cannot stand in for the Gateway the way it
+	 * can elsewhere; the state machine is driven through this seam instead, and
+	 * the transport itself is proven separately against a real socket in
+	 * `@corca-ai/ceal`. Absent in the shipped binary, which builds the real one.
+	 */
+	createDeviceAdoptionClient?: (options: { endpoint: string }) => CealDeviceAdoptionClient;
 }

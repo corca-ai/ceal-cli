@@ -6,6 +6,7 @@ import {
 } from "@corca-ai/ceal";
 import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
@@ -18,6 +19,7 @@ const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 // `CEAL_SUBCOMMANDS` fails to compile until it is named here, which is what stops
 // it from being swallowed by whichever branch happens to be last.
 export const SESSION_ROUTES: CealSubcommandHandlers<"session", SessionRouteHandler> = {
+	adopt: (rest, io, runtime) => adoptSession(rest, io, runtime),
 	enroll: (rest, io, runtime) => enrollSession(rest, io, runtime),
 	logout: (rest, io, runtime) => (rest.length === 0 ? runSessionLogout(io, runtime) : writeEnrollmentInvalidArgument(io)),
 };

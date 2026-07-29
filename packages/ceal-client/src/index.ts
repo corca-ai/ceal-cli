@@ -16,6 +16,14 @@ export type {
 	CealProofUnavailable,
 } from "@corca-ai/ceal-protocol";
 export type {
+	CealDeviceAdoptionClient,
+	CreateCealDeviceAdoptionClientOptions,
+} from "./device-adoption-client.js";
+export {
+	CealDeviceAdoptionClientError,
+	createCealDeviceAdoptionClient,
+} from "./device-adoption-client.js";
+export type {
 	CealEnrollmentClient,
 	CreateCealEnrollmentClientOptions,
 } from "./enrollment-client.js";
