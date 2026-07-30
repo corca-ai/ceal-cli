@@ -1,0 +1,16 @@
+{
+  "schema_version": "ceal.worker_gateway_leased_consumer_call_handoff_lock.v1",
+  "handoff": {
+    "path": "vendor/gateway-leased-consumer-call/gateway-leased-consumer-call-conformance.json",
+    "sha256": "3de6e453580e7e8fdf9239950d1133468b9d3503ec56193693801ea4c8cb9cb4",
+    "source_repository": "corca-ai/ceal",
+    "source_commit": "1ab8563a9e1beafad15d746d01895c861fd3bdeb",
+    "source_tree": "b3ea44ce9bddbb8d42673f764349e8914d928bc9",
+    "vector_ids": [
+      "admitted-owner-result-is-unavailable-external-response",
+      "caller-provenance-field",
+      "credential-bearing-arguments",
+      "wrong-schema-version"
+    ]
+  }
+}

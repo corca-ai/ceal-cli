@@ -1,0 +1,135 @@
+{
+  "schema_version": "ceal.gateway_leased_consumer_call_conformance_handoff.v1",
+  "proof_level": "local_state",
+  "writes_external": false,
+  "source": {
+    "repository": "corca-ai/ceal",
+    "commit": "1ab8563a9e1beafad15d746d01895c861fd3bdeb",
+    "tree": "b3ea44ce9bddbb8d42673f764349e8914d928bc9",
+    "inputs": [
+      {
+        "path": "scripts/agent-runtime/gateway-leased-consumer-call-admission.mjs",
+        "sha256": "c8d537d87512f0769e3e2bc07daa47ff9f7191e4b217c7bac7974d8f5b4a5cf9"
+      },
+      {
+        "path": "scripts/agent-runtime/gateway-leased-consumer-call-route.mjs",
+        "sha256": "ab08289aa0c7f098429a50ac334ae6df8320c72e1af197a916ca983195b4c900"
+      },
+      {
+        "path": "scripts/agent-runtime/fixtures/gateway-leased-consumer-call-transport.json",
+        "sha256": "4bbb0284332bfe8b3c4eb43ede0f527ba8bb1f92dc2f480eef84261edc311701"
+      }
+    ]
+  },
+  "transport": {
+    "method": "POST",
+    "service_path": "/api/ceal/agent/v1/call",
+    "required_headers": {
+      "authorization": "Bearer <protected-service-credential>",
+      "content_type": "application/json"
+    }
+  },
+  "vectors": [
+    {
+      "id": "admitted-owner-result-is-unavailable-external-response",
+      "request_body": {
+        "schema_version": "ceal.gateway_leased_consumer_call_request.v1",
+        "event_ref": "event:interop-1",
+        "lease_ref": "lease:interop-1",
+        "lease_fence": 1,
+        "capability_id": "message.search",
+        "target_ref": "target:interop-1",
+        "arguments": {
+          "query": "fixture-only"
+        },
+        "purpose": "fixture-only governed read"
+      },
+      "external_response": {
+        "status": 503,
+        "body": {
+          "ok": false,
+          "error_code": "leased_consumer_call_unavailable"
+        }
+      }
+    },
+    {
+      "id": "wrong-schema-version",
+      "request_body": {
+        "schema_version": "ceal.gateway_leased_consumer_call_request.v0",
+        "event_ref": "event:interop-1",
+        "lease_ref": "lease:interop-1",
+        "lease_fence": 1,
+        "capability_id": "message.search",
+        "target_ref": "target:interop-1",
+        "arguments": {
+          "query": "fixture-only"
+        },
+        "purpose": "fixture-only governed read"
+      },
+      "external_response": {
+        "status": 400,
+        "body": {
+          "ok": false,
+          "error_code": "invalid_request"
+        }
+      }
+    },
+    {
+      "id": "caller-provenance-field",
+      "request_body": {
+        "schema_version": "ceal.gateway_leased_consumer_call_request.v1",
+        "event_ref": "event:interop-1",
+        "lease_ref": "lease:interop-1",
+        "lease_fence": 1,
+        "capability_id": "message.search",
+        "target_ref": "target:interop-1",
+        "arguments": {
+          "query": "fixture-only"
+        },
+        "purpose": "fixture-only governed read",
+        "runner_ref": "runner:spoofed"
+      },
+      "external_response": {
+        "status": 400,
+        "body": {
+          "ok": false,
+          "error_code": "invalid_request"
+        }
+      }
+    },
+    {
+      "id": "credential-bearing-arguments",
+      "request_body": {
+        "schema_version": "ceal.gateway_leased_consumer_call_request.v1",
+        "event_ref": "event:interop-1",
+        "lease_ref": "lease:interop-1",
+        "lease_fence": 1,
+        "capability_id": "message.search",
+        "target_ref": "target:interop-1",
+        "arguments": {
+          "authorization": "spoofed"
+        },
+        "purpose": "fixture-only governed read"
+      },
+      "external_response": {
+        "status": 400,
+        "body": {
+          "ok": false,
+          "error_code": "invalid_request"
+        }
+      }
+    }
+  ],
+  "invariants": [
+    "credential must arrive only through the protected service channel",
+    "no personal-client session or public call fallback",
+    "no arbitrary request headers or caller provenance fields",
+    "owner-only service_call_ref never appears in the external response",
+    "unregistered route has no successful call result semantics"
+  ],
+  "non_claims": [
+    "This is a local immutable-source handoff, not a signed release, installed CLI artifact, registered HTTP route, or live Gateway proof.",
+    "The service URL and credential remain a protected runtime input; this handoff supplies only the fixed path and placeholder authorization grammar.",
+    "Gateway-derived service identity and owner-only admission facts are intentionally excluded from this external transport oracle."
+  ]
+}
