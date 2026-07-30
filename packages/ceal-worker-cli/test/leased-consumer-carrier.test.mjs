@@ -12,6 +12,7 @@ const handoff = JSON.parse(
 		"utf8",
 	),
 );
+const carrierContract = JSON.parse(readFileSync(new URL("../leased-consumer-carrier-contract.json", import.meta.url), "utf8"));
 const request = handoff.vectors.find((vector) => vector.id === "admitted-owner-result-is-unavailable-external-response").request_body;
 const encoder = new TextEncoder();
 const requestBytes = encoder.encode(JSON.stringify(request));
@@ -51,7 +52,7 @@ test("private carrier derives its one POST from the embedded handoff and decodes
 			redirect: "error",
 		},
 	]);
-	assert.equal(LEASED_CONSUMER_CARRIER_ARGV, "--internal-leased-consumer-carrier");
+	assert.equal(LEASED_CONSUMER_CARRIER_ARGV, carrierContract.argv[0]);
 });
 
 test("bad request bytes and every protected-channel failure make zero HTTP requests", async () => {

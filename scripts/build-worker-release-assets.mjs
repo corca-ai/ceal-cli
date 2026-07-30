@@ -9,6 +9,7 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readCarrierContract } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
@@ -17,6 +18,7 @@ const MARKER = ".ceal-worker-release-assets";
 const INSTALLER_NAME = "install-ceal.sh";
 const GUIDE_ASSET = "ceal-guide-SKILL.md";
 const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
+const PRIVATE_CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const SHARED_ASSETS = Object.freeze([GUIDE_ASSET, NOTICE_NAME, INSTALLER_NAME]);
 const PLATFORM_PATTERN = /^(?:linux|darwin)-(?:arm64|amd64)$/u;
 
@@ -55,6 +57,21 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		const guide = readStagedFile(path.join(nativeOut, GUIDE_ASSET), "native_output_incomplete");
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
+		let privateCarrierContract;
+		try {
+			privateCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
+		} catch {
+			fail("private_carrier_contract_invalid", "Worker release assets require the exact validated private carrier contract.");
+		}
+		if (
+			!native.private_leased_consumer_carrier ||
+			native.private_leased_consumer_carrier.sha256 !== privateCarrierContract.sha256 ||
+			JSON.stringify(native.private_leased_consumer_carrier.contract) !== JSON.stringify(privateCarrierContract.value)
+		)
+			fail(
+				"private_carrier_contract_drift",
+				"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
+			);
 		const manifest = {
 			schema_version: "ceal.worker_release_manifest.v1",
 			artifact_state: "unsigned_build_candidate",
@@ -67,6 +84,10 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			third_party_notices: { name: NOTICE_NAME, bytes: notices.length, sha256: sha256(notices) },
 			protocol: native.protocol,
 			native_smoke: native.native_smoke,
+			private_leased_consumer_carrier: {
+				contract: privateCarrierContract.value,
+				contract_sha256: privateCarrierContract.sha256,
+			},
 			non_claims: [
 				"This asset set is unsigned until the worker release workflow signs and publishes it.",
 				"This does not prove a Gateway host, policy, connector, provider, audit, or installed-client action.",
@@ -145,6 +166,16 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
 	if (platforms.size === 0) fail("merge_input_incomplete", "Merged worker release set names no platform.");
+	const carrierContracts = new Set(
+		[...platforms.entries()].map(([platform, entries]) =>
+			carrierContractIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes),
+		),
+	);
+	if (carrierContracts.size !== 1)
+		fail(
+			"merge_private_carrier_contract_drift",
+			"Merged worker release assets require one identical private carrier contract across every platform.",
+		);
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
@@ -182,6 +213,29 @@ function readInventory(directory) {
 	if (lines.length === 0 || entries.some((entry) => entry === null))
 		fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
 	return entries.map((entry) => [entry[2], entry[1]]);
+}
+
+function carrierContractIdentity(bytes) {
+	try {
+		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
+		const carrier = manifest?.private_leased_consumer_carrier;
+		if (
+			manifest?.schema_version !== "ceal.worker_release_manifest.v1" ||
+			!carrier ||
+			typeof carrier.contract_sha256 !== "string" ||
+			!/^[a-f0-9]{64}$/u.test(carrier.contract_sha256) ||
+			!carrier.contract ||
+			typeof carrier.contract !== "object" ||
+			Array.isArray(carrier.contract)
+		)
+			throw new Error("invalid_manifest");
+		return `${carrier.contract_sha256}:${JSON.stringify(carrier.contract)}`;
+	} catch {
+		fail(
+			"merge_private_carrier_contract_invalid",
+			"Merged worker release assets require each platform manifest to declare a valid private carrier contract.",
+		);
+	}
 }
 
 function writeChecksumInventory(directory) {

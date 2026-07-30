@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.mjs";
+import { verifyEmbeddedCarrierContractSource } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
@@ -59,6 +60,15 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 				let stage;
 				try {
 					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
+					let privateCarrierContract;
+					try {
+						privateCarrierContract = verifyEmbeddedCarrierContractSource({ repoRoot });
+					} catch {
+						fail(
+							"embedded_carrier_contract_drift",
+							"Worker native artifacts require generated carrier contract bytes to match the source contract.",
+						);
+					}
 					const packed = prepareWorkerReleaseConsumer({
 						repoRoot,
 						stage,
@@ -68,7 +78,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 					});
 					const version = resolveVersion(repoRoot, inputs);
 					const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-					materializeOutput({ output, repoRoot, inputs, version, platform, artifact });
+					materializeOutput({ output, repoRoot, inputs, version, platform, artifact, privateCarrierContract });
 					return {
 						schema_version: "ceal.worker_native_artifact_build.v1",
 						ok: true,
@@ -81,6 +91,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						consumer_smoke: packed.consumerSmoke,
 						native_smoke: artifact.smoke,
 						protocol: inputs.protocol,
+						private_leased_consumer_carrier: privateCarrierContract,
 						non_claims: [
 							"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
 							"No operator CLI, operator guide, Gateway protocol source, legacy installer, or composite release workflow was used as a worker-release input.",
@@ -248,7 +259,7 @@ function smokeArtifact({ artifactPath, version }) {
 	}
 }
 
-function materializeOutput({ output, repoRoot, inputs, version, platform, artifact }) {
+function materializeOutput({ output, repoRoot, inputs, version, platform, artifact, privateCarrierContract }) {
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-native-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
@@ -267,6 +278,7 @@ function materializeOutput({ output, repoRoot, inputs, version, platform, artifa
 			guide: { name: inputs.guide.asset, bytes: guide.length, sha256: sha256(guide) },
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,
+			private_leased_consumer_carrier: privateCarrierContract,
 			handoff: inputs.handoff,
 			consumer_smoke: { installed_from_packed_archives: true, source_or_workspace_fallback_used: false },
 			native_smoke: artifact.smoke,

@@ -26,7 +26,7 @@
 	],
 	"scripts": {
 		"clean": "rm -rf dist",
-		"build": "node ../../scripts/generate-leased-consumer-handoff-runtime.mjs && tsc -p tsconfig.build.json",
+		"build": "tsc -p tsconfig.build.json",
 		"pretest": "npm run build",
 		"test": "node --test test/*.test.mjs",
 		"prepack": "npm run clean && npm run build"

@@ -1,0 +1,23 @@
+{
+  "schema_version": "ceal.worker_private_leased_consumer_carrier_contract.v1",
+  "argv": ["--internal-leased-consumer-carrier"],
+  "stdin": {
+    "schema_version": "ceal.gateway_leased_consumer_call_request.v1",
+    "maximum_bytes": 32768
+  },
+  "service_channel": {
+    "child_fd": 4,
+    "schema_version": "ceal.leased_consumer_service_channel.v1",
+    "maximum_bytes": 8192,
+    "deadline_ms": 2000
+  },
+  "result": {
+    "schema_version": "ceal.leased_consumer_call_result.v1",
+    "maximum_bytes": 32768,
+    "allowed_error_codes": ["invalid_request", "leased_consumer_call_unavailable", "service_call_failed", "service_channel_unavailable"]
+  },
+  "non_claims": [
+    "This private contract is not a public ceal command or an Agent effect API.",
+    "A release manifest containing this contract does not register a Gateway route, issue a credential, or prove a successful capability call."
+  ]
+}

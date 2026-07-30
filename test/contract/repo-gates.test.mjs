@@ -68,6 +68,7 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	// unformatted commit fails the gate instead of merely drifting.
 	assert.equal(manifest.scripts.lint, "biome check .");
 	assert.match(manifest.scripts.build, /npm run build:worker/u);
+	assert.match(manifest.scripts["build:worker"], /^node scripts\/generate-leased-consumer-handoff-runtime[.]mjs/u);
 	assert.match(manifest.scripts["build:worker"], /packages\/ceal-protocol run build/u);
 	for (const ownerPackage of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
 		assert.match(manifest.scripts["build:worker"], new RegExp(`${ownerPackage} run build`, "u"));
@@ -77,6 +78,8 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 		assert.doesNotMatch(manifest.scripts["test:unit"], new RegExp(`${frozenPackage} test`, "u"));
 	}
 	assert.doesNotMatch(manifest.scripts["build:worker"], /packages\/ceal-operator-cli/u);
+	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
+	assert.equal(workerPackage.scripts.build, "tsc -p tsconfig.build.json");
 });
 
 // The frozen packages are compatibility inputs this lane may not originate

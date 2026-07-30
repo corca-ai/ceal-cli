@@ -1,21 +1,26 @@
 import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
 import {
+	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
+	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
+} from "./generated/leased-consumer-carrier-contract.js";
+import {
 	GATEWAY_LEASED_CONSUMER_HANDOFF_JSON,
 	GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON,
 	GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256,
 } from "./generated/leased-consumer-handoff.js";
 
-const CHANNEL_SCHEMA = "ceal.leased_consumer_service_channel.v1";
-const RESULT_SCHEMA = "ceal.leased_consumer_call_result.v1";
-const MAX_CHANNEL_BYTES = 8 * 1024;
-const MAX_REQUEST_BYTES = 32 * 1024;
-const MAX_RESPONSE_BYTES = 32 * 1024;
-const CHANNEL_DEADLINE_MS = 2_000;
+const CARRIER_CONTRACT = verifyEmbeddedCarrierContract();
+const CHANNEL_SCHEMA = CARRIER_CONTRACT.serviceChannelSchema;
+const RESULT_SCHEMA = CARRIER_CONTRACT.resultSchema;
+const MAX_CHANNEL_BYTES = CARRIER_CONTRACT.maximumChannelBytes;
+const MAX_REQUEST_BYTES = CARRIER_CONTRACT.maximumRequestBytes;
+const MAX_RESPONSE_BYTES = CARRIER_CONTRACT.maximumResultBytes;
+const CHANNEL_DEADLINE_MS = CARRIER_CONTRACT.channelDeadlineMs;
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 
-/** Internal-only argv token; deliberately absent from the public command registry. */
-export const LEASED_CONSUMER_CARRIER_ARGV = "--internal-leased-consumer-carrier";
+/** Internal-only argv token; derived from the signed release contract and absent from the public command registry. */
+export const LEASED_CONSUMER_CARRIER_ARGV = CARRIER_CONTRACT.argv;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -309,6 +314,55 @@ function verifyEmbeddedHandoff(): CarrierHandoff {
 	};
 }
 
+function verifyEmbeddedCarrierContract(): CarrierContract {
+	const bytes = new TextEncoder().encode(LEASED_CONSUMER_CARRIER_CONTRACT_JSON);
+	if (createHash("sha256").update(bytes).digest("hex") !== LEASED_CONSUMER_CARRIER_CONTRACT_SHA256)
+		throw new Error("invalid_carrier_contract");
+	const value = parseStrictJson(bytes);
+	if (
+		!plainRecord(value) ||
+		!sameKeys(value, ["argv", "non_claims", "result", "schema_version", "service_channel", "stdin"]) ||
+		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v1" ||
+		!Array.isArray(value.argv) ||
+		value.argv.length !== 1 ||
+		typeof value.argv[0] !== "string" ||
+		!plainRecord(value.stdin) ||
+		!sameKeys(value.stdin, ["maximum_bytes", "schema_version"]) ||
+		value.stdin.schema_version !== "ceal.gateway_leased_consumer_call_request.v1" ||
+		!Number.isSafeInteger(value.stdin.maximum_bytes) ||
+		!plainRecord(value.service_channel) ||
+		!sameKeys(value.service_channel, ["child_fd", "deadline_ms", "maximum_bytes", "schema_version"]) ||
+		value.service_channel.child_fd !== 4 ||
+		typeof value.service_channel.schema_version !== "string" ||
+		!Number.isSafeInteger(value.service_channel.maximum_bytes) ||
+		!Number.isSafeInteger(value.service_channel.deadline_ms) ||
+		!plainRecord(value.result) ||
+		!sameKeys(value.result, ["allowed_error_codes", "maximum_bytes", "schema_version"]) ||
+		typeof value.result.schema_version !== "string" ||
+		!Number.isSafeInteger(value.result.maximum_bytes) ||
+		!Array.isArray(value.result.allowed_error_codes) ||
+		!value.result.allowed_error_codes.every((code) => typeof code === "string")
+	)
+		throw new Error("invalid_carrier_contract");
+	const allowedErrors = new Set(value.result.allowed_error_codes);
+	if (
+		!allowedErrors.has("invalid_request") ||
+		!allowedErrors.has("leased_consumer_call_unavailable") ||
+		!allowedErrors.has("service_call_failed") ||
+		!allowedErrors.has("service_channel_unavailable")
+	)
+		throw new Error("invalid_carrier_contract");
+	return {
+		argv: value.argv[0],
+		maximumRequestBytes: value.stdin.maximum_bytes as number,
+		serviceChannelSchema: value.service_channel.schema_version,
+		maximumChannelBytes: value.service_channel.maximum_bytes as number,
+		channelDeadlineMs: value.service_channel.deadline_ms as number,
+		resultSchema: value.result.schema_version,
+		maximumResultBytes: value.result.maximum_bytes as number,
+	};
+}
+
 async function readBoundedWebResponse(response: globalThis.Response, maximum: number): Promise<Uint8Array> {
 	if (!response.body) throw new Error("missing_body");
 	const reader = response.body.getReader();
@@ -491,4 +545,14 @@ interface CarrierHandoff {
 	readonly requestKeys: readonly string[];
 	readonly unavailableStatus: unknown;
 	readonly unavailableBody: JsonRecord;
+}
+
+interface CarrierContract {
+	readonly argv: string;
+	readonly maximumRequestBytes: number;
+	readonly serviceChannelSchema: string;
+	readonly maximumChannelBytes: number;
+	readonly channelDeadlineMs: number;
+	readonly resultSchema: string;
+	readonly maximumResultBytes: number;
 }

@@ -14,6 +14,12 @@ import {
 	mergeWorkerReleaseAssetSets,
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.mjs";
+import { verifyEmbeddedCarrierContractSource } from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
+
+const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
+const CARRIER_CONTRACT_BYTES = readFileSync(CARRIER_CONTRACT_PATH);
+const CARRIER_CONTRACT = JSON.parse(CARRIER_CONTRACT_BYTES.toString("utf8"));
+const CARRIER_CONTRACT_SHA256 = digest(CARRIER_CONTRACT_BYTES);
 
 // The installer's own allowlist, read out of the shell rather than restated
 // here. It was a hand-copy, and a hand-copy of an allowlist is the shape that
@@ -87,6 +93,8 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.version, "0.65.0");
 	assert.equal(manifest.platform, "linux-arm64");
 	assert.equal(manifest.command, "ceal");
+	assert.deepEqual(manifest.private_leased_consumer_carrier.contract, CARRIER_CONTRACT);
+	assert.equal(manifest.private_leased_consumer_carrier.contract_sha256, CARRIER_CONTRACT_SHA256);
 	assert.equal(manifest.guide.name, "ceal-guide-SKILL.md");
 	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide-SKILL.md"))));
 	assert.equal(manifest.installer.sha256, digest(readFileSync(path.join(output, "install-ceal.sh"))));
@@ -103,6 +111,29 @@ test("composed worker release assets match the installer's signed inventory cont
 			),
 		hasCode("version_mismatch"),
 	);
+	await assert.rejects(
+		() =>
+			composeWorkerReleaseAssets(
+				{ outputDirectory: path.join(root, "carrier-drift"), gatewayHandoffArchive: "/unused/fixture.tar.gz", repoRoot: fixtureRepo(root) },
+				{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0", { carrierSha256: "f".repeat(64) }) },
+			),
+		hasCode("private_carrier_contract_drift"),
+	);
+});
+
+test("native source verification refuses a stale generated carrier contract before bundling", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-carrier-generated-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
+	mkdirSync(generated, { recursive: true });
+	writeFileSync(path.join(root, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
+	writeFileSync(
+		path.join(generated, "leased-consumer-carrier-contract.ts"),
+		'export const LEASED_CONSUMER_CARRIER_CONTRACT_JSON = "{}" as const;\nexport const LEASED_CONSUMER_CARRIER_CONTRACT_SHA256 = "' +
+			"0".repeat(64) +
+			'" as const;\n',
+	);
+	assert.throws(() => verifyEmbeddedCarrierContractSource({ repoRoot: root }), /embedded_carrier_contract_drift/u);
 });
 
 test("merged worker release sets stay pair-complete with byte-identical shared assets", async (context) => {
@@ -126,6 +157,19 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	const sums = readFileSync(path.join(merged, "SHA256SUMS"), "utf8").trim().split("\n");
 	assert.equal(sums.length, 7);
 	for (const line of sums) assert.match(line.slice(66), INSTALLER_ALLOWLIST);
+
+	const platformManifest = path.join(inputs[1], "ceal-worker-release-manifest-linux-amd64.json");
+	const originalManifest = readFileSync(platformManifest);
+	const driftedManifest = JSON.parse(originalManifest);
+	driftedManifest.private_leased_consumer_carrier.contract_sha256 = "f".repeat(64);
+	writeFileSync(platformManifest, `${JSON.stringify(driftedManifest, null, 2)}\n`);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-carrier-drift"), inputs, repoRoot }),
+		hasCode("merge_private_carrier_contract_drift"),
+	);
+	writeFileSync(platformManifest, originalManifest);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
 
 	writeFileSync(path.join(inputs[1], "ceal-guide-SKILL.md"), "drifted guide\n");
 	const driftedSums = readFileSync(path.join(inputs[1], "SHA256SUMS"), "utf8").replace(
@@ -291,7 +335,7 @@ test("worker stable rollback re-verifies an immutable public tag before moving t
 	assert.ok(pointerAdvanceIndex > publicProofIndex, "rollback must move stable only after immutable public proof");
 });
 
-function fakeNativeBuild(platform, version) {
+function fakeNativeBuild(platform, version, { carrierContract = CARRIER_CONTRACT, carrierSha256 = CARRIER_CONTRACT_SHA256 } = {}) {
 	return async ({ outputDirectory }) => {
 		mkdirSync(outputDirectory, { recursive: true });
 		const binary = Buffer.from(`native-${platform}\n`);
@@ -304,6 +348,7 @@ function fakeNativeBuild(platform, version) {
 			platform,
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
 			protocol: { package: "@corca-ai/ceal-protocol", version, sha256: "0".repeat(64) },
+			private_leased_consumer_carrier: { contract: carrierContract, sha256: carrierSha256 },
 			native_smoke: { command: "ceal", version, operator_surface_absent: true },
 		};
 	};
@@ -313,6 +358,9 @@ function fixtureRepo(root) {
 	const repo = path.join(root, "repo");
 	mkdirSync(repo, { recursive: true });
 	writeFileSync(path.join(repo, "install-ceal.sh"), "#!/usr/bin/env sh\nexit 0\n", { mode: 0o755 });
+	const contractDirectory = path.join(repo, "packages", "ceal-worker-cli");
+	mkdirSync(contractDirectory, { recursive: true });
+	writeFileSync(path.join(contractDirectory, "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
 	return repo;
 }
 
@@ -322,4 +370,10 @@ function hasCode(code) {
 
 function digest(bytes) {
 	return createHash("sha256").update(bytes).digest("hex");
+}
+
+function rewriteInventoryDigest(directory, name) {
+	const inventory = path.join(directory, "SHA256SUMS");
+	const digestLine = `${digest(readFileSync(path.join(directory, name)))}  ${name}`;
+	writeFileSync(inventory, readFileSync(inventory, "utf8").replace(new RegExp(`^[a-f0-9]{64}  ${name}$`, "mu"), digestLine));
 }
