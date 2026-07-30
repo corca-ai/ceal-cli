@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -215,13 +215,9 @@ test("stdin reader caps before retaining an unbounded request", async () => {
 	await assert.rejects(() => readLeasedConsumerRequest(chunks()), /input_too_large/u);
 });
 
-test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", () => {
+test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", async () => {
 	const binary = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
-	const child = spawnSync(process.execPath, [binary, LEASED_CONSUMER_CARRIER_ARGV], {
-		input: JSON.stringify(request),
-		encoding: "utf8",
-		stdio: ["pipe", "pipe", "pipe", "ignore", "ignore"],
-	});
+	const child = await runCarrierProcess(binary, JSON.stringify(request));
 	assert.equal(child.status, 3, child.stderr);
 	assert.equal(child.stderr, "");
 	assert.deepEqual(JSON.parse(child.stdout), {
@@ -231,3 +227,40 @@ test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", (
 		error_code: "service_channel_unavailable",
 	});
 });
+
+function runCarrierProcess(binary, input) {
+	return new Promise((resolve, reject) => {
+		const devNull = openSync("/dev/null", "r");
+		let child;
+		try {
+			child = spawn(process.execPath, [binary, LEASED_CONSUMER_CARRIER_ARGV], {
+				stdio: ["pipe", "pipe", "pipe", devNull, devNull],
+			});
+		} finally {
+			closeSync(devNull);
+		}
+		let stdout = "";
+		let stderr = "";
+		const timeout = setTimeout(() => {
+			child.kill("SIGKILL");
+			reject(new Error("leased consumer carrier child timed out"));
+		}, 5_000);
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.once("error", (error) => {
+			clearTimeout(timeout);
+			reject(error);
+		});
+		child.once("close", (exitCode) => {
+			clearTimeout(timeout);
+			resolve({ status: exitCode, stdout, stderr });
+		});
+		child.stdin.end(input);
+	});
+}
