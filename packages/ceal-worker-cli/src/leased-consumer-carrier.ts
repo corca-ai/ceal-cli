@@ -1,0 +1,494 @@
+import { createHash } from "node:crypto";
+import { createReadStream, fstatSync } from "node:fs";
+import {
+	GATEWAY_LEASED_CONSUMER_HANDOFF_JSON,
+	GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON,
+	GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256,
+} from "./generated/leased-consumer-handoff.js";
+
+const CHANNEL_SCHEMA = "ceal.leased_consumer_service_channel.v1";
+const RESULT_SCHEMA = "ceal.leased_consumer_call_result.v1";
+const MAX_CHANNEL_BYTES = 8 * 1024;
+const MAX_REQUEST_BYTES = 32 * 1024;
+const MAX_RESPONSE_BYTES = 32 * 1024;
+const CHANNEL_DEADLINE_MS = 2_000;
+const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+
+/** Internal-only argv token; deliberately absent from the public command registry. */
+export const LEASED_CONSUMER_CARRIER_ARGV = "--internal-leased-consumer-carrier";
+
+type JsonRecord = Record<string, unknown>;
+
+export type LeasedConsumerCarrierResult =
+	| {
+			readonly schema_version: typeof RESULT_SCHEMA;
+			readonly ok: false;
+			readonly status: "unavailable";
+			readonly error_code: "service_channel_unavailable";
+	  }
+	| {
+			readonly schema_version: typeof RESULT_SCHEMA;
+			readonly ok: false;
+			readonly status: "unavailable";
+			readonly error_code: "leased_consumer_call_unavailable";
+	  }
+	| {
+			readonly schema_version: typeof RESULT_SCHEMA;
+			readonly ok: false;
+			readonly status: "error";
+			readonly error_code: "invalid_request" | "service_call_failed";
+	  };
+
+export interface LeasedConsumerCarrierRuntime {
+	/** Test seam only. The shipped command reads FD 4 and closes it itself. */
+	readonly readChannel?: () => Promise<Uint8Array>;
+	/** Test seam only. The shipped command closes FD 4. */
+	readonly closeChannel?: () => Promise<void>;
+	readonly fetchFn?: typeof globalThis.fetch;
+	readonly monotonicNow?: () => number;
+	readonly setTimer?: (callback: () => void, ms: number) => unknown;
+	readonly clearTimer?: (timer: unknown) => void;
+	/** Test-only URL validator; the shipped command always requires HTTPS. */
+	readonly validateServiceUrl?: (value: string, requiredPath: string) => URL;
+	/** Test seam only; the shipped command always verifies the generated handoff. */
+	readonly loadHandoff?: () => CarrierHandoff;
+}
+
+/**
+ * The internal worker mode's whole authority surface. It has neither argv nor
+ * environment inputs for the endpoint/credential, and does not receive a
+ * session, profile, cache, or public Ceal HTTP transport.
+ */
+export async function runLeasedConsumerCarrier(
+	requestBytes: Uint8Array,
+	runtime: LeasedConsumerCarrierRuntime = {},
+): Promise<LeasedConsumerCarrierResult> {
+	let closeChannel = onceAsync(async () => {});
+	try {
+		const fd4 = runtime.readChannel ? null : createFd4Channel();
+		closeChannel = onceAsync(runtime.closeChannel ?? (() => fd4?.close() ?? Promise.resolve()));
+		let handoff: CarrierHandoff;
+		try {
+			handoff = runtime.loadHandoff?.() ?? verifyEmbeddedHandoff();
+		} catch {
+			return localFailure("service_call_failed");
+		}
+		let request: JsonRecord;
+		try {
+			request = parseCarrierRequest(requestBytes, handoff);
+		} catch {
+			return localFailure("invalid_request");
+		}
+		const channelBytes = await readChannelBeforeDeadline({
+			...runtime,
+			readChannel: runtime.readChannel ?? (() => fd4?.read() ?? Promise.reject(new Error("missing_channel"))),
+			closeChannel,
+		});
+		if (channelBytes === null) return localFailure("service_channel_unavailable");
+		let channel: ServiceChannel;
+		try {
+			channel = parseServiceChannel(channelBytes, handoff.servicePath, runtime.validateServiceUrl ?? validateProductionServiceUrl);
+		} catch {
+			return localFailure("service_channel_unavailable");
+		}
+		const fetchFn = runtime.fetchFn ?? globalThis.fetch;
+		if (typeof fetchFn !== "function") return localFailure("service_call_failed");
+		try {
+			const response = await fetchFn(channel.url, {
+				method: handoff.method,
+				headers: {
+					Authorization: `Bearer ${channel.credential}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(request),
+				redirect: "error",
+			});
+			if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.headers.get("content-type")))
+				return localFailure("service_call_failed");
+			const responseBytes = await readBoundedWebResponse(response, MAX_RESPONSE_BYTES);
+			const decoded = parseStrictJson(responseBytes);
+			if (!sameJson(decoded, handoff.unavailableBody)) return localFailure("service_call_failed");
+			return localFailure("leased_consumer_call_unavailable");
+		} catch {
+			return localFailure("service_call_failed");
+		}
+	} catch {
+		return localFailure("service_channel_unavailable");
+	} finally {
+		await closeChannel();
+	}
+}
+
+/** Reads one exact UTF-8 JSON request to EOF without retaining more than 32 KiB. */
+export async function readLeasedConsumerRequest(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+	return readBoundedStream(stream, MAX_REQUEST_BYTES);
+}
+
+function localFailure(errorCode: LeasedConsumerCarrierResult["error_code"]): LeasedConsumerCarrierResult {
+	return errorCode === "leased_consumer_call_unavailable"
+		? { schema_version: RESULT_SCHEMA, ok: false, status: "unavailable", error_code: errorCode }
+		: errorCode === "service_channel_unavailable"
+			? { schema_version: RESULT_SCHEMA, ok: false, status: "unavailable", error_code: errorCode }
+			: { schema_version: RESULT_SCHEMA, ok: false, status: "error", error_code: errorCode };
+}
+
+async function readChannelBeforeDeadline(runtime: LeasedConsumerCarrierRuntime): Promise<Uint8Array | null> {
+	const readChannel = runtime.readChannel ?? (() => Promise.reject(new Error("missing_channel")));
+	const closeChannel = onceAsync(runtime.closeChannel ?? (async () => {}));
+	const now = runtime.monotonicNow ?? monotonicNow;
+	const setTimer = runtime.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
+	const clearTimer = runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
+	const started = now();
+	let timedOut = false;
+	let timer: unknown;
+	try {
+		const pending = readChannel();
+		pending.catch(() => undefined);
+		const timeout = new Promise<null>((resolve) => {
+			timer = setTimer(() => {
+				timedOut = true;
+				void closeChannel();
+				resolve(null);
+			}, CHANNEL_DEADLINE_MS);
+		});
+		const value = await Promise.race([pending, timeout]);
+		if (timedOut || now() - started > CHANNEL_DEADLINE_MS) return null;
+		return value;
+	} catch {
+		return null;
+	} finally {
+		if (timer !== undefined) clearTimer(timer);
+		await closeChannel();
+	}
+}
+
+function createFd4Channel(): { readonly read: () => Promise<Uint8Array>; readonly close: () => Promise<void> } {
+	// `fd` prevents opening this placeholder path. A 8KiB high-water mark keeps
+	// the pipe reader bounded even before the record cap rejects a second chunk.
+	// The stream owns FD 4: destroying it first and waiting for `close` avoids a
+	// concurrent raw close while libuv still has a read in flight.
+	// Probe before creating a libuv reader. The launch contract supplies a pipe:
+	// accepting an arbitrary inherited descriptor would not be a protected
+	// one-shot channel, and can make libuv abort when a host-reserved FD closes.
+	if (!fstatSync(4).isFIFO()) throw new Error("missing_channel");
+	const stream = createReadStream("/dev/null", { fd: 4, autoClose: true, highWaterMark: MAX_CHANNEL_BYTES });
+	return {
+		read: () => readBoundedStream(stream, MAX_CHANNEL_BYTES, () => stream.destroy()),
+		close: () => {
+			if (stream.destroyed) return Promise.resolve();
+			return new Promise((resolve) => {
+				stream.once("close", resolve);
+				stream.destroy();
+			});
+		},
+	};
+}
+
+async function readBoundedStream(stream: AsyncIterable<Uint8Array>, maximum: number, abort?: () => void): Promise<Uint8Array> {
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	for await (const chunk of stream) {
+		if (!(chunk instanceof Uint8Array) || chunk.byteLength > maximum - total) {
+			abort?.();
+			throw new Error("input_too_large");
+		}
+		total += chunk.byteLength;
+		chunks.push(chunk);
+	}
+	return concatBytes(chunks, total);
+}
+
+function parseCarrierRequest(bytes: Uint8Array, handoff: CarrierHandoff): JsonRecord {
+	if (bytes.byteLength > MAX_REQUEST_BYTES) throw new Error("request_too_large");
+	const value = parseStrictJson(bytes);
+	if (!plainRecord(value) || !sameKeys(value, handoff.requestKeys)) throw new Error("invalid_request");
+	const template = handoff.requestTemplate;
+	for (const key of handoff.requestKeys) {
+		if (key === "lease_fence") {
+			if (!Number.isSafeInteger(value[key]) || (value[key] as number) < 1) throw new Error("invalid_request");
+			continue;
+		}
+		if (key === "arguments") {
+			if (!plainJson(value[key])) throw new Error("invalid_request");
+			continue;
+		}
+		if (typeof value[key] !== "string") throw new Error("invalid_request");
+		if (key === "purpose") {
+			if (
+				Buffer.byteLength(value[key] as string, "utf8") < 1 ||
+				Buffer.byteLength(value[key] as string, "utf8") > 4096 ||
+				hasControlCharacter(value[key] as string)
+			)
+				throw new Error("invalid_request");
+			continue;
+		}
+		if (!SAFE_REF.test(value[key] as string)) throw new Error("invalid_request");
+		if (key === "schema_version" && value[key] !== template[key]) throw new Error("invalid_request");
+	}
+	return value;
+}
+
+function parseServiceChannel(bytes: Uint8Array, requiredPath: string, validateUrl: (value: string, path: string) => URL): ServiceChannel {
+	if (bytes.byteLength > MAX_CHANNEL_BYTES) throw new Error("channel_too_large");
+	const value = parseStrictJson(bytes);
+	if (!plainRecord(value) || !sameKeys(value, ["schema_version", "service_call_url", "service_credential"]))
+		throw new Error("invalid_channel");
+	if (value.schema_version !== CHANNEL_SCHEMA || typeof value.service_call_url !== "string" || typeof value.service_credential !== "string")
+		throw new Error("invalid_channel");
+	const credential = value.service_credential;
+	if (Buffer.byteLength(credential, "utf8") === 0 || Buffer.byteLength(credential, "utf8") > 4096 || !/^[\x21-\x7e]+$/u.test(credential))
+		throw new Error("invalid_channel");
+	return { url: validateUrl(value.service_call_url, requiredPath), credential };
+}
+
+function validateProductionServiceUrl(value: string, requiredPath: string): URL {
+	const url = new URL(value);
+	if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== requiredPath)
+		throw new Error("invalid_channel");
+	return url;
+}
+
+function verifyEmbeddedHandoff(): CarrierHandoff {
+	const lock = parseStrictJson(new TextEncoder().encode(GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON));
+	const handoff = parseStrictJson(new TextEncoder().encode(GATEWAY_LEASED_CONSUMER_HANDOFF_JSON));
+	if (
+		!plainRecord(lock) ||
+		!plainRecord(handoff) ||
+		!plainRecord(lock.handoff) ||
+		lock.schema_version !== "ceal.worker_gateway_leased_consumer_call_handoff_lock.v1"
+	)
+		throw new Error("invalid_handoff");
+	const pinned = lock.handoff;
+	if (
+		typeof pinned.sha256 !== "string" ||
+		pinned.sha256 !== GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256 ||
+		createHash("sha256").update(GATEWAY_LEASED_CONSUMER_HANDOFF_JSON).digest("hex") !== pinned.sha256 ||
+		typeof pinned.source_repository !== "string" ||
+		typeof pinned.source_commit !== "string" ||
+		typeof pinned.source_tree !== "string" ||
+		!Array.isArray(pinned.vector_ids) ||
+		!pinned.vector_ids.every((id) => typeof id === "string")
+	)
+		throw new Error("invalid_handoff");
+	if (
+		handoff.schema_version !== "ceal.gateway_leased_consumer_call_conformance_handoff.v1" ||
+		!plainRecord(handoff.source) ||
+		handoff.source.repository !== pinned.source_repository ||
+		handoff.source.commit !== pinned.source_commit ||
+		handoff.source.tree !== pinned.source_tree ||
+		!plainRecord(handoff.transport) ||
+		typeof handoff.transport.method !== "string" ||
+		typeof handoff.transport.service_path !== "string" ||
+		!plainRecord(handoff.transport.required_headers) ||
+		handoff.transport.required_headers.authorization !== "Bearer <protected-service-credential>" ||
+		handoff.transport.required_headers.content_type !== "application/json" ||
+		!Array.isArray(handoff.vectors)
+	)
+		throw new Error("invalid_handoff");
+	const ids = handoff.vectors.map((vector) => (plainRecord(vector) ? vector.id : null));
+	if (!sameStringSet(ids, pinned.vector_ids)) throw new Error("invalid_handoff");
+	const positive = handoff.vectors.find(
+		(vector) => plainRecord(vector) && plainRecord(vector.external_response) && vector.external_response.status === 503,
+	);
+	if (
+		!plainRecord(positive) ||
+		!plainRecord(positive.request_body) ||
+		!plainRecord(positive.external_response) ||
+		!plainRecord(positive.external_response.body)
+	)
+		throw new Error("invalid_handoff");
+	if (positive.external_response.body.ok !== false || positive.external_response.body.error_code !== "leased_consumer_call_unavailable")
+		throw new Error("invalid_handoff");
+	return {
+		method: handoff.transport.method,
+		servicePath: handoff.transport.service_path,
+		requestTemplate: positive.request_body,
+		requestKeys: Object.keys(positive.request_body).sort(),
+		unavailableStatus: positive.external_response.status,
+		unavailableBody: positive.external_response.body,
+	};
+}
+
+async function readBoundedWebResponse(response: globalThis.Response, maximum: number): Promise<Uint8Array> {
+	if (!response.body) throw new Error("missing_body");
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) return concatBytes(chunks, total);
+			if (!value || value.byteLength > maximum - total) {
+				void reader.cancel();
+				throw new Error("response_too_large");
+			}
+			total += value.byteLength;
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+function parseStrictJson(bytes: Uint8Array): unknown {
+	const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	const value = JSON.parse(text) as unknown;
+	assertNoDuplicateJsonKeys(text);
+	return value;
+}
+
+function assertNoDuplicateJsonKeys(text: string): void {
+	let index = 0;
+	const whitespace = () => {
+		while (/\s/u.test(text[index] ?? "")) index += 1;
+	};
+	const string = () => {
+		const start = index;
+		if (text[index] !== '"') throw new Error("invalid_json");
+		index += 1;
+		while (index < text.length) {
+			const character = text[index];
+			if (character === "\\") index += 2;
+			else {
+				index += 1;
+				if (character === '"') return JSON.parse(text.slice(start, index)) as string;
+			}
+		}
+		throw new Error("invalid_json");
+	};
+	const value = (): void => {
+		whitespace();
+		if (text[index] === "{") {
+			index += 1;
+			const keys = new Set<string>();
+			whitespace();
+			if (text[index] === "}") {
+				index += 1;
+				return;
+			}
+			for (;;) {
+				whitespace();
+				const key = string();
+				if (keys.has(key)) throw new Error("duplicate_json_key");
+				keys.add(key);
+				whitespace();
+				if (text[index++] !== ":") throw new Error("invalid_json");
+				value();
+				whitespace();
+				if (text[index] === "}") {
+					index += 1;
+					return;
+				}
+				if (text[index++] !== ",") throw new Error("invalid_json");
+			}
+		}
+		if (text[index] === "[") {
+			index += 1;
+			whitespace();
+			if (text[index] === "]") {
+				index += 1;
+				return;
+			}
+			for (;;) {
+				value();
+				whitespace();
+				if (text[index] === "]") {
+					index += 1;
+					return;
+				}
+				if (text[index++] !== ",") throw new Error("invalid_json");
+			}
+		}
+		if (text[index] === '"') {
+			string();
+			return;
+		}
+		const match = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(text.slice(index));
+		if (!match) throw new Error("invalid_json");
+		index += match[0].length;
+	};
+	value();
+	whitespace();
+	if (index !== text.length) throw new Error("invalid_json");
+}
+
+function plainRecord(value: unknown): value is JsonRecord {
+	return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function plainJson(value: unknown, depth = 0): boolean {
+	if (depth > 32 || value === null || typeof value === "string" || typeof value === "boolean") return depth <= 32;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.length <= 1024 && value.every((item) => plainJson(item, depth + 1));
+	return plainRecord(value) && Object.keys(value).length <= 1024 && Object.values(value).every((item) => plainJson(item, depth + 1));
+}
+
+function sameKeys(value: JsonRecord, expected: readonly string[]): boolean {
+	const actual = Object.keys(value).sort();
+	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function sameStringSet(left: readonly unknown[], right: readonly unknown[]): boolean {
+	return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]);
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+	return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
+}
+
+function canonicalJson(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(canonicalJson);
+	if (!plainRecord(value)) return value;
+	return Object.fromEntries(
+		Object.keys(value)
+			.sort()
+			.map((key) => [key, canonicalJson(value[key])]),
+	);
+}
+
+function concatBytes(chunks: readonly Uint8Array[], total: number): Uint8Array {
+	const value = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		value.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return value;
+}
+
+function monotonicNow(): number {
+	return performance.now();
+}
+
+function hasControlCharacter(value: string): boolean {
+	return [...value].some((character) => {
+		const code = character.codePointAt(0) ?? 0;
+		return code <= 0x1f || code === 0x7f;
+	});
+}
+
+function onceAsync(action: () => Promise<void>): () => Promise<void> {
+	let pending: Promise<void> | undefined;
+	return () => {
+		pending ??= action().catch(() => undefined);
+		return pending;
+	};
+}
+
+function isJsonContentType(value: string | null): boolean {
+	return value !== null && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
+}
+
+interface ServiceChannel {
+	readonly url: URL;
+	readonly credential: string;
+}
+
+interface CarrierHandoff {
+	readonly method: string;
+	readonly servicePath: string;
+	readonly requestTemplate: JsonRecord;
+	readonly requestKeys: readonly string[];
+	readonly unavailableStatus: unknown;
+	readonly unavailableBody: JsonRecord;
+}

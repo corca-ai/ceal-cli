@@ -6,7 +6,15 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**/*.ts", "**/*.mjs", "!**/dist", "!**/node_modules", "!packages/ceal-protocol", "!packages/ceal-operator-cli"]
+		"includes": [
+			"**/*.ts",
+			"**/*.mjs",
+			"!**/dist",
+			"!**/node_modules",
+			"!packages/ceal-protocol",
+			"!packages/ceal-operator-cli",
+			"!packages/ceal-worker-cli/src/generated"
+		]
 	},
 	"formatter": {
 		"enabled": true,
