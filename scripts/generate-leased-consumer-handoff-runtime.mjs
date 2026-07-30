@@ -139,6 +139,42 @@ export function verifyEmbeddedCarrierContractSource({ repoRoot = ROOT } = {}) {
 	return Object.freeze({ contract: expected.value, sha256: expected.sha256 });
 }
 
+/**
+ * Native artifacts bundle the generated handoff module, so a fresh release
+ * builder must reject it when it no longer represents the checked-in,
+ * SHA-locked Gateway handoff. Running the generator on only some CI platforms
+ * is not sufficient: the other platforms package the committed source too.
+ */
+export function verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot = ROOT } = {}) {
+	const root = path.resolve(repoRoot);
+	const verification = verifyGatewayLeasedConsumerCallHandoff({ repoRoot: root });
+	const expectedLock = readFileSync(path.join(root, LOCK_PATH), "utf8");
+	const expectedHandoff = readFileSync(path.join(root, HANDOFF_PATH), "utf8");
+	let generated;
+	try {
+		generated = readFileSync(path.join(root, OUTPUT_PATH), "utf8");
+	} catch {
+		throw new Error("embedded_gateway_leased_consumer_handoff_missing");
+	}
+	const lock = /^export const GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON = (.+) as const;$/mu.exec(generated)?.[1];
+	const handoff = /^export const GATEWAY_LEASED_CONSUMER_HANDOFF_JSON = (.+) as const;$/mu.exec(generated)?.[1];
+	const sha256 = /^export const GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256 = "([a-f0-9]{64})" as const;$/mu.exec(generated)?.[1];
+	try {
+		if (
+			typeof lock !== "string" ||
+			typeof handoff !== "string" ||
+			typeof sha256 !== "string" ||
+			JSON.parse(lock) !== expectedLock ||
+			JSON.parse(handoff) !== expectedHandoff ||
+			sha256 !== verification.handoff.sha256
+		)
+			throw new Error("embedded_gateway_leased_consumer_handoff_drift");
+	} catch {
+		throw new Error("embedded_gateway_leased_consumer_handoff_drift");
+	}
+	return verification.handoff;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	try {
 		console.log(JSON.stringify(generateLeasedConsumerHandoffRuntime()));

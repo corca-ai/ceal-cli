@@ -13,7 +13,28 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
   사라진 건 정상**(소화 후 삭제가 운영자 규칙) — 배송 실패로 오진하지 말 것. 두 번 틀렸다.
 - `ceal capabilities --fresh`, `ceal call`은 실세션·provider 동작이라 승인 후에만.
 
-## Waiting On
+## Current correction — 2026-07-30
+
+The following historical queue is retained for traceability, but its former
+handoff-origin and `session adopt` blockers are closed:
+
+- Gateway handoff `v0.68.0` is publicly available at
+  `https://ceal.borca.ai/releases/gateway-handoff/gateway-handoff-v0.68.0/ceal-gateway-handoff-0.68.0.tar.gz`.
+  The object returned HTTP 200 from `vinc` on 2026-07-30 and matches the
+  `gateway-handoff-lock.json` SHA-256.
+- The source tree already contains `ceal session adopt`, Protocol 0.68.0's
+  device-enrollment decoder, and the RFC 9180 HPKE implementation/tests.
+- The branch also contains the reviewed private leased-consumer carrier. Its
+  complete `npm run check` passed on `vinc` on 2026-07-30, and this checkout's
+  `.githooks/pre-push` is installed.
+
+The next CLI action is to prepare a new versioned worker release from these
+commits, prove the release workflow with a non-publishing dispatch, then tag
+only after explicit release approval. The remaining announcement blockers are
+not client-source blockers: Gateway apply/mail configuration and a consenting
+named-device acceptance record.
+
+## Historical Waiting On
 
 1. **Mac acceptance 레코드.** Mac에 `0.68.0`이 서명 검증되어 설치돼 있지만 **세션이 없다.**
    등록 코드가 필요하고, 그건 게이트웨이 호스트에서 `cealctl`로 발급한다. 절차와 마찰은

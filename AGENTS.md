@@ -25,12 +25,17 @@ has grown an explanation belongs in one of them, with the rule left here.
 
 Resolve the lane from `hostname`, never from a document's pronoun.
 
-- `narnia` — this lane, owning **`corca-ai/ceal-cli` only**: worker CLI, client
-  SDK, `ceal-guide`, and the Claude and Codex guide hosts. Local checkouts:
-  `~/codes/ceal-cli`, plus `~/codes/ceal` as a consumer/reference copy.
+- `narnia` — the normal source-owner lane for **`corca-ai/ceal-cli`**: worker
+  CLI, client SDK, `ceal-guide`, and the Claude and Codex guide hosts. Its
+  checkout is `~/codes/ceal-cli`.
 - `vinc` — the Gateway lane, reachable as `ssh oc`, checkout `~/ceal`. It owns
   Gateway routes, connector execution, Profile policy, audit/receipt custody,
   `cealctl`, canonical protocol/conformance, **and `corca-ai/ceal-agent`**.
+  For the current repository-separation and internal-announcement initiative,
+  `vinc` is also the integrated operating checkout for `corca-ai/ceal-cli` at
+  `/home/ubuntu/ceal-cli`: it may implement, verify, commit, and publish that
+  repository. This is an operating assignment, not a transfer of the package's
+  source authority or a reason to edit Gateway-owned frozen inputs.
 
 `ceal-agent` moved to `vinc` on 2026-07-27, after this lane had landed
 `gateway-artifact-handoff.json` and its verifier there (through
@@ -55,17 +60,14 @@ Frozen compatibility inputs owned by `corca-ai/ceal`:
 and the historical dual release lane — `install.sh`,
 `scripts/build-platform-binaries.mjs`, `scripts/build-release-manifest.mjs`,
 bare `v*` tags, `.github/workflows/cealctl-release.yml`. Do not execute, amend,
-or publish the release-lane files. Symmetrically, `corca-ai/ceal`'s
-`packaging/ceal-cli-source/` is the frozen copy of this repository's source.
+or publish those compatibility release-lane files.
 
-Nothing stops these edits mechanically — they are ordinary tracked files. The
-constraint is that each side mirrors the other, and a one-sided change breaks
-the copy. So do not originate an independent edit in a frozen copy on either
-side: change the recorded owner first, then land a reviewed target-derived sync.
-The authority and the deletion gates live in
-`repository-extraction-migration-ledger.json` in `corca-ai/ceal`. As of Stage 2
-the source-edit authority has transferred, consumer cutover is pending, and no
-deletion is authorized — so both copies stay.
+The worker source projection has been removed from `corca-ai/ceal`: Gateway now
+consumes only the signed `vendor/ceal-cli` artifact. There is no mirrored
+`packaging/ceal-cli-source/` path to keep synchronized and no Gateway source
+copy to edit. This repository remains responsible for its own worker source,
+worker quality gates, worker release workflow, and `ceal-v*` tags; the frozen
+Gateway inputs above remain Gateway-owned compatibility material.
 
 ## Gates
 

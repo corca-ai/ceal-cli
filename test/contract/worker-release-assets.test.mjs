@@ -14,12 +14,16 @@ import {
 	mergeWorkerReleaseAssetSets,
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.mjs";
-import { verifyEmbeddedCarrierContractSource } from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
+import {
+	verifyEmbeddedCarrierContractSource,
+	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
+} from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
 const CARRIER_CONTRACT_BYTES = readFileSync(CARRIER_CONTRACT_PATH);
 const CARRIER_CONTRACT = JSON.parse(CARRIER_CONTRACT_BYTES.toString("utf8"));
 const CARRIER_CONTRACT_SHA256 = digest(CARRIER_CONTRACT_BYTES);
+const CARRIER_HANDOFF = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot: REPO_ROOT });
 
 // The installer's own allowlist, read out of the shell rather than restated
 // here. It was a hand-copy, and a hand-copy of an allowlist is the shape that
@@ -95,6 +99,7 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.command, "ceal");
 	assert.equal(manifest.private_leased_consumer_carrier.contract_json, CARRIER_CONTRACT_BYTES.toString("utf8"));
 	assert.equal(manifest.private_leased_consumer_carrier.contract_sha256, CARRIER_CONTRACT_SHA256);
+	assert.deepEqual(manifest.private_leased_consumer_handoff, CARRIER_HANDOFF);
 	assert.equal(manifest.guide.name, "ceal-guide-SKILL.md");
 	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide-SKILL.md"))));
 	assert.equal(manifest.installer.sha256, digest(readFileSync(path.join(output, "install-ceal.sh"))));
@@ -136,6 +141,25 @@ test("native source verification refuses a stale generated carrier contract befo
 	assert.throws(() => verifyEmbeddedCarrierContractSource({ repoRoot: root }), /embedded_carrier_contract_drift/u);
 });
 
+test("native source verification refuses a stale generated Gateway handoff before bundling", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-handoff-generated-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	writeGatewayHandoffFixture(root);
+	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated", "leased-consumer-handoff.ts");
+	const source = readFileSync(generated, "utf8");
+	writeFileSync(
+		generated,
+		source.replace(
+			/GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256 = "[a-f0-9]{64}"/u,
+			`GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256 = "${"0".repeat(64)}"`,
+		),
+	);
+	assert.throws(
+		() => verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot: root }),
+		/embedded_gateway_leased_consumer_handoff_drift/u,
+	);
+});
+
 test("merged worker release sets stay pair-complete with byte-identical shared assets", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-merge-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -167,6 +191,17 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	assert.throws(
 		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-carrier-drift"), inputs, repoRoot }),
 		hasCode("merge_private_carrier_contract_drift"),
+	);
+	writeFileSync(platformManifest, originalManifest);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+
+	const driftedHandoff = JSON.parse(readFileSync(platformManifest, "utf8"));
+	driftedHandoff.private_leased_consumer_handoff.sha256 = "0".repeat(64);
+	writeFileSync(platformManifest, `${JSON.stringify(driftedHandoff, null, 2)}\n`);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-handoff-drift"), inputs, repoRoot }),
+		hasCode("merge_private_carrier_handoff_drift"),
 	);
 	writeFileSync(platformManifest, originalManifest);
 	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
@@ -335,7 +370,11 @@ test("worker stable rollback re-verifies an immutable public tag before moving t
 	assert.ok(pointerAdvanceIndex > publicProofIndex, "rollback must move stable only after immutable public proof");
 });
 
-function fakeNativeBuild(platform, version, { carrierContract = CARRIER_CONTRACT, carrierSha256 = CARRIER_CONTRACT_SHA256 } = {}) {
+function fakeNativeBuild(
+	platform,
+	version,
+	{ carrierContract = CARRIER_CONTRACT, carrierSha256 = CARRIER_CONTRACT_SHA256, carrierHandoff = CARRIER_HANDOFF } = {},
+) {
 	return async ({ outputDirectory }) => {
 		mkdirSync(outputDirectory, { recursive: true });
 		const binary = Buffer.from(`native-${platform}\n`);
@@ -349,6 +388,7 @@ function fakeNativeBuild(platform, version, { carrierContract = CARRIER_CONTRACT
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
 			protocol: { package: "@corca-ai/ceal-protocol", version, sha256: "0".repeat(64) },
 			private_leased_consumer_carrier: { contract: carrierContract, sha256: carrierSha256 },
+			private_leased_consumer_handoff: carrierHandoff,
 			native_smoke: { command: "ceal", version, operator_surface_absent: true },
 		};
 	};
@@ -361,7 +401,27 @@ function fixtureRepo(root) {
 	const contractDirectory = path.join(repo, "packages", "ceal-worker-cli");
 	mkdirSync(contractDirectory, { recursive: true });
 	writeFileSync(path.join(contractDirectory, "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
+	writeGatewayHandoffFixture(repo);
 	return repo;
+}
+
+function writeGatewayHandoffFixture(root) {
+	const vendor = path.join(root, "vendor", "gateway-leased-consumer-call");
+	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
+	mkdirSync(vendor, { recursive: true });
+	mkdirSync(generated, { recursive: true });
+	writeFileSync(
+		path.join(root, "gateway-leased-consumer-call-handoff-lock.json"),
+		readFileSync(path.join(REPO_ROOT, "gateway-leased-consumer-call-handoff-lock.json")),
+	);
+	writeFileSync(
+		path.join(vendor, "gateway-leased-consumer-call-conformance.json"),
+		readFileSync(path.join(REPO_ROOT, "vendor", "gateway-leased-consumer-call", "gateway-leased-consumer-call-conformance.json")),
+	);
+	writeFileSync(
+		path.join(generated, "leased-consumer-handoff.ts"),
+		readFileSync(path.join(REPO_ROOT, "packages", "ceal-worker-cli", "src", "generated", "leased-consumer-handoff.ts")),
+	);
 }
 
 function hasCode(code) {

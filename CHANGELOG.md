@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.70.0 (unreleased)
+
+The first worker release candidate that consumes the published
+`gateway-handoff-v0.68.0` archive and carries verified-email first-device
+adoption.
+
+- **Adds `ceal session adopt`.** A consenting employee starts with the
+  published Gateway URL and their mailbox; the device creates its own proof and
+  recipient keys, the browser completes mailbox verification, and only an
+  authenticated HPKE-sealed session bound to those keys can be stored. It never
+  automates the browser, exposes a raw credential, or falls back to copied code
+  enrollment.
+- **Carries the private Agent leased-consumer carrier.** It accepts only the
+  SHA-locked Gateway conformance input, accepts the protected service credential
+  only from its one-shot private channel, and cannot turn into a public `ceal
+  call` fallback or caller-supplied provenance channel. Every native platform
+  now rejects a stale generated handoff before bundling, records its exact
+  identity in the release manifest, and refuses a cross-platform identity split
+  during merge.
+- **Uses the Gateway v0.68.0 origin.** The release workflow downloads the
+  immutable public handoff archive before composing every platform asset. This
+  candidate is not a release, installation proof, Gateway apply, email-delivery
+  proof, or device acceptance record.
+
 ## 0.69.0 (`ceal-v0.69.0`)
 
 The first worker release built against `gateway-handoff-v0.67.0`, and the first

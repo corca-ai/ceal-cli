@@ -9,7 +9,7 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readCarrierContract } from "./generate-leased-consumer-handoff-runtime.mjs";
+import { readCarrierContract, verifyEmbeddedGatewayLeasedConsumerHandoffSource } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
@@ -58,10 +58,15 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
 		let privateCarrierContract;
+		let privateCarrierHandoff;
 		try {
 			privateCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
+			privateCarrierHandoff = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot });
 		} catch {
-			fail("private_carrier_contract_invalid", "Worker release assets require the exact validated private carrier contract.");
+			fail(
+				"private_carrier_contract_invalid",
+				"Worker release assets require exact validated private carrier contract and Gateway handoff bytes.",
+			);
 		}
 		if (
 			!native.private_leased_consumer_carrier ||
@@ -71,6 +76,11 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			fail(
 				"private_carrier_contract_drift",
 				"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
+			);
+		if (JSON.stringify(native.private_leased_consumer_handoff) !== JSON.stringify(privateCarrierHandoff))
+			fail(
+				"private_carrier_handoff_drift",
+				"Worker release assets refuse a native binary whose embedded Gateway handoff differs from the SHA-locked source handoff.",
 			);
 		const manifest = {
 			schema_version: "ceal.worker_release_manifest.v1",
@@ -88,6 +98,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 				contract_json: privateCarrierContract.bytes.toString("utf8"),
 				contract_sha256: privateCarrierContract.sha256,
 			},
+			private_leased_consumer_handoff: privateCarrierHandoff,
 			non_claims: [
 				"This asset set is unsigned until the worker release workflow signs and publishes it.",
 				"This does not prove a Gateway host, policy, connector, provider, audit, or installed-client action.",
@@ -176,6 +187,16 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 			"merge_private_carrier_contract_drift",
 			"Merged worker release assets require one identical private carrier contract across every platform.",
 		);
+	const carrierHandoffs = new Set(
+		[...platforms.entries()].map(([platform, entries]) =>
+			carrierHandoffIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes),
+		),
+	);
+	if (carrierHandoffs.size !== 1)
+		fail(
+			"merge_private_carrier_handoff_drift",
+			"Merged worker release assets require one identical private Gateway handoff across every platform.",
+		);
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
@@ -233,6 +254,28 @@ function carrierContractIdentity(bytes) {
 		fail(
 			"merge_private_carrier_contract_invalid",
 			"Merged worker release assets require each platform manifest to declare a valid private carrier contract.",
+		);
+	}
+}
+
+function carrierHandoffIdentity(bytes) {
+	try {
+		const handoff = JSON.parse(bytes?.toString("utf8") ?? "")?.private_leased_consumer_handoff;
+		if (
+			!handoff ||
+			typeof handoff.path !== "string" ||
+			typeof handoff.sha256 !== "string" ||
+			!/^[a-f0-9]{64}$/u.test(handoff.sha256) ||
+			typeof handoff.source_repository !== "string" ||
+			!Array.isArray(handoff.vector_ids) ||
+			handoff.vector_ids.some((value) => typeof value !== "string")
+		)
+			throw new Error("invalid_manifest");
+		return JSON.stringify(handoff);
+	} catch {
+		fail(
+			"merge_private_carrier_handoff_invalid",
+			"Merged worker release assets require each platform manifest to declare a valid private Gateway handoff.",
 		);
 	}
 }

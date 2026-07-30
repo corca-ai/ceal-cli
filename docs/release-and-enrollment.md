@@ -29,7 +29,31 @@ npm ci → npm run check → commit → push main
 
 `CHANGELOG.md` owns which tags are burned and why. A burned tag is never reused.
 
-## Re-enrollment
+## Employee first-device adoption
+
+For a consenting employee's first device, the preferred flow is verified-email
+adoption. It does not copy an operator-visible enrollment code through chat or
+email. The employee supplies the published Gateway URL and the mailbox that
+received the invitation:
+
+```
+ceal session adopt --gateway <https-url> --email <employee-email>
+```
+
+The command generates device keys locally, shows the employee the two
+fingerprints to compare in their browser, and waits only for the Gateway's
+bounded poll interval. The browser verifies the mailbox; the Gateway seals the
+resulting session to the device key; the command stores it only after it
+validates the Gateway origin, transaction, both keys, authenticated delivery,
+and session payload binding.
+
+This is a client contract, not proof that a particular Gateway instance has
+enabled the routes, configured its mail sender, delivered an invitation, or
+accepted a device. Do not advertise it as available until the Gateway has been
+applied and a consenting named device has produced the required acceptance
+evidence.
+
+## Additional device and recovery enrollment
 
 A worker session binds one instance, so switching is locally destructive. Do this
 only when the current binding is genuinely finished with.
