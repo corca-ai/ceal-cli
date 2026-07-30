@@ -85,7 +85,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			protocol: native.protocol,
 			native_smoke: native.native_smoke,
 			private_leased_consumer_carrier: {
-				contract: privateCarrierContract.value,
+				contract_json: privateCarrierContract.bytes.toString("utf8"),
 				contract_sha256: privateCarrierContract.sha256,
 			},
 			non_claims: [
@@ -224,12 +224,11 @@ function carrierContractIdentity(bytes) {
 			!carrier ||
 			typeof carrier.contract_sha256 !== "string" ||
 			!/^[a-f0-9]{64}$/u.test(carrier.contract_sha256) ||
-			!carrier.contract ||
-			typeof carrier.contract !== "object" ||
-			Array.isArray(carrier.contract)
+			typeof carrier.contract_json !== "string" ||
+			!carrier.contract_json.startsWith("{")
 		)
 			throw new Error("invalid_manifest");
-		return `${carrier.contract_sha256}:${JSON.stringify(carrier.contract)}`;
+		return `${carrier.contract_sha256}:${carrier.contract_json}`;
 	} catch {
 		fail(
 			"merge_private_carrier_contract_invalid",

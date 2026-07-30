@@ -93,7 +93,7 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.version, "0.65.0");
 	assert.equal(manifest.platform, "linux-arm64");
 	assert.equal(manifest.command, "ceal");
-	assert.deepEqual(manifest.private_leased_consumer_carrier.contract, CARRIER_CONTRACT);
+	assert.equal(manifest.private_leased_consumer_carrier.contract_json, CARRIER_CONTRACT_BYTES.toString("utf8"));
 	assert.equal(manifest.private_leased_consumer_carrier.contract_sha256, CARRIER_CONTRACT_SHA256);
 	assert.equal(manifest.guide.name, "ceal-guide-SKILL.md");
 	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide-SKILL.md"))));
@@ -161,7 +161,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	const platformManifest = path.join(inputs[1], "ceal-worker-release-manifest-linux-amd64.json");
 	const originalManifest = readFileSync(platformManifest);
 	const driftedManifest = JSON.parse(originalManifest);
-	driftedManifest.private_leased_consumer_carrier.contract_sha256 = "f".repeat(64);
+	driftedManifest.private_leased_consumer_carrier.contract_json = "{}";
 	writeFileSync(platformManifest, `${JSON.stringify(driftedManifest, null, 2)}\n`);
 	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
 	assert.throws(
