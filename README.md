@@ -147,14 +147,16 @@ npm run hooks:install   # once per clone: points core.hooksPath at .githooks/
 npm run check
 ```
 
-`npm run check` is the final proof gate: lint, build, then every suite. Most of
-its wall clock is the release-artifact and native-binary suites, which cannot
-observe CLI or client behavior. While iterating, use the fast lane and keep the
-full gate for the last run before pushing or tagging:
+`npm run check` is the final worker proof gate: lint, build, then every
+worker-owned suite. Most of its wall clock is the release-artifact and
+native-binary suites, which cannot observe CLI or client behavior. While
+iterating, use the fast lane and keep the full gate for the last run before
+pushing or tagging:
 
 ```sh
-npm run check:unit   # lint + build + package suites + test/contract
+npm run check:unit   # lint + worker build + client/worker suites + test/contract
 npm run test:release # release-artifact and native-binary suites only
+npm run test:legacy-compatibility # explicit frozen Gateway compatibility audit; never pre-push/CI
 npm run lint         # biome check: lint + format + import order
 ```
 

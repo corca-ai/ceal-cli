@@ -90,6 +90,14 @@ Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서
 - **브랜치 `client-protocol-0.67.0-sync` @ `fd771d46…`는 소임을 다했다.** `main`이 이제 그
   선언을 정당하게 담는다. 삭제 가능하나, 그쪽 기록이 가리킬까 봐 남겨뒀다.
 - **2026-07-28 측정**: `check` 45~52s, `check:unit` 21.4s(36코어).
+- **2026-07-30 gate ownership**: branch pre-push and `check.yml` now run only
+  explicit worker test inventories: client/worker unit tests, worker contract
+  tests (including `ceal-guide`), and worker release proofs. `cealctl`,
+  `cealctl-guide`, and legacy dual-release checks require the explicit
+  `npm run test:legacy-compatibility` audit and cannot re-enter branch CI through
+  a glob. The frozen protocol is still built solely as the client type-check
+  input; this does **not** claim artifact-only protocol consumption in this
+  repository.
 
 ## Discuss
 

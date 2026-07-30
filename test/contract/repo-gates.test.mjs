@@ -10,6 +10,39 @@ import { parse } from "yaml";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
+const WORKER_CONTRACT_TESTS = [
+	"test/contract/prewarm-offline-consumer-cache.test.mjs",
+	"test/contract/probe-surface.test.mjs",
+	"test/contract/protocol-vendor-pin.test.mjs",
+	"test/contract/repo-build.test.mjs",
+	"test/contract/repo-gates.test.mjs",
+	"test/contract/safe-output-path.test.mjs",
+	"test/contract/script-lib.test.mjs",
+	"test/contract/verify-worker-release-inputs.test.mjs",
+	"test/contract/worker-acceptance-packet.test.mjs",
+	"test/contract/worker-gateway-handoff-archive.test.mjs",
+	"test/contract/worker-guide-contract.test.mjs",
+	"test/contract/worker-release-assets.test.mjs",
+	"test/contract/worker-release-inputs.test.mjs",
+];
+const WORKER_RELEASE_TESTS = [
+	"test/build-worker-release-artifact.test.mjs",
+	"test/gateway-protocol-consumer.test.mjs",
+	"test/worker-native-artifact.test.mjs",
+	"test/worker-release-installer.test.mjs",
+	"test/worker-release-package.test.mjs",
+];
+const LEGACY_COMPATIBILITY_TESTS = [
+	"test/contract/build-platform-binaries.test.mjs",
+	"test/contract/guide-contract.test.mjs",
+	"test/contract/release-contract.test.mjs",
+	"test/public-distribution.test.mjs",
+];
+
+function nodeTestCommand(testFiles) {
+	return `node --test ${testFiles.join(" ")}`;
+}
+
 function read(relative) {
 	return readFileSync(path.join(ROOT, relative), "utf8");
 }
@@ -33,6 +66,16 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	// `biome check`, not `biome lint`: it also verifies formatting, so an
 	// unformatted commit fails the gate instead of merely drifting.
 	assert.equal(manifest.scripts.lint, "biome check .");
+	assert.match(manifest.scripts.build, /npm run build:worker/u);
+	assert.match(manifest.scripts["build:worker"], /packages\/ceal-protocol run build/u);
+	for (const ownerPackage of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
+		assert.match(manifest.scripts["build:worker"], new RegExp(`${ownerPackage} run build`, "u"));
+		assert.match(manifest.scripts["test:unit"], new RegExp(`${ownerPackage} test`, "u"));
+	}
+	for (const frozenPackage of ["packages/ceal-protocol", "packages/ceal-operator-cli"]) {
+		assert.doesNotMatch(manifest.scripts["test:unit"], new RegExp(`${frozenPackage} test`, "u"));
+	}
+	assert.doesNotMatch(manifest.scripts["build:worker"], /packages\/ceal-operator-cli/u);
 });
 
 // The frozen packages are compatibility inputs this lane may not originate
@@ -584,31 +627,37 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 	assert.equal(check().status, 0);
 });
 
-// The reason this suite exists. `test:release` globs `test/*.test.mjs`, which the
-// pre-push hook never runs for a branch push — it runs `check:unit`. Every
-// repo-contract test written into `test/` was therefore invisible to the hook and
-// first failed on CI, twice in one session. Cheap contract tests live in
-// `test/contract/` and run inside `check:unit`; the expensive release-artifact
-// proofs stay in `test/`. A new file must land in exactly one of the two, because
-// landing in neither is the silent failure this guards.
-test("every test file under test/ belongs to exactly one suite", () => {
+// A glob once put frozen `cealctl` and legacy dual-release proofs back into the
+// worker pre-push/CI gate. Keep the three suites as explicit inventories: every
+// test is run somewhere, but Gateway-owned compatibility evidence cannot become
+// an accidental worker-source requirement.
+test("every test file under test/ belongs to one explicit worker or legacy suite", () => {
 	const scripts = manifest.scripts;
-	assert.equal(scripts["test:contract"], "node --test test/contract/*.test.mjs");
-	assert.match(scripts["test:release"], /^node --test test\/\*\.test\.mjs$/u);
-	// The two globs are exclusive: test/*.test.mjs cannot match test/contract/*.
+	assert.equal(scripts["test:contract"], nodeTestCommand(WORKER_CONTRACT_TESTS));
+	assert.equal(scripts["test:release"], nodeTestCommand(WORKER_RELEASE_TESTS));
+	assert.equal(scripts["test:legacy-compatibility"], nodeTestCommand(LEGACY_COMPATIBILITY_TESTS));
 	assert.match(scripts["check:unit"], /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:release/u);
+	assert.doesNotMatch(scripts["check:unit"], /legacy-compatibility/u);
+	assert.doesNotMatch(scripts.test, /legacy-compatibility/u);
 
-	const contract = readdirSync(path.join(ROOT, "test", "contract")).filter((name) => name.endsWith(".test.mjs"));
-	const release = readdirSync(path.join(ROOT, "test")).filter((name) => name.endsWith(".test.mjs"));
-	assert.ok(contract.length > 0 && release.length > 0);
+	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS, ...LEGACY_COMPATIBILITY_TESTS].sort();
+	const actual = [
+		...readdirSync(path.join(ROOT, "test", "contract"))
+			.filter((name) => name.endsWith(".test.mjs"))
+			.map((name) => `test/contract/${name}`),
+		...readdirSync(path.join(ROOT, "test"))
+			.filter((name) => name.endsWith(".test.mjs"))
+			.map((name) => `test/${name}`),
+	].sort();
+	assert.deepEqual(declared, actual);
 
-	// Any other directory under test/ would be globbed by neither script.
+	// Any other directory under test/ would be declared by neither inventory.
 	const directories = readdirSync(path.join(ROOT, "test"), { withFileTypes: true })
 		.filter((entry) => entry.isDirectory())
 		.map((entry) => entry.name);
-	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory is run by no suite; wire it up or use test/contract/");
+	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory needs an explicit suite inventory entry");
 });
 
 // The contract suite only helps if it stays fast enough to sit in the iteration
@@ -616,6 +665,8 @@ test("every test file under test/ belongs to exactly one suite", () => {
 // assertion would be flaky on a loaded machine — but a file that belongs in the
 // release tier is usually obvious by name.
 test("the contract suite stays small enough to run on every push", () => {
-	const contract = readdirSync(path.join(ROOT, "test", "contract")).filter((name) => name.endsWith(".test.mjs"));
-	assert.ok(contract.length <= 20, `test/contract has ${contract.length} files; re-check that each is still cheap`);
+	assert.ok(
+		WORKER_CONTRACT_TESTS.length <= 20,
+		`test:contract has ${WORKER_CONTRACT_TESTS.length} files; re-check that each is still cheap`,
+	);
 });

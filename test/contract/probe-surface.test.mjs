@@ -63,7 +63,6 @@ test("a declared non-read-only route is refused as a probe", () => {
 		["ceal", "session", "logout"],
 		["ceal", "guide", "register", "codex"],
 		["ceal", "update"],
-		["cealctl", "connectors", "apply", "--stdin"],
 	]) {
 		const result = probe(args);
 		assert.equal(result.status, 2, args.join(" "));

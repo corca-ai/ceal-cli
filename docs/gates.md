@@ -13,6 +13,12 @@ than merely drifting. `npm run lint:fix` applies every safe fix.
 `biome.json` excludes the frozen packages deliberately. Do not widen its
 `includes` to lint code this lane may not edit.
 
+The worker `check:unit` and `check` gates run only client/worker package tests
+and explicit worker contract/release lists. The frozen protocol is built only as
+the exact local input needed to type-check the client; its unit suite remains
+Gateway-owned. Frozen `cealctl` and legacy dual-release checks are available
+only through `npm run test:legacy-compatibility`, never through pre-push or CI.
+
 `lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
 style being introduced.
 
@@ -129,9 +135,9 @@ exists; it does not let anything ship. Plain existence was too weak a check for
 the request: every path in the tree satisfied it, so a one-character edit could
 keep a dead declaration alive by aiming it at `README.md`.
 
-Development motion survives that: `npm run check:protocol-dev` runs the protocol
-and client suites plus `verify-protocol-vendor-pin.mjs --development`, which
-reports the pin without the shippability assertion and stamps its own output
+Development motion survives that: `npm run check:protocol-dev` runs the client
+suite plus `verify-protocol-vendor-pin.mjs --development`, which reports the pin
+without the shippability assertion and stamps its own output
 `proof_level: development_only` with the non-claim spelled out. It is not release
 proof and not installed-worker proof, and no release, acceptance, or announcement
 path calls it.
@@ -207,7 +213,7 @@ Worker *dispatch* derives from the same table. Each runner reads a
 `CealSubcommandHandlers<parent, …>` table keyed by the declared route joined with
 spaces (`register codex`). That `Record` over a literal key union is total, so a
 row added to `CEAL_SUBCOMMANDS` without a handler fails `tsc` — inside
-`npm run build`, inside both gates. A worker route still needs its table entry
+`npm run build:worker`, inside both gates. A worker route still needs its table entry
 *and* its handler; what changed is that forgetting the handler is now a build
 failure naming the route rather than a misroute in the shipped binary.
 

@@ -69,8 +69,11 @@ deletion is authorized — so both copies stay.
 
 ## Gates
 
-- `npm run check:unit` is the iteration gate; `npm run check` is the final one,
-  and the release suite dominates its cost. Prefer the narrow one until closeout.
+- `npm run check:unit` is the worker-source iteration gate; `npm run check` is
+  the final worker gate, and its worker release suite dominates its cost. Frozen
+  Gateway compatibility tests run only through explicit
+  `npm run test:legacy-compatibility`, never pre-push or CI. Prefer the narrow
+  worker gate until closeout.
 - Time a gate with `time npm run check` on the host in hand rather than quoting a
   figure from a document. The recorded numbers went stale unnoticed once already,
   and a stale figure makes an honest run look like a regression under the
