@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
 	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
@@ -11,7 +12,7 @@ import {
 } from "./generated/leased-consumer-handoff.js";
 
 const CARRIER_CONTRACT = verifyEmbeddedCarrierContract();
-const CHANNEL_SCHEMA = CARRIER_CONTRACT.serviceChannelSchema;
+const CHANNEL_SCHEMAS = CARRIER_CONTRACT.serviceChannelSchemas;
 const RESULT_SCHEMA = CARRIER_CONTRACT.resultSchema;
 const MAX_CHANNEL_BYTES = CARRIER_CONTRACT.maximumChannelBytes;
 const MAX_REQUEST_BYTES = CARRIER_CONTRACT.maximumRequestBytes;
@@ -55,6 +56,8 @@ export interface LeasedConsumerCarrierRuntime {
 	readonly clearTimer?: (timer: unknown) => void;
 	/** Test-only URL validator; the shipped command always requires HTTPS. */
 	readonly validateServiceUrl?: (value: string, requiredPath: string) => URL;
+	/** Test seam only. The shipped command uses one fixed-path Unix socket POST. */
+	readonly requestUnixSocket?: (input: { readonly socketPath: string; readonly path: string; readonly method: string; readonly credential: string; readonly body: string }) => Promise<UnixSocketResponse>;
 	/** Test seam only; the shipped command always verifies the generated handoff. */
 	readonly loadHandoff?: () => CarrierHandoff;
 }
@@ -96,21 +99,9 @@ export async function runLeasedConsumerCarrier(
 		} catch {
 			return localFailure("service_channel_unavailable");
 		}
-		const fetchFn = runtime.fetchFn ?? globalThis.fetch;
-		if (typeof fetchFn !== "function") return localFailure("service_call_failed");
 		try {
-			const response = await fetchFn(channel.url, {
-				method: handoff.method,
-				headers: {
-					Authorization: `Bearer ${channel.credential}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify(request),
-				redirect: "error",
-			});
-			if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.headers.get("content-type")))
-				return localFailure("service_call_failed");
-			const responseBytes = await readBoundedWebResponse(response, MAX_RESPONSE_BYTES);
+			const responseBytes = await sendCarrierRequest(channel, request, handoff, runtime);
+			if (responseBytes === null) return localFailure("service_call_failed");
 			const decoded = parseStrictJson(responseBytes);
 			if (!sameJson(decoded, handoff.unavailableBody)) return localFailure("service_call_failed");
 			return localFailure("leased_consumer_call_unavailable");
@@ -233,17 +224,52 @@ function parseCarrierRequest(bytes: Uint8Array, handoff: CarrierHandoff): JsonRe
 	return value;
 }
 
+async function sendCarrierRequest(channel: ServiceChannel, request: JsonRecord, handoff: CarrierHandoff, runtime: LeasedConsumerCarrierRuntime): Promise<Uint8Array | null> {
+	const body = JSON.stringify(request);
+	if (channel.kind === "https") {
+		const fetchFn = runtime.fetchFn ?? globalThis.fetch;
+		if (typeof fetchFn !== "function") return null;
+		const response = await fetchFn(channel.url, {
+			method: handoff.method,
+			headers: { Authorization: `Bearer ${channel.credential}`, "Content-Type": "application/json" },
+			body,
+			redirect: "error",
+		});
+		if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.headers.get("content-type"))) return null;
+		return readBoundedWebResponse(response, MAX_RESPONSE_BYTES);
+	}
+	const response = await (runtime.requestUnixSocket ?? postUnixSocket)({
+		socketPath: channel.socketPath,
+		path: handoff.servicePath,
+		method: handoff.method,
+		credential: channel.credential,
+		body,
+	});
+	if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.contentType)) return null;
+	if (response.bytes.byteLength > MAX_RESPONSE_BYTES) return null;
+	return response.bytes;
+}
+
 function parseServiceChannel(bytes: Uint8Array, requiredPath: string, validateUrl: (value: string, path: string) => URL): ServiceChannel {
 	if (bytes.byteLength > MAX_CHANNEL_BYTES) throw new Error("channel_too_large");
 	const value = parseStrictJson(bytes);
-	if (!plainRecord(value) || !sameKeys(value, ["schema_version", "service_call_url", "service_credential"]))
-		throw new Error("invalid_channel");
-	if (value.schema_version !== CHANNEL_SCHEMA || typeof value.service_call_url !== "string" || typeof value.service_credential !== "string")
-		throw new Error("invalid_channel");
-	const credential = value.service_credential;
-	if (Buffer.byteLength(credential, "utf8") === 0 || Buffer.byteLength(credential, "utf8") > 4096 || !/^[\x21-\x7e]+$/u.test(credential))
-		throw new Error("invalid_channel");
-	return { url: validateUrl(value.service_call_url, requiredPath), credential };
+	if (!plainRecord(value) || typeof value.schema_version !== "string" || !CHANNEL_SCHEMAS.includes(value.schema_version)) throw new Error("invalid_channel");
+	if (value.schema_version === "ceal.leased_consumer_service_channel.v1") {
+		if (!sameKeys(value, ["schema_version", "service_call_url", "service_credential"]) || typeof value.service_call_url !== "string") throw new Error("invalid_channel");
+		return { kind: "https", url: validateUrl(value.service_call_url, requiredPath), credential: validCredential(value.service_credential) };
+	}
+	if (!sameKeys(value, ["schema_version", "service_credential", "socket_path", "transport"]) || value.transport !== "unix_socket" || typeof value.socket_path !== "string") throw new Error("invalid_channel");
+	return { kind: "unix_socket", socketPath: validSocketPath(value.socket_path), credential: validCredential(value.service_credential) };
+}
+
+function validCredential(value: unknown): string {
+	if (typeof value !== "string" || Buffer.byteLength(value, "utf8") === 0 || Buffer.byteLength(value, "utf8") > 4096 || !/^[\x21-\x7e]+$/u.test(value)) throw new Error("invalid_channel");
+	return value;
+}
+
+function validSocketPath(value: string): string {
+	if (!value.startsWith("/") || value.length > 1024 || /[\r\n\0]/u.test(value) || value.endsWith("/admin-gateway.sock")) throw new Error("invalid_channel");
+	return value;
 }
 
 function validateProductionServiceUrl(value: string, requiredPath: string): URL {
@@ -331,9 +357,12 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 		value.stdin.schema_version !== "ceal.gateway_leased_consumer_call_request.v1" ||
 		!Number.isSafeInteger(value.stdin.maximum_bytes) ||
 		!plainRecord(value.service_channel) ||
-		!sameKeys(value.service_channel, ["child_fd", "deadline_ms", "maximum_bytes", "schema_version"]) ||
+		!sameKeys(value.service_channel, ["child_fd", "deadline_ms", "maximum_bytes", "schema_versions"]) ||
 		value.service_channel.child_fd !== 4 ||
-		typeof value.service_channel.schema_version !== "string" ||
+		!Array.isArray(value.service_channel.schema_versions) ||
+		value.service_channel.schema_versions.length !== 2 ||
+		value.service_channel.schema_versions[0] !== "ceal.leased_consumer_service_channel.v1" ||
+		value.service_channel.schema_versions[1] !== "ceal.leased_consumer_service_channel.v2" ||
 		!Number.isSafeInteger(value.service_channel.maximum_bytes) ||
 		!Number.isSafeInteger(value.service_channel.deadline_ms) ||
 		!plainRecord(value.result) ||
@@ -355,7 +384,7 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 	return {
 		argv: value.argv[0],
 		maximumRequestBytes: value.stdin.maximum_bytes as number,
-		serviceChannelSchema: value.service_channel.schema_version,
+		serviceChannelSchemas: value.service_channel.schema_versions as readonly string[],
 		maximumChannelBytes: value.service_channel.maximum_bytes as number,
 		channelDeadlineMs: value.service_channel.deadline_ms as number,
 		resultSchema: value.result.schema_version,
@@ -382,6 +411,39 @@ async function readBoundedWebResponse(response: globalThis.Response, maximum: nu
 	} finally {
 		reader.releaseLock();
 	}
+}
+
+function postUnixSocket(input: { readonly socketPath: string; readonly path: string; readonly method: string; readonly credential: string; readonly body: string }): Promise<UnixSocketResponse> {
+	const body = Buffer.from(input.body, "utf8");
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const finish = (callback: () => void) => {
+			if (settled) return;
+			settled = true;
+			callback();
+		};
+		const request = httpRequest({
+			socketPath: input.socketPath,
+			path: input.path,
+			method: input.method,
+			headers: { Authorization: `Bearer ${input.credential}`, "Content-Type": "application/json", "Content-Length": String(body.byteLength) },
+		}, (response) => {
+			const chunks: Buffer[] = []; let total = 0;
+			response.on("data", (chunk: Buffer) => {
+				total += chunk.byteLength;
+				if (total > MAX_RESPONSE_BYTES) {
+					request.destroy();
+					finish(() => reject(new Error("response_too_large")));
+					return;
+				}
+				chunks.push(chunk);
+			});
+			response.once("error", () => finish(() => reject(new Error("socket_response_failed"))));
+			response.once("end", () => finish(() => resolve({ status: response.statusCode ?? 0, contentType: response.headers["content-type"], bytes: new Uint8Array(Buffer.concat(chunks)) })));
+		});
+		request.once("error", () => finish(() => reject(new Error("socket_request_failed"))));
+		request.end(body);
+	});
 }
 
 function parseStrictJson(bytes: Uint8Array): unknown {
@@ -529,13 +591,24 @@ function onceAsync(action: () => Promise<void>): () => Promise<void> {
 	};
 }
 
-function isJsonContentType(value: string | null): boolean {
-	return value !== null && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
+function isJsonContentType(value: string | string[] | null | undefined): boolean {
+	return typeof value === "string" && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
 }
 
-interface ServiceChannel {
+type ServiceChannel = {
+	readonly kind: "https";
 	readonly url: URL;
 	readonly credential: string;
+} | {
+	readonly kind: "unix_socket";
+	readonly socketPath: string;
+	readonly credential: string;
+}
+
+interface UnixSocketResponse {
+	readonly status: number;
+	readonly contentType: string | string[] | undefined;
+	readonly bytes: Uint8Array;
 }
 
 interface CarrierHandoff {
@@ -550,7 +623,7 @@ interface CarrierHandoff {
 interface CarrierContract {
 	readonly argv: string;
 	readonly maximumRequestBytes: number;
-	readonly serviceChannelSchema: string;
+	readonly serviceChannelSchemas: readonly string[];
 	readonly maximumChannelBytes: number;
 	readonly channelDeadlineMs: number;
 	readonly resultSchema: string;

@@ -7,7 +7,10 @@
   },
   "service_channel": {
     "child_fd": 4,
-    "schema_version": "ceal.leased_consumer_service_channel.v1",
+    "schema_versions": [
+      "ceal.leased_consumer_service_channel.v1",
+      "ceal.leased_consumer_service_channel.v2"
+    ],
     "maximum_bytes": 8192,
     "deadline_ms": 2000
   },

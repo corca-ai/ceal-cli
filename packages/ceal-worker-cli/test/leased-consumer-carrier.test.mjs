@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -55,11 +59,63 @@ test("private carrier derives its one POST from the embedded handoff and decodes
 	assert.equal(LEASED_CONSUMER_CARRIER_ARGV, carrierContract.argv[0]);
 });
 
+test("v2 protected channel uses only its fixed Unix socket path and never falls back to fetch", async () => {
+	const localChannel = encoder.encode(
+		JSON.stringify({
+			schema_version: "ceal.leased_consumer_service_channel.v2",
+			transport: "unix_socket",
+			socket_path: "/run/user/1000/ceal/leased-consumer-call-v2.sock",
+			service_credential: "private-service-credential",
+		}),
+	);
+	let fetchCalls = 0;
+	const calls = [];
+	const result = await runLeasedConsumerCarrier(requestBytes, {
+		readChannel: async () => localChannel,
+		closeChannel: async () => {},
+		fetchFn: async () => { fetchCalls += 1; throw new Error("v2 must not fetch"); },
+		requestUnixSocket: async (input) => {
+			calls.push(input);
+			return { status: 503, contentType: "application/json", bytes: encoder.encode(JSON.stringify({ ok: false, error_code: "leased_consumer_call_unavailable" })) };
+		},
+	});
+	assert.equal(fetchCalls, 0);
+	assert.deepEqual(calls, [{
+		socketPath: "/run/user/1000/ceal/leased-consumer-call-v2.sock",
+		path: "/api/ceal/agent/v1/call",
+		method: "POST",
+		credential: "private-service-credential",
+		body: JSON.stringify(request),
+	}]);
+	assert.equal(result.error_code, "leased_consumer_call_unavailable");
+});
+
+test("v2 shipped transport performs the bounded fixed-route post over a Unix socket", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-socket-"));
+	const socketPath = join(root, "leased-consumer-call-v2.sock");
+	let observed = null;
+	const server = createServer(async (incoming, response) => {
+		let body = "";
+		for await (const chunk of incoming) body += String(chunk);
+		observed = { method: incoming.method, path: incoming.url, authorization: incoming.headers.authorization, contentType: incoming.headers["content-type"], body };
+		response.writeHead(503, { "content-type": "application/json" });
+		response.end(JSON.stringify({ ok: false, error_code: "leased_consumer_call_unavailable" }));
+	});
+	await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+	t.after(async () => { await new Promise((resolve) => server.close(resolve)); await rm(root, { recursive: true, force: true }); });
+	const localChannel = encoder.encode(JSON.stringify({ schema_version: "ceal.leased_consumer_service_channel.v2", transport: "unix_socket", socket_path: socketPath, service_credential: "private-service-credential" }));
+	const result = await runLeasedConsumerCarrier(requestBytes, { readChannel: async () => localChannel, closeChannel: async () => {}, fetchFn: async () => { throw new Error("v2 must not fetch"); } });
+	assert.equal(result.error_code, "leased_consumer_call_unavailable");
+	assert.deepEqual(observed, { method: "POST", path: "/api/ceal/agent/v1/call", authorization: "Bearer private-service-credential", contentType: "application/json", body: JSON.stringify(request) });
+});
+
 test("bad request bytes and every protected-channel failure make zero HTTP requests", async () => {
 	const badRequests = [
 		encoder.encode(
 			'{"schema_version":"ceal.gateway_leased_consumer_call_request.v1","schema_version":"ceal.gateway_leased_consumer_call_request.v1"}',
 		),
+		encoder.encode(JSON.stringify({ schema_version: "ceal.leased_consumer_service_channel.v2", transport: "unix_socket", socket_path: "/run/user/1000/ceal/admin-gateway.sock", service_credential: "secret" })),
+		encoder.encode(JSON.stringify({ schema_version: "ceal.leased_consumer_service_channel.v2", transport: "unix_socket", socket_path: "https://gateway.example/api/ceal/agent/v1/call", service_credential: "secret" })),
 		encoder.encode(JSON.stringify({ ...request, runner_ref: "runner:spoofed" })),
 		new Uint8Array(32 * 1024 + 1),
 		new Uint8Array([0xc3]),

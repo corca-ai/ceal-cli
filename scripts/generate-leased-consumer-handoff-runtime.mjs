@@ -90,9 +90,12 @@ export function readCarrierContract(file) {
 		!exact(value.stdin, ["schema_version", "maximum_bytes"]) ||
 		value.stdin.schema_version !== "ceal.gateway_leased_consumer_call_request.v1" ||
 		value.stdin.maximum_bytes !== 32 * 1024 ||
-		!exact(value.service_channel, ["child_fd", "schema_version", "maximum_bytes", "deadline_ms"]) ||
+		!exact(value.service_channel, ["child_fd", "schema_versions", "maximum_bytes", "deadline_ms"]) ||
 		value.service_channel.child_fd !== 4 ||
-		value.service_channel.schema_version !== "ceal.leased_consumer_service_channel.v1" ||
+		!Array.isArray(value.service_channel.schema_versions) ||
+		value.service_channel.schema_versions.length !== 2 ||
+		value.service_channel.schema_versions[0] !== "ceal.leased_consumer_service_channel.v1" ||
+		value.service_channel.schema_versions[1] !== "ceal.leased_consumer_service_channel.v2" ||
 		value.service_channel.maximum_bytes !== 8 * 1024 ||
 		value.service_channel.deadline_ms !== 2_000 ||
 		!exact(value.result, ["schema_version", "maximum_bytes", "allowed_error_codes"]) ||
