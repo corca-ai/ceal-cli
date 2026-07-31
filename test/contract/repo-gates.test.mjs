@@ -22,6 +22,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/verify-worker-release-inputs.test.mjs",
 	"test/contract/worker-acceptance-packet.test.mjs",
 	"test/contract/worker-gateway-handoff-archive.test.mjs",
+	"test/contract/worker-gateway-protocol-handoff-archive.test.mjs",
 	"test/contract/worker-guide-contract.test.mjs",
 	"test/contract/worker-release-assets.test.mjs",
 	"test/contract/worker-release-inputs.test.mjs",
