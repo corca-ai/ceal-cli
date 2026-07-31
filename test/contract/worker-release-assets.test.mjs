@@ -12,6 +12,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 import {
 	composeWorkerReleaseAssets,
 	mergeWorkerReleaseAssetSets,
+	parsePublishedWorkerReleaseInventory,
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.mjs";
 import {
@@ -49,7 +50,7 @@ function installerAllowlist() {
 function releasePlatforms() {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github", "workflows", "ceal-release.yml"), "utf8");
 	const platforms = parse(workflow).jobs?.build?.strategy?.matrix?.include?.map((entry) => entry.platform) ?? [];
-	assert.ok(platforms.length >= 4, `ceal-release.yml build matrix names only ${platforms.length} platforms`);
+	assert.ok(platforms.length >= 3, `ceal-release.yml build matrix names only ${platforms.length} platforms`);
 	return platforms;
 }
 
@@ -291,7 +292,7 @@ test("worker release workflow builds, merges, and signs every contracted release
 	const parsed = parse(workflow);
 	const contract = JSON.parse(readFileSync(path.join(REPO_ROOT, "release-contract.json"), "utf8"));
 	const platforms = contract.native_build_matrix.signed_release_platforms;
-	assert.deepEqual([...platforms].sort(), ["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
+	assert.deepEqual([...platforms].sort(), ["darwin-arm64", "linux-amd64", "linux-arm64"]);
 
 	const built = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
 	assert.deepEqual([...built].sort(), [...platforms].sort(), "every contracted platform needs a build runner");
@@ -305,8 +306,14 @@ test("worker release workflow builds, merges, and signs every contracted release
 	// The rollback lane re-verifies this same set before moving stable, so it is
 	// a fifth platform-naming site and drifts silently without this assertion.
 	const rollback = parse(readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-worker-stable-rollback.yml"), "utf8"));
-	const rollbackSigning = bashArray(runStepContaining(rollback.jobs.rollback, "cosign verify-blob"), "primary");
-	assert.deepEqual([...rollbackSigning].sort(), [...signing].sort(), "rollback must re-verify the signed set");
+	const rollbackInventory = runStepContaining(rollback.jobs.rollback, "parsePublishedWorkerReleaseInventory");
+	const rollbackSignature = runStepContaining(rollback.jobs.rollback, "SHA256SUMS.pem");
+	assert.match(rollbackInventory, /Verify the signed inventory itself before it is allowed to name any[\s\S]+later URL/u);
+	assert.match(rollbackSignature, /cosign verify-blob/u);
+	assert.ok(
+		rollbackSignature.indexOf("cosign verify-blob") < rollbackInventory.indexOf("parsePublishedWorkerReleaseInventory"),
+		"rollback must verify SHA256SUMS before parsing its asset names",
+	);
 	const manifestLoop = /for platform in ([^;]+); do/u.exec(inventory)?.[1].trim().split(/\s+/u);
 
 	assert.deepEqual([...manifestLoop].sort(), [...platforms].sort(), "manifest check must cover every platform");
@@ -323,6 +330,42 @@ test("worker release workflow builds, merges, and signs every contracted release
 	}
 });
 
+test("published worker inventory parser accepts both historical and current release platform sets", () => {
+	assert.deepEqual(
+		parsePublishedWorkerReleaseInventory(publishedInventory(["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"])),
+		[
+			"THIRD_PARTY_NOTICES.txt",
+			"ceal-darwin-amd64",
+			"ceal-darwin-arm64",
+			"ceal-guide-SKILL.md",
+			"ceal-linux-amd64",
+			"ceal-linux-arm64",
+			"ceal-worker-release-manifest-darwin-amd64.json",
+			"ceal-worker-release-manifest-darwin-arm64.json",
+			"ceal-worker-release-manifest-linux-amd64.json",
+			"ceal-worker-release-manifest-linux-arm64.json",
+			"install-ceal.sh",
+		],
+	);
+	assert.equal(parsePublishedWorkerReleaseInventory(publishedInventory(["linux-arm64", "linux-amd64", "darwin-arm64"])).length, 9);
+});
+
+test("published worker inventory parser rejects duplicate, partial, and widened rollback input", () => {
+	const complete = publishedInventory(["linux-arm64"]);
+	assert.throws(
+		() => parsePublishedWorkerReleaseInventory(`${complete}${complete.split("\n")[0]}\n`),
+		hasCode("published_inventory_malformed"),
+	);
+	assert.throws(
+		() => parsePublishedWorkerReleaseInventory(complete.replace("ceal-worker-release-manifest-linux-arm64.json", "unexpected.bin")),
+		hasCode("published_inventory_malformed"),
+	);
+	assert.throws(
+		() => parsePublishedWorkerReleaseInventory(complete.replace(/^.*ceal-linux-arm64\n/mu, "")),
+		hasCode("published_inventory_malformed"),
+	);
+});
+
 function runStepContaining(job, needle) {
 	const found = job.steps.filter((step) => (step.run ?? "").includes(needle));
 	assert.equal(found.length, 1, `expected exactly one step containing ${needle}`);
@@ -335,6 +378,16 @@ function bashArray(script, name) {
 	const body = new RegExp(`${name}=\\(([^)]*)\\)`, "u").exec(script);
 	assert.ok(body, `expected a ${name}=( ... ) array`);
 	return body[1].trim().split(/\s+/u);
+}
+
+function publishedInventory(platforms) {
+	const names = [
+		"THIRD_PARTY_NOTICES.txt",
+		"ceal-guide-SKILL.md",
+		"install-ceal.sh",
+		...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
+	];
+	return `${names.map((name) => `${digest(name)}  ${name}`).join("\n")}\n`;
 }
 
 // The build job is the only one that runs on macOS runners, which ship no GNU

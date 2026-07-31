@@ -21,8 +21,44 @@ const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
 const PRIVATE_CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const SHARED_ASSETS = Object.freeze([GUIDE_ASSET, NOTICE_NAME, INSTALLER_NAME]);
 const PLATFORM_PATTERN = /^(?:linux|darwin)-(?:arm64|amd64)$/u;
+// A published release may predate the current build matrix. Keep this bounded
+// historical vocabulary solely for rollback verification; it is not permission
+// for a future release to produce every one of these platforms.
+const HISTORICAL_RELEASE_PLATFORMS = Object.freeze(["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"]);
 
 export const WorkerReleaseAssetsError = codedErrorClass("WorkerReleaseAssetsError");
+
+/**
+ * Strictly names the signed primary assets in an already-published worker
+ * inventory. Rollback verifies SHA256SUMS itself before calling this parser;
+ * the parser then prevents that trusted inventory from widening the rollback
+ * writer's URL/path vocabulary beyond complete historical worker pairs.
+ */
+export function parsePublishedWorkerReleaseInventory(bytes) {
+	const lines = String(bytes).split("\n").filter(Boolean);
+	if (lines.length === 0) fail("published_inventory_malformed", "Published worker SHA256SUMS is empty.");
+	const entries = lines.map((line) => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
+	if (entries.some((entry) => entry === null)) fail("published_inventory_malformed", "Published worker SHA256SUMS is malformed.");
+	const names = entries.map((entry) => entry[2]);
+	if (new Set(names).size !== names.length) fail("published_inventory_malformed", "Published worker SHA256SUMS contains duplicate entries.");
+	const named = new Set(names);
+	for (const shared of SHARED_ASSETS)
+		if (!named.has(shared)) fail("published_inventory_malformed", `Published worker SHA256SUMS is missing ${shared}.`);
+	let platformCount = 0;
+	for (const platform of HISTORICAL_RELEASE_PLATFORMS) {
+		const binary = `ceal-${platform}`;
+		const manifest = `ceal-worker-release-manifest-${platform}.json`;
+		const binaryPresent = named.has(binary);
+		const manifestPresent = named.has(manifest);
+		if (binaryPresent !== manifestPresent)
+			fail("published_inventory_malformed", `Published worker SHA256SUMS has an incomplete platform pair for ${platform}.`);
+		if (binaryPresent) platformCount += 1;
+	}
+	if (platformCount === 0) fail("published_inventory_malformed", "Published worker SHA256SUMS names no platform.");
+	if (names.length !== SHARED_ASSETS.length + platformCount * 2)
+		fail("published_inventory_malformed", "Published worker SHA256SUMS contains an unexpected asset.");
+	return [...named].sort();
+}
 
 export async function composeWorkerReleaseAssets(options = {}, dependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);

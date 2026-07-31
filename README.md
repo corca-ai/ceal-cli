@@ -242,14 +242,15 @@ curl -fsSL "https://ceal.borca.ai/releases/worker/$TAG/install-ceal.sh" \
 As with any `curl | sh` installer, this initial bootstrap deliberately trusts
 the TLS-authenticated release origin for the shell script. Cosign verification
 begins before any worker executable is accepted; the bootstrap script itself
-is re-verified as a signed versioned asset during installation. Supported platforms: `linux-arm64`,
-`linux-amd64`, `darwin-arm64`, `darwin-amd64`. The installer verifies every
+is re-verified as a signed versioned asset during installation. New releases target
+`linux-arm64`, `linux-amd64`, and `darwin-arm64` (Apple Silicon). Existing Intel
+macOS releases remain immutable historical artifacts but receive no new stable update.
+The installer verifies every
 asset against its cosign keyless identity and the signed `SHA256SUMS`
 inventory before an atomic generation switch under
 `$CEAL_INSTALL_DIR/.ceal-cli/worker/` (default `~/.local/bin`), and the
 installed `ceal update` re-runs the release-staged installer stable-only.
-The tagged CI lane is configured to build and sign all four platforms; no
-four-platform tag has been published yet. A Mac checkout
+The tagged CI lane is configured to build and sign these three platforms. A Mac checkout
 can still produce an unsigned local candidate for diagnosis
 ([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)), but the
 installer fail-closes on it, so it is never an install or acceptance path.

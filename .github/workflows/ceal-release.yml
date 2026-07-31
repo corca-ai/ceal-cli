@@ -66,18 +66,15 @@ jobs:
           - platform: linux-amd64
             runner: ubuntu-24.04
             validate_source: "1"
-          # darwin runners are enabled (operator decision, 2026-07-25): a signed
-          # darwin release is the only supported macOS install path, because
+          # darwin-arm64 is the only supported macOS install path: a signed
+          # release is required because
           # install-ceal.sh verifies every asset against its tag-bound OIDC
           # signing identity and has no unsigned bypass. A manual Mac build
           # cannot carry that identity. Every job below that names a platform
-          # must name all four; the merge tooling is already platform-generic.
+          # must name all three; the merge tooling is already platform-generic.
           - platform: darwin-arm64
             runner: macos-15
             validate_source: "1"
-          - platform: darwin-amd64
-            runner: macos-15-intel
-            validate_source: "0"
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact tag
@@ -107,8 +104,8 @@ jobs:
       # and no check.yml leg is arm64 so nothing else could have caught it.
       #
       # `validate_source` runs this once per architecture family rather than
-      # once per platform. The source is identical on all four legs, so three of
-      # the four runs were re-proving the same commit; the two that remain are
+      # once per platform. The source is identical on all three legs, so two of
+      # the three runs were re-proving the same commit; the two that remain are
       # the one that can run the platform proofs (`linux-amd64`) and one macOS
       # leg, so a macOS-only source break still fails before anything is signed.
       #
@@ -213,11 +210,6 @@ jobs:
         with:
           name: ceal-worker-release-${{ github.sha }}-darwin-arm64
           path: handoff/darwin-arm64
-      - name: Download exact darwin-amd64 build handoff
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ceal-worker-release-${{ github.sha }}-darwin-amd64
-          path: handoff/darwin-amd64
       - name: Merge one worker release inventory
         id: release-set
         run: |
@@ -227,7 +219,6 @@ jobs:
             --input "$PWD/handoff/linux-arm64" \
             --input "$PWD/handoff/linux-amd64" \
             --input "$PWD/handoff/darwin-arm64" \
-            --input "$PWD/handoff/darwin-amd64" \
             --json
           (cd "$RUNNER_TEMP/dist" && sha256sum -c SHA256SUMS)
           digest="$(sha256sum "$RUNNER_TEMP/dist/SHA256SUMS" | cut -d' ' -f1)"
@@ -279,10 +270,10 @@ jobs:
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -not -name '.*' -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
-            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-darwin-amd64 ceal-darwin-arm64 ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-darwin-amd64.json ceal-worker-release-manifest-darwin-arm64.json ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
+            "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-darwin-arm64 ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-darwin-arm64.json ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
             || { echo "Unexpected worker release inventory" >&2; exit 1; }
           (cd dist && sha256sum -c SHA256SUMS)
-          for platform in linux-arm64 linux-amd64 darwin-arm64 darwin-amd64; do
+          for platform in linux-arm64 linux-amd64 darwin-arm64; do
             manifest="dist/ceal-worker-release-manifest-$platform.json"
             grep -F "\"version\": \"${TAG#ceal-v}\"" "$manifest" >/dev/null
             grep -F "\"platform\": \"$platform\"" "$manifest" >/dev/null
@@ -300,12 +291,10 @@ jobs:
             [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
           done
           primary=(
-            ceal-linux-arm64 ceal-linux-amd64
-            ceal-darwin-arm64 ceal-darwin-amd64
+            ceal-linux-arm64 ceal-linux-amd64 ceal-darwin-arm64
             ceal-worker-release-manifest-linux-arm64.json
             ceal-worker-release-manifest-linux-amd64.json
             ceal-worker-release-manifest-darwin-arm64.json
-            ceal-worker-release-manifest-darwin-amd64.json
             ceal-guide-SKILL.md THIRD_PARTY_NOTICES.txt SHA256SUMS install-ceal.sh
           )
           expected=()

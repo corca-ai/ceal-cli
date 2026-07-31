@@ -41,6 +41,14 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_RELEASE_CLOUDFLARE_API_TOKEN }}
     steps:
+      - name: Check out inventory verifier
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22.22.1
       - name: Install cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
       - name: Re-verify an immutable worker release, then move stable
@@ -51,33 +59,42 @@ jobs:
           for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
             [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
           done
-          # Must stay identical to the release lane's signing array: this set is
-          # both what sha256sum -c checks against the tag's SHA256SUMS and what
-          # cosign re-verifies before the stable pointer moves. A platform
-          # missing here fails the checksum pass and, if it did not, would
-          # advance stable on partial signature proof.
-          primary=(
-            ceal-linux-arm64 ceal-linux-amd64
-            ceal-darwin-arm64 ceal-darwin-amd64
-            ceal-worker-release-manifest-linux-arm64.json
-            ceal-worker-release-manifest-linux-amd64.json
-            ceal-worker-release-manifest-darwin-arm64.json
-            ceal-worker-release-manifest-darwin-amd64.json
-            ceal-guide-SKILL.md THIRD_PARTY_NOTICES.txt SHA256SUMS install-ceal.sh
-          )
           readback_dir="$RUNNER_TEMP/ceal-worker-rollback-readback"
           mkdir -p "$readback_dir"
           version_url="$CEAL_RELEASE_ORIGIN/worker/$TAG"
-          for asset in "${primary[@]}"; do
+          identity="https://github.com/corca-ai/ceal-cli/.github/workflows/ceal-release.yml@refs/tags/$TAG"
+          # Verify the signed inventory itself before it is allowed to name any
+          # later URL. The parser then accepts only shared assets and complete
+          # pairs from the bounded historical platform vocabulary, so rollback
+          # can validate an older four-platform tag and a future three-platform
+          # tag without treating arbitrary signed names as writer authority.
+          for asset in SHA256SUMS; do
             curl --fail --silent --show-error --location "$version_url/$asset" --output "$readback_dir/$asset"
             curl --fail --silent --show-error --location "$version_url/$asset.sig" --output "$readback_dir/$asset.sig"
             curl --fail --silent --show-error --location "$version_url/$asset.pem" --output "$readback_dir/$asset.pem"
           done
-          (
-            cd "$readback_dir"
-            sha256sum -c SHA256SUMS
+          cosign verify-blob \
+            --certificate "$readback_dir/SHA256SUMS.pem" \
+            --signature "$readback_dir/SHA256SUMS.sig" \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-repository "corca-ai/ceal-cli" \
+            --certificate-github-workflow-ref "refs/tags/$TAG" \
+            "$readback_dir/SHA256SUMS" >/dev/null
+          mapfile -t inventory_assets < <(
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              import { parsePublishedWorkerReleaseInventory } from "./scripts/build-worker-release-assets.mjs";
+              for (const asset of parsePublishedWorkerReleaseInventory(readFileSync(process.argv[1], "utf8"))) console.log(asset);
+            ' "$readback_dir/SHA256SUMS"
           )
-          identity="https://github.com/corca-ai/ceal-cli/.github/workflows/ceal-release.yml@refs/tags/$TAG"
+          primary=(SHA256SUMS "${inventory_assets[@]}")
+          for asset in "${inventory_assets[@]}"; do
+            curl --fail --silent --show-error --location "$version_url/$asset" --output "$readback_dir/$asset"
+            curl --fail --silent --show-error --location "$version_url/$asset.sig" --output "$readback_dir/$asset.sig"
+            curl --fail --silent --show-error --location "$version_url/$asset.pem" --output "$readback_dir/$asset.pem"
+          done
+          (cd "$readback_dir" && sha256sum -c SHA256SUMS)
           for asset in "${primary[@]}"; do
             cosign verify-blob \
               --certificate "$readback_dir/$asset.pem" \
