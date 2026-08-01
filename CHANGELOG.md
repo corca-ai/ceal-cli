@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.71.0 (unreleased)
+## 0.71.0 (`ceal-v0.71.0`)
 
 The first worker release candidate that consumes the Gateway **protocol-only**
 handoff, `gateway-protocol-handoff-v0.71.6`.
@@ -27,8 +27,10 @@ handoff, `gateway-protocol-handoff-v0.71.6`.
   and protocol subtree as the rest of the packet. This repository implements no
   control surface, and this claims none.
 
-This candidate is not a release, installation proof, Gateway apply,
-email-delivery proof, or device acceptance record.
+Released and published, with a clean-machine `linux-amd64` proof: the signed
+binary was fetched from the public origin, verified against the tag's cosign
+identity, and run. This is not an installation-script proof, not a Gateway
+apply, not an email-delivery proof, and not a device acceptance record.
 
 ## 0.70.0 (`ceal-v0.70.0`)
 

@@ -1,7 +1,7 @@
 # Session Handoff
 Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.6`(protocol-only 팩킷)을 검증·소비했고,
-`ceal-v0.71.0` 워커 릴리스 후보가 로컬에서 전부 초록이다.** 남은 건 **푸시·태그 승인**과
-여전히 **Mac 증거**다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
+`ceal-v0.71.0`이 릴리스·게시됐다(stable 이동 완료).** 남은 실질 관문은 여전히 **Mac 증거**다.
+이 레인은 `corca-ai/ceal-cli`만 다룬다.
 
 ## 2026-08-01 — protocol-only 핸드오프 소비
 
@@ -97,11 +97,15 @@ named-device acceptance record.
 
 ## Current State
 
-- **`ceal-v0.71.0` 후보**: 소스 커밋 로컬 준비 완료. `npm run check` 초록(**36.4s**, narnia,
-  2026-08-01). 실아카이브로 `release:worker:inputs` 해석 성공, `linux-amd64` compose 성공,
-  합성 바이너리 `ceal version` → `0.71.0` / protocol `1.3.0`. **아직 푸시·태그 안 함.**
-- **stable 포인터는 `ceal-v0.70.0`**(`worker/stable/ceal-worker-stable-release.json`).
-  `ceal-v0.70.0`은 게시돼 있다.
+- **`ceal-v0.71.0` 게시됨.** 소스 커밋 `d07300f…`, 릴리스 run `30686719029`(성공), 네 플랫폼
+  전부 서명·게시. stable 포인터가 `0.70.0` → `0.71.0`으로 이동
+  (`sha256sums_sha256 dbdc5e5b…`). 태그 전에 브랜치 게이트 `30686625997` 초록 확인.
+  `npm run check` **36.4s**(narnia, 36코어).
+- **clean-machine linux-amd64 증거**: 공개 origin에서만 받아 `cosign verify-blob` **Verified
+  OK**(identity `…/ceal-release.yml@refs/tags/ceal-v0.71.0`), 바이너리 sha256 `c087bd6f…`,
+  `ceal version` → `0.71.0` / protocol `1.3.0`, signed manifest가 protocol `0.71.6`·
+  producer `cd350024…`·subtree `3ca6fe3a…`를 바인딩. **설치 스크립트 증거도 실세션도 아니다.**
+- **반환 패킷**: [to-gateway-lane-protocol-handoff-v0.71.6-consumed-and-released](requests/2026-08-01-to-gateway-lane-protocol-handoff-v0.71.6-consumed-and-released.md).
 - **lock은 이제 `gateway-protocol-handoff-v0.71.6`**: producer `cd350024…`, tree `24897031…`,
   protocol subtree `3ca6fe3a…`, archive `6a979c63…`, manifest `ab2f0be8…`,
   protocol tgz `fa841862…`, Actions run `30684849631`.
