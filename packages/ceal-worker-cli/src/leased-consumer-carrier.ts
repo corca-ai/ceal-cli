@@ -57,7 +57,13 @@ export interface LeasedConsumerCarrierRuntime {
 	/** Test-only URL validator; the shipped command always requires HTTPS. */
 	readonly validateServiceUrl?: (value: string, requiredPath: string) => URL;
 	/** Test seam only. The shipped command uses one fixed-path Unix socket POST. */
-	readonly requestUnixSocket?: (input: { readonly socketPath: string; readonly path: string; readonly method: string; readonly credential: string; readonly body: string }) => Promise<UnixSocketResponse>;
+	readonly requestUnixSocket?: (input: {
+		readonly socketPath: string;
+		readonly path: string;
+		readonly method: string;
+		readonly credential: string;
+		readonly body: string;
+	}) => Promise<UnixSocketResponse>;
 	/** Test seam only; the shipped command always verifies the generated handoff. */
 	readonly loadHandoff?: () => CarrierHandoff;
 }
@@ -224,7 +230,12 @@ function parseCarrierRequest(bytes: Uint8Array, handoff: CarrierHandoff): JsonRe
 	return value;
 }
 
-async function sendCarrierRequest(channel: ServiceChannel, request: JsonRecord, handoff: CarrierHandoff, runtime: LeasedConsumerCarrierRuntime): Promise<Uint8Array | null> {
+async function sendCarrierRequest(
+	channel: ServiceChannel,
+	request: JsonRecord,
+	handoff: CarrierHandoff,
+	runtime: LeasedConsumerCarrierRuntime,
+): Promise<Uint8Array | null> {
 	const body = JSON.stringify(request);
 	if (channel.kind === "https") {
 		const fetchFn = runtime.fetchFn ?? globalThis.fetch;
@@ -253,22 +264,36 @@ async function sendCarrierRequest(channel: ServiceChannel, request: JsonRecord, 
 function parseServiceChannel(bytes: Uint8Array, requiredPath: string, validateUrl: (value: string, path: string) => URL): ServiceChannel {
 	if (bytes.byteLength > MAX_CHANNEL_BYTES) throw new Error("channel_too_large");
 	const value = parseStrictJson(bytes);
-	if (!plainRecord(value) || typeof value.schema_version !== "string" || !CHANNEL_SCHEMAS.includes(value.schema_version)) throw new Error("invalid_channel");
+	if (!plainRecord(value) || typeof value.schema_version !== "string" || !CHANNEL_SCHEMAS.includes(value.schema_version))
+		throw new Error("invalid_channel");
 	if (value.schema_version === "ceal.leased_consumer_service_channel.v1") {
-		if (!sameKeys(value, ["schema_version", "service_call_url", "service_credential"]) || typeof value.service_call_url !== "string") throw new Error("invalid_channel");
+		if (!sameKeys(value, ["schema_version", "service_call_url", "service_credential"]) || typeof value.service_call_url !== "string")
+			throw new Error("invalid_channel");
 		return { kind: "https", url: validateUrl(value.service_call_url, requiredPath), credential: validCredential(value.service_credential) };
 	}
-	if (!sameKeys(value, ["schema_version", "service_credential", "socket_path", "transport"]) || value.transport !== "unix_socket" || typeof value.socket_path !== "string") throw new Error("invalid_channel");
+	if (
+		!sameKeys(value, ["schema_version", "service_credential", "socket_path", "transport"]) ||
+		value.transport !== "unix_socket" ||
+		typeof value.socket_path !== "string"
+	)
+		throw new Error("invalid_channel");
 	return { kind: "unix_socket", socketPath: validSocketPath(value.socket_path), credential: validCredential(value.service_credential) };
 }
 
 function validCredential(value: unknown): string {
-	if (typeof value !== "string" || Buffer.byteLength(value, "utf8") === 0 || Buffer.byteLength(value, "utf8") > 4096 || !/^[\x21-\x7e]+$/u.test(value)) throw new Error("invalid_channel");
+	if (
+		typeof value !== "string" ||
+		Buffer.byteLength(value, "utf8") === 0 ||
+		Buffer.byteLength(value, "utf8") > 4096 ||
+		!/^[\x21-\x7e]+$/u.test(value)
+	)
+		throw new Error("invalid_channel");
 	return value;
 }
 
 function validSocketPath(value: string): string {
-	if (!value.startsWith("/") || value.length > 1024 || /[\r\n\0]/u.test(value) || value.endsWith("/admin-gateway.sock")) throw new Error("invalid_channel");
+	if (!value.startsWith("/") || value.length > 1024 || /[\r\n\0]/u.test(value) || value.endsWith("/admin-gateway.sock"))
+		throw new Error("invalid_channel");
 	return value;
 }
 
@@ -413,7 +438,13 @@ async function readBoundedWebResponse(response: globalThis.Response, maximum: nu
 	}
 }
 
-function postUnixSocket(input: { readonly socketPath: string; readonly path: string; readonly method: string; readonly credential: string; readonly body: string }): Promise<UnixSocketResponse> {
+function postUnixSocket(input: {
+	readonly socketPath: string;
+	readonly path: string;
+	readonly method: string;
+	readonly credential: string;
+	readonly body: string;
+}): Promise<UnixSocketResponse> {
 	const body = Buffer.from(input.body, "utf8");
 	return new Promise((resolve, reject) => {
 		let settled = false;
@@ -422,25 +453,37 @@ function postUnixSocket(input: { readonly socketPath: string; readonly path: str
 			settled = true;
 			callback();
 		};
-		const request = httpRequest({
-			socketPath: input.socketPath,
-			path: input.path,
-			method: input.method,
-			headers: { Authorization: `Bearer ${input.credential}`, "Content-Type": "application/json", "Content-Length": String(body.byteLength) },
-		}, (response) => {
-			const chunks: Buffer[] = []; let total = 0;
-			response.on("data", (chunk: Buffer) => {
-				total += chunk.byteLength;
-				if (total > MAX_RESPONSE_BYTES) {
-					request.destroy();
-					finish(() => reject(new Error("response_too_large")));
-					return;
-				}
-				chunks.push(chunk);
-			});
-			response.once("error", () => finish(() => reject(new Error("socket_response_failed"))));
-			response.once("end", () => finish(() => resolve({ status: response.statusCode ?? 0, contentType: response.headers["content-type"], bytes: new Uint8Array(Buffer.concat(chunks)) })));
-		});
+		const request = httpRequest(
+			{
+				socketPath: input.socketPath,
+				path: input.path,
+				method: input.method,
+				headers: { Authorization: `Bearer ${input.credential}`, "Content-Type": "application/json", "Content-Length": String(body.byteLength) },
+			},
+			(response) => {
+				const chunks: Buffer[] = [];
+				let total = 0;
+				response.on("data", (chunk: Buffer) => {
+					total += chunk.byteLength;
+					if (total > MAX_RESPONSE_BYTES) {
+						request.destroy();
+						finish(() => reject(new Error("response_too_large")));
+						return;
+					}
+					chunks.push(chunk);
+				});
+				response.once("error", () => finish(() => reject(new Error("socket_response_failed"))));
+				response.once("end", () =>
+					finish(() =>
+						resolve({
+							status: response.statusCode ?? 0,
+							contentType: response.headers["content-type"],
+							bytes: new Uint8Array(Buffer.concat(chunks)),
+						}),
+					),
+				);
+			},
+		);
 		request.once("error", () => finish(() => reject(new Error("socket_request_failed"))));
 		request.end(body);
 	});
@@ -595,15 +638,17 @@ function isJsonContentType(value: string | string[] | null | undefined): boolean
 	return typeof value === "string" && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
 }
 
-type ServiceChannel = {
-	readonly kind: "https";
-	readonly url: URL;
-	readonly credential: string;
-} | {
-	readonly kind: "unix_socket";
-	readonly socketPath: string;
-	readonly credential: string;
-}
+type ServiceChannel =
+	| {
+			readonly kind: "https";
+			readonly url: URL;
+			readonly credential: string;
+	  }
+	| {
+			readonly kind: "unix_socket";
+			readonly socketPath: string;
+			readonly credential: string;
+	  };
 
 interface UnixSocketResponse {
 	readonly status: number;
