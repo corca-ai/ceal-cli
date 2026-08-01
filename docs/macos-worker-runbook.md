@@ -34,14 +34,30 @@ postject injection (`--macho-segment-name NODE_SEA`), and ad-hoc re-signs it.
 ## 2. Obtain the locked Gateway handoff archive
 
 The only consumable Protocol input is the archive pinned by
-`gateway-handoff-lock.json`. Download the static, versioned archive and
-verify its digest:
+`gateway-protocol-handoff-lock.json`. Read the version out of the lock rather
+than typing one: this procedure outlived two handoff origins, and a hard-coded
+version here is a procedure that keeps working against the wrong archive.
 
 ```sh
-curl -fsSLo "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz" \
-  https://ceal.borca.ai/releases/gateway-handoff/gateway-handoff-v0.65.0/ceal-gateway-handoff-0.65.0.tar.gz
-shasum -a 256 "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz"
-# must equal archive.sha256 in gateway-handoff-lock.json
+tag="$(node -p 'require("./gateway-protocol-handoff-lock.json").gateway.tag')"
+origin="$(node -p 'require("./gateway-protocol-handoff-lock.json").gateway.origin')"
+archive="$(node -p 'require("./gateway-protocol-handoff-lock.json").archive.filename')"
+curl -fsSLo "$HOME/Downloads/$archive" "$origin/$tag/$archive"
+shasum -a 256 "$HOME/Downloads/$archive"
+# must equal archive.sha256 in gateway-protocol-handoff-lock.json
+```
+
+The origin also publishes `SHA256SUMS`, `$archive.sig`, and `$archive.pem`
+alongside the archive. Verifying the signature is a separate, stronger act than
+the digest comparison above, and it is the one that says the bytes came from the
+Gateway's release workflow rather than from whoever answered the URL:
+
+```sh
+cosign verify-blob --certificate "$HOME/Downloads/$archive.pem" \
+  --signature "$HOME/Downloads/$archive.sig" \
+  --certificate-identity "$(node -p 'require("./gateway-protocol-handoff-lock.json").reviewed_signature.certificate_identity')" \
+  --certificate-oidc-issuer "$(node -p 'require("./gateway-protocol-handoff-lock.json").reviewed_signature.oidc_issuer')" \
+  "$HOME/Downloads/$archive"
 ```
 
 ## 3. Compose the darwin asset set
@@ -49,7 +65,7 @@ shasum -a 256 "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz"
 ```sh
 npm run release:worker:assets -- compose \
   --out "$HOME/ceal-worker-assets-darwin" \
-  --gateway-handoff-archive "$HOME/Downloads/ceal-gateway-handoff-0.65.0.tar.gz" \
+  --gateway-handoff-archive "$HOME/Downloads/$archive" \
   --json
 ```
 

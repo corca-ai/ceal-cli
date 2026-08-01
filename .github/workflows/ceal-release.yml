@@ -35,16 +35,16 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # These two must name the archive gateway-handoff-lock.json binds. They are
+  # These two must name the archive gateway-protocol-handoff-lock.json binds. They are
   # literals because the job needs them before any checkout step could read the
   # lock, and a mismatch is not a soft failure: the download succeeds, the digest
   # comparison below fails, and the tag is burned and cannot be reused. The
   # contract tier pins them against the lock for exactly that reason.
-  HANDOFF_RELEASE_TAG: gateway-handoff-v0.68.0
-  HANDOFF_ARCHIVE: ceal-gateway-handoff-0.68.0.tar.gz
+  HANDOFF_RELEASE_TAG: gateway-protocol-handoff-v0.71.6
+  HANDOFF_ARCHIVE: ceal-gateway-protocol-handoff-0.71.6.tar.gz
   CEAL_RELEASE_ORIGIN: https://ceal.borca.ai/releases
   CEAL_RELEASE_BUCKET: ceal-release
-  GATEWAY_HANDOFF_ORIGIN: https://ceal.borca.ai/releases/gateway-handoff
+  GATEWAY_HANDOFF_ORIGIN: https://ceal.borca.ai/releases/gateway-protocol-handoff
 
 jobs:
   build:
@@ -129,12 +129,12 @@ jobs:
             --retry 5 --retry-delay 3 --retry-connrefused \
             "$GATEWAY_HANDOFF_ORIGIN/$HANDOFF_RELEASE_TAG/$HANDOFF_ARCHIVE" \
             --output "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE"
-          expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("gateway-handoff-lock.json","utf8")).archive.sha256')"
+          expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("gateway-protocol-handoff-lock.json","utf8")).archive.sha256')"
           # This job also runs on macOS runners, which ship no GNU sha256sum;
           # node is already installed above and is the portable digest source.
           observed="$(node -p 'require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex")' "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE")"
           [ "$expected" = "$observed" ] \
-            || { echo "Gateway handoff archive does not match gateway-handoff-lock.json" >&2; exit 1; }
+            || { echo "Gateway handoff archive does not match gateway-protocol-handoff-lock.json" >&2; exit 1; }
       - name: Compose the checked worker asset set twice
         env:
           TAG: ${{ github.ref_name }}

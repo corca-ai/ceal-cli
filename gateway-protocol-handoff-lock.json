@@ -1,0 +1,35 @@
+{
+  "schema_version": "ceal.worker_gateway_protocol_handoff_lock.v1",
+  "status": "locked",
+  "gateway": {
+    "repository": "corca-ai/ceal",
+    "workflow_path": ".github/workflows/gateway-protocol-handoff-release.yml",
+    "commit": "cd350024743342bfaf65716ec909695918771d49",
+    "tree": "24897031285d482b954cc378e53fb7e95e8163c5",
+    "protocol_tree": "3ca6fe3a1b650dbe6414bd5cbd77d9a6b843924b",
+    "tag": "gateway-protocol-handoff-v0.71.6",
+    "actions_run_id": 30684849631,
+    "origin": "https://ceal.borca.ai/releases/gateway-protocol-handoff"
+  },
+  "protocol": {
+    "package": "@corca-ai/ceal-protocol",
+    "version": "0.71.6",
+    "filename": "corca-ai-ceal-protocol-0.71.6.tgz",
+    "sha256": "fa8418622d12511c98cd7fe1b497bdf453bfd3947c720008f1052dd4571aa1f1"
+  },
+  "archive": {
+    "filename": "ceal-gateway-protocol-handoff-0.71.6.tar.gz",
+    "sha256": "6a979c6325a832b8d2b1e595ca386f68244353a2aab19166c1fc547ce2c71e34",
+    "handoff_manifest_sha256": "ab2f0be83ebacef3999b4966d429b6c202d260ca095061202365c5ee3455a523"
+  },
+  "reviewed_signature": {
+    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.71.6",
+    "oidc_issuer": "https://token.actions.githubusercontent.com",
+    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/30684849631/attempts/1"
+  },
+  "non_claims": [
+    "This lock records identities a maintainer verified once, at consumption time, against the immutable Gateway origin. Nothing in this repository re-fetches the archive or re-checks the Sigstore certificate on its own.",
+    "The release lane binds the downloaded archive by `archive.sha256` alone. `reviewed_signature` is the recorded provenance of that digest, not a signature this repository verifies during a release.",
+    "`gateway.tree` and `gateway.protocol_tree` are the producer identities the signed handoff manifest declares. `protocol_tree` is the one this repository can confirm locally, because the vendored copy hashes to it."
+  ]
+}

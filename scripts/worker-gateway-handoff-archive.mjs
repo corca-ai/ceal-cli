@@ -5,15 +5,24 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 
-const LOCK_SCHEMA = "ceal.worker_gateway_handoff_lock.v1";
-const HANDOFF_SCHEMA = "ceal.repository_extraction_gateway_handoff.v1";
-const HANDOFF_MARKER = ".ceal-handoff-owner";
+const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
+const LOCK_SCHEMA = "ceal.worker_gateway_protocol_handoff_lock.v1";
+const HANDOFF_SCHEMA = "ceal.gateway_protocol_handoff.v1";
+const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";
+// The Gateway handoff used to carry the Protocol and this repository's own
+// client tarball in one packet, plus a private conformance proof about the pair.
+// The protocol-only handoff carries neither: the client is packed here, from the
+// source this repository owns, and the Gateway ships the control conformance it
+// owns instead. A member list is the whole security surface of an archive, so it
+// is spelled out rather than derived.
 const HANDOFF_FILES = [
 	HANDOFF_MARKER,
-	"gateway-artifact-handoff.json",
-	"gateway-conformance-proof.json",
+	"gateway-leased-consumer-control-conformance.json",
+	"gateway-protocol-handoff.json",
 	"gateway-protocol-provenance.json",
 ];
+
+const ORIGIN = "https://ceal.borca.ai/releases/gateway-protocol-handoff";
 
 export const WorkerGatewayHandoffArchiveError = codedErrorClass("WorkerGatewayHandoffArchiveError");
 
@@ -57,7 +66,7 @@ export async function consumeLockedGatewayHandoffArchive(options = {}, dependenc
 function prepareLockedGatewayHandoffArchive(options, dependencies) {
 	const repoRoot = path.resolve(options.repoRoot);
 	const archive = requireRegularAbsoluteFile(options.archiveFile, "invalid_gateway_handoff_archive");
-	const lockPath = requireRegularFile(path.join(repoRoot, "gateway-handoff-lock.json"), "gateway_handoff_lock_missing");
+	const lockPath = requireRegularFile(path.join(repoRoot, LOCK_FILENAME), "gateway_handoff_lock_missing");
 	const lock = validateLock(readJson(lockPath, "invalid_gateway_handoff_lock"));
 	if (path.basename(archive) !== lock.archive.filename)
 		fail("gateway_handoff_archive_mismatch", "Gateway handoff archive does not match the reviewed lock.");
@@ -75,17 +84,18 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 		const rawInputs = {
 			repoRoot,
 			protocolTarball: path.join(extraction, lock.protocol.filename),
-			clientTarball: path.join(extraction, lock.client.filename),
 			protocolProvenance: path.join(extraction, "gateway-protocol-provenance.json"),
-			conformanceProof: path.join(extraction, "gateway-conformance-proof.json"),
-			handoffManifest: path.join(extraction, "gateway-artifact-handoff.json"),
+			controlConformance: path.join(extraction, "gateway-leased-consumer-control-conformance.json"),
+			handoffManifest: path.join(extraction, "gateway-protocol-handoff.json"),
 			expectedHandoffSha256: lock.archive.handoff_manifest_sha256,
 		};
 		const resolution = dependencies.resolveInputs?.(rawInputs);
 		if (
 			!resolution ||
 			resolution.protocol?.producer?.commit !== lock.gateway.commit ||
-			resolution.protocol?.producer?.tree !== lock.gateway.tree
+			resolution.protocol?.producer?.tree !== lock.gateway.tree ||
+			resolution.protocol?.producer?.protocol_tree !== lock.gateway.protocol_tree ||
+			resolution.protocol?.sha256 !== lock.protocol.sha256
 		) {
 			fail("gateway_handoff_lock_mismatch", "Gateway handoff archive does not resolve to the locked Gateway producer identity.");
 		}
@@ -98,7 +108,7 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 				gateway_commit: lock.gateway.commit,
 				gateway_tag: lock.gateway.tag,
 				actions_run_id: lock.gateway.actions_run_id,
-				artifact_name: lock.gateway.artifact_name,
+				origin: lock.gateway.origin,
 				archive_filename: lock.archive.filename,
 				archive_sha256: lock.archive.sha256,
 			},
@@ -119,55 +129,69 @@ function validateLock(value) {
 	if (
 		!isRecord(gateway) ||
 		gateway.repository !== "corca-ai/ceal" ||
-		gateway.workflow_path !== ".github/workflows/gateway-handoff-archive.yml" ||
+		gateway.workflow_path !== ".github/workflows/gateway-protocol-handoff-release.yml" ||
 		!isGitObject(gateway.commit) ||
 		!isGitObject(gateway.tree) ||
+		!isGitObject(gateway.protocol_tree) ||
 		!Number.isSafeInteger(gateway.actions_run_id) ||
 		gateway.actions_run_id <= 0 ||
 		typeof gateway.tag !== "string" ||
-		!/^gateway-handoff-v\d+\.\d+\.\d+$/u.test(gateway.tag) ||
-		gateway.artifact_name !== `ceal-gateway-handoff-${gateway.commit}`
+		!/^gateway-protocol-handoff-v\d+\.\d+\.\d+$/u.test(gateway.tag) ||
+		gateway.origin !== ORIGIN
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid immutable producer identity.");
 	}
-	const version = gateway.tag.slice("gateway-handoff-v".length);
+	const version = gateway.tag.slice("gateway-protocol-handoff-v".length);
 	if (
 		!isRecord(archive) ||
-		archive.filename !== `ceal-gateway-handoff-${version}.tar.gz` ||
+		archive.filename !== `ceal-gateway-protocol-handoff-${version}.tar.gz` ||
 		!isSha256(archive.sha256) ||
 		!isSha256(archive.handoff_manifest_sha256)
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}
-	// The two package tarball names used to be derived from the handoff tag, on
-	// the assumption that the tag version, the Protocol version, and the Client
-	// version were one number. They are not: the archive carries a Protocol and a
-	// Client that version independently, and deriving both from the tag made a
-	// genuine pair unconsumable — the lock expected `corca-ai-ceal-<tag>.tgz` and
-	// the archive held the Client's own version. The lock now declares the pair,
-	// so the consumer reads what was reviewed instead of recomputing a guess.
-	//
-	// The tag still names the Protocol version, because the handoff is cut per
-	// Protocol release; that one is checked rather than assumed.
-	const protocol = requirePackageBinding(value.protocol, "@corca-ai/ceal-protocol", "corca-ai-ceal-protocol");
-	const client = requirePackageBinding(value.client, "@corca-ai/ceal", "corca-ai-ceal");
+	// This asserts formatting, not a signature. Every field is derived from the
+	// same lock's tag, workflow path, and run id, so the block cannot fail a lock
+	// that passed the producer check above — say plainly what it is for rather
+	// than letting it read as a binding. It keeps the recorded identity from
+	// drifting away from the tag it belongs to, so a maintainer re-running cosign
+	// from this lock verifies against the archive the lock actually binds. The
+	// digest in `archive.sha256` is the anchor that touches bytes.
+	const signature = value.reviewed_signature;
+	if (
+		!isRecord(signature) ||
+		signature.certificate_identity !== `https://github.com/corca-ai/ceal/${gateway.workflow_path}@refs/tags/${gateway.tag}` ||
+		signature.oidc_issuer !== "https://token.actions.githubusercontent.com" ||
+		signature.run_invocation_uri !== `https://github.com/corca-ai/ceal/actions/runs/${gateway.actions_run_id}/attempts/1`
+	) {
+		fail("invalid_gateway_handoff_lock", "Gateway handoff lock does not record the reviewed Sigstore signing identity.");
+	}
+	// The tag names the Protocol version, because the handoff is cut per Protocol
+	// release. That is checked rather than assumed, and the tarball bytes are
+	// bound here too: the packet no longer carries a second package whose version
+	// could disagree with the tag, so the Protocol binding is the whole of it.
+	const protocol = requireProtocolBinding(value.protocol);
 	if (protocol.version !== version) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock's Protocol version does not match the handoff tag it was cut from.");
 	}
-	return { gateway: { ...gateway }, archive: { ...archive }, protocol, client };
+	return { gateway: { ...gateway }, archive: { ...archive }, protocol };
 }
 
-function requirePackageBinding(value, expectedPackage, tarballPrefix) {
+function requireProtocolBinding(value) {
 	if (
 		!isRecord(value) ||
-		value.package !== expectedPackage ||
+		value.package !== "@corca-ai/ceal-protocol" ||
 		typeof value.version !== "string" ||
 		!/^\d+\.\d+\.\d+$/u.test(value.version) ||
-		value.filename !== `${tarballPrefix}-${value.version}.tgz`
+		value.filename !== `corca-ai-ceal-protocol-${value.version}.tgz` ||
+		!isSha256(value.sha256)
 	) {
-		fail("invalid_gateway_handoff_lock", `Gateway handoff lock does not bind ${expectedPackage} to an exact package version and tarball.`);
+		fail(
+			"invalid_gateway_handoff_lock",
+			"Gateway handoff lock does not bind @corca-ai/ceal-protocol to an exact package version, tarball, and digest.",
+		);
 	}
-	return { package: value.package, version: value.version, filename: value.filename };
+	return { package: value.package, version: value.version, filename: value.filename, sha256: value.sha256 };
 }
 
 function assertArchiveLockBinding(archive, lock) {
@@ -207,7 +231,7 @@ function assertExtractedPacket(directory, lock) {
 }
 
 function packetMembers(lock) {
-	return [...HANDOFF_FILES, lock.protocol.filename, lock.client.filename].sort();
+	return [...HANDOFF_FILES, lock.protocol.filename].sort();
 }
 
 function listArchive(archive) {

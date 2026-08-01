@@ -126,12 +126,18 @@ test("a protocol input named by version alone, or by a source path, is refused",
 test("a protocol producer disagreeing with the handoff lock is refused", (context) => {
 	const root = scratch(context);
 	const { manifest } = stageInstall(root);
-	writeFileSync(path.join(root, "gateway-handoff-lock.json"), JSON.stringify({ gateway: { commit: "c".repeat(40), tree: "t".repeat(40) } }));
+	writeFileSync(
+		path.join(root, "gateway-protocol-handoff-lock.json"),
+		JSON.stringify({ gateway: { commit: "c".repeat(40), tree: "t".repeat(40) } }),
+	);
 	const agreed = verifyProtocolProvenance(manifest, { repoRoot: root });
 	assert.equal(agreed.lock_agreement.commit_matches, true);
 	assert.equal(agreed.lock_agreement.tree_matches, true);
 
-	writeFileSync(path.join(root, "gateway-handoff-lock.json"), JSON.stringify({ gateway: { commit: "d".repeat(40), tree: "t".repeat(40) } }));
+	writeFileSync(
+		path.join(root, "gateway-protocol-handoff-lock.json"),
+		JSON.stringify({ gateway: { commit: "d".repeat(40), tree: "t".repeat(40) } }),
+	);
 	assert.throws(() => verifyProtocolProvenance(manifest, { repoRoot: root }), code("protocol_provenance_disagreement"));
 });
 

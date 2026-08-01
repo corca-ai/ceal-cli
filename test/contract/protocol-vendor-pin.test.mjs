@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import {
 } from "../../scripts/verify-protocol-vendor-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-handoff-lock.json"), "utf8"));
+const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
 
 // Every divergence-shaped case below runs off this local fixture rather than off
 // the repository's real protocol-vendor-pin.json, and that is the point. The
@@ -29,10 +29,10 @@ const DIVERGED = Object.freeze({
 		tree: "b".repeat(40),
 	},
 	shipped: {
-		lock_file: "gateway-handoff-lock.json",
+		lock_file: "gateway-protocol-handoff-lock.json",
 		status: "diverged",
 		gateway_commit: LOCK.gateway.commit,
-		protocol_tree: "c".repeat(40),
+		protocol_tree: LOCK.gateway.protocol_tree,
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
 		// A real tracked file, because the gate now requires one. It points at a
@@ -95,6 +95,9 @@ test("the vendored protocol copy matches its recorded Gateway source", () => {
 test("a pin whose proof and shipped trees have converged passes as agreed", () => {
 	const converged = clone(DIVERGED);
 	converged.shipped.status = "agreed";
+	// The lock carries the shipped protocol subtree now, so a converged fixture
+	// converges on the lock's value rather than on an arbitrary one.
+	converged.source.tree = LOCK.gateway.protocol_tree;
 	converged.shipped.protocol_tree = converged.source.tree;
 	// Convergence is decided by the commits, so a converged fixture has to move
 	// both: matching trees alone would now be a pin contradicting itself.
@@ -105,6 +108,23 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 	converged.shipped.disposition_request = undefined;
 	const result = expectPass({ pin: converged, vendoredTree: converged.source.tree });
 	assert.equal(result.diverged, false);
+});
+
+// Moving to the protocol-only handoff left `gateway-handoff-lock.json` sitting in
+// the root, tracked and read by nothing: every gate was green, because a gate
+// that only reads the lock the pin names cannot notice a second one. It was not
+// harmless — `docs/macos-worker-runbook.md` told an operator to verify a download
+// against `archive.sha256` in that file, and the file still answered, with the
+// digest of a Protocol no release lane binds any more. A superseded lock is a
+// working procedure pointing at the wrong bytes.
+test("the repository root carries exactly the one protocol handoff lock the pin names", () => {
+	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
+	const locks = readdirSync(ROOT).filter((name) => /handoff-lock\.json$/u.test(name));
+	assert.deepEqual(
+		locks.filter((name) => name.includes("protocol")).sort(),
+		[pin.shipped.lock_file],
+		"a protocol handoff lock the pin does not name is a stale procedure input, not a spare copy",
+	);
 });
 
 // A drifted copy is the whole point, so it gets its own case rather than being
@@ -147,9 +167,21 @@ test("a status that contradicts the recorded trees fails in both directions", ()
 	expectCode("undeclared_divergence", { pin: claimsAgreement });
 
 	const claimsDivergence = clone(DIVERGED);
+	claimsDivergence.source.tree = LOCK.gateway.protocol_tree;
 	claimsDivergence.shipped.protocol_tree = claimsDivergence.source.tree;
 	claimsDivergence.source.commit = LOCK.gateway.commit;
-	expectCode("stale_divergence_record", { pin: claimsDivergence });
+	expectCode("stale_divergence_record", { pin: claimsDivergence, vendoredTree: claimsDivergence.source.tree });
+});
+
+// Forging `source.tree` alone always failed against `HEAD:`. Forging
+// `shipped.protocol_tree` to agree with it used to pass, because nothing else in
+// the repository knew what the shipped subtree was. The protocol-only handoff
+// declares it and the lock records it, so the pin no longer gets the last word on
+// that field.
+test("a shipped protocol subtree the lock does not bind is refused", () => {
+	const forged = clone(DIVERGED);
+	forged.shipped.protocol_tree = "f".repeat(40);
+	expectCode("shipped_lock_mismatch", { pin: forged });
 });
 
 // Existence alone was too weak: every path in the tree satisfied it, so a
@@ -214,7 +246,7 @@ test("a pin missing its schema, identities, or non-claims is rejected", () => {
 // lands. It states what must hold whichever way that goes.
 test("the repository's own pin agrees with the lock it was written about", () => {
 	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
-	assert.equal(pin.shipped.lock_file, "gateway-handoff-lock.json");
+	assert.equal(pin.shipped.lock_file, "gateway-protocol-handoff-lock.json");
 	assert.equal(pin.shipped.gateway_commit, LOCK.gateway.commit, "the pin must be written about the lock this repository actually carries");
 	assert.equal(
 		pin.shipped.status === "diverged",
@@ -279,6 +311,7 @@ test("a pin whose commits and trees disagree about convergence is rejected", () 
 // which is the one field the whole verdict rests on.
 test("an identical subtree under a different Gateway commit is a divergence, not a lying pin", () => {
 	const identicalSubtree = clone(DIVERGED);
+	identicalSubtree.source.tree = LOCK.gateway.protocol_tree;
 	identicalSubtree.shipped.protocol_tree = identicalSubtree.source.tree;
 	const injected = {
 		pin: identicalSubtree,

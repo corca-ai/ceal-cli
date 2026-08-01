@@ -17,20 +17,13 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INPUTS_FILENAME = "worker-release-inputs.json";
 const SCHEMA_VERSION = "ceal.worker_release_inputs.v1";
-const HANDOFF_SCHEMA = "ceal.repository_extraction_gateway_handoff.v1";
-const CONFORMANCE_PROOF_SCHEMA = "ceal.repository_extraction_private_gateway_conformance.v1";
+const HANDOFF_SCHEMA = "ceal.gateway_protocol_handoff.v1";
+const CONTROL_CONFORMANCE_SCHEMA = "ceal.gateway_leased_consumer_control_conformance_handoff.v1";
 const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
-const HANDOFF_MARKER = ".ceal-handoff-owner";
+const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
-const PACKAGE_NAMES = ["@corca-ai/ceal-protocol", "@corca-ai/ceal"];
-const RAW_HANDOFF_INPUT_KEYS = [
-	"protocolTarball",
-	"clientTarball",
-	"protocolProvenance",
-	"conformanceProof",
-	"handoffManifest",
-	"expectedHandoffSha256",
-];
+const PROTOCOL_PACKAGE = "@corca-ai/ceal-protocol";
+const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "protocolProvenance", "controlConformance", "handoffManifest", "expectedHandoffSha256"];
 
 export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
@@ -63,34 +56,31 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	// decision carves out.
 	assertShippableProtocolVendorPinFor(repoRoot);
 	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
-	const clientTarball = requireRegularAbsoluteFile(options.clientTarball, "client_tarball");
 	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
-	const conformanceProof = requireRegularAbsoluteFile(options.conformanceProof, "conformance_proof");
+	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
 	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
 	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
 	if (
 		new Set([
 			path.dirname(protocolTarball),
-			path.dirname(clientTarball),
 			path.dirname(protocolProvenance),
-			path.dirname(conformanceProof),
+			path.dirname(controlConformance),
 			path.dirname(handoffManifest),
 		]).size !== 1
 	) {
 		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
 	}
 	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
-	const proof = readJson(conformanceProof, "invalid_conformance_proof");
+	const control = readJson(controlConformance, "invalid_control_conformance");
 	const handoff = readJson(handoffManifest, "invalid_handoff_manifest");
 	if (sha256(readFileSync(handoffManifest)) !== expectedHandoffSha256) {
 		fail("handoff_trust_mismatch", "Gateway handoff manifest does not match the caller-approved digest.");
 	}
 	const packet = validateHandoffPacket({
 		inventory,
-		clientTarball,
-		conformanceProof,
+		control,
+		controlConformance,
 		handoff,
-		proof,
 		protocolTarball,
 		protocolProvenance,
 		provenance,
@@ -105,7 +95,7 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 		client: { ...inventory.client },
 		guide: { ...inventory.guide },
 		protocol,
-		gateway_client: packet.client,
+		control_conformance: packet.control_conformance,
 		handoff: { filename: path.basename(handoffManifest), sha256: expectedHandoffSha256 },
 		trust_anchor: { kind: "caller_supplied_manifest_sha256", value: expectedHandoffSha256 },
 		forbidden_release_inputs: [...inventory.forbidden_release_inputs],
@@ -178,9 +168,8 @@ function rawInputOptions(repoRoot, options) {
 	return {
 		repoRoot,
 		protocolTarball: options.protocolTarball,
-		clientTarball: options.clientTarball,
 		protocolProvenance: options.protocolProvenance,
-		conformanceProof: options.conformanceProof,
+		controlConformance: options.controlConformance,
 		handoffManifest: options.handoffManifest,
 		expectedHandoffSha256: options.expectedHandoffSha256,
 	};
@@ -208,7 +197,7 @@ function lockBoundResolution(resolution, lock) {
 			gateway_commit: lock.gateway_commit,
 			gateway_tag: lock.gateway_tag,
 			actions_run_id: lock.actions_run_id,
-			artifact_name: lock.artifact_name,
+			origin: lock.origin,
 			archive_filename: lock.archive_filename,
 			archive_sha256: lock.archive_sha256,
 		},
@@ -302,28 +291,19 @@ function assertProtocolRequirement(protocol) {
 		protocol.source_repository !== "corca-ai/ceal" ||
 		protocol.source_path !== "packages/ceal-protocol" ||
 		protocol.provenance_schema !== PROTOCOL_PROVENANCE_SCHEMA ||
-		protocol.handoff_manifest_schema !== "ceal.repository_extraction_gateway_handoff.v1" ||
+		protocol.handoff_manifest_schema !== HANDOFF_SCHEMA ||
 		!sameStrings(protocol.required_exports, [".", "./conformance"])
 	) {
 		fail("invalid_inventory", "Worker release inventory has an invalid Gateway Protocol requirement.");
 	}
 }
 
-function validateHandoffPacket({
-	inventory,
-	clientTarball,
-	conformanceProof,
-	handoff,
-	proof,
-	protocolTarball,
-	protocolProvenance,
-	provenance,
-}) {
+function validateHandoffPacket({ inventory, control, controlConformance, handoff, protocolTarball, protocolProvenance, provenance }) {
 	if (
 		!isPlainObject(handoff) ||
 		handoff.schema_version !== HANDOFF_SCHEMA ||
 		handoff.ok !== true ||
-		handoff.proof_level !== "host_decision" ||
+		handoff.proof_level !== "local_state" ||
 		handoff.writes_external !== false
 	) {
 		fail("invalid_handoff_manifest", "Gateway handoff manifest is not a self-consistent producer record.");
@@ -334,74 +314,54 @@ function validateHandoffPacket({
 		producer.repository !== inventory.required_gateway_protocol.source_repository ||
 		!GIT_OBJECT_ID.test(producer.commit ?? "") ||
 		!GIT_OBJECT_ID.test(producer.tree ?? "") ||
+		!GIT_OBJECT_ID.test(producer.protocol_tree ?? "") ||
 		producer.scoped_paths_clean !== true
 	) {
 		fail("invalid_handoff_manifest", "Gateway handoff producer identity is invalid.");
 	}
-	const records = packageRecords(handoff.packages);
-	const protocol = records.get(inventory.required_gateway_protocol.package);
-	const client = records.get(inventory.client.package);
-	assertHandoffMarker(path.dirname(conformanceProof));
+	const protocol = validateProtocolRecord(handoff.protocol);
+	assertHandoffMarker(path.dirname(protocolProvenance));
 	assertArtifactBytes({
 		tarball: protocolTarball,
 		record: protocol,
 		code: "protocol_artifact_mismatch",
 		message: "Gateway Protocol tarball does not match the complete handoff packet.",
 	});
-	assertArtifactBytes({
-		tarball: clientTarball,
-		record: client,
-		code: "client_artifact_mismatch",
-		message: "Gateway client tarball does not match the complete handoff packet.",
-	});
-	const protocolManifest = assertPackedPackage({
+	assertPackedPackage({
 		tarball: protocolTarball,
 		record: protocol,
 		expectedName: inventory.required_gateway_protocol.package,
 		code: "protocol_artifact_mismatch",
 	});
-	const clientManifest = assertPackedPackage({
-		tarball: clientTarball,
-		record: client,
-		expectedName: inventory.client.package,
-		code: "client_artifact_mismatch",
-	});
-	if (clientManifest.dependencies?.[protocol.name] !== protocolManifest.version) {
-		fail("client_artifact_mismatch", "Gateway client tarball does not declare the supplied Gateway Protocol version.");
-	}
-	assertConformanceProof({ handoff, proof, conformanceProof, producer, records });
+	const controlRecord = assertControlConformanceSidecar({ handoff, control, controlConformance, producer });
 	assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer, protocol });
-	return { protocol, client };
+	return { protocol, control_conformance: controlRecord };
 }
 
-function packageRecords(value) {
-	if (!Array.isArray(value) || value.length !== PACKAGE_NAMES.length || value.some((entry, index) => entry?.name !== PACKAGE_NAMES[index])) {
-		fail("invalid_handoff_manifest", "Gateway handoff must contain the exact Protocol and client package pair in canonical order.");
-	}
-	const records = new Map(value.map((entry) => [entry.name, validatePackageRecord(entry)]));
-	if (records.size !== PACKAGE_NAMES.length) fail("invalid_handoff_manifest", "Gateway handoff package records must be unique.");
-	return records;
-}
-
-function validatePackageRecord(record) {
+// One record, not a pair. The handoff used to carry this repository's own client
+// tarball alongside the Protocol, so the manifest declared an ordered two-package
+// array and the resolver checked that the client named the right Protocol
+// version. The client is packed here now, from the source this repository owns,
+// and `validateProtocolArtifact` already asserts that the owned client and worker
+// manifests name the supplied Protocol version — so nothing that check covered
+// was lost with the second record, only the redundant external witness for it.
+function validateProtocolRecord(record) {
 	if (
 		!isPlainObject(record) ||
+		record.package !== PROTOCOL_PACKAGE ||
 		typeof record.version !== "string" ||
 		!/^\d+\.\d+\.\d+$/u.test(record.version) ||
-		typeof record.filename !== "string" ||
-		record.filename !== path.basename(record.filename) ||
-		!record.filename.endsWith(".tgz") ||
+		record.filename !== `corca-ai-ceal-protocol-${record.version}.tgz` ||
 		!isSha256(record.sha256) ||
 		typeof record.integrity !== "string" ||
 		!record.integrity.startsWith("sha512-") ||
 		!Number.isSafeInteger(record.bytes) ||
 		record.bytes <= 0 ||
-		!sameSortedExports(record.declared_exports) ||
-		!isSha256(record.package_manifest_sha256)
+		!sameSortedExports(record.exports)
 	) {
-		fail("invalid_handoff_manifest", "Gateway handoff package record is invalid.");
+		fail("invalid_handoff_manifest", "Gateway handoff Protocol record is invalid.");
 	}
-	return { ...record, declared_exports: [...record.declared_exports] };
+	return { name: record.package, ...record, exports: [...record.exports] };
 }
 
 function assertArtifactBytes({ tarball, record, code, message }) {
@@ -428,8 +388,7 @@ function assertPackedPackage({ tarball, record, expectedName, code }) {
 	if (
 		manifest?.name !== expectedName ||
 		manifest?.version !== record.version ||
-		sha256(manifestBytes) !== record.package_manifest_sha256 ||
-		!sameStrings(exportKeys(manifest.exports), record.declared_exports)
+		!sameStrings(exportKeys(manifest.exports), record.exports)
 	) {
 		fail(code, "Gateway package tarball does not match its complete handoff record.");
 	}
@@ -443,61 +402,45 @@ function assertHandoffMarker(directory) {
 	}
 }
 
-function assertConformanceProof({ handoff, proof, conformanceProof, producer, records }) {
-	const bytes = readFileSync(conformanceProof);
-	const sidecar = handoff.conformance_proof;
-	const digest = handoff.conformance_proof_digest;
+// The Gateway ships its leased-consumer control conformance in the same packet
+// now. This repository does not implement that control surface, so nothing here
+// interprets the vectors — but an unbound member is an unbound member, and the
+// manifest already binds its bytes. What is checked is that the file the archive
+// carries is the file the signed manifest names, and that it describes the same
+// Gateway commit as everything else in the packet. Reading it further belongs to
+// whoever implements the surface, not to the release-input resolver.
+function assertControlConformanceSidecar({ handoff, control, controlConformance, producer }) {
+	const bytes = readFileSync(controlConformance);
+	const sidecar = handoff.control_conformance;
 	if (
 		!isPlainObject(sidecar) ||
-		sidecar.filename !== path.basename(conformanceProof) ||
+		sidecar.filename !== path.basename(controlConformance) ||
 		sidecar.bytes !== bytes.length ||
-		!isPlainObject(digest) ||
-		digest.algorithm !== "sha256" ||
-		digest.canonicalization !== "utf8-json-pretty-v1" ||
-		digest.value !== sha256(bytes)
+		sidecar.sha256 !== sha256(bytes)
 	) {
-		fail("handoff_conformance_mismatch", "Gateway handoff does not bind the conformance-proof sidecar bytes.");
+		fail("handoff_conformance_mismatch", "Gateway handoff does not bind the control-conformance sidecar bytes.");
 	}
 	if (
-		!isPlainObject(proof) ||
-		proof.schema_version !== CONFORMANCE_PROOF_SCHEMA ||
-		proof.ok !== true ||
-		proof.proof_level !== "host_decision" ||
-		proof.writes_external !== false ||
-		!sameProducer(proof.source_identity, producer)
+		!isPlainObject(control) ||
+		control.schema_version !== CONTROL_CONFORMANCE_SCHEMA ||
+		control.proof_level !== "local_state" ||
+		control.writes_external !== false ||
+		!sameSourceIdentity(control.source, producer) ||
+		control.source.protocol_tree !== producer.protocol_tree
 	) {
-		fail("invalid_conformance_proof", "Gateway conformance proof does not bind the handoff producer identity.");
+		fail("invalid_control_conformance", "Gateway control conformance does not bind the handoff producer identity.");
 	}
-	if (!Array.isArray(proof.packages) || proof.packages.length !== PACKAGE_NAMES.length) {
-		fail("invalid_conformance_proof", "Gateway conformance proof does not contain the required package pair.");
-	}
-	for (const name of PACKAGE_NAMES) {
-		const record = records.get(name);
-		const packageProof = proof.packages.find((entry) => entry?.name === name);
-		if (
-			!packageProof ||
-			packageProof.name !== name ||
-			packageProof.version !== record.version ||
-			packageProof.filename !== record.filename ||
-			packageProof.sha256 !== record.sha256 ||
-			packageProof.integrity !== record.integrity ||
-			packageProof.bytes !== record.bytes ||
-			!sameStrings(packageProof.declared_exports, record.declared_exports) ||
-			packageProof.package_manifest_sha256 !== record.package_manifest_sha256 ||
-			packageProof.installed_as_regular_directory !== true
-		) {
-			fail("handoff_conformance_mismatch", "Gateway conformance proof does not bind every supplied package record.");
-		}
-	}
+	return { filename: sidecar.filename, sha256: sidecar.sha256, bytes: sidecar.bytes };
 }
 
 function assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer, protocol }) {
 	if (
 		!isPlainObject(provenance) ||
 		provenance.schema_version !== PROTOCOL_PROVENANCE_SCHEMA ||
-		provenance.proof_level !== "host_decision" ||
+		provenance.proof_level !== "local_state" ||
 		provenance.writes_external !== false ||
 		!sameSourceIdentity(provenance.source, producer) ||
+		provenance.source.protocol_tree !== producer.protocol_tree ||
 		provenance.source.package_path !== "packages/ceal-protocol"
 	) {
 		fail("invalid_protocol_provenance", "Gateway Protocol provenance is not a verified handoff record.");
@@ -510,21 +453,17 @@ function assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenan
 		artifact.filename !== protocol.filename ||
 		artifact.sha256 !== protocol.sha256 ||
 		artifact.npm_integrity !== protocol.integrity ||
-		!sameStrings(artifact.exports, protocol.declared_exports)
+		!sameStrings(artifact.exports, protocol.exports)
 	) {
 		fail("handoff_provenance_mismatch", "Gateway Protocol provenance does not bind the complete handoff record.");
 	}
 	const bytes = readFileSync(protocolProvenance);
 	const sidecar = handoff.protocol_provenance;
-	const digest = handoff.protocol_provenance_digest;
 	if (
 		!isPlainObject(sidecar) ||
 		sidecar.filename !== path.basename(protocolProvenance) ||
 		sidecar.bytes !== bytes.length ||
-		!isPlainObject(digest) ||
-		digest.algorithm !== "sha256" ||
-		digest.canonicalization !== "utf8-json-pretty-v1" ||
-		digest.value !== sha256(bytes)
+		sidecar.sha256 !== sha256(bytes)
 	) {
 		fail("handoff_provenance_mismatch", "Gateway handoff does not bind the Protocol provenance sidecar bytes.");
 	}
@@ -564,7 +503,7 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 		sha256: artifact.sha256,
 		npm_integrity: artifact.npm_integrity,
 		exports: [...artifact.exports],
-		producer: { repository: source.repository, commit: source.commit, tree: source.tree },
+		producer: { repository: source.repository, commit: source.commit, tree: source.tree, protocol_tree: source.protocol_tree },
 	};
 }
 
@@ -648,16 +587,6 @@ function exportKeys(exportsField) {
 	return Object.keys(exportsField)
 		.filter((key) => key === "." || key.startsWith("./"))
 		.sort();
-}
-
-function sameProducer(candidate, expected) {
-	return (
-		isPlainObject(candidate) &&
-		candidate.repository === expected.repository &&
-		candidate.commit === expected.commit &&
-		candidate.tree === expected.tree &&
-		candidate.scoped_paths_clean === true
-	);
 }
 
 function sameSourceIdentity(candidate, expected) {

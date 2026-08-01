@@ -19,7 +19,7 @@
 		"source_repository": "corca-ai/ceal",
 		"source_path": "packages/ceal-protocol",
 		"provenance_schema": "ceal.gateway_protocol_artifact.v1",
-		"handoff_manifest_schema": "ceal.repository_extraction_gateway_handoff.v1",
+		"handoff_manifest_schema": "ceal.gateway_protocol_handoff.v1",
 		"required_exports": [".", "./conformance"]
 	},
 	"forbidden_release_inputs": [

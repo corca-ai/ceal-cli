@@ -210,7 +210,7 @@ function acceptanceNonClaims(parts: CealAcceptanceRecordParts): readonly string[
 		);
 	}
 	// The repository-side script cross-checks the release's protocol producer
-	// against `gateway-handoff-lock.json`. An installed host carries no lock, so
+	// against `gateway-protocol-handoff-lock.json`. An installed host carries no lock, so
 	// that agreement is genuinely absent here rather than silently assumed — the
 	// producer tuple below is the release manifest's own statement, and verifying
 	// it is the receiving lane's step.

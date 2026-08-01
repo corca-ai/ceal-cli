@@ -4,20 +4,21 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "844b19cef64599ea41efb7d46c66df74f7bf583c",
-		"tree": "eea361e5a085251719a872411bb297316bdf00b2"
+		"commit": "cd350024743342bfaf65716ec909695918771d49",
+		"tree": "3ca6fe3a1b650dbe6414bd5cbd77d9a6b843924b"
 	},
 	"shipped": {
-		"lock_file": "gateway-handoff-lock.json",
+		"lock_file": "gateway-protocol-handoff-lock.json",
 		"status": "agreed",
-		"gateway_commit": "844b19cef64599ea41efb7d46c66df74f7bf583c",
-		"protocol_tree": "eea361e5a085251719a872411bb297316bdf00b2"
+		"gateway_commit": "cd350024743342bfaf65716ec909695918771d49",
+		"protocol_tree": "3ca6fe3a1b650dbe6414bd5cbd77d9a6b843924b"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
-		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` and `shipped.protocol_tree` are recorded observations that no local check can confirm: neither the working tree nor gateway-handoff-lock.json carries them. Confirming them needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
+		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` is a recorded observation that no local check can confirm; confirming it needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
 		"`agreed` means the proof and shipment identities converged when this pin was written. It is not evidence that any release was built, installed, or accepted against the locked archive.",
-		"The `source.tree` recorded here was derived from the tagged Gateway commit (`git rev-parse gateway-handoff-v0.68.0^{commit}:packages/ceal-protocol` in a local reference checkout of corca-ai/ceal). The Gateway lane's handoff notes state the producer tree of the whole commit rather than the protocol subtree.",
-		"The archive this pin ships against exists only as a 30-day GitHub Actions artifact. It is not published under the Gateway handoff release origin that .github/workflows/ceal-release.yml downloads from, so a green pin here does not make a worker release runnable."
+		"`shipped.protocol_tree` is no longer only self-recorded. The signed gateway-protocol-handoff-v0.71.6 manifest and its Protocol provenance both declare protocol_tree 3ca6fe3a…, gateway-protocol-handoff-lock.json carries that value, and scripts/verify-protocol-vendor-pin.mjs now fails `shipped_lock_mismatch` when the pin records a different one. What that closes is the pin's last unilateral field, not the remote: the check still compares two local files.",
+		"The vendored copy at this pin builds to a `dist/` byte-identical to the one inside the signed `corca-ai-ceal-protocol-0.71.6.tgz` (observed on narnia, 2026-08-01, Node 22.22.1 / TypeScript 5.9.3). That is a one-time maintainer observation, not a check any gate re-runs.",
+		"The archive this pin ships against is published under the Gateway protocol-handoff release origin that .github/workflows/ceal-release.yml downloads from, and was verified there against its Sigstore certificate. This pin does not prove that origin still answers, only which bytes a release must accept from it."
 	]
 }
