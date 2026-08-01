@@ -17,6 +17,7 @@ import {
 } from "../../scripts/build-worker-release-assets.mjs";
 import {
 	verifyEmbeddedCarrierContractSource,
+	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
 
@@ -24,6 +25,10 @@ const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli"
 const CARRIER_CONTRACT_BYTES = readFileSync(CARRIER_CONTRACT_PATH);
 const CARRIER_CONTRACT = JSON.parse(CARRIER_CONTRACT_BYTES.toString("utf8"));
 const CARRIER_CONTRACT_SHA256 = digest(CARRIER_CONTRACT_BYTES);
+const CONTROL_SESSION_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
+const CONTROL_SESSION_CONTRACT_BYTES = readFileSync(CONTROL_SESSION_CONTRACT_PATH);
+const CONTROL_SESSION_CONTRACT = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
+const CONTROL_SESSION_CONTRACT_SHA256 = digest(CONTROL_SESSION_CONTRACT_BYTES);
 const CARRIER_HANDOFF = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot: REPO_ROOT });
 
 // The installer's own allowlist, read out of the shell rather than restated
@@ -100,6 +105,8 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.command, "ceal");
 	assert.equal(manifest.private_leased_consumer_carrier.contract_json, CARRIER_CONTRACT_BYTES.toString("utf8"));
 	assert.equal(manifest.private_leased_consumer_carrier.contract_sha256, CARRIER_CONTRACT_SHA256);
+	assert.equal(manifest.private_leased_consumer_control_session.contract_json, CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
+	assert.equal(manifest.private_leased_consumer_control_session.contract_sha256, CONTROL_SESSION_CONTRACT_SHA256);
 	assert.deepEqual(manifest.private_leased_consumer_handoff, CARRIER_HANDOFF);
 	assert.equal(manifest.guide.name, "ceal-guide-SKILL.md");
 	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide-SKILL.md"))));
@@ -125,6 +132,18 @@ test("composed worker release assets match the installer's signed inventory cont
 			),
 		hasCode("private_carrier_contract_drift"),
 	);
+	await assert.rejects(
+		() =>
+			composeWorkerReleaseAssets(
+				{
+					outputDirectory: path.join(root, "control-session-drift"),
+					gatewayHandoffArchive: "/unused/fixture.tar.gz",
+					repoRoot: fixtureRepo(root),
+				},
+				{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0", { controlSessionSha256: "f".repeat(64) }) },
+			),
+		hasCode("private_control_session_contract_drift"),
+	);
 });
 
 test("native source verification refuses a stale generated carrier contract before bundling", (context) => {
@@ -140,6 +159,28 @@ test("native source verification refuses a stale generated carrier contract befo
 			'" as const;\n',
 	);
 	assert.throws(() => verifyEmbeddedCarrierContractSource({ repoRoot: root }), /embedded_carrier_contract_drift/u);
+});
+
+test("native source verification refuses a stale generated control-session contract before bundling", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-control-session-generated-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
+	mkdirSync(generated, { recursive: true });
+	writeFileSync(
+		path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json"),
+		CONTROL_SESSION_CONTRACT_BYTES,
+	);
+	writeFileSync(
+		path.join(root, "gateway-protocol-handoff-lock.json"),
+		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
+	);
+	writeFileSync(
+		path.join(generated, "leased-consumer-control-session-contract.ts"),
+		'export const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON = "{}" as const;\nexport const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256 = "' +
+			"0".repeat(64) +
+			'" as const;\n',
+	);
+	assert.throws(() => verifyEmbeddedControlSessionContractSource({ repoRoot: root }), /embedded_control_session_contract_drift/u);
 });
 
 test("native source verification refuses a stale generated Gateway handoff before bundling", (context) => {
@@ -206,6 +247,41 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	);
 	writeFileSync(platformManifest, originalManifest);
 	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+
+	const driftedControlSession = JSON.parse(readFileSync(platformManifest, "utf8"));
+	driftedControlSession.private_leased_consumer_control_session.contract_json = "{}";
+	writeFileSync(platformManifest, `${JSON.stringify(driftedControlSession, null, 2)}\n`);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-control-session-drift"), inputs, repoRoot }),
+		hasCode("merge_private_control_session_contract_drift"),
+	);
+	writeFileSync(platformManifest, originalManifest);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+
+	const identicallyDriftedControlSession = JSON.parse(originalManifest);
+	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_json = "{}";
+	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_sha256 = "0".repeat(64);
+	for (const input of inputs) {
+		const manifestPath = path.join(
+			input,
+			`ceal-worker-release-manifest-${input.endsWith("linux-amd64") ? "linux-amd64" : "linux-arm64"}.json`,
+		);
+		writeFileSync(manifestPath, `${JSON.stringify(identicallyDriftedControlSession, null, 2)}\n`);
+		rewriteInventoryDigest(input, path.basename(manifestPath));
+	}
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-identical-control-session-drift"), inputs, repoRoot }),
+		hasCode("merge_private_control_session_contract_drift"),
+	);
+	for (const input of inputs) {
+		const manifestPath = path.join(
+			input,
+			`ceal-worker-release-manifest-${input.endsWith("linux-amd64") ? "linux-amd64" : "linux-arm64"}.json`,
+		);
+		writeFileSync(manifestPath, originalManifest);
+		rewriteInventoryDigest(input, path.basename(manifestPath));
+	}
 
 	writeFileSync(path.join(inputs[1], "ceal-guide-SKILL.md"), "drifted guide\n");
 	const driftedSums = readFileSync(path.join(inputs[1], "SHA256SUMS"), "utf8").replace(
@@ -434,7 +510,13 @@ test("worker stable rollback re-verifies an immutable public tag before moving t
 function fakeNativeBuild(
 	platform,
 	version,
-	{ carrierContract = CARRIER_CONTRACT, carrierSha256 = CARRIER_CONTRACT_SHA256, carrierHandoff = CARRIER_HANDOFF } = {},
+	{
+		carrierContract = CARRIER_CONTRACT,
+		carrierSha256 = CARRIER_CONTRACT_SHA256,
+		controlSessionContract = CONTROL_SESSION_CONTRACT,
+		controlSessionSha256 = CONTROL_SESSION_CONTRACT_SHA256,
+		carrierHandoff = CARRIER_HANDOFF,
+	} = {},
 ) {
 	return async ({ outputDirectory }) => {
 		mkdirSync(outputDirectory, { recursive: true });
@@ -449,6 +531,7 @@ function fakeNativeBuild(
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
 			protocol: { package: "@corca-ai/ceal-protocol", version, sha256: "0".repeat(64) },
 			private_leased_consumer_carrier: { contract: carrierContract, sha256: carrierSha256 },
+			private_leased_consumer_control_session: { contract: controlSessionContract, sha256: controlSessionSha256 },
 			private_leased_consumer_handoff: carrierHandoff,
 			native_smoke: { command: "ceal", version, operator_surface_absent: true },
 		};
@@ -462,6 +545,11 @@ function fixtureRepo(root) {
 	const contractDirectory = path.join(repo, "packages", "ceal-worker-cli");
 	mkdirSync(contractDirectory, { recursive: true });
 	writeFileSync(path.join(contractDirectory, "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
+	writeFileSync(path.join(contractDirectory, "leased-consumer-control-session-contract.json"), CONTROL_SESSION_CONTRACT_BYTES);
+	writeFileSync(
+		path.join(repo, "gateway-protocol-handoff-lock.json"),
+		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
+	);
 	writeGatewayHandoffFixture(repo);
 	return repo;
 }

@@ -50,7 +50,10 @@ test("private control session carries exactly the five canonical operations over
 	async function* input() {
 		yield encoder.encode(`${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`);
 	}
-	await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame))));
+	assert.equal(
+		await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))),
+		true,
+	);
 	assert.deepEqual(
 		calls.map((call) => ({ socketPath: call.socketPath, path: call.path, credential: call.credential })),
 		[
@@ -111,8 +114,63 @@ test("invalid protected session and malformed Agent frames make zero control req
 	async function* malformed() {
 		yield encoder.encode('{"bad":true}\n{"schema_version":"ceal.leased_consumer_control_request.v1","operation":"acquire","input":{}}\n');
 	}
-	await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame));
+	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
 	assert.equal(calls, 0);
+	assert.deepEqual(output, []);
+});
+
+test("protected session is closed and refused at its fixed two-second deadline", async () => {
+	let closed = 0;
+	await assert.rejects(() =>
+		openLeasedConsumerControlSession({
+			readProtectedSession: () => new Promise(() => {}),
+			closeProtectedSession: async () => {
+				closed += 1;
+			},
+			monotonicNow: () => 0,
+			setTimer: (callback, milliseconds) => {
+				assert.equal(milliseconds, 2_000);
+				callback();
+				return Symbol("timer");
+			},
+			clearTimer: () => {},
+		}),
+	);
+	// A read that resolves after the deadline is refused too.
+	await assert.rejects(() =>
+		openLeasedConsumerControlSession({
+			readProtectedSession: async () => session,
+			closeProtectedSession: async () => {
+				closed += 1;
+			},
+			monotonicNow: (() => {
+				let now = 0;
+				return () => (now += 2_001);
+			})(),
+			setTimer: () => Symbol("timer"),
+			clearTimer: () => {},
+		}),
+	);
+	assert.equal(closed, 2);
+});
+
+test("a Gateway control operation that never answers is bounded and emits no Agent frame", async () => {
+	const carrier = await openLeasedConsumerControlSession({
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		monotonicNow: () => 0,
+		setTimer: (callback, milliseconds) => {
+			if (milliseconds === 30_000) callback();
+			return Symbol("timer");
+		},
+		clearTimer: () => {},
+		requestUnixSocket: () => new Promise(() => {}),
+	});
+	const output = [];
+	async function* input() {
+		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+	}
+	assert.equal(await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(frame)), false);
 	assert.deepEqual(output, []);
 });
 

@@ -9,7 +9,11 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readCarrierContract, verifyEmbeddedGatewayLeasedConsumerHandoffSource } from "./generate-leased-consumer-handoff-runtime.mjs";
+import {
+	readCarrierContract,
+	readControlSessionContract,
+	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
+} from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
@@ -19,6 +23,7 @@ const INSTALLER_NAME = "install-ceal.sh";
 const GUIDE_ASSET = "ceal-guide-SKILL.md";
 const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
 const PRIVATE_CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
+const PRIVATE_CONTROL_SESSION_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-control-session-contract.json";
 const SHARED_ASSETS = Object.freeze([GUIDE_ASSET, NOTICE_NAME, INSTALLER_NAME]);
 const PLATFORM_PATTERN = /^(?:linux|darwin)-(?:arm64|amd64)$/u;
 // A published release may predate the current build matrix. Keep this bounded
@@ -94,9 +99,11 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
 		let privateCarrierContract;
+		let privateControlSessionContract;
 		let privateCarrierHandoff;
 		try {
 			privateCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
+			privateControlSessionContract = readControlSessionContract(path.join(repoRoot, PRIVATE_CONTROL_SESSION_CONTRACT_PATH), { repoRoot });
 			privateCarrierHandoff = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot });
 		} catch {
 			fail(
@@ -112,6 +119,15 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			fail(
 				"private_carrier_contract_drift",
 				"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
+			);
+		if (
+			!native.private_leased_consumer_control_session ||
+			native.private_leased_consumer_control_session.sha256 !== privateControlSessionContract.sha256 ||
+			JSON.stringify(native.private_leased_consumer_control_session.contract) !== JSON.stringify(privateControlSessionContract.value)
+		)
+			fail(
+				"private_control_session_contract_drift",
+				"Worker release assets refuse a native binary whose embedded control-session contract differs from the source contract.",
 			);
 		if (JSON.stringify(native.private_leased_consumer_handoff) !== JSON.stringify(privateCarrierHandoff))
 			fail(
@@ -133,6 +149,10 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			private_leased_consumer_carrier: {
 				contract_json: privateCarrierContract.bytes.toString("utf8"),
 				contract_sha256: privateCarrierContract.sha256,
+			},
+			private_leased_consumer_control_session: {
+				contract_json: privateControlSessionContract.bytes.toString("utf8"),
+				contract_sha256: privateControlSessionContract.sha256,
 			},
 			private_leased_consumer_handoff: privateCarrierHandoff,
 			non_claims: [
@@ -213,6 +233,15 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
 	if (platforms.size === 0) fail("merge_input_incomplete", "Merged worker release set names no platform.");
+	let sourceControlSessionContract;
+	try {
+		sourceControlSessionContract = readControlSessionContract(path.join(repoRoot, PRIVATE_CONTROL_SESSION_CONTRACT_PATH), { repoRoot });
+	} catch {
+		fail(
+			"merge_private_control_session_contract_invalid",
+			"Merged worker release assets require a valid source private control-session contract.",
+		);
+	}
 	const carrierContracts = new Set(
 		[...platforms.entries()].map(([platform, entries]) =>
 			carrierContractIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes),
@@ -232,6 +261,16 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		fail(
 			"merge_private_carrier_handoff_drift",
 			"Merged worker release assets require one identical private Gateway handoff across every platform.",
+		);
+	const controlSessionContracts = new Set(
+		[...platforms.entries()].map(([platform, entries]) =>
+			controlSessionContractIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes, sourceControlSessionContract),
+		),
+	);
+	if (controlSessionContracts.size !== 1)
+		fail(
+			"merge_private_control_session_contract_drift",
+			"Merged worker release assets require one identical private control-session contract across every platform.",
 		);
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
 	try {
@@ -312,6 +351,37 @@ function carrierHandoffIdentity(bytes) {
 		fail(
 			"merge_private_carrier_handoff_invalid",
 			"Merged worker release assets require each platform manifest to declare a valid private Gateway handoff.",
+		);
+	}
+}
+
+function controlSessionContractIdentity(bytes, sourceControlSessionContract) {
+	try {
+		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
+		const controlSession = manifest?.private_leased_consumer_control_session;
+		if (
+			manifest?.schema_version !== "ceal.worker_release_manifest.v1" ||
+			!controlSession ||
+			typeof controlSession.contract_sha256 !== "string" ||
+			!/^[a-f0-9]{64}$/u.test(controlSession.contract_sha256) ||
+			typeof controlSession.contract_json !== "string" ||
+			!controlSession.contract_json.startsWith("{")
+		)
+			throw new Error("invalid_manifest");
+		if (
+			controlSession.contract_sha256 !== sourceControlSessionContract.sha256 ||
+			controlSession.contract_json !== sourceControlSessionContract.bytes.toString("utf8")
+		)
+			fail(
+				"merge_private_control_session_contract_drift",
+				"Merged worker release assets refuse a control-session contract that differs from the source contract.",
+			);
+		return `${controlSession.contract_sha256}:${controlSession.contract_json}`;
+	} catch (error) {
+		if (error instanceof WorkerReleaseAssetsError) throw error;
+		fail(
+			"merge_private_control_session_contract_invalid",
+			"Merged worker release assets require each platform manifest to declare a valid private control-session contract.",
 		);
 	}
 }

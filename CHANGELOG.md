@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.72.0 (`ceal-v0.72.0`)
+
+Introduces the signed-worker contract needed for the Gateway-owned Agent
+control-session handover.
+
+- **Carries a private five-operation control session.** The hidden carrier can
+  only receive its one-shot Gateway session through protected FD 4, gives it a
+  fixed two-second deadline, and accepts serial newline-framed canonical
+  requests for `acquire`, `projection`, `recheck`, `call`, and `complete`.
+  The Agent receives only those framed requests and responses; it never receives
+  the Gateway credential, socket path, or a caller-selectable route.
+- **Binds the control session to the reviewed protocol-only handoff.** Its
+  release contract names `gateway-protocol-handoff-v0.71.6`, Gateway commit,
+  protocol subtree, and archive digest. The generated source, every native
+  worker artifact, and every platform release manifest must carry byte-identical
+  contract bytes; composition and merge refuse drift.
+- **Does not cut over a service.** This release does not register the Gateway
+  socket, issue a protected session, launch `ceal-agent`, accept provider
+  ingress, or prove any capability call. Those are separately applied and
+  observed Gateway/Agent operations.
+
 ## 0.71.0 (`ceal-v0.71.0`)
 
 The first worker release candidate that consumes the Gateway **protocol-only**

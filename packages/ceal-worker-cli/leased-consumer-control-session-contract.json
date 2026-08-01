@@ -1,0 +1,41 @@
+{
+  "schema_version": "ceal.worker_private_leased_consumer_control_session_contract.v1",
+  "argv": ["--internal-leased-consumer-control-session"],
+  "protected_session": {
+    "child_fd": 4,
+    "schema_version": "ceal.leased_consumer_control_session.v1",
+    "maximum_bytes": 8192,
+    "deadline_ms": 2000
+  },
+  "agent_ipc": {
+    "transport": "stdin_stdout_ndjson",
+    "request_schema_version": "ceal.leased_consumer_control_request.v1",
+    "response_schema_version": "ceal.leased_consumer_control_response.v1",
+    "maximum_frame_bytes": 32768,
+    "serial": true
+  },
+  "gateway": {
+    "transport": "unix_socket",
+    "socket_path": "/run/ceal/leased-consumer-control-v1.sock",
+    "operation_deadline_ms": 30000,
+    "routes": {
+      "acquire": "/api/ceal/agent/v1/control/acquire",
+      "projection": "/api/ceal/agent/v1/control/projection",
+      "recheck": "/api/ceal/agent/v1/control/recheck",
+      "call": "/api/ceal/agent/v1/call",
+      "complete": "/api/ceal/agent/v1/control/complete"
+    }
+  },
+  "gateway_protocol_handoff": {
+    "lock_file": "gateway-protocol-handoff-lock.json",
+    "gateway_tag": "gateway-protocol-handoff-v0.71.6",
+    "gateway_commit": "cd350024743342bfaf65716ec909695918771d49",
+    "protocol_tree": "3ca6fe3a1b650dbe6414bd5cbd77d9a6b843924b",
+    "archive_sha256": "6a979c6325a832b8d2b1e595ca386f68244353a2aab19166c1fc547ce2c71e34"
+  },
+  "non_claims": [
+    "This private contract is not a public ceal command or an Agent effect API.",
+    "A release manifest containing this contract does not register a Gateway route, issue a credential, launch an Agent, or prove a successful capability call.",
+    "The Agent receives only framed requests and responses; it never receives the protected Gateway credential or an arbitrary socket path."
+  ]
+}

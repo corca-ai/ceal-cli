@@ -43,8 +43,8 @@ if (process.argv.slice(2).length === 1 && process.argv[2] === LEASED_CONSUMER_CA
 			}),
 		)
 		.then(
-			() => {
-				process.exitCode = 3;
+			(cleanClose) => {
+				process.exitCode = cleanClose ? 0 : 3;
 			},
 			() => {
 				process.exitCode = 3;

@@ -23,6 +23,7 @@ import { parse } from "yaml";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.mjs";
 import {
 	verifyEmbeddedCarrierContractSource,
+	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
@@ -64,6 +65,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 				try {
 					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
 					let privateCarrierContract;
+					let privateControlSessionContract;
 					let privateCarrierHandoff;
 					try {
 						privateCarrierContract = verifyEmbeddedCarrierContractSource({ repoRoot });
@@ -71,6 +73,14 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						fail(
 							"embedded_carrier_contract_drift",
 							"Worker native artifacts require generated carrier contract bytes to match the source contract.",
+						);
+					}
+					try {
+						privateControlSessionContract = verifyEmbeddedControlSessionContractSource({ repoRoot });
+					} catch {
+						fail(
+							"embedded_control_session_contract_drift",
+							"Worker native artifacts require generated control-session contract bytes to match the source contract.",
 						);
 					}
 					try {
@@ -90,7 +100,17 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 					});
 					const version = resolveVersion(repoRoot, inputs);
 					const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-					materializeOutput({ output, repoRoot, inputs, version, platform, artifact, privateCarrierContract, privateCarrierHandoff });
+					materializeOutput({
+						output,
+						repoRoot,
+						inputs,
+						version,
+						platform,
+						artifact,
+						privateCarrierContract,
+						privateControlSessionContract,
+						privateCarrierHandoff,
+					});
 					return {
 						schema_version: "ceal.worker_native_artifact_build.v1",
 						ok: true,
@@ -104,6 +124,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						native_smoke: artifact.smoke,
 						protocol: inputs.protocol,
 						private_leased_consumer_carrier: privateCarrierContract,
+						private_leased_consumer_control_session: privateControlSessionContract,
 						private_leased_consumer_handoff: privateCarrierHandoff,
 						non_claims: [
 							"This is a local unsigned native worker-artifact proof, not a signature, tag, upload, installation, or Gateway action.",
@@ -272,7 +293,17 @@ function smokeArtifact({ artifactPath, version }) {
 	}
 }
 
-function materializeOutput({ output, repoRoot, inputs, version, platform, artifact, privateCarrierContract, privateCarrierHandoff }) {
+function materializeOutput({
+	output,
+	repoRoot,
+	inputs,
+	version,
+	platform,
+	artifact,
+	privateCarrierContract,
+	privateControlSessionContract,
+	privateCarrierHandoff,
+}) {
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-native-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
@@ -292,6 +323,7 @@ function materializeOutput({ output, repoRoot, inputs, version, platform, artifa
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,
 			private_leased_consumer_carrier: privateCarrierContract,
+			private_leased_consumer_control_session: privateControlSessionContract,
 			private_leased_consumer_handoff: privateCarrierHandoff,
 			handoff: inputs.handoff,
 			consumer_smoke: { installed_from_packed_archives: true, source_or_workspace_fallback_used: false },

@@ -1,7 +1,20 @@
 # Session Handoff
 Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.6`(protocol-only 팩킷)을 검증·소비했고,
-`ceal-v0.71.0`이 릴리스·게시됐다(stable 이동 완료).** 남은 실질 관문은 여전히 **Mac 증거**다.
-이 레인은 `corca-ai/ceal-cli`만 다룬다.
+`ceal-v0.71.0`이 릴리스·게시됐다(stable 이동 완료).** `vinc`의 통합 운영 체크아웃은 이제
+`ceal-v0.72.0` 제어 세션 계약을 릴리스 후보로 만들고 있다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
+
+## Current slice — private control-session carrier (unreleased)
+
+- `packages/ceal-worker-cli/leased-consumer-control-session-contract.json`이
+  `gateway-protocol-handoff-v0.71.6`의 tag·commit·protocol subtree·archive digest,
+  보호 FD 4(8 KiB, 2초), 그리고 다섯 고정 UDS 경로를 한 계약으로 묶는다.
+- 생성된 계약 → 네이티브 산출물 → 플랫폼별 worker release manifest → platform merge가 같은
+  bytes/SHA-256을 요구한다. drift는 source build, compose, merge 중 하나에서 거부된다.
+- 이 바이너리는 **공개 명령이 아니며** Gateway socket 등록, credential 발급, Agent launch,
+  ingress 전환, provider 성공을 주장하지 않는다. 다음 Gateway slice가 별도로 등록·fence·apply하고,
+  그 다음에야 Mac/Narnia/Agent 실제 수용 테스트를 요청한다.
+- `vinc`는 현재 이 repository의 통합 운영 checkout(`/home/ubuntu/ceal-cli`)에서 구현·검증·
+  commit·publish할 수 있다. Narnia의 추가 source 작업을 기다리지 않는다.
 
 ## 2026-08-01 — protocol-only 핸드오프 소비
 
