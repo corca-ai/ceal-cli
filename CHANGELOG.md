@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.72.2 (`ceal-v0.72.2`)
+
+Carries the exact v2 private result-control frame required by the reviewed
+Gateway result-delivery fence.
+
+- **Adds a separate result-bearing control grammar.** The worker accepts only
+  `ceal.leased_consumer_result_control_{request,response}.v2` for its private
+  `call` operation; it keeps the v1 status-only control session distinct.
+- **Rejects a stale or invented carrier before socket I/O.** Valid-looking v1
+  and unknown-version result frames are refused without any UDS request.
+- **Does not cut over service delivery.** This artifact neither registers the
+  Gateway socket nor launches an Agent, invokes a provider, transfers Slack
+  ingress, or makes a provider-derived result user-visible.
+
 ## 0.72.1 (`ceal-v0.72.1`)
 
 Consumes the signed `gateway-protocol-handoff-v0.71.8` packet.
