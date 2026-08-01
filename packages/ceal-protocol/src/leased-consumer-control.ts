@@ -7,8 +7,12 @@ import { requireJsonByteSize } from "./gateway-validation-primitives.js";
 export const CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA = "ceal.leased_consumer_control_session.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer_control_request.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_control_response.v1" as const;
+export const CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer_result_control_request.v2" as const;
+export const CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_result_control_response.v2" as const;
+export const CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA = "ceal.gateway_leased_agent_delegated_read_result.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES = 8 * 1024;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES = 32 * 1024;
+export const CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES = 24 * 1024;
 
 export type CealLeasedConsumerControlOperation = "acquire" | "projection" | "recheck" | "call" | "complete";
 export type CealLeasedConsumerControlDisposition = "completed" | "failed" | "cancelled" | "deferred";
@@ -89,6 +93,35 @@ export type CealLeasedConsumerControlCompleteResult =
 	| CealLeasedConsumerControlUnavailable;
 export type CealLeasedConsumerControlTerminalResult = { status: "lease_lost" | "lease_expired" | "event_settled" };
 
+/**
+ * The result carrier is intentionally a separate protocol revision. v1 remains
+ * status-only so an installed older worker rejects a result-bearing frame
+ * rather than treating it as a successful but malformed call.
+ */
+export type CealLeasedConsumerResultControlRequest =
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA; operation: "acquire"; input: Record<string, never> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA; operation: "projection" | "recheck"; input: CealLeasedConsumerControlLeaseInput }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA; operation: "call"; input: CealLeasedConsumerCallInput }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA; operation: "complete"; input: CealLeasedConsumerControlCompleteInput };
+
+export type CealLeasedConsumerResultControlResponse =
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "acquire"; result: CealLeasedConsumerControlAcquireResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "projection"; result: CealLeasedConsumerControlProjectionResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "recheck"; result: CealLeasedConsumerControlRecheckResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "call"; result: CealLeasedConsumerResultControlCallResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "complete"; result: CealLeasedConsumerControlCompleteResult };
+
+export interface CealLeasedConsumerDelegatedReadResult {
+	schema_version: typeof CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA;
+	capability_id: string;
+	data: unknown;
+}
+
+export type CealLeasedConsumerResultControlCallResult =
+	| { status: "result"; result: CealLeasedConsumerDelegatedReadResult }
+	| { status: "lease_lost" | "lease_expired" | "action_scope_unavailable" | "action_scope_mismatch" | "delegated_read_unavailable" | "result_not_replayable" }
+	| CealLeasedConsumerControlAuthenticationFailure;
+
 export interface CealLeasedConsumerNormalizedProjection {
 	schema_version: "ceal.gateway_normalized_projection.v1";
 	text: string;
@@ -108,10 +141,18 @@ export function decodeCealLeasedConsumerControlSession(value: unknown): CealLeas
 }
 
 export function decodeCealLeasedConsumerControlRequest(value: unknown): CealLeasedConsumerControlRequest {
+	return decodeControlRequest(value, CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA) as CealLeasedConsumerControlRequest;
+}
+
+export function decodeCealLeasedConsumerResultControlRequest(value: unknown): CealLeasedConsumerResultControlRequest {
+	return decodeControlRequest(value, CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA) as CealLeasedConsumerResultControlRequest;
+}
+
+function decodeControlRequest(value: unknown, schema: string): Record<string, unknown> {
 	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, invalid);
 	const record = requireRecord(value);
 	requireExactKeys(record, ["input", "operation", "schema_version"]);
-	if (record.schema_version !== CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA || typeof record.operation !== "string" || !CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerControlOperation)) invalid();
+	if (record.schema_version !== schema || typeof record.operation !== "string" || !CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerControlOperation)) invalid();
 	const input = requireRecord(record.input);
 	switch (record.operation as CealLeasedConsumerControlOperation) {
 		case "acquire": requireExactKeys(input, []); break;
@@ -119,23 +160,31 @@ export function decodeCealLeasedConsumerControlRequest(value: unknown): CealLeas
 		case "call": decodeCallInput(input); break;
 		case "complete": decodeCompleteInput(input); break;
 	}
-	return record as unknown as CealLeasedConsumerControlRequest;
+	return record;
 }
 
 export function decodeCealLeasedConsumerControlResponse(value: unknown): CealLeasedConsumerControlResponse {
+	return decodeControlResponse(value, CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA, decodeCallResult) as CealLeasedConsumerControlResponse;
+}
+
+export function decodeCealLeasedConsumerResultControlResponse(value: unknown): CealLeasedConsumerResultControlResponse {
+	return decodeControlResponse(value, CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, decodeResultControlCallResult) as CealLeasedConsumerResultControlResponse;
+}
+
+function decodeControlResponse(value: unknown, schema: string, decodeCall: (result: Record<string, unknown>) => void): Record<string, unknown> {
 	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, invalid);
 	const record = requireRecord(value);
 	requireExactKeys(record, ["operation", "result", "schema_version"]);
-	if (record.schema_version !== CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA || typeof record.operation !== "string" || !CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerControlOperation)) invalid();
+	if (record.schema_version !== schema || typeof record.operation !== "string" || !CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerControlOperation)) invalid();
 	const result = requireRecord(record.result);
 	switch (record.operation as CealLeasedConsumerControlOperation) {
 		case "acquire": decodeAcquireResult(result); break;
 		case "projection": decodeProjectionResult(result); break;
 		case "recheck": decodeRecheckResult(result); break;
-		case "call": decodeCallResult(result); break;
+		case "call": decodeCall(result); break;
 		case "complete": decodeCompleteResult(result); break;
 	}
-	return record as unknown as CealLeasedConsumerControlResponse;
+	return record;
 }
 
 function decodeLeaseInput(value: Record<string, unknown>): void {
@@ -167,6 +216,16 @@ function decodeCallResult(value: Record<string, unknown>): void {
 	if (value.status === "authentication_failed") { requireExactKeys(value, ["status"]); return; }
 	requireExactKeys(value, ["status"]); if (!["lease_lost", "lease_expired", "action_scope_unavailable", "action_scope_mismatch", "leased_consumer_call_unavailable"].includes(value.status as string)) invalid();
 }
+function decodeResultControlCallResult(value: Record<string, unknown>): void {
+	if (value.status === "authentication_failed") { requireExactKeys(value, ["status"]); return; }
+	if (value.status === "result") { requireExactKeys(value, ["result", "status"]); decodeDelegatedReadResult(value.result); return; }
+	requireExactKeys(value, ["status"]); if (!["lease_lost", "lease_expired", "action_scope_unavailable", "action_scope_mismatch", "delegated_read_unavailable", "result_not_replayable"].includes(value.status as string)) invalid();
+}
+function decodeDelegatedReadResult(value: unknown): void {
+	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES, invalid);
+	const record = requireRecord(value); requireExactKeys(record, ["capability_id", "data", "schema_version"]);
+	if (record.schema_version !== CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA || !safeRef(record.capability_id) || !safeResultJson(record.data)) invalid();
+}
 function decodeCompleteResult(value: Record<string, unknown>): void { if (value.status === "authentication_failed" || value.status === "control_unavailable") { requireExactKeys(value, ["status"]); } else if (value.status === "completed") { requireExactKeys(value, ["replayed", "status"]); if (typeof value.replayed !== "boolean") invalid(); } else decodeTerminal(value); }
 function decodeTerminal(value: Record<string, unknown>): void { requireExactKeys(value, ["status"]); if (!TERMINAL_STATUSES.has(value.status as CealLeasedConsumerControlTerminalResult["status"])) invalid(); }
 function decodeLease(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, ["delivery_attempt", "event_ref", "expires_at", "lease_fence", "lease_ref"]); if (!safeRef(record.event_ref) || !safeRef(record.lease_ref) || !positive(record.lease_fence) || !positive(record.delivery_attempt) || !timestamp(record.expires_at)) invalid(); }
@@ -179,8 +238,11 @@ function positive(value: unknown): value is number { return typeof value === "nu
 function timestamp(value: unknown): boolean { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function safeText(value: unknown, maximum: number): value is string { return typeof value === "string" && Buffer.byteLength(value, "utf8") <= maximum && ![...value].some((character) => character.codePointAt(0)! < 32 || character.codePointAt(0) === 127); }
 function safeJson(value: unknown, depth = 0): boolean { if (depth > 16) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 8 * 1024); if (Array.isArray(value)) return value.length <= 128 && value.every((entry) => safeJson(entry, depth + 1)); if (!record(value) || Object.keys(value).length > 128) return false; return Object.entries(value).every(([key, entry]) => safeText(key, 128) && !/(?:token|secret|password|authorization|credential|provenance|runner|consumer|requester|source_kind)/iu.test(key) && safeJson(entry, depth + 1)); }
+function safeResultJson(value: unknown, depth = 0): boolean { if (depth > 8) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 4 * 1024); if (Array.isArray(value)) return value.length <= 64 && value.every((entry) => safeResultJson(entry, depth + 1)); if (!plainRecord(value) || Object.keys(value).length > 64) return false; return Object.entries(value).every(([key, entry]) => safeResultKey(key) && safeResultJson(entry, depth + 1)); }
+function safeResultKey(value: string): boolean { return safeText(value, 128) && !/(?:token|secret|password|authorization|credential|provenance|runner|consumer|requester|source_kind|attachment|binary|body|header|url|uri|link|path|locator|acl|permission|__proto__|constructor|prototype)/iu.test(value); }
 function requireRecord(value: unknown): Record<string, unknown> { if (!record(value)) invalid(); return value; }
 function requireExactKeys(value: Record<string, unknown>, expected: readonly string[], optional: readonly string[] = []): void { const keys = Object.keys(value).sort(); const allowed = [...expected].sort(); const required = allowed.filter((key) => !optional.includes(key)); if (keys.length < required.length || keys.length > allowed.length || !keys.every((key) => allowed.includes(key)) || !required.every((key) => Object.hasOwn(value, key))) invalid(); }
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean { const keys = Object.keys(value).sort(); return keys.length === expected.length && keys.every((key, index) => key === expected[index]); }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
+function plainRecord(value: unknown): value is Record<string, unknown> { return record(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null); }
 function invalid(): never { throw new TypeError("Ceal leased-consumer control record is invalid"); }

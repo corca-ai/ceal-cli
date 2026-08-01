@@ -745,7 +745,7 @@ test("package metadata stays exact and packages only dist plus MIT license", () 
 	// that version. `packages/ceal-protocol` is a frozen copy of a Gateway-owned
 	// package, and consuming the v0.66.1 artifact moved it to 0.66.1; leaving
 	// `0.65.0` here made `npm ci` chase an unpublished version on the registry.
-	assert.equal(manifest.dependencies["@corca-ai/ceal-protocol"], "0.71.6");
+	assert.equal(manifest.dependencies["@corca-ai/ceal-protocol"], "0.71.8");
 	assert.equal(manifest.dependencies["@corca-ai/ceal"], undefined);
 	assert.equal(manifest.dependencies.yaml, "2.9.0");
 	assert.equal(manifest.license, "MIT");

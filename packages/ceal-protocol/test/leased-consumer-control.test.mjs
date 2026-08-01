@@ -4,9 +4,14 @@ import {
 	CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA,
 	CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA,
+	CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA,
+	CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA,
+	CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA,
 	decodeCealLeasedConsumerControlRequest,
 	decodeCealLeasedConsumerControlResponse,
 	decodeCealLeasedConsumerControlSession,
+	decodeCealLeasedConsumerResultControlRequest,
+	decodeCealLeasedConsumerResultControlResponse,
 } from "../dist/index.js";
 
 const lease = { event_ref: "event:one", lease_ref: "lease:one", lease_fence: 1, delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };
@@ -63,4 +68,24 @@ test("leased-consumer control rejects a public/admin socket, caller authority, r
 	assert.throws(() => decodeCealLeasedConsumerControlResponse({
 		schema_version: CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "idempotency_not_allowed" },
 	}), TypeError);
+});
+
+test("result control v2 accepts one bounded projected read result without widening v1", () => {
+	const request = { schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA, operation: "call", input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id: "message.search", target_ref: "target:channel", purpose: "answer", arguments: { query: "roadmap" }, idempotency_key: "call:one" } };
+	const response = { schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { items: [{ text: "bounded" }] } } } };
+	assert.equal(decodeCealLeasedConsumerResultControlRequest(request).operation, "call");
+	assert.equal(decodeCealLeasedConsumerResultControlResponse(response).operation, "call");
+	assert.throws(() => decodeCealLeasedConsumerControlResponse(response), TypeError);
+});
+
+test("result control v2 rejects raw custody fields, oversized text, and a result lookup operation", () => {
+	for (const response of [
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { authorization: "forged" } } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { locator: "forged" } } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { source_url: "https://unsafe.example" } } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: JSON.parse('{"__proto__":{"x":true}}') } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: new Date() } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { text: "x".repeat(5 * 1024) } } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA, operation: "result", input: leaseInput },
+	]) assert.throws(() => response.operation === "result" ? decodeCealLeasedConsumerResultControlRequest(response) : decodeCealLeasedConsumerResultControlResponse(response), TypeError);
 });
