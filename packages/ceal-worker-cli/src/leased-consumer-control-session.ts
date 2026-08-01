@@ -4,9 +4,9 @@ import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES,
 	type CealLeasedConsumerControlOperation,
-	decodeCealLeasedConsumerControlRequest,
-	decodeCealLeasedConsumerControlResponse,
 	decodeCealLeasedConsumerControlSession,
+	decodeCealLeasedConsumerResultControlRequest,
+	decodeCealLeasedConsumerResultControlResponse,
 } from "@corca-ai/ceal-protocol";
 import { LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON } from "./generated/leased-consumer-control-session-contract.js";
 
@@ -154,7 +154,7 @@ async function readProtectedSessionBeforeDeadline(
 }
 
 async function dispatch(credential: string, frame: Uint8Array, runtime: LeasedConsumerControlSessionRuntime): Promise<Uint8Array> {
-	const request = decodeCealLeasedConsumerControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
+	const request = decodeCealLeasedConsumerResultControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
 	const body = JSON.stringify(request);
 	const response = await requestControlBeforeDeadline(runtime, () =>
 		(runtime.requestUnixSocket ?? postUnixSocket)({
@@ -167,7 +167,7 @@ async function dispatch(credential: string, frame: Uint8Array, runtime: LeasedCo
 	);
 	if (response.status !== 200 || !isJsonContentType(response.contentType) || response.bytes.byteLength > MAX_FRAME_BYTES)
 		throw new Error("control_unavailable");
-	const decoded = decodeCealLeasedConsumerControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
+	const decoded = decodeCealLeasedConsumerResultControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
 	if (decoded.operation !== request.operation) throw new Error("operation_mismatch");
 	return new TextEncoder().encode(`${JSON.stringify(decoded)}\n`);
 }
@@ -410,8 +410,8 @@ function assertEmbeddedControlSessionContract(
 		value.protected_session.maximum_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES ||
 		value.protected_session.deadline_ms !== 2_000 ||
 		value.agent_ipc.transport !== "stdin_stdout_ndjson" ||
-		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_control_request.v1" ||
-		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_control_response.v1" ||
+		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_result_control_request.v2" ||
+		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_result_control_response.v2" ||
 		value.agent_ipc.maximum_frame_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES ||
 		value.agent_ipc.serial !== true ||
 		value.gateway.transport !== "unix_socket" ||

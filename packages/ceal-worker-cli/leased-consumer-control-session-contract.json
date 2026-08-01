@@ -9,8 +9,8 @@
   },
   "agent_ipc": {
     "transport": "stdin_stdout_ndjson",
-    "request_schema_version": "ceal.leased_consumer_control_request.v1",
-    "response_schema_version": "ceal.leased_consumer_control_response.v1",
+    "request_schema_version": "ceal.leased_consumer_result_control_request.v2",
+    "response_schema_version": "ceal.leased_consumer_result_control_response.v2",
     "maximum_frame_bytes": 32768,
     "serial": true
   },

@@ -13,11 +13,11 @@ const session = encoder.encode(
 );
 
 const frames = [
-	{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "acquire", input: {} },
-	{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "projection", input: leaseInput() },
-	{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "recheck", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "acquire", input: {} },
+	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "projection", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "recheck", input: leaseInput() },
 	{
-		schema_version: "ceal.leased_consumer_control_request.v1",
+		schema_version: "ceal.leased_consumer_result_control_request.v2",
 		operation: "call",
 		input: {
 			...leaseInput(),
@@ -29,7 +29,7 @@ const frames = [
 		},
 	},
 	{
-		schema_version: "ceal.leased_consumer_control_request.v1",
+		schema_version: "ceal.leased_consumer_result_control_request.v2",
 		operation: "complete",
 		input: { ...leaseInput(), disposition: "completed", agent_run_ref: "run:fixture" },
 	},
@@ -112,11 +112,37 @@ test("invalid protected session and malformed Agent frames make zero control req
 	});
 	const output = [];
 	async function* malformed() {
-		yield encoder.encode('{"bad":true}\n{"schema_version":"ceal.leased_consumer_control_request.v1","operation":"acquire","input":{}}\n');
+		yield encoder.encode(
+			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_result_control_request.v2","operation":"acquire","input":{}}\n',
+		);
 	}
 	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
 	assert.equal(calls, 0);
 	assert.deepEqual(output, []);
+});
+
+test("legacy and unknown private control grammars make zero control requests and emit nothing", async () => {
+	for (const frame of [
+		{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "acquire", input: {} },
+		{ schema_version: "ceal.leased_consumer_result_control_request.v3", operation: "acquire", input: {} },
+	]) {
+		let calls = 0;
+		const carrier = await openLeasedConsumerControlSession({
+			readProtectedSession: async () => session,
+			closeProtectedSession: async () => {},
+			requestUnixSocket: async () => {
+				calls += 1;
+				throw new Error("must not run");
+			},
+		});
+		const output = [];
+		async function* input() {
+			yield encoder.encode(`${JSON.stringify(frame)}\n`);
+		}
+		assert.equal(await runLeasedConsumerControlSession(input(), carrier, (value) => output.push(value)), false);
+		assert.equal(calls, 0);
+		assert.deepEqual(output, []);
+	}
 });
 
 test("protected session is closed and refused at its fixed two-second deadline", async () => {
@@ -178,7 +204,7 @@ function leaseInput() {
 	return { event_ref: "event:fixture", lease_ref: "lease:fixture", lease_fence: 1 };
 }
 function responseFor(operation) {
-	const base = { schema_version: "ceal.leased_consumer_control_response.v1", operation };
+	const base = { schema_version: "ceal.leased_consumer_result_control_response.v2", operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
 		return {
@@ -193,7 +219,18 @@ function responseFor(operation) {
 			},
 		};
 	if (operation === "recheck") return { ...base, result: { status: "active", lease: lease() } };
-	if (operation === "call") return { ...base, result: { status: "leased_consumer_call_unavailable" } };
+	if (operation === "call")
+		return {
+			...base,
+			result: {
+				status: "result",
+				result: {
+					schema_version: "ceal.gateway_leased_agent_delegated_read_result.v1",
+					capability_id: "message.search",
+					data: { matches: ["fixture"] },
+				},
+			},
+		};
 	return { ...base, result: { status: "completed", replayed: false } };
 }
 function lease() {

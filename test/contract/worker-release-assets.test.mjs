@@ -16,6 +16,7 @@ import {
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.mjs";
 import {
+	readControlSessionContract,
 	verifyEmbeddedCarrierContractSource,
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
@@ -181,6 +182,26 @@ test("native source verification refuses a stale generated control-session contr
 			'" as const;\n',
 	);
 	assert.throws(() => verifyEmbeddedControlSessionContractSource({ repoRoot: root }), /embedded_control_session_contract_drift/u);
+});
+
+test("private control-session release input accepts only its exact result-control v2 grammar pair", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-control-session-contract-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const contractPath = path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
+	mkdirSync(path.dirname(contractPath), { recursive: true });
+	writeFileSync(
+		path.join(root, "gateway-protocol-handoff-lock.json"),
+		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
+	);
+	writeFileSync(contractPath, CONTROL_SESSION_CONTRACT_BYTES);
+	assert.equal(
+		readControlSessionContract(contractPath, { repoRoot: root }).value.agent_ipc.request_schema_version,
+		"ceal.leased_consumer_result_control_request.v2",
+	);
+	const mixed = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	mixed.agent_ipc.response_schema_version = "ceal.leased_consumer_control_response.v1";
+	writeFileSync(contractPath, `${JSON.stringify(mixed, null, 2)}\n`);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 });
 
 test("native source verification refuses a stale generated Gateway handoff before bundling", (context) => {
