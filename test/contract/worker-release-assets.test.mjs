@@ -227,28 +227,36 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 test("worker release workflow signs only the worker inventory from the locked archive", () => {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
 	assert.match(workflow, /tags:\n {6}- "ceal-v\*\.\*\.\*"/u);
-	assert.match(workflow, /gateway-handoff-lock\.json/u);
+	assert.match(workflow, /gateway-protocol-handoff-lock\.json/u);
 	assert.match(workflow, /build-worker-release-assets\.mjs compose/u);
 	assert.match(workflow, /build-worker-release-assets\.mjs merge/u);
 	assert.doesNotMatch(workflow, /cealctl-linux/u);
 	assert.doesNotMatch(workflow, /cealctl-guide/u);
-	assert.match(workflow, /GATEWAY_HANDOFF_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases\/gateway-handoff/u);
 	assert.match(workflow, /\$GATEWAY_HANDOFF_ORIGIN\/\$HANDOFF_RELEASE_TAG\/\$HANDOFF_ARCHIVE/u);
-	// The two literals above must name the archive the lock binds. Nothing else
+	// The three literals below must name the archive the lock binds. The origin
+	// used to be asserted as its own hard-coded string, which is the one of the
+	// three that cannot self-heal from a lock bump: moving to a new handoff origin
+	// left a passing literal describing the old path. It is derived from the lock
+	// now, like the other two. Nothing else
 	// checks this, and the failure mode is the expensive one: the download
 	// succeeds against a stale origin path, the digest comparison fails, and the
 	// tag is burned. One clean run per tag is the contract, so this has to fail in
 	// the gate rather than in the release.
-	const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-handoff-lock.json"), "utf8"));
+	const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	assert.match(
+		workflow,
+		new RegExp(`GATEWAY_HANDOFF_ORIGIN: ${lock.gateway.origin.replaceAll(".", "[.]")}\\n`, "u"),
+		"the release workflow's handoff origin must be the one gateway-protocol-handoff-lock.json binds",
+	);
 	assert.match(
 		workflow,
 		new RegExp(`HANDOFF_RELEASE_TAG: ${lock.gateway.tag.replaceAll(".", "[.]")}\\n`, "u"),
-		"the release workflow's handoff tag must be the one gateway-handoff-lock.json binds",
+		"the release workflow's handoff tag must be the one gateway-protocol-handoff-lock.json binds",
 	);
 	assert.match(
 		workflow,
 		new RegExp(`HANDOFF_ARCHIVE: ${lock.archive.filename.replaceAll(".", "[.]")}\\n`, "u"),
-		"the release workflow's handoff archive must be the one gateway-handoff-lock.json binds",
+		"the release workflow's handoff archive must be the one gateway-protocol-handoff-lock.json binds",
 	);
 	assert.match(workflow, /CEAL_RELEASE_ORIGIN: https:\/\/ceal[.]borca[.]ai\/releases/u);
 	// The platform proofs build a SEA and run an installer for

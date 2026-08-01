@@ -385,7 +385,11 @@ function assertPackedPackage({ tarball, record, expectedName, code }) {
 	} catch {
 		fail(code, "Gateway package tarball has an invalid package manifest.");
 	}
-	if (manifest?.name !== expectedName || manifest?.version !== record.version || !sameStrings(exportKeys(manifest.exports), record.exports)) {
+	if (
+		manifest?.name !== expectedName ||
+		manifest?.version !== record.version ||
+		!sameStrings(exportKeys(manifest.exports), record.exports)
+	) {
 		fail(code, "Gateway package tarball does not match its complete handoff record.");
 	}
 	return manifest;

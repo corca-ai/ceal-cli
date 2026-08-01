@@ -157,8 +157,7 @@ function validateLock(value) {
 	const signature = value.reviewed_signature;
 	if (
 		!isRecord(signature) ||
-		signature.certificate_identity !==
-			`https://github.com/corca-ai/ceal/${gateway.workflow_path}@refs/tags/${gateway.tag}` ||
+		signature.certificate_identity !== `https://github.com/corca-ai/ceal/${gateway.workflow_path}@refs/tags/${gateway.tag}` ||
 		signature.oidc_issuer !== "https://token.actions.githubusercontent.com" ||
 		signature.run_invocation_uri !== `https://github.com/corca-ai/ceal/actions/runs/${gateway.actions_run_id}/attempts/1`
 	) {
@@ -184,7 +183,10 @@ function requireProtocolBinding(value) {
 		value.filename !== `corca-ai-ceal-protocol-${value.version}.tgz` ||
 		!isSha256(value.sha256)
 	) {
-		fail("invalid_gateway_handoff_lock", "Gateway handoff lock does not bind @corca-ai/ceal-protocol to an exact package version, tarball, and digest.");
+		fail(
+			"invalid_gateway_handoff_lock",
+			"Gateway handoff lock does not bind @corca-ai/ceal-protocol to an exact package version, tarball, and digest.",
+		);
 	}
 	return { package: value.package, version: value.version, filename: value.filename, sha256: value.sha256 };
 }

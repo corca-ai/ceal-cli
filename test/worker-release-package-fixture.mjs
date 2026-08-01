@@ -11,19 +11,32 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export function packedProtocolFixture(context) {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
-	// Both packs read the shared workspace `dist`, so they happen inside one hold of
-	// the lock that also owns building it — see `test/repo-build.mjs`.
-	const [protocol, client] = withBuiltPackages(["packages/ceal-protocol", "packages/ceal-client"], () => [
+	// The pack reads the shared workspace `dist`, so it happens inside one hold of
+	// the lock that also owns building it — see `test/repo-build.mjs`. Only the
+	// Protocol is packed here: the Gateway packet carries no client tarball, and
+	// the builders pack the client from `packages/ceal-client` themselves.
+	const [protocol] = withBuiltPackages(["packages/ceal-protocol"], () => [
 		packPackage(root, "packages/ceal-protocol", [".", "./conformance"]),
-		packPackage(root, "packages/ceal-client", ["."]),
 	]);
-	const producer = { repository: "corca-ai/ceal", commit: "a".repeat(40), tree: "b".repeat(40), scoped_paths_clean: true };
-	writeFileSync(path.join(root, ".ceal-handoff-owner"), "ceal.repository_extraction_gateway_handoff.v1\n");
+	const producer = {
+		repository: "corca-ai/ceal",
+		commit: "a".repeat(40),
+		tree: "b".repeat(40),
+		protocol_tree: "e".repeat(40),
+		scoped_paths_clean: true,
+	};
+	writeFileSync(path.join(root, ".ceal-protocol-handoff-owner"), "ceal.gateway_protocol_handoff.v1\n");
 	const provenance = {
 		schema_version: "ceal.gateway_protocol_artifact.v1",
-		proof_level: "host_decision",
+		proof_level: "local_state",
 		writes_external: false,
-		source: { repository: producer.repository, commit: producer.commit, tree: producer.tree, package_path: "packages/ceal-protocol" },
+		source: {
+			repository: producer.repository,
+			commit: producer.commit,
+			tree: producer.tree,
+			protocol_tree: producer.protocol_tree,
+			package_path: "packages/ceal-protocol",
+		},
 		artifact: {
 			package: protocol.name,
 			version: protocol.version,
@@ -35,42 +48,37 @@ export function packedProtocolFixture(context) {
 	};
 	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
 	writeFileSync(protocolProvenance, `${JSON.stringify(provenance)}\n`);
-	const conformanceProof = path.join(root, "gateway-conformance-proof.json");
+	const controlConformance = path.join(root, "gateway-leased-consumer-control-conformance.json");
 	writeFileSync(
-		conformanceProof,
+		controlConformance,
 		`${JSON.stringify({
-			schema_version: "ceal.repository_extraction_private_gateway_conformance.v1",
-			ok: true,
-			proof_level: "host_decision",
+			schema_version: "ceal.gateway_leased_consumer_control_conformance_handoff.v1",
+			proof_level: "local_state",
 			writes_external: false,
-			source_identity: producer,
-			packages: [proofRecord(protocol), proofRecord(client)],
+			source: { repository: producer.repository, commit: producer.commit, tree: producer.tree, protocol_tree: producer.protocol_tree },
 		})}\n`,
 	);
 	const sidecar = readFileSync(protocolProvenance);
-	const proofBytes = readFileSync(conformanceProof);
-	const handoffManifest = path.join(root, "gateway-artifact-handoff.json");
+	const controlBytes = readFileSync(controlConformance);
+	const handoffManifest = path.join(root, "gateway-protocol-handoff.json");
 	writeFileSync(
 		handoffManifest,
 		`${JSON.stringify({
-			schema_version: "ceal.repository_extraction_gateway_handoff.v1",
+			schema_version: "ceal.gateway_protocol_handoff.v1",
 			ok: true,
-			proof_level: "host_decision",
+			proof_level: "local_state",
 			writes_external: false,
 			producer,
-			packages: [record(protocol), record(client)],
-			conformance_proof: { filename: path.basename(conformanceProof), bytes: proofBytes.length },
-			conformance_proof_digest: { algorithm: "sha256", canonicalization: "utf8-json-pretty-v1", value: sha256(proofBytes) },
-			protocol_provenance: { filename: path.basename(protocolProvenance), bytes: sidecar.length },
-			protocol_provenance_digest: { algorithm: "sha256", canonicalization: "utf8-json-pretty-v1", value: sha256(sidecar) },
+			protocol: record(protocol),
+			protocol_provenance: { filename: path.basename(protocolProvenance), bytes: sidecar.length, sha256: sha256(sidecar) },
+			control_conformance: { filename: path.basename(controlConformance), bytes: controlBytes.length, sha256: sha256(controlBytes) },
 		})}\n`,
 	);
 	return {
 		root,
 		protocolTarball: protocol.tarball,
-		clientTarball: client.tarball,
 		protocolProvenance,
-		conformanceProof,
+		controlConformance,
 		handoffManifest,
 		provenance,
 		expectedHandoffSha256: sha256(readFileSync(handoffManifest)),
@@ -103,26 +111,21 @@ function packPackage(root, sourcePath, declaredExports) {
 		integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
 		bytes: bytes.length,
 		declared_exports: declaredExports,
-		package_manifest_sha256: sha256(manifestBytes),
 	};
 }
 
 function record(item) {
 	return {
-		name: item.name,
+		package: item.name,
 		version: item.version,
 		filename: item.filename,
+		bytes: item.bytes,
 		sha256: item.sha256,
 		integrity: item.integrity,
-		bytes: item.bytes,
-		declared_exports: item.declared_exports,
-		package_manifest_sha256: item.package_manifest_sha256,
+		exports: item.declared_exports,
 	};
 }
 
-function proofRecord(item) {
-	return { ...record(item), installed_as_regular_directory: true };
-}
 function sha256(bytes) {
 	return createHash("sha256").update(bytes).digest("hex");
 }

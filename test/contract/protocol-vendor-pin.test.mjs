@@ -10,7 +10,7 @@ import {
 } from "../../scripts/verify-protocol-vendor-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-handoff-lock.json"), "utf8"));
+const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
 
 // Every divergence-shaped case below runs off this local fixture rather than off
 // the repository's real protocol-vendor-pin.json, and that is the point. The
@@ -29,7 +29,7 @@ const DIVERGED = Object.freeze({
 		tree: "b".repeat(40),
 	},
 	shipped: {
-		lock_file: "gateway-handoff-lock.json",
+		lock_file: "gateway-protocol-handoff-lock.json",
 		status: "diverged",
 		gateway_commit: LOCK.gateway.commit,
 		protocol_tree: "c".repeat(40),
@@ -214,7 +214,7 @@ test("a pin missing its schema, identities, or non-claims is rejected", () => {
 // lands. It states what must hold whichever way that goes.
 test("the repository's own pin agrees with the lock it was written about", () => {
 	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
-	assert.equal(pin.shipped.lock_file, "gateway-handoff-lock.json");
+	assert.equal(pin.shipped.lock_file, "gateway-protocol-handoff-lock.json");
 	assert.equal(pin.shipped.gateway_commit, LOCK.gateway.commit, "the pin must be written about the lock this repository actually carries");
 	assert.equal(
 		pin.shipped.status === "diverged",

@@ -11,5 +11,5 @@ verification_install_proposals: []
 truth_surfaces:
   - README.md
   - worker-release-inputs.json
-  - gateway-handoff-lock.json
+  - gateway-protocol-handoff-lock.json
   - protocol-vendor-pin.json

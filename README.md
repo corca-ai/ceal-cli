@@ -25,13 +25,15 @@ between the copy and the shipped archive. The second fails
 is not what a release would ship. A divergence may still be declared — naming a
 disposition owner and a tracked request under `docs/requests/` — but a
 declaration is a quarantine, not a clearance, and re-syncing the copy or bumping
-`gateway-handoff-lock.json` expires it. `npm run check:protocol-dev` is the
+`gateway-protocol-handoff-lock.json` expires it. `npm run check:protocol-dev` is the
 development-only path that keeps working meanwhile; it proves nothing about a
 release or an installed worker and says so in its own output.
 
 The check reaches no remote, so it cannot see the copy falling behind its owner,
-and `source.commit` and `shipped.protocol_tree` are recorded observations rather
-than locally verified ones — confirming those needs the owner checkout. The
+and `source.commit` is a recorded observation rather than a locally verified one
+— confirming it needs the owner checkout. `shipped.protocol_tree` is no longer in
+that category: the signed protocol handoff declares the producer's protocol
+subtree and the lock records it. The
 divergence verdict compares `source.commit` against the lock's `gateway.commit`
 rather than the pin's two tree fields, so it is not computed entirely from
 author-written values — but `source.commit` is still self-recorded, which makes a
@@ -257,17 +259,19 @@ installer fail-closes on it, so it is never an install or acceptance path.
 `release:worker:inputs`, `release:worker:package`, and
 `release:worker:native` accept exactly one `--gateway-handoff-archive`
 argument. The archive must match a source-reviewed
-`gateway-handoff-lock.json`, contain the exact six-file Gateway packet, and is
-copied into a private temporary directory before its bytes are checked and it
-is extracted. The release commands reject the former six raw file/digest
-arguments, so a caller cannot replace the reviewed archive binding with a
-caller-selected digest.
+`gateway-protocol-handoff-lock.json`, contain the exact five-file Gateway
+packet, and is copied into a private temporary directory before its bytes are
+checked and it is extracted. The release commands reject the former five raw
+file/digest arguments, so a caller cannot replace the reviewed archive binding
+with a caller-selected digest.
 
-The committed `gateway-handoff-lock.json` pins the Gateway
-repository/workflow, tag, commit/tree, Actions run and artifact name, archive
-SHA-256, and embedded handoff-manifest SHA-256 for the one consumable archive.
-The archive must contain exactly the marker, two package tarballs, manifest,
-conformance proof, and Protocol provenance; it is extracted only into a
+The committed `gateway-protocol-handoff-lock.json` pins the Gateway
+repository/workflow, tag, commit/tree/protocol-subtree, Actions run, release
+origin, Protocol package digest, archive SHA-256, and embedded
+handoff-manifest SHA-256 for the one consumable archive, plus the Sigstore
+identity a maintainer verified it against.
+The archive must contain exactly the marker, the Protocol tarball, manifest,
+leased-consumer control conformance, and Protocol provenance; it is extracted only into a
 disposable directory for the preflight/package/native operation, and every
 release command fails closed on any mismatch. The explicit
 `*FromDevelopmentInputs` APIs remain test/development seams for assembling and

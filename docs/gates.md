@@ -109,7 +109,7 @@ the Git index, and the working tree:
   was taken from;
 - **vendored** — what `packages/ceal-protocol` hashes to right now;
 - **shipped** — the protocol subtree inside the locked handoff archive that
-  `gateway-handoff-lock.json` binds a release to consume.
+  `gateway-protocol-handoff-lock.json` binds a release to consume.
 
 *source* against *vendored* is the drift check, and it fails on a committed edit
 (the recorded tree stops matching `HEAD:packages/ceal-protocol`) and on an
@@ -151,7 +151,7 @@ bytes the lock does not bind, so the refusal comes before anything is measured.
 
 Two things then expire the declaration, and it is worth naming them exactly
 rather than saying "its own facts". **Re-sync the vendored copy** and the drift
-check fails until the pin moves with it. **Bump `gateway-handoff-lock.json`** and
+check fails until the pin moves with it. **Bump `gateway-protocol-handoff-lock.json`** and
 `shipped_lock_mismatch` fails, because the declaration was made about a shipped
 state that no longer exists. Deleting or untracking the request also fails it.
 That expiry is the point — a note in a document has no such property, and this is
@@ -167,11 +167,15 @@ cannot be mistaken for one: it fails the gate rather than annotating it.
 
 Be precise about which of the three the gate can actually check. Only
 `source.tree` is verified locally, against `HEAD:packages/ceal-protocol`. The
-lock supplies `shipped.gateway_commit`, so that one is cross-checked. But
-`source.commit` and `shipped.protocol_tree` are **recorded observations no local
-check can confirm** — neither the working tree nor `gateway-handoff-lock.json`
-carries them, and the archive that would is not in this repository. A wrong value
-in either field passes the gate. Confirming them needs the owner checkout
+lock supplies `shipped.gateway_commit`, so that one is cross-checked.
+`shipped.protocol_tree` used to be unconfirmable here as well; it is not any
+more, because the protocol-only handoff declares the producer's protocol subtree
+and `gateway-protocol-handoff-lock.json` records it, so the two can be read side
+by side. That is a comparison against a reviewed lock, not against the archive:
+the gate still reaches no remote and still opens no tarball.
+
+`source.commit` remains a **recorded observation no local check can confirm** — a
+wrong value there passes the gate. Confirming it needs the owner checkout
 (`git rev-parse <commit>:packages/ceal-protocol`), which is a separate act from
 running the gate.
 

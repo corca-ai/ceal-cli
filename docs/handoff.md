@@ -1,7 +1,25 @@
 # Session Handoff
-Date: 2026-07-28 — **`ceal-v0.69.0`이 `gateway-handoff-v0.67.0` 쌍 위에서 릴리스·게시됐고
-설치·실세션·provider·receipt 증거까지 반환했다.** 공지에 남은 실질 관문은 **Mac 증거**와
-**온보딩 절차**다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
+Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.6`(protocol-only 팩킷)을 검증·소비했고,
+`ceal-v0.71.0` 워커 릴리스 후보가 로컬에서 전부 초록이다.** 남은 건 **푸시·태그 승인**과
+여전히 **Mac 증거**다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
+
+## 2026-08-01 — protocol-only 핸드오프 소비
+
+- 소비 커밋은 **`gateway-protocol-handoff-lock.json`**(신규) + vendored subtree +
+  `protocol-vendor-pin.json`을 한 커밋에 묶는다. 이전 `gateway-handoff-lock.json`은 **없어졌다.**
+- 팩킷이 바뀌었다: **client tarball이 없다.** 멤버는 marker·protocol tgz·manifest·
+  protocol provenance·**leased-consumer control conformance** 다섯 개. client는 원래도
+  `packages/ceal-client`에서 로컬로 팩킹됐고, 팩킷의 client는 검증 증인일 뿐이었다.
+  그래서 빌더는 안 바뀌고 **검증 표면만** 줄었다.
+- control conformance는 **해석하지 않는다.** manifest digest와 producer identity만 바인딩한다.
+  이 레포엔 control surface 구현이 없고, 그렇다고 주장하지도 않는다.
+- **`source.tree`를 얻는 경로가 바뀌었다.** 서명 아카이브는 빌드된 tgz만 담고 **프로토콜 소스
+  서브트리를 담지 않는다.** vendored 복사본은 운영자가 `~/codes/ceal`에 pull한 레퍼런스
+  체크아웃의 `cd350024:packages/ceal-protocol`에서 왔다. 다만 그 tree(`3ca6fe3a…`)는 **서명된
+  manifest/provenance가 선언**하는 값이라, 이번엔 복사본이 맞는지 레포 안에서 확인된다.
+  추가로 **vendored 소스가 빌드한 `dist/`가 게시 tgz의 `dist/`와 바이트 동일**함을 확인했다.
+- 그래서 pin의 non-claim 하나가 줄었다: `shipped.protocol_tree`는 더 이상 "확인 불가 관측"이
+  아니다. `source.commit`은 여전히 자기 기록이다.
 
 ## Workflow Trigger
 
@@ -42,7 +60,10 @@ named-device acceptance record.
    **이게 오면 공지 문구에서 Mac을 뺄 이유가 사라진다. 그 전엔 반드시 빼야 한다.**
    받는 법: 터미널 2줄(설치·`session enroll`) 뒤 `ceal acceptance emit --request-ref <ref>`.
    clone도 `node`도 불필요하다. 결과를 `docs/acceptance/ceal-v0.69.0/darwin-arm64.yaml`로 커밋.
-2. **`gateway-handoff-v0.68.0` 아카이브의 release origin 게시.** 지금 이 아카이브는
+2. ~~**`gateway-handoff-v0.68.0` 아카이브의 release origin 게시.**~~ **해소됨(2026-08-01).**
+   후속 protocol-only 핸드오프는 `releases/gateway-protocol-handoff/<tag>/`에 네 자산
+   (아카이브·`SHA256SUMS`·`.sig`·`.pem`)으로 게시돼 있고, 이 레인에서 전부 200으로 받아
+   검증했다. 아래 원문은 이력용으로 남긴다.
    **30일짜리 Actions artifact로만 존재한다.** `.github/workflows/ceal-release.yml`은
    `$GATEWAY_HANDOFF_ORIGIN/<tag>/<archive>`에서 받는데 그 경로는 **현재 404**다.
    lock/vendor는 끝났지만 **이 상태로는 어떤 worker 릴리스도 태그 즉시 죽는다**(그리고
@@ -76,7 +97,20 @@ named-device acceptance record.
 
 ## Current State
 
-- **릴리스**: `ceal-v0.69.0` 게시, stable 포인터가 `0.68.0` → `0.69.0`으로 이동.
+- **`ceal-v0.71.0` 후보**: 소스 커밋 로컬 준비 완료. `npm run check` 초록(**36.4s**, narnia,
+  2026-08-01). 실아카이브로 `release:worker:inputs` 해석 성공, `linux-amd64` compose 성공,
+  합성 바이너리 `ceal version` → `0.71.0` / protocol `1.3.0`. **아직 푸시·태그 안 함.**
+- **stable 포인터는 `ceal-v0.70.0`**(`worker/stable/ceal-worker-stable-release.json`).
+  `ceal-v0.70.0`은 게시돼 있다.
+- **lock은 이제 `gateway-protocol-handoff-v0.71.6`**: producer `cd350024…`, tree `24897031…`,
+  protocol subtree `3ca6fe3a…`, archive `6a979c63…`, manifest `ab2f0be8…`,
+  protocol tgz `fa841862…`, Actions run `30684849631`.
+  아카이브·SHA256SUMS·Sigstore 인증서/서명(워크플로 identity 정확 일치)·멤버 인벤토리·
+  manifest/provenance/conformance 상호 digest를 전부 재검증했다. pin은 `agreed`.
+- **v0.71.3/.4/.5는 소비 실패분이다.** 선택·재시도 금지(게이트웨이 지시).
+- **릴리스 워크플로 origin이 lock에서 파생된다.** 예전엔 `GATEWAY_HANDOFF_ORIGIN`만 하드코딩
+  리터럴이라 origin 이동 때 자기 치유가 안 됐다. 이제 셋 다 lock 대조다.
+- **이전 릴리스**: `ceal-v0.69.0` 게시, stable 포인터가 `0.68.0` → `0.69.0`으로 이동.
   `ceal-v0.67.0`은 **탔다**(linux-arm64, 미발행 — 핀 금지). `0.67.1`·`0.68.0`은 게시돼 있고
   `v0.66.1`을 소비한다.
 - **lock은 이제 `gateway-handoff-v0.68.0`**(2026-07-29, `cfa6c28`): producer `844b19ce…`,

@@ -196,7 +196,7 @@ test("the check lane may skip the macOS gate only for documentation-only changes
 		".github/workflows/check.yml",
 		"install-ceal.sh",
 		"package.json",
-		"gateway-handoff-lock.json",
+		"gateway-protocol-handoff-lock.json",
 		"skills/ceal-guide/SKILL.md",
 	]) {
 		assert.ok(!documentation.test(file), `${file} can change what a release builds, so it must run the macOS gate`);

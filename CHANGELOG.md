@@ -1,6 +1,36 @@
 # Changelog
 
-## 0.70.0 (unreleased)
+## 0.71.0 (unreleased)
+
+The first worker release candidate that consumes the Gateway **protocol-only**
+handoff, `gateway-protocol-handoff-v0.71.6`.
+
+- **Consumes `@corca-ai/ceal-protocol@0.71.6`** from the signed, publicly
+  published `ceal-gateway-protocol-handoff-0.71.6.tar.gz`. The archive, its
+  `SHA256SUMS`, and its Sigstore certificate/signature were verified against the
+  Gateway release workflow identity for that tag before anything was consumed.
+- **Replaces `gateway-handoff-lock.json` with
+  `gateway-protocol-handoff-lock.json`.** The new lock binds the Gateway
+  commit/tree/protocol-subtree, the tag, the Actions run, the release origin, the
+  Protocol package digest, the archive digest, the embedded manifest digest, and
+  the Sigstore identity the archive was reviewed against. The release workflow's
+  origin literal is now derived from the lock in the gate rather than asserted as
+  its own string, which is the literal a handoff-origin move used to leave stale.
+- **The Gateway packet no longer carries this repository's client tarball.** The
+  builders already packed the client from `packages/ceal-client`; the packet's
+  client copy was a verification witness only. The consumer now accepts exactly
+  five members — marker, Protocol tarball, handoff manifest, Protocol provenance,
+  and the Gateway's leased-consumer control conformance — and refuses a packet
+  that still ships a client tarball.
+- **Binds the leased-consumer control conformance without interpreting it.** Its
+  bytes must match the signed manifest and it must name the same Gateway commit
+  and protocol subtree as the rest of the packet. This repository implements no
+  control surface, and this claims none.
+
+This candidate is not a release, installation proof, Gateway apply,
+email-delivery proof, or device acceptance record.
+
+## 0.70.0 (`ceal-v0.70.0`)
 
 The first worker release candidate that consumes the published
 `gateway-handoff-v0.68.0` archive and carries verified-email first-device

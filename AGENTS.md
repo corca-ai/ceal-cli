@@ -15,7 +15,7 @@ scope, and update it when reality changes it:
   standing procedures, step by step.
 - [docs/operator-acceptance.md](docs/operator-acceptance.md) — what a maintainer
   can prove without a Gateway session, and what a release tag needs first.
-- `worker-release-inputs.json`, `gateway-handoff-lock.json` — release and
+- `worker-release-inputs.json`, `gateway-protocol-handoff-lock.json` — release and
   Gateway-contract inputs.
 
 This file holds only the rules those surfaces do not already carry. A rule that
