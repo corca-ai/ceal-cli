@@ -1,7 +1,7 @@
 # Session Handoff
-Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.6`(protocol-only 팩킷)을 검증·소비했고,
-`ceal-v0.71.0`이 릴리스·게시됐다(stable 이동 완료).** `vinc`의 통합 운영 체크아웃은 이제
-`ceal-v0.72.0` 제어 세션 계약을 릴리스 후보로 만들고 있다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
+Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.8`(protocol-only packet)을 검증·소비했고,
+`ceal-v0.72.0`은 이미 릴리스·게시됐다(stable 이동 완료).** `vinc`의 통합 운영 checkout은 이제
+result-carrier grammar 소비 상태를 `ceal-v0.72.1` 릴리스 후보로 만들고 있다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
 
 ## Current slice — private control-session carrier (unreleased)
 

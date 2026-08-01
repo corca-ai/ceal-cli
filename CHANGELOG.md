@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.72.1 (`ceal-v0.72.1`)
+
+Consumes the signed `gateway-protocol-handoff-v0.71.8` packet.
+
+- **Pins the result-carrier grammar to the reviewed Gateway artifact.** The
+  vendored `@corca-ai/ceal-protocol@0.71.8` tree, its compiled `dist/` bytes,
+  the handoff lock, the worker's embedded control-session contract, and the
+  release workflow all bind the same immutable Gateway producer identity.
+- **Keeps the service boundary closed.** The worker retains the v1 private
+  control-session frame. This release does not register a Gateway result writer,
+  issue a credential, launch an Agent, route Slack ingress, or claim a
+  successful provider call.
+
 ## 0.72.0 (`ceal-v0.72.0`)
 
 Introduces the signed-worker contract needed for the Gateway-owned Agent
