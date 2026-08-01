@@ -50,6 +50,7 @@ export type {
 	CealEnrollmentResult,
 } from "./enrollment.js";
 export * from "./device-enrollment.js";
+export * from "./leased-consumer-control.js";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 	CEAL_CLIENT_REFRESH_RESULT_SCHEMA,

@@ -31,7 +31,7 @@ import { codedErrorClass } from "./lib/coded-error.mjs";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const LOCK_PATH = "gateway-handoff-lock.json";
+const LOCK_PATH = "gateway-protocol-handoff-lock.json";
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
 

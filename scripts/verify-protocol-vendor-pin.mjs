@@ -41,7 +41,7 @@ const PIN_PATH = "protocol-vendor-pin.json";
 const SCHEMA = "ceal.protocol_vendor_pin.v1";
 const VENDORED_PATH = "packages/ceal-protocol";
 const SOURCE_REPOSITORY = "corca-ai/ceal";
-const LOCK_FILE = "gateway-handoff-lock.json";
+const LOCK_FILE = "gateway-protocol-handoff-lock.json";
 const REQUESTS_DIRECTORY = "docs/requests";
 const STATUSES = new Set(["agreed", "diverged"]);
 
