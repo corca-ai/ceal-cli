@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -108,6 +108,23 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 	converged.shipped.disposition_request = undefined;
 	const result = expectPass({ pin: converged, vendoredTree: converged.source.tree });
 	assert.equal(result.diverged, false);
+});
+
+// Moving to the protocol-only handoff left `gateway-handoff-lock.json` sitting in
+// the root, tracked and read by nothing: every gate was green, because a gate
+// that only reads the lock the pin names cannot notice a second one. It was not
+// harmless — `docs/macos-worker-runbook.md` told an operator to verify a download
+// against `archive.sha256` in that file, and the file still answered, with the
+// digest of a Protocol no release lane binds any more. A superseded lock is a
+// working procedure pointing at the wrong bytes.
+test("the repository root carries exactly the one protocol handoff lock the pin names", () => {
+	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
+	const locks = readdirSync(ROOT).filter((name) => /handoff-lock\.json$/u.test(name));
+	assert.deepEqual(
+		locks.filter((name) => name.includes("protocol")).sort(),
+		[pin.shipped.lock_file],
+		"a protocol handoff lock the pin does not name is a stale procedure input, not a spare copy",
+	);
 });
 
 // A drifted copy is the whole point, so it gets its own case rather than being

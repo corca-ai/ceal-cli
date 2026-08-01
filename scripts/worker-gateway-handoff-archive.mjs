@@ -150,10 +150,13 @@ function validateLock(value) {
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}
-	// The lock is what a maintainer reviews, so it has to be able to say which
-	// Sigstore identity the archive was verified against. Nothing here re-runs
-	// that verification — the release lane binds the digest — but a lock that
-	// cannot name the identity cannot be reviewed for it either.
+	// This asserts formatting, not a signature. Every field is derived from the
+	// same lock's tag, workflow path, and run id, so the block cannot fail a lock
+	// that passed the producer check above — say plainly what it is for rather
+	// than letting it read as a binding. It keeps the recorded identity from
+	// drifting away from the tag it belongs to, so a maintainer re-running cosign
+	// from this lock verifies against the archive the lock actually binds. The
+	// digest in `archive.sha256` is the anchor that touches bytes.
 	const signature = value.reviewed_signature;
 	if (
 		!isRecord(signature) ||

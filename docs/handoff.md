@@ -168,12 +168,13 @@ named-device acceptance record.
   projection 없이 통과시켜서 `membership_ref`·`subject_ref`가 실린다. 게이트웨이가 발급한
   식별자를 게이트웨이에 돌려주는 것이라 유출은 아니지만, 레코드 자신의 "assembled by
   allow-list" 문구가 그 가지에 대해선 과장이다. 게이트웨이에도 보고했다.
-- **signed release manifest에 client 패키지가 없다.**
-  `ceal-worker-release-manifest-<platform>.json`은 protocol만 기록한다. `@corca-ai/ceal`
-  수치는 릴리스 커밋의 lock → archive digest → `gateway-artifact-handoff.json`으로
-  **전이적으로만** 커버된다. 소비자는 그걸 signed-manifest 사실이 아니라 source-owner
-  주장으로 pin해야 한다. manifest 스키마 추가는 릴리스에 영향을 주는 변경이라 패킷 안에서
-  하지 않았다.
+- **signed release manifest에 client 패키지가 없다. 2026-08-01에 더 나빠졌다.**
+  `ceal-worker-release-manifest-<platform>.json`은 protocol만 기록한다. 예전엔 `@corca-ai/ceal`
+  수치가 lock → archive digest → 게이트웨이 팩킷의 client 레코드로 **전이적으로** 커버됐는데,
+  protocol-only 팩킷엔 client tarball이 없다. **그 전이 경로 자체가 사라졌다.** client 바이트에
+  대한 외부 증인은 이제 **없고**, 소비자에겐 순수 source-owner 주장만 남는다(원래도 게이트웨이가
+  우리 client를 패킹하던 게 이상한 배치였다 — 소유는 이 레인이다). 진짜 해법은 manifest 스키마에
+  client를 넣는 것이고, 그건 릴리스에 영향을 주는 변경이라 이 슬라이스에서 하지 않았다.
 - **`@corca-ai/ceal@0.69.0`이 두 개의 서로 다른 tarball을 가리킨다.** `v0.67.0` handoff의
   것은 `085839e1…`(게시된 `ceal-v0.69.0` 바이너리가 담은 것), `v0.68.0` handoff의 것은
   `50405db9…`다. protocol dependency가 `0.67.0`→`0.68.0`으로 바뀌었는데 client 버전은 안

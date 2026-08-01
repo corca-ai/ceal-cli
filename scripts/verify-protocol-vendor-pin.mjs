@@ -14,7 +14,7 @@
 //   source   — the Gateway commit and protocol subtree this copy was taken from
 //   vendored — what `packages/ceal-protocol` actually hashes to right now
 //   shipped  — the protocol subtree inside the locked handoff archive that
-//              `gateway-handoff-lock.json` binds a release to consume
+//              `gateway-protocol-handoff-lock.json` binds a release to consume
 //
 // `source` vs `vendored` is the drift check, and it is fatal. `source` vs
 // `shipped` is the proof/ship divergence, and it is fatal too: the Gateway owner
@@ -28,7 +28,10 @@
 //
 // Read `docs/gates.md` before trusting this further than it goes. It reaches no
 // remote, so it cannot see the copy falling behind its owner, and `source.commit`
-// and `shipped.protocol_tree` are recorded observations nothing here confirms.
+// is a recorded observation nothing here confirms. `shipped.protocol_tree` used
+// to be in that sentence too; the protocol-only handoff declares the producer's
+// protocol subtree and the lock records it, so it is cross-checked below — which
+// is a comparison of two local files, not a check against the archive.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -120,10 +123,21 @@ export function validateProtocolVendorPin({
 	// `shipped.protocol_tree` to match it used to pass. It cannot now, because the
 	// lock disagrees — and the lock's value came from a signed archive.
 	//
-	// Conditional on the lock carrying the field, deliberately. A lock shape
-	// without it is not evidence of anything and must not be read as agreement.
+	// Required, not conditional. Skipping the check when the lock omits the field
+	// would leave the forgery one deletion away: drop `gateway.protocol_tree` from
+	// the lock and the pin gets the last word again, with the gate still green.
+	// The pin's `shipped.lock_file` is constrained to the protocol handoff lock,
+	// whose shape always carries this, so a lock without it is malformed rather
+	// than an older variant to tolerate.
 	const lockedProtocolTree = lockValue?.gateway?.protocol_tree;
-	if (lockedProtocolTree !== undefined && lockedProtocolTree !== candidate.shipped.protocol_tree) {
+	if (!isGitObject(lockedProtocolTree)) {
+		throw new ProtocolVendorPinError(
+			"invalid_gateway_handoff_lock",
+			`${candidate.shipped.lock_file} does not bind a Gateway protocol subtree, so the pin's shipped.protocol_tree cannot be checked ` +
+				"against anything. A lock this gate cannot read is not a lock it may pass over.",
+		);
+	}
+	if (lockedProtocolTree !== candidate.shipped.protocol_tree) {
 		throw new ProtocolVendorPinError(
 			"shipped_lock_mismatch",
 			`${candidate.shipped.lock_file} binds protocol subtree ${lockedProtocolTree}, but the pin records ` +

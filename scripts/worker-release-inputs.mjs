@@ -423,6 +423,7 @@ function assertControlConformanceSidecar({ handoff, control, controlConformance,
 	if (
 		!isPlainObject(control) ||
 		control.schema_version !== CONTROL_CONFORMANCE_SCHEMA ||
+		control.proof_level !== "local_state" ||
 		control.writes_external !== false ||
 		!sameSourceIdentity(control.source, producer) ||
 		control.source.protocol_tree !== producer.protocol_tree
