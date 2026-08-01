@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -32,8 +32,22 @@ test("refuses archive byte, producer, protocol, and member drift", (context) => 
 	}
 });
 
+test("refuses an archive reached through a symbolic-link ancestor", (context) => {
+	const fixture = archiveFixture(context);
+	const alias = path.join(fixture.root, "packet-alias");
+	symlinkSync(fixture.root, alias, "dir");
+	assert.throws(
+		() =>
+			consumeLockedGatewayProtocolHandoffArchive({
+				repoRoot: fixture.root,
+				archiveFile: path.join(alias, path.basename(fixture.archive)),
+			}),
+		(error) => error instanceof WorkerGatewayProtocolHandoffArchiveError && error.code === "invalid_protocol_handoff_archive",
+	);
+});
+
 function archiveFixture(context, mutation) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-protocol-archive-fixture-"));
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-protocol-archive-fixture-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const packet = path.join(root, "packet");
 	const packageDirectory = path.join(root, "package");
