@@ -169,10 +169,17 @@ Be precise about which of the three the gate can actually check. Only
 `source.tree` is verified locally, against `HEAD:packages/ceal-protocol`. The
 lock supplies `shipped.gateway_commit`, so that one is cross-checked.
 `shipped.protocol_tree` used to be unconfirmable here as well; it is not any
-more, because the protocol-only handoff declares the producer's protocol subtree
-and `gateway-protocol-handoff-lock.json` records it, so the two can be read side
-by side. That is a comparison against a reviewed lock, not against the archive:
-the gate still reaches no remote and still opens no tarball.
+more. The protocol-only handoff declares the producer's protocol subtree,
+`gateway-protocol-handoff-lock.json` records it, and the gate fails
+`shipped_lock_mismatch` when the pin names a different one. That closes the
+two-field forgery this document used to list as a known bypass: forging
+`source.tree` alone already failed against `HEAD:`, and forging
+`shipped.protocol_tree` to agree with it now contradicts the lock.
+
+Be exact about what that is. It is a comparison of two local files, one of which
+a maintainer wrote after verifying a signed archive. The gate still reaches no
+remote and still opens no tarball, so it cannot tell you the lock itself is
+honest — only that the pin does not disagree with it.
 
 `source.commit` remains a **recorded observation no local check can confirm** — a
 wrong value there passes the gate. Confirming it needs the owner checkout

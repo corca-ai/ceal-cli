@@ -113,6 +113,24 @@ export function validateProtocolVendorPin({
 		);
 	}
 
+	// The protocol-only handoff declares the producer's protocol subtree, so the
+	// lock carries it and `shipped.protocol_tree` stopped being a field the pin
+	// alone gets to write. Closing that is what removes the documented two-field
+	// forgery: forging `source.tree` alone already failed, and forging
+	// `shipped.protocol_tree` to match it used to pass. It cannot now, because the
+	// lock disagrees — and the lock's value came from a signed archive.
+	//
+	// Conditional on the lock carrying the field, deliberately. A lock shape
+	// without it is not evidence of anything and must not be read as agreement.
+	const lockedProtocolTree = lockValue?.gateway?.protocol_tree;
+	if (lockedProtocolTree !== undefined && lockedProtocolTree !== candidate.shipped.protocol_tree) {
+		throw new ProtocolVendorPinError(
+			"shipped_lock_mismatch",
+			`${candidate.shipped.lock_file} binds protocol subtree ${lockedProtocolTree}, but the pin records ` +
+				`${candidate.shipped.protocol_tree}. The lock's value comes from the signed handoff, so the pin is the wrong one.`,
+		);
+	}
+
 	// The divergence verdict is decided by `source.commit` against the lock's
 	// `gateway.commit`, not by the pin's own two tree fields. Both trees are
 	// author-written, so a verdict computed from them is a statement about the

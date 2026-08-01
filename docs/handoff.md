@@ -184,8 +184,10 @@ named-device acceptance record.
   한 문서라는 게이트 때문). 같은 스키마에 형식 둘은 소비자에게 지저분하다.
 - **요구 3에 행위 테스트가 없다.** 다섯 경로의 발산 거부는 `repo-gates.test.mjs`의 소스 형태
   게이트로만 붙들려 있다. live pin이 수렴 상태라 행위로 falsify가 안 된다.
-- **동결 경로 우회**: `source.tree`만 올리는 수는 `invalid_protocol_vendor_pin`으로 죽지만,
-  `shipped.protocol_tree`까지 함께 위조하면 통과한다(두 필드 고의 위조 필요).
+- ~~**동결 경로 우회**: `shipped.protocol_tree`까지 함께 위조하면 통과한다.~~ **닫혔다
+  (2026-08-01).** protocol-only 핸드오프가 producer의 protocol subtree를 선언하고 lock이 그걸
+  싣기 때문에, pin이 다른 값을 적으면 `shipped_lock_mismatch`로 죽는다. 남은 한계는 그대로다 —
+  이건 **로컬 파일 둘의 대조**이지 remote 확인이 아니고, `source.commit`은 여전히 자기 기록이다.
 - **worker `createLock`의 잔여 경합**은 이 레인 소유이고 미해결.
 - **CI에 macOS 설치 레그가 없다.** `require_platform_proofs`는 릴리스·설치기 **테스트 스위트**
   얘기라 이 공백의 근거로 인용하면 틀린다. 그 플래그를 `linux-*` 전체에 요구한 것이

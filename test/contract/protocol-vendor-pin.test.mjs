@@ -32,7 +32,7 @@ const DIVERGED = Object.freeze({
 		lock_file: "gateway-protocol-handoff-lock.json",
 		status: "diverged",
 		gateway_commit: LOCK.gateway.commit,
-		protocol_tree: "c".repeat(40),
+		protocol_tree: LOCK.gateway.protocol_tree,
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
 		// A real tracked file, because the gate now requires one. It points at a
@@ -95,6 +95,9 @@ test("the vendored protocol copy matches its recorded Gateway source", () => {
 test("a pin whose proof and shipped trees have converged passes as agreed", () => {
 	const converged = clone(DIVERGED);
 	converged.shipped.status = "agreed";
+	// The lock carries the shipped protocol subtree now, so a converged fixture
+	// converges on the lock's value rather than on an arbitrary one.
+	converged.source.tree = LOCK.gateway.protocol_tree;
 	converged.shipped.protocol_tree = converged.source.tree;
 	// Convergence is decided by the commits, so a converged fixture has to move
 	// both: matching trees alone would now be a pin contradicting itself.
@@ -147,9 +150,21 @@ test("a status that contradicts the recorded trees fails in both directions", ()
 	expectCode("undeclared_divergence", { pin: claimsAgreement });
 
 	const claimsDivergence = clone(DIVERGED);
+	claimsDivergence.source.tree = LOCK.gateway.protocol_tree;
 	claimsDivergence.shipped.protocol_tree = claimsDivergence.source.tree;
 	claimsDivergence.source.commit = LOCK.gateway.commit;
-	expectCode("stale_divergence_record", { pin: claimsDivergence });
+	expectCode("stale_divergence_record", { pin: claimsDivergence, vendoredTree: claimsDivergence.source.tree });
+});
+
+// Forging `source.tree` alone always failed against `HEAD:`. Forging
+// `shipped.protocol_tree` to agree with it used to pass, because nothing else in
+// the repository knew what the shipped subtree was. The protocol-only handoff
+// declares it and the lock records it, so the pin no longer gets the last word on
+// that field.
+test("a shipped protocol subtree the lock does not bind is refused", () => {
+	const forged = clone(DIVERGED);
+	forged.shipped.protocol_tree = "f".repeat(40);
+	expectCode("shipped_lock_mismatch", { pin: forged });
 });
 
 // Existence alone was too weak: every path in the tree satisfied it, so a
@@ -279,6 +294,7 @@ test("a pin whose commits and trees disagree about convergence is rejected", () 
 // which is the one field the whole verdict rests on.
 test("an identical subtree under a different Gateway commit is a divergence, not a lying pin", () => {
 	const identicalSubtree = clone(DIVERGED);
+	identicalSubtree.source.tree = LOCK.gateway.protocol_tree;
 	identicalSubtree.shipped.protocol_tree = identicalSubtree.source.tree;
 	const injected = {
 		pin: identicalSubtree,
