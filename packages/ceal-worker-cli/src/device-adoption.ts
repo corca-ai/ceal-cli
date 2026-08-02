@@ -25,7 +25,7 @@ import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 
-// `ceal session adopt`: the employee-facing first-device flow.
+// `ceal session adopt`: the employee-facing verified-email device flow.
 //
 // It is a different state machine from `session enroll`, not another spelling
 // of it. `enroll` consumes an operator-issued plaintext code, which means the
@@ -295,6 +295,10 @@ async function completeAdoption(
 		command: "ceal",
 		ok: true,
 		status: "adopted",
+		// Preserve the v1 literal for installed consumers. The Gateway decides
+		// whether this transaction is first-device or approval-held; that richer
+		// admission meaning needs its paired Protocol result contract rather than
+		// a client-only rename.
 		enrollment_kind: "verified_email_first_device",
 		credential_context: CREDENTIAL_CONTEXT,
 		gateway_endpoint: delivery.gateway,
@@ -314,7 +318,7 @@ async function completeAdoption(
 		proof_level: "host_decision",
 		non_claims: [
 			"This host verified the sealed delivery and stored a session; it did not verify the mailbox, which the employee did in a browser.",
-			"Adoption grants one first device. Later devices, permission changes, and offboarding are separate operator actions.",
+			"This adoption grants only this device session. Additional devices, permission changes, and offboarding remain separately governed.",
 		],
 		next_action: "Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
 	});
@@ -325,7 +329,7 @@ async function completeAdoption(
 // signature, or any key material — only the two fingerprints the employee is
 // meant to compare, and the URL that has already been validated.
 function presentVerification(io: CealCliIo, started: CealDeviceEnrollmentStartResult, proofKey: string, recipientKey: string): void {
-	io.stderr.write("Ceal first-device adoption started.\n\n");
+	io.stderr.write("Ceal verified-email device adoption started.\n\n");
 	io.stderr.write("Compare these fingerprints with the ones shown on the verification page:\n");
 	io.stderr.write(`  proof key      ${grouped(deviceEnrollmentPublicKeyFingerprint(proofKey))}\n`);
 	io.stderr.write(`  recipient key  ${grouped(deviceEnrollmentPublicKeyFingerprint(recipientKey))}\n\n`);
@@ -345,7 +349,7 @@ function failureOutcome(code: "unsupported_feature" | "recovery_required" | "exp
 	if (code === "unsupported_feature") {
 		return {
 			code: "unsupported_feature",
-			message: "This Gateway does not offer verified-email first-device adoption.",
+			message: "This Gateway does not offer verified-email device adoption.",
 			nextAction: "Ask your operator which enrollment route this Gateway supports.",
 		};
 	}

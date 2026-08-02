@@ -29,9 +29,9 @@ npm ci → npm run check → commit → push main
 
 `CHANGELOG.md` owns which tags are burned and why. A burned tag is never reused.
 
-## Employee first-device adoption
+## Employee verified-email device adoption
 
-For a consenting employee's first device, the preferred flow is verified-email
+For a consenting employee device, the preferred flow is verified-email
 adoption. It does not copy an operator-visible enrollment code through chat or
 email. The employee supplies the published Gateway URL and the mailbox that
 received the invitation:
@@ -49,9 +49,11 @@ and session payload binding.
 
 This is a client contract, not proof that a particular Gateway instance has
 enabled the routes, configured its mail sender, delivered an invitation, or
-accepted a device. Do not advertise it as available until the Gateway has been
-applied and a consenting named device has produced the required acceptance
-evidence.
+accepted a device. Additional-device approval behavior is a paired
+Gateway/Protocol/client release concern and must not be promised by this
+procedure until that exact signed client version is installed. Do not advertise
+the flow as available until the Gateway has been applied and a consenting named
+device has produced the required acceptance evidence.
 
 ## Additional device and recovery enrollment
 

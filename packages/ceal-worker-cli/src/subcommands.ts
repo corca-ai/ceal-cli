@@ -78,7 +78,7 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "session",
 		route: ["adopt"],
-		description: "Adopt this device as a first device using a verified mailbox, with no operator-issued code.",
+		description: "Adopt this device using a verified mailbox, with no operator-issued code.",
 		usage: "ceal session adopt --gateway <https-url> --email <address>",
 		effect: "local_write",
 		evidence: "surface_or_host_decision",
