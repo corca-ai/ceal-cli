@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
-import type { CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
+import type { CealStableUpdateOptions, CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
 
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
@@ -70,8 +70,9 @@ export function createCealStableUpdateRunner(
 	overrides: Partial<CealStableUpdateDeadlines> = {},
 ): () => Promise<CealStableUpdateResult> {
 	const deadlines = { ...DEFAULT_DEADLINES, ...overrides };
-	return async () => {
+	return async (options: CealStableUpdateOptions = {}) => {
 		const startedAt = Date.now();
+		options.onProgress?.("check");
 		let installed: InstalledWorkerRelease;
 		try {
 			installed = findInstalledWorkerRelease(executablePath);
@@ -89,6 +90,7 @@ export function createCealStableUpdateRunner(
 				"The installed worker release could not report its current version.",
 				"Reinstall an explicitly approved signed worker release before retrying.",
 			);
+		options.onProgress?.("download_install");
 		const run = await runProcess(
 			"/bin/sh",
 			[installed.installerPath],
@@ -117,8 +119,22 @@ export function createCealStableUpdateRunner(
 				"The stable signed worker update did not complete.",
 				"Retry once, then reinstall an explicitly approved signed worker release.",
 			);
-		const commandAfterUpdate = join(installed.installDirectory, "ceal");
-		const current = await readVersion(commandAfterUpdate, deadlines);
+		// The staged installer verifies its signed inventory before it switches the
+		// managed command. Re-open the new managed generation as a separate local
+		// verification step before executing it for the version readback.
+		options.onProgress?.("verify");
+		let updated: InstalledWorkerRelease;
+		try {
+			updated = findInstalledWorkerRelease(join(installed.installDirectory, "ceal"));
+		} catch {
+			return unavailable(
+				"update_readback_failed",
+				"The updated worker release is not reachable through its verified managed command link.",
+				"Reinstall an explicitly approved signed worker release before retrying.",
+			);
+		}
+		options.onProgress?.("installed_readback");
+		const current = await readVersion(updated.commandPath, deadlines);
 		if (!current)
 			return unavailable(
 				"update_readback_failed",
@@ -131,23 +147,13 @@ export function createCealStableUpdateRunner(
 				"The stable worker update resolved to an older release.",
 				"Reinstall the current signed worker release and ask a maintainer to repair the stable release selection.",
 			);
-		let artifactPath: string;
-		try {
-			artifactPath = realpathSync(commandAfterUpdate);
-		} catch {
-			return unavailable(
-				"update_readback_failed",
-				"The updated worker release is not reachable through its managed command link.",
-				"Reinstall an explicitly approved signed worker release before retrying.",
-			);
-		}
 		const elapsed_ms = Date.now() - startedAt;
 		return {
 			status: current.version === previous.version ? "unchanged" : "updated",
 			previous_version: previous.version,
 			installed_version: current.version,
 			platform: current.platform,
-			artifact_sha256: digest(readFileSync(artifactPath)),
+			artifact_sha256: digest(readFileSync(updated.commandPath)),
 			elapsed_ms,
 		};
 	};

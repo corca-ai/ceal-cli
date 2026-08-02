@@ -26,10 +26,21 @@ export interface CealStableUpdateResult {
 	};
 }
 
+// Progress belongs exclusively to the interactive stderr surface. The final
+// result remains the one YAML document on stdout so agents never need to parse
+// transient status text.
+export type CealStableUpdateProgressStage = "check" | "download_install" | "verify" | "installed_readback";
+
+export interface CealStableUpdateOptions {
+	onProgress?: (stage: CealStableUpdateProgressStage) => void;
+}
+
 export interface CealCommandRuntime {
 	readSecret?: () => Promise<string>;
 	promptEnrollmentCode?: () => Promise<string>;
 	isInteractiveTerminal?: () => boolean;
+	/** Whether stderr is a human terminal suitable for transient progress text. */
+	isOutputTerminal?: () => boolean;
 	isInputTerminal?: () => boolean;
 	loadSession?: () => Promise<CealStoredSession | null>;
 	saveSession?: (session: CealStoredSession) => Promise<void>;
@@ -59,7 +70,7 @@ export interface CealCommandRuntime {
 	// On-demand bounded event scan for one inventoried session (Workbench
 	// drill-down); null declares a rejected runtime/ref grammar.
 	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
-	runStableUpdate?: () => Promise<CealStableUpdateResult>;
+	runStableUpdate?: (options?: CealStableUpdateOptions) => Promise<CealStableUpdateResult>;
 	/** Real executable path for managed-install observation (`ceal observe`). */
 	executablePath?: string;
 	/** Test/embedding hook: receives the live observer URL and a closer. */

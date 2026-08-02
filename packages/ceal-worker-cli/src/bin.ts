@@ -99,6 +99,7 @@ function runPublicCli(): void {
 			readSecret: readStdinSecret,
 			promptEnrollmentCode: () => readHiddenTerminalEnrollmentCode(process.stdin, process.stderr),
 			isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
+			isOutputTerminal: () => Boolean(process.stderr.isTTY),
 			isInputTerminal: () => Boolean(process.stdin.isTTY),
 			loadSession: sessionStore ? () => sessionStore.load() : undefined,
 			saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,

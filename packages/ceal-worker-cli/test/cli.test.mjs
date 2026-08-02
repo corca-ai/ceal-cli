@@ -502,6 +502,40 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 	assert.equal(unavailable.error.kind, "update_unavailable");
 });
 
+test("update reports bounded stable progress only to an interactive stderr surface", async () => {
+	const stages = [];
+	const interactive = await run(["update"], {
+		isOutputTerminal: () => true,
+		runStableUpdate: async ({ onProgress } = {}) => {
+			for (const stage of ["check", "download_install", "verify", "installed_readback"]) {
+				stages.push(stage);
+				onProgress?.(stage);
+			}
+			return { status: "unchanged", previous_version: "1.2.3", installed_version: "1.2.3", platform: "darwin-arm64" };
+		},
+	});
+	assert.deepEqual(stages, ["check", "download_install", "verify", "installed_readback"]);
+	assert.deepEqual(parseAllDocuments(interactive.stdout, { uniqueKeys: true })[0].toJS().status, "unchanged");
+	assert.deepEqual(interactive.stderr.split("\n").filter(Boolean), [
+		"ceal update: checking the installed worker release",
+		"ceal update: downloading and installing the signed stable worker release",
+		"ceal update: verifying signed update completion",
+		"ceal update: reading back the installed worker release",
+	]);
+	assert.doesNotMatch(interactive.stderr, /https?:\/\//u);
+	assert.doesNotMatch(interactive.stderr, /[|/\\-]\r/u);
+
+	const nonInteractive = await run(["update"], {
+		isOutputTerminal: () => false,
+		runStableUpdate: async ({ onProgress } = {}) => {
+			onProgress?.("check");
+			return { status: "unchanged" };
+		},
+	});
+	assert.equal(nonInteractive.stderr, "");
+	assert.equal(parseAllDocuments(nonInteractive.stdout, { uniqueKeys: true })[0].toJS().status, "unchanged");
+});
+
 test("guide status and per-host registration expose one update-safe local skill path", async () => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-guide-runtime-"));
 	const guidePath = path.join(root, "install", ".ceal-cli", "worker", "current", "guide");

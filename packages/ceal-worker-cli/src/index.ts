@@ -23,7 +23,7 @@ import {
 	writeCallUnavailable,
 } from "./call-result-output.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
-import type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandRuntime, CealStableUpdateProgressStage, CealStableUpdateResult } from "./cli-runtime.js";
 import {
 	CealClientSessionError,
 	classifyClientSessionFailure,
@@ -473,7 +473,8 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<nu
 			},
 		});
 	try {
-		return writeUpdate(io, await runtime.runStableUpdate());
+		const onProgress = runtime.isOutputTerminal?.() ? (stage: CealStableUpdateProgressStage) => writeUpdateProgress(io, stage) : undefined;
+		return writeUpdate(io, await runtime.runStableUpdate({ onProgress }));
 	} catch {
 		return writeUpdate(io, {
 			status: "unavailable",
@@ -484,6 +485,16 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<nu
 			},
 		});
 	}
+}
+
+function writeUpdateProgress(io: CealCliIo, stage: CealStableUpdateProgressStage): void {
+	const message: Record<CealStableUpdateProgressStage, string> = {
+		check: "ceal update: checking the installed worker release",
+		download_install: "ceal update: downloading and installing the signed stable worker release",
+		verify: "ceal update: verifying signed update completion",
+		installed_readback: "ceal update: reading back the installed worker release",
+	};
+	io.stderr.write(`${message[stage]}\n`);
 }
 
 function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {

@@ -25,7 +25,10 @@ test("stable updater only launches a current managed worker generation and reads
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 
-	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
+	const stages = [];
+	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })({
+		onProgress: (stage) => stages.push(stage),
+	});
 	assert.equal(result.status, "updated");
 	assert.equal(result.previous_version, "0.65.0");
 	assert.equal(result.installed_version, "0.65.1");
@@ -33,6 +36,7 @@ test("stable updater only launches a current managed worker generation and reads
 	assert.equal(result.artifact_sha256, digest(readFileSync(path.join(second, "ceal-linux-amd64"))));
 	assert.equal(typeof result.elapsed_ms, "number");
 	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
+	assert.deepEqual(stages, ["check", "download_install", "verify", "installed_readback"]);
 });
 
 test("stable updater recognizes a managed darwin worker generation", async (context) => {
@@ -62,9 +66,11 @@ test("stable updater fails closed for an unmanaged or tampered staged installer"
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const binary = path.join(root, "ceal-linux-amd64");
 	writeWorkerBinary(binary, "0.65.0");
-	const unmanaged = await createCealStableUpdateRunner(binary, { PATH: process.env.PATH })();
+	const stages = [];
+	const unmanaged = await createCealStableUpdateRunner(binary, { PATH: process.env.PATH })({ onProgress: (stage) => stages.push(stage) });
 	assert.equal(unmanaged.status, "unavailable");
 	assert.equal(unmanaged.error.kind, "update_unavailable");
+	assert.deepEqual(stages, ["check"]);
 });
 
 test("stable updater rejects a verified installer result that would downgrade the worker", async (context) => {
@@ -82,9 +88,13 @@ test("stable updater rejects a verified installer result that would downgrade th
 	symlinkSync("releases/0.65.1-linux-amd64-test", path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
-	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
+	const stages = [];
+	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })({
+		onProgress: (stage) => stages.push(stage),
+	});
 	assert.equal(result.status, "unavailable");
 	assert.equal(result.error.kind, "update_failed");
+	assert.deepEqual(stages, ["check", "download_install"]);
 });
 
 test("stable updater runs only the checksum-bound migrated worker installer", async (context) => {
@@ -305,6 +315,12 @@ fi
 exit 2
 EOF
 chmod 755 '${path.join(nextGeneration, binaryName)}'
+cat > '${path.join(nextGeneration, "install.sh")}' <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+chmod 755 '${path.join(nextGeneration, "install.sh")}'
+printf '${digest("#!/usr/bin/env sh\nexit 0\n")}  install.sh\\n' > '${path.join(nextGeneration, "SHA256SUMS")}'
 rm -f "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
 ln -s 'releases/${path.basename(nextGeneration)}' "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
 printf 'installer prose must not escape\\n'
