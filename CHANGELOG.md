@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.72.3 (`ceal-v0.72.3`)
+
+Fixes the employee-visible adoption waiting surface.
+
+- **Keeps terminal progress quiet and accurate.** After the initial browser
+  instruction, `ceal session adopt` emits one waiting message and silently
+  follows the Gateway-provided polling interval until the terminal result.
+- **Does not weaken browser pairing.** The browser still requires the employee
+  to compare the device fingerprints before explicitly confirming the mailbox.
+  A mailbox-link fetch alone cannot seal a session to a device.
+
 ## 0.72.2 (`ceal-v0.72.2`)
 
 Carries the exact v2 private result-control frame required by the reviewed

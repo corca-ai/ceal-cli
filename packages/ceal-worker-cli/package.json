@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-worker-cli",
-	"version": "0.72.2",
+	"version": "0.72.3",
 	"private": true,
 	"license": "MIT",
 	"description": "Credential-separated worker-facing Ceal CLI",
@@ -32,7 +32,7 @@
 		"prepack": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@corca-ai/ceal": "0.72.2",
+		"@corca-ai/ceal": "0.72.3",
 		"@corca-ai/ceal-protocol": "0.71.8",
 		"yaml": "2.9.0"
 	},
