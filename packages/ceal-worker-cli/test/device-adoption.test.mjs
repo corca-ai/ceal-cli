@@ -94,6 +94,12 @@ test("waiting is paced only by the Gateway and stops at the challenge expiry", a
 	const world = createWorld({ pendingPolls: 3, retryAfterMs: 5_000 });
 	assert.equal(await run(world), 0);
 	assert.deepEqual(world.slept, [5_000, 5_000, 5_000], "each wait must be exactly the interval the Gateway named");
+	assert.equal(
+		(world.stderrText().match(/Waiting for mailbox verification/gu) ?? []).length,
+		1,
+		"the employee sees one wait instruction, not one per poll",
+	);
+	assert.doesNotMatch(world.stderrText(), /next check in/u);
 
 	const expiring = createWorld({ pendingPolls: 1000, retryAfterMs: 30_000 });
 	const code = await run(expiring);

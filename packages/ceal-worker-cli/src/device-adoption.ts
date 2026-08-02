@@ -188,7 +188,6 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 				nextAction: "Run 'ceal session adopt' again to start a new transaction; the previous device keys are discarded.",
 			});
 		}
-		io.stderr.write(`Waiting for mailbox verification (next check in ${Math.round(response.retry_after_ms / 1000)}s)...\n`);
 		await sleep(response.retry_after_ms);
 	}
 }
@@ -317,9 +316,8 @@ async function completeAdoption(
 	});
 }
 
-// Progress goes to stderr because every non-help result on stdout is exactly one
-// YAML document, and a flow that waits on a human needs to say so while it
-// waits. Nothing here prints the address that was submitted, the nonce, the
+// The one-time instruction goes to stderr because every non-help result on
+// stdout is exactly one YAML document. Nothing here prints the address that was submitted, the nonce, the
 // signature, or any key material — only the two fingerprints the employee is
 // meant to compare, and the URL that has already been validated.
 function presentVerification(io: CealCliIo, started: CealDeviceEnrollmentStartResult, proofKey: string, recipientKey: string): void {
@@ -329,6 +327,7 @@ function presentVerification(io: CealCliIo, started: CealDeviceEnrollmentStartRe
 	io.stderr.write(`  recipient key  ${grouped(deviceEnrollmentPublicKeyFingerprint(recipientKey))}\n\n`);
 	io.stderr.write("If either differs, stop and report it. Do not continue.\n\n");
 	io.stderr.write(`Open this page and confirm the message sent to your mailbox:\n  ${started.browser_session_url}\n\n`);
+	io.stderr.write("Waiting for mailbox verification. This command will continue automatically after confirmation.\n");
 }
 
 // Fingerprints are compared by a human under mild time pressure, and 64 hex
