@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.72.4 (`ceal-v0.72.4`)
+
+Fixes false first-device-adoption expiry on a machine whose wall clock differs
+from the Gateway's.
+
+- **Makes Gateway expiry authoritative.** The worker no longer compares a
+  Gateway challenge timestamp to its own wall clock; it waits for the
+  Gateway's terminal `expired` result instead.
+- **Keeps liveness bounded without relabeling it as expiry.** A repeatedly
+  pending Gateway reaches a 35-minute monotonic local safety limit and reports
+  `wait_timeout`, not a fabricated mailbox-verification expiry.
+
 ## 0.72.3 (`ceal-v0.72.3`)
 
 Fixes the employee-visible adoption waiting surface.

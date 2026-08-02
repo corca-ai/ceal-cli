@@ -90,7 +90,7 @@ test("the client never fetches the verifier and never falls back to code enrollm
 	assert.deepEqual(Object.keys(world.gateway.calledRoutes).sort(), ["poll", "start"]);
 });
 
-test("waiting is paced only by the Gateway and stops at the challenge expiry", async () => {
+test("waiting is paced only by the Gateway, and only a monotonic local safety cap stops a silent Gateway", async () => {
 	const world = createWorld({ pendingPolls: 3, retryAfterMs: 5_000 });
 	assert.equal(await run(world), 0);
 	assert.deepEqual(world.slept, [5_000, 5_000, 5_000], "each wait must be exactly the interval the Gateway named");
@@ -104,11 +104,26 @@ test("waiting is paced only by the Gateway and stops at the challenge expiry", a
 	const expiring = createWorld({ pendingPolls: 1000, retryAfterMs: 30_000 });
 	const code = await run(expiring);
 	assert.equal(code, 3);
-	assert.equal(expiring.result().error.kind, "expired");
+	assert.equal(expiring.result().error.kind, "wait_timeout");
 	assert.equal(expiring.saved.length, 0);
-	// The expiry stops it, not the poll count: the challenge lives 10 minutes and
-	// the Gateway asks for 30s waits.
-	assert.ok(expiring.slept.length <= 20, `stopped after ${expiring.slept.length} waits rather than polling forever`);
+	assert.ok(expiring.slept.length <= 70, `stopped after ${expiring.slept.length} waits rather than polling forever`);
+});
+
+test("a skewed device clock does not locally expire a fresh Gateway challenge", async () => {
+	const world = createWorld({ pendingPolls: 1, retryAfterMs: 3_000, localWallClock: NOW + 40 * 60 * 1000 });
+	assert.equal(await run(world), 0);
+	assert.equal(world.result().status, "adopted");
+	assert.deepEqual(world.slept, [3_000]);
+	assert.equal(world.saved.length, 1);
+});
+
+test("a skewed device clock waits for the Gateway's terminal expiry", async () => {
+	const world = createWorld({ pendingPolls: 1, retryAfterMs: 3_000, failWith: "expired", localWallClock: NOW + 40 * 60 * 1000 });
+	assert.equal(await run(world), 3);
+	assert.equal(world.result().error.kind, "expired");
+	assert.deepEqual(world.slept, [3_000]);
+	assert.equal(world.gateway.polls.length, 2, "the terminal expiry must come from a second Gateway poll");
+	assert.equal(world.saved.length, 0);
 });
 
 test("retries inside one run reuse the same device keys", async () => {
@@ -199,7 +214,8 @@ function createWorld(options = {}) {
 	const stderr = [];
 	const saved = [];
 	const slept = [];
-	let clock = NOW;
+	let clock = options.localWallClock ?? NOW;
+	let monotonicClock = 0;
 	const gateway = createGateway(options);
 
 	return {
@@ -220,9 +236,11 @@ function createWorld(options = {}) {
 				throw new Error("adoption must never read an enrollment code");
 			},
 			now: () => clock,
+			monotonicNow: () => monotonicClock,
 			sleep: async (ms) => {
 				slept.push(ms);
 				clock += ms;
+				monotonicClock += ms;
 			},
 			createDeviceAdoptionClient: () => gateway.client,
 		},
@@ -276,11 +294,11 @@ function createGateway(options) {
 		async poll(request) {
 			state.calledRoutes.poll = true;
 			state.polls.push(request);
-			if (options.failWith) return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "failed", code: options.failWith };
 			if (remaining > 0) {
 				remaining -= 1;
 				return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "pending", retry_after_ms: retryAfterMs };
 			}
+			if (options.failWith) return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "failed", code: options.failWith };
 			return sealed(state, options);
 		},
 	};

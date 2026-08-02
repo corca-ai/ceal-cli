@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "@corca-ai/ceal";
 import {
 	assertCealDeviceEnrollmentDeliveryExpectation,
@@ -44,7 +45,8 @@ import type { CealStoredSession } from "./profile-store.js";
 //      voice, and the employee is about to type a mailbox verification into it.
 //   3. Show both fingerprints so the employee compares them against the page.
 //   4. Sign only the returned challenge, poll only on the Gateway's own
-//      `retry_after_ms`, and stop at the challenge's own expiry.
+//      `retry_after_ms`, accept the Gateway's terminal expiry, and bound a
+//      repeatedly-pending wait by one local monotonic safety limit.
 //   5. Validate the sealed delivery's binding against locally retained facts
 //      before decrypting, open it, then validate the decrypted payload's
 //      identity against the authenticated AAD, and only then persist a session.
@@ -61,11 +63,13 @@ import type { CealStoredSession } from "./profile-store.js";
 // half-removed private key on disk is a worse failure than retyping a command.
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
-// The Gateway bounds `retry_after_ms` to 30s and a verification round trip is a
-// human reading their mail, so this is the ceiling on the whole wait rather than
-// on one poll. The challenge's own `expires_at` usually arrives first; this is
-// the backstop for a Gateway that hands out a far-future expiry.
-const MAX_TOTAL_WAIT_MS = 15 * 60 * 1000;
+// The Gateway is authoritative for a challenge's absolute expiry: comparing
+// its wall-clock timestamp to a separate device's clock can falsely reject a
+// fresh confirmation when that device is skewed. This monotonic local ceiling
+// only bounds a Gateway that keeps returning pending. It deliberately exceeds the
+// deployed 30-minute device-registration window, so the normal terminal path
+// is the Gateway's explicit `expired` response.
+const MAX_LOCAL_WAIT_MS = 35 * 60 * 1000;
 
 interface AdoptionOutcome {
 	code: string;
@@ -144,10 +148,9 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 	presentVerification(io, started, proofPublicKey, recipientPublicKey);
 
 	const signature = base64url(signCealDeviceProof(proof.privateKey, deviceEnrollmentProofPayload(started.challenge)));
-	const now = runtime.now ?? (() => Date.now());
+	const monotonicNow = runtime.monotonicNow ?? (() => performance.now());
 	const sleep = runtime.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-	const expiresAt = Date.parse(started.challenge.expires_at);
-	const deadline = Math.min(Number.isFinite(expiresAt) ? expiresAt : now() + MAX_TOTAL_WAIT_MS, now() + MAX_TOTAL_WAIT_MS);
+	const localDeadline = monotonicNow() + MAX_LOCAL_WAIT_MS;
 
 	while (true) {
 		let response: Awaited<ReturnType<typeof client.poll>>;
@@ -177,15 +180,16 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			});
 		}
 
-		// Only the Gateway's own interval is honored. There is no local floor to
-		// "speed things up" and no fallback interval for a malformed value: the
-		// Protocol decoder already refuses anything outside 1s-30s, so reaching
-		// here means the Gateway named a wait and this waits exactly that long.
-		if (now() + response.retry_after_ms > deadline) {
+		// Only the Gateway's own interval is honored. The Gateway decides whether
+		// its absolute challenge expiry has passed; a client-side cross-machine
+		// wall-clock comparison would reject a valid confirmation on a skewed
+		// device. The local monotonic ceiling merely prevents an unavailable
+		// Gateway from keeping this process alive indefinitely.
+		if (monotonicNow() + response.retry_after_ms > localDeadline) {
 			return writeAdoptionFailure(io, {
-				code: "expired",
-				message: "The verification window closed before the mailbox was confirmed.",
-				nextAction: "Run 'ceal session adopt' again to start a new transaction; the previous device keys are discarded.",
+				code: "wait_timeout",
+				message: "The Gateway did not finish this adoption within the local safety window.",
+				nextAction: "Check Gateway reachability and run 'ceal session adopt' again; the previous device keys are discarded.",
 			});
 		}
 		await sleep(response.retry_after_ms);

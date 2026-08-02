@@ -75,6 +75,12 @@ export interface CealCommandRuntime {
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => number;
 	/**
+	 * Monotonic elapsed-time source for bounded workflows. Unlike `now`, it is
+	 * not compared with a timestamp issued by another machine, so NTP skew
+	 * cannot turn a fresh Gateway challenge into a local expiry.
+	 */
+	monotonicNow?: () => number;
+	/**
 	 * Adoption transport factory. The Protocol requires an https origin for this
 	 * flow, so a loopback test server cannot stand in for the Gateway the way it
 	 * can elsewhere; the state machine is driven through this seam instead, and
