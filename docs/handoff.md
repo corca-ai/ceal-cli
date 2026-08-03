@@ -1,4 +1,38 @@
 # Session Handoff
+
+## Current correction — 2026-08-03 (vinc)
+
+The historical queue below is retained for provenance. This is the operative
+state for the next session.
+
+- Local commits `90e05f2` and `e673262` consume the signed
+  `gateway-protocol-handoff-v0.72.3` packet: protocol `0.72.3`, the private
+  reply-control v3 contract and its six fixed UDS routes, plus the
+  `device_enrollment_approval_wait_v1` negotiation. A later device now receives
+  one bounded operator-wait notice and continues on the Gateway's own poll
+  interval; it does not fall back to a new plaintext enrollment code.
+- The root npm workspace now contains only protocol/client/worker. Frozen
+  `cealctl` remains archived in the tree but is outside install and CI, so its
+  old protocol pin cannot make a worker protocol update fail `npm ci`. A clean
+  offline `npm ci` and `npm run check:unit` both pass. The obsolete pre-v0.72
+  handoff parser and its unreachable contract test were removed; the current
+  release path is `worker-release-inputs.mjs` through
+  `worker-gateway-handoff-archive.mjs`.
+- `ceal update` progress already exists in source commit `d0dfba4`, but it is
+  not in released `ceal-v0.72.4`; the next signed release is the first installed
+  generation that can show its TTY-only bounded stages. Stdout remains one YAML
+  document for agent callers.
+- Nothing in these commits is pushed, tagged, released, Gateway-applied, or
+  Agent-activated. Before any release: run the final `npm run check`, then get
+  a fresh explicit approval for the ceal-cli push/CI and a separate tag/release
+  approval. After a signed v3 worker is installed, update the Agent selection
+  record from the published signed packet, materialize its verified runtime,
+  and perform the separately approved canary/cutover proof.
+- Related Agent preparation landed locally at
+  `corca-ai/ceal-agent@e954c03`: its installed-selection verifier recognizes
+  either exact result-control v2 or reply-control v3+the fixed reply route,
+  while serving preflight still refuses v2. `npm run check` passed (145 tests).
+
 Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.8`(protocol-only packet)을 검증·소비했고,
 `ceal-v0.72.0`은 이미 릴리스·게시됐다(stable 이동 완료).** `vinc`의 통합 운영 checkout은 이제
 result-carrier grammar 소비 상태를 `ceal-v0.72.1` 릴리스 후보로 만들고 있다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
