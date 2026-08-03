@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { deviceEnrollmentHpkeAssociatedData, deviceEnrollmentHpkeInfo, deviceEnrollmentProofPayload } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
+	CEAL_DEVICE_ENROLLMENT_FEATURE,
+	deviceEnrollmentHpkeAssociatedData,
+	deviceEnrollmentHpkeInfo,
+	deviceEnrollmentProofPayload,
+} from "@corca-ai/ceal-protocol";
 import { adoptSession } from "../dist/device-adoption.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
@@ -107,6 +113,15 @@ test("waiting is paced only by the Gateway, and only a monotonic local safety ca
 	assert.equal(expiring.result().error.kind, "wait_timeout");
 	assert.equal(expiring.saved.length, 0);
 	assert.ok(expiring.slept.length <= 70, `stopped after ${expiring.slept.length} waits rather than polling forever`);
+});
+
+test("a later-device approval wait is explicitly negotiated, Gateway-paced, and announced once", async () => {
+	const world = createWorld({ approvalRequiredPolls: 2, retryAfterMs: 4_000 });
+	assert.equal(await run(world), 0);
+	assert.deepEqual(world.gateway.start.client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE]);
+	assert.deepEqual(world.slept, [4_000, 4_000]);
+	assert.equal((world.stderrText().match(/Waiting for operator approval/gu) ?? []).length, 1);
+	assert.equal(world.result().status, "adopted");
 });
 
 test("a skewed device clock does not locally expire a fresh Gateway challenge", async () => {
@@ -249,6 +264,7 @@ function createWorld(options = {}) {
 
 function createGateway(options) {
 	const pendingPolls = options.pendingPolls ?? 0;
+	const approvalRequiredPolls = options.approvalRequiredPolls ?? 0;
 	const retryAfterMs = options.retryAfterMs ?? 1_000;
 	const browserSessionUrl = `${ORIGIN}/adopt/verify/${encodeURIComponent("adoption:1")}`;
 	const state = {
@@ -270,6 +286,7 @@ function createGateway(options) {
 		}),
 	};
 	let remaining = pendingPolls;
+	let approvalRemaining = approvalRequiredPolls;
 
 	state.client = {
 		async start(request) {
@@ -297,6 +314,10 @@ function createGateway(options) {
 			if (remaining > 0) {
 				remaining -= 1;
 				return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "pending", retry_after_ms: retryAfterMs };
+			}
+			if (approvalRemaining > 0) {
+				approvalRemaining -= 1;
+				return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "approval_required", retry_after_ms: retryAfterMs };
 			}
 			if (options.failWith) return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "failed", code: options.failWith };
 			return sealed(state, options);

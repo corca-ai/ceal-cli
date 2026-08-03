@@ -4,6 +4,7 @@ import {
 	assertCealDeviceEnrollmentDeliveryExpectation,
 	assertCealDeviceEnrollmentSealedPayloadBinding,
 	assertCealDeviceEnrollmentStartExpectation,
+	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_PROOF_SUITE,
 	CEAL_DEVICE_ENROLLMENT_RECIPIENT_SUITE,
@@ -121,7 +122,11 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 				name: "ceal",
 				version: packageJson.version,
 				protocol_version: CEAL_PROTOCOL_VERSION,
-				features: [CEAL_DEVICE_ENROLLMENT_FEATURE],
+				// Ordered capability negotiation: a Gateway that does not know the
+				// second marker still has the original sealed-delivery path, while a
+				// Gateway enforcing the later-device limit can keep this command in a
+				// bounded approval wait instead of forcing the employee to restart.
+				features: [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE],
 			},
 		} as Parameters<typeof client.start>[0]);
 	} catch (error) {
@@ -151,6 +156,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 	const monotonicNow = runtime.monotonicNow ?? (() => performance.now());
 	const sleep = runtime.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const localDeadline = monotonicNow() + MAX_LOCAL_WAIT_MS;
+	let approvalWaitAnnounced = false;
 
 	while (true) {
 		let response: Awaited<ReturnType<typeof client.poll>>;
@@ -178,6 +184,10 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 				encapsulatedKey: response.encapsulated_key,
 				ciphertext: response.ciphertext,
 			});
+		}
+		if (response.status === "approval_required" && !approvalWaitAnnounced) {
+			io.stderr.write("Mailbox verified. Waiting for operator approval. This command will continue automatically.\n");
+			approvalWaitAnnounced = true;
 		}
 
 		// Only the Gateway's own interval is honored. The Gateway decides whether
