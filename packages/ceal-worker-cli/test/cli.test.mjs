@@ -912,44 +912,113 @@ test("a local session summary does not present an untested refresh credential as
 	assert.equal(Object.hasOwn(payload, "renewal_available"), false);
 });
 
-test("renewal transport failure is retryable session state, not an invalid enrollment", async () => {
+test("ambiguous renewal response tells the employee not to replay a one-time refresh credential", async () => {
 	await withRenewingGateway(
-		async ({ endpoint, oldRefreshToken }) => {
+		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const runtime = {
-				loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-				saveSession: async () => assert.fail("an unavailable renewal must not replace local state"),
+				loadSession: async () => current,
+				saveSession: async (session) => {
+					current = session;
+				},
 			};
 			const capabilities = await yamlRun(["capabilities", "--fresh"], 3, runtime);
 			assert.equal(capabilities.schema_version, "ceal.client_session.v1");
 			assert.equal(capabilities.error.kind, "session_renewal_unavailable");
-			assert.equal(capabilities.error.retryable, true);
-			assert.match(capabilities.error.next_action, /does not establish.*invalid/u);
+			assert.equal(capabilities.error.retryable, false);
+			assert.match(capabilities.error.message, /may already have been consumed/u);
+			assert.match(capabilities.error.next_action, /Do not retry the same command/u);
+			assert.match(capabilities.error.next_action, /replacement device-enrollment code/u);
+			assert.equal(current.renewalBlockedReason, "outcome_unknown");
+			assert.equal(refreshCalls(), 1);
+
+			const blockedRetry = await yamlRun(["capabilities", "--fresh"], 3, runtime);
+			assert.equal(blockedRetry.error.kind, "session_renewal_unavailable");
+			assert.equal(blockedRetry.error.retryable, false);
+			assert.equal(refreshCalls(), 1, "the quarantined v1 credential must never reach the Gateway again");
 
 			const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
 			assert.equal(call.error.kind, "session_renewal_unavailable");
-			assert.equal(call.error.retryable, true);
+			assert.equal(call.error.retryable, false);
+			assert.match(call.error.next_action, /Do not retry the same command/u);
 			assert.equal(Object.hasOwn(call, "receipt"), false);
 
 			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
 			assert.equal(receipt.error.kind, "session_renewal_unavailable");
-			assert.equal(receipt.error.retryable, true);
+			assert.equal(receipt.error.retryable, false);
+			assert.match(receipt.error.next_action, /Do not retry the same command/u);
 		},
 		{ invalidRefreshResponse: true },
 	);
 });
 
+test("a refresh never reaches the Gateway when its pre-send quarantine cannot persist", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+		const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+			saveSession: async () => {
+				throw new Error("disk unavailable");
+			},
+		});
+		assert.equal(payload.error.kind, "session_save_failed");
+		assert.equal(refreshCalls(), 0);
+	});
+});
+
 test("typed Gateway refresh denial requires reenrollment instead of retry", async () => {
 	await withRenewingGateway(
-		async ({ endpoint, oldRefreshToken }) => {
+		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const payload = await yamlRun(["capabilities"], 3, {
-				loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-				saveSession: async () => assert.fail("a denied refresh must not replace local state"),
+				loadSession: async () => current,
+				saveSession: async (session) => {
+					current = session;
+				},
 			});
 			assert.equal(payload.error.kind, "refresh_invalid");
 			assert.equal(payload.error.retryable, false);
 			assert.match(payload.error.next_action, /replacement device-enrollment code/u);
+			assert.equal(current.renewalBlockedReason, "refresh_invalid");
+			assert.equal(refreshCalls(), 1);
+			const blockedRetry = await yamlRun(["capabilities"], 3, {
+				loadSession: async () => current,
+				saveSession: async () => assert.fail("blocked refresh must not save"),
+			});
+			assert.equal(blockedRetry.error.kind, "refresh_invalid");
+			assert.equal(refreshCalls(), 1);
 		},
 		{ refreshDeniedCode: "refresh_invalid" },
+	);
+});
+
+test("separate installed invocations durably quarantine an ambiguous refresh before a second network attempt", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+			const home = mkdtempSync(path.join(tmpdir(), "ceal-refresh-quarantine-"));
+			try {
+				const sessionPath = path.join(home, ".ceal", "client-session.json");
+				mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
+				writeFileSync(
+					sessionPath,
+					`${JSON.stringify(serializeStoredSession(storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken })), null, 2)}\n`,
+					{ mode: 0o600 },
+				);
+				const first = await runBin(["capabilities", "--fresh"], "", { HOME: home });
+				assert.equal(first.code, 3, first.stdout);
+				assert.match(first.stdout, /Do not retry the same command/u);
+				const persisted = JSON.parse(readFileSync(sessionPath, "utf8"));
+				assert.equal(persisted.schema_version, "ceal.client_session_store.v2");
+				assert.equal(persisted.renewal_blocked_reason, "outcome_unknown");
+				assert.equal(refreshCalls(), 1);
+
+				const second = await runBin(["capabilities", "--fresh"], "", { HOME: home });
+				assert.equal(second.code, 3, second.stdout);
+				assert.equal(refreshCalls(), 1, "the second process must not replay the quarantined token");
+			} finally {
+				rmSync(home, { recursive: true, force: true });
+			}
+		},
+		{ invalidRefreshResponse: true },
 	);
 });
 
@@ -1547,7 +1616,7 @@ test("an unknown outcome on a declared read does not warn about repeating a writ
 	assert.match(payload.error.next_action, /ceal receipt show/u);
 });
 
-test("a rejected call followed by failed session renewal is known pre-provider state, not an unknown receipt", async () => {
+test("a rejected call followed by failed pre-send refresh quarantine is known pre-provider state, not an unknown receipt", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, requests }) => {
 			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
@@ -1557,7 +1626,7 @@ test("a rejected call followed by failed session renewal is known pre-provider s
 				},
 				nextRequestId: () => "narnia:renewal-failed:001",
 			});
-			assert.equal(payload.error.kind, "session_renewal_failed");
+			assert.equal(payload.error.kind, "session_save_failed");
 			assert.equal("receipt" in payload, false);
 			assert.doesNotMatch(payload.error.next_action, /Do not repeat this call yet/u);
 			assert.deepEqual(

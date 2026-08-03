@@ -65,12 +65,15 @@ function configuredSessionSummary(session: CealStoredSession, now: number): Reco
 		// Gateway renewal.  Advertising it as "available" made an expired client
 		// look healthy precisely when an operator needed to distinguish the two.
 		renewal_configured: true,
-		renewal_status: "not_checked",
+		renewal_status:
+			session.renewalBlockedReason === "outcome_unknown" ? "outcome_unknown" : session.renewalBlockedReason ? "not_renewable" : "not_checked",
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
 		raw_token_visible: false,
 		proof_level: "local_state",
-		next_action: "Run 'ceal capabilities' to verify live Gateway access.",
+		next_action: session.renewalBlockedReason
+			? "Do not retry a session refresh. Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'."
+			: "Run 'ceal capabilities' to verify live Gateway access.",
 	};
 }
 
@@ -321,9 +324,28 @@ async function renewSession(
 	save: (session: CealStoredSession) => Promise<void>,
 ): Promise<CealStoredSession> {
 	if (!force && sessionIsCurrent(session, now)) return session;
+	if (session.renewalBlockedReason)
+		throw new CealClientSessionError(
+			session.renewalBlockedReason === "outcome_unknown" ? "session_renewal_unavailable" : session.renewalBlockedReason,
+		);
 	const refresh = requireRefreshContext(session, now);
+	// Write before send.  A v1 refresh can commit before its response reaches us;
+	// if this durable write fails, no process is allowed to send the one-time
+	// credential because it could not prove a later replay will be stopped.
+	try {
+		await save({ ...session, renewalBlockedReason: "outcome_unknown" });
+	} catch (error) {
+		throw new CealClientSessionError(sessionStoreFailureCode(error));
+	}
 	const response = await refreshSession(session, refresh);
-	if (!response.ok) throw new CealClientSessionError(response.error.code);
+	if (!response.ok) {
+		try {
+			await save({ ...session, renewalBlockedReason: response.error.code });
+		} catch (error) {
+			throw new CealClientSessionError(sessionStoreFailureCode(error));
+		}
+		throw new CealClientSessionError(response.error.code);
+	}
 	assertSessionBindings(session, response);
 	const rotated = rotatedSession(session, response);
 	await save(rotated);
@@ -391,8 +413,9 @@ function sessionStoreFailureCode(error: unknown): string {
 }
 
 function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult): CealStoredSession {
+	const { renewalBlockedReason: _blockedReason, ...unblocked } = session;
 	return {
-		...session,
+		...unblocked,
 		accessToken: response.access_token,
 		expiresAt: response.expires_at,
 		refreshToken: response.refresh_token,
@@ -448,9 +471,14 @@ const NOT_RENEWABLE: ClientSessionFailureDisposition = {
  */
 const CLIENT_SESSION_FAILURES: Readonly<Record<string, ClientSessionFailureDisposition>> = {
 	session_renewal_unavailable: {
-		retryable: true,
-		message: "The Gateway did not return a usable response while renewing the stored session.",
-		nextAction: "Wait briefly, then retry the same command. This does not establish that the enrollment or refresh credential is invalid.",
+		// Refresh credentials are one-time rotation inputs. A lost or malformed
+		// response can follow a committed Gateway rotation, so repeating this v1
+		// request may replay the old credential and revoke its session family.
+		retryable: false,
+		message:
+			"The Gateway did not return a usable response while renewing the stored session; the one-time refresh credential may already have been consumed.",
+		nextAction:
+			"Do not retry the same command. Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
 	},
 	session_revocation_unavailable: {
 		retryable: true,

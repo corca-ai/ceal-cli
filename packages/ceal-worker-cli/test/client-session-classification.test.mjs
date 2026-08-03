@@ -23,11 +23,12 @@ test("every classified reason is agreed on by both readers", () => {
 	}
 });
 
-// Only the three transport/contention reasons are retryable; a spent refresh
-// credential is not, and telling an agent to retry it would loop forever.
+// Only local contention and revocation transport uncertainty are retryable. An
+// unknown one-time refresh may already have committed, so retrying it can revoke
+// the whole Gateway session family.
 test("retryable is reserved for the reasons a retry can actually clear", () => {
 	const retryable = classifiedClientSessionFailureReasons().filter((reason) => classifyClientSessionFailure(reason).retryable);
-	assert.deepEqual(retryable.sort(), ["refresh_busy", "session_renewal_unavailable", "session_revocation_unavailable"]);
+	assert.deepEqual(retryable.sort(), ["refresh_busy", "session_revocation_unavailable"]);
 });
 
 test("an unclassified reason is reported without being trusted as membership", () => {
