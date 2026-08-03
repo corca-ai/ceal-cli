@@ -40,6 +40,18 @@ test("worker release inventory accepts one exact complete Gateway protocol hando
 	assert.equal(resolution.gateway_client, undefined);
 });
 
+test("worker release inventory accepts the v3 Gateway control conformance while still binding its producer", (context) => {
+	const fixture = handoffFixture(context);
+	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v3");
+	writeHandoffManifest(fixture);
+	const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
+	assert.equal(resolution.ok, true);
+
+	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v2");
+	writeHandoffManifest(fixture);
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("invalid_control_conformance"));
+});
+
 test("worker release inventory rejects stale sidecars, an unbound control conformance, and source fallback", (context) => {
 	const fixture = handoffFixture(context);
 	const marker = path.join(fixture.root, MARKER_NAME);
@@ -210,9 +222,9 @@ function packedPackage(root, { name, exports, dependencies = {}, files }) {
 	};
 }
 
-function writeControlConformance(fixture) {
+function writeControlConformance(fixture, schemaVersion = "ceal.gateway_leased_consumer_control_conformance_handoff.v1") {
 	fixture.control = {
-		schema_version: "ceal.gateway_leased_consumer_control_conformance_handoff.v1",
+		schema_version: schemaVersion,
 		proof_level: "local_state",
 		writes_external: false,
 		source: {

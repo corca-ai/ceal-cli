@@ -18,7 +18,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INPUTS_FILENAME = "worker-release-inputs.json";
 const SCHEMA_VERSION = "ceal.worker_release_inputs.v1";
 const HANDOFF_SCHEMA = "ceal.gateway_protocol_handoff.v1";
-const CONTROL_CONFORMANCE_SCHEMA = "ceal.gateway_leased_consumer_control_conformance_handoff.v1";
+// The Gateway owns the control conformance.  This consumer only binds its
+// declared producer identity and bytes; it must therefore accept every
+// published handoff schema whose identity envelope stays unchanged.  v3 adds
+// the reply-control vectors without changing that envelope.
+const CONTROL_CONFORMANCE_SCHEMAS = new Set([
+	"ceal.gateway_leased_consumer_control_conformance_handoff.v1",
+	"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
+]);
 const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
@@ -422,7 +429,7 @@ function assertControlConformanceSidecar({ handoff, control, controlConformance,
 	}
 	if (
 		!isPlainObject(control) ||
-		control.schema_version !== CONTROL_CONFORMANCE_SCHEMA ||
+		!CONTROL_CONFORMANCE_SCHEMAS.has(control.schema_version) ||
 		control.proof_level !== "local_state" ||
 		control.writes_external !== false ||
 		!sameSourceIdentity(control.source, producer) ||

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.72.5 (`ceal-v0.72.5`)
+## 0.72.6 (`ceal-v0.72.6`)
 
 Makes the signed worker release ready for the private Agent's reply-control
 handover and for a second employee device awaiting operator approval.
@@ -17,6 +17,9 @@ handover and for a second employee device awaiting operator approval.
 - **Shows stable update progress on a terminal.** Interactive `ceal update`
   writes bounded stages to stderr while preserving its one YAML document on
   stdout for agents.
+- **Consumes the signed Gateway v3 control conformance.** Release composition
+  retains byte and producer-identity binding while accepting the v3 reply
+  control envelope; unknown schemas remain fail-closed.
 
 ## 0.72.4 (`ceal-v0.72.4`)
 
