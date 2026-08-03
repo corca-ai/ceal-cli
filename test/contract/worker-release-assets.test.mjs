@@ -202,6 +202,10 @@ test("private control-session release input accepts only its exact reply-control
 	mixed.agent_ipc.response_schema_version = "ceal.leased_consumer_control_response.v1";
 	writeFileSync(contractPath, `${JSON.stringify(mixed, null, 2)}\n`);
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
+	const stalePathContract = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	stalePathContract.gateway.socket_path = "/run/ceal/leased-consumer-control-v1.sock";
+	writeFileSync(contractPath, `${JSON.stringify(stalePathContract, null, 2)}\n`);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 });
 
 test("native source verification refuses a stale generated Gateway handoff before bundling", (context) => {

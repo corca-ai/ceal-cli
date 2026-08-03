@@ -4,21 +4,21 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-    "commit": "292220fdd963ef3c0f35954da533934a5f67340b",
-    "tree": "cbce21d7c4356728f204c77bad50c407afc13a42"
+    "commit": "c3f2df48c06ec3006fb5712c12f3d492ef5facd9",
+    "tree": "2fe207f78fb3a0d3a56fdb805174cae72e2459f3"
 	},
 	"shipped": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
 		"status": "agreed",
-    "gateway_commit": "292220fdd963ef3c0f35954da533934a5f67340b",
-    "protocol_tree": "cbce21d7c4356728f204c77bad50c407afc13a42"
+    "gateway_commit": "c3f2df48c06ec3006fb5712c12f3d492ef5facd9",
+    "protocol_tree": "2fe207f78fb3a0d3a56fdb805174cae72e2459f3"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
 		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` is a recorded observation that no local check can confirm; confirming it needs the owner checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
 		"`agreed` means the proof and shipment identities converged when this pin was written. It is not evidence that any release was built, installed, or accepted against the locked archive.",
-    "`shipped.protocol_tree` is no longer only self-recorded. The signed gateway-protocol-handoff-v0.72.3 manifest and its Protocol provenance both declare protocol_tree cbce21d7…, gateway-protocol-handoff-lock.json carries that value, and scripts/verify-protocol-vendor-pin.mjs now fails `shipped_lock_mismatch` when the pin records a different one. What that closes is the pin's last unilateral field, not the remote: the check still compares two local files.",
-    "The vendored copy at this pin builds to a `dist/` byte-identical to the one inside the signed `corca-ai-ceal-protocol-0.72.3.tgz` (observed on vinc, 2026-08-03, Node 22.22.1 / TypeScript 5.9.3). That is a one-time maintainer observation, not a check any gate re-runs.",
+    "`shipped.protocol_tree` is no longer only self-recorded. The signed gateway-protocol-handoff-v0.72.4 manifest and its Protocol provenance both declare protocol_tree 2fe207f7…, gateway-protocol-handoff-lock.json carries that value, and scripts/verify-protocol-vendor-pin.mjs now fails `shipped_lock_mismatch` when the pin records a different one. What that closes is the pin's last unilateral field, not the remote: the check still compares two local files.",
+    "The vendored copy at this pin builds to a `dist/` byte-identical to the one inside the signed `corca-ai-ceal-protocol-0.72.4.tgz` (observed on vinc, 2026-08-03, Node 22.22.1 / TypeScript 5.9.3). That is a one-time maintainer observation, not a check any gate re-runs.",
 		"The archive this pin ships against is published under the Gateway protocol-handoff release origin that .github/workflows/ceal-release.yml downloads from, and was verified there against its Sigstore certificate. This pin does not prove that origin still answers, only which bytes a release must accept from it."
 	]
 }

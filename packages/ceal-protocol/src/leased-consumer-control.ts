@@ -310,7 +310,10 @@ function decodeTerminal(value: Record<string, unknown>): void { requireExactKeys
 function decodeLease(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, ["delivery_attempt", "event_ref", "expires_at", "lease_fence", "lease_ref"]); if (!safeRef(record.event_ref) || !safeRef(record.lease_ref) || !positive(record.lease_fence) || !positive(record.delivery_attempt) || !timestamp(record.expires_at)) invalid(); }
 function decodeProjection(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, Object.hasOwn(record, "context") ? ["context", "schema_version", "text"] : ["schema_version", "text"]); if (record.schema_version !== "ceal.gateway_normalized_projection.v1" || !safeText(record.text, 16_384) || (record.context !== undefined && !projectionContext(record.context))) invalid(); }
 function projectionContext(value: unknown): boolean { if (!record(value)) return false; const context = value as Record<string, unknown>; return exactKeys(context, ["conversation_kind", "is_thread_reply"]) && ["channel", "dm", "group"].includes(context.conversation_kind as string) && typeof context.is_thread_reply === "boolean"; }
-function socketPath(value: unknown): boolean { return typeof value === "string" && value.startsWith("/") && value.length <= 1024 && !/[\r\n\0]/u.test(value) && !value.endsWith("/admin-gateway.sock"); }
+// A protected session is the sole socket authority. Keep the permitted value
+// portable and incapable of targeting the Gateway administration listener;
+// consumers must not substitute an ambient or contract-literal path.
+function socketPath(value: unknown): boolean { return isSafeUnixSocketPath(value) && !value.endsWith("/admin-gateway.sock"); }
 function credential(value: unknown): boolean { return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= 4096 && /^[\x21-\x7e]+$/u.test(value); }
 function safeRef(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
 function safeReplyReceiptRef(value: unknown): value is string { return typeof value === "string" && /^reply-receipt:[a-f0-9]{64}$/u.test(value); }
@@ -328,3 +331,4 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function plainRecord(value: unknown): value is Record<string, unknown> { return record(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null); }
 function invalid(): never { throw new TypeError("Ceal leased-consumer control record is invalid"); }
+import { isSafeUnixSocketPath } from "./unix-socket-path-safety.js";

@@ -179,9 +179,8 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_reply_control_response.v3" ||
 		value.agent_ipc.maximum_frame_bytes !== 32 * 1024 ||
 		value.agent_ipc.serial !== true ||
-		!exact(value.gateway, ["transport", "socket_path", "operation_deadline_ms", "routes"]) ||
+		!exact(value.gateway, ["transport", "operation_deadline_ms", "routes"]) ||
 		value.gateway.transport !== "unix_socket" ||
-		value.gateway.socket_path !== "/run/ceal/leased-consumer-control-v1.sock" ||
 		value.gateway.operation_deadline_ms !== 30_000 ||
 		!exact(value.gateway.routes, Object.keys(routes)) ||
 		!Object.entries(routes).every(([operation, route]) => value.gateway.routes[operation] === route) ||

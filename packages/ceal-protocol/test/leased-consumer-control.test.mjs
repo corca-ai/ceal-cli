@@ -48,10 +48,12 @@ test("leased-consumer control response projections never return credential, cons
 	]) assert.equal(decodeCealLeasedConsumerControlResponse(response).operation, response.operation);
 });
 
-test("leased-consumer control rejects a public/admin socket, caller authority, receipt assertion, and widened result", () => {
-	assert.throws(() => decodeCealLeasedConsumerControlSession({
-		schema_version: CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA, transport: "unix_socket", socket_path: "/run/ceal/admin-gateway.sock", service_credential: "private-service-credential",
-	}), TypeError);
+test("leased-consumer control rejects a public/admin or nonportable socket, caller authority, receipt assertion, and widened result", () => {
+	for (const socket_path of ["/run/ceal/admin-gateway.sock", "relative.sock", "/run/ceal/bad\npath.sock", `/${"a".repeat(103)}`]) {
+		assert.throws(() => decodeCealLeasedConsumerControlSession({
+			schema_version: CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA, transport: "unix_socket", socket_path, service_credential: "private-service-credential",
+		}), TypeError);
+	}
 	for (const request of [
 		{ schema_version: CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA, operation: "acquire", input: { instance_ref: "instance:prod" } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA, operation: "projection", input: { ...leaseInput, service_credential: "forged" } },

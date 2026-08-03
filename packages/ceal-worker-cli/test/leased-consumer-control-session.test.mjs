@@ -3,14 +3,19 @@ import test from "node:test";
 import { openLeasedConsumerControlSession, runLeasedConsumerControlSession } from "../dist/leased-consumer-control-session.js";
 
 const encoder = new TextEncoder();
-const session = encoder.encode(
-	JSON.stringify({
-		schema_version: "ceal.leased_consumer_control_session.v1",
-		transport: "unix_socket",
-		socket_path: "/run/ceal/leased-consumer-control-v1.sock",
-		service_credential: "private-service-credential",
-	}),
-);
+const sessionPath = "/run/user/1001/ceal/leased-consumer-control-v1.sock";
+const session = sessionFor(sessionPath);
+
+function sessionFor(socketPath) {
+	return encoder.encode(
+		JSON.stringify({
+			schema_version: "ceal.leased_consumer_control_session.v1",
+			transport: "unix_socket",
+			socket_path: socketPath,
+			service_credential: "private-service-credential",
+		}),
+	);
+}
 
 const frames = [
 	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "acquire", input: {} },
@@ -40,7 +45,7 @@ const frames = [
 	},
 ];
 
-test("private control session carries exactly the six canonical operations over its fixed UDS routes", async () => {
+test("private control session carries exactly the six canonical operations over Gateway-issued UDS routes", async () => {
 	const calls = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
@@ -63,28 +68,28 @@ test("private control session carries exactly the six canonical operations over 
 		calls.map((call) => ({ socketPath: call.socketPath, path: call.path, credential: call.credential })),
 		[
 			{
-				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/acquire",
 				credential: "private-service-credential",
 			},
 			{
-				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/projection",
 				credential: "private-service-credential",
 			},
 			{
-				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/recheck",
 				credential: "private-service-credential",
 			},
-			{ socketPath: "/run/ceal/leased-consumer-control-v1.sock", path: "/api/ceal/agent/v1/call", credential: "private-service-credential" },
+			{ socketPath: sessionPath, path: "/api/ceal/agent/v1/call", credential: "private-service-credential" },
 			{
-				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/complete",
 				credential: "private-service-credential",
 			},
 			{
-				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/reply",
 				credential: "private-service-credential",
 			},
@@ -95,6 +100,26 @@ test("private control session carries exactly the six canonical operations over 
 		["acquire", "projection", "recheck", "call", "complete", "reply"],
 	);
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
+});
+
+test("each carrier binds only the socket path in its own protected session", async () => {
+	const paths = ["/run/user/1001/ceal/one.sock", "/run/user/1001/ceal/two.sock"];
+	const observed = [];
+	for (const socketPath of paths) {
+		const carrier = await openLeasedConsumerControlSession({
+			readProtectedSession: async () => sessionFor(socketPath),
+			closeProtectedSession: async () => {},
+			requestUnixSocket: async (input) => {
+				observed.push(input.socketPath);
+				return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(responseFor("acquire"))) };
+			},
+		});
+		async function* input() {
+			yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+		}
+		assert.equal(await runLeasedConsumerControlSession(input(), carrier, () => {}), true);
+	}
+	assert.deepEqual(observed, paths);
 });
 
 test("invalid protected session and malformed Agent frames make zero control requests and emit nothing", async () => {
@@ -129,6 +154,23 @@ test("invalid protected session and malformed Agent frames make zero control req
 	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
 	assert.equal(calls, 0);
 	assert.deepEqual(output, []);
+});
+
+test("invalid protected-session socket paths make zero control requests", async () => {
+	for (const socketPath of ["relative.sock", "/run/user/1001/ceal/bad\npath.sock", `/${"a".repeat(1024)}`]) {
+		let calls = 0;
+		await assert.rejects(() =>
+			openLeasedConsumerControlSession({
+				readProtectedSession: async () => sessionFor(socketPath),
+				closeProtectedSession: async () => {},
+				requestUnixSocket: async () => {
+					calls += 1;
+					throw new Error("must not run");
+				},
+			}),
+		);
+		assert.equal(calls, 0);
+	}
 });
 
 test("legacy and unknown private control grammars make zero control requests and emit nothing", async () => {

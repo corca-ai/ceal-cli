@@ -51,6 +51,7 @@ export type {
 } from "./enrollment.js";
 export * from "./device-enrollment.js";
 export * from "./leased-consumer-control.js";
+export { PORTABLE_UNIX_SOCKET_PATH_MAX_BYTES, isSafeUnixSocketPath } from "./unix-socket-path-safety.js";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 	CEAL_CLIENT_REFRESH_RESULT_SCHEMA,

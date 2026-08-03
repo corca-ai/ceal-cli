@@ -19,6 +19,14 @@ lockfile, but the tagged workflow's `npm ci --ignore-scripts` does.
 Nothing else carries the version. Source reads it from its own manifest, and
 `repo-gates` fails a commit that retypes it or lets the manifests disagree.
 
+Before a worker release, consume a signed Gateway Protocol handoff as one
+committed input slice: verify the tag-bound archive; update
+`gateway-protocol-handoff-lock.json`, `protocol-vendor-pin.json`, the frozen
+`packages/ceal-protocol` tree, the private control-session contract, generated
+source, and workflow handoff literals together. The vendor-pin check reads the
+committed frozen tree by design, so run it after committing that coherent slice;
+never weaken it to accept a transient worktree copy.
+
 Then:
 
 ```

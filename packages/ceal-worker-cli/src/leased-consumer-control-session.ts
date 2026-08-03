@@ -23,13 +23,11 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(LEASED_CONSUMER_CONTROL_SESSION_CONT
 	}>;
 	gateway: Readonly<{
 		transport: string;
-		socket_path: string;
 		operation_deadline_ms: number;
 		routes: Record<CealLeasedConsumerReplyControlOperation, string>;
 	}>;
 }>;
 export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.argv[0];
-const SOCKET_PATH = CONTROL_SESSION_CONTRACT.gateway.socket_path;
 const PROTECTED_SESSION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.protected_session.deadline_ms;
 const OPERATION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_ms;
 const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
@@ -75,9 +73,8 @@ export async function openLeasedConsumerControlSession(runtime: LeasedConsumerCo
 		);
 		if (bytes === null) throw new Error("session_unavailable");
 		const session = decodeCealLeasedConsumerControlSession(parseStrictJson(bytes, MAX_SESSION_BYTES));
-		if (session.socket_path !== SOCKET_PATH) throw new Error("unexpected_socket");
 		return Object.freeze({
-			dispatch: async (frame) => dispatch(session.service_credential, frame, runtime),
+			dispatch: async (frame) => dispatch(session.socket_path, session.service_credential, frame, runtime),
 		});
 	} finally {
 		await close();
@@ -153,12 +150,17 @@ async function readProtectedSessionBeforeDeadline(
 	}
 }
 
-async function dispatch(credential: string, frame: Uint8Array, runtime: LeasedConsumerControlSessionRuntime): Promise<Uint8Array> {
+async function dispatch(
+	socketPath: string,
+	credential: string,
+	frame: Uint8Array,
+	runtime: LeasedConsumerControlSessionRuntime,
+): Promise<Uint8Array> {
 	const request = decodeCealLeasedConsumerReplyControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
 	const body = JSON.stringify(request);
 	const response = await requestControlBeforeDeadline(runtime, () =>
 		(runtime.requestUnixSocket ?? postUnixSocket)({
-			socketPath: SOCKET_PATH,
+			socketPath,
 			path: ROUTES[request.operation],
 			body,
 			credential,
@@ -397,7 +399,6 @@ function assertEmbeddedControlSessionContract(
 		}>;
 		gateway: Readonly<{
 			transport: string;
-			socket_path: string;
 			operation_deadline_ms: number;
 			routes: Record<CealLeasedConsumerReplyControlOperation, string>;
 		}>;
@@ -415,7 +416,6 @@ function assertEmbeddedControlSessionContract(
 		value.agent_ipc.maximum_frame_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES ||
 		value.agent_ipc.serial !== true ||
 		value.gateway.transport !== "unix_socket" ||
-		value.gateway.socket_path !== "/run/ceal/leased-consumer-control-v1.sock" ||
 		value.gateway.operation_deadline_ms !== 30_000 ||
 		Object.keys(value.gateway.routes).length !== 6 ||
 		Object.entries(ROUTES).some(([operation, route]) => value.gateway.routes[operation as CealLeasedConsumerReplyControlOperation] !== route)
