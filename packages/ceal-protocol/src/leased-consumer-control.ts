@@ -9,12 +9,20 @@ export const CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer
 export const CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_control_response.v1" as const;
 export const CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer_result_control_request.v2" as const;
 export const CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_result_control_response.v2" as const;
+/**
+ * v3 adds the terminal Gateway-owned reply operation.  It must not reuse v2:
+ * a signed older worker must reject the new operation before it can mistake a
+ * reply acknowledgement for any existing control result.
+ */
+export const CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer_reply_control_request.v3" as const;
+export const CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_reply_control_response.v3" as const;
 export const CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA = "ceal.gateway_leased_agent_delegated_read_result.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES = 8 * 1024;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES = 32 * 1024;
 export const CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES = 24 * 1024;
 
 export type CealLeasedConsumerControlOperation = "acquire" | "projection" | "recheck" | "call" | "complete";
+export type CealLeasedConsumerReplyControlOperation = CealLeasedConsumerControlOperation | "reply";
 export type CealLeasedConsumerControlDisposition = "completed" | "failed" | "cancelled" | "deferred";
 
 export interface CealLeasedConsumerControlSession {
@@ -111,6 +119,30 @@ export type CealLeasedConsumerResultControlResponse =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "call"; result: CealLeasedConsumerResultControlCallResult }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA; operation: "complete"; result: CealLeasedConsumerControlCompleteResult };
 
+/** The v3 reply carrier retains all v2 operation meanings and adds one terminal reply. */
+export type CealLeasedConsumerReplyControlRequest =
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA; operation: "acquire"; input: Record<string, never> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA; operation: "projection" | "recheck"; input: CealLeasedConsumerControlLeaseInput }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA; operation: "call"; input: CealLeasedConsumerCallInput }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA; operation: "complete"; input: CealLeasedConsumerControlCompleteInput }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA; operation: "reply"; input: CealLeasedConsumerReplyInput };
+
+export interface CealLeasedConsumerReplyInput extends CealLeasedConsumerControlLeaseInput {
+	text: string;
+}
+
+export type CealLeasedConsumerReplyControlResponse =
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "acquire"; result: CealLeasedConsumerControlAcquireResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "projection"; result: CealLeasedConsumerControlProjectionResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "recheck"; result: CealLeasedConsumerControlRecheckResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "call"; result: CealLeasedConsumerResultControlCallResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "complete"; result: CealLeasedConsumerControlCompleteResult }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA; operation: "reply"; result: CealLeasedConsumerReplyResult };
+
+export type CealLeasedConsumerReplyResult =
+	| { status: "replied"; receipt_ref: string; replayed: boolean }
+	| { status: "lease_lost" | "lease_expired" | "event_settled" | "reply_not_eligible" | "reply_unavailable" | "authentication_failed" };
+
 export interface CealLeasedConsumerDelegatedReadResult {
 	schema_version: typeof CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA;
 	capability_id: string;
@@ -130,6 +162,7 @@ export interface CealLeasedConsumerNormalizedProjection {
 
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const CONTROL_OPERATIONS = new Set<CealLeasedConsumerControlOperation>(["acquire", "projection", "recheck", "call", "complete"]);
+const REPLY_CONTROL_OPERATIONS = new Set<CealLeasedConsumerReplyControlOperation>(["acquire", "projection", "recheck", "call", "complete", "reply"]);
 const TERMINAL_STATUSES = new Set<CealLeasedConsumerControlTerminalResult["status"]>(["lease_lost", "lease_expired", "event_settled"]);
 
 export function decodeCealLeasedConsumerControlSession(value: unknown): CealLeasedConsumerControlSession {
@@ -146,6 +179,22 @@ export function decodeCealLeasedConsumerControlRequest(value: unknown): CealLeas
 
 export function decodeCealLeasedConsumerResultControlRequest(value: unknown): CealLeasedConsumerResultControlRequest {
 	return decodeControlRequest(value, CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA) as CealLeasedConsumerResultControlRequest;
+}
+
+export function decodeCealLeasedConsumerReplyControlRequest(value: unknown): CealLeasedConsumerReplyControlRequest {
+	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, invalid);
+	const record = requireRecord(value);
+	requireExactKeys(record, ["input", "operation", "schema_version"]);
+	if (record.schema_version !== CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA || typeof record.operation !== "string" || !REPLY_CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerReplyControlOperation)) invalid();
+	const input = requireRecord(record.input);
+	switch (record.operation as CealLeasedConsumerReplyControlOperation) {
+		case "acquire": requireExactKeys(input, []); break;
+		case "projection": case "recheck": decodeLeaseInput(input); break;
+		case "call": decodeCallInput(input); break;
+		case "complete": decodeCompleteInput(input); break;
+		case "reply": decodeReplyInput(input); break;
+	}
+	return record as unknown as CealLeasedConsumerReplyControlRequest;
 }
 
 function decodeControlRequest(value: unknown, schema: string): Record<string, unknown> {
@@ -169,6 +218,23 @@ export function decodeCealLeasedConsumerControlResponse(value: unknown): CealLea
 
 export function decodeCealLeasedConsumerResultControlResponse(value: unknown): CealLeasedConsumerResultControlResponse {
 	return decodeControlResponse(value, CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, decodeResultControlCallResult) as CealLeasedConsumerResultControlResponse;
+}
+
+export function decodeCealLeasedConsumerReplyControlResponse(value: unknown): CealLeasedConsumerReplyControlResponse {
+	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, invalid);
+	const record = requireRecord(value);
+	requireExactKeys(record, ["operation", "result", "schema_version"]);
+	if (record.schema_version !== CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA || typeof record.operation !== "string" || !REPLY_CONTROL_OPERATIONS.has(record.operation as CealLeasedConsumerReplyControlOperation)) invalid();
+	const result = requireRecord(record.result);
+	switch (record.operation as CealLeasedConsumerReplyControlOperation) {
+		case "acquire": decodeAcquireResult(result); break;
+		case "projection": decodeProjectionResult(result); break;
+		case "recheck": decodeRecheckResult(result); break;
+		case "call": decodeResultControlCallResult(result); break;
+		case "complete": decodeCompleteResult(result); break;
+		case "reply": decodeReplyResult(result); break;
+	}
+	return record as unknown as CealLeasedConsumerReplyControlResponse;
 }
 
 function decodeControlResponse(value: unknown, schema: string, decodeCall: (result: Record<string, unknown>) => void): Record<string, unknown> {
@@ -199,6 +265,10 @@ function decodeCompleteInput(value: Record<string, unknown>): void {
 	requireExactKeys(value, ["agent_run_ref", "disposition", "event_ref", "lease_fence", "lease_ref"], ["agent_run_ref"]);
 	if (!safeRef(value.event_ref) || !safeRef(value.lease_ref) || !positive(value.lease_fence) || !["completed", "failed", "cancelled", "deferred"].includes(value.disposition as string) || (value.agent_run_ref !== undefined && !safeRef(value.agent_run_ref))) invalid();
 }
+function decodeReplyInput(value: Record<string, unknown>): void {
+	requireExactKeys(value, ["event_ref", "lease_fence", "lease_ref", "text"]);
+	if (!safeRef(value.event_ref) || !safeRef(value.lease_ref) || !positive(value.lease_fence) || !safeReplyText(value.text)) invalid();
+}
 function decodeAcquireResult(value: Record<string, unknown>): void {
 	if (value.status === "authentication_failed") { requireExactKeys(value, ["status"]); return; }
 	if (value.status === "leased" || value.status === "consumer_busy") { requireExactKeys(value, ["lease", "status"]); decodeLease(value.lease); return; }
@@ -227,6 +297,15 @@ function decodeDelegatedReadResult(value: unknown): void {
 	if (record.schema_version !== CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA || !safeRef(record.capability_id) || !safeResultJson(record.data)) invalid();
 }
 function decodeCompleteResult(value: Record<string, unknown>): void { if (value.status === "authentication_failed" || value.status === "control_unavailable") { requireExactKeys(value, ["status"]); } else if (value.status === "completed") { requireExactKeys(value, ["replayed", "status"]); if (typeof value.replayed !== "boolean") invalid(); } else decodeTerminal(value); }
+function decodeReplyResult(value: Record<string, unknown>): void {
+	if (value.status === "replied") {
+		requireExactKeys(value, ["receipt_ref", "replayed", "status"]);
+		if (!safeReplyReceiptRef(value.receipt_ref) || typeof value.replayed !== "boolean") invalid();
+		return;
+	}
+	requireExactKeys(value, ["status"]);
+	if (!["lease_lost", "lease_expired", "event_settled", "reply_not_eligible", "reply_unavailable", "authentication_failed"].includes(value.status as string)) invalid();
+}
 function decodeTerminal(value: Record<string, unknown>): void { requireExactKeys(value, ["status"]); if (!TERMINAL_STATUSES.has(value.status as CealLeasedConsumerControlTerminalResult["status"])) invalid(); }
 function decodeLease(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, ["delivery_attempt", "event_ref", "expires_at", "lease_fence", "lease_ref"]); if (!safeRef(record.event_ref) || !safeRef(record.lease_ref) || !positive(record.lease_fence) || !positive(record.delivery_attempt) || !timestamp(record.expires_at)) invalid(); }
 function decodeProjection(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, Object.hasOwn(record, "context") ? ["context", "schema_version", "text"] : ["schema_version", "text"]); if (record.schema_version !== "ceal.gateway_normalized_projection.v1" || !safeText(record.text, 16_384) || (record.context !== undefined && !projectionContext(record.context))) invalid(); }
@@ -234,8 +313,11 @@ function projectionContext(value: unknown): boolean { if (!record(value)) return
 function socketPath(value: unknown): boolean { return typeof value === "string" && value.startsWith("/") && value.length <= 1024 && !/[\r\n\0]/u.test(value) && !value.endsWith("/admin-gateway.sock"); }
 function credential(value: unknown): boolean { return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= 4096 && /^[\x21-\x7e]+$/u.test(value); }
 function safeRef(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
+function safeReplyReceiptRef(value: unknown): value is string { return typeof value === "string" && /^reply-receipt:[a-f0-9]{64}$/u.test(value); }
 function positive(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 1; }
 function timestamp(value: unknown): boolean { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
+/** Reply text is a visible message body, so line breaks are intentional. */
+function safeReplyText(value: unknown): value is string { return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= 16_384 && ![...value].some((character) => character.codePointAt(0)! < 32 && character !== "\t" && character !== "\n" && character !== "\r" || character.codePointAt(0) === 127); }
 function safeText(value: unknown, maximum: number): value is string { return typeof value === "string" && Buffer.byteLength(value, "utf8") <= maximum && ![...value].some((character) => character.codePointAt(0)! < 32 || character.codePointAt(0) === 127); }
 function safeJson(value: unknown, depth = 0): boolean { if (depth > 16) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 8 * 1024); if (Array.isArray(value)) return value.length <= 128 && value.every((entry) => safeJson(entry, depth + 1)); if (!record(value) || Object.keys(value).length > 128) return false; return Object.entries(value).every(([key, entry]) => safeText(key, 128) && !/(?:token|secret|password|authorization|credential|provenance|runner|consumer|requester|source_kind)/iu.test(key) && safeJson(entry, depth + 1)); }
 function safeResultJson(value: unknown, depth = 0): boolean { if (depth > 8) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 4 * 1024); if (Array.isArray(value)) return value.length <= 64 && value.every((entry) => safeResultJson(entry, depth + 1)); if (!plainRecord(value) || Object.keys(value).length > 64) return false; return Object.entries(value).every(([key, entry]) => safeResultKey(key) && safeResultJson(entry, depth + 1)); }

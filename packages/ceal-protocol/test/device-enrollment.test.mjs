@@ -4,6 +4,7 @@ import { generateKeyPairSync, sign, verify } from "node:crypto";
 import test from "node:test";
 import {
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
+	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_CHALLENGE_REQUEST_SCHEMA,
 	CEAL_DEVICE_ENROLLMENT_HPKE_SUITE,
 	CEAL_DEVICE_ENROLLMENT_PROOF_SUITE,
@@ -70,6 +71,8 @@ test("device enrollment start names raw-key algorithms and embeds the required p
 		client: { name: "ceal", version: "0.70.0", protocol_version: binding.protocol_version, features: [CEAL_DEVICE_ENROLLMENT_FEATURE] },
 	});
 	assert.equal(startRequest.client.features[0], CEAL_DEVICE_ENROLLMENT_FEATURE);
+	assert.deepEqual(decodeCealDeviceEnrollmentStartRequest({ ...startRequest, client: { ...startRequest.client, features: [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE] } }).client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE]);
+	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, client: { ...startRequest.client, features: [CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE, CEAL_DEVICE_ENROLLMENT_FEATURE] } }), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, recipient_public_key: startRequest.proof_public_key }), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, recipient_public_key: "A".repeat(43) }), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, client: { ...startRequest.client, protocol_version: "1.2.0" } }), TypeError);
@@ -112,6 +115,15 @@ test("Ed25519 proof payload has a fixed wire encoding and verifies with the decl
 		nonce_ref: challenge.nonce_ref, signature: signature.toString("base64url"),
 	}).nonce_ref, challenge.nonce_ref);
 	assert.throws(() => decodeCealDeviceEnrollmentChallenge({ ...challenge, gateway_origin: "http://ceal.example.test" }), TypeError);
+});
+
+test("device enrollment exposes a bounded non-terminal additional-device approval wait", () => {
+	assert.deepEqual(decodeCealDeviceEnrollmentPollResponse({
+		schema_version: "ceal.device_enrollment_poll_result.v1", status: "approval_required", retry_after_ms: 10_000,
+	}), { schema_version: "ceal.device_enrollment_poll_result.v1", status: "approval_required", retry_after_ms: 10_000 });
+	assert.throws(() => decodeCealDeviceEnrollmentPollResponse({
+		schema_version: "ceal.device_enrollment_poll_result.v1", status: "approval_required", retry_after_ms: 999,
+	}), TypeError);
 });
 
 test("sealed delivery binds canonical HPKE info/AAD and rejects a decrypted identity mismatch", () => {

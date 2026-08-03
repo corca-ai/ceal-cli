@@ -9,7 +9,9 @@
 		"node": ">=22.19.0"
 	},
 	"workspaces": [
-		"packages/*"
+		"packages/ceal-protocol",
+		"packages/ceal-client",
+		"packages/ceal-worker-cli"
 	],
 	"scripts": {
 		"build": "npm run build:worker",

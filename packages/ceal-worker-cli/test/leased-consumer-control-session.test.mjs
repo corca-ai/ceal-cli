@@ -13,11 +13,11 @@ const session = encoder.encode(
 );
 
 const frames = [
-	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "acquire", input: {} },
-	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "projection", input: leaseInput() },
-	{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "recheck", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "acquire", input: {} },
+	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "projection", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "recheck", input: leaseInput() },
 	{
-		schema_version: "ceal.leased_consumer_result_control_request.v2",
+		schema_version: "ceal.leased_consumer_reply_control_request.v3",
 		operation: "call",
 		input: {
 			...leaseInput(),
@@ -29,13 +29,18 @@ const frames = [
 		},
 	},
 	{
-		schema_version: "ceal.leased_consumer_result_control_request.v2",
+		schema_version: "ceal.leased_consumer_reply_control_request.v3",
 		operation: "complete",
 		input: { ...leaseInput(), disposition: "completed", agent_run_ref: "run:fixture" },
 	},
+	{
+		schema_version: "ceal.leased_consumer_reply_control_request.v3",
+		operation: "reply",
+		input: { ...leaseInput(), text: "Gateway-owned terminal reply." },
+	},
 ];
 
-test("private control session carries exactly the five canonical operations over its fixed UDS routes", async () => {
+test("private control session carries exactly the six canonical operations over its fixed UDS routes", async () => {
 	const calls = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
@@ -78,11 +83,16 @@ test("private control session carries exactly the five canonical operations over
 				path: "/api/ceal/agent/v1/control/complete",
 				credential: "private-service-credential",
 			},
+			{
+				socketPath: "/run/ceal/leased-consumer-control-v1.sock",
+				path: "/api/ceal/agent/v1/control/reply",
+				credential: "private-service-credential",
+			},
 		],
 	);
 	assert.deepEqual(
 		output.map((value) => value.operation),
-		["acquire", "projection", "recheck", "call", "complete"],
+		["acquire", "projection", "recheck", "call", "complete", "reply"],
 	);
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
 });
@@ -113,7 +123,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 	const output = [];
 	async function* malformed() {
 		yield encoder.encode(
-			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_result_control_request.v2","operation":"acquire","input":{}}\n',
+			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_reply_control_request.v3","operation":"acquire","input":{}}\n',
 		);
 	}
 	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
@@ -124,7 +134,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 test("legacy and unknown private control grammars make zero control requests and emit nothing", async () => {
 	for (const frame of [
 		{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "acquire", input: {} },
-		{ schema_version: "ceal.leased_consumer_result_control_request.v3", operation: "acquire", input: {} },
+		{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "acquire", input: {} },
 	]) {
 		let calls = 0;
 		const carrier = await openLeasedConsumerControlSession({
@@ -204,7 +214,7 @@ function leaseInput() {
 	return { event_ref: "event:fixture", lease_ref: "lease:fixture", lease_fence: 1 };
 }
 function responseFor(operation) {
-	const base = { schema_version: "ceal.leased_consumer_result_control_response.v2", operation };
+	const base = { schema_version: "ceal.leased_consumer_reply_control_response.v3", operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
 		return {
@@ -231,7 +241,8 @@ function responseFor(operation) {
 				},
 			},
 		};
-	return { ...base, result: { status: "completed", replayed: false } };
+	if (operation === "complete") return { ...base, result: { status: "completed", replayed: false } };
+	return { ...base, result: { status: "replied", receipt_ref: `reply-receipt:${"a".repeat(64)}`, replayed: false } };
 }
 function lease() {
 	return { ...leaseInput(), delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };

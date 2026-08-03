@@ -4,6 +4,7 @@ import type { CealEnrollmentResult } from "./enrollment.js";
 import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 
 export const CEAL_DEVICE_ENROLLMENT_FEATURE = "device_enrollment_sealed_v1" as const;
+export const CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE = "device_enrollment_approval_wait_v1" as const;
 export const CEAL_DEVICE_ENROLLMENT_START_SCHEMA = "ceal.device_enrollment_start.v1" as const;
 export const CEAL_DEVICE_ENROLLMENT_START_RESULT_SCHEMA = "ceal.device_enrollment_start_result.v1" as const;
 export const CEAL_DEVICE_ENROLLMENT_CHALLENGE_REQUEST_SCHEMA = "ceal.device_enrollment_challenge_request.v1" as const;
@@ -24,7 +25,12 @@ export interface CealDeviceEnrollmentStartRequest {
 	proof_public_key: string;
 	recipient_suite: typeof CEAL_DEVICE_ENROLLMENT_RECIPIENT_SUITE;
 	recipient_public_key: string;
-	client: { name: "ceal"; version: string; protocol_version: typeof CEAL_PROTOCOL_VERSION; features: [typeof CEAL_DEVICE_ENROLLMENT_FEATURE] };
+	client: {
+		name: "ceal";
+		version: string;
+		protocol_version: typeof CEAL_PROTOCOL_VERSION;
+		features: [typeof CEAL_DEVICE_ENROLLMENT_FEATURE] | [typeof CEAL_DEVICE_ENROLLMENT_FEATURE, typeof CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE];
+	};
 }
 
 export interface CealDeviceEnrollmentStartResult {
@@ -109,6 +115,7 @@ export interface CealDeviceEnrollmentStartExpectation {
 
 export type CealDeviceEnrollmentPollResponse =
 	| { schema_version: typeof CEAL_DEVICE_ENROLLMENT_POLL_RESULT_SCHEMA; status: "pending"; retry_after_ms: number }
+	| { schema_version: typeof CEAL_DEVICE_ENROLLMENT_POLL_RESULT_SCHEMA; status: "approval_required"; retry_after_ms: number }
 	| {
 		schema_version: typeof CEAL_DEVICE_ENROLLMENT_POLL_RESULT_SCHEMA;
 		status: "sealed";
@@ -276,15 +283,24 @@ function validStartResultBinding(record: Record<string, unknown>): boolean {
 }
 function validStartClient(client: Record<string, unknown>): boolean {
 	return client.name === "ceal" && semver(client.version) && client.protocol_version === CEAL_PROTOCOL_VERSION
-		&& Array.isArray(client.features) && client.features.length === 1 && client.features[0] === CEAL_DEVICE_ENROLLMENT_FEATURE;
+		&& Array.isArray(client.features) && (sameFeatures(client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE])
+			|| sameFeatures(client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE]));
 }
+function sameFeatures(actual: unknown[], expected: readonly string[]): boolean { return actual.length === expected.length && actual.every((value, index) => value === expected[index]); }
 function decodePollResult(record: Record<string, unknown>): CealDeviceEnrollmentPollResponse {
 	switch (record.status) {
 		case "pending": return decodePendingPollResult(record);
+		case "approval_required": return decodeApprovalRequiredPollResult(record);
 		case "sealed": return decodeSealedPollResult(record);
 		case "failed": return decodeFailedPollResult(record);
 		default: return invalid();
 	}
+}
+function decodeApprovalRequiredPollResult(record: Record<string, unknown>): CealDeviceEnrollmentPollResponse {
+	requireExactKeys(record, ["retry_after_ms", "schema_version", "status"]);
+	if (typeof record.retry_after_ms !== "number" || !Number.isSafeInteger(record.retry_after_ms)
+		|| record.retry_after_ms < 1000 || record.retry_after_ms > 30_000) invalid();
+	return record as unknown as CealDeviceEnrollmentPollResponse;
 }
 function decodePendingPollResult(record: Record<string, unknown>): CealDeviceEnrollmentPollResponse {
 	requireExactKeys(record, ["retry_after_ms", "schema_version", "status"]);

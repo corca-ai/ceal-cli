@@ -14,10 +14,14 @@ than merely drifting. `npm run lint:fix` applies every safe fix.
 `includes` to lint code this lane may not edit.
 
 The worker `check:unit` and `check` gates run only client/worker package tests
-and explicit worker contract/release lists. The frozen protocol is built only as
-the exact local input needed to type-check the client; its unit suite remains
-Gateway-owned. Frozen `cealctl` and legacy dual-release checks are available
-only through `npm run test:legacy-compatibility`, never through pre-push or CI.
+and explicit worker contract/release lists. The root npm workspace names exactly
+the protocol, client, and worker packages; the frozen `cealctl` directory is not
+installed as a workspace dependency. This keeps a new signed worker protocol
+from resolving the operator's independently frozen pin. The frozen protocol is
+built only as the exact local input needed to type-check the client; its unit
+suite remains Gateway-owned. Frozen `cealctl` and legacy dual-release checks are
+available only through `npm run test:legacy-compatibility`, never through
+pre-push or CI.
 
 `lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
 style being introduced.

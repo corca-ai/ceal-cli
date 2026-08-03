@@ -39,8 +39,11 @@ rather than the pin's two tree fields, so it is not computed entirely from
 author-written values — but `source.commit` is still self-recorded, which makes a
 divergence detectable without making convergence observable.
 
-The workspace still contains four historical package directories so packed
-consumer and deletion gates can be proved:
+The worker workspace contains exactly the three packages that the worker
+release builds. The frozen operator directory remains in the repository as
+compatibility evidence, but it is deliberately outside dependency installation
+and worker CI: a worker protocol update must never make `npm ci` resolve the
+old operator's independently frozen protocol pin.
 
 - `@corca-ai/ceal-protocol`: frozen Gateway compatibility input;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;

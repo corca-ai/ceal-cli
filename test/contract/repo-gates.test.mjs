@@ -62,6 +62,7 @@ function runsFinalGate(step) {
 // to route around. Both gates must carry it, or "green" means different things
 // depending on which command was typed.
 test("both gates run the linter, and the final gate runs every suite", () => {
+	assert.deepEqual(manifest.workspaces, ["packages/ceal-protocol", "packages/ceal-client", "packages/ceal-worker-cli"]);
 	assert.match(manifest.scripts["check:unit"], /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm test/u);

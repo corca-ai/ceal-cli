@@ -6,12 +6,16 @@ import {
 	CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA,
 	CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA,
+	CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA,
+	CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA,
 	CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA,
 	decodeCealLeasedConsumerControlRequest,
 	decodeCealLeasedConsumerControlResponse,
 	decodeCealLeasedConsumerControlSession,
 	decodeCealLeasedConsumerResultControlRequest,
 	decodeCealLeasedConsumerResultControlResponse,
+	decodeCealLeasedConsumerReplyControlRequest,
+	decodeCealLeasedConsumerReplyControlResponse,
 } from "../dist/index.js";
 
 const lease = { event_ref: "event:one", lease_ref: "lease:one", lease_fence: 1, delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };
@@ -88,4 +92,27 @@ test("result control v2 rejects raw custody fields, oversized text, and a result
 		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, capability_id: "message.search", data: { text: "x".repeat(5 * 1024) } } } },
 		{ schema_version: CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA, operation: "result", input: leaseInput },
 	]) assert.throws(() => response.operation === "result" ? decodeCealLeasedConsumerResultControlRequest(response) : decodeCealLeasedConsumerResultControlResponse(response), TypeError);
+});
+
+test("reply control v3 is the only carrier that admits one bounded terminal text reply", () => {
+	const request = {
+		schema_version: CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA,
+		operation: "reply",
+		input: { ...leaseInput, text: "A bounded Gateway-owned thread reply." },
+	};
+	const response = {
+		schema_version: CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA,
+		operation: "reply",
+		result: { status: "replied", receipt_ref: `reply-receipt:${"a".repeat(64)}`, replayed: false },
+	};
+	assert.equal(decodeCealLeasedConsumerReplyControlRequest(request).operation, "reply");
+	assert.equal(decodeCealLeasedConsumerReplyControlResponse(response).operation, "reply");
+	assert.throws(() => decodeCealLeasedConsumerResultControlRequest(request), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerReplyControlRequest({ ...request, input: { ...request.input, channel: "Cprivate" } }), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerReplyControlRequest({ ...request, input: { ...request.input, text: "" } }), TypeError);
+	assert.equal(decodeCealLeasedConsumerReplyControlRequest({ ...request, input: { ...request.input, text: "First line\n\tsecond line" } }).operation, "reply");
+	assert.throws(() => decodeCealLeasedConsumerReplyControlRequest({ ...request, input: { ...request.input, text: "x".repeat(16_385) } }), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerReplyControlRequest({ ...request, input: { ...request.input, text: "\u0000" } }), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerReplyControlResponse({ ...response, result: { ...response.result, message_ts: "unsafe" } }), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerReplyControlResponse({ ...response, result: { ...response.result, receipt_ref: "channel:Cprivate" } }), TypeError);
 });
