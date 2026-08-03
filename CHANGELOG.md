@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.72.7 (`ceal-v0.72.7`)
+
+Consumes the signed Gateway Protocol handoff needed to remove the last
+machine-specific UDS assumption from the private Agent-control carrier.
+
+- **Binds one verified Protocol input.** The lock, frozen Protocol source,
+  worker dependency declarations, embedded control contract, and worker-release
+  workflow all name `gateway-protocol-handoff-v0.72.4` and
+  `@corca-ai/ceal-protocol@0.72.4` from Gateway commit `c3f2df48`.
+- **Lets the Gateway select its own safe private socket.** The Agent-facing
+  carrier obtains the UDS path only from the protected FD-4 session after the
+  Protocol decoder validates it; no static host path or Agent-selected path is
+  accepted.
+- **Keeps the runtime boundary closed.** This release does not register a
+  Gateway socket, launch or cut over ceal-agent, receive Slack ingress, or
+  prove a provider call.
+
 ## 0.72.6 (`ceal-v0.72.6`)
 
 Makes the signed worker release ready for the private Agent's reply-control

@@ -5,12 +5,11 @@
 The historical queue below is retained for provenance. This is the operative
 state for the next session.
 
-- Local commits `90e05f2` and `e673262` consume the signed
-  `gateway-protocol-handoff-v0.72.3` packet: protocol `0.72.3`, the private
-  reply-control v3 contract and its six fixed UDS routes, plus the
-  `device_enrollment_approval_wait_v1` negotiation. A later device now receives
-  one bounded operator-wait notice and continues on the Gateway's own poll
-  interval; it does not fall back to a new plaintext enrollment code.
+- Local commit `ccb04b9` consumes the Sigstore-verified
+  `gateway-protocol-handoff-v0.72.4` packet: Protocol `0.72.4`, producer
+  `corca-ai/ceal@c3f2df48`, and its safe Gateway-selected UDS path contract.
+  The lock, frozen Protocol tree, vendor pin, private control-session contract,
+  generated source, and release workflow literals now name one identity.
 - The root npm workspace now contains only protocol/client/worker. Frozen
   `cealctl` remains archived in the tree but is outside install and CI, so its
   old protocol pin cannot make a worker protocol update fail `npm ci`. A clean
@@ -18,16 +17,13 @@ state for the next session.
   handoff parser and its unreachable contract test were removed; the current
   release path is `worker-release-inputs.mjs` through
   `worker-gateway-handoff-archive.mjs`.
-- `ceal update` progress already exists in source commit `d0dfba4`, but it is
-  not in released `ceal-v0.72.4`; the next signed release is the first installed
-  generation that can show its TTY-only bounded stages. Stdout remains one YAML
-  document for agent callers.
-- Nothing in these commits is pushed, tagged, released, Gateway-applied, or
-  Agent-activated. Before any release: run the final `npm run check`, then get
-  a fresh explicit approval for the ceal-cli push/CI and a separate tag/release
-  approval. After a signed v3 worker is installed, update the Agent selection
-  record from the published signed packet, materialize its verified runtime,
-  and perform the separately approved canary/cutover proof.
+- `ceal update` TTY-only bounded progress is already in source and will ship in
+  this `0.72.7` worker release; stdout remains one YAML document for agents.
+- `npm run check` and a real linux-arm64 asset composition against the signed
+  archive pass locally. The remaining worker boundary is push/tag/publish;
+  this is not a Gateway apply or Agent activation. After the signed worker is
+  installed, update the Agent selection record from the published packet,
+  materialize its verified runtime, and perform the canary/cutover proof.
 - Related Agent preparation landed locally at
   `corca-ai/ceal-agent@e954c03`: its installed-selection verifier recognizes
   either exact result-control v2 or reply-control v3+the fixed reply route,
