@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.72.5 (`ceal-v0.72.5`)
+
+Makes the signed worker release ready for the private Agent's reply-control
+handover and for a second employee device awaiting operator approval.
+
+- **Carries the signed Gateway reply-control v3 contract.** The private carrier
+  accepts only its six fixed UDS operations, including a bounded terminal
+  reply; it does not start, register, or cut over an Agent service.
+- **Makes additional-device waiting an actual negotiated flow.** `session
+  adopt` advertises the bounded approval-wait feature, follows the Gateway's
+  interval, and prints one operator-wait transition rather than a poll stream.
+- **Separates worker dependency installation from frozen operator history.**
+  Worker CI and release installation resolve only the protocol/client/worker
+  workspaces, so the archived cealctl protocol pin cannot block a worker update.
+- **Shows stable update progress on a terminal.** Interactive `ceal update`
+  writes bounded stages to stderr while preserving its one YAML document on
+  stdout for agents.
+
 ## 0.72.4 (`ceal-v0.72.4`)
 
 Fixes false first-device-adoption expiry on a machine whose wall clock differs
