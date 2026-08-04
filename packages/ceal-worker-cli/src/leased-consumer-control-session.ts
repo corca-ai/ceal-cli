@@ -113,9 +113,12 @@ export async function runLeasedConsumerControlSession(
 		pending += decoder.decode();
 		if (pending.length !== 0) throw new Error("unterminated_frame");
 		return true;
-	} catch {
+	} catch (error) {
 		// The Agent receives no oracle for malformed frames or local transport
-		// failures. Its inherited stream is simply closed by the caller.
+		// failures. Its inherited stream is simply closed by the caller. The
+		// error NAME still lands on stderr (never frame content): a silent
+		// exit-3 was indistinguishable from a crash at the serving pair.
+		process.stderr.write(`ceal-worker control-session failed: ${error instanceof Error ? error.message : "unknown"}\n`);
 		return false;
 	}
 }
