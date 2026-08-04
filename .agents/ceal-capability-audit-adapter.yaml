@@ -1,0 +1,22 @@
+version: 1
+repo: ceal-cli
+language: en
+output_dir: charness-artifacts/ceal-capability-audit
+artifact_class: history
+preset_id: portable-defaults
+customized_from: portable-defaults
+implementation_identity_terms:
+  - canonical implementation
+  - shared implementation
+placement_terms:
+  - local skill
+  - dated audit artifact
+  - issue report
+intentional_fork_signals:
+  - behavior difference
+  - data isolation
+  - independent lifecycle
+topology_verification_hints:
+  - Keep one canonical implementation under skills/ceal-capability-audit.
+  - Do not copy provider-specific variants into the skill directory.
+  - Keep target URLs, refs, credentials, and issue numbers in the run artifact, not this adapter.
