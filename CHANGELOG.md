@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.72.8 (`ceal-v0.72.8`)
+
+Turns the private Agent-control carrier into the v4 capability carrier so a
+Gateway serving the RunnerSession v4 path has a signed worker to select.
+
+- **Speaks only the v4 capability control grammar.** The private carrier's
+  Agent IPC advertises `ceal.leased_consumer_capability_control_request.v4` /
+  `response.v4` over the same stdin/stdout NDJSON, 32 KiB, serial contract,
+  and its Gateway routes are exactly the five canonical operations (`acquire`,
+  `projection`, `recheck`, `call`, `complete`). The v3 terminal-reply grammar
+  and its `reply` route are rejected, not silently narrowed.
+- **Consumes the signed protocol-only handoff v0.72.6.** Lock, frozen Protocol
+  source (`@corca-ai/ceal-protocol@0.72.6`, Gateway commit `851a9d7c`),
+  vendor pin, embedded control contract, generated source, and the release
+  workflow literals name one identity.
+- **Keeps the runtime boundary closed.** This release does not register a
+  Gateway socket, launch or cut over an Agent service, receive Slack ingress,
+  or prove a provider capability call.
+
 ## 0.72.7 (`ceal-v0.72.7`)
 
 Consumes the signed Gateway Protocol handoff needed to remove the last

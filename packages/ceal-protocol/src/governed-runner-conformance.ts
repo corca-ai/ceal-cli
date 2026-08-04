@@ -1,7 +1,7 @@
 import type { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 
 export const GOVERNED_RUNNER_CORPUS_SCHEMA = "ceal.governed_runner_conformance_corpus.v1" as const;
-export const GOVERNED_RUNNER_CORPUS_VERSION = "1.0.0" as const;
+export const GOVERNED_RUNNER_CORPUS_VERSION = "1.1.0" as const;
 
 export type GovernedRunnerConformanceKind =
 	| "runner_context"
@@ -9,7 +9,8 @@ export type GovernedRunnerConformanceKind =
 	| "ledger"
 	| "dispatch"
 	| "egress"
-	| "wake";
+	| "wake"
+	| "capability_result";
 
 export interface GovernedRunnerProofContract {
 	requirement: "local_state";

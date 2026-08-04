@@ -3,10 +3,10 @@ import { request as httpRequest } from "node:http";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES,
-	type CealLeasedConsumerReplyControlOperation,
+	type CealLeasedConsumerCapabilityControlOperation,
+	decodeCealLeasedConsumerCapabilityControlRequest,
+	decodeCealLeasedConsumerCapabilityControlResponse,
 	decodeCealLeasedConsumerControlSession,
-	decodeCealLeasedConsumerReplyControlRequest,
-	decodeCealLeasedConsumerReplyControlResponse,
 } from "@corca-ai/ceal-protocol";
 import { LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON } from "./generated/leased-consumer-control-session-contract.js";
 
@@ -24,7 +24,7 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(LEASED_CONSUMER_CONTROL_SESSION_CONT
 	gateway: Readonly<{
 		transport: string;
 		operation_deadline_ms: number;
-		routes: Record<CealLeasedConsumerReplyControlOperation, string>;
+		routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
 	}>;
 }>;
 export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.argv[0];
@@ -33,7 +33,9 @@ const OPERATION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadlin
 const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
 const MAX_SESSION_BYTES = CONTROL_SESSION_CONTRACT.protected_session.maximum_bytes;
 const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
-const ROUTES: Readonly<Record<CealLeasedConsumerReplyControlOperation, string>> = Object.freeze(CONTROL_SESSION_CONTRACT.gateway.routes);
+const ROUTES: Readonly<Record<CealLeasedConsumerCapabilityControlOperation, string>> = Object.freeze(
+	CONTROL_SESSION_CONTRACT.gateway.routes,
+);
 assertEmbeddedControlSessionContract(CONTROL_SESSION_CONTRACT);
 
 type ControlSession = Readonly<{ dispatch: (frame: Uint8Array) => Promise<Uint8Array> }>;
@@ -156,7 +158,7 @@ async function dispatch(
 	frame: Uint8Array,
 	runtime: LeasedConsumerControlSessionRuntime,
 ): Promise<Uint8Array> {
-	const request = decodeCealLeasedConsumerReplyControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
+	const request = decodeCealLeasedConsumerCapabilityControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
 	const body = JSON.stringify(request);
 	const response = await requestControlBeforeDeadline(runtime, () =>
 		(runtime.requestUnixSocket ?? postUnixSocket)({
@@ -169,7 +171,7 @@ async function dispatch(
 	);
 	if (response.status !== 200 || !isJsonContentType(response.contentType) || response.bytes.byteLength > MAX_FRAME_BYTES)
 		throw new Error("control_unavailable");
-	const decoded = decodeCealLeasedConsumerReplyControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
+	const decoded = decodeCealLeasedConsumerCapabilityControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
 	if (decoded.operation !== request.operation) throw new Error("operation_mismatch");
 	return new TextEncoder().encode(`${JSON.stringify(decoded)}\n`);
 }
@@ -400,7 +402,7 @@ function assertEmbeddedControlSessionContract(
 		gateway: Readonly<{
 			transport: string;
 			operation_deadline_ms: number;
-			routes: Record<CealLeasedConsumerReplyControlOperation, string>;
+			routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
 		}>;
 	}>,
 ): void {
@@ -411,14 +413,16 @@ function assertEmbeddedControlSessionContract(
 		value.protected_session.maximum_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES ||
 		value.protected_session.deadline_ms !== 2_000 ||
 		value.agent_ipc.transport !== "stdin_stdout_ndjson" ||
-		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_reply_control_request.v3" ||
-		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_reply_control_response.v3" ||
+		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_capability_control_request.v4" ||
+		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_capability_control_response.v4" ||
 		value.agent_ipc.maximum_frame_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES ||
 		value.agent_ipc.serial !== true ||
 		value.gateway.transport !== "unix_socket" ||
 		value.gateway.operation_deadline_ms !== 30_000 ||
-		Object.keys(value.gateway.routes).length !== 6 ||
-		Object.entries(ROUTES).some(([operation, route]) => value.gateway.routes[operation as CealLeasedConsumerReplyControlOperation] !== route)
+		Object.keys(value.gateway.routes).length !== 5 ||
+		Object.entries(ROUTES).some(
+			([operation, route]) => value.gateway.routes[operation as CealLeasedConsumerCapabilityControlOperation] !== route,
+		)
 	)
 		throw new Error("invalid_embedded_control_session_contract");
 }

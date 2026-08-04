@@ -342,6 +342,12 @@ export interface CealGatewayAuditEvent {
 	error_code: string | null;
 	/** Emitted only when the client negotiated `x-ceal-route-provenance: accept`. */
 	connector_route_failure?: CealGatewayConnectorRouteFailure;
+	/**
+	 * Bounded thrown-error provenance for a failed call, persisted in the
+	 * Gateway audit journal only; the readback emission seam always strips it
+	 * because strict decoders reject unknown keys.
+	 */
+	failure_class?: string;
 	/** Emitted only when the client negotiated `x-ceal-audit-timing: accept`. */
 	gateway_elapsed_ms?: number;
 	grant_snapshot?: CealGatewayAuthorizationSnapshot;
@@ -362,6 +368,19 @@ export interface CealGatewayConnectorRouteFailure {
 	 * need operator or binding repair.
 	 */
 	cause?: "provider_throttled" | "provider_unavailable" | "binding_invalid" | "scope_limit_exceeded";
+	/**
+	 * Thrown error class name, persisted in the Gateway audit journal only when
+	 * the failure is unclassified so the next occurrence is diagnosable from
+	 * production state. Never emitted in a client readback: strict decoders
+	 * reject unknown keys, so the Gateway strips it at the emission seam.
+	 *
+	 * When `connector_kind` is `"unknown"` the whole record is
+	 * Gateway-synthesized at the catch site: `phase` then names the serving
+	 * operation that caught the escape (resolve → route_resolution,
+	 * discover → scope_observation, select → target_selection), not a
+	 * connector-reported failure phase.
+	 */
+	error_class?: string;
 }
 
 export interface CealGatewayAuthorizationSnapshot {

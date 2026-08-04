@@ -20,8 +20,8 @@ function cloneJson(value) {
 
 test("canonical corpus validates exact bytes and runs through a consumer harness", async () => {
 	const { corpus, digest } = await loadCanonicalCorpus();
-	assert.equal(digest, "97dc279ec95fc14f345693428c98785e8def2c9795a9936c8544f97ff3009c7e");
-	assert.equal(corpus.cases.length, 24);
+	assert.equal(digest, "39dc8f4452dcb6e19ff23cffb91485ac4985528bd5a635024a5f3f27844e0850");
+	assert.equal(corpus.cases.length, 27);
 	const report = await runConformanceCorpus(corpus, {
 		name: "fixture-reference-consumer",
 		version: "0.65.0",
@@ -29,7 +29,7 @@ test("canonical corpus validates exact bytes and runs through a consumer harness
 	});
 	assert.deepEqual(
 		{ passed: report.passed, total: report.total, passedCount: report.passed_count, failedCount: report.failed_count },
-		{ passed: true, total: 24, passedCount: 24, failedCount: 0 },
+		{ passed: true, total: 27, passedCount: 27, failedCount: 0 },
 	);
 });
 

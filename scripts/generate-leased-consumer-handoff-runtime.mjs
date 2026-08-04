@@ -154,7 +154,6 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		recheck: "/api/ceal/agent/v1/control/recheck",
 		call: "/api/ceal/agent/v1/call",
 		complete: "/api/ceal/agent/v1/control/complete",
-		reply: "/api/ceal/agent/v1/control/reply",
 	};
 	let lock;
 	try {
@@ -175,8 +174,8 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.protected_session.deadline_ms !== 2_000 ||
 		!exact(value.agent_ipc, ["transport", "request_schema_version", "response_schema_version", "maximum_frame_bytes", "serial"]) ||
 		value.agent_ipc.transport !== "stdin_stdout_ndjson" ||
-		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_reply_control_request.v3" ||
-		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_reply_control_response.v3" ||
+		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_capability_control_request.v4" ||
+		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_capability_control_response.v4" ||
 		value.agent_ipc.maximum_frame_bytes !== 32 * 1024 ||
 		value.agent_ipc.serial !== true ||
 		!exact(value.gateway, ["transport", "operation_deadline_ms", "routes"]) ||

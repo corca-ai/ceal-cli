@@ -184,7 +184,7 @@ test("native source verification refuses a stale generated control-session contr
 	assert.throws(() => verifyEmbeddedControlSessionContractSource({ repoRoot: root }), /embedded_control_session_contract_drift/u);
 });
 
-test("private control-session release input accepts only its exact reply-control v3 grammar pair", (context) => {
+test("private control-session release input accepts only its exact capability-control v4 grammar pair", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-control-session-contract-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const contractPath = path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
@@ -196,7 +196,7 @@ test("private control-session release input accepts only its exact reply-control
 	writeFileSync(contractPath, CONTROL_SESSION_CONTRACT_BYTES);
 	assert.equal(
 		readControlSessionContract(contractPath, { repoRoot: root }).value.agent_ipc.request_schema_version,
-		"ceal.leased_consumer_reply_control_request.v3",
+		"ceal.leased_consumer_capability_control_request.v4",
 	);
 	const mixed = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
 	mixed.agent_ipc.response_schema_version = "ceal.leased_consumer_control_response.v1";

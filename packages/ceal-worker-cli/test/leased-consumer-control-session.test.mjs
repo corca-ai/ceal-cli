@@ -18,34 +18,29 @@ function sessionFor(socketPath) {
 }
 
 const frames = [
-	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "acquire", input: {} },
-	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "projection", input: leaseInput() },
-	{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "recheck", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "acquire", input: {} },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "projection", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "recheck", input: leaseInput() },
 	{
-		schema_version: "ceal.leased_consumer_reply_control_request.v3",
+		schema_version: "ceal.leased_consumer_capability_control_request.v4",
 		operation: "call",
 		input: {
 			...leaseInput(),
 			schema_version: "ceal.gateway_leased_consumer_call_request.v1",
 			capability_id: "message.search",
-			target_ref: "target:fixture",
+			target_ref: `target:${"a".repeat(64)}`,
 			purpose: "fixture-only governed read",
-			arguments: { query: "fixture" },
+			arguments: { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", query: "fixture" },
 		},
 	},
 	{
-		schema_version: "ceal.leased_consumer_reply_control_request.v3",
+		schema_version: "ceal.leased_consumer_capability_control_request.v4",
 		operation: "complete",
 		input: { ...leaseInput(), disposition: "completed", agent_run_ref: "run:fixture" },
 	},
-	{
-		schema_version: "ceal.leased_consumer_reply_control_request.v3",
-		operation: "reply",
-		input: { ...leaseInput(), text: "Gateway-owned terminal reply." },
-	},
 ];
 
-test("private control session carries exactly the six canonical operations over Gateway-issued UDS routes", async () => {
+test("private control session carries exactly the five canonical v4 capability operations over Gateway-issued UDS routes", async () => {
 	const calls = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
@@ -88,16 +83,11 @@ test("private control session carries exactly the six canonical operations over 
 				path: "/api/ceal/agent/v1/control/complete",
 				credential: "private-service-credential",
 			},
-			{
-				socketPath: sessionPath,
-				path: "/api/ceal/agent/v1/control/reply",
-				credential: "private-service-credential",
-			},
 		],
 	);
 	assert.deepEqual(
 		output.map((value) => value.operation),
-		["acquire", "projection", "recheck", "call", "complete", "reply"],
+		["acquire", "projection", "recheck", "call", "complete"],
 	);
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
 });
@@ -148,7 +138,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 	const output = [];
 	async function* malformed() {
 		yield encoder.encode(
-			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_reply_control_request.v3","operation":"acquire","input":{}}\n',
+			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_capability_control_request.v4","operation":"acquire","input":{}}\n',
 		);
 	}
 	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
@@ -177,6 +167,17 @@ test("legacy and unknown private control grammars make zero control requests and
 	for (const frame of [
 		{ schema_version: "ceal.leased_consumer_control_request.v1", operation: "acquire", input: {} },
 		{ schema_version: "ceal.leased_consumer_result_control_request.v2", operation: "acquire", input: {} },
+		{ schema_version: "ceal.leased_consumer_reply_control_request.v3", operation: "acquire", input: {} },
+		{
+			schema_version: "ceal.leased_consumer_reply_control_request.v3",
+			operation: "reply",
+			input: { ...leaseInput(), text: "terminal reply" },
+		},
+		{
+			schema_version: "ceal.leased_consumer_capability_control_request.v4",
+			operation: "reply",
+			input: { ...leaseInput(), text: "terminal reply" },
+		},
 	]) {
 		let calls = 0;
 		const carrier = await openLeasedConsumerControlSession({
@@ -256,7 +257,7 @@ function leaseInput() {
 	return { event_ref: "event:fixture", lease_ref: "lease:fixture", lease_fence: 1 };
 }
 function responseFor(operation) {
-	const base = { schema_version: "ceal.leased_consumer_reply_control_response.v3", operation };
+	const base = { schema_version: "ceal.leased_consumer_capability_control_response.v4", operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
 		return {
@@ -267,24 +268,37 @@ function responseFor(operation) {
 				event_revision: 1,
 				normalized_projection_ref: "projection:fixture",
 				normalized_projection_revision: 1,
+				conversation_ref: `conversation:${"c".repeat(64)}`,
+				requester: { subject_ref: "subject:fixture" },
+				attachments: { count: 0, set_ref: null },
 				projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "fixture projection" },
+				capability_contexts: [
+					{
+						capability_id: "message.search",
+						target_ref: `target:${"a".repeat(64)}`,
+						message_ref: `message:${"b".repeat(64)}`,
+						thread_ref: `thread:${"d".repeat(64)}`,
+					},
+				],
 			},
 		};
-	if (operation === "recheck") return { ...base, result: { status: "active", lease: lease() } };
+	if (operation === "recheck") return { ...base, result: { status: "active", lease: lease(), abort_requested: false } };
 	if (operation === "call")
 		return {
 			...base,
 			result: {
 				status: "result",
 				result: {
-					schema_version: "ceal.gateway_leased_agent_delegated_read_result.v1",
+					schema_version: "ceal.gateway_leased_agent_capability_result.v1",
 					capability_id: "message.search",
-					data: { matches: ["fixture"] },
+					effect: "read",
+					result_ref: `result:${"a".repeat(64)}`,
+					handles: [{ kind: "message", ref: `message:${"b".repeat(64)}` }],
+					data: { schema_version: "ceal.gateway_leased_agent_message_read_data.v1", items: [{ text: "fixture" }] },
 				},
 			},
 		};
-	if (operation === "complete") return { ...base, result: { status: "completed", replayed: false } };
-	return { ...base, result: { status: "replied", receipt_ref: `reply-receipt:${"a".repeat(64)}`, replayed: false } };
+	return { ...base, result: { status: "completed", replayed: false } };
 }
 function lease() {
 	return { ...leaseInput(), delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };
