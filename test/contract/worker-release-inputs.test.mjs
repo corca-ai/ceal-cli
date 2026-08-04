@@ -40,12 +40,17 @@ test("worker release inventory accepts one exact complete Gateway protocol hando
 	assert.equal(resolution.gateway_client, undefined);
 });
 
-test("worker release inventory accepts the v3 Gateway control conformance while still binding its producer", (context) => {
+test("worker release inventory accepts the v3 and v4 Gateway control conformances while still binding their producer", (context) => {
 	const fixture = handoffFixture(context);
-	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v3");
-	writeHandoffManifest(fixture);
-	const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
-	assert.equal(resolution.ok, true);
+	for (const schemaVersion of [
+		"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
+		"ceal.gateway_leased_consumer_control_conformance_handoff.v4",
+	]) {
+		writeControlConformance(fixture, schemaVersion);
+		writeHandoffManifest(fixture);
+		const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
+		assert.equal(resolution.ok, true);
+	}
 
 	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v2");
 	writeHandoffManifest(fixture);

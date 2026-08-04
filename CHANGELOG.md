@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.72.8 (`ceal-v0.72.8`)
+## 0.72.9 (`ceal-v0.72.9`)
+
+`ceal-v0.72.8` is burned: its tagged composer refused the v4 control
+conformance schema (`invalid_control_conformance`) before signing anything;
+this release adds the v4 schema to the accepted identity envelope.
 
 Turns the private Agent-control carrier into the v4 capability carrier so a
 Gateway serving the RunnerSession v4 path has a signed worker to select.
