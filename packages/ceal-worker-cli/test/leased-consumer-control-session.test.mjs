@@ -324,6 +324,52 @@ test("an in-bounds injected operation deadline bounds every Gateway control oper
 	assert.ok(!timers.includes(30_000));
 });
 
+test("a slow governed write that answers within the injected 120s deadline survives as a typed response", async () => {
+	const carrier = await openLeasedConsumerControlSession({
+		env: { CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "120000" },
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		monotonicNow: slowWriteClock(),
+		setTimer: () => Symbol("timer"),
+		clearTimer: () => {},
+		requestUnixSocket: async () => ({
+			status: 200,
+			contentType: "application/json",
+			bytes: encoder.encode(JSON.stringify(responseFor("call"))),
+		}),
+	});
+	const response = JSON.parse(new TextDecoder().decode(await carrier.dispatch(encoder.encode(JSON.stringify(frames[3])))));
+	assert.equal(response.operation, "call");
+	assert.equal(response.result.status, "result");
+});
+
+test("the same slow write under the contract-minimum 30s deadline fails closed with control_deadline_exceeded", async () => {
+	const carrier = await openLeasedConsumerControlSession({
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		monotonicNow: slowWriteClock(),
+		setTimer: () => Symbol("timer"),
+		clearTimer: () => {},
+		requestUnixSocket: async () => ({
+			status: 200,
+			contentType: "application/json",
+			bytes: encoder.encode(JSON.stringify(responseFor("call"))),
+		}),
+	});
+	await assert.rejects(() => carrier.dispatch(encoder.encode(JSON.stringify(frames[3]))), /control_deadline_exceeded/u);
+});
+
+/**
+ * Injected clock for the #686 rate-limited-governed-write scenario: the
+ * protected-session read is instantaneous, then the single control request
+ * takes a virtual 35s (a Slack rate-limit retry serialized in the Gateway),
+ * which is inside a 120s configured deadline and past the 30s minimum.
+ */
+function slowWriteClock() {
+	let calls = 0;
+	return () => (calls++ < 3 ? 0 : 35_000);
+}
+
 function leaseInput() {
 	return { event_ref: "event:fixture", lease_ref: "lease:fixture", lease_fence: 1 };
 }
