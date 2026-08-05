@@ -8,3 +8,5 @@ candidate-source-inventory.json
 
 # c8 output; measurement artifacts are not source
 coverage/
+
+__pycache__
