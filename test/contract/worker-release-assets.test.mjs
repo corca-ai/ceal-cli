@@ -194,10 +194,19 @@ test("private control-session release input accepts only its exact capability-co
 		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
 	);
 	writeFileSync(contractPath, CONTROL_SESSION_CONTRACT_BYTES);
-	assert.equal(
-		readControlSessionContract(contractPath, { repoRoot: root }).value.agent_ipc.request_schema_version,
-		"ceal.leased_consumer_capability_control_request.v4",
-	);
+	const accepted = readControlSessionContract(contractPath, { repoRoot: root }).value;
+	assert.equal(accepted.agent_ipc.request_schema_version, "ceal.leased_consumer_capability_control_request.v4");
+	assert.equal(accepted.schema_version, "ceal.worker_private_leased_consumer_control_session_contract.v2");
+	assert.deepEqual(accepted.gateway.operation_deadline_bounds_ms, { minimum: 30000, maximum: 600000 });
+	const legacyDeadline = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	legacyDeadline.gateway.operation_deadline_ms = 30000;
+	delete legacyDeadline.gateway.operation_deadline_bounds_ms;
+	writeFileSync(contractPath, `${JSON.stringify(legacyDeadline, null, 2)}\n`);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
+	const wideBounds = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	wideBounds.gateway.operation_deadline_bounds_ms.maximum = 700000;
+	writeFileSync(contractPath, `${JSON.stringify(wideBounds, null, 2)}\n`);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 	const mixed = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
 	mixed.agent_ipc.response_schema_version = "ceal.leased_consumer_control_response.v1";
 	writeFileSync(contractPath, `${JSON.stringify(mixed, null, 2)}\n`);

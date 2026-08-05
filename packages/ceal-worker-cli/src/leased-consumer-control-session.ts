@@ -23,13 +23,15 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(LEASED_CONSUMER_CONTROL_SESSION_CONT
 	}>;
 	gateway: Readonly<{
 		transport: string;
-		operation_deadline_ms: number;
+		operation_deadline_bounds_ms: Readonly<{ minimum: number; maximum: number }>;
 		routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
 	}>;
 }>;
 export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.argv[0];
 const PROTECTED_SESSION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.protected_session.deadline_ms;
-const OPERATION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_ms;
+const OPERATION_DEADLINE_BOUNDS_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_bounds_ms;
+/** The Gateway launcher injects the operative deadline; the contract keeps only its bounds. */
+export const LEASED_CONSUMER_OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
 const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
 const MAX_SESSION_BYTES = CONTROL_SESSION_CONTRACT.protected_session.maximum_bytes;
 const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
@@ -56,6 +58,24 @@ export interface LeasedConsumerControlSessionRuntime {
 	readonly setTimer?: (callback: () => void, milliseconds: number) => unknown;
 	/** Test seam only. */
 	readonly clearTimer?: (timer: unknown) => void;
+	/** Test seam only. The shipped carrier reads the launcher-injected deadline from process.env. */
+	readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * Resolves the operative per-operation Gateway deadline at session start.
+ * Absent launcher input keeps the contract minimum (today's behavior); a
+ * present but non-integer or out-of-bounds value fails closed before any
+ * operation is served.
+ */
+export function resolveOperationDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
+	const raw = env[LEASED_CONSUMER_OPERATION_DEADLINE_ENV];
+	if (raw === undefined) return OPERATION_DEADLINE_BOUNDS_MS.minimum;
+	if (!/^\d+$/u.test(raw)) throw new Error("invalid_operation_deadline");
+	const value = Number(raw);
+	if (!Number.isSafeInteger(value) || value < OPERATION_DEADLINE_BOUNDS_MS.minimum || value > OPERATION_DEADLINE_BOUNDS_MS.maximum)
+		throw new Error("invalid_operation_deadline");
+	return value;
 }
 
 /**
@@ -65,6 +85,7 @@ export interface LeasedConsumerControlSessionRuntime {
  */
 export async function openLeasedConsumerControlSession(runtime: LeasedConsumerControlSessionRuntime = {}): Promise<ControlSession> {
 	let close = onceAsync(async () => {});
+	const operationDeadlineMs = resolveOperationDeadlineMs(runtime.env);
 	try {
 		const fd4 = runtime.readProtectedSession ? null : createProtectedFd4();
 		close = onceAsync(runtime.closeProtectedSession ?? (() => fd4?.close() ?? Promise.resolve()));
@@ -76,7 +97,7 @@ export async function openLeasedConsumerControlSession(runtime: LeasedConsumerCo
 		if (bytes === null) throw new Error("session_unavailable");
 		const session = decodeCealLeasedConsumerControlSession(parseStrictJson(bytes, MAX_SESSION_BYTES));
 		return Object.freeze({
-			dispatch: async (frame) => dispatch(session.socket_path, session.service_credential, frame, runtime),
+			dispatch: async (frame) => dispatch(session.socket_path, session.service_credential, frame, runtime, operationDeadlineMs),
 		});
 	} finally {
 		await close();
@@ -160,16 +181,17 @@ async function dispatch(
 	credential: string,
 	frame: Uint8Array,
 	runtime: LeasedConsumerControlSessionRuntime,
+	operationDeadlineMs: number,
 ): Promise<Uint8Array> {
 	const request = decodeCealLeasedConsumerCapabilityControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
 	const body = JSON.stringify(request);
-	const response = await requestControlBeforeDeadline(runtime, () =>
+	const response = await requestControlBeforeDeadline(runtime, operationDeadlineMs, () =>
 		(runtime.requestUnixSocket ?? postUnixSocket)({
 			socketPath,
 			path: ROUTES[request.operation],
 			body,
 			credential,
-			deadlineMs: OPERATION_DEADLINE_MS,
+			deadlineMs: operationDeadlineMs,
 		}),
 	);
 	if (response.status !== 200 || !isJsonContentType(response.contentType) || response.bytes.byteLength > MAX_FRAME_BYTES)
@@ -181,6 +203,7 @@ async function dispatch(
 
 async function requestControlBeforeDeadline(
 	runtime: LeasedConsumerControlSessionRuntime,
+	operationDeadlineMs: number,
 	request: () => Promise<UnixSocketResponse>,
 ): Promise<UnixSocketResponse> {
 	const now = runtime.monotonicNow ?? monotonicNow;
@@ -196,10 +219,10 @@ async function requestControlBeforeDeadline(
 			timer = setTimer(() => {
 				timedOut = true;
 				resolve(null);
-			}, OPERATION_DEADLINE_MS);
+			}, operationDeadlineMs);
 		});
 		const result = await Promise.race([pending, timeout]);
-		if (timedOut || now() - started > OPERATION_DEADLINE_MS || result === null) throw new Error("control_deadline_exceeded");
+		if (timedOut || now() - started > operationDeadlineMs || result === null) throw new Error("control_deadline_exceeded");
 		return result;
 	} finally {
 		if (timer !== undefined) clearTimer(timer);
@@ -404,7 +427,7 @@ function assertEmbeddedControlSessionContract(
 		}>;
 		gateway: Readonly<{
 			transport: string;
-			operation_deadline_ms: number;
+			operation_deadline_bounds_ms: Readonly<{ minimum: number; maximum: number }>;
 			routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
 		}>;
 	}>,
@@ -421,7 +444,9 @@ function assertEmbeddedControlSessionContract(
 		value.agent_ipc.maximum_frame_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES ||
 		value.agent_ipc.serial !== true ||
 		value.gateway.transport !== "unix_socket" ||
-		value.gateway.operation_deadline_ms !== 30_000 ||
+		value.gateway.operation_deadline_bounds_ms.minimum !== 30_000 ||
+		value.gateway.operation_deadline_bounds_ms.maximum !== 600_000 ||
+		value.gateway.operation_deadline_bounds_ms.minimum > value.gateway.operation_deadline_bounds_ms.maximum ||
 		Object.keys(value.gateway.routes).length !== 5 ||
 		Object.entries(ROUTES).some(
 			([operation, route]) => value.gateway.routes[operation as CealLeasedConsumerCapabilityControlOperation] !== route,

@@ -1,5 +1,5 @@
 {
-	"schema_version": "ceal.worker_private_leased_consumer_control_session_contract.v1",
+	"schema_version": "ceal.worker_private_leased_consumer_control_session_contract.v2",
 	"argv": [
 		"--internal-leased-consumer-control-session"
 	],
@@ -18,7 +18,10 @@
 	},
 	"gateway": {
 		"transport": "unix_socket",
-		"operation_deadline_ms": 30000,
+		"operation_deadline_bounds_ms": {
+			"minimum": 30000,
+			"maximum": 600000
+		},
 		"routes": {
 			"acquire": "/api/ceal/agent/v1/control/acquire",
 			"projection": "/api/ceal/agent/v1/control/projection",

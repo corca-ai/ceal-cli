@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { openLeasedConsumerControlSession, runLeasedConsumerControlSession } from "../dist/leased-consumer-control-session.js";
+import {
+	openLeasedConsumerControlSession,
+	resolveOperationDeadlineMs,
+	runLeasedConsumerControlSession,
+} from "../dist/leased-consumer-control-session.js";
 
 const encoder = new TextEncoder();
 const sessionPath = "/run/user/1001/ceal/leased-consumer-control-v1.sock";
@@ -251,6 +255,73 @@ test("a Gateway control operation that never answers is bounded and emits no Age
 	}
 	assert.equal(await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(frame)), false);
 	assert.deepEqual(output, []);
+});
+
+test("operation deadline resolution uses the contract minimum when the launcher injects nothing", () => {
+	assert.equal(resolveOperationDeadlineMs({}), 30_000);
+	assert.equal(resolveOperationDeadlineMs({ CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: undefined }), 30_000);
+});
+
+test("operation deadline resolution honors an in-bounds launcher-injected value", () => {
+	assert.equal(resolveOperationDeadlineMs({ CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "30000" }), 30_000);
+	assert.equal(resolveOperationDeadlineMs({ CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "120000" }), 120_000);
+	assert.equal(resolveOperationDeadlineMs({ CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "600000" }), 600_000);
+});
+
+test("operation deadline resolution fails closed on out-of-bounds or non-integer launcher input", () => {
+	for (const raw of ["29999", "600001", "0", "-30000", "30000.5", "3e4", "30000ms", "", " 30000", "0x7530"]) {
+		assert.throws(() => resolveOperationDeadlineMs({ CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: raw }), /invalid_operation_deadline/u);
+	}
+});
+
+test("an invalid injected operation deadline refuses the session before any protected read or control request", async () => {
+	let reads = 0;
+	let calls = 0;
+	await assert.rejects(
+		() =>
+			openLeasedConsumerControlSession({
+				env: { CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "1000" },
+				readProtectedSession: async () => {
+					reads += 1;
+					return session;
+				},
+				closeProtectedSession: async () => {},
+				requestUnixSocket: async () => {
+					calls += 1;
+					throw new Error("must not run");
+				},
+			}),
+		/invalid_operation_deadline/u,
+	);
+	assert.equal(reads, 0);
+	assert.equal(calls, 0);
+});
+
+test("an in-bounds injected operation deadline bounds every Gateway control operation", async () => {
+	const deadlines = [];
+	const timers = [];
+	const carrier = await openLeasedConsumerControlSession({
+		env: { CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "120000" },
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		monotonicNow: () => 0,
+		setTimer: (_callback, milliseconds) => {
+			timers.push(milliseconds);
+			return Symbol("timer");
+		},
+		clearTimer: () => {},
+		requestUnixSocket: async (input) => {
+			deadlines.push(input.deadlineMs);
+			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(responseFor("acquire"))) };
+		},
+	});
+	async function* input() {
+		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+	}
+	assert.equal(await runLeasedConsumerControlSession(input(), carrier, () => {}), true);
+	assert.deepEqual(deadlines, [120_000]);
+	assert.ok(timers.includes(120_000));
+	assert.ok(!timers.includes(30_000));
 });
 
 function leaseInput() {

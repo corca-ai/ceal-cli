@@ -163,7 +163,7 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	}
 	if (
 		!exact(value, ["schema_version", "argv", "protected_session", "agent_ipc", "gateway", "gateway_protocol_handoff", "non_claims"]) ||
-		value.schema_version !== "ceal.worker_private_leased_consumer_control_session_contract.v1" ||
+		value.schema_version !== "ceal.worker_private_leased_consumer_control_session_contract.v2" ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		value.argv[0] !== "--internal-leased-consumer-control-session" ||
@@ -178,9 +178,12 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_capability_control_response.v4" ||
 		value.agent_ipc.maximum_frame_bytes !== 32 * 1024 ||
 		value.agent_ipc.serial !== true ||
-		!exact(value.gateway, ["transport", "operation_deadline_ms", "routes"]) ||
+		!exact(value.gateway, ["transport", "operation_deadline_bounds_ms", "routes"]) ||
 		value.gateway.transport !== "unix_socket" ||
-		value.gateway.operation_deadline_ms !== 30_000 ||
+		!exact(value.gateway.operation_deadline_bounds_ms, ["minimum", "maximum"]) ||
+		value.gateway.operation_deadline_bounds_ms.minimum !== 30_000 ||
+		value.gateway.operation_deadline_bounds_ms.maximum !== 600_000 ||
+		value.gateway.operation_deadline_bounds_ms.minimum > value.gateway.operation_deadline_bounds_ms.maximum ||
 		!exact(value.gateway.routes, Object.keys(routes)) ||
 		!Object.entries(routes).every(([operation, route]) => value.gateway.routes[operation] === route) ||
 		!exact(value.gateway_protocol_handoff, ["lock_file", "gateway_tag", "gateway_commit", "protocol_tree", "archive_sha256"]) ||
