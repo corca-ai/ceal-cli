@@ -41,6 +41,19 @@ export interface SafeJsonOptions {
 	maxNodes?: number;
 }
 
+/**
+ * Derives a safe-JSON node budget from an enforced byte cap (goal3 S5 rule:
+ * guard budgets derive from their enforced bound instead of being frozen as
+ * arbitrary constants). The floor is the smallest serialized JSON node — a
+ * one-digit array element plus its separator (~4 bytes) — so a walk can never
+ * exhaust its node budget before the byte cap would have rejected the value.
+ */
+export const SAFE_JSON_MIN_BYTES_PER_NODE = 4;
+export function safeJsonNodeBudgetForBytes(maxBytes: number): number {
+	if (!Number.isSafeInteger(maxBytes) || maxBytes < SAFE_JSON_MIN_BYTES_PER_NODE) throw new RangeError("safe-JSON byte cap is invalid");
+	return Math.floor(maxBytes / SAFE_JSON_MIN_BYTES_PER_NODE);
+}
+
 export function assertSafeJsonValue(value: unknown, options: SafeJsonOptions, depth = 0, count = { value: 0 }): void {
 	count.value += 1;
 	if (depth > 8 || count.value > (options.maxNodes ?? 512)) invalidByContext(options);

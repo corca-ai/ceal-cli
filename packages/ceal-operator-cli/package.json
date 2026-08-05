@@ -24,7 +24,7 @@
 		"prepack": "npm run build"
 	},
 	"dependencies": {
-		"@corca-ai/ceal-protocol": "0.72.11",
+		"@corca-ai/ceal-protocol": "0.72.12",
 		"yaml": "2.9.0"
 	},
 	"devDependencies": {

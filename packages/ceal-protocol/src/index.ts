@@ -22,9 +22,9 @@ import {
 	requireRecord,
 	requireSafeRef,
 	requireSafeText,
-	SAFE_CODE,
+	SAFE_CODE, safeJsonNodeBudgetForBytes,
 } from "./gateway-validation-primitives.js";
-export { CealProtocolValidationError, isCealPublicSafeText, redactCealPublicUnsafeText } from "./gateway-validation-primitives.js";
+export { CealProtocolValidationError, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.js";
 export type { CealProtocolValidationErrorCode } from "./gateway-validation-primitives.js";
 
 export {
@@ -147,6 +147,7 @@ const REQUEST_KEYS = ["body", "operation", "profile_ref", "protocol_version", "r
 const MAX_REQUEST_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 16 * 1024;
 const MAX_RESPONSE_VALUE_BYTES = 64 * 1024;
+// Response node budget derives from the enforced byte cap (goal3 S5 rule).
 export function decodeCealGatewayRequest(value: unknown): CealGatewayRequest {
 	try {
 		const envelope = requireRecord(value);
@@ -174,7 +175,7 @@ export function decodeCealClientResponse<R extends CealGatewayRequest>(
 	try {
 		const expectedRequest = decodeCealGatewayRequest(expectedRequestValue);
 		const response = requireRecord(value);
-		if (response.ok === true) validateSuccessResponse(response, expectedRequest, options.responseValueMaxNodes ?? 16_384);
+		if (response.ok === true) validateSuccessResponse(response, expectedRequest, options.responseValueMaxNodes ?? safeJsonNodeBudgetForBytes(MAX_RESPONSE_VALUE_BYTES));
 		else if (response.ok === false) validateFailureResponse(response, expectedRequest);
 		else invalidResponse();
 		return response as unknown as CealGatewayResponseFor<R>;
@@ -262,7 +263,7 @@ function requireTargetSelector(value: unknown): void {
 	invalidRequest();
 }
 
-function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>, responseValueMaxNodes = 16_384): void {
+function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>, responseValueMaxNodes = safeJsonNodeBudgetForBytes(MAX_RESPONSE_VALUE_BYTES)): void {
 	requireExactKeys(response, ["ok", "proof_ref_or_unavailable", "protocol_version", "request_id", "value"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
 	assertSafeJsonValue(response.value, {

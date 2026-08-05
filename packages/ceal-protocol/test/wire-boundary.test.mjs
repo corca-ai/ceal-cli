@@ -8,6 +8,8 @@ import {
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
 	isCealPublicSafeText,
+	SAFE_JSON_MIN_BYTES_PER_NODE,
+	safeJsonNodeBudgetForBytes,
 	redactCealPublicUnsafeText,
 } from "../dist/index.js";
 
@@ -1117,4 +1119,11 @@ test("a discovery response whose catalog exceeds 512 JSON nodes still decodes in
 	};
 	const decoded = decodeCealClientResponse({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value, proof_ref_or_unavailable: "gateway-audit-request:request:node-budget:d" }, request);
 	assert.equal(decoded.value.capabilities.length, 40);
+});
+
+test("safe-JSON node budgets derive from their enforced byte caps", () => {
+	assert.equal(safeJsonNodeBudgetForBytes(64 * 1024), 16_384);
+	assert.equal(safeJsonNodeBudgetForBytes(SAFE_JSON_MIN_BYTES_PER_NODE), 1);
+	assert.throws(() => safeJsonNodeBudgetForBytes(0), RangeError);
+	assert.throws(() => safeJsonNodeBudgetForBytes(3.5), RangeError);
 });
