@@ -504,7 +504,7 @@ test("public discovery, call, and audit envelopes admit provider-neutral capabil
 		grant_ref: "grant:workspace-file-search", grant_revision: 1, target_ref: "target:workspace",
 		data: { schema_version: "ceal.file_search_result.v1", results: [{ ref: "file:roadmap", label: "Roadmap" }] },
 		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.equal(decodeCealClientResponse(call, callRequest).value.capability_id, "file.search");
 
@@ -536,7 +536,7 @@ test("legacy message fixtures remain safe generic result envelopes", () => {
 			text: "Approved source text may contain slack:C0123456789 without becoming audit data.", offset: 0,
 		},
 		redaction: { state: "applied", omitted_classes: ["credential_material"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 
@@ -561,7 +561,7 @@ test("compact message source_url cells use the same safe HTTPS boundary as sourc
 			rows: [["message:approved_001", "https://workspace.slack.com/archives/C0123456789/p1720000000000100"]],
 		},
 		redaction: { state: "applied", omitted_classes: ["raw_messages"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	const unsafe = structuredClone(response);
@@ -582,7 +582,7 @@ test("legacy link fixtures accept only safe URL transport while leaving resource
 			ref: "message:approved_001", kind: "message", source: { provider: "slack", url: sourceUrl },
 		} },
 		redaction: { state: "applied", omitted_classes: ["credential_material"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	for (const mutate of [
@@ -620,7 +620,7 @@ test("legacy write fixtures keep only generic write-boundary validation in the p
 			message_ref: "message:created_001", reply_to: "message:approved_001",
 		},
 		redaction: { state: "applied", omitted_classes: ["message_text", "idempotency_key", "provider_locator", "provider_identity"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	const discoverRequest = envelope("discover", { capability_id: "message.search" });
@@ -666,7 +666,7 @@ test("legacy search fixtures use the generic response envelope", () => {
 			minimization: { raw_provider_ids_included: true, raw_messages_included: false, credential_material_included: false },
 		},
 		redaction: { state: "applied", omitted_classes: ["query_text", "raw_messages"] },
-		host_decision: "accepted", proof_level: "host_decision", non_claims: ["production_audit_not_reached"],
+		host_decision: "accepted", proof_level: "host_decision", non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	} });
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	const falseMinimization = structuredClone(response);
@@ -1093,3 +1093,28 @@ function responseEnvelope(request, body) {
 function hasCode(code) {
 	return (error) => error instanceof CealProtocolValidationError && error.code === code;
 }
+
+test("a discovery response whose catalog exceeds 512 JSON nodes still decodes inside the byte cap (2026-08-05 live incident)", () => {
+	const request = { request_id: "request:node-budget:d", protocol_version: "1.3.0", operation: "discover", profile_ref: "profile:work", body: {} };
+	const capabilities = Array.from({ length: 40 }, (_, index) => ({
+		capability_id: `probe.capability.${index}`,
+		label: `Probe capability ${index}`,
+		effect: "read",
+		target_requirement: "required",
+		evidence_requirement: "provider_readback",
+		input_contract: { schema_version: `ceal.probe_input_${index}.v1`, required: ["query"], query: { type: "string", max_bytes: 512 } },
+	}));
+	const value = {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: "profile:work",
+		membership_ref: "membership:alice-work",
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+		capabilities,
+		targets: [],
+		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+	};
+	const decoded = decodeCealClientResponse({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value, proof_ref_or_unavailable: "gateway-audit-request:request:node-budget:d" }, request);
+	assert.equal(decoded.value.capabilities.length, 40);
+});

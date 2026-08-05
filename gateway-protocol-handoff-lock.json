@@ -4,28 +4,28 @@
   "gateway": {
     "repository": "corca-ai/ceal",
     "workflow_path": ".github/workflows/gateway-protocol-handoff-release.yml",
-    "commit": "851a9d7c6772a0babbe80f13f779f38cec4eb609",
-    "tree": "fb7964f55d733d7ae2d3736241cc94424dbeb05d",
-    "protocol_tree": "c567220c581eb8cc365af2e091011628270d3de7",
-    "tag": "gateway-protocol-handoff-v0.72.6",
-    "actions_run_id": 30905719013,
+    "commit": "061af48da30405852f7507f680b14fdc08bde897",
+    "tree": "02161b028c210604e8e4250c1569ccb667b7615b",
+    "protocol_tree": "fc0dc16026abc0b3662cb70479a068301dc9dd9d",
+    "tag": "gateway-protocol-handoff-v0.72.11",
+    "actions_run_id": 30978413293,
     "origin": "https://ceal.borca.ai/releases/gateway-protocol-handoff"
   },
   "protocol": {
     "package": "@corca-ai/ceal-protocol",
-    "version": "0.72.6",
-    "filename": "corca-ai-ceal-protocol-0.72.6.tgz",
-    "sha256": "07de5d04050634e27111a3962646fb95020c2e588be55080683806879f727adc"
+    "version": "0.72.11",
+    "filename": "corca-ai-ceal-protocol-0.72.11.tgz",
+    "sha256": "7b4663baa31a179415e786cc737a85b0d70f469380ebdb9bb42929f7fd06141c"
   },
   "archive": {
-    "filename": "ceal-gateway-protocol-handoff-0.72.6.tar.gz",
-    "sha256": "07c6d8f4540e9851b21d44189be97b8605c90242a9b9f6e23e3ed9fd44444853",
-    "handoff_manifest_sha256": "f0ea5e29c9abb514409d4efbf4c42ac767b70286356b522e7c967e73f54fca04"
+    "filename": "ceal-gateway-protocol-handoff-0.72.11.tar.gz",
+    "sha256": "d47865f295b1bb7eb1eca5e523b9e4de9b8cadbcea41cbc86b1cbdbef210d7e3",
+    "handoff_manifest_sha256": "d010b87b0bfee67835a2ae29227ee74820a15f8692a2ffc49e43fff1aed9069b"
   },
   "reviewed_signature": {
-    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.6",
+    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.11",
     "oidc_issuer": "https://token.actions.githubusercontent.com",
-    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/30905719013/attempts/1"
+    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/30978413293/attempts/1"
   },
   "non_claims": [
     "This lock records identities a maintainer verified once, at consumption time, against the immutable Gateway origin. Nothing in this repository re-fetches the archive or re-checks the Sigstore certificate on its own.",

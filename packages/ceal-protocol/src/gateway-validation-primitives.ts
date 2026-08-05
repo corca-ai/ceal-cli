@@ -30,11 +30,20 @@ export interface SafeJsonOptions {
 	forbidAuthorityKeys: boolean;
 	allowHttpsUrl?: boolean;
 	allowResultContent?: boolean;
+	/**
+	 * Node budget for one safe-JSON walk. The default (512) suits bounded
+	 * argument/detail records; a full discovery response walks every
+	 * capability contract with ONE counter and legitimately exceeds it well
+	 * inside the 64KiB byte cap (live incident 2026-08-05: a 17-op Slack
+	 * policy pushed the catalog past ~23 capabilities and every bare
+	 * `capabilities` discover failed as target_catalog_response_too_large).
+	 */
+	maxNodes?: number;
 }
 
 export function assertSafeJsonValue(value: unknown, options: SafeJsonOptions, depth = 0, count = { value: 0 }): void {
 	count.value += 1;
-	if (depth > 8 || count.value > 512) invalidByContext(options);
+	if (depth > 8 || count.value > (options.maxNodes ?? 512)) invalidByContext(options);
 	if (value === null || typeof value === "boolean") return;
 	if (typeof value === "number") return assertSafeJsonNumber(value, options);
 	if (typeof value === "string") return assertSafeJsonString(value, options);

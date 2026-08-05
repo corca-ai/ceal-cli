@@ -167,11 +167,14 @@ export function decodeCealGatewayRequest(value: unknown): CealGatewayRequest {
 export function decodeCealClientResponse<R extends CealGatewayRequest>(
 	value: unknown,
 	expectedRequestValue: Readonly<R>,
+	// responseValueMaxNodes: budget for the response.value walk (default 16384 =
+	// 64KiB floor); a Gateway probe passes the DEPLOYED fleet's budget instead.
+	options: { readonly responseValueMaxNodes?: number } = {},
 ): CealGatewayResponseFor<R> {
 	try {
 		const expectedRequest = decodeCealGatewayRequest(expectedRequestValue);
 		const response = requireRecord(value);
-		if (response.ok === true) validateSuccessResponse(response, expectedRequest);
+		if (response.ok === true) validateSuccessResponse(response, expectedRequest, options.responseValueMaxNodes ?? 16_384);
 		else if (response.ok === false) validateFailureResponse(response, expectedRequest);
 		else invalidResponse();
 		return response as unknown as CealGatewayResponseFor<R>;
@@ -259,13 +262,16 @@ function requireTargetSelector(value: unknown): void {
 	invalidRequest();
 }
 
-function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>): void {
+function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>, responseValueMaxNodes = 16_384): void {
 	requireExactKeys(response, ["ok", "proof_ref_or_unavailable", "protocol_version", "request_id", "value"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
 	assertSafeJsonValue(response.value, {
 		forbidAuthorityKeys: false,
 		allowHttpsUrl: true,
 		allowResultContent: expectedRequest.operation === "call",
+		// The byte cap below is the transport bound; the node budget only guards
+		// pathological shapes (2026-08-05 discovery incident).
+		maxNodes: responseValueMaxNodes,
 	});
 	requireJsonByteSize(response.value, MAX_RESPONSE_VALUE_BYTES, invalidResponse);
 	if ("proof_ref_or_unavailable" in response) validateProofReference(response.proof_ref_or_unavailable);

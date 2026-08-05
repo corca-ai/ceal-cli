@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal",
-	"version": "0.72.9",
+	"version": "0.72.11",
 	"license": "MIT",
 	"description": "Public Ceal client SDK for Gateway-neutral requests and responses; no CLI, Agent, or Gateway server",
 	"repository": {
@@ -23,7 +23,10 @@
 			"import": "./dist/index.js"
 		}
 	},
-	"files": ["dist", "LICENSE"],
+	"files": [
+		"dist",
+		"LICENSE"
+	],
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
@@ -31,7 +34,7 @@
 		"prepack": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@corca-ai/ceal-protocol": "0.72.6"
+		"@corca-ai/ceal-protocol": "0.72.11"
 	},
 	"devDependencies": {
 		"@types/node": "24.6.0",
