@@ -9,7 +9,7 @@ import {
 	type CealAgentSessionEventsLookup,
 } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
-import { type CealDiscoveryCacheEntry, discoveryCacheFreshness } from "./discovery-cache.js";
+import { type CealDiscoveryCacheEntry, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheFreshness } from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
@@ -365,7 +365,7 @@ async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number):
 		return { status: "unreadable" };
 	}
 	if (!entry) return { status: "absent" };
-	const ttl = runtime.discoveryCacheTtlMs ?? 300_000;
+	const ttl = runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS;
 	// Freshness is the store's judgement, not a second copy of it — see
 	// `discoveryCacheFreshness`.
 	const { ageMs: age, withinTtl } = discoveryCacheFreshness(entry.cachedAt, now, ttl);

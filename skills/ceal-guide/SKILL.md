@@ -28,13 +28,22 @@ For the installed personal-client surface, use this exact provider-neutral
 sequence after reading the matching leaf help:
 
 ```sh
-ceal capabilities --profile <profile-ref> --fresh
+ceal capabilities --profile <profile-ref>
 ceal capabilities targets --profile <profile-ref> \
   --capability <capability-id> --match <text-or-url> --limit 5
 ceal call <capability-id> --target <target-ref> \
   --profile <profile-ref> key=value
 ceal receipt show <request-ref> --profile <profile-ref>
 ```
+
+The first step omits `--fresh` on purpose: the catalog is advisory and every
+`ceal call` re-validates live at the Gateway, so a warm session should serve it
+from the client cache instead of paying the discovery probe again. Add `--fresh`
+only when the RESULT must claim a live discovery — a cached catalog reports
+`catalog_source: cached_discovery` and narrows `claims_allowed` to
+`["gateway_handshake"]`, withholding `gateway_discovery`. Evidence packets that
+must show fresh capability discovery, and any first run against a profile whose
+grants may have just changed, therefore need `--fresh`; routine work does not.
 
 Omit `--match` only when the selected capability's target help permits a small
 unfiltered page. Use only ids, input fields, target refs, cursors, and request

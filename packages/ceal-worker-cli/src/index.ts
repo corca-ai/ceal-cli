@@ -33,7 +33,7 @@ import {
 	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
-import { type CealDiscoveryCacheKey, discoveryCacheEntryUsable } from "./discovery-cache.js";
+import { type CealDiscoveryCacheKey, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "./discovery-cache.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
@@ -65,12 +65,6 @@ import packageJson from "../package.json" with { type: "json" };
 const CEAL_PACKAGE_VERSION: string = packageJson.version;
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
-
-// Conservative default freshness for a served discovery-catalog cache entry.
-// The catalog is advisory (calls re-validate live), so a few minutes trades a
-// small staleness window for eliding the ~4.3s discovery probe on repeat use;
-// `--fresh` forces a live probe and `CEAL_DISCOVERY_CACHE_TTL_MS` overrides it.
-const DEFAULT_DISCOVERY_CACHE_TTL_MS = 300_000;
 
 // 0xCEA1: a stable, unregistered default so the printed observer URL is
 // predictable across sessions; --port 0 selects an ephemeral port instead.

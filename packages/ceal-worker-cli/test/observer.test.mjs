@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
+import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
@@ -739,7 +739,9 @@ test("local suggestions fire deterministically and stay linked to observed evide
 				membershipRef: "membership:suggestion-fixture",
 				negotiatedProtocolVersion: "1.3.0",
 			},
-			cachedAt: NOW - 10 * 60_000,
+			// Expressed relative to the shared default rather than as a literal, so
+			// this fixture stays genuinely expired when the window is retuned.
+			cachedAt: NOW - DEFAULT_DISCOVERY_CACHE_TTL_MS - 60_000,
 			discovery: { capabilities: [], targets: [] },
 		}),
 	});
@@ -777,6 +779,9 @@ test("the observer and the discovery cache agree on freshness, including a backw
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 	};
+	// An explicit TTL, deliberately not the default: this case proves the observer
+	// and the store agree about whatever window they are GIVEN. The separate test
+	// below proves they agree about the window they FALL BACK to.
 	const ttl = 300_000;
 	const now = Date.UTC(2026, 6, 27, 12, 0, 0);
 	const cases = [
@@ -802,6 +807,41 @@ test("the observer and the discovery cache agree on freshness, including a backw
 		// what carries the anomaly.
 		assert.ok(state.discovery_cache.age_ms >= 0, `${scenario.label}: rendered a negative age`);
 	}
+});
+
+test("the observer falls back to the SAME default window as the cli", async () => {
+	// The observer used to carry its own `?? 300_000`, so an observer built
+	// without an explicit TTL could render `within_ttl` against a window the CLI
+	// had already moved off. Both now fall back to the one exported constant;
+	// re-introduce a second literal in observer.ts and this goes red.
+	const key = {
+		gatewayEndpoint: "https://gateway.example/api/ceal/v1",
+		profileRef: "profile:work",
+		membershipRef: "membership:work",
+		negotiatedProtocolVersion: "1.3.0",
+	};
+	const discovery = {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: key.profileRef,
+		membership_ref: key.membershipRef,
+		capabilities: [],
+		targets: [],
+		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	};
+	const now = Date.UTC(2026, 6, 27, 12, 0, 0);
+	// Inside the shared default, outside the former 5-minute one.
+	const cachedAt = now - DEFAULT_DISCOVERY_CACHE_TTL_MS + 60_000;
+	const entry = { key, cachedAt, discovery };
+	const state = await buildObserverState({ loadDiscoveryCache: async () => entry, now: () => now });
+	assert.equal(
+		state.discovery_cache.within_ttl,
+		discoveryCacheEntryUsable(entry, key, now, DEFAULT_DISCOVERY_CACHE_TTL_MS),
+		"the observer's fallback window disagrees with the store's",
+	);
+	assert.equal(state.discovery_cache.within_ttl, true);
 });
 
 function rawRequest(baseUrl, requestPath, headers) {

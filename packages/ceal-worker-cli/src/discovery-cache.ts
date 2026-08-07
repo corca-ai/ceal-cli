@@ -17,6 +17,23 @@ import { prepareDirectory, removableFile, safeExistingFile } from "./local-store
 // corrupt, unsafe-mode, schema drift — degrades to a MISS (never throws), so the
 // cache can never break a command; the caller simply probes live and repopulates.
 
+// Default freshness for a served discovery-catalog entry. It lives HERE, beside
+// the freshness predicate, rather than in a caller: it was previously declared
+// in `index.ts` and shadowed by a second literal in `observer.ts`, so the CLI and
+// the observer projection could disagree about the same entry's `within_ttl`.
+//
+// 30 minutes is an OPERATOR MEASUREMENT (2026-08-07), not a derived value. The
+// catalog is advisory and every `ceal call` re-validates live, so the window
+// trades staleness for eliding the ~4.3s probe. What the window is NOT free of:
+// `cachedCapabilityEffect` classifies a capability's write-effect from this same
+// entry, so a capability reclassified read -> write by a policy or connector
+// change keeps its stale `read` classification for up to the TTL, and the
+// unknown-outcome write caution is suppressed for that window. Accepted because
+// the Gateway is authoritative at call time; recorded because it is not zero.
+//
+// `--fresh` forces a live probe and `CEAL_DISCOVERY_CACHE_TTL_MS` overrides this.
+export const DEFAULT_DISCOVERY_CACHE_TTL_MS = 1_800_000;
+
 const CACHE_FILE = "client-discovery-cache.json";
 const CACHE_SCHEMA_VERSION = "ceal.client_discovery_cache.v1";
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;

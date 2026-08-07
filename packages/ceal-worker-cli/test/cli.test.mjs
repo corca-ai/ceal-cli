@@ -2890,6 +2890,45 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 	});
 });
 
+test("the default discovery-cache window is the operator-measured 30 minutes", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		// 20 minutes: past the former 5-minute default, inside the measured 30-minute
+		// one. Pinning the boundary here is what makes the default a decision rather
+		// than a literal — shrink DEFAULT_DISCOVERY_CACHE_TTL_MS and this goes red.
+		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 20 * 60_000));
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "cached_discovery");
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake"],
+			"a 20-minute-old entry must not cost a discovery probe",
+		);
+	});
+});
+
+test("an entry older than the default window still re-probes", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const now = Date.parse("2026-07-18T12:00:00.000Z");
+		// 31 minutes: the widened window is still a window, not an unbounded cache.
+		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 31 * 60_000));
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () => storedSession(endpoint),
+			now: () => now,
+			...cache.runtime,
+		});
+		assert.equal(payload.catalog_source, "live_discovery");
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake", "discover"],
+		);
+	});
+});
+
 test("capabilities re-probes when the cached entry is past its freshness window", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
