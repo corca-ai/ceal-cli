@@ -102,14 +102,17 @@ macOS portability defect:
 - the build job verified the handoff archive with `sha256sum`, which macOS
   runners do not ship; it now uses node.
 
-`release-contract.json` `native_build_matrix` declares the current three
-release platforms, but note what it does and does not do: the worker lane's build gate is `resolvePlatform` in
+The release platform set is declared in one place: the `build` job's matrix in
+`.github/workflows/ceal-release.yml`. Note what that does and does not do — the
+worker lane's build gate is `resolvePlatform` in
 `build-worker-native-artifact.mjs`, which validates against its own hardcoded
-`linux|darwin` pattern and never reads the contract. `requireTargetPlatform`
-in `build-platform-binaries.mjs` belongs to the frozen `cealctl` lane. The
-contract entry is the declared release surface and the source the tests derive
-from — not the thing that unblocks a darwin build leg.
+`linux|darwin` pattern and never reads the matrix. The matrix is the declared
+release surface and the source the tests derive from, not the thing that unblocks
+a darwin build leg.
 
-`worker-release-assets.test.mjs` derives every site above from
-`signed_release_platforms`, so adding or dropping a platform fails the tests
-until all five agree.
+The legacy `release-contract.json` used to hold this list, and
+`build-platform-binaries.mjs` used to gate on its own copy; both went with the
+frozen `cealctl` lane.
+
+`worker-release-assets.test.mjs` derives every site above from that build matrix,
+so adding or dropping a platform fails the tests until all five agree.

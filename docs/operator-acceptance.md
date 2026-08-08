@@ -121,8 +121,9 @@ readback step is what turns a published artifact into an accepted one.
 
 ### The npm lane is a separate, currently unconfigured lane
 
-Bare `v*.*.*` tags trigger `.github/workflows/npm-package-stage.yml` and the
-frozen `cealctl-release.yml` — not the worker lane. The npm lane gates on
+Bare `v*.*.*` tags trigger `.github/workflows/npm-package-stage.yml` — not the
+worker lane. They also triggered the frozen `cealctl-release.yml` until that lane
+was deleted, so the tag now belongs to the npm lane alone. The npm lane gates on
 environment variables in `ceal-npm-release`, and that environment held **no
 variables** on 2026-07-27:
 

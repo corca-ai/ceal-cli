@@ -10,18 +10,20 @@ session will otherwise re-derive or undo.
 is `check` rather than `lint` deliberately, so an unformatted commit fails rather
 than merely drifting. `npm run lint:fix` applies every safe fix.
 
-`biome.json` excludes the frozen packages deliberately. Do not widen its
-`includes` to lint code this lane may not edit.
+`biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
+widen its `includes` to lint code this lane may not edit.
 
-The worker `check:unit` and `check` gates run only client/worker package tests
-and explicit worker contract/release lists. The root npm workspace names exactly
-the protocol, client, and worker packages; the frozen `cealctl` directory is not
-installed as a workspace dependency. This keeps a new signed worker protocol
-from resolving the operator's independently frozen pin. The frozen protocol is
-built only as the exact local input needed to type-check the client; its unit
-suite remains Gateway-owned. Frozen `cealctl` and legacy dual-release checks are
-available only through `npm run test:legacy-compatibility`, never through
-pre-push or CI.
+The `check:unit` and `check` gates run only client/worker package tests and the
+explicit worker contract/release lists. The root npm workspace names exactly the
+protocol, client, and worker packages. The frozen protocol is built only as the
+exact local input needed to type-check the client; its unit suite remains
+Gateway-owned.
+
+There is no third suite any more. `test:legacy-compatibility` audited the frozen
+`cealctl` and dual-release material, and that material was deleted once
+`corca-ai/ceal` had moved past the copies kept here — so every test file now
+belongs to `test:contract` or `test:release`, and `repo-gates.test.mjs` fails if
+one belongs to neither.
 
 `lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
 style being introduced.
@@ -210,8 +212,8 @@ to poke an installed binary. It refuses any route whose declared effect is not
 
 The one exception: a `--help`/`-h` token anywhere in the tail bypasses the effect
 check, because a help token makes the invocation read-only help regardless of
-what the route would otherwise do. That bypass is proven for `ceal` only — do not
-lean on it for `cealctl`.
+what the route would otherwise do. That bypass is proven for `ceal`, the only
+binary this repository builds.
 
 A live readback against the real session is a different act from a probe. Read
 the declared effect before typing the route, and never batch a state change into
@@ -219,10 +221,8 @@ a list of checks.
 
 ## Routes And Dispatch Derive From One Table
 
-Route *acceptance* and leaf help derive from a declaration table:
-`CEAL_SUBCOMMANDS` in `packages/ceal-worker-cli/src/subcommands.ts`, and
-`CEALCTL_SUBCOMMANDS` in `packages/ceal-operator-cli/src/index.ts` — a frozen
-package, so a `cealctl` route is not an edit this lane originates.
+Route *acceptance* and leaf help derive from one declaration table:
+`CEAL_SUBCOMMANDS` in `packages/ceal-worker-cli/src/subcommands.ts`.
 
 Worker *dispatch* derives from the same table. Each runner reads a
 `CealSubcommandHandlers<parent, …>` table keyed by the declared route joined with
@@ -249,6 +249,6 @@ Two constraints keep that gate real:
   flag meaning "some route matched", which is the same fallthrough in the one
   place `tsc` is blind.
 
-`cealctl` dispatch still falls through this way (`CEALCTL_SUBCOMMANDS`, frozen),
-so none of this covers it. That is a request to `corca-ai/ceal`, not an edit this
-lane originates.
+`cealctl` had the same fallthrough shape and none of this covered it. Its source
+now lives only in `corca-ai/ceal`, so it is that repository's to fix, not a
+request this lane files against a copy it holds.

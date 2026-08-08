@@ -24,18 +24,10 @@
 	},
 	"forbidden_release_inputs": [
 		"packages/ceal-protocol",
-		"packages/ceal-operator-cli",
-		"skills/cealctl-guide",
-		"install.sh",
-		"release-contract.json",
-		"ceal-cli-seed-manifest.json",
-		"scripts/build-platform-binaries.mjs",
-		"scripts/build-release-manifest.mjs",
-		".github/workflows/cealctl-release.yml",
 		".github/workflows/npm-package-stage.yml"
 	],
 	"non_claims": [
 		"This inventory authorizes no tag, signature, upload, installation, or Gateway action.",
-		"The retained composite release files remain compatibility evidence and are not worker-release inputs."
+		"The cealctl material this list used to name is gone from the repository; corca-ai/ceal owns it."
 	]
 }

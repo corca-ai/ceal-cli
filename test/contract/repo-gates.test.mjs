@@ -19,7 +19,6 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/repo-gates.test.mjs",
 	"test/contract/safe-output-path.test.mjs",
 	"test/contract/script-lib.test.mjs",
-	"test/contract/verify-worker-release-inputs.test.mjs",
 	"test/contract/worker-acceptance-packet.test.mjs",
 	"test/contract/worker-gateway-handoff-archive.test.mjs",
 	"test/contract/worker-guide-contract.test.mjs",
@@ -27,17 +26,10 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/worker-release-inputs.test.mjs",
 ];
 const WORKER_RELEASE_TESTS = [
-	"test/build-worker-release-artifact.test.mjs",
 	"test/gateway-protocol-consumer.test.mjs",
 	"test/worker-native-artifact.test.mjs",
 	"test/worker-release-installer.test.mjs",
 	"test/worker-release-package.test.mjs",
-];
-const LEGACY_COMPATIBILITY_TESTS = [
-	"test/contract/build-platform-binaries.test.mjs",
-	"test/contract/guide-contract.test.mjs",
-	"test/contract/release-contract.test.mjs",
-	"test/public-distribution.test.mjs",
 ];
 
 function testFilesIn(script) {
@@ -70,7 +62,11 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	for (const owned of ["packages/ceal-protocol", "packages/ceal-client", "packages/ceal-worker-cli"]) {
 		assert.ok(manifest.workspaces.includes(owned), `${owned} must be a workspace`);
 	}
-	assert.ok(!manifest.workspaces.includes("packages/ceal-operator-cli"), "the frozen operator package must not be a workspace");
+	// `packages/ceal-operator-cli` used to sit here as a frozen non-workspace copy.
+	// `corca-ai/ceal` owns and has moved past it, so the copy is gone and the claim
+	// is now about the directory, not the workspace list: re-vendoring a stale fork
+	// is the defect, and a workspace assertion would not catch it.
+	assert.ok(!existsSync(path.join(ROOT, "packages", "ceal-operator-cli")), "cealctl source belongs to corca-ai/ceal, not this repo");
 	assert.match(manifest.scripts["check:unit"], /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm test/u);
@@ -88,10 +84,7 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 		assert.match(manifest.scripts["build:worker"], new RegExp(`${ownerPackage} run build`, "u"));
 		assert.match(manifest.scripts["test:unit"], new RegExp(`${ownerPackage} test`, "u"));
 	}
-	for (const frozenPackage of ["packages/ceal-protocol", "packages/ceal-operator-cli"]) {
-		assert.doesNotMatch(manifest.scripts["test:unit"], new RegExp(`${frozenPackage} test`, "u"));
-	}
-	assert.doesNotMatch(manifest.scripts["build:worker"], /packages\/ceal-operator-cli/u);
+	assert.doesNotMatch(manifest.scripts["test:unit"], /packages\/ceal-protocol test/u);
 	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
 	assert.match(workerPackage.scripts.build, /^tsc -p tsconfig\.build\.json\b/u);
 	// A trailing `|| true` would make every type error a green build, which is the
@@ -103,7 +96,7 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 // edits in. Linting them would surface findings an agent cannot legally act on,
 // and the pressure to "just fix the lint error" is exactly how a frozen copy
 // drifts.
-test("the linter and formatter both run, and both exclude the frozen packages", () => {
+test("the linter and formatter both run, and both exclude the frozen package", () => {
 	const biome = JSON.parse(read("biome.json"));
 	assert.equal(biome.linter.enabled, true);
 	assert.equal(biome.formatter.enabled, true);
@@ -116,12 +109,11 @@ test("the linter and formatter both run, and both exclude the frozen packages", 
 	// spelling biome prefers this year. Pinning the literal `!<path>/**` made a
 	// correct migration to `!<path>` — biome's own fixable preference — look like
 	// a removed exclusion.
-	for (const frozen of ["packages/ceal-protocol", "packages/ceal-operator-cli"]) {
-		assert.ok(
-			biome.files.includes.some((pattern) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
-			`biome.json must exclude the frozen package ${frozen}`,
-		);
-	}
+	const frozen = "packages/ceal-protocol";
+	assert.ok(
+		biome.files.includes.some((pattern) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
+		`biome.json must exclude the frozen package ${frozen}`,
+	);
 });
 
 // Release workflows trigger on tags only, so without this lane the first CI run
@@ -290,6 +282,27 @@ test("the shipped version is derived from the manifests, not retyped into source
 	// a client whose own handshake version disagrees with the worker's.
 	assert.equal(manifests.worker.dependencies["@corca-ai/ceal"], version, "the worker must depend on this exact client version");
 
+	// Relocated from release-contract.test.mjs and verify-worker-release-inputs.test.mjs,
+	// both of which went with the legacy lane. Nothing else asserted these, and
+	// they are release-identity claims that outlive that lane: the worker is a
+	// private build input, the client and protocol are the published pair, and
+	// every consumer pins the vendored protocol exactly. A range here would let a
+	// release ship a package declaring one protocol while the lock binds another.
+	const protocol = JSON.parse(read("packages/ceal-protocol/package.json"));
+	assert.equal(manifests.worker.private, true, "the worker CLI is a build input, never a published package");
+	assert.equal(manifests.client.private, undefined, "the client SDK must stay publishable");
+	assert.equal(protocol.private, undefined, "the vendored protocol must stay publishable");
+	for (const [name, consumer] of [
+		["client", manifests.client],
+		["worker", manifests.worker],
+	]) {
+		assert.equal(
+			consumer.dependencies["@corca-ai/ceal-protocol"],
+			protocol.version,
+			`the ${name} must declare the vendored protocol version exactly`,
+		);
+	}
+
 	// No source file may carry the current version as a literal. Matching the
 	// *current* version rather than any version-shaped string is deliberate: test
 	// fixtures legitimately use arbitrary version strings, and only a literal that
@@ -364,10 +377,11 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.mjs`);
 	}
 	// The helper is only load-bearing if the proofs that motivated it use it, and
-	// that is an anti-vacuity floor, not an inventory. Naming the two suites here
-	// made a rename or a suite move look like a missing platform proof.
+	// that is an anti-vacuity floor, not an inventory. Naming the suites here made
+	// a rename or a suite move look like a missing platform proof, and the floor
+	// dropped to one when the development-only release-artifact suite was deleted.
 	const declaring = suites.filter((suite) => /platformProofTest\(/u.test(read(path.join("test", suite))));
-	assert.ok(declaring.length >= 2, `only ${declaring.length} suite(s) declare a platform-gated proof through the shared helper`);
+	assert.ok(declaring.length >= 1, "no suite declares a platform-gated proof through the shared helper");
 });
 
 // Requirement 3 of the proof/ship divergence decision says worker release,
@@ -382,7 +396,6 @@ test("every release, packing, and acceptance path still asserts protocol shippab
 	for (const [file, why] of [
 		["scripts/worker-release-inputs.mjs", "the chokepoint every release, packing, and native-artifact path funnels through"],
 		["scripts/worker-acceptance-packet.mjs", "acceptance-candidate emission"],
-		["scripts/build-worker-release-artifact.mjs", "writes a release manifest and provenance without traversing the chokepoint"],
 	]) {
 		assert.match(read(file), /assertShippableProtocolVendorPin\(/u, `${file} must assert shippability: ${why}`);
 	}
@@ -409,15 +422,14 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 
 // A mutable action ref resolves to whatever the tag points at when the lane runs,
 // which for the release lanes is the moment artifacts get signed and published.
-// Two pin assertions already existed, but between them they covered exactly one
-// workflow this lane can edit (`npm-package-stage.yml`) and one it cannot
-// (`cealctl-release.yml`, frozen) — so `check.yml`, `ceal-release.yml`, and
-// `ceal-worker-stable-rollback.yml` were pinned only by habit. A frozen file may
-// be read, so this asserts across every workflow rather than a hand-kept list.
+// Two pin assertions already existed, but between them they covered exactly two
+// workflows, so `check.yml`, `ceal-release.yml`, and
+// `ceal-worker-stable-rollback.yml` were pinned only by habit. This asserts
+// across every workflow rather than a hand-kept list.
 test("every workflow pins every action to a full commit SHA", () => {
 	const directory = path.join(ROOT, ".github/workflows");
 	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 5, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	assert.ok(workflows.length >= 4, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let pinned = 0;
 	for (const name of workflows) {
 		const uses = [...read(path.join(".github/workflows", name)).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
@@ -439,18 +451,16 @@ test("every workflow pins every action to a full commit SHA", () => {
 // cannot be reused, so a wedged release job turns a burned tag into something
 // discovered hours after the cause stopped being obvious. Asserting across every
 // workflow rather than a hand-kept list is what keeps a newly added lane from
-// inheriting the default silently. Frozen workflows are read here, never edited:
-// if one of them lacks a bound, that is a request to its owner, so it is named
-// as an exemption rather than left to widen the rule for everyone.
-const UNBOUNDED_WORKFLOW_EXEMPTIONS = new Set(["cealctl-release.yml"]);
+// inheriting the default silently. The one exemption this carried was the frozen
+// cealctl-release.yml, which is gone with the rest of that lane, so the rule now
+// applies to every workflow without a hole in it.
 
 test("every workflow job this lane owns bounds its own runtime", () => {
 	const directory = path.join(ROOT, ".github/workflows");
 	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 5, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	assert.ok(workflows.length >= 4, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let bounded = 0;
 	for (const name of workflows) {
-		if (UNBOUNDED_WORKFLOW_EXEMPTIONS.has(name)) continue;
 		const jobs = Object.entries(parse(read(path.join(".github/workflows", name))).jobs ?? {});
 		// A file that parses to zero jobs would satisfy the loop trivially, which
 		// is how this kind of sweep goes quietly vacuous after a restructure.
@@ -650,10 +660,9 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 });
 
 // A glob once put frozen `cealctl` and legacy dual-release proofs back into the
-// worker pre-push/CI gate. Keep the three suites as explicit inventories: every
-// test is run somewhere, but Gateway-owned compatibility evidence cannot become
-// an accidental worker-source requirement.
-test("every test file under test/ belongs to one explicit worker or legacy suite", () => {
+// worker pre-push/CI gate. Both suites stay explicit inventories so that a file
+// added under test/ has to be placed deliberately rather than swept in.
+test("every test file under test/ belongs to one explicit worker suite", () => {
 	const scripts = manifest.scripts;
 	// Which files each suite runs is the claim; the argument order and spacing of
 	// the `node --test` line are not. Exact equality made a reporter flag or a
@@ -661,7 +670,6 @@ test("every test file under test/ belongs to one explicit worker or legacy suite
 	for (const [suite, declared] of [
 		["test:contract", WORKER_CONTRACT_TESTS],
 		["test:release", WORKER_RELEASE_TESTS],
-		["test:legacy-compatibility", LEGACY_COMPATIBILITY_TESTS],
 	]) {
 		// The file set is the claim, but the runner still has to be `node --test`:
 		// swapping it, or appending a name filter, would run almost nothing while
@@ -673,10 +681,11 @@ test("every test file under test/ belongs to one explicit worker or legacy suite
 	assert.match(scripts["check:unit"], /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:release/u);
-	assert.doesNotMatch(scripts["check:unit"], /legacy-compatibility/u);
-	assert.doesNotMatch(scripts.test, /legacy-compatibility/u);
+	// The legacy compatibility suite is gone with the lane it audited, so a test
+	// file now belongs to a worker suite or to nothing.
+	assert.equal(scripts["test:legacy-compatibility"], undefined, "the legacy compatibility suite must not come back");
 
-	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS, ...LEGACY_COMPATIBILITY_TESTS].sort();
+	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS].sort();
 	const actual = [
 		...readdirSync(path.join(ROOT, "test", "contract"))
 			.filter((name) => name.endsWith(".test.mjs"))

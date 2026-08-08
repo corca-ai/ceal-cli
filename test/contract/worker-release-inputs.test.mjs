@@ -34,7 +34,7 @@ test("worker release inventory accepts one exact complete Gateway protocol hando
 	assert.equal(resolution.protocol.producer.protocol_tree, fixture.producer.protocol_tree);
 	assert.deepEqual(resolution.protocol.exports, [".", "./conformance"]);
 	assert.equal(resolution.control_conformance.filename, "gateway-leased-consumer-control-conformance.json");
-	assert.equal(resolution.forbidden_release_inputs.includes("packages/ceal-operator-cli"), true);
+	assert.equal(resolution.forbidden_release_inputs.includes("packages/ceal-protocol"), true);
 	// The packet carries no client tarball, so the resolution must not pretend to
 	// witness one. The client is packed from this repository's own source.
 	assert.equal(resolution.gateway_client, undefined);
@@ -133,6 +133,13 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 
 test("worker release inventory rejects Gateway and legacy composite paths", () => {
 	const inventory = JSON.parse(readFileSync(path.join(ROOT, "worker-release-inputs.json"), "utf8"));
+	// The loop below iterates whatever the file happens to contain, so on its own
+	// it would stay green if someone emptied the list. `verify-worker-release-inputs.mjs`
+	// used to pin the contents against a frozen constant; that script is gone, so
+	// the pin lives here. Both entries are load-bearing: the protocol is
+	// Gateway-owned source that must arrive as a signed artifact, and the npm
+	// staging lane is a different lane with a different tag.
+	assert.deepEqual([...inventory.forbidden_release_inputs].sort(), [".github/workflows/npm-package-stage.yml", "packages/ceal-protocol"]);
 	for (const blocked of inventory.forbidden_release_inputs) {
 		assert.throws(() => assertWorkerReleaseSourcePath(inventory, blocked), hasCode("forbidden_release_input"));
 	}

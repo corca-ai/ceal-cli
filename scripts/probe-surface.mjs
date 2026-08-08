@@ -7,14 +7,13 @@
 // verification loop revoked a live Gateway client session: `session logout` sat
 // in a list of otherwise read-only spot checks.
 //
-// Both CLIs now declare an `effect` per command and per subcommand, so the guard
+// The CLI declares an `effect` per command and per subcommand, so the guard
 // is derivable rather than a habit: resolve the route through the declaration,
 // refuse anything that is not `read_only`, and run in a throwaway HOME so even a
 // read-only route cannot touch real local state.
 //
 // Usage:
 //   node scripts/probe-surface.mjs ceal capabilities targets --help
-//   node scripts/probe-surface.mjs cealctl connectors show
 //   node scripts/probe-surface.mjs --allow-effect local_write ceal guide status
 //
 // `--allow-effect <effect>` is the deliberate escape hatch: it still runs in the
@@ -29,9 +28,11 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// `cealctl` was a second entry here until its source left this repository. The
+// map stays a map: the guard is about resolving a binary's declared routes, not
+// about there being exactly one binary.
 const BINARIES = {
 	ceal: { packageDir: "ceal-worker-cli", commands: "CEAL_COMMANDS", subcommands: "CEAL_SUBCOMMANDS" },
-	cealctl: { packageDir: "ceal-operator-cli", commands: "CEALCTL_COMMANDS", subcommands: "CEALCTL_SUBCOMMANDS" },
 };
 
 function fail(message) {

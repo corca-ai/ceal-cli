@@ -10,10 +10,11 @@ public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
   `skills/ceal-guide`.
 - `corca-ai/ceal` owns `@corca-ai/ceal-protocol`, `cealctl`, `cealctl-guide`,
   their release/install contract, and canonical conformance.
-- The protocol, `packages/ceal-operator-cli`, and `skills/cealctl-guide` paths
-  remaining here are frozen compatibility inputs until the migration ledger's
-  Stage 5 deletion gate. Do not add a Gateway/operator feature, release
-  surface, guide, or command to them; consume the Gateway-issued artifact.
+- The cealctl surface reached the migration ledger's Stage 5 deletion gate and is
+  gone from this tree — `corca-ai/ceal` had already moved past the copies kept
+  here. `packages/ceal-protocol` is the one frozen input left. Do not add a
+  Gateway/operator feature, release surface, guide, or command to it, and do not
+  re-vendor the deleted cealctl paths; consume the Gateway-issued artifact.
 
 `protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
 subtree the frozen protocol copy was taken from, alongside the protocol subtree
@@ -48,8 +49,7 @@ old operator's independently frozen protocol pin.
 - `@corca-ai/ceal-protocol`: frozen Gateway compatibility input;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;
 - `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing
-  `ceal` binary;
-- `@corca-ai/ceal-operator-cli`: frozen Gateway operator compatibility input.
+  `ceal` binary.
 
 A worker source build consumes only a supplied packed Gateway protocol artifact.
 Run `node scripts/verify-gateway-protocol-consumer.mjs --help` for that local,
@@ -60,12 +60,11 @@ runner, Gateway server, or an umbrella SDK.
 
 The historical composite kept the two commands deliberately separate: distinct
 help, command registries, credential-context identifiers, and package archives.
-That separation remains compatibility evidence, not permission to make this
-worker repository a `cealctl` producer. `ceal` does not contain operator or
-credential-management commands; the frozen `cealctl` package does not contain
-worker capability calls or worker Session material.
+That separation is now a repository boundary rather than a convention, and it is
+not permission to make this worker repository a `cealctl` producer. `ceal` does
+not contain operator or credential-management commands.
 
-Both command surfaces use conventional text only for progressive `--help`
+The command surface uses conventional text only for progressive `--help`
 discovery. Every non-help result, including parser failures, is exactly one
 compact YAML document. The public commands reject `--json` and `--format json`;
 typed callers use `@corca-ai/ceal`, whose HTTP wire remains JSON.
@@ -161,7 +160,6 @@ pushing or tagging:
 ```sh
 npm run check:unit   # lint + worker build + client/worker suites + test/contract
 npm run test:release # release-artifact and native-binary suites only
-npm run test:legacy-compatibility # explicit frozen Gateway compatibility audit; never pre-push/CI
 npm run lint         # biome check: lint + format + import order
 ```
 
@@ -181,7 +179,7 @@ declared-effect guard rather than typing the binary at your own `HOME`:
 
 ```sh
 npm run probe -- ceal capabilities targets --help
-npm run probe -- cealctl connectors show
+npm run probe -- ceal receipt show --help
 ```
 
 The guard resolves the route through the same declaration help renders from,
@@ -204,11 +202,11 @@ the source and tag-bound OIDC signer identity; it is not a release artifact
 origin. A successful tag run promotes that verified release to the stable lane
 (`CEAL_VERSION=stable` / `ceal update`) by rotating
 `releases/worker/stable/ceal-worker-stable-release.json` last.
-The historical dual `install.sh`, `release:binaries`,
-`release:manifest`, bare `v*` tags, and
-`.github/workflows/cealctl-release.yml` remain frozen compatibility material.
-Do not execute, amend, publish, or use them to install either command from
-this checkout.
+The historical dual lane — `install.sh`, `release:binaries`, `release:manifest`,
+and `.github/workflows/cealctl-release.yml` — is deleted. Bare `v*` tags now
+belong solely to `.github/workflows/npm-package-stage.yml`, which stages
+`@corca-ai/ceal-protocol` and `@corca-ai/ceal` to npm. To install `cealctl`, use
+`corca-ai/ceal`; nothing in this checkout installs it.
 
 ### Installing the worker
 

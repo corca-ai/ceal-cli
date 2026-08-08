@@ -8,7 +8,6 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
-import { validateWorkerReleaseInputs, WorkerReleaseInputsError } from "./verify-worker-release-inputs.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROTOCOL_NAME = "@corca-ai/ceal-protocol";
@@ -66,18 +65,42 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 	}
 }
 
+// This used to call into `verify-worker-release-inputs.mjs`, which read a second
+// inventory (`release/worker-inputs.json`) whose contents were pinned to a frozen
+// constant in that script and restated again in its test — three hand-kept copies
+// of one list, and a fourth in the live `worker-release-inputs.json` that the real
+// release lane reads. Read the live inventory directly instead. The package
+// identity, `private` flag, and exact-protocol-dependency claims that script also
+// made are asserted in `test/contract/repo-gates.test.mjs`, and the release lane
+// enforces the version agreement in `scripts/worker-release-inputs.mjs`.
 function validateReleaseInputs(root, protocolVersion) {
-	try {
-		return validateWorkerReleaseInputs({ repoRoot: root, protocolVersion });
-	} catch (error) {
-		if (error instanceof WorkerReleaseInputsError) {
+	const inventory = readJson(path.join(root, "worker-release-inputs.json"), "invalid_worker_release_inputs");
+	const client = { path: inventory?.client?.source_path, name: inventory?.client?.package };
+	const worker = { path: inventory?.worker?.source_path, name: inventory?.worker?.package };
+	const guide = inventory?.guide?.source_path;
+	if (!client.path || !client.name || !worker.path || !worker.name || !guide) {
+		throw new GatewayProtocolConsumerError("invalid_worker_release_inputs", "Worker release inventory does not name the owned inputs.");
+	}
+	for (const input of [client, worker]) {
+		const manifest = readJson(path.join(root, input.path, "package.json"), "invalid_worker_release_inputs");
+		if (manifest.name !== input.name) {
+			throw new GatewayProtocolConsumerError("invalid_worker_release_inputs", "Worker release input package identity is invalid.");
+		}
+		// The consumer proof is about resolving *this* protocol version, so a
+		// package declaring a different one would make the readback meaningless.
+		if (manifest.dependencies?.[PROTOCOL_NAME] !== protocolVersion) {
 			throw new GatewayProtocolConsumerError(
 				"invalid_worker_release_inputs",
-				"Worker release inputs do not satisfy the owned-only release contract.",
+				"Worker release package does not declare the supplied Gateway protocol version exactly.",
 			);
 		}
-		throw error;
 	}
+	return {
+		packages: { client, worker },
+		guide,
+		installer: "install-ceal.sh",
+		protocol: { package: PROTOCOL_NAME, input: "gateway_artifact_only", version: protocolVersion },
+	};
 }
 
 function validateArtifactInput({ protocolTarball, protocolProvenance }) {

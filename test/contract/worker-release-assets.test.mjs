@@ -404,21 +404,18 @@ test("worker release workflow signs only the worker inventory from the locked ar
 });
 
 // The merge tooling is platform-generic, but every workflow site that names a
-// platform is not. A platform present in the contract yet missing from any one
-// of these sites publishes a silently partial inventory, so derive all of them
-// from the contract instead of restating a platform list here.
-test("worker release workflow builds, merges, and signs every contracted release platform", () => {
+// platform is not. A platform missing from any one of these sites publishes a
+// silently partial inventory, so derive all of them from one producer instead of
+// restating a platform list here. That producer used to be the legacy
+// release-contract.json; with that lane gone it is the build matrix, which is
+// what actually decides what exists to sign.
+test("worker release workflow builds, merges, and signs every platform it builds", () => {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
 	const parsed = parse(workflow);
-	const contract = JSON.parse(readFileSync(path.join(REPO_ROOT, "release-contract.json"), "utf8"));
-	const platforms = contract.native_build_matrix.signed_release_platforms;
+	const platforms = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
 	// A floor, not a snapshot: every assertion below derives from `platforms`, so
 	// the only thing this has to rule out is an empty list making them vacuous.
-	// Restating the set here turned adding a platform into a test failure.
-	assert.ok(platforms.length >= 3, `the contract names only ${platforms.length} signed release platforms`);
-
-	const built = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
-	assert.deepEqual([...built].sort(), [...platforms].sort(), "every contracted platform needs a build runner");
+	assert.ok(platforms.length >= 3, `the build matrix names only ${platforms.length} release platforms`);
 
 	// Each site is isolated: asserting against a whole job lets one site cover
 	// for another, which is exactly the partial-inventory bug being guarded.

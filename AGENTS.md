@@ -23,33 +23,39 @@ has grown an explanation belongs in one of them, with the rule left here.
 
 ## Frozen Paths
 
-Frozen compatibility inputs owned by `corca-ai/ceal`:
-`packages/ceal-protocol`, `packages/ceal-operator-cli`, `skills/cealctl-guide`,
-and the historical dual release lane — `install.sh`,
-`scripts/build-platform-binaries.mjs`, `scripts/build-release-manifest.mjs`,
-bare `v*` tags, `.github/workflows/cealctl-release.yml`. Do not execute, amend,
-or publish those compatibility release-lane files.
+`packages/ceal-protocol` is the one remaining frozen compatibility input owned by
+`corca-ai/ceal`. It is a vendored copy: consume the Gateway-issued artifact and
+re-pin, never originate an edit in it. `protocol-vendor-pin.json` is what makes
+that checkable.
 
-The worker source projection has been removed from `corca-ai/ceal`: Gateway now
-consumes only the signed `vendor/ceal-cli` artifact. There is no mirrored
-`packaging/ceal-cli-source/` path to keep synchronized and no Gateway source
-copy to edit. This repository remains responsible for its own worker source,
-worker quality gates, worker release workflow, and `ceal-v*` tags; the frozen
-Gateway inputs above remain Gateway-owned compatibility material.
+Everything else that was frozen here is gone. `corca-ai/ceal` owns and has moved
+past the cealctl surface, so `packages/ceal-operator-cli`, `skills/cealctl-guide`,
+`install.sh`, `release-contract.json`, `ceal-cli-seed-manifest.json`,
+`scripts/build-platform-binaries.mjs`, `scripts/build-release-manifest.mjs`, and
+`.github/workflows/cealctl-release.yml` were deleted rather than kept as stale
+forks of files this repository may not edit. Do not re-vendor any of them; read
+`corca-ai/ceal` instead. The worker source projection is likewise gone from
+`corca-ai/ceal` — Gateway consumes only the signed `vendor/ceal-cli` artifact, so
+there is no mirrored `packaging/ceal-cli-source/` path and no Gateway source copy
+to edit.
+
+`.github/workflows/npm-package-stage.yml` and its bare `v*` tags stay. That lane
+publishes `@corca-ai/ceal-protocol` and `@corca-ai/ceal`, both worker-lane
+packages; it is not cealctl material and it is not a worker-release input.
 
 ## Gates
 
 - `npm run check:unit` is the worker-source iteration gate; `npm run check` is
-  the final worker gate, and its worker release suite dominates its cost. Frozen
-  Gateway compatibility tests run only through explicit
-  `npm run test:legacy-compatibility`, never pre-push or CI. Prefer the narrow
-  worker gate until closeout.
+  the final worker gate, and its worker release suite dominates its cost. Prefer
+  the narrow worker gate until closeout. There is no separate legacy suite any
+  more: every test belongs to `test:contract` or `test:release`, and
+  `repo-gates.test.mjs` fails if a file under `test/` belongs to neither.
 - Time a gate with `time npm run check` on the host in hand rather than quoting a
   figure from a document. The recorded numbers went stale unnoticed once already,
   and a stale figure makes an honest run look like a regression under the
   slow-test rule below.
 - `npm run lint` is `biome check .` and runs inside both gates. Three rules are
-  off on purpose and the frozen packages are excluded on purpose — read
+  off on purpose and `packages/ceal-protocol` is excluded on purpose — read
   [docs/gates.md](docs/gates.md) before changing either.
 - `.github/workflows/check.yml` runs the full gate on every push and pull request
   to `main`. Every other workflow is a release lane triggered only on tags, so
