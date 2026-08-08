@@ -13,21 +13,16 @@ months with nothing to measure it against. Requirement 3's chokepoint could be
 deleted in one line with every gate staying green. The first three are fixed and
 the fourth was fixed on the way to writing this — see `## 2026-08-08` above.
 
-What remains lives in `scripts/`: **4,052 lines of release-lane production code
-with no coverage at all.**
+What remains lives in `scripts/`: **about 4.9k lines of release-lane production
+code** (`wc -l scripts/*.mjs scripts/lib/*.mjs`) that had no coverage at all until
+slice 1 measured it.
 
 The insight that makes this one goal rather than three chores: **measuring
 `scripts/` turns the reachability audit into a standing signal.** A guard nobody
 calls shows up as 0% functions, every run, instead of needing the grep audit that
 found the holes below. Slice 1 produces the evidence slice 2 acts on.
 
-### Slice 1 — cover `scripts/`
-
-Measured on 2026-08-08 across both test tiers: **79.88% statements / 71.63%
-branches / 89.53% functions**. Add a third `c8` target with floors just under,
-the same scoping discipline as the two packages (`all: true`, named exclusions
-with reasons). Note that `test:contract` alone gives 54.93% — the release tier is
-required, so this belongs to `npm run check`, not `check:unit`.
+### Slice 1 — cover `scripts/` — **done, see `## 2026-08-08 — scripts/ is measured`**
 
 ### Slice 2 — resolve what it exposes
 
@@ -47,6 +42,20 @@ what remains is true, not that everything survives.
   is test-only. Low severity — its inner guards are shared with the production
   `consume*` variants — but the tests exercise the unused wrapper, so it can drift
   from the consumed path with nothing noticing.
+
+Slice 1 adds a third name to that list, and it is the one with the most room:
+**`worker-acceptance-packet.mjs` at 52.64% statements and 53.33% functions** —
+half the file, including everything from `:407` to the end. That is the largest
+unproven surface in the release lane and nothing on this list explains it yet.
+`build-worker-release-assets.mjs` at 66.44% branch and
+`verify-gateway-protocol-consumer.mjs` at 60.24% are the next two.
+
+Two zeros are also on the report and neither is a finding. `lint-shell.mjs` is
+hook-only and `npm run check` is right not to reach it — though hook-only does not
+imply zero, since `check-dup-ratchet.mjs` is hook-only too and reads about 49%,
+because `repo-gates.test.mjs:730` runs the hook. `install-git-hooks.mjs` *is*
+exercised, from a throwaway clone whose temp path remaps to nothing. Read
+[gates.md](gates.md) before treating a zero as a verdict.
 
 ### Slice 3 — the two structural holes the audit surfaced
 
@@ -80,6 +89,56 @@ before a threshold is honest.
 ## Current State`, then pick
 from `## Debt` or do what the operator asked for. `ceal capabilities --fresh` and
 `ceal call` are live-session, provider-touching acts: approval first.
+
+## 2026-08-08 — scripts/ is measured
+
+Slice 1 of the release-guard goal. `scripts/` now has the third `c8` target:
+`.c8rc.scripts.json`, `npm run coverage:scripts`, and the runner
+`scripts/coverage-scripts.mjs`. Measured across both tiers at 80.55 / 72.68 /
+89.75 / 80.55; floors sit at 80 / 72 / 89 / 80.
+
+Two things the handoff's plan did not account for, both found by running it:
+
+- **The floor cannot be flat across platforms.** `check.yml` runs the same
+  `npm run check` on macOS, where `platformProofSkip` correctly skips the
+  installed-binary proofs — on platform and arch alone, not on
+  `CEAL_REQUIRE_PLATFORM_PROOFS`, which only escalates a skip that was already
+  decided — and coverage drops through nobody's defect. A flat floor would fail
+  that leg for skipping what it is right to skip: the `ceal-v0.67.0` shape. Hence
+  the runner. It measures on Linux, and on macOS runs the tiers plainly and prints
+  the measurement it did not carry.
+- **The maintainer host is `linux-arm64`, not the release platform.** So the
+  floors are measured there and *extrapolated* to `linux-x64`, which is enforced
+  too because it carries every platform proof. [gates.md](gates.md) states the
+  extrapolation and why it is small. **The first `check.yml` run confirms it or
+  moves the number** — that is the one open thread in this slice.
+
+Falsified rather than assumed, per the goal's own acceptance bar: breaking `all`,
+`check-coverage`, the floor values, the release platform's place in the runner's
+enforcement list, and `test`'s route through `coverage:scripts` each turn
+`repo-gates.test.mjs` red, and a c8 run over an empty program exits nonzero on all
+four ratios.
+
+The mandated fresh-eye review found two things worth recording, both since fixed:
+
+- **The floor was vacuous on an empty file set.** `c8` exits **0** when its
+  `include` matches nothing — verified directly — printing all-zero ratios and
+  comparing nothing, because istanbul builds them from 0/0 totals. A rename or a
+  `src` typo would have left this gate green while measuring nothing. The runner
+  now reads the emitted `coverage-summary.json` after a passing run and fails
+  unless it names every script the config claims; breaking the glob now exits 2
+  and lists all 19.
+- **Nothing asserted that `npm test` still runs `test:unit`** — pre-existing, not
+  introduced here. `repo-gates.test.mjs` pinned what `test:unit` *is*, never that
+  anything called it, so deleting it from `test` would have taken both packages'
+  coverage floors out of `npm run check` and out of `check.yml` with every gate
+  green. It is a hop in the resolved chain now.
+
+Cost, timed on this host: `npm run check` went from about 1m44s to **about 2m35s**.
+`check:unit` is unchanged. The overhead is `NODE_V8_COVERAGE` in every process the
+release tier spawns — package managers, compilers, SEA tooling — none of which can
+contribute `scripts/` coverage. Stripping it at those spawn sites would buy most
+of the minute back and is untaken debt.
 
 ## 2026-08-08 — the legacy lane is gone
 
@@ -154,9 +213,11 @@ which until then would have stayed green on an emptied list.
 - `gateway-protocol-handoff-lock.json` is the single record of handoff consumption.
 - Four workflows: `check.yml`, `ceal-release.yml`,
   `ceal-worker-stable-rollback.yml`, `npm-package-stage.yml`.
-- Gates: `npm run check` passes in about 1m44s, `check:unit` in about 43s, both
-  timed with `time` on this host. Two suites only — `test:contract`,
-  `test:release`.
+- Gates: `npm run check` passes in about 2m35s, `check:unit` in about 49s, both
+  timed with `time` on this host — the final gate carries the `scripts/` coverage
+  run and the iteration gate does not. Two suites only — `test:contract`,
+  `test:release`, reached from `npm test` through `coverage:scripts` and
+  `test:tiers`.
 
 ## Debt
 

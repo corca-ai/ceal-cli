@@ -2,10 +2,17 @@
   "entries": [
     {
       "surface": "code",
-      "id": "7c84b6f6556d6b49",
+      "id": "a1b5412a5f2feb47",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
-      "note": "scripts/probe-surface.mjs and scripts/lint-shell.mjs share an ES-module import header plus the one-line repo-root computation. Reviewed and classified rather than removed, because removing it made things worse by this gate's own measure: extracting repoRootFrom() into scripts/lib/ and converting all ten call sites turned one family into three, since every rewritten header then carried the same extra import. It also broke the install-git-hooks scratch-clone test, which needs that script self-contained. Import statements are not extractable; this is portable boilerplate."
+      "note": "scripts/probe-surface.mjs, scripts/lint-shell.mjs and scripts/coverage-scripts.mjs share an ES-module import header plus the one-line repo-root computation. Reviewed and classified rather than removed, because removing it made things worse by this gate's own measure: extracting repoRootFrom() into scripts/lib/ and converting all ten call sites turned one family into three, since every rewritten header then carried the same extra import. It also broke the install-git-hooks scratch-clone test, which needs that script self-contained. Import statements are not extractable; this is portable boilerplate. The id moved from 7c84b6f6556d6b49 on 2026-08-08 when coverage-scripts.mjs became the third member: the fingerprint is over the family, so gaining a member re-keys it, and the classification is re-stated rather than inherited."
+    },
+    {
+      "surface": "code",
+      "id": "a24dc00b66631581",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "test/contract/repo-gates.test.mjs runs scripts/install-git-hooks.mjs against a throwaway clone twice, checking the hooksPath after each. The repetition IS the assertion — 'an installed clone stays installed', which is the idempotence claim the second run exists to make — so factoring it into a helper would delete the property under test and leave one call. Pre-existing and untouched; it re-keyed on 2026-08-08 only because the coverage slice changed content inside the same detected member span."
     }
   ],
   "fixable_ceiling": 0,

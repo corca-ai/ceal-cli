@@ -279,6 +279,89 @@ Raise a floor after real improvement lands. Do not lower one to make a red gate
 green; the branch ratios are the ones with room, and `acceptance-record.ts` at
 55% branch and `bin.ts` at 50% are where to start.
 
+## The Third Target: `scripts/`
+
+The two packages above are the code the worker ships. `scripts/` is the code that
+*releases* it — about 4.9k lines of guards, composers and verifiers — and until
+2026-08-08 none of it was measured. That is what made the reachability audit a
+hand-grep: a guard nothing calls and a guard everything calls looked identical.
+Now the first reads as `0` on every run.
+
+`npm run coverage:scripts` is the front door and `.c8rc.scripts.json` the config.
+The three properties that carry the other two targets carry this one — `all`, the
+floor, and `check-coverage` — and `repo-gates.test.mjs` asserts each, plus the
+`include`/`src`/`extension` scoping and the single named exclusion.
+
+**It needs both tiers, so it belongs to `npm run check` and not to
+`check:unit`.** The contract tier alone reaches about 55%; the release tier is
+where the composers and native-artifact paths actually run.
+
+**Why a runner script rather than a `c8` prefix in the npm script.** Two reasons,
+and the first is the load-bearing one. A floor only holds against the proof set
+it was measured on. `platformProofSkip` decides from `process.platform` and
+`process.arch` alone (`test/platform-proof.mjs:16-17`), so the macOS leg of
+`check.yml` skips the installed-binary and installer proofs whatever
+`CEAL_REQUIRE_PLATFORM_PROOFS` is set to — that variable turns an
+already-decided skip into a failure, it does not cause one. The scripts those
+proofs reach therefore report lower on macOS through nobody's defect, and a flat
+floor would fail that leg for skipping what it is right to skip, which is the
+shape that burned `ceal-v0.67.0`. So macOS runs the tiers plainly and prints the
+measurement it is not carrying. The second reason is mechanical: `test:contract`
+and `test:release` must keep starting with `node --test` because
+`repo-gates.test.mjs` reads their file inventories, so the wrapper cannot sit in
+front of them.
+
+**The floor alone cannot tell a pass from an empty measurement, so the runner
+also checks the inventory.** `c8` exits 0 when its file set is empty — verified,
+not assumed: point `include` at a glob matching nothing and it prints
+`All files | 0 | 0 | 0 | 0` and passes, because istanbul computes those ratios
+from 0/0 totals and never compares them to a threshold. A rename, a `src` typo or
+a changed cwd would therefore leave this gate green while measuring nothing, and
+the printed report would not look wrong — the exact failure the `src`/`dist`
+remap notes above call the worst of them. After a passing measured run the runner
+reads `coverage/scripts/coverage-summary.json` and fails unless it names every
+`.mjs` the config claims. `repo-gates.test.mjs` asserts that check is both
+declared and called.
+
+**Where the floor applies, and the one extrapolation in it.** Measured on
+2026-08-08 on `linux-arm64` across both tiers: 80.55% statements / 72.68%
+branches / 89.75% functions / 80.55% lines, and the floors sit just under at
+80 / 72 / 89 / 80. It is enforced on `linux-arm64` and `linux-x64`. arm64 is
+there because it is the maintainer host, and a gate no maintainer can run before
+pushing is one CI discovers for them; x64 is there because it carries every
+platform proof, and `repo-gates.test.mjs` asserts `PLATFORM_PROOF_PLATFORM` stays
+in that list. Applying an arm64 measurement to x64 is an extrapolation: the arm64
+run skips proofs that only *add* coverage on x64, and the entire arch-conditional
+surface under `scripts/` is one ternary at `build-worker-native-artifact.mjs:372`
+whose covered and uncovered branch counts are symmetric between the two.
+
+**The first `check.yml` run is what makes that floor real, in both directions.**
+If x64 measures lower than arm64, the extrapolation was wrong and the floor moves
+down to what was measured. If it measures materially *higher*, the floor is loose
+by that margin on the only host that ever enforces it in CI, and an x64-only
+regression inside that margin lands green — so it moves up. Either way the number
+in `.c8rc.scripts.json` is provisional until a `ubuntu-24.04` run has printed one.
+
+**What the report already says, and one thing it does not.** `lint-shell.mjs` at
+0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not
+invoke. `check-dup-ratchet.mjs` is hook-only in the same way and yet reads about
+49%, because `repo-gates.test.mjs:730` runs the hook itself; hook-only does not
+imply zero here. And `install-git-hooks.mjs` at 0% is not a reachability finding
+at all: `repo-gates.test.mjs` runs it, but against a throwaway clone, so the
+coverage lands under a temp path that remaps to nothing. A zero is therefore a
+question, not a verdict — the reachability claim needs the same positive control
+any absence claim needs.
+
+**The cost is real and it is on `npm run check` only.** Both tiers plain take
+about 1m11s on the maintainer host; under `c8` they take about 2m03s, which took
+the full gate from about 1m44s to about 2m35s (2m33s and 2m36s on two timed runs). `check:unit` is unchanged. The
+overhead is not the report but `NODE_V8_COVERAGE` in every process the release
+tier spawns — the package managers, compilers and SEA tooling whose coverage is
+discarded on remap, which also write about 100MB of raw profiles per run. The
+runner deletes that temp directory after a passing run. Stripping the variable at
+the spawn sites that can never contribute `scripts/` coverage would buy most of
+the minute back and is not done yet.
+
 ## Two Gates That Live In The Hook
 
 `npm run check` runs on GitHub runners that have neither `nose` nor the charness

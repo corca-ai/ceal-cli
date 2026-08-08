@@ -43,6 +43,13 @@ function read(relative) {
 	return readFileSync(path.join(ROOT, relative), "utf8");
 }
 
+// Two tests read the coverage runner: the one that checks how scripts/ is
+// measured, and the one that resolves `npm test` down to the two tiers. Naming
+// the path once means a rename cannot leave one of them reading a stale file.
+function runnerSource() {
+	return read("scripts/coverage-scripts.mjs");
+}
+
 // Both gates below have to find "the step that runs the final gate", and both used
 // to do it with exact equality after `trim()`. Wrapping the step in a multi-line
 // `run:` — to export one env var, say — then made one of them vacuous and the
@@ -107,6 +114,75 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	// A trailing `|| true` would make every type error a green build, which is the
 	// one thing loosening this assertion off exact equality must not permit.
 	assert.doesNotMatch(workerPackage.scripts.build, /\|\||;|--noEmit/u);
+});
+
+// The third target. `scripts/` is the release lane's production code and was the
+// one owned tree with no coverage at all, so a guard nobody called looked exactly
+// like a guard everybody called. It is measured to make that difference visible
+// on every run instead of by hand-audit.
+test("scripts/ is measured on the same terms as the two packages", () => {
+	const config = JSON.parse(read(".c8rc.scripts.json"));
+	// Same three properties the packages carry, and for the same reasons: without
+	// `check-coverage` the floor is a printed number, and without `all` an entirely
+	// untested script is absent from the report rather than zero — which is the
+	// single failure mode this target exists to prevent.
+	assert.equal(config["check-coverage"], true, "scripts/ coverage must fail below its floor, not just report");
+	assert.equal(config.all, true, "scripts/ must count scripts no test loaded; without this an unreached guard is invisible, not zero");
+	// Measured on 2026-08-08 across both tiers at 80.55 / 72.68 / 89.75 / 80.55.
+	// The floors sit just under. Nothing here may fall back to the portable 80%
+	// default, which for branches would sit eight points above what is measured
+	// and for the rest would be a floor that cannot fail.
+	assert.deepEqual(Object.fromEntries(["statements", "branches", "functions", "lines"].map((ratio) => [ratio, config[ratio]])), {
+		statements: 80,
+		branches: 72,
+		functions: 89,
+		lines: 80,
+	});
+	// `all: true` enumerates from `src`, and `include` is what keeps the report to
+	// this tree: without it a run that also loaded `packages/*/dist` would fold
+	// that coverage into the same ratios.
+	assert.equal(config.src, "scripts");
+	assert.deepEqual(config.include, ["scripts/**/*.mjs"]);
+	assert.deepEqual(config.extension, [".mjs"]);
+	// One exclusion, by name and with a reason, matching the discipline the two
+	// packages already follow. The runner spawns c8 and so is never inside the
+	// coverage it produces; nothing else may be excluded, because an exclusion here
+	// is precisely how an unreached guard would be hidden again.
+	assert.deepEqual(config.exclude, ["scripts/coverage-scripts.mjs"]);
+
+	// c8 exits 0 when its file set is empty — verified, not assumed: an `include`
+	// matching nothing prints all-zero ratios and still passes, because istanbul
+	// computes them from 0/0 totals. So the floor alone cannot tell "measured and
+	// passed" from "measured nothing", and the runner compares the emitted
+	// `coverage-summary.json` against the inventory on disk after every measured
+	// run. That check is the one this whole target rests on.
+	assert.match(runnerSource(), /function assertReportIsNotEmpty\(\)/u);
+	assert.match(runnerSource(), /^\s*assertReportIsNotEmpty\(\);/mu, "the emptiness check must be called, not merely declared");
+
+	// `extension` is the other half of that inventory, and it is why this must not
+	// silently widen: a `.js` or `.sh` helper dropped into scripts/ matches neither
+	// the glob nor the runner's inventory, so it would be unmeasured rather than
+	// zero and nothing would say so.
+	const foreign = readdirSync(path.join(ROOT, "scripts"), { recursive: true })
+		.map((name) => `scripts/${name}`.replaceAll(path.sep, "/"))
+		.filter((name) => /[.](?:js|cjs|mts|ts|sh)$/u.test(name));
+	assert.deepEqual(foreign, [], "scripts/ carries a file the .mjs-only coverage inventory cannot see; measure it or move it");
+
+	// The floor must be enforced where the full proof set runs. `platformProofTest`
+	// correctly skips the installed-binary proofs elsewhere, so a floor applied
+	// there would fail a run for skipping what it is right to skip — but the
+	// converse is the real risk: dropping the release platform out of the runner's
+	// list would leave the floor enforced only on hosts that prove less.
+	const proofPlatform = read("test/platform-proof.mjs").match(/PLATFORM_PROOF_PLATFORM = "([^"]+)"/u);
+	const enforced = runnerSource().match(/MEASURED_PLATFORMS = Object\.freeze\(\[([^\]]*)\]\)/u);
+	assert.ok(proofPlatform && enforced, "the proof helper and the coverage runner must each name their platforms in one place");
+	assert.ok(
+		enforced[1].includes(`"${proofPlatform[1]}"`),
+		`the coverage floor must be enforced on ${proofPlatform[1]}, the host that carries every platform proof`,
+	);
+	// And nowhere the proofs cannot run. Adding `darwin` here is the `ceal-v0.67.0`
+	// shape the runner exists to avoid, and it would look like widening coverage.
+	assert.doesNotMatch(enforced[1], /darwin|win32/u, "the floor may only be enforced where the platform proofs run");
 });
 
 // The frozen packages are compatibility inputs this lane may not originate
@@ -749,8 +825,38 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 		assert.deepEqual(testFilesIn(scripts[suite]), [...declared].sort());
 	}
 	assert.match(scripts["check:unit"], /npm run test:contract/u);
-	assert.match(scripts.test, /npm run test:contract/u);
-	assert.match(scripts.test, /npm run test:release/u);
+	// `npm test` no longer names the two tiers itself: it goes through
+	// `coverage:scripts`, whose runner wraps them in c8 so scripts/ is measured
+	// once rather than run plainly and then again under coverage. The claim is
+	// unchanged — every suite still runs in the final gate — so it is resolved
+	// through the chain instead of pattern-matched at the entry point, and each
+	// hop is asserted, because a broken hop would silently stop running a tier.
+	//
+	// `test:unit` is a hop here for the first time. Nothing used to assert that
+	// anything *called* it — only what it was — so deleting it from `test` took
+	// both packages' coverage floors out of `npm run check`, and out of
+	// `check.yml`, with every gate green.
+	for (const [hop, reaches] of [
+		["test", /npm run test:unit\b/u],
+		["test", /npm run coverage:scripts/u],
+		["coverage:scripts", /^node scripts\/coverage-scripts[.]mjs$/u],
+		["test:tiers", /npm run test:contract/u],
+		["test:tiers", /npm run test:release/u],
+	]) {
+		assert.match(scripts[hop], reaches, `${hop} must still reach ${reaches.source}, or the final gate stops running a suite`);
+	}
+	// Joined with `&&`, so a red suite stops the chain. A `;` or `||` join would
+	// run every one of them and report the last one's status, which is the same
+	// failure as not running them at all.
+	for (const chain of ["test", "test:tiers"]) {
+		assert.doesNotMatch(scripts[chain], /;|\|\|/u, `${chain} must fail on the first red step`);
+	}
+	assert.match(runnerSource(), /const TIERS = "test:tiers"/u);
+	// Both of the runner's paths reach the tiers through that one constant. A
+	// quoted tier name would mean one of them runs something else — or runs it a
+	// second time, unmeasured, beside the c8 pass. Quoted, because the prose above
+	// it names both tiers on purpose.
+	assert.doesNotMatch(runnerSource(), /"test:(?:contract|release)"/u, "the runner must reach both tiers only through test:tiers");
 	// The legacy compatibility suite is gone with the lane it audited, so a test
 	// file now belongs to a worker suite or to nothing.
 	assert.equal(scripts["test:legacy-compatibility"], undefined, "the legacy compatibility suite must not come back");

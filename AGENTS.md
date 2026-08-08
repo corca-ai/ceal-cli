@@ -78,6 +78,12 @@ belongs in one of them, with the rule left here.
   improvement lands; never lower one to clear a red gate — read
   [docs/gates.md](docs/gates.md) first, because three of the four ways to scope
   this produce a number better than the truth.
+- `scripts/` is the third coverage target and belongs to `npm run check` alone:
+  reaching it takes both test tiers, and the contract tier by itself measures
+  about 55%. `npm run coverage:scripts` is its front door, and it enforces the
+  floor only on the Linux hosts the floor was measured on — a macOS run skips
+  platform proofs it is right to skip, and says the measurement it did not carry.
+  Read its header before changing where it applies.
 - Two gates are **maintainer-local by design**, run by `.githooks/pre-push` and
   not by `npm run check`: `npm run check:duplication` (the boy-scout duplicate
   ratchet, needs `nose` plus the charness quality skill) and `npm run lint:shell`

@@ -1,0 +1,16 @@
+{
+	"$schema": "https://json.schemastore.org/c8rc.json",
+	"all": true,
+	"src": "scripts",
+	"include": ["scripts/**/*.mjs"],
+	"extension": [".mjs"],
+	"exclude": ["scripts/coverage-scripts.mjs"],
+	"reporter": ["text", "json-summary"],
+	"reports-dir": "coverage/scripts",
+	"temp-directory": "coverage/scripts/tmp",
+	"check-coverage": true,
+	"statements": 80,
+	"branches": 72,
+	"functions": 89,
+	"lines": 80
+}
