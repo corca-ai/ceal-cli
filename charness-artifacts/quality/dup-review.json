@@ -1,5 +1,13 @@
 {
-  "entries": [],
+  "entries": [
+    {
+      "surface": "code",
+      "id": "7c84b6f6556d6b49",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/probe-surface.mjs and scripts/lint-shell.mjs share an ES-module import header plus the one-line repo-root computation. Reviewed and classified rather than removed, because removing it made things worse by this gate's own measure: extracting repoRootFrom() into scripts/lib/ and converting all ten call sites turned one family into three, since every rewritten header then carried the same extra import. It also broke the install-git-hooks scratch-clone test, which needs that script self-contained. Import statements are not extractable; this is portable boilerplate."
+    }
+  ],
   "fixable_ceiling": 0,
   "note": "Reviewed fixable-duplication overlay (item 5). Keyed by family identity (code: offset/path-independent content fingerprint; doc: family_signature). Stores only explicitly-classified families; an unlisted family defaults to 'unreviewed'. fixable_ceiling (count of 'fixable') is one-way and only decreases via a deliberate re-review. nose-baseline.json / doc-nose-baseline.json own drift detection; this overlay owns fixable classification.",
   "schemaVersion": "charness.quality.dup_review.v1"
