@@ -9,8 +9,11 @@ rules those surfaces do not already carry; a rule that has grown an explanation
 belongs in one of them, with the rule left here.
 
 - [README.md](README.md) — ownership status and what each package directory is.
-- [docs/handoff.md](docs/handoff.md) — current state, what the last session
-  settled, and the open debt to pick from.
+- [docs/handoff.md](docs/handoff.md) — current state and the next action. It is a
+  continuation pointer, not a session log; keep it that way.
+- [docs/release-guard-reachability.md](docs/release-guard-reachability.md) — the
+  standing goal and its remaining slices.
+- [docs/debt.md](docs/debt.md) — known and unscheduled, each item unconfirmed.
 - [docs/gates.md](docs/gates.md) — why the lint exemptions, the probe rule, and
   the route/dispatch table are shaped the way they are.
 - [docs/release-and-enrollment.md](docs/release-and-enrollment.md) — the two
@@ -158,6 +161,13 @@ belongs in one of them, with the rule left here.
   pipe**: `zsh` has no `pipefail` by default, so `$?` after `npm test | tail -30`
   is `tail`'s status, which is 0 whatever the run did. Redirect to a file, or run
   unpiped. Pipe-trimming is for read-only output.
+- Regenerate `package-lock.json` with `node_modules` absent — a clean directory
+  holding only the manifests. npm records only the optional platform packages
+  matching the tree it can see, so regenerating in place on one architecture
+  silently deletes every other runner's toolchain and `npm ci` then installs no
+  binary there. That happened on 2026-08-08 and cost five red CI runs; the comment
+  above the lockfile gate in `repo-gates.test.mjs` carries the detail. The gate
+  catches it now, but only after the fact.
 - Search with `rg`, not `grep`. `rg` is already recursive and already regex, so
   the `-r`/`-E` reflex adds flags it does not need — in ripgrep those letters are
   `--replace` and `--encoding`, which swallow the pattern or rewrite the output
