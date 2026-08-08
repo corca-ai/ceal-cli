@@ -54,6 +54,23 @@ skill_ergonomics_gate_rules:
 skill_ergonomics_skill_paths:
   - skills/ceal-guide/SKILL.md
 runtime_profile_default: default
+# The worker CLI is invoked by an agent once per step, so process start is a real
+# cost centre and not a micro-benchmark. `--help` is the cheapest route that
+# still pays the whole bootstrap: argv parse, command table, help render. Marked
+# `warm` on purpose — the process is new each sample but the page cache is not,
+# so this measures the repeat-invocation cost an agent actually pays. It reads
+# gitignored `dist/`, so it fails loud on a fresh clone until `npm run build`.
+startup_probes:
+  - label: ceal --help process start
+    class: standing
+    surface: worker-cli
+    startup_mode: warm
+    samples: 5
+    timeout_seconds: 30
+    command:
+      - node
+      - packages/ceal-worker-cli/dist/bin.js
+      - --help
 concept_paths:
   - README.md
   - docs/handoff.md
@@ -62,3 +79,22 @@ concept_paths:
 gate_commands:
   - npm run check:unit
   - npm run check
+# `.githooks/pre-push` writes this log on every push, so the runtime helpers read
+# what a real host measured instead of a figure typed into a doc. AGENTS.md makes
+# that a rule; this is where the rule gets a machine-readable home.
+command_timing_log:
+  path: .charness/quality/command-timing.jsonl
+  format: jsonl
+  elapsed_unit: ms
+  recent_window: 10
+  field_map:
+    label: label
+    elapsed: elapsed_ms
+# Closes quality_adapter.review_fields_missing. Empty is the honest state: no
+# adapter review has been sourced or acknowledged yet.
+adapter_review_sources: []
+acknowledged_recommendations: []
+gate_design_review_globs:
+  - .github/workflows/*.yml
+  - .githooks/*
+  - package.json

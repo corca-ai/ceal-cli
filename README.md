@@ -51,10 +51,11 @@ author-written values — but `source.commit` is still self-recorded, which make
 divergence detectable without making convergence observable.
 
 The worker workspace contains exactly the three packages that the worker
-release builds. The frozen operator directory remains in the repository as
-compatibility evidence, but it is deliberately outside dependency installation
-and worker CI: a worker protocol update must never make `npm ci` resolve the
-old operator's independently frozen protocol pin.
+release builds. The frozen operator directory used to sit beside them, outside
+dependency installation and worker CI so that a worker protocol update could
+never make `npm ci` resolve the old operator's independently frozen protocol
+pin. It is deleted now, and `repo-gates.test.mjs` asserts its absence rather
+than its exclusion.
 
 - `@corca-ai/ceal-protocol`: frozen Gateway compatibility input;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;

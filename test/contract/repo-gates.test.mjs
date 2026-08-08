@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -630,6 +630,47 @@ test("the pre-push hook is checked in and its installer reports honestly", () =>
 	// A tag push is the expensive one, so it must not settle for the fast gate.
 	assert.match(hook, /npm run check\b/u);
 	assert.equal(manifest.scripts["hooks:install"], "node scripts/install-git-hooks.mjs");
+});
+
+// The two regex matches above would pass just as happily against a hook that ran
+// the gate and then swallowed its exit code, and the hook now does bookkeeping
+// after the gate returns. Run it instead of reading it: an early version guarded
+// the timing write but not its rotation, so an unwritable log directory turned a
+// green gate into a blocked push one line after printing "passed".
+test("the pre-push hook propagates the gate's exit code and never blocks on its own bookkeeping", (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-hook-exit-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	// The gate commands are the one thing that must not really run here, so the
+	// harness puts a stand-in `npm` ahead of the real one on PATH.
+	const bin = path.join(scratch, "bin");
+	mkdirSync(bin, { recursive: true });
+	const stub = path.join(bin, "npm");
+	const runHook = (refLine, exitCode) => {
+		writeFileSync(stub, `#!/bin/sh\nexit ${exitCode}\n`, { mode: 0o755 });
+		return spawnSync("sh", [path.join(ROOT, ".githooks/pre-push"), "origin", "git@example.invalid:x/y.git"], {
+			cwd: scratch,
+			input: refLine,
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+		});
+	};
+
+	assert.equal(runHook("refs/heads/topic a refs/heads/topic b\n", 0).status, 0, "a passing gate must let the push through");
+	// Not 1: a flattened code hides which gate failed and how.
+	assert.equal(runHook("refs/heads/topic a refs/heads/topic b\n", 42).status, 42, "the gate's own exit code must reach git");
+	assert.equal(runHook("refs/tags/ceal-v9.9.9 a refs/tags/ceal-v9.9.9 b\n", 7).status, 7, "a tag push must fail closed too");
+
+	// The bookkeeping half. Every write path is best-effort, so a log directory
+	// the hook cannot write must cost a warning, never the push.
+	const unwritable = path.join(scratch, ".charness");
+	mkdirSync(path.join(unwritable, "quality"), { recursive: true });
+	writeFileSync(path.join(unwritable, "quality", "command-timing.jsonl"), `${"x\n".repeat(400)}`);
+	chmodSync(path.join(unwritable, "quality"), 0o500);
+	const blocked = runHook("refs/heads/topic a refs/heads/topic b\n", 0).status;
+	// Restored inline, not in an `after` hook: node:test runs those in registration
+	// order, so the scratch cleanup above would hit EACCES before the restore ran.
+	chmodSync(path.join(unwritable, "quality"), 0o700);
+	assert.equal(blocked, 0, "an unwritable timing log must not block a green gate");
 });
 
 // Proven against a throwaway clone rather than this one: asserting the current

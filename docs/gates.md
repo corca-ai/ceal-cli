@@ -1,8 +1,9 @@
 # Gate Details
 
-`AGENTS.md ## Gates` holds the rules. This file holds the reasons behind them —
-the things a rule cannot carry without becoming a paragraph, and that a future
-session will otherwise re-derive or undo.
+`AGENTS.md` holds the rules — mostly in `## Gates`, with the probe rule under
+`## Boundaries` because a probe is a boundary act before it is a gate. This file
+holds the reasons behind them: the things a rule cannot carry without becoming a
+paragraph, and that a future session will otherwise re-derive or undo.
 
 ## Lint Rules That Are Off On Purpose
 
