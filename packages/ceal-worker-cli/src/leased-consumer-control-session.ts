@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import * as CealProtocol from "@corca-ai/ceal-protocol";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES,
-	type CealLeasedConsumerCapabilityControlOperation,
 	decodeCealLeasedConsumerCapabilityControlRequest,
 	decodeCealLeasedConsumerCapabilityControlResponse,
 	decodeCealLeasedConsumerControlSession,
@@ -32,8 +32,15 @@ function verifiedControlSessionContractJson(): string {
 
 /** Not a public command: a service wrapper may invoke only this fixed token. */
 const CONTROL_SESSION_CONTRACT = JSON.parse(verifiedControlSessionContractJson()) as Readonly<{
+	schema_version: string;
 	argv: readonly [string];
 	protected_session: Readonly<{ child_fd: number; schema_version: string; maximum_bytes: number; deadline_ms: number }>;
+	notification_channel?: Readonly<{
+		child_fd: number;
+		schema_version: string;
+		framing: string;
+		maximum_frame_bytes: number;
+	}>;
 	agent_ipc: Readonly<{
 		transport: string;
 		request_schema_version: string;
@@ -44,7 +51,7 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(verifiedControlSessionContractJson()
 	gateway: Readonly<{
 		transport: string;
 		operation_deadline_bounds_ms: Readonly<{ minimum: number; maximum: number }>;
-		routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
+		routes: Readonly<Record<string, string>>;
 	}>;
 }>;
 export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.argv[0];
@@ -55,13 +62,76 @@ const LEASED_CONSUMER_OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_D
 const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
 const MAX_SESSION_BYTES = CONTROL_SESSION_CONTRACT.protected_session.maximum_bytes;
 const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
-const ROUTES: Readonly<Record<CealLeasedConsumerCapabilityControlOperation, string>> = Object.freeze(
-	CONTROL_SESSION_CONTRACT.gateway.routes,
-);
+const ROUTES = Object.freeze(CONTROL_SESSION_CONTRACT.gateway.routes);
+
+type ControlSession = Readonly<{ dispatch: (frame: Uint8Array, signal?: AbortSignal) => Promise<Uint8Array> }>;
+type UnixSocketResponse = Readonly<{ status: number; contentType: string | string[] | undefined; bytes: Uint8Array }>;
+type DecodedControlFrame = Readonly<{ operation: string }> & Record<string, unknown>;
+type NotificationDecoder = (value: unknown) => Record<string, unknown>;
+type FrameEmitter = (frame: Uint8Array, signal?: AbortSignal) => void | Promise<void>;
+
+const V4_ROUTES = Object.freeze({
+	acquire: "/api/ceal/agent/v1/control/acquire",
+	projection: "/api/ceal/agent/v1/control/projection",
+	recheck: "/api/ceal/agent/v1/control/recheck",
+	call: "/api/ceal/agent/v1/call",
+	complete: "/api/ceal/agent/v1/control/complete",
+});
+const V5_ROUTES = Object.freeze({
+	...V4_ROUTES,
+	notification_receipt: "/api/ceal/agent/v1/control/notification-receipt",
+});
+
+type CandidateProtocol = Readonly<{
+	decodeCealLeasedConsumerCapabilityNotification?: NotificationDecoder;
+	decodeCealLeasedConsumerNotificationControlRequest?: (value: unknown) => DecodedControlFrame;
+	decodeCealLeasedConsumerNotificationControlResponse?: (value: unknown) => DecodedControlFrame;
+}>;
+const CANDIDATE_PROTOCOL = CealProtocol as unknown as CandidateProtocol;
 assertEmbeddedControlSessionContract(CONTROL_SESSION_CONTRACT);
 
-type ControlSession = Readonly<{ dispatch: (frame: Uint8Array) => Promise<Uint8Array> }>;
-type UnixSocketResponse = Readonly<{ status: number; contentType: string | string[] | undefined; bytes: Uint8Array }>;
+export interface LeasedConsumerNotificationChannel {
+	readonly stream: AsyncIterable<Uint8Array>;
+	readonly close: () => Promise<void>;
+}
+
+export interface LeasedConsumerNotificationRuntime {
+	/** Test seam only. Production resolves the decoder from the selected protocol package. */
+	readonly decodeNotification?: NotificationDecoder;
+}
+
+interface AbortableWritable {
+	write(frame: Uint8Array, callback?: (error?: Error | null) => void): boolean;
+	destroy(): void;
+}
+
+/**
+ * v4 writes one response per request and retains its established non-blocking
+ * behavior. v5 can emit unsolicited notifications, so its selected transport
+ * supplies a lifecycle signal and waits for the shared stream to drain.
+ */
+export function writeLeasedConsumerAgentFrame(stream: AbortableWritable, frame: Uint8Array, signal?: AbortSignal): void | Promise<void> {
+	if (!signal) {
+		stream.write(frame);
+		return;
+	}
+	return new Promise<void>((resolve, reject) => {
+		let settled = false;
+		const finish = (action: () => void) => {
+			if (settled) return;
+			settled = true;
+			signal.removeEventListener("abort", abortWrite);
+			action();
+		};
+		const abortWrite = () => {
+			stream.destroy();
+			finish(() => reject(new Error("control_aborted")));
+		};
+		if (signal.aborted) return abortWrite();
+		signal.addEventListener("abort", abortWrite, { once: true });
+		stream.write(frame, (error) => finish(() => (error ? reject(error) : resolve())));
+	});
+}
 
 export interface LeasedConsumerControlSessionRuntime {
 	/** Test seam only. The shipped carrier reads and closes protected FD 4. */
@@ -70,7 +140,7 @@ export interface LeasedConsumerControlSessionRuntime {
 	readonly closeProtectedSession?: () => Promise<void>;
 	/** Test seam only. The shipped carrier makes one fixed-route Unix-socket POST. */
 	readonly requestUnixSocket?: (
-		input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number }>,
+		input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number; signal?: AbortSignal }>,
 	) => Promise<UnixSocketResponse>;
 	/** Test seam only. The shipped carrier gives protected FD 4 two seconds. */
 	readonly monotonicNow?: () => number;
@@ -122,7 +192,8 @@ export async function openLeasedConsumerControlSession(runtime: LeasedConsumerCo
 		if (bytes === null) throw new Error("session_unavailable");
 		const session = decodeCealLeasedConsumerControlSession(parseStrictJson(bytes, MAX_SESSION_BYTES));
 		return Object.freeze({
-			dispatch: async (frame) => dispatch(session.socket_path, session.service_credential, frame, runtime, operationDeadlineMs),
+			dispatch: async (frame, signal) =>
+				dispatch(session.socket_path, session.service_credential, frame, runtime, operationDeadlineMs, signal),
 		});
 	} finally {
 		await close();
@@ -134,10 +205,11 @@ export async function openLeasedConsumerControlSession(runtime: LeasedConsumerCo
  * oversized, or transport-failed frame closes without a response and never
  * retries through a public/client session path.
  */
-export async function runLeasedConsumerControlSession(
+async function runLeasedConsumerControlSession(
 	stream: AsyncIterable<Uint8Array>,
 	session: ControlSession,
-	emit: (frame: Uint8Array) => void,
+	emit: FrameEmitter,
+	signal?: AbortSignal,
 ): Promise<boolean> {
 	let pending = "";
 	const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -152,8 +224,9 @@ export async function runLeasedConsumerControlSession(
 				const text = pending.slice(0, newline);
 				pending = pending.slice(newline + 1);
 				if (text.length === 0 || text.endsWith("\r")) throw new Error("invalid_frame");
-				const response = await session.dispatch(new TextEncoder().encode(text));
-				emit(response);
+				const response = await session.dispatch(new TextEncoder().encode(text), signal);
+				if (signal?.aborted) throw new Error("control_aborted");
+				await emit(response, signal);
 			}
 		}
 		pending += decoder.decode();
@@ -167,6 +240,132 @@ export async function runLeasedConsumerControlSession(
 		process.stderr.write(`ceal-worker control-session failed: ${error instanceof Error ? error.message : "unknown"}\n`);
 		return false;
 	}
+}
+
+/**
+ * Validates bounded FD5 NDJSON with the selected Gateway protocol decoder, then
+ * forwards only the canonical notification value to the existing Agent stdout.
+ * This function owns no credential, route, or provider payload.
+ */
+async function runLeasedConsumerNotificationStream(
+	stream: AsyncIterable<Uint8Array>,
+	emit: FrameEmitter,
+	runtime: LeasedConsumerNotificationRuntime = {},
+	signal?: AbortSignal,
+): Promise<boolean> {
+	const maximum = CONTROL_SESSION_CONTRACT.notification_channel?.maximum_frame_bytes ?? 4 * 1024;
+	const decodeNotification = runtime.decodeNotification ?? CANDIDATE_PROTOCOL.decodeCealLeasedConsumerCapabilityNotification;
+	try {
+		if (!decodeNotification) throw new Error("notification_protocol_unavailable");
+		await consumeNdjson(stream, maximum, async (text) => {
+			const decoded = decodeNotification(parseStrictJson(new TextEncoder().encode(text), maximum));
+			await emit(new TextEncoder().encode(`${JSON.stringify(decoded)}\n`), signal);
+		});
+		return true;
+	} catch (error) {
+		process.stderr.write(`ceal-worker notification-session failed: ${error instanceof Error ? error.message : "unknown"}\n`);
+		return false;
+	}
+}
+
+/**
+ * Runs the request/response and notification halves as one fail-closed pair.
+ * Agent stdin is the lifecycle owner: its close ends FD5; FD5 ending first
+ * closes Agent stdin and makes the pair unsuccessful.
+ */
+export async function runLeasedConsumerControlTransport(
+	agentStream: AsyncIterable<Uint8Array>,
+	session: ControlSession,
+	emit: FrameEmitter,
+	notificationChannel: LeasedConsumerNotificationChannel | undefined,
+	closeAgentStream: () => Promise<void>,
+	notificationRuntime: LeasedConsumerNotificationRuntime = {},
+): Promise<boolean> {
+	if (!notificationChannel) return runLeasedConsumerControlSession(agentStream, session, emit);
+	const abort = new AbortController();
+	let emitting = Promise.resolve();
+	let emissionFailed = false;
+	let emissionFailure: unknown;
+	const serialEmit: FrameEmitter = (frame) => {
+		const next = emitting.then(() => {
+			if (emissionFailed) throw emissionFailure;
+			return emit(frame, abort.signal);
+		});
+		emitting = next.then(
+			() => undefined,
+			(error) => {
+				emissionFailed = true;
+				emissionFailure = error;
+			},
+		);
+		return next;
+	};
+	let agentFinished = false;
+	let notificationEndedEarly = false;
+	const notification = runLeasedConsumerNotificationStream(notificationChannel.stream, serialEmit, notificationRuntime, abort.signal).then(
+		async (clean) => {
+			if (!agentFinished) {
+				notificationEndedEarly = true;
+				abort.abort();
+				await closeAgentStream();
+			}
+			return clean;
+		},
+	);
+	const controlClean = await runLeasedConsumerControlSession(agentStream, session, serialEmit, abort.signal);
+	agentFinished = true;
+	abort.abort();
+	await notificationChannel.close();
+	const notificationClean = await notification;
+	return controlClean && notificationClean && !notificationEndedEarly;
+}
+
+/** Opens inherited FD5 only when the embedded selected contract declares it. */
+export function openLeasedConsumerNotificationChannel(): LeasedConsumerNotificationChannel | undefined {
+	const contract = CONTROL_SESSION_CONTRACT.notification_channel;
+	if (!contract) return undefined;
+	if (!fstatSync(contract.child_fd).isFIFO()) throw new Error("missing_notification_channel");
+	const stream = createReadStream("/dev/null", {
+		fd: contract.child_fd,
+		autoClose: true,
+		highWaterMark: contract.maximum_frame_bytes,
+	});
+	return Object.freeze({
+		stream,
+		close: () => closeReadable(stream),
+	});
+}
+
+async function consumeNdjson(
+	stream: AsyncIterable<Uint8Array>,
+	maximum: number,
+	consume: (text: string) => void | Promise<void>,
+): Promise<void> {
+	let pending = "";
+	const decoder = new TextDecoder("utf-8", { fatal: true });
+	for await (const chunk of stream) {
+		if (!(chunk instanceof Uint8Array)) throw new Error("invalid_stream");
+		pending += decoder.decode(chunk, { stream: true });
+		for (;;) {
+			const newline = pending.indexOf("\n");
+			if (newline < 0) break;
+			const text = pending.slice(0, newline);
+			pending = pending.slice(newline + 1);
+			if (text.length === 0 || text.endsWith("\r") || Buffer.byteLength(text, "utf8") > maximum) throw new Error("invalid_frame");
+			await consume(text);
+		}
+		if (Buffer.byteLength(pending, "utf8") > maximum) throw new Error("frame_too_large");
+	}
+	pending += decoder.decode();
+	if (pending.length !== 0) throw new Error("unterminated_frame");
+}
+
+function closeReadable(stream: NodeJS.ReadableStream & { destroyed?: boolean; destroy: () => void }): Promise<void> {
+	if (stream.destroyed) return Promise.resolve();
+	return new Promise<void>((resolve) => {
+		stream.once("close", resolve);
+		stream.destroy();
+	});
 }
 
 async function readProtectedSessionBeforeDeadline(
@@ -207,36 +406,65 @@ async function dispatch(
 	frame: Uint8Array,
 	runtime: LeasedConsumerControlSessionRuntime,
 	operationDeadlineMs: number,
+	signal?: AbortSignal,
 ): Promise<Uint8Array> {
-	const request = decodeCealLeasedConsumerCapabilityControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
+	const request = decodeControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
+	const route = ROUTES[request.operation];
+	if (typeof route !== "string") throw new Error("operation_unavailable");
 	const body = JSON.stringify(request);
-	const response = await requestControlBeforeDeadline(runtime, operationDeadlineMs, () =>
-		(runtime.requestUnixSocket ?? postUnixSocket)({
-			socketPath,
-			path: ROUTES[request.operation],
-			body,
-			credential,
-			deadlineMs: operationDeadlineMs,
-		}),
+	const response = await requestControlBeforeDeadline(
+		runtime,
+		operationDeadlineMs,
+		() =>
+			(runtime.requestUnixSocket ?? postUnixSocket)({
+				socketPath,
+				path: route,
+				body,
+				credential,
+				deadlineMs: operationDeadlineMs,
+				signal,
+			}),
+		signal,
 	);
 	if (response.status !== 200 || !isJsonContentType(response.contentType) || response.bytes.byteLength > MAX_FRAME_BYTES)
 		throw new Error("control_unavailable");
-	const decoded = decodeCealLeasedConsumerCapabilityControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
+	const decoded = decodeControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
 	if (decoded.operation !== request.operation) throw new Error("operation_mismatch");
 	return new TextEncoder().encode(`${JSON.stringify(decoded)}\n`);
+}
+
+function decodeControlRequest(value: unknown): DecodedControlFrame {
+	if (CONTROL_SESSION_CONTRACT.agent_ipc.request_schema_version.endsWith(".v5")) {
+		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest;
+		if (!decode) throw new Error("notification_protocol_unavailable");
+		return decode(value);
+	}
+	return decodeCealLeasedConsumerCapabilityControlRequest(value) as DecodedControlFrame;
+}
+
+function decodeControlResponse(value: unknown): DecodedControlFrame {
+	if (CONTROL_SESSION_CONTRACT.agent_ipc.response_schema_version.endsWith(".v5")) {
+		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse;
+		if (!decode) throw new Error("notification_protocol_unavailable");
+		return decode(value);
+	}
+	return decodeCealLeasedConsumerCapabilityControlResponse(value) as DecodedControlFrame;
 }
 
 async function requestControlBeforeDeadline(
 	runtime: LeasedConsumerControlSessionRuntime,
 	operationDeadlineMs: number,
 	request: () => Promise<UnixSocketResponse>,
+	signal?: AbortSignal,
 ): Promise<UnixSocketResponse> {
+	if (signal?.aborted) throw new Error("control_aborted");
 	const now = runtime.monotonicNow ?? monotonicNow;
 	const setTimer = runtime.setTimer ?? ((callback, milliseconds) => setTimeout(callback, milliseconds));
 	const clearTimer = runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
 	const started = now();
 	let timedOut = false;
 	let timer: unknown;
+	let abortListener: (() => void) | undefined;
 	try {
 		const pending = request();
 		pending.catch(() => undefined);
@@ -246,11 +474,18 @@ async function requestControlBeforeDeadline(
 				resolve(null);
 			}, operationDeadlineMs);
 		});
-		const result = await Promise.race([pending, timeout]);
+		const aborted = new Promise<null>((resolve) => {
+			if (!signal) return;
+			abortListener = () => resolve(null);
+			signal.addEventListener("abort", abortListener, { once: true });
+		});
+		const result = await Promise.race([pending, timeout, aborted]);
+		if (signal?.aborted) throw new Error("control_aborted");
 		if (timedOut || now() - started > operationDeadlineMs || result === null) throw new Error("control_deadline_exceeded");
 		return result;
 	} finally {
 		if (timer !== undefined) clearTimer(timer);
+		if (abortListener) signal?.removeEventListener("abort", abortListener);
 	}
 }
 
@@ -290,7 +525,7 @@ async function readBoundedStream(stream: AsyncIterable<Uint8Array>, maximum: num
 }
 
 function postUnixSocket(
-	input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number }>,
+	input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number; signal?: AbortSignal }>,
 ): Promise<UnixSocketResponse> {
 	const body = Buffer.from(input.body, "utf8");
 	return new Promise((resolve, reject) => {
@@ -298,8 +533,13 @@ function postUnixSocket(
 		const finish = (action: () => void) => {
 			if (!settled) {
 				settled = true;
+				input.signal?.removeEventListener("abort", abortRequest);
 				action();
 			}
+		};
+		const abortRequest = () => {
+			request.destroy();
+			finish(() => reject(new Error("control_aborted")));
 		};
 		const request = httpRequest(
 			{
@@ -337,6 +577,8 @@ function postUnixSocket(
 			finish(() => reject(new Error("request_deadline_exceeded")));
 		});
 		request.once("error", () => finish(() => reject(new Error("request_failed"))));
+		if (input.signal?.aborted) return abortRequest();
+		input.signal?.addEventListener("abort", abortRequest, { once: true });
 		request.end(body);
 	});
 }
@@ -441,8 +683,15 @@ function isJsonContentType(value: string | string[] | undefined): boolean {
 
 function assertEmbeddedControlSessionContract(
 	value: Readonly<{
+		schema_version: string;
 		argv: readonly [string];
 		protected_session: Readonly<{ child_fd: number; schema_version: string; maximum_bytes: number; deadline_ms: number }>;
+		notification_channel?: Readonly<{
+			child_fd: number;
+			schema_version: string;
+			framing: string;
+			maximum_frame_bytes: number;
+		}>;
 		agent_ipc: Readonly<{
 			transport: string;
 			request_schema_version: string;
@@ -453,29 +702,46 @@ function assertEmbeddedControlSessionContract(
 		gateway: Readonly<{
 			transport: string;
 			operation_deadline_bounds_ms: Readonly<{ minimum: number; maximum: number }>;
-			routes: Record<CealLeasedConsumerCapabilityControlOperation, string>;
+			routes: Readonly<Record<string, string>>;
 		}>;
 	}>,
 ): void {
+	const expectedRoutes = value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" ? V5_ROUTES : V4_ROUTES;
+	const exactRoutes =
+		Object.keys(value.gateway.routes).length === Object.keys(expectedRoutes).length &&
+		Object.entries(expectedRoutes).every(([operation, route]) => value.gateway.routes[operation] === route);
+	const v4 =
+		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v2" &&
+		value.notification_channel === undefined &&
+		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v4" &&
+		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v4" &&
+		exactRoutes;
+	const v5 =
+		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" &&
+		value.notification_channel?.child_fd === 5 &&
+		value.notification_channel.schema_version === "ceal.leased_consumer_capability_notification.v5" &&
+		value.notification_channel.framing === "ndjson" &&
+		value.notification_channel.maximum_frame_bytes === 4 * 1024 &&
+		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v5" &&
+		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v5" &&
+		exactRoutes &&
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerCapabilityNotification === "function" &&
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest === "function" &&
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse === "function";
 	if (
+		(!v4 && !v5) ||
 		value.argv[0] !== "--internal-leased-consumer-control-session" ||
 		value.protected_session.child_fd !== 4 ||
 		value.protected_session.schema_version !== "ceal.leased_consumer_control_session.v1" ||
 		value.protected_session.maximum_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES ||
 		value.protected_session.deadline_ms !== 2_000 ||
 		value.agent_ipc.transport !== "stdin_stdout_ndjson" ||
-		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_capability_control_request.v4" ||
-		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_capability_control_response.v4" ||
 		value.agent_ipc.maximum_frame_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES ||
 		value.agent_ipc.serial !== true ||
 		value.gateway.transport !== "unix_socket" ||
 		value.gateway.operation_deadline_bounds_ms.minimum !== 30_000 ||
 		value.gateway.operation_deadline_bounds_ms.maximum !== 600_000 ||
-		value.gateway.operation_deadline_bounds_ms.minimum > value.gateway.operation_deadline_bounds_ms.maximum ||
-		Object.keys(value.gateway.routes).length !== 5 ||
-		Object.entries(ROUTES).some(
-			([operation, route]) => value.gateway.routes[operation as CealLeasedConsumerCapabilityControlOperation] !== route,
-		)
+		value.gateway.operation_deadline_bounds_ms.minimum > value.gateway.operation_deadline_bounds_ms.maximum
 	)
 		throw new Error("invalid_embedded_control_session_contract");
 }

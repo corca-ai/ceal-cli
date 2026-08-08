@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	openLeasedConsumerControlSession,
 	resolveOperationDeadlineMs,
-	runLeasedConsumerControlSession,
+	runLeasedConsumerControlTransport,
+	writeLeasedConsumerAgentFrame,
 } from "../dist/leased-consumer-control-session.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
@@ -55,7 +55,7 @@ test("the embedded control-session contract is refused when its digest does not 
 	// the rejection above would also be satisfied by a copy that cannot load at
 	// all — which is exactly what the first attempt at this test did.
 	const restored = await import(intactEntry);
-	assert.equal(typeof restored.runLeasedConsumerControlSession, "function");
+	assert.equal(typeof restored.runLeasedConsumerControlTransport, "function");
 });
 
 const encoder = new TextEncoder();
@@ -111,10 +111,7 @@ test("private control session carries exactly the five canonical v4 capability o
 	async function* input() {
 		yield encoder.encode(`${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`);
 	}
-	assert.equal(
-		await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))),
-		true,
-	);
+	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))), true);
 	assert.deepEqual(
 		calls.map((call) => ({ socketPath: call.socketPath, path: call.path, credential: call.credential })),
 		[
@@ -148,6 +145,274 @@ test("private control session carries exactly the five canonical v4 capability o
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
 });
 
+test("candidate notifications are protocol-decoded and forwarded as bounded canonical Agent frames", async () => {
+	const notification = notificationFixture();
+	const emitted = [];
+	const decodeNotification = (value) => {
+		assert.deepEqual(value, notification);
+		return value;
+	};
+	async function* input() {
+		// The chunk deliberately exceeds one frame's 4 KiB cap while every one
+		// of its 20 newline-delimited frames remains individually bounded.
+		yield encoder.encode(`${Array.from({ length: 20 }, () => JSON.stringify(notification)).join("\n")}\n`);
+	}
+	assert.equal(
+		await runNotificationStreamForTest(input(), (frame) => emitted.push(new TextDecoder().decode(frame)), {
+			decodeNotification,
+		}),
+		true,
+	);
+	assert.equal(emitted.length, 20);
+	assert.ok(emitted.every((frame) => frame === `${JSON.stringify(notification)}\n`));
+});
+
+test("notification input stops reading until the prior Agent stdout frame drains", async () => {
+	let decoded = 0;
+	let releaseFirst;
+	const firstDrained = new Promise((resolve) => {
+		releaseFirst = resolve;
+	});
+	async function* input() {
+		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n${JSON.stringify(notificationFixture())}\n`);
+	}
+	const running = runNotificationStreamForTest(
+		input(),
+		async () => {
+			if (decoded === 1) await firstDrained;
+		},
+		{
+			decodeNotification: (value) => {
+				decoded += 1;
+				return value;
+			},
+		},
+	);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(decoded, 1);
+	releaseFirst();
+	assert.equal(await running, true);
+	assert.equal(decoded, 2);
+});
+
+test("malformed, duplicate-key, oversized, and unterminated notification frames fail closed", async () => {
+	const cases = [
+		'{"schema_version":"ceal.leased_consumer_capability_notification.v5","schema_version":"ceal.leased_consumer_capability_notification.v5"}\n',
+		`${"x".repeat(4 * 1024 + 1)}\n`,
+		JSON.stringify(notificationFixture()),
+	];
+	for (const frame of cases) {
+		const emitted = [];
+		async function* input() {
+			yield encoder.encode(frame);
+		}
+		assert.equal(
+			await runNotificationStreamForTest(input(), (value) => emitted.push(value), {
+				decodeNotification: (value) => value,
+			}),
+			false,
+		);
+		assert.deepEqual(emitted, []);
+	}
+});
+
+test("FD5 notification forwarding does not consume or wait for the pending serial Agent response", async () => {
+	let resolveDispatch;
+	const pendingDispatch = new Promise((resolve) => {
+		resolveDispatch = resolve;
+	});
+	let closeNotifications;
+	const notificationsClosed = new Promise((resolve) => {
+		closeNotifications = resolve;
+	});
+	const output = [];
+	async function* agentInput() {
+		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+	}
+	async function* notificationInput() {
+		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
+		await notificationsClosed;
+	}
+	const running = runLeasedConsumerControlTransport(
+		agentInput(),
+		{ dispatch: () => pendingDispatch },
+		(frame) => output.push(JSON.parse(new TextDecoder().decode(frame))),
+		{ stream: notificationInput(), close: async () => closeNotifications() },
+		async () => {},
+		{ decodeNotification: (value) => value },
+	);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(
+		output.map((frame) => frame.schema_version),
+		["ceal.leased_consumer_capability_notification.v5"],
+	);
+	resolveDispatch(encoder.encode(`${JSON.stringify(responseFor("acquire"))}\n`));
+	assert.equal(await running, true);
+	assert.deepEqual(
+		output.map((frame) => frame.schema_version),
+		["ceal.leased_consumer_capability_notification.v5", "ceal.leased_consumer_capability_control_response.v4"],
+	);
+});
+
+test("the shared emitter stays failed after its first output failure", async () => {
+	let rejectFirstWrite;
+	const firstWrite = new Promise((_resolve, reject) => {
+		rejectFirstWrite = reject;
+	});
+	let closeNotifications;
+	const notificationsClosed = new Promise((resolve) => {
+		closeNotifications = resolve;
+	});
+	async function* agentInput() {
+		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+	}
+	async function* notificationInput() {
+		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
+		await notificationsClosed;
+	}
+	let writes = 0;
+	const running = runLeasedConsumerControlTransport(
+		agentInput(),
+		{ dispatch: async () => encoder.encode(`${JSON.stringify(responseFor("acquire"))}\n`) },
+		() => {
+			writes += 1;
+			return firstWrite;
+		},
+		{ stream: notificationInput(), close: async () => closeNotifications() },
+		async () => {},
+		{ decodeNotification: (value) => value },
+	);
+	await new Promise((resolve) => setImmediate(resolve));
+	rejectFirstWrite(new Error("stdout_failed"));
+	assert.equal(await running, false);
+	assert.equal(writes, 1);
+});
+
+test("FD5 ending before Agent stdin closes the pair and cannot be reported clean", async () => {
+	let closeAgent;
+	const agentClosed = new Promise((resolve) => {
+		closeAgent = resolve;
+	});
+	async function* agentInput() {
+		await agentClosed;
+		yield new Uint8Array();
+	}
+	async function* notificationInput() {
+		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
+	}
+	assert.equal(
+		await runLeasedConsumerControlTransport(
+			agentInput(),
+			{ dispatch: async () => assert.fail("no Agent frame expected") },
+			() => {},
+			{ stream: notificationInput(), close: async () => {} },
+			async () => closeAgent(),
+			{ decodeNotification: (value) => value },
+		),
+		false,
+	);
+});
+
+test("FD5 ending aborts an outstanding Gateway request before its operation deadline and emits no late response", async () => {
+	const carrier = await openLeasedConsumerControlSession({
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		requestUnixSocket: () => new Promise(() => {}),
+	});
+	let closeAgent;
+	const agentClosed = new Promise((resolve) => {
+		closeAgent = resolve;
+	});
+	async function* agentInput() {
+		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+		await agentClosed;
+	}
+	async function* notificationInput() {
+		yield new Uint8Array();
+	}
+	const output = [];
+	const running = runLeasedConsumerControlTransport(
+		agentInput(),
+		carrier,
+		(frame) => output.push(frame),
+		{ stream: notificationInput(), close: async () => {} },
+		async () => closeAgent(),
+		{ decodeNotification: (value) => value },
+	);
+	const result = await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("deadline_not_cancelled"), 100))]);
+	assert.equal(result, false);
+	assert.deepEqual(output, []);
+});
+
+test("Agent shutdown aborts a notification write stalled on stdout backpressure", async () => {
+	let markWriteStarted;
+	const writeStarted = new Promise((resolve) => {
+		markWriteStarted = resolve;
+	});
+	let closeNotifications;
+	const notificationsClosed = new Promise((resolve) => {
+		closeNotifications = resolve;
+	});
+	async function* agentInput() {
+		await writeStarted;
+		yield new Uint8Array();
+	}
+	async function* notificationInput() {
+		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
+		await notificationsClosed;
+	}
+	const running = runLeasedConsumerControlTransport(
+		agentInput(),
+		{ dispatch: async () => assert.fail("no Agent frame expected") },
+		(_frame, signal) =>
+			new Promise((_resolve, reject) => {
+				markWriteStarted();
+				signal.addEventListener("abort", () => reject(new Error("control_aborted")), { once: true });
+			}),
+		{ stream: notificationInput(), close: async () => closeNotifications() },
+		async () => {},
+		{ decodeNotification: (value) => value },
+	);
+	assert.equal(await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("stdout_not_cancelled"), 100))]), false);
+});
+
+test("the shipped Agent writer destroys a backpressured stdout stream and rejects exactly once on abort", async () => {
+	let callback;
+	let destroys = 0;
+	const stream = {
+		write: (_frame, next) => {
+			callback = next;
+			return false;
+		},
+		destroy: () => {
+			destroys += 1;
+		},
+	};
+	const abort = new AbortController();
+	const writing = writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal);
+	abort.abort();
+	await assert.rejects(writing, /control_aborted/u);
+	assert.equal(destroys, 1);
+	callback?.();
+	assert.equal(destroys, 1);
+
+	let v4Writes = 0;
+	assert.equal(
+		writeLeasedConsumerAgentFrame(
+			{
+				write: () => {
+					v4Writes += 1;
+					return false;
+				},
+				destroy: () => assert.fail("v4 does not own a notification shutdown signal"),
+			},
+			encoder.encode("v4 response"),
+		),
+		undefined,
+	);
+	assert.equal(v4Writes, 1);
+});
+
 test("each carrier binds only the socket path in its own protected session", async () => {
 	const paths = ["/run/user/1001/ceal/one.sock", "/run/user/1001/ceal/two.sock"];
 	const observed = [];
@@ -163,7 +428,7 @@ test("each carrier binds only the socket path in its own protected session", asy
 		async function* input() {
 			yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 		}
-		assert.equal(await runLeasedConsumerControlSession(input(), carrier, () => {}), true);
+		assert.equal(await runControlSessionForTest(input(), carrier, () => {}), true);
 	}
 	assert.deepEqual(observed, paths);
 });
@@ -197,7 +462,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_capability_control_request.v4","operation":"acquire","input":{}}\n',
 		);
 	}
-	assert.equal(await runLeasedConsumerControlSession(malformed(), carrier, (frame) => output.push(frame)), false);
+	assert.equal(await runControlSessionForTest(malformed(), carrier, (frame) => output.push(frame)), false);
 	assert.equal(calls, 0);
 	assert.deepEqual(output, []);
 });
@@ -248,7 +513,7 @@ test("legacy and unknown private control grammars make zero control requests and
 		async function* input() {
 			yield encoder.encode(`${JSON.stringify(frame)}\n`);
 		}
-		assert.equal(await runLeasedConsumerControlSession(input(), carrier, (value) => output.push(value)), false);
+		assert.equal(await runControlSessionForTest(input(), carrier, (value) => output.push(value)), false);
 		assert.equal(calls, 0);
 		assert.deepEqual(output, []);
 	}
@@ -305,7 +570,7 @@ test("a Gateway control operation that never answers is bounded and emits no Age
 	async function* input() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
-	assert.equal(await runLeasedConsumerControlSession(input(), carrier, (frame) => output.push(frame)), false);
+	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(frame)), false);
 	assert.deepEqual(output, []);
 });
 
@@ -370,7 +635,7 @@ test("an in-bounds injected operation deadline bounds every Gateway control oper
 	async function* input() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
-	assert.equal(await runLeasedConsumerControlSession(input(), carrier, () => {}), true);
+	assert.equal(await runControlSessionForTest(input(), carrier, () => {}), true);
 	assert.deepEqual(deadlines, [120_000]);
 	assert.ok(timers.includes(120_000));
 	assert.ok(!timers.includes(30_000));
@@ -422,8 +687,65 @@ function slowWriteClock() {
 	return () => (calls++ < 3 ? 0 : 35_000);
 }
 
+function runControlSessionForTest(stream, control, emit) {
+	return runLeasedConsumerControlTransport(stream, control, emit, undefined, async () => {});
+}
+
+async function runNotificationStreamForTest(stream, emit, runtime) {
+	let finishAgent;
+	let closeNotifications;
+	let markSourceFinished;
+	const agentFinished = new Promise((resolve) => {
+		finishAgent = resolve;
+	});
+	const notificationsClosed = new Promise((resolve) => {
+		closeNotifications = resolve;
+	});
+	const sourceFinished = new Promise((resolve) => {
+		markSourceFinished = resolve;
+	});
+	async function* agentInput() {
+		await agentFinished;
+		yield new Uint8Array();
+	}
+	async function* heldNotificationInput() {
+		try {
+			for await (const chunk of stream) yield chunk;
+			markSourceFinished();
+			await notificationsClosed;
+		} finally {
+			markSourceFinished();
+		}
+	}
+	const running = runLeasedConsumerControlTransport(
+		agentInput(),
+		{ dispatch: async () => assert.fail("no Agent control frame expected") },
+		emit,
+		{ stream: heldNotificationInput(), close: async () => closeNotifications() },
+		async () => finishAgent(),
+		runtime,
+	);
+	await Promise.race([running, sourceFinished]);
+	finishAgent();
+	return running;
+}
+
 function leaseInput() {
 	return { event_ref: "event:fixture", lease_ref: "lease:fixture", lease_fence: 1 };
+}
+function notificationFixture() {
+	return {
+		schema_version: "ceal.leased_consumer_capability_notification.v5",
+		kind: "abort_requested",
+		notification_sequence: 1,
+		event_ref: "event:fixture",
+		event_revision: 1,
+		runner_ref: "runner:fixture",
+		consumer_ref: "consumer:fixture",
+		consumer_generation: 1,
+		lease_ref: "lease:fixture",
+		lease_fence: 1,
+	};
 }
 function responseFor(operation) {
 	const base = { schema_version: "ceal.leased_consumer_capability_control_response.v4", operation };

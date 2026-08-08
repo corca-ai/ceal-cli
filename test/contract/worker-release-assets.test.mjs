@@ -217,6 +217,54 @@ test("private control-session release input accepts only its exact capability-co
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 });
 
+test("private control-session release input accepts the exact candidate v5 FD5 and receipt grammar as one pair", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-control-session-v5-contract-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const contractPath = path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
+	mkdirSync(path.dirname(contractPath), { recursive: true });
+	const candidateLock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	candidateLock.protocol.version = "0.72.13";
+	candidateLock.gateway.tag = "gateway-protocol-handoff-v0.72.13";
+	writeFileSync(path.join(root, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(candidateLock, null, 2)}\n`);
+	const candidate = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	candidate.schema_version = "ceal.worker_private_leased_consumer_control_session_contract.v3";
+	candidate.notification_channel = {
+		child_fd: 5,
+		schema_version: "ceal.leased_consumer_capability_notification.v5",
+		framing: "ndjson",
+		maximum_frame_bytes: 4096,
+	};
+	candidate.agent_ipc.request_schema_version = "ceal.leased_consumer_capability_control_request.v5";
+	candidate.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v5";
+	candidate.gateway.routes.notification_receipt = "/api/ceal/agent/v1/control/notification-receipt";
+	candidate.gateway_protocol_handoff.gateway_tag = candidateLock.gateway.tag;
+	writeFileSync(contractPath, `${JSON.stringify(candidate, null, 2)}\n`);
+	const accepted = readControlSessionContract(contractPath, { repoRoot: root }).value;
+	assert.equal(accepted.notification_channel.child_fd, 5);
+	assert.equal(accepted.gateway.routes.notification_receipt, "/api/ceal/agent/v1/control/notification-receipt");
+	const staleHandoff = structuredClone(candidate);
+	const staleLock = structuredClone(candidateLock);
+	staleLock.protocol.version = "0.72.12";
+	staleLock.gateway.tag = "gateway-protocol-handoff-v0.72.12";
+	staleHandoff.gateway_protocol_handoff.gateway_tag = staleLock.gateway.tag;
+	writeFileSync(path.join(root, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(staleLock, null, 2)}\n`);
+	writeFileSync(contractPath, `${JSON.stringify(staleHandoff, null, 2)}\n`);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
+	writeFileSync(path.join(root, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(candidateLock, null, 2)}\n`);
+
+	for (const mutate of [
+		(value) => (value.notification_channel.child_fd = 4),
+		(value) => (value.notification_channel.maximum_frame_bytes = 4097),
+		(value) => (value.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v4"),
+		(value) => delete value.gateway.routes.notification_receipt,
+	]) {
+		const invalid = structuredClone(candidate);
+		mutate(invalid);
+		writeFileSync(contractPath, `${JSON.stringify(invalid, null, 2)}\n`);
+		assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
+	}
+});
+
 test("native source verification refuses a stale generated Gateway handoff before bundling", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-handoff-generated-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));

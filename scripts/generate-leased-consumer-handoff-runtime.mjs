@@ -148,12 +148,16 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		!Array.isArray(object) &&
 		Object.keys(object).length === keys.length &&
 		keys.every((key) => key in object);
-	const routes = {
+	const v4Routes = {
 		acquire: "/api/ceal/agent/v1/control/acquire",
 		projection: "/api/ceal/agent/v1/control/projection",
 		recheck: "/api/ceal/agent/v1/control/recheck",
 		call: "/api/ceal/agent/v1/call",
 		complete: "/api/ceal/agent/v1/control/complete",
+	};
+	const v5Routes = {
+		...v4Routes,
+		notification_receipt: "/api/ceal/agent/v1/control/notification-receipt",
 	};
 	let lock;
 	try {
@@ -161,9 +165,37 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	} catch {
 		throw new Error("invalid_control_session_contract");
 	}
+	const v4 =
+		exact(value, ["schema_version", "argv", "protected_session", "agent_ipc", "gateway", "gateway_protocol_handoff", "non_claims"]) &&
+		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v2" &&
+		value.agent_ipc?.request_schema_version === "ceal.leased_consumer_capability_control_request.v4" &&
+		value.agent_ipc?.response_schema_version === "ceal.leased_consumer_capability_control_response.v4" &&
+		exact(value.gateway?.routes, Object.keys(v4Routes)) &&
+		Object.entries(v4Routes).every(([operation, route]) => value.gateway.routes[operation] === route);
+	const v5 =
+		exact(value, [
+			"schema_version",
+			"argv",
+			"protected_session",
+			"notification_channel",
+			"agent_ipc",
+			"gateway",
+			"gateway_protocol_handoff",
+			"non_claims",
+		]) &&
+		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" &&
+		exact(value.notification_channel, ["child_fd", "schema_version", "framing", "maximum_frame_bytes"]) &&
+		value.notification_channel.child_fd === 5 &&
+		value.notification_channel.schema_version === "ceal.leased_consumer_capability_notification.v5" &&
+		value.notification_channel.framing === "ndjson" &&
+		value.notification_channel.maximum_frame_bytes === 4 * 1024 &&
+		value.agent_ipc?.request_schema_version === "ceal.leased_consumer_capability_control_request.v5" &&
+		value.agent_ipc?.response_schema_version === "ceal.leased_consumer_capability_control_response.v5" &&
+		exact(value.gateway?.routes, Object.keys(v5Routes)) &&
+		Object.entries(v5Routes).every(([operation, route]) => value.gateway.routes[operation] === route) &&
+		protocolVersionAtLeast(lock?.protocol?.version, [0, 72, 13]);
 	if (
-		!exact(value, ["schema_version", "argv", "protected_session", "agent_ipc", "gateway", "gateway_protocol_handoff", "non_claims"]) ||
-		value.schema_version !== "ceal.worker_private_leased_consumer_control_session_contract.v2" ||
+		(!v4 && !v5) ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		value.argv[0] !== "--internal-leased-consumer-control-session" ||
@@ -174,8 +206,6 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.protected_session.deadline_ms !== 2_000 ||
 		!exact(value.agent_ipc, ["transport", "request_schema_version", "response_schema_version", "maximum_frame_bytes", "serial"]) ||
 		value.agent_ipc.transport !== "stdin_stdout_ndjson" ||
-		value.agent_ipc.request_schema_version !== "ceal.leased_consumer_capability_control_request.v4" ||
-		value.agent_ipc.response_schema_version !== "ceal.leased_consumer_capability_control_response.v4" ||
 		value.agent_ipc.maximum_frame_bytes !== 32 * 1024 ||
 		value.agent_ipc.serial !== true ||
 		!exact(value.gateway, ["transport", "operation_deadline_bounds_ms", "routes"]) ||
@@ -184,8 +214,6 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.gateway.operation_deadline_bounds_ms.minimum !== 30_000 ||
 		value.gateway.operation_deadline_bounds_ms.maximum !== 600_000 ||
 		value.gateway.operation_deadline_bounds_ms.minimum > value.gateway.operation_deadline_bounds_ms.maximum ||
-		!exact(value.gateway.routes, Object.keys(routes)) ||
-		!Object.entries(routes).every(([operation, route]) => value.gateway.routes[operation] === route) ||
 		!exact(value.gateway_protocol_handoff, ["lock_file", "gateway_tag", "gateway_commit", "protocol_tree", "archive_sha256"]) ||
 		value.gateway_protocol_handoff.lock_file !== "gateway-protocol-handoff-lock.json" ||
 		value.gateway_protocol_handoff.gateway_tag !== lock?.gateway?.tag ||
@@ -198,6 +226,15 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	)
 		throw new Error("invalid_control_session_contract");
 	return Object.freeze({ bytes, value: Object.freeze(value), sha256: createHash("sha256").update(bytes).digest("hex") });
+}
+
+function protocolVersionAtLeast(value, minimum) {
+	if (typeof value !== "string" || !/^\d+[.]\d+[.]\d+$/u.test(value)) return false;
+	const parts = value.split(".").map(Number);
+	return (
+		parts.some((part, index) => part > minimum[index] && parts.slice(0, index).every((prior, priorIndex) => prior === minimum[priorIndex])) ||
+		parts.every((part, index) => part === minimum[index])
+	);
 }
 
 /**

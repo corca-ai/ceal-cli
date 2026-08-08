@@ -27,6 +27,7 @@ const CONTROL_CONFORMANCE_SCHEMAS = new Set([
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v1",
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v4",
+	"ceal.gateway_leased_consumer_control_conformance_handoff.v5",
 ]);
 const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";

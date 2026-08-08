@@ -10,7 +10,9 @@ import { LEASED_CONSUMER_CARRIER_ARGV, readLeasedConsumerRequest, runLeasedConsu
 import {
 	LEASED_CONSUMER_CONTROL_SESSION_ARGV,
 	openLeasedConsumerControlSession,
-	runLeasedConsumerControlSession,
+	openLeasedConsumerNotificationChannel,
+	runLeasedConsumerControlTransport,
+	writeLeasedConsumerAgentFrame,
 } from "./leased-consumer-control-session.js";
 import { createCealSessionStore } from "./profile-store.js";
 import { createCealReceiptSpoolStore } from "./receipt-spool.js";
@@ -37,11 +39,16 @@ if (process.argv.slice(2).length === 1 && process.argv[2] === LEASED_CONSUMER_CA
 		);
 } else if (process.argv.slice(2).length === 1 && process.argv[2] === LEASED_CONSUMER_CONTROL_SESSION_ARGV) {
 	void openLeasedConsumerControlSession()
-		.then((session) =>
-			runLeasedConsumerControlSession(process.stdin, session, (frame) => {
-				process.stdout.write(frame);
-			}),
-		)
+		.then((session) => {
+			const notificationChannel = openLeasedConsumerNotificationChannel();
+			return runLeasedConsumerControlTransport(
+				process.stdin,
+				session,
+				(frame, signal) => writeLeasedConsumerAgentFrame(process.stdout, frame, signal),
+				notificationChannel,
+				() => closeProcessStdin(),
+			);
+		})
 		.then(
 			(cleanClose) => {
 				process.exitCode = cleanClose ? 0 : 3;
@@ -52,6 +59,14 @@ if (process.argv.slice(2).length === 1 && process.argv[2] === LEASED_CONSUMER_CA
 		);
 } else {
 	runPublicCli();
+}
+
+function closeProcessStdin(): Promise<void> {
+	if (process.stdin.destroyed) return Promise.resolve();
+	return new Promise<void>((resolve) => {
+		process.stdin.once("close", resolve);
+		process.stdin.destroy();
+	});
 }
 
 function runPublicCli(): void {
