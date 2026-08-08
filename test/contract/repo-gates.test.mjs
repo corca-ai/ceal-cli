@@ -645,13 +645,25 @@ test("the pre-push hook propagates the gate's exit code and never blocks on its 
 	const bin = path.join(scratch, "bin");
 	mkdirSync(bin, { recursive: true });
 	const stub = path.join(bin, "npm");
+	const timingLog = path.join(scratch, "timing", "command-timing.jsonl");
 	const runHook = (refLine, exitCode) => {
 		writeFileSync(stub, `#!/bin/sh\nexit ${exitCode}\n`, { mode: 0o755 });
+		// `cwd: ROOT`, because git runs a pre-push hook from the top of the working
+		// tree and the hook's relative paths depend on it — running it from a scratch
+		// directory tested a situation that cannot happen. Isolation comes from the
+		// environment instead: a stub `npm` ahead on PATH, the ratchet's own skip
+		// switch (the scratch tree is not a repo it could scan), and a timing log
+		// redirected out of the maintainer's own.
 		return spawnSync("sh", [path.join(ROOT, ".githooks/pre-push"), "origin", "git@example.invalid:x/y.git"], {
-			cwd: scratch,
+			cwd: ROOT,
 			input: refLine,
 			encoding: "utf8",
-			env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+			env: {
+				...process.env,
+				PATH: `${bin}:${process.env.PATH}`,
+				CEAL_SKIP_DUP_RATCHET: "1",
+				CEAL_TIMING_LOG: timingLog,
+			},
 		});
 	};
 
@@ -661,15 +673,15 @@ test("the pre-push hook propagates the gate's exit code and never blocks on its 
 	assert.equal(runHook("refs/tags/ceal-v9.9.9 a refs/tags/ceal-v9.9.9 b\n", 7).status, 7, "a tag push must fail closed too");
 
 	// The bookkeeping half. Every write path is best-effort, so a log directory
-	// the hook cannot write must cost a warning, never the push.
-	const unwritable = path.join(scratch, ".charness");
-	mkdirSync(path.join(unwritable, "quality"), { recursive: true });
-	writeFileSync(path.join(unwritable, "quality", "command-timing.jsonl"), `${"x\n".repeat(400)}`);
-	chmodSync(path.join(unwritable, "quality"), 0o500);
+	// the hook cannot write must cost a warning, never the push. Rotation is the
+	// path that gets forgotten, so the log starts over the keep threshold.
+	mkdirSync(path.dirname(timingLog), { recursive: true });
+	writeFileSync(timingLog, `${"x\n".repeat(400)}`);
+	chmodSync(path.dirname(timingLog), 0o500);
 	const blocked = runHook("refs/heads/topic a refs/heads/topic b\n", 0).status;
 	// Restored inline, not in an `after` hook: node:test runs those in registration
 	// order, so the scratch cleanup above would hit EACCES before the restore ran.
-	chmodSync(path.join(unwritable, "quality"), 0o700);
+	chmodSync(path.dirname(timingLog), 0o700);
 	assert.equal(blocked, 0, "an unwritable timing log must not block a green gate");
 });
 

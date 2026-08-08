@@ -28,6 +28,8 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 - `.githooks/pre-push` — iteration gate on branch push, full gate on tag push; `node scripts/install-git-hooks.mjs --check` confirms this clone enforces it.
 - `protocol-vendor-pin.json` + `npm run check:protocol-dev` — vendored-protocol drift and proof/ship divergence.
 - `npm run probe` — declared-effect guard, refuses any route that is not `read_only`.
+- `npm run check:duplication` — boy-scout duplicate ratchet, armed this slice; hook-run, maintainer-local.
+- `npm run lint:shell` — `shellcheck -s sh --severity=warning` over `install-ceal.sh` and the hook; hook-run, maintainer-local.
 
 ## Runtime Signals
 
@@ -43,16 +45,20 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 - Every required binary is present: `node` 22.22.1, `npm` 10.9.4, `rg` 13.0.0, `git` 2.34.1, `gh` 2.92.0, `cosign`, `jq`, `python3`, `shellcheck`.
 - All four workflows run `npm run check` (`ceal-release.yml:119`, `check.yml:155,201`, `npm-package-stage.yml:37`); local and CI prove the same thing.
 - `inventory_adapter_gate_design` now reports 0 findings; `migration_gap` closed this slice.
+- The duplicate ratchet is armed and falsified in both directions: a planted clone of `prewarm-offline-consumer-cache.mjs` hard-blocked with the family named, and removing it returned green. Baseline seeded at 132 code families over `scripts`, both `src` trees, and `test`. It then caught its own front door duplicating `probe-surface.mjs:38-41`, which is now `scripts/lib/exit-with.mjs` — the gate paying for itself on day one.
+- Shell is linted for the first time. `install-ceal.sh` is a signed release asset and `.githooks/pre-push` is the last gate before a push, and `biome` sees neither. The warning tier found a dead variable the installer had been assigning since its byte comparison was removed.
 - The delegated review's two hook defects are fixed and one is now regression-tested. It found that a green gate could still block the push when log rotation failed (an unwritable `.charness/quality` gave `EXIT=2` one line after printing "passed"), and that the hook used `status` as a scratch variable — which this repo's own convention bans, and which kills the hook under `zsh` before the gate runs. Reproduced both, fixed both, and added `repo-gates.test.mjs` coverage that runs the hook with stand-in gate commands: it goes red against the defective shape and green against the fix, verified in both directions. Its precision findings are fixed too — failures now record under their own label so red pushes cannot drag the passing median down, the seconds-resolution and `dist/`-dependency caveats are stated at their sites, and the `AGENTS.md` timing rule no longer points at a log that usually has no full-gate sample.
 
 ## Weak
 
 - Runtime budgets are unset. Samples now exist but n=1 per label, and a threshold picked off one sample is the false-red this repo has already been burned by. Deliberately deferred, not overlooked.
 - `inventory_ci_local_gate_parity` reports all four workflows unmatched unless invoked with `--canonical-gate-pattern 'npm run check'`; there is no adapter key for it, so the invocation is the only carrier. Recorded here because the same finding was recorded on 2026-07-27 and lost.
+- The `noRestrictedGlobals` override for `**/*.mjs` outlived its reason. It was added because the Gateway lane mirrored this source into a harness whose lint did not know those globals; that mirror is gone — `corca-ai/ceal` consumes only `.tgz` artifacts under `vendor/ceal-cli/` and ignores `packages/ceal-client/**` in its own eslint. Kept as a local convention with the false justification corrected in `docs/gates.md` and `biome.json`; dropping it entirely is now defensible.
 - `README.md` is 280 core lines with 2 internal doc links — `long_entrypoint` plus `progressive_disclosure_risk` from `inventory_entrypoint_docs_ergonomics`.
 
 ## Missing
 
+- Neither hook-run gate reaches CI. `check:duplication` and `lint:shell` block a maintainer's push and stand aside everywhere else, so a change that lands without passing through a configured clone is unchecked by both. Honest, but not enforcement.
 - No coverage measurement at all. The adapter declares an 80% floor policy the repo has no way to satisfy or even report against, which reads as enforcement that does not exist.
 
 ## Deferred

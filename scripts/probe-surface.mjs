@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { exitWith } from "./lib/exit-with.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // `cealctl` was a second entry here until its source left this repository. The
@@ -36,8 +37,7 @@ const BINARIES = {
 };
 
 function fail(message) {
-	process.stderr.write(`probe-surface: ${message}\n`);
-	process.exit(2);
+	exitWith("probe-surface", message, 2);
 }
 
 const argv = process.argv.slice(2);

@@ -76,6 +76,25 @@ concept_paths:
   - docs/handoff.md
   - docs/operator-acceptance.md
   - charness-artifacts/quality/latest.md
+# Boy-scout duplicate ratchet. The hard arm blocks a NEW fixable clone family;
+# the boy-scout arm nudges the reviewed ceiling down. Scope is the code this repo
+# actually owns — `packages/ceal-protocol` is a vendored copy this lane may not
+# edit, so linting its duplication would surface findings nobody here can act on,
+# the same reason biome excludes it.
+dup_ratchet:
+  enabled: true
+  floor_F: 0
+  escalation_K: 10
+  scope_paths:
+    - scripts
+    - packages/ceal-client/src
+    - packages/ceal-worker-cli/src
+    - test
+  # Tracked, not `.charness/`: that path is gitignored, and the boy-scout arm
+  # measures stagnation from the commit that last touched the overlay. An
+  # untracked overlay has no anchor and no life outside one clone.
+  review_artifact_path: charness-artifacts/quality/dup-review.json
+  gate_baseline_path: charness-artifacts/quality/dup-ratchet-baseline.json
 gate_commands:
   - npm run check:unit
   - npm run check

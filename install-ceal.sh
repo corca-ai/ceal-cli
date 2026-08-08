@@ -261,7 +261,10 @@ verify_manifest_guide() {
 }
 
 verify_version_output() {
-  binary="$1"; stdout_path="$TMP_DIR/ceal-version.yaml"; stderr_path="$TMP_DIR/ceal-version.stderr"; expected_path="$TMP_DIR/ceal-version.expected.yaml" # retained for older callers
+  # `expected_path` used to live here for a byte comparison against a rendered
+  # document. That comparison is gone (see below) and nothing read the variable
+  # afterwards; shellcheck found it still being assigned.
+  binary="$1"; stdout_path="$TMP_DIR/ceal-version.yaml"; stderr_path="$TMP_DIR/ceal-version.stderr"
   "$binary" version >"$stdout_path" 2>"$stderr_path" || fail "ceal version probe failed"
   [ ! -s "$stderr_path" ] || fail "ceal version probe wrote unexpected stderr"
   # Check the fields this installer actually depends on, not the whole document.

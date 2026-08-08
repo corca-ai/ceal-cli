@@ -45,20 +45,28 @@ its four findings were a fixable preference for `!**/dist` over `!**/dist/**`.
 The exclusion syntax moved and the rule is on; the count above is now true.
 
 `noRestrictedGlobals` is on for `**/*.mjs` only, denying `Response`, `Request`,
-`Headers`, `ReadableStream`, `WritableStream`, and `TransformStream`. It is not a style preference. The
-Gateway lane mirrors this source into a harness whose lint does not know those
-names, so a bare reference passes here and fails there — which is exactly what
-happened: four references in new client tests broke that lane's gate after it
-had already consumed the commit. The idiom this enforces, `globalThis.Response`,
-was already established two lines away in the same file and in nine places in
-`http-transport.test.mjs`; nothing local caught the drift because `biome` knows
-these globals perfectly well.
+`Headers`, `ReadableStream`, `WritableStream`, and `TransformStream`.
+
+Read the reason it was added before deciding what to do with it, because that
+reason is gone. The Gateway lane used to mirror this source into a harness whose
+lint did not know those names, so a bare reference passed here and failed there —
+which is exactly what happened: four references in new client tests broke that
+lane's gate after it had already consumed the commit. That mirror no longer
+exists. `corca-ai/ceal` consumes only packed `.tgz` artifacts under
+`vendor/ceal-cli/`, and its own lint ignores `packages/ceal-client/**` outright,
+so nothing outside this repository lints these files.
+
+What is left is a local convention, and a weaker claim: `globalThis.Response` is
+the more explicit form, and a file that mixes both spellings is drift a reader
+notices before a tool does. That is enough to keep a rule that costs nothing, and
+not enough to defend it if someone wants it gone. It is no longer true that the
+list "grows when the other lane's gate names another global" — there is no other
+lane's gate.
 
 It is scoped to `.mjs` deliberately. In TypeScript, `Response` is usually a
 *type* annotation rather than a runtime global read, and `globalThis.Response`
 is not a substitute there — denying it repo-wide flags four correct type
-positions in `ceal-client`. The list grows when the other lane's gate names
-another global, not by guessing which ones it might dislike.
+positions in `ceal-client`.
 
 Formatting-only commits belong in `.git-blame-ignore-revs`, which
 `npm run hooks:install` wires into the clone.
@@ -204,6 +212,33 @@ act, but the gate has to describe the tree on disk, not the tree Git was told to
 pretend it sees.
 
 Nothing here consults the live `corca-ai/ceal` remote.
+
+## Two Gates That Live In The Hook
+
+`npm run check` runs on GitHub runners that have neither `nose` nor the charness
+quality skill, and an ARM macOS runner does not ship `shellcheck` either. Two
+gates therefore run from `.githooks/pre-push` instead:
+
+- `npm run check:duplication` arms the boy-scout duplicate ratchet. A NEW fixable
+  clone family blocks the push; the reviewed ceiling nudges down over time. The
+  accepted baseline and the reviewed overlay are tracked under
+  `charness-artifacts/quality/` rather than gitignored `.charness/`, because the
+  boy-scout arm measures stagnation from the commit that last touched the
+  overlay — an untracked overlay has no anchor. `scripts/check-dup-ratchet.mjs`
+  is the repo-owned front door: it resolves the skill rather than hardcoding one
+  maintainer's home directory, and `CEAL_SKIP_DUP_RATCHET=1` bypasses it.
+- `npm run lint:shell` runs `shellcheck -s sh --severity=warning` over
+  `install-ceal.sh` and the hook. The info tier is dropped deliberately: every
+  info hit in the installer is intentional idiom — `set -- $version` under
+  `IFS=.` is the semver parse, and `[ -d "$x" ] && [ ! -L "$x" ] || fail` is a
+  guard whose "C may run when A is true" note describes its purpose. Nine
+  directives in a signed installer to silence style notes on correct code is a
+  worse trade than one severity flag. The warning tier still fires, and it is
+  what found a variable the installer had been assigning to nothing.
+
+Both skip loudly rather than failing when their tool is absent. A gate that
+no-ops silently while counted as part of the gate is the failure being avoided;
+saying "skipped, and here is what went unchecked" is not.
 
 ## Probing An Installed Surface
 

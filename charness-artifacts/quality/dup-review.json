@@ -1,0 +1,6 @@
+{
+  "entries": [],
+  "fixable_ceiling": 0,
+  "note": "Reviewed fixable-duplication overlay (item 5). Keyed by family identity (code: offset/path-independent content fingerprint; doc: family_signature). Stores only explicitly-classified families; an unlisted family defaults to 'unreviewed'. fixable_ceiling (count of 'fixable') is one-way and only decreases via a deliberate re-review. nose-baseline.json / doc-nose-baseline.json own drift detection; this overlay owns fixable classification.",
+  "schemaVersion": "charness.quality.dup_review.v1"
+}

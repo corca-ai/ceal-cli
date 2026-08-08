@@ -35,12 +35,12 @@ const DIVERGED = Object.freeze({
 		protocol_tree: LOCK.gateway.protocol_tree,
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
-		// A real tracked file, because the gate now requires one. It points at a
-		// received Gateway-lane decision rather than at this lane's own outbound
-		// request: an outbound request about a resolved divergence is a candidate
-		// for archiving, and archiving it would turn three tests red for a reason
-		// unrelated to the code.
-		disposition_request: "docs/requests/from-gateway-lane/2026-07-27-proof-ship-divergence-decision.md",
+		// A real tracked file, because the gate now requires one. It points at the
+		// directory's own README rather than at any dated request: it used to name
+		// a received Gateway-lane decision, and deleting that correspondence turned
+		// three tests red for a reason unrelated to the code. The README is the one
+		// file under `docs/requests/` that outlives every individual request.
+		disposition_request: "docs/requests/README.md",
 	},
 	non_claims: ["fixture"],
 });

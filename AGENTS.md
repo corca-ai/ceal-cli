@@ -72,6 +72,13 @@ belongs in one of them, with the rule left here.
   and its output is not release or installed-worker proof. The check reaches no
   remote, so it says nothing about the copy falling behind its owner —
   [docs/gates.md](docs/gates.md) says what it does and does not cover.
+- Two gates are **maintainer-local by design**, run by `.githooks/pre-push` and
+  not by `npm run check`: `npm run check:duplication` (the boy-scout duplicate
+  ratchet, needs `nose` plus the charness quality skill) and `npm run lint:shell`
+  (`shellcheck` over `install-ceal.sh` and the hook itself, which `biome` cannot
+  see). Both say so and stand aside on a host that cannot run them, because a
+  gate that no-ops on every CI run while claiming to be part of the gate is worse
+  than an honest local one. `CEAL_SKIP_DUP_RATCHET=1` is the deliberate bypass.
 - Worker routes and their dispatch both derive from `CEAL_SUBCOMMANDS`, so a
   route without a handler is a `tsc` failure. Do not reintroduce a fallthrough
   `else`, and do not remove either half of the pair of gates that keeps the type

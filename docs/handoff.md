@@ -115,4 +115,5 @@ Everything else is owned by the comment at the site and by [gates.md](gates.md).
 
 - [Gate detail](gates.md) · [release and enrollment](release-and-enrollment.md) ·
   [operator acceptance ceiling](operator-acceptance.md)
-- [Release provenance packets](requests/) — history, and a path the tests read
+- [docs/requests/](requests/) — where a divergence declaration must point; the
+  split-era correspondence that filled it was deleted on 2026-08-08 and is in `git log`

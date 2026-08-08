@@ -27,6 +27,8 @@
 		"check:protocol-dev": "node scripts/verify-protocol-vendor-pin.mjs --development && npm --prefix packages/ceal-client test",
 		"hooks:install": "node scripts/install-git-hooks.mjs",
 		"probe": "node scripts/probe-surface.mjs",
+		"check:duplication": "node scripts/check-dup-ratchet.mjs",
+		"lint:shell": "node scripts/lint-shell.mjs",
 		"accept:worker": "node scripts/worker-acceptance-packet.mjs",
 		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",
 		"release:worker:package": "node scripts/build-worker-release-package.mjs",

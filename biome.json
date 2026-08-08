@@ -45,12 +45,12 @@
 							"level": "error",
 							"options": {
 								"deniedGlobals": {
-									"Response": "Use globalThis.Response; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
-									"Request": "Use globalThis.Request; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
-									"Headers": "Use globalThis.Headers; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
-									"ReadableStream": "Use globalThis.ReadableStream; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
-									"WritableStream": "Use globalThis.WritableStream; a bare web global fails the Gateway lane's lint. See docs/gates.md.",
-									"TransformStream": "Use globalThis.TransformStream; a bare web global fails the Gateway lane's lint. See docs/gates.md."
+									"Response": "Use globalThis.Response; this tree spells web globals through globalThis. See docs/gates.md.",
+									"Request": "Use globalThis.Request; this tree spells web globals through globalThis. See docs/gates.md.",
+									"Headers": "Use globalThis.Headers; this tree spells web globals through globalThis. See docs/gates.md.",
+									"ReadableStream": "Use globalThis.ReadableStream; this tree spells web globals through globalThis. See docs/gates.md.",
+									"WritableStream": "Use globalThis.WritableStream; this tree spells web globals through globalThis. See docs/gates.md.",
+									"TransformStream": "Use globalThis.TransformStream; this tree spells web globals through globalThis. See docs/gates.md."
 								}
 							}
 						}

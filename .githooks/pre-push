@@ -30,7 +30,10 @@
 # land without the gate (a docs-only revert, an emergency).
 set -eu
 
-TIMING_LOG=.charness/quality/command-timing.jsonl
+# Relative on purpose: git runs a pre-push hook from the top of the working tree.
+# `CEAL_TIMING_LOG` exists so a test can exercise this file for real without
+# writing stub timings into the maintainer's own log.
+TIMING_LOG=${CEAL_TIMING_LOG:-.charness/quality/command-timing.jsonl}
 TIMING_KEEP=200
 
 record_timing() {
@@ -83,3 +86,13 @@ if [ "$tagged" -eq 1 ]; then
 else
 	run_phase "iteration gate" npm run check:unit
 fi
+
+# Maintainer-local on purpose. The duplicate ratchet needs `nose` and the charness
+# quality skill, which a CI runner has neither of, so it cannot live inside
+# `npm run check` without no-opping on every CI run while claiming to be part of
+# the gate. Here it blocks a maintainer who introduces a new clone family, and
+# says so and stands aside on a host that cannot run it.
+run_phase "duplicate ratchet" node scripts/check-dup-ratchet.mjs
+# Same maintainer-local shape, same reason: `npm run lint` is biome, which sees no
+# shell, and the two files below are a signed release asset and this hook itself.
+run_phase "shell lint" npm run lint:shell
