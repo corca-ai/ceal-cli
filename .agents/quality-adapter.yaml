@@ -74,6 +74,8 @@ startup_probes:
 concept_paths:
   - README.md
   - docs/handoff.md
+  - docs/release-guard-reachability.md
+  - docs/debt.md
   - docs/operator-acceptance.md
   - charness-artifacts/quality/latest.md
 # Boy-scout duplicate ratchet. The hard arm blocks a NEW fixable clone family;

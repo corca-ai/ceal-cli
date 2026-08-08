@@ -66,7 +66,7 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 
 ## Deferred
 
-- `assertWorkerReleaseSourcePath` (`scripts/worker-release-inputs.mjs:220`) has no production caller; the forbidden-path inventory is declared and enforced only from tests. Tracked in `docs/handoff.md`; predates this slice.
+- `assertWorkerReleaseSourcePath` (`scripts/worker-release-inputs.mjs:220`) has no production caller; the forbidden-path inventory is declared and enforced only from tests. Tracked in `docs/release-guard-reachability.md` (slice 2); predates this slice.
 
 ## Advisory
 

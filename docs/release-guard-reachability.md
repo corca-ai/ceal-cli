@@ -16,23 +16,26 @@ found the holes below.
 ## Acceptance
 
 **Deleting any guard call must turn something red.** That is the whole goal in one
-sentence, and it is testable: `worker-release-inputs.test.mjs` does it for the
-protocol pin, and the same shape works for the rest. A slice that ends with a
+sentence, and it is testable *in a test* — `worker-release-inputs.test.mjs` does it
+for the protocol pin by reaching the guard, not by deleting one for real, and the
+same shape works for the rest. A slice that ends with a
 guard still only pinned by a regex has not finished.
 
 ## Slice 1 — cover `scripts/` — done
 
 The third `c8` target: `.c8rc.scripts.json`, `npm run coverage:scripts`, and
-`scripts/coverage-scripts.mjs`. Measured on both `linux-arm64` and `linux-x64` at
-80.59 / 72.60 / 89.75 / 80.59; floors at 80 / 72 / 89 / 80.
+`scripts/coverage-scripts.mjs`. Floors at 80 / 72 / 89 / 80, set from measurements
+on `linux-arm64` and `linux-x64` that differ on branches — gates.md carries both
+numbers and why the difference is load-bearing.
 [gates.md](gates.md#the-third-target-scripts) owns the reasoning — read it before
 touching the floor, the platform list, or the emptiness check.
 
 ## Slice 2 — resolve what it exposes
 
 For each: wire it into the real path, or delete it. **Deleting is a legitimate
-outcome** and often the right one — the goal is that what remains is true, not
-that everything survives.
+outcome** — the goal is that what remains is true, not that everything survives.
+It is not the default: establish whether a surface is untested or unreachable
+before choosing, for every item below and not only the first.
 
 Start here, because slice 1 named it and nothing on this list explains it:
 
@@ -57,16 +60,18 @@ Then the two confirmed dead guards:
   tests exercise the unused wrapper, so it can drift from the consumed path with
   nothing noticing.
 
-Next by measurement: `build-worker-release-assets.mjs` at 66.44% branch and
-`verify-gateway-protocol-consumer.mjs` at 60.24%.
+Next by measurement, both branch coverage: `build-worker-release-assets.mjs` at
+66.44% and `verify-gateway-protocol-consumer.mjs` at 60.24%. (gates.md quotes the
+latter's *statements* figure for a different purpose; do not read them as one.)
 
-**A zero is a question, not a verdict.** `lint-shell.mjs` at 0% is honest — it is
-hook-only. But hook-only does not imply zero: `check-dup-ratchet.mjs` is hook-only
-too and reads about 49%, because `repo-gates.test.mjs:730` runs the hook. And
-`install-git-hooks.mjs` at 0% *is* exercised, from a throwaway clone whose temp
-path remaps to nothing. Read [gates.md](gates.md) before acting on one.
+**A zero is a question, not a verdict.** Two of the three on this report are not
+findings at all, and one of them is exercised despite reading 0%. gates.md names
+which and why; read it before acting on a zero.
 
 ## Slice 3 — the two structural holes the audit surfaced
+
+**Decision-first.** Both are knowing holes with a stated tradeoff, so they are the
+operator's to settle before anything moves. Do not implement either unilaterally.
 
 - **`linux-arm64` is signed without `npm run check`.** `ceal-release.yml:118` gates
   the gate on `validate_source == '1'`. That leg gets `tsc`, the SEA build, the
@@ -81,9 +86,7 @@ path remaps to nothing. Read [gates.md](gates.md) before acting on one.
 
 ## Explicitly not in this goal
 
-The signed manifest carries no client identity — no digest or package record for
-`@corca-ai/ceal`, only a shared `version` string, so nothing downstream can detect
-a client substitution that keeps the version number. It is a real hole, and it is a
-manifest schema change that needs a release to prove, which makes it its own goal.
-Same for the README split and the runtime budgets, which need a sample window
-before a threshold is honest.
+The signed manifest's missing client identity, described in [debt.md](debt.md), is
+a real hole and is out of this goal: it is a manifest schema change that needs a
+release to prove, which makes it its own goal. Same for the README split and the
+runtime budgets, which need a sample window before a threshold is honest.

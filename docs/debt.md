@@ -4,7 +4,9 @@ Items known and not scheduled. Each was carried across sessions **unconfirmed**:
 re-check that an item is still true before starting on it, and delete it here
 when it stops being.
 
-Everything not listed is owned by the comment at the site and by
+Work that belongs to the standing goal lives in
+[release-guard-reachability.md](release-guard-reachability.md), not here.
+Everything else not listed is owned by the comment at the site and by
 [gates.md](gates.md).
 
 - **The signed release manifest has no client package.**
