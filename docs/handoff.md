@@ -20,8 +20,8 @@ action.
 - Version `0.74.0` (root and `packages/ceal-worker-cli` agree), latest tag
   `ceal-v0.74.0`. `gateway-protocol-handoff-lock.json` is the single record of
   handoff consumption.
-- **One commit is unpushed: `a0fbbb3`**, documentation only — it records the
-  `linux-x64` coverage measurement.
+- **Two commits are unpushed**: `0cce9f9` and `da52059`, the guard deletions and
+  the test refactor they forced. Both touch code, so the next push runs the gate.
 - `check.yml` is green on both legs (run `31263490521`) after five consecutive red
   runs on a platform-pruned `package-lock.json`. Cause, consequence and the rule
   it earned are in `AGENTS.md` `## Conventions`; the gate is in
@@ -38,13 +38,16 @@ action.
    *range*, not the tip commit — checking `git status` is how this was got wrong
    once already. Verify with `git diff --name-only origin/main..HEAD` before
    pushing, and expect `scope` to report `code=false` with neither leg running.
-2. **Slice 2 continues at `worker-acceptance-packet.mjs`** — 52.64% statements,
-   everything from `:407`. The two dead guards it also named are deleted; see
-   [release-guard-reachability.md](release-guard-reachability.md), including the
-   premise that slice corrected and the open question it left.
-3. **Slice 3 is decision-first**, not implementation: both items are knowing holes
+2. **Slice 4, in its two decided steps**: adopt `knip` — settled, not contingent
+   on what it finds — then build the narrow production-reachability check for the
+   class `knip` structurally cannot see. Slice 2 proved coverage cannot see it
+   either. [release-guard-reachability.md](release-guard-reachability.md) has the
+   reasoning and the trap to avoid.
+3. **Then slice 2's remaining mass**: `worker-acceptance-packet.mjs`, 52.64%
+   statements, everything from `:407`. Its two dead guards are already deleted.
+4. **Slice 3 is decision-first**, not implementation: both items are knowing holes
    to settle with the operator before anything moves.
-4. Do not reopen the coverage run's cost as a performance goal. The obvious lever
+5. Do not reopen the coverage run's cost as a performance goal. The obvious lever
    was measured and recovered ~9s of 52; gates.md says why the rest is the
    measurement rather than waste.
 

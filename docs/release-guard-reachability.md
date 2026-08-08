@@ -103,12 +103,31 @@ a real hole and is out of this goal: it is a manifest schema change that needs a
 release to prove, which makes it its own goal. Same for the README split and the
 runtime budgets, which need a sample window before a threshold is honest.
 
-## Open question — a standing signal for production-unreachability
+## Slice 4 — the standing signal coverage cannot give
 
-Coverage cannot supply one, per the table above. `knip` is the obvious candidate
-and is **not installed**: it was tried config-less on 2026-07-26 and reported
-"3 unused files / 42 unused exports, almost entirely false positives", with the
-verdict that it needs `entry`/`project` config to be usable. Note also that knip
-counts test files as consumers by default, so out of the box it would have called
-both deleted guards *used*. Whatever is adopted has to distinguish "reached by a
-test" from "reached by production", which is the whole difficulty.
+Coverage finds unexercised code; it cannot find code no production path reaches,
+per the table at the top. Slice 2 found both of its guards by hand. Two moves,
+decided, in this order:
+
+**Adopt `knip`.** Not conditional on it solving the reachability problem — it
+earns its place on unused files, unused exports and unused dependencies
+regardless. It is not installed today: tried config-less on 2026-07-26, it
+reported "3 unused files / 42 unused exports, almost entirely false positives",
+and the verdict was that it needs `entry`/`project` config. Two of the three
+blockers named there are one line of config each — `bin.ts` is an esbuild entry,
+`postject` resolves through `require.resolve`. The third is structural and
+deliberate: suites exercise `dist/`, not `src/`, which `gates.md` defends and
+which `c8` already works around with `--src=dist`. Configure it and see what it
+gives; do not refactor the repo to suit it before knowing that.
+
+**Then a repo-owned production-reachability check for what `knip` cannot see.**
+It cannot see this class by default, and that is not a config gap: `knip` counts
+test files as consumers, so both guards slice 2 deleted would have read as *used*.
+Excluding tests from `entry` to force the question turns every test file into an
+"unused file", which trades one blind spot for a page of noise.
+
+The check we actually want is narrow — an export under `scripts/` that no
+production entry point reaches, walking static imports from the npm-script
+entries. It has no `dist`/`src` problem, and it can fail closed like the rest of
+the gates here. Size it against what `knip` already covers before building it, so
+it stays the narrow thing rather than a second general tool.
