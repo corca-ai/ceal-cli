@@ -137,6 +137,8 @@ export function openCealHpkeMessage(options: {
  * flow — the Gateway is the sender — but the vector suite needs a sender to
  * prove that a message this code seals is one it also opens, and a Gateway
  * counterpart cannot be stood up inside a unit test.
+ *
+ * @testOnly
  */
 export function sealCealHpkeMessage(options: {
 	recipientPublicKey: Uint8Array;

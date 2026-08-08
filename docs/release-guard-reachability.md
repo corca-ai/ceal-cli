@@ -125,11 +125,49 @@ as a delete-list would delete working code.
 [gates.md](gates.md#knip-and-why-it-is-not-in-either-gate-yet) carries the split
 and how to re-derive it.
 
-So the six are the reachability candidates, and they are still questions rather
-than verdicts: this package ships `exports`, so a symbol with no in-repo
-production caller may be consumed surface. Resolve each the way slice 2 resolved
-its two — wire it into the real path, or delete it. The other 15 are a smaller,
-separate question about export surface, and they are not this goal.
+**The six are triaged.** None reaches the package's `exports` — no candidate
+appears in `index.ts` or `profile-store.ts` — so the "may be consumed surface"
+escape was closed by reading rather than assumed away. Three outcomes, and the
+distribution is the finding: only one of six was dead code.
+
+- **Three are deliberate test-only exports whose reason is written at the
+  definition** — `verifyCealDeviceProof` ("so the proof path can be falsified
+  rather than only exercised"), `sealCealHpkeMessage` ("the vector suite needs a
+  sender"), `classifiedClientSessionFailureReasons` ("for tests that must prove
+  both readers agree"). Deleting any of them weakens a proof. They carry
+  `@testOnly` now, and `knip.json` reads that tag, so the exception lives at the
+  declaration instead of in a config allowlist a reader would have to correlate.
+- **One was deleted**: `CEAL_ACCEPTANCE_RECORD_SCHEMA`. It could not be wired in,
+  and the reason is the trap this goal keeps meeting. Its four would-be call
+  sites write the schema as a literal on purpose, because the gate proving every
+  declared result schema is actually emitted scans the source text for
+  `schema_version: "..."` (`packages/ceal-worker-cli/test/cli.test.mjs:338`).
+  Routing them through the constant would pass `tsc` and turn that gate vacuous.
+  A constant no emitter may use is not a constant.
+- **Two were wired into the real path**, and each was a live defect rather than
+  tidiness:
+  - `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES` exists, by its own comment, for "the
+    probe guard pinning them inside a throwaway HOME". `scripts/probe-surface.mjs`
+    named two of them by hand instead — the stale hand-kept copy the comment
+    warns about, whose failure mode is a probe writing to the operator's real
+    agent configuration directory. The guard derives the set now.
+  - `LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256` was the odd one of three
+    sibling generated digests: `leased-consumer-carrier.ts` verifies its embedded
+    contract against its digest before parsing, and the control session parsed
+    its embedded contract without ever reading the digest beside it. The native
+    build's `embedded_control_session_contract_drift` check reads the source file
+    as *text*, so it said nothing about the pair this module loaded. It verifies
+    now, and the guard is falsifiable — deleting the comparison turns
+    `test/leased-consumer-control-session.test.mjs` red, confirmed by doing it.
+
+The other 15 are a separate, smaller question about surplus export modifiers, and
+they are not this goal.
+
+One of the two wirings did **not** leave the list: `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`
+is still reported, because its new production consumer is a `scripts/` file
+importing `dist/`, which `knip` does not trace back to `src/`. Read that as the
+measurement it is — `knip`'s list is not the reachability signal, which is what
+the next move exists to build.
 
 **Then a repo-owned production-reachability check for what `knip` cannot see.**
 `scripts/` is still where it cannot see, and the reason is worse than the config

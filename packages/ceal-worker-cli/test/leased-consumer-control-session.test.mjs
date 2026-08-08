@@ -1,10 +1,62 @@
 import assert from "node:assert/strict";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
 	openLeasedConsumerControlSession,
 	resolveOperationDeadlineMs,
 	runLeasedConsumerControlSession,
 } from "../dist/leased-consumer-control-session.js";
+
+const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const EMBEDDED_CONTRACT = path.join("generated", "leased-consumer-control-session-contract.js");
+
+// The module refuses to parse an embedded contract whose text and digest
+// disagree. Proven by falsification rather than by calling the check: a test
+// that only asserts the shipped pair agrees would stay green with the whole
+// guard deleted, which is how a guard nobody can turn red gets written.
+//
+// Deleting the guard turns this red. Confirm that by hand before trusting it:
+// remove the digest comparison in `verifiedControlSessionContractJson`, rebuild,
+// and this test must fail.
+test("the embedded control-session contract is refused when its digest does not match", async (context) => {
+	// Inside the package rather than in `tmpdir()`: the copied module imports
+	// `@corca-ai/ceal-protocol`, and Node resolves that by walking up from the
+	// importing file. A copy outside the workspace fails to load for a reason
+	// that has nothing to do with the guard under test.
+	const scratch = mkdtempSync(path.join(DIST, "..", "ceal-embedded-contract-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	// Two independent copies rather than one file rewritten between imports: the
+	// generated module is imported by path with no query, so Node's module cache
+	// would hand the second import the first copy's already-evaluated digest.
+	const entryIn = (name) => {
+		cpSync(DIST, path.join(scratch, name), { recursive: true });
+		return path.join(scratch, name, "leased-consumer-control-session.js");
+	};
+	const tamperedEntry = entryIn("tampered");
+	const intactEntry = entryIn("intact");
+	const embedded = path.join(scratch, "tampered", EMBEDDED_CONTRACT);
+	const source = readFileSync(embedded, "utf8");
+	// Only the digest changes, so the failure can be nothing but the mismatch —
+	// the contract text the module parses is byte-identical to the shipped one.
+	const tampered = source.replace(/CONTRACT_SHA256 = "[a-f0-9]{64}"/u, `CONTRACT_SHA256 = "${"0".repeat(64)}"`);
+	assert.notEqual(tampered, source, "the embedded module must carry a digest for this test to falsify");
+	writeFileSync(embedded, tampered);
+
+	await assert.rejects(
+		import(tamperedEntry),
+		/invalid_control_session_contract/u,
+		"a contract whose digest disagrees with its text must not be parsed",
+	);
+
+	// The positive control: an untouched copy in the same place loads. Without it,
+	// the rejection above would also be satisfied by a copy that cannot load at
+	// all — which is exactly what the first attempt at this test did.
+	const restored = await import(intactEntry);
+	assert.equal(typeof restored.runLeasedConsumerControlSession, "function");
+});
 
 const encoder = new TextEncoder();
 const sessionPath = "/run/user/1001/ceal/leased-consumer-control-v1.sock";

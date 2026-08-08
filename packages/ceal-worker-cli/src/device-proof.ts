@@ -71,6 +71,8 @@ export function signCealDeviceProof(privateKey: Uint8Array, payload: Uint8Array)
  * Present so the proof path can be falsified rather than only exercised: a test
  * that only signs proves the signer runs, not that what it produced verifies
  * under the public key the Gateway was given.
+ *
+ * @testOnly
  */
 export function verifyCealDeviceProof(publicKey: Uint8Array, payload: Uint8Array, signature: Uint8Array): boolean {
 	if (!(publicKey instanceof Uint8Array) || publicKey.length !== N_PUBLIC_KEY) return false;

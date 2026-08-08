@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import {
@@ -8,10 +9,29 @@ import {
 	decodeCealLeasedConsumerCapabilityControlResponse,
 	decodeCealLeasedConsumerControlSession,
 } from "@corca-ai/ceal-protocol";
-import { LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON } from "./generated/leased-consumer-control-session-contract.js";
+import {
+	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
+	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
+} from "./generated/leased-consumer-control-session-contract.js";
+
+/**
+ * The generator emits the contract text and its digest together, and the native
+ * build refuses a generated module whose two halves disagree
+ * (`embedded_control_session_contract_drift`). That check reads the source file
+ * as text, so it says nothing about the pair this module actually parsed — and
+ * this module used to parse the text without ever reading the digest beside it,
+ * while `leased-consumer-carrier.ts` verified its own before parsing. The
+ * asymmetry was the whole finding: one of the two embedded contracts was
+ * checked at runtime and the other was not.
+ */
+function verifiedControlSessionContractJson(): string {
+	const digest = createHash("sha256").update(new TextEncoder().encode(LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON)).digest("hex");
+	if (digest !== LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256) throw new Error("invalid_control_session_contract");
+	return LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON;
+}
 
 /** Not a public command: a service wrapper may invoke only this fixed token. */
-const CONTROL_SESSION_CONTRACT = JSON.parse(LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON) as Readonly<{
+const CONTROL_SESSION_CONTRACT = JSON.parse(verifiedControlSessionContractJson()) as Readonly<{
 	argv: readonly [string];
 	protected_session: Readonly<{ child_fd: number; schema_version: string; maximum_bytes: number; deadline_ms: number }>;
 	agent_ipc: Readonly<{

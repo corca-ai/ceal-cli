@@ -429,31 +429,35 @@ every entry is a real question. Each entry earns its place:
   excludes it: it is a frozen vendored copy, and a finding there is one no agent
   may act on.
 
-What survives is 15 unused exports and 6 unused exported types, all in
-`packages/ceal-worker-cli/src/`. **Read what that means precisely, because it is
-not what it looks like.** `knip` reports an unnecessary `export` *modifier*, not
-unreachable code. The suites import `dist/`, so a test reference does not count
-as a consumer of `src/`; every symbol whose only out-of-file use is a test
-therefore appears here whatever production does with it *inside* its own file.
-Counting in-`src` references other than the definition splits the 21 in two:
+What survives is 16 findings, all in `packages/ceal-worker-cli/src/`. **Read what
+that means precisely, because it is not what it looks like.** `knip` reports an
+unnecessary `export` *modifier*, not unreachable code. The suites import `dist/`,
+so a test reference does not count as a consumer of `src/`; every symbol whose
+only out-of-file use is a test appears here whatever production does with it
+*inside* its own file. Counting in-`src` references other than the definition
+splits them:
 
 - **15 are live production code** with the export modifier as the only surplus.
   `CealHpkeError` has 13 in-`src` references and is thrown at
   `packages/ceal-worker-cli/src/hpke.ts:103` among others; `RECEIPT_SPOOL_MAX_ENTRIES`
   bounds the spool at `src/receipt-spool.ts:221`. Deleting one of these deletes
   working code.
-- **6 have no in-`src` reference at all** — `verifyCealDeviceProof`,
-  `sealCealHpkeMessage`, `classifiedClientSessionFailureReasons`,
-  `LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256`,
-  `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`, `CEAL_ACCEPTANCE_RECORD_SCHEMA`. These
-  are the reachability candidates, and still not verdicts: the package ships
-  `exports`, so a symbol with no in-repo caller may be consumed surface.
+- **One is a blind spot rather than a finding.** `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`
+  is consumed by `scripts/probe-surface.mjs`, which imports `dist/agent-guide.js`;
+  `knip` does not trace that back to `src/`, so a wired production consumer still
+  reads as unused.
+
+The six that had no in-`src` reference at all were triaged, and
+[release-guard-reachability.md](release-guard-reachability.md) records what each
+became. Three were deliberate test-only exports and now carry `@testOnly`, which
+`knip.json`'s `tags` entry reads — the exception belongs at the declaration,
+where its reason already was, rather than in a config allowlist.
 
 Re-derive the split rather than trusting the counts here — `npx knip --reporter json`
 and `rg --word-regexp <symbol> packages/ceal-worker-cli/src`.
 
 So the tool is installed and configured, and it is in neither `npm run check` nor
-the hook. Wiring it in would either fail the gate on 21 untriaged questions or
+the hook. Wiring it in would either fail the gate on 16 untriaged questions or
 require suppressing them, and a suppressed finding is the vacuous guard this
 repository keeps removing. It joins a gate when the list is triaged;
 [release-guard-reachability.md](release-guard-reachability.md) owns that work.

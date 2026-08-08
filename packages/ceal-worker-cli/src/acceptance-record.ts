@@ -23,8 +23,6 @@ const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
 const RELEASE_MANIFEST_SCHEMA = "ceal.worker_release_manifest.v1";
 
-export const CEAL_ACCEPTANCE_RECORD_SCHEMA = "ceal.worker_acceptance_result.v1";
-
 export interface CealInstalledReleaseFacts {
 	platform: unknown;
 	release_version: unknown;
@@ -154,9 +152,12 @@ export interface CealAcceptanceRecordParts {
 export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<string, unknown> {
 	const { release, session } = parts;
 	return {
-		// Written as a literal, not through the constant, because the repo gate that
-		// proves every declared result schema is actually emitted scans the source
-		// for `schema_version: "..."`. A constant would pass tsc and fail that gate.
+		// Written as a literal on purpose. The gate that proves every declared
+		// result schema is actually emitted scans the source text for
+		// `schema_version: "..."` (`test/cli.test.mjs:338`), so routing this
+		// through a constant would pass `tsc` and fail that gate. A constant no
+		// emitter may use is not a constant, which is why there is no longer one
+		// here for a reader to reach for.
 		schema_version: "ceal.worker_acceptance_result.v1",
 		emitted_by: "installed_client",
 		installed_client: {

@@ -521,7 +521,11 @@ export function isClassifiedClientSessionFailure(reason: string): boolean {
 	return Object.hasOwn(CLIENT_SESSION_FAILURES, reason);
 }
 
-/** The classified reasons, for tests that must prove both readers agree. */
+/**
+ * The classified reasons, for tests that must prove both readers agree.
+ *
+ * @testOnly
+ */
 export function classifiedClientSessionFailureReasons(): readonly string[] {
 	return Object.keys(CLIENT_SESSION_FAILURES);
 }

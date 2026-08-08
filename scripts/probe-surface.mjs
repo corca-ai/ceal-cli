@@ -33,7 +33,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // map stays a map: the guard is about resolving a binary's declared routes, not
 // about there being exactly one binary.
 const BINARIES = {
-	ceal: { packageDir: "ceal-worker-cli", commands: "CEAL_COMMANDS", subcommands: "CEAL_SUBCOMMANDS" },
+	ceal: {
+		packageDir: "ceal-worker-cli",
+		commands: "CEAL_COMMANDS",
+		subcommands: "CEAL_SUBCOMMANDS",
+		// The agent-host table declares which environment variables can redirect a
+		// host's state root, and this guard is the caller that must neutralize all
+		// of them. It used to name two of them by hand, which is the copy the
+		// declaration's own comment warns goes stale the moment a host row is
+		// added — silently, by aiming a declared local write at the operator's real
+		// configuration directory. Read the set from the module that owns it.
+		agentHosts: "agent-guide.js",
+	},
 };
 
 function fail(message) {
@@ -56,6 +67,16 @@ if (!command) fail(`usage: probe-surface.mjs [--allow-effect <effect>] ${binary}
 
 const dist = path.join(ROOT, "packages", target.packageDir, "dist", "index.js");
 const module = await import(dist).catch(() => fail(`build first: ${dist} is missing`));
+const agentHostsPath = path.join(ROOT, "packages", target.packageDir, "dist", target.agentHosts);
+const { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } = await import(agentHostsPath).catch(() =>
+	fail(`build first: ${agentHostsPath} is missing`),
+);
+// Refuse rather than probe with nothing pinned: an empty set would mean every
+// inherited host variable still reaches the operator's real state, which is the
+// failure this guard exists to prevent.
+if (!Array.isArray(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES) || CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.length === 0) {
+	fail(`${agentHostsPath} declares no agent-host environment variables to neutralize`);
+}
 const commands = module[target.commands];
 const subcommands = module[target.subcommands];
 const definition = commands.find((entry) => entry.name === command);
@@ -100,8 +121,10 @@ try {
 		env: {
 			...process.env,
 			HOME: home,
-			CODEX_HOME: path.join(home, ".codex"),
-			CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
+			// One throwaway directory per declared variable. Which leaf name each
+			// gets does not matter — the whole tree is removed below; that every
+			// declared variable gets one does.
+			...Object.fromEntries(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.map((variable) => [variable, path.join(home, variable)])),
 			XDG_RUNTIME_DIR: path.join(home, "run"),
 		},
 	});
