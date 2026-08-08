@@ -54,10 +54,12 @@ const TIERS = "test:tiers";
 // sits ~0.6 under, not because the prediction was right. Re-measure rather than
 // re-derive.
 //
-// Raised 2026-08-08 after `worker-acceptance-packet.mjs` went 48.44 -> 97.60:
-// 80/72/89/80 -> 84/74/91/84 against a measured 85.36/75.75/92.63/85.36. That
-// measurement is **linux-x64 only** — the arm64 half of the pair above has not
-// been re-measured since, and x64 was the binding platform last time it was.
+// The floors live in `.c8rc.scripts.json` and nowhere else. To move one, run
+// `npm run coverage:scripts` on each platform above, take the lower reading, and
+// set the floor just under it. The last raise (2026-08-08, after the acceptance
+// packet went from mostly-unmeasured to nearly covered) was measured on
+// **linux-x64 only**; the arm64 half has not been re-measured since, and x64 was
+// the binding platform the last time both were.
 const MEASURED_PLATFORMS = Object.freeze(["linux-arm64", "linux-x64"]);
 
 function runTiers(prefix) {

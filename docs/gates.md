@@ -265,15 +265,27 @@ build output whose coverage says nothing about whether anything was proven, and
 `**/cli-runtime.*` emits no executable code at all. Nothing is excluded by broad
 pattern, so an exclusion that stops being true is visible in review.
 
-**The floors come from measurement.** Measured on 2026-08-08: the worker at
-93.86% statements / 83.92% branches / 92.73% functions, the client at
-99.00 / 90.58 / 100.00. The floors in each `.c8rc.json` sit just under. The
-portable default of 80% would have been cleared by every ratio in both packages
-by ten to twenty points, which is a floor that can never fail and therefore never
-says anything. `check-coverage: true` is what makes a breach an exit code rather
-than a printed number, and `repo-gates.test.mjs` asserts all three of those
-properties — the floor, `all`, and `check-coverage` — so the gate cannot be
-quietly softened into a report.
+**The floors come from measurement, and the measurement is a command, not a
+figure quoted here.** Run `npm run test:unit` and read the two package reports;
+the floor in each `.c8rc.json` sits just under what its package measures. Those
+files are the only place the numbers live.
+
+Each ratio is declared rather than left to c8, because c8's defaults are not one
+uniform safe number: three of the four default to a floor that can never fail and
+one defaults above what parts of this repository measure. Check the installed
+tool rather than a copy of its defaults —
+`rg -n "option\('(branches|functions|lines|statements)'" -A 2
+node_modules/c8/lib/parse-args.js`. This paragraph used to state a single
+"portable default of 80%", which is not what c8 does; a number in prose is wrong
+the moment nobody can re-derive it.
+
+`check-coverage: true` is what makes a breach an exit code rather than a printed
+number, and `repo-gates.test.mjs` asserts the properties — that each floor is
+declared, plus `all` and `check-coverage` — so the gate cannot be quietly
+softened into a report. It asserts the floors are *present*, not what they equal:
+a test holding a second copy of the numbers cannot tell a right floor from a
+wrong one, because it has no measurement either, and the copy going stale
+reports as a coverage collapse rather than as the stale copy it is.
 
 Raise a floor after real improvement lands. Do not lower one to make a red gate
 green; the branch ratios are the ones with room, and `acceptance-record.ts` at
@@ -323,25 +335,24 @@ reads `coverage/scripts/coverage-summary.json` and fails unless it names every
 `.mjs` the config claims. `repo-gates.test.mjs` asserts that check is both
 declared and called.
 
-**Where the floor applies, and the one extrapolation in it.** Measured on
-2026-08-08 on `linux-arm64` across both tiers: 80.55% statements / 72.68%
-branches / 89.75% functions / 80.55% lines, and the floors sit just under at
-80 / 72 / 89 / 80. It is enforced on `linux-arm64` and `linux-x64`. arm64 is
-there because it is the maintainer host, and a gate no maintainer can run before
-pushing is one CI discovers for them; x64 is there because it carries every
-platform proof, and `repo-gates.test.mjs` asserts `PLATFORM_PROOF_PLATFORM` stays
-in that list. Applying an arm64 measurement to x64 is an extrapolation: the arm64
-run skips proofs that only *add* coverage on x64, and the entire arch-conditional
-surface under `scripts/` is one ternary at `build-worker-native-artifact.mjs:372`
-whose covered and uncovered branch counts are symmetric between the two.
+**Where the floor applies.** It is enforced on `linux-arm64` and `linux-x64`.
+arm64 is there because it is the maintainer host, and a gate no maintainer can
+run before pushing is one CI discovers for them; x64 is there because it carries
+every platform proof, and `repo-gates.test.mjs` asserts `PLATFORM_PROOF_PLATFORM`
+stays in that list. The floor is the lower reading of the two, and it lives in
+`.c8rc.scripts.json` alone — `npm run coverage:scripts` on each is how to move
+it.
 
-**Both platforms are measured now, and the extrapolation was wrong in sign.**
-Run `31263490521` on `ubuntu-24.04` printed 80.59% statements / **72.60%**
-branches / 89.75% functions / 80.59% lines — identical to arm64 on three ratios
-and *lower* on branches, against the argument above that x64 runs strictly more
-proofs and so should measure at or above. It held because the floor sits about
-0.6 under, not because the reasoning was right. The floor is the lower of the two
-platforms and is no longer provisional; re-measure both before moving it.
+**The extrapolation that used to be here was wrong in sign, which is why both
+are measured.** The floor began as an arm64 measurement applied to x64 on the
+argument that x64 runs strictly more proofs and so must measure at or above: the
+arm64 run skips proofs that only *add* coverage there, and the whole
+arch-conditional surface under `scripts/` is one ternary at
+`build-worker-native-artifact.mjs:372` whose covered and uncovered branch counts
+are symmetric. Measuring x64 (run `31263490521`) gave the same figures on three
+ratios and a *lower* branch ratio than arm64. The floor held because it sat
+under, not because the reasoning was right. Re-measure both before moving it;
+do not re-derive one from the other.
 
 **What the report already says, and one thing it does not.** `lint-shell.mjs` at
 0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not
@@ -506,6 +517,16 @@ commit it skips and says so rather than passing.
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way
 to poke an installed binary. It refuses any route whose declared effect is not
 `read_only`, and it runs under a throwaway `HOME`.
+
+**The guard is only ever as right as the field it reads.** It was exactly as
+wrong as the declaration for as long as `call` said `read_only`: the vocabulary
+stopped at this machine, so the one route that executes a governed provider
+capability had no truthful value available to it and was admitted as a probe
+(issue #11). `remote_write` is that missing term, and `--allow-effect` refuses
+it — the hatch's entire safety argument is the throwaway `HOME`, which cannot
+take back a revoked session, a consumed enrollment code, or a posted message.
+Adding a route without thinking about its effect does not fail any gate; it
+produces a guard that is confidently wrong, which is worse than an absent one.
 
 The one exception: a `--help`/`-h` token anywhere in the tail bypasses the effect
 check, because a help token makes the invocation read-only help regardless of

@@ -126,6 +126,20 @@ belongs in one of them, with the rule left here.
   present. A zero-hit is a property of the search, not of the tree.
 - A **normative** claim ("the rule says", "the contract forbids") needs the same
   `file:line` a code claim needs. Without one, say you believe it, or go read it.
+- **A measured number does not go in prose. The way to produce it does.** Percent
+  ratios, counts, elapsed times, thresholds: write the command or the `file:line`
+  that yields the figure, and let the reader run it. Three exceptions, and they
+  are the only ones — a number that *is* the history ("the extrapolation was wrong
+  in sign"), a number bound to a run or artifact that names it (`31263490521`,
+  a tag, a digest), and a value the reader must match rather than re-derive.
+  Everything else goes stale silently and then argues with the tree: a floor
+  restated beside the config it copies is one edit away from reporting a coverage
+  collapse that never happened, and a handoff saying "thirteen commits unpushed"
+  is wrong by the next commit. Both of those happened here.
+  This binds a threshold to exactly one home. If a test wants to assert a floor,
+  assert the property — declared, non-default, enforced — not a second copy of
+  the figure, because the copy has no measurement either and cannot tell a right
+  number from a wrong one.
 - Treat unexpectedly slow tests as suspicious and fix the test shape in the same
   slice when the cost is local; record an unavoidable slow gate as explicit debt
   with its command and elapsed time.
