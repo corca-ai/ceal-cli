@@ -129,15 +129,22 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	// single failure mode this target exists to prevent.
 	assert.equal(config["check-coverage"], true, "scripts/ coverage must fail below its floor, not just report");
 	assert.equal(config.all, true, "scripts/ must count scripts no test loaded; without this an unreached guard is invisible, not zero");
-	// Measured on 2026-08-08 across both tiers at 80.55 / 72.68 / 89.75 / 80.55.
-	// The floors sit just under. Nothing here may fall back to the portable 80%
-	// default, which for branches would sit eight points above what is measured
-	// and for the rest would be a floor that cannot fail.
+	// Re-measured on 2026-08-08 across both tiers at 85.36 / 75.75 / 92.63 / 85.36,
+	// after `worker-acceptance-packet.mjs` went 48.44 -> 97.60; the previous
+	// measurement was 80.55 / 72.68 / 89.75 / 80.55. The floors sit just under.
+	// Nothing here may fall back to the portable 80% default, which for branches
+	// would sit above what is measured and for the rest would be a floor that
+	// cannot fail.
+	//
+	// Pinned here as well as in the config on purpose: the config is what enforces
+	// the floor, and this is what makes LOWERING it a visible edit to a test with
+	// a measurement written beside it rather than a one-character change nobody
+	// reviews.
 	assert.deepEqual(Object.fromEntries(["statements", "branches", "functions", "lines"].map((ratio) => [ratio, config[ratio]])), {
-		statements: 80,
-		branches: 72,
-		functions: 89,
-		lines: 80,
+		statements: 84,
+		branches: 74,
+		functions: 91,
+		lines: 84,
 	});
 	// `all: true` enumerates from `src`, and `include` is what keeps the report to
 	// this tree: without it a run that also loaded `packages/*/dist` would fold

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	buildAcceptancePacket,
 	inspectInstalledRelease,
 	resolveInstalledBinary,
 	sanitizedAcceptanceRecord,
@@ -26,13 +28,13 @@ function scratch(context) {
 	return root;
 }
 
-function stageInstall(root, { manifest: overrides = {}, sums, digest } = {}) {
+function stageInstall(root, { manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES } = {}) {
 	const directory = path.join(root, "install", "releases", "0.66.1-linux-amd64-deadbeef");
 	mkdirSync(directory, { recursive: true });
 	const binary = path.join(directory, "ceal-linux-amd64");
-	writeFileSync(binary, BINARY_BYTES);
+	writeFileSync(binary, binaryBytes);
 	chmodSync(binary, 0o755);
-	const actual = digest ?? sha256(BINARY_BYTES);
+	const actual = digest ?? sha256(binaryBytes);
 	const manifest = {
 		schema_version: "ceal.worker_release_manifest.v1",
 		artifact_state: "unsigned_build_candidate",
@@ -139,6 +141,242 @@ test("a protocol producer disagreeing with the handoff lock is refused", (contex
 		JSON.stringify({ gateway: { commit: "d".repeat(40), tree: "t".repeat(40) } }),
 	);
 	assert.throws(() => verifyProtocolProvenance(manifest, { repoRoot: root }), code("protocol_provenance_disagreement"));
+});
+
+// A manifest of some other shape is refused rather than read field by field:
+// the fields this command quotes only mean what it says they mean under the
+// schema it names.
+test("a release manifest of an unknown schema is refused before any field is read", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, { manifest: { schema_version: "ceal.worker_release_manifest.v2" } });
+	assert.throws(() => inspectInstalledRelease(binary), code("release_manifest_schema"));
+});
+
+// A stub that answers the five routes the packet actually runs, in the shape it
+// actually parses: the command reads a handful of scalars out of the CLI's YAML
+// with a regex, deliberately not a parser, so the fixture has to be text rather
+// than a structure. `$1 $2` because the packet distinguishes `guide status` from
+// `receipt show`, and a stub keyed on `$1` alone would let those two collapse.
+function stubBinary({ discoveryStatus = 0 } = {}) {
+	return `#!/bin/sh
+case "$1 $2" in
+  "version ") echo "version: 0.66.1"; echo "protocol_version: 0.65.0" ;;
+  "guide status") echo "status: registered"; echo "  registration_path: /home/fixture/.claude/skills/ceal-guide"; echo "  registration_path: /home/fixture/.codex/skills/ceal-guide" ;;
+  "capabilities --fresh")
+    echo "instance_ref: instance:fixture"
+    echo "profile_ref: profile:fixture"
+    echo "negotiated_protocol_version: 0.65.0"
+    echo "host_decision: allow"
+    echo "catalog_source: gateway"
+    echo "live_gateway_checked: true"
+    echo "  - capability_id: message.search"
+    echo "  - capability_id: message.post"
+    exit ${discoveryStatus} ;;
+  "call message.search")
+    echo "status: completed"
+    echo "evidence: receipt"
+    echo "request_ref: request:fixture" ;;
+  "receipt show")
+    echo "status: readback_complete"
+    echo "outcome: succeeded"
+    echo "authorization: granted"
+    echo "gateway_elapsed_ms: 42"
+    echo "  - ref: audit:one"
+    echo "  - ref: audit:two" ;;
+esac
+exit 0
+`;
+}
+
+// The real lock, read rather than restated: `buildAcceptancePacket` compares the
+// manifest's producer against the repo's own lock, so a hand-copied commit here
+// would be a fixture agreeing with itself.
+function lockedProducer() {
+	const gateway = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8")).gateway;
+	return { repository: gateway.repository, commit: gateway.commit, tree: gateway.tree };
+}
+
+// `repoRoot` is the real checkout, not a scratch fixture, because the first
+// thing this command does is refuse on a proof/ship protocol divergence — and
+// that refusal is only meaningful against the pin this repository actually
+// ships. The INSTALL still lives in a scratch directory, which is the
+// separation that matters: the packet describes an install, never the source.
+test("the packet describes the install it measured, and its non-claims follow what the run reached", (context) => {
+	const root = scratch(context);
+	const { binary, directory } = stageInstall(root, {
+		binaryBytes: stubBinary(),
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
+
+	assert.equal(packet.schema_version, "ceal.worker_acceptance_packet.v1");
+	assert.equal(packet.installed_client.binary_path, binary);
+	assert.equal(packet.installed_client.platform, "linux-amd64");
+	assert.equal(packet.installed_client.release_version, "0.66.1");
+	// Read out of the binary's own output, not copied from the manifest: these
+	// two rows are what makes the packet a measurement rather than a restatement.
+	assert.equal(packet.installed_client.reported_version, "0.66.1");
+	assert.equal(packet.installed_client.client_protocol_version, "0.65.0");
+	assert.equal(packet.installed_client.manifest, path.basename(path.join(directory, "ceal-worker-release-manifest-linux-amd64.json")));
+
+	assert.equal(packet.gateway_protocol_input.lock_agreement.commit_matches, true);
+	assert.equal(packet.gateway_protocol_input.lock_agreement.tree_matches, true);
+
+	assert.equal(packet.guide.status, "registered");
+	assert.equal(packet.guide.exit_code, 0);
+	assert.equal(packet.guide.registered_hosts.length, 2);
+
+	assert.equal(packet.gateway_session.reached, true);
+	assert.equal(packet.gateway_session.instance_ref, "instance:fixture");
+	assert.equal(packet.gateway_session.host_decision, "allow");
+	assert.equal(packet.gateway_session.live_gateway_checked, true);
+	assert.equal(packet.gateway_session.capability_count, 2);
+
+	// No --capability/--target, so the provider row must be absent AND said so.
+	assert.equal(packet.bounded_capability_call, null);
+	assert.ok(packet.non_claims.some((claim) => claim.startsWith("provider_execution_not_reached:")));
+	assert.ok(!packet.non_claims.some((claim) => claim.startsWith("gateway_session_not_reached:")));
+	assert.ok(packet.non_claims.some((claim) => claim.includes("Only linux-amd64 is evidenced")));
+	// The artifact_state claim exists to stop a reader concluding the installed
+	// binary is unsigned; it must not disappear quietly.
+	assert.ok(packet.non_claims.some((claim) => claim.includes("before signing")));
+});
+
+test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, {
+		binaryBytes: stubBinary(),
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+
+	assert.equal(packet.bounded_capability_call.capability, "message.search");
+	assert.equal(packet.bounded_capability_call.status, "completed");
+	assert.equal(packet.bounded_capability_call.evidence, "receipt");
+	assert.equal(packet.bounded_capability_call.request_ref, "request:fixture");
+	// The receipt is a SECOND invocation keyed on the request_ref the call
+	// returned. Without it the packet would be quoting the call's own report of
+	// itself, which is the substitution this row exists to avoid.
+	assert.equal(packet.bounded_capability_call.receipt.readback_status, "readback_complete");
+	assert.equal(packet.bounded_capability_call.receipt.authorization, "granted");
+	assert.equal(packet.bounded_capability_call.receipt.gateway_elapsed_ms, 42);
+	assert.deepEqual(packet.bounded_capability_call.receipt.audit_refs, ["audit:one", "audit:two"]);
+	assert.ok(!packet.non_claims.some((claim) => claim.startsWith("provider_execution_not_reached:")));
+});
+
+// A discovery that exits non-zero is not a failure of the command — it is a row
+// the packet must report as unreached and then say so, rather than omitting.
+test("an unreached Gateway session is recorded and named in the non-claims", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, {
+		binaryBytes: stubBinary({ discoveryStatus: 3 }),
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
+	assert.equal(packet.gateway_session.reached, false);
+	assert.equal(packet.gateway_session.exit_code, 3);
+	assert.ok(packet.non_claims.some((claim) => claim.startsWith("gateway_session_not_reached:")));
+});
+
+test("a binary that cannot answer 'version' is refused rather than described", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, {
+		binaryBytes: "#!/bin/sh\nexit 9\n",
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+	assert.throws(() => buildAcceptancePacket({ repoRoot: ROOT, binary }), code("installed_binary_unusable"));
+});
+
+// The CLI entry, run as the process it really is. `parseArgs` and `render` have
+// no other caller, and exporting them to reach in-process would prove a surface
+// no operator uses. The child inherits NODE_V8_COVERAGE, so this counts.
+function runCli(args, options = {}) {
+	return spawnSync(process.execPath, [path.join(ROOT, "scripts", "worker-acceptance-packet.mjs"), ...args], {
+		encoding: "utf8",
+		...options,
+	});
+}
+
+test("the CLI renders a human packet, emits JSON on request, and refuses malformed argv", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, {
+		binaryBytes: stubBinary(),
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+
+	const rendered = runCli(["--binary", binary]);
+	assert.equal(rendered.status, 0, rendered.stderr);
+	assert.match(rendered.stdout, /^installed: {2}0[.]66[.]1 linux-amd64 {2}[0-9a-f]{64}$/mu);
+	assert.match(rendered.stdout, /^ {12}digests agree: bytes = manifest = SHA256SUMS$/mu);
+	assert.match(rendered.stdout, /^guide: {6}registered \(2 host paths\)$/mu);
+	assert.match(rendered.stdout, /^gateway: {4}instance:fixture protocol 0[.]65[.]0 allow in \d+ms$/mu);
+	assert.match(rendered.stdout, /^call: {7}not requested$/mu);
+	assert.match(rendered.stdout, /^non_claims:$/mu);
+
+	// The call and receipt lines are a separate rendering branch, and the branch
+	// that prints "not requested" above cannot reach them.
+	const called = runCli(["--binary", binary, "--capability", "message.search", "--target", `target:${"a".repeat(64)}`]);
+	assert.equal(called.status, 0, called.stderr);
+	assert.match(called.stdout, /^call: {7}message[.]search -> completed \(receipt\) in \d+ms$/mu);
+	assert.match(called.stdout, /^ {12}request:fixture$/mu);
+	assert.match(called.stdout, /^receipt: {4}readback_complete granted\/succeeded audit:one, audit:two$/mu);
+
+	const json = runCli(["--binary", binary, "--json"]);
+	assert.equal(json.status, 0, json.stderr);
+	assert.equal(JSON.parse(json.stdout).schema_version, "ceal.worker_acceptance_packet.v1");
+
+	// --sanitized implies --json: the external record exists to be written to a
+	// file another lane reads by digest, not to be eyeballed.
+	const sanitized = runCli(["--binary", binary, "--sanitized"]);
+	assert.equal(sanitized.status, 0, sanitized.stderr);
+	const record = JSON.parse(sanitized.stdout);
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	assert.doesNotMatch(sanitized.stdout, new RegExp(root.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+	assert.equal(record.bounded_capability_call, null);
+
+	// The record projects the provider row through its own allow-list, which is a
+	// different branch from projecting its absence — and the one that would leak
+	// a host-local path if the allow-list were widened by accident.
+	const sanitizedCall = runCli([
+		"--binary",
+		binary,
+		"--sanitized",
+		"--capability",
+		"message.search",
+		"--target",
+		`target:${"a".repeat(64)}`,
+	]);
+	assert.equal(sanitizedCall.status, 0, sanitizedCall.stderr);
+	const calledRecord = JSON.parse(sanitizedCall.stdout);
+	assert.equal(calledRecord.bounded_capability_call.request_ref, "request:fixture");
+	assert.deepEqual(calledRecord.bounded_capability_call.receipt.audit_refs, ["audit:one", "audit:two"]);
+	assert.doesNotMatch(sanitizedCall.stdout, new RegExp(root.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+
+	for (const [argv, expected] of [
+		[["--nope"], "unknown_argument"],
+		[["--binary"], "missing_argument_value"],
+		[["--capability", "message.search"], "incomplete_call_request"],
+		[["--target", "target:x"], "incomplete_call_request"],
+	]) {
+		const refused = runCli(argv);
+		assert.notEqual(refused.status, 0, `${argv.join(" ")} must be refused`);
+		assert.match(refused.stderr + refused.stdout, new RegExp(expected, "u"));
+	}
+});
+
+// A call whose stdout carries no request_ref must leave the receipt null rather
+// than inventing one — the packet would otherwise claim a readback it never ran.
+test("a call with no request_ref leaves the receipt unclaimed", (context) => {
+	const root = scratch(context);
+	const { binary } = stageInstall(root, {
+		binaryBytes:
+			'#!/bin/sh\ncase "$1 $2" in\n  "version ") echo "version: 0.66.1" ;;\n  "call message.search") echo "status: refused" ;;\nesac\nexit 0\n',
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+	assert.equal(packet.bounded_capability_call.status, "refused");
+	assert.equal(packet.bounded_capability_call.request_ref, null);
+	assert.equal(packet.bounded_capability_call.receipt, null);
 });
 
 // A packet shaped like a real one, with the three host-local fields populated.
