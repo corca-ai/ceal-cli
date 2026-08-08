@@ -164,6 +164,27 @@ chokepoint every release, packing, and native-artifact path funnels through, and
 — a packet describing a real install is the most convincing possible evidence for
 bytes the lock does not bind, so the refusal comes before anything is measured.
 
+That chokepoint is one call, and for a while nothing could tell whether it was
+still there. This section used to say the call sites were pinned by source shape
+because a converged live pin cannot falsify them behaviourally. That was right
+about the *verdict* and wrong about the *call*, and the gap was exploitable:
+deleting the single invocation in `resolveWorkerReleaseDevelopmentInputs` — which
+disarms release-input resolution, packing, the native build, and the workflow's
+own compose step — left every gate green, because the regex still matched the
+call inside `assertShippableProtocolVendorPinFor`, the error-translating wrapper
+that nothing then called. Reproduced on 2026-08-08.
+
+`worker-release-inputs.test.mjs` now falsifies it behaviourally. A scratch
+`repoRoot` reaches the guard and fails for a pin reason; with the call removed the
+same input walks past it and fails on the next argument check instead. Two
+distinguishable outcomes are all a falsification needs, and it does not need a
+genuinely diverged pin — the guard refusing at all is the claim. The divergence
+verdicts stay in `protocol-vendor-pin.test.mjs`, which owns them properly.
+
+The source-shape gate in `repo-gates.test.mjs` stays, because it still catches the
+easy case in `worker-acceptance-packet.mjs`. Do not treat it as the guard's
+protection: it reads text, and text cannot tell a live call from a dead one.
+
 Two things then expire the declaration, and it is worth naming them exactly
 rather than saying "its own facts". **Re-sync the vendored copy** and the drift
 check fails until the pin moves with it. **Bump `gateway-protocol-handoff-lock.json`** and

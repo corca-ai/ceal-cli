@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -129,6 +129,64 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 		() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, controlConformance: scattered }),
 		hasCode("handoff_layout_mismatch"),
 	);
+});
+
+// docs/gates.md pinned this call site by source shape, on the reasoning that a
+// converged live pin cannot falsify it behaviourally. That reasoning was right
+// about the *verdict* and wrong about the *call*: a scratch repoRoot reaches the
+// guard and fails for a pin reason, and with the call removed the same input
+// walks past it and fails on the next argument check instead. Two distinguishable
+// outcomes are all a falsification needs.
+//
+// It matters because the shape gate could not see the difference. Deleting the
+// one invocation in `resolveWorkerReleaseDevelopmentInputs` -- which disarms
+// release-input resolution, packing, the native build, and the workflow's own
+// compose step -- left `repo-gates.test.mjs` green, because the regex still
+// matched the call inside the error-translating wrapper that nothing then called.
+test("the release chokepoint reaches the protocol pin guard before it reads any argument", (context) => {
+	const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-pin-chokepoint-")));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	for (const file of ["worker-release-inputs.json", "gateway-protocol-handoff-lock.json", "protocol-vendor-pin.json", "install-ceal.sh"]) {
+		cpSync(path.join(ROOT, file), path.join(scratch, file));
+	}
+	for (const owned of ["packages/ceal-client", "packages/ceal-worker-cli", "skills/ceal-guide"]) {
+		mkdirSync(path.join(scratch, owned), { recursive: true });
+	}
+	cpSync(path.join(ROOT, "packages/ceal-client/package.json"), path.join(scratch, "packages/ceal-client/package.json"));
+	cpSync(path.join(ROOT, "packages/ceal-worker-cli/package.json"), path.join(scratch, "packages/ceal-worker-cli/package.json"));
+	cpSync(path.join(ROOT, "skills/ceal-guide/SKILL.md"), path.join(scratch, "skills/ceal-guide/SKILL.md"));
+
+	// Absolute paths that do not exist. If the guard runs, it refuses first and
+	// these are never read; if it does not, `protocol_tarball` is the next failure.
+	const absent = {
+		protocolTarball: path.join(scratch, "absent.tgz"),
+		protocolProvenance: path.join(scratch, "absent-provenance.json"),
+		controlConformance: path.join(scratch, "absent-conformance.json"),
+		handoffManifest: path.join(scratch, "absent-handoff.json"),
+	};
+	let code = null;
+	try {
+		resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent });
+	} catch (error) {
+		code = error.code;
+	}
+	assert.notEqual(code, null, "the chokepoint must refuse this input, not resolve it");
+	assert.notEqual(
+		code,
+		"protocol_tarball",
+		"the chokepoint read its arguments before asserting protocol shippability; the pin guard call is gone or moved",
+	);
+	// The scratch tree is not a git checkout, so the guard cannot establish the
+	// vendored identity — which is a guard verdict, and the point. The divergence
+	// verdicts themselves belong to protocol-vendor-pin.test.mjs; this asserts only
+	// that a release path cannot get past the guard without one.
+	assert.match(
+		code,
+		/^(?:git_identity_failed|proof_shipment_protocol_divergence|invalid_protocol_vendor_pin|shipped_lock_mismatch|stale_divergence_record)$/u,
+	);
+	// Re-raised as this module's error type, so a caller catching
+	// WorkerReleaseInputError sees the refusal instead of an escaping exception.
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent }), WorkerReleaseInputError);
 });
 
 test("worker release inventory rejects Gateway and legacy composite paths", () => {

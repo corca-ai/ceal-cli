@@ -2,7 +2,82 @@
 
 ## Workflow Trigger
 
-If this file is mentioned with no other task, read `## Current State`, then pick
+If this file is mentioned with no other task, read `## Next Session — release-guard reachability
+
+**The goal: every release-safety guard is reachable, measured, and falsifiable.**
+
+The theme this repository keeps failing at is claiming more than it enforces. The
+guide digest guarded a lane the release did not consume. `forbidden_release_inputs`
+would have passed on an emptied list. An 80% coverage floor was declared for
+months with nothing to measure it against. Requirement 3's chokepoint could be
+deleted in one line with every gate staying green. The first three are fixed and
+the fourth was fixed on the way to writing this — see `## 2026-08-08` above.
+
+What remains lives in `scripts/`: **4,052 lines of release-lane production code
+with no coverage at all.**
+
+The insight that makes this one goal rather than three chores: **measuring
+`scripts/` turns the reachability audit into a standing signal.** A guard nobody
+calls shows up as 0% functions, every run, instead of needing the grep audit that
+found the holes below. Slice 1 produces the evidence slice 2 acts on.
+
+### Slice 1 — cover `scripts/`
+
+Measured on 2026-08-08 across both test tiers: **79.88% statements / 71.63%
+branches / 89.53% functions**. Add a third `c8` target with floors just under,
+the same scoping discipline as the two packages (`all: true`, named exclusions
+with reasons). Note that `test:contract` alone gives 54.93% — the release tier is
+required, so this belongs to `npm run check`, not `check:unit`.
+
+### Slice 2 — resolve what it exposes
+
+Start from the known ones. For each: wire it into the real path, or delete it.
+**Deleting is a legitimate outcome** and often the right one — the goal is that
+what remains is true, not that everything survives.
+
+- **`assertWorkerReleaseSourcePath`** (`scripts/worker-release-inputs.mjs:220`) has
+  no production caller. CONFIRMED with a positive control: the same search finds
+  `prepareWorkerReleaseConsumer` and `assertNoSymlinkComponents` at four and seven
+  production sites. What still holds the line is `assertInventory`'s overlap check
+  (`:252-260`), which constrains the inventory *file* and not the code — so any new
+  file-copy site added to the composer takes a path nothing validates. Either call
+  it at the `stageOwnedPackage` and guide-read sites, or delete it and stop
+  documenting an enforcement that does not exist.
+- **`resolveLockedGatewayHandoffArchive`** (`scripts/worker-gateway-handoff-archive.mjs:34`)
+  is test-only. Low severity — its inner guards are shared with the production
+  `consume*` variants — but the tests exercise the unused wrapper, so it can drift
+  from the consumed path with nothing noticing.
+
+### Slice 3 — the two structural holes the audit surfaced
+
+- **`linux-arm64` is signed without `npm run check`.** `ceal-release.yml:118` gates
+  the gate on `validate_source == '1'`. That leg gets `tsc`, the SEA build, the
+  native smoke and the pin guard through compose — but not `test:release`, so
+  `verifyGatewayProtocolConsumer`, the only proof that npm's resolver binds the
+  Gateway tarball rather than a workspace link, never runs against the bytes being
+  signed on that platform. The workflow comment at `:112-116` states the tradeoff,
+  so this is a knowing hole. Decide it deliberately rather than inheriting it.
+- **Nothing re-asserts the pin between the build artifact and the stable pointer.**
+  Neither the sign/publish job nor `ceal-worker-stable-rollback.yml` invokes the
+  guard. If compose's call is ever bypassed, no later stage asks again.
+
+### Acceptance
+
+**Deleting any guard call must turn something red.** That is the whole goal in one
+sentence, and it is now testable: `worker-release-inputs.test.mjs` does it for the
+protocol pin, and the same shape works for the rest. A slice that ends with a
+guard still only pinned by a regex has not finished.
+
+### Explicitly not in this goal
+
+The signed manifest carries no client identity — no digest or package record for
+`@corca-ai/ceal`, only a shared `version` string, so nothing downstream can detect
+a client substitution that keeps the version number. It is a real hole and it is a
+manifest schema change that needs a release to prove, which makes it its own goal.
+Same for the README split and the runtime budgets, which need a sample window
+before a threshold is honest.
+
+## Current State`, then pick
 from `## Debt` or do what the operator asked for. `ceal capabilities --fresh` and
 `ceal call` are live-session, provider-touching acts: approval first.
 
@@ -102,12 +177,6 @@ item is still true before starting on it.
   all of `linux-*` is what burned `ceal-v0.67.0`. It is narrowed to `linux-amd64`
   and gated there now.
 - **The worker `createLock` race** is unresolved.
-- **Requirement 3 has no behavioural test.** Divergence refusal across five paths
-  is held only by a source-shape gate in `repo-gates.test.mjs`, because a
-  converged live pin cannot falsify it behaviourally.
-- **`assertWorkerReleaseSourcePath` has no production caller.** The
-  forbidden-path enforcement in `worker-release-inputs.mjs:220` is reached only
-  from tests, so the inventory may be declared and enforced nowhere.
 
 Everything else is owned by the comment at the site and by [gates.md](gates.md).
 
