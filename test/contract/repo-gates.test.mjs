@@ -82,9 +82,26 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.match(manifest.scripts["build:worker"], /packages\/ceal-protocol run build/u);
 	for (const ownerPackage of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
 		assert.match(manifest.scripts["build:worker"], new RegExp(`${ownerPackage} run build`, "u"));
-		assert.match(manifest.scripts["test:unit"], new RegExp(`${ownerPackage} test`, "u"));
+		assert.match(manifest.scripts.coverage, new RegExp(`${ownerPackage} run coverage`, "u"));
 	}
-	assert.doesNotMatch(manifest.scripts["test:unit"], /packages\/ceal-protocol test/u);
+	assert.doesNotMatch(manifest.scripts.coverage, /packages\/ceal-protocol/u);
+	// `test:unit` IS the coverage run. Running the suites plainly and then again
+	// under c8 paid for the same 275 tests twice and let the floor apply to a
+	// second execution nobody read. A separate `coverage` script stays for a
+	// human who wants the report without the rest of the gate.
+	assert.equal(manifest.scripts["test:unit"], "npm run coverage");
+
+	// A floor is only a floor if it fails closed, and c8 only checks one when the
+	// config says so. `check-coverage` false anywhere turns the whole thing into a
+	// report the gate prints and ignores.
+	for (const ownerPackage of ["ceal-client", "ceal-worker-cli"]) {
+		const config = JSON.parse(read(`packages/${ownerPackage}/.c8rc.json`));
+		assert.equal(config["check-coverage"], true, `${ownerPackage} must fail below its floor, not just report`);
+		assert.equal(config.all, true, `${ownerPackage} must count modules no test loaded; without this they are invisible, not zero`);
+		for (const ratio of ["statements", "branches", "functions", "lines"]) {
+			assert.ok(config[ratio] > 80, `${ownerPackage} ${ratio} floor is ${config[ratio]}; a floor under what is measured catches nothing`);
+		}
+	}
 	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
 	assert.match(workerPackage.scripts.build, /^tsc -p tsconfig\.build\.json\b/u);
 	// A trailing `|| true` would make every type error a green build, which is the

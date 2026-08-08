@@ -36,7 +36,7 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 - runtime source: `command_timing_log` bridge, written by `.githooks/pre-push` to `.charness/quality/command-timing.jsonl` and rendered by `render_runtime_summary.py --detail`. Before this slice `commands_source` was `none`. <!-- reproduction-source -->
 - runtime hot spots: `tag push, full gate` 106000ms; `iteration gate` 48000ms. Neither is budgeted yet — one sample each.
 - startup probe: `ceal --help process start` 146ms median over 5 samples (`measure_startup_probes.py --detail`).
-- coverage gate: none exists. No `c8`/`nyc`/`--experimental-test-coverage` anywhere; the adapter's `coverage_floor_policy` names `lefthook.yml` and `scripts/coverage-floor-exemptions.txt`, neither of which is in the repo.
+- coverage gate: introduced this slice. `c8` remapped to `src/**/*.ts`, `all: true`, floors in each `.c8rc.json` and `check-coverage: true`. Worker 93.86% statements / 83.92 branches / 92.73 functions; client 99.00 / 90.58 / 100.00. `test:unit` is the coverage run, so the suites are not paid for twice.
 - evaluator depth: deterministic gates plus quality-skill inventories only; no Cautilus run.
 
 ## Healthy
@@ -46,6 +46,7 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 - All four workflows run `npm run check` (`ceal-release.yml:119`, `check.yml:155,201`, `npm-package-stage.yml:37`); local and CI prove the same thing.
 - `inventory_adapter_gate_design` now reports 0 findings; `migration_gap` closed this slice.
 - The duplicate ratchet is armed and falsified in both directions: a planted clone of `prewarm-offline-consumer-cache.mjs` hard-blocked with the family named, and removing it returned green. Baseline seeded at 132 code families over `scripts`, both `src` trees, and `test`. It then caught its own front door twice. The first hit was a real four-line `stderr`-then-`exit` helper duplicated from `probe-surface.mjs`, now `scripts/lib/exit-with.mjs`. The second was an ES-module import header, and the attempted fix is the more useful record: extracting `repoRootFrom()` and converting all ten call sites turned one family into three, because every rewritten header then carried the same extra import, and it broke the `install-git-hooks` scratch-clone test that needs that script self-contained. Reverted and classified `intentional` in the overlay with that reasoning attached — which is what the class is for.
+- Coverage exists and is scoped deliberately, following `../craken-agents`: source-mapped to `src`, `all: true` so an untested module is zero rather than invisible, two named exclusions with reasons, floors from measurement. Three of the four plausible scopings inflate the number, and one — Node's own `--test-coverage-include='src/**'` — reports a perfect score over an empty set. `repo-gates.test.mjs` now asserts the floor, `all`, and `check-coverage` so the gate cannot be softened into a report.
 - Shell is linted for the first time. `install-ceal.sh` is a signed release asset and `.githooks/pre-push` is the last gate before a push, and `biome` sees neither. The warning tier found a dead variable the installer had been assigning since its byte comparison was removed.
 - The delegated review's two hook defects are fixed and one is now regression-tested. It found that a green gate could still block the push when log rotation failed (an unwritable `.charness/quality` gave `EXIT=2` one line after printing "passed"), and that the hook used `status` as a scratch variable — which this repo's own convention bans, and which kills the hook under `zsh` before the gate runs. Reproduced both, fixed both, and added `repo-gates.test.mjs` coverage that runs the hook with stand-in gate commands: it goes red against the defective shape and green against the fix, verified in both directions. Its precision findings are fixed too — failures now record under their own label so red pushes cannot drag the passing median down, the seconds-resolution and `dist/`-dependency caveats are stated at their sites, and the `AGENTS.md` timing rule no longer points at a log that usually has no full-gate sample.
 
@@ -58,8 +59,8 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 
 ## Missing
 
+- Nothing measures the `test/` and `scripts/` tiers. Coverage covers the two owned packages; the contract and release suites and the scripts they exercise have no ratio at all.
 - Neither hook-run gate reaches CI. `check:duplication` and `lint:shell` block a maintainer's push and stand aside everywhere else, so a change that lands without passing through a configured clone is unchecked by both. Honest, but not enforcement.
-- No coverage measurement at all. The adapter declares an 80% floor policy the repo has no way to satisfy or even report against, which reads as enforcement that does not exist.
 
 ## Deferred
 
@@ -86,7 +87,7 @@ Ambient repo findings: binary/linter/hook setup and runtime visibility, requeste
 
 ## Recommended Next Quality Moves
 
-- active add a coverage signal — capability_needed=a maintainer can see which worker behavior is unproven instead of trusting test count; next_center=`packages/ceal-worker-cli`; transformation=run the existing suites under `node --test --experimental-test-coverage` and report before setting any floor; proof_boundary=a coverage report checked in against the current suites; enforcement_posture=advisory until one report exists, because the adapter's 80% floor was never measured against.
+- active raise the branch floors — capability_needed=the weakest-proven paths get proven rather than averaged over; next_center=`acceptance-record.ts` at 55% branch and `bin.ts` at 50%; transformation=cover those two, then ratchet the worker branch floor above 83; proof_boundary=`npm run coverage` green at the higher floor; enforcement_posture=advisory until the tests land.
 - active set runtime budgets from a real window — capability_needed=a gate slowdown is visible before it is normalized; next_center=`.agents/quality-adapter.yaml` `runtime_budget_profiles.local-linux-aarch64-2cpu`; transformation=derive budgets once `command-timing.jsonl` holds ~10 samples per label; proof_boundary=`check_runtime_budget.py` green on the recorded window; enforcement_posture=advisory.
 - passive split `README.md` — capability_needed=a reader reaches the right doc without scanning 280 lines; next_center=`README.md`; transformation=move the release-lane and distribution sections behind links to `docs/`; proof_boundary=`inventory_entrypoint_docs_ergonomics.py` no longer reports `long_entrypoint`; enforcement_posture=no-gate because the entrypoint heuristic is advisory and the split is a judgment call the operator should make.
 

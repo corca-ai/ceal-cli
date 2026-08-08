@@ -72,6 +72,12 @@ belongs in one of them, with the rule left here.
   and its output is not release or installed-worker proof. The check reaches no
   remote, so it says nothing about the copy falling behind its owner —
   [docs/gates.md](docs/gates.md) says what it does and does not cover.
+- `test:unit` *is* the coverage run: `c8` over both owned packages, remapped to
+  `src/**/*.ts`, with `all: true` so an untested module reads as zero rather than
+  vanishing. Floors are set from measurement and fail closed. Raise one after
+  improvement lands; never lower one to clear a red gate — read
+  [docs/gates.md](docs/gates.md) first, because three of the four ways to scope
+  this produce a number better than the truth.
 - Two gates are **maintainer-local by design**, run by `.githooks/pre-push` and
   not by `npm run check`: `npm run check:duplication` (the boy-scout duplicate
   ratchet, needs `nose` plus the charness quality skill) and `npm run lint:shell`

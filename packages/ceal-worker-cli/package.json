@@ -29,7 +29,9 @@
 		"build": "tsc -p tsconfig.build.json",
 		"pretest": "npm run build",
 		"test": "node --test test/*.test.mjs",
-		"prepack": "npm run clean && npm run build"
+		"prepack": "npm run clean && npm run build",
+		"precoverage": "npm run build",
+		"coverage": "c8 node --test test/*.test.mjs"
 	},
 	"dependencies": {
 		"@corca-ai/ceal": "0.74.0",

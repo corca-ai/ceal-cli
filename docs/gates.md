@@ -213,6 +213,51 @@ pretend it sees.
 
 Nothing here consults the live `corca-ai/ceal` remote.
 
+## Coverage
+
+`npm run coverage` is `c8` over both owned packages, and `test:unit` *is* that
+run — not a second pass beside it. It is inside `npm run check` and
+`npm run check:unit`, so CI and the pre-push hook both enforce it. It costs about
+five seconds.
+
+What took the work was the target, and three of the four ways to get it wrong
+produce a number that looks better than the truth.
+
+**It measures `src/**/*.ts`, not `dist/**/*.js`.** The suites exercise compiled
+output, so `c8` reads V8 coverage of `dist/` and remaps it through the emitted
+source maps. `--src=dist --extension=.js` is what makes that work; the report
+then names the TypeScript a maintainer actually edits. Node's own
+`--experimental-test-coverage` cannot do this — `--test-coverage-include='src/**'`
+matches nothing after the include filter runs on pre-remap paths, and reports
+`100.00 | 100.00 | 100.00` over an empty set. A vacuous perfect score is the
+worst of the failure modes, because nothing about it looks wrong.
+
+**`all: true` is load-bearing.** Without it `c8` reports only modules some test
+loaded, so an entirely untested module is invisible rather than zero, and the
+average silently rises. `cli-runtime.ts` is the proof it works: it is the one
+source file the report does not name, because it is type-only and compiles to
+`export {};`. It is excluded deliberately, and the count is checked — 26 reported
+files against 27 in `src/`.
+
+**Two exclusions, both by name and both with a reason.** `**/generated/**` is
+build output whose coverage says nothing about whether anything was proven, and
+`**/cli-runtime.*` emits no executable code at all. Nothing is excluded by broad
+pattern, so an exclusion that stops being true is visible in review.
+
+**The floors come from measurement.** Measured on 2026-08-08: the worker at
+93.86% statements / 83.92% branches / 92.73% functions, the client at
+99.00 / 90.58 / 100.00. The floors in each `.c8rc.json` sit just under. The
+portable default of 80% would have been cleared by every ratio in both packages
+by ten to twenty points, which is a floor that can never fail and therefore never
+says anything. `check-coverage: true` is what makes a breach an exit code rather
+than a printed number, and `repo-gates.test.mjs` asserts all three of those
+properties — the floor, `all`, and `check-coverage` — so the gate cannot be
+quietly softened into a report.
+
+Raise a floor after real improvement lands. Do not lower one to make a red gate
+green; the branch ratios are the ones with room, and `acceptance-record.ts` at
+55% branch and `bin.ts` at 50% are where to start.
+
 ## Two Gates That Live In The Hook
 
 `npm run check` runs on GitHub runners that have neither `nose` nor the charness

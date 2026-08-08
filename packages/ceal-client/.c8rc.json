@@ -1,0 +1,13 @@
+{
+	"$schema": "https://json.schemastore.org/c8rc.json",
+	"all": true,
+	"src": "dist",
+	"extension": [".js"],
+	"reporter": ["text", "json-summary"],
+	"reports-dir": "coverage",
+	"check-coverage": true,
+	"statements": 98,
+	"branches": 90,
+	"functions": 100,
+	"lines": 98
+}

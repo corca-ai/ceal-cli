@@ -1,0 +1,22 @@
+{
+	"$schema": "https://json.schemastore.org/c8rc.json",
+	"all": true,
+	"src": "dist",
+	"extension": [
+		".js"
+	],
+	"exclude": [
+		"**/generated/**",
+		"**/cli-runtime.*"
+	],
+	"reporter": [
+		"text",
+		"json-summary"
+	],
+	"reports-dir": "coverage",
+	"check-coverage": true,
+	"statements": 93,
+	"branches": 83,
+	"functions": 92,
+	"lines": 93
+}
