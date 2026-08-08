@@ -15,6 +15,7 @@ import {
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
 import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -272,6 +273,26 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 			"merge_private_control_session_contract_drift",
 			"Merged worker release assets require one identical private control-session contract across every platform.",
 		);
+	// The last point at which a protocol-producer disagreement is still cheap.
+	// The pin is asserted while each platform BUILDS, and after that nothing
+	// asked again: the signing job verifies digests, the file list, and each
+	// manifest's version and platform — bytes and shape, never
+	// `protocol.producer`. The only other caller compares it against an
+	// INSTALLED release, which is after publishing by definition, and a failed
+	// release tag cannot be reused. This job already checked out the exact tag,
+	// so the lock it reads is the one these artifacts were built against.
+	for (const [platform, entries] of platforms) {
+		let manifest;
+		try {
+			manifest = JSON.parse(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes?.toString("utf8") ?? "");
+		} catch {
+			fail("merge_manifest_unreadable", `Merged worker release assets require a parseable manifest for ${platform}.`);
+		}
+		verifyProtocolProvenanceAgainstLock(manifest, {
+			repoRoot,
+			fail: (code, message) => fail(`merge_${code}`, `${message} (${platform})`),
+		});
+	}
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });

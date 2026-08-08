@@ -31,6 +31,15 @@ const CONTROL_SESSION_CONTRACT_BYTES = readFileSync(CONTROL_SESSION_CONTRACT_PAT
 const CONTROL_SESSION_CONTRACT = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
 const CONTROL_SESSION_CONTRACT_SHA256 = digest(CONTROL_SESSION_CONTRACT_BYTES);
 const CARRIER_HANDOFF = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot: REPO_ROOT });
+// Read from the lock rather than restated, for the same reason as the installer
+// allowlist below: a hand-copied expectation and the value it stands for drift
+// apart silently, and here both sides of a comparison would be this file.
+const LOCKED_GATEWAY = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8")).gateway;
+const LOCKED_PROTOCOL_PRODUCER = Object.freeze({
+	repository: LOCKED_GATEWAY.repository,
+	commit: LOCKED_GATEWAY.commit,
+	tree: LOCKED_GATEWAY.tree,
+});
 
 // The installer's own allowlist, read out of the shell rather than restated
 // here. It was a hand-copy, and a hand-copy of an allowlist is the shape that
@@ -341,6 +350,35 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	writeFileSync(platformManifest, originalManifest);
 	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
 
+	// The three drifts above are cross-platform disagreements, which an identical
+	// drift on every leg escapes — that is what the case below covers. Protocol
+	// provenance is not that shape: it is compared against the lock, so an
+	// identical wrong producer on every platform still has to fail. Both of the
+	// ways it can be wrong are exercised, because they are different mistakes:
+	// bytes bound to another Gateway commit, and a manifest that names a version
+	// with no producer at all.
+	const driftedProducer = JSON.parse(originalManifest);
+	driftedProducer.protocol.producer = { ...LOCKED_PROTOCOL_PRODUCER, commit: "f".repeat(40) };
+	writeFileSync(platformManifest, `${JSON.stringify(driftedProducer, null, 2)}\n`);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-protocol-provenance-drift"), inputs, repoRoot }),
+		hasCode("merge_protocol_provenance_disagreement"),
+	);
+	writeFileSync(platformManifest, originalManifest);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+
+	const versionOnlyProtocol = JSON.parse(originalManifest);
+	versionOnlyProtocol.protocol.producer = undefined;
+	writeFileSync(platformManifest, `${JSON.stringify(versionOnlyProtocol, null, 2)}\n`);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-protocol-provenance-missing"), inputs, repoRoot }),
+		hasCode("merge_protocol_provenance_incomplete"),
+	);
+	writeFileSync(platformManifest, originalManifest);
+	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+
 	const identicallyDriftedControlSession = JSON.parse(originalManifest);
 	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_json = "{}";
 	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_sha256 = "0".repeat(64);
@@ -435,6 +473,25 @@ test("worker release workflow signs only the worker inventory from the locked ar
 		workflow,
 		/CEAL_REQUIRE_PLATFORM_PROOFS: \$\{\{ startsWith\(/u,
 		"a prefix match over platforms demands proofs on legs that cannot run them",
+	);
+	// Slice 3 A. The gate is skipped on `linux-arm64`, and everything that skip
+	// is argued from is architecture-independent — lint, unit, contract, all
+	// about the source. `test:release` is not: it is the only proof that npm's
+	// resolver ON THAT RUNNER binds the packed Gateway tarball rather than the
+	// workspace symlink development creates, and those two are indistinguishable
+	// from a passing build. Without this the one binary never asked that question
+	// is also a signed one.
+	assert.match(
+		workflow,
+		/if: matrix[.]validate_source == '0'\n {8}run: npm run build && npm run test:release/u,
+		"the leg that skips the gate must still prove the packed Gateway consumer on its own runner",
+	);
+	// The packed-consumer proofs read an offline cache and fail as ENOTCACHED
+	// without it, so the prewarm cannot stay conditional on the gate.
+	assert.doesNotMatch(
+		workflow,
+		/- name: Prewarm the offline packed-consumer cache\n {8}if:/u,
+		"every leg now runs a packed-consumer proof, so none of them may skip the prewarm",
 	);
 	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
 	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
@@ -600,6 +657,7 @@ function fakeNativeBuild(
 		controlSessionContract = CONTROL_SESSION_CONTRACT,
 		controlSessionSha256 = CONTROL_SESSION_CONTRACT_SHA256,
 		carrierHandoff = CARRIER_HANDOFF,
+		protocolProducer = LOCKED_PROTOCOL_PRODUCER,
 	} = {},
 ) {
 	return async ({ outputDirectory }) => {
@@ -613,7 +671,12 @@ function fakeNativeBuild(
 			version,
 			platform,
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
-			protocol: { package: "@corca-ai/ceal-protocol", version, sha256: "0".repeat(64) },
+			// Producer provenance, not just a version: the merge asserts it against
+			// the lock before the artifacts are handed to signing, and the real
+			// compose path fills it from the handoff source
+			// (scripts/worker-release-inputs.mjs:504). A fixture carrying only a
+			// version would prove the merge accepts a manifest no release produces.
+			protocol: { package: "@corca-ai/ceal-protocol", version, sha256: "0".repeat(64), producer: protocolProducer },
 			private_leased_consumer_carrier: { contract: carrierContract, sha256: carrierSha256 },
 			private_leased_consumer_control_session: { contract: controlSessionContract, sha256: controlSessionSha256 },
 			private_leased_consumer_handoff: carrierHandoff,

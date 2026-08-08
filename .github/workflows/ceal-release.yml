@@ -88,8 +88,10 @@ jobs:
           cache: npm
       - name: Install exact dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      # Unconditional now that every leg runs a packed-consumer proof. The
+      # `linux-arm64` leg reaches it through the release tier below rather than
+      # the gate, and without the cache those proofs fail as `ENOTCACHED`.
       - name: Prewarm the offline packed-consumer cache
-        if: matrix.validate_source == '1'
         run: node scripts/prewarm-offline-consumer-cache.mjs
       # The gate is the same one check.yml runs, so it must be asked for the
       # same proofs. Without this the linux runners silently skip the
@@ -119,6 +121,23 @@ jobs:
         run: npm run check
         env:
           CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.platform == 'linux-amd64' && '1' || '0' }}
+      # The one proof the paragraph above cannot hand a skipped leg. Everything
+      # it argues is architecture-independent — lint, unit, contract — is about
+      # the SOURCE, and this tier is not: `verifyGatewayProtocolConsumer` proves
+      # npm's resolver on THIS runner binds the packed Gateway tarball rather
+      # than the workspace symlink development creates, and those two are
+      # indistinguishable from a passing build. Without it the signed arm64
+      # binary is the one artifact never asked that question. The 2026-08-08
+      # lockfile incident is the same axis: npm recorded only the optional
+      # platform packages matching the host it resolved on.
+      #
+      # `npm run build` first because the tier reads `dist/`, and platform
+      # proofs stay off: they build a `linux-x64` SEA and cannot run here.
+      - name: Prove the packed Gateway consumer on the ungated leg
+        if: matrix.validate_source == '0'
+        run: npm run build && npm run test:release
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: "0"
       - name: Download the locked Gateway handoff archive
         run: |
           set -eu

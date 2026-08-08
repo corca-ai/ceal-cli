@@ -28,10 +28,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const LOCK_PATH = "gateway-protocol-handoff-lock.json";
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
 
@@ -129,49 +129,12 @@ function sha256File(file) {
 }
 
 /**
- * The Protocol input must be named by immutable producer provenance, not by a
- * version string. `@corca-ai/ceal-protocol@0.65.0` has been observed with three
- * different byte sets, so a version-only binding names no particular artifact.
+ * This lane's binding of the shared provenance rule. The rule itself is in
+ * `lib/protocol-provenance.mjs` because the asset merge asks the same question
+ * before signing; only the error envelope differs.
  */
 export function verifyProtocolProvenance(manifest, { repoRoot = REPO_ROOT } = {}) {
-	const protocol = manifest.protocol;
-	if (!protocol) fail("protocol_input_missing", "The release manifest declares no Gateway protocol input.");
-	const producer = protocol.producer ?? {};
-	for (const field of ["repository", "commit", "tree"]) {
-		if (typeof producer[field] !== "string" || !producer[field]) {
-			fail("protocol_provenance_incomplete", `The protocol input names no producer ${field}; a version alone does not identify an artifact.`);
-		}
-	}
-	for (const [field, value] of Object.entries(protocol)) {
-		if (typeof value === "string" && /^(?:workspace|link|file|portal):/u.test(value)) {
-			fail(
-				"protocol_substitution",
-				`The protocol input's ${field} uses a '${value.split(":")[0]}:' specifier; a source-path substitution is not a Gateway artifact.`,
-			);
-		}
-	}
-	const lockPath = path.join(repoRoot, LOCK_PATH);
-	const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, "utf8")) : undefined;
-	const agreement = lock
-		? {
-				checked_against: LOCK_PATH,
-				commit_matches: lock.gateway?.commit === producer.commit,
-				tree_matches: lock.gateway?.tree === producer.tree,
-			}
-		: { checked_against: null, commit_matches: null, tree_matches: null };
-	if (lock && (!agreement.commit_matches || !agreement.tree_matches)) {
-		fail(
-			"protocol_provenance_disagreement",
-			`The installed release's protocol producer (${producer.commit}) disagrees with ${LOCK_PATH} (${lock.gateway?.commit}).`,
-		);
-	}
-	return {
-		package: protocol.package,
-		version: protocol.version,
-		sha256: protocol.sha256,
-		producer,
-		lock_agreement: agreement,
-	};
+	return verifyProtocolProvenanceAgainstLock(manifest, { repoRoot, fail });
 }
 
 function runBinary(binaryPath, args) {
