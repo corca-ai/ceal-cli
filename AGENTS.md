@@ -62,6 +62,11 @@ belongs in one of them, with the rule left here.
   so `repo-gates.test.mjs` asserts the allowlist against real paths and against
   the release inventory. Every other workflow is a release lane triggered only on
   tags, so none of them proves anything about a branch.
+- **`main` is deliberately unprotected**, traded for development speed. Do not
+  "fix" it. The consequence is that CI blocks nothing: a red `check.yml` is a
+  report, and five consecutive red runs once went unnoticed because of it. So the
+  enforcing gate is `.githooks/pre-push` plus whoever reads the run, and a session
+  that pushes owns reading its result — `gh run list --workflow=check.yml`.
 - `npm run hooks:install` points `core.hooksPath` at `.githooks/`, whose
   `pre-push` runs the iteration gate — or the full gate for a tag push, because a
   failed release tag cannot be reused. Run it once per clone;

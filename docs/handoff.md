@@ -53,9 +53,6 @@ action.
 Needs the operator this session; carried-but-unscheduled work belongs in
 [debt.md](debt.md) instead.
 
-- **`main` has no branch protection**, which is why the red CI runs went
-  unnoticed — nothing required a check, and the pre-push hook runs only
-  `check:unit`, which passed on this host.
 - **[debt.md](debt.md) was carried unconfirmed across sessions.** Re-confirm an
   item before starting it, or delete it.
 
