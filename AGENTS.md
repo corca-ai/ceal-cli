@@ -21,38 +21,6 @@ scope, and update it when reality changes it:
 This file holds only the rules those surfaces do not already carry. A rule that
 has grown an explanation belongs in one of them, with the rule left here.
 
-## Host And Lane
-
-Resolve the lane from `hostname`, never from a document's pronoun.
-
-- `narnia` — the normal source-owner lane for **`corca-ai/ceal-cli`**: worker
-  CLI, client SDK, `ceal-guide`, and the Claude and Codex guide hosts. Its
-  checkout is `~/codes/ceal-cli`.
-- `vinc` — the Gateway lane, reachable as `ssh oc`, checkout `~/ceal`. It owns
-  Gateway routes, connector execution, Profile policy, audit/receipt custody,
-  `cealctl`, canonical protocol/conformance, **and `corca-ai/ceal-agent`**.
-  For the current repository-separation and internal-announcement initiative,
-  `vinc` is also the integrated operating checkout for `corca-ai/ceal-cli` at
-  `/home/ubuntu/ceal-cli`: it may implement, verify, commit, and publish that
-  repository. This is an operating assignment, not a transfer of the package's
-  source authority or a reason to edit Gateway-owned frozen inputs.
-
-`ceal-agent` moved to `vinc` on 2026-07-27, after this lane had landed
-`gateway-artifact-handoff.json` and its verifier there (through
-`corca-ai/ceal-agent@474ac96`). That work is handed over, not a standing
-responsibility: `~/codes/ceal-agent` here is a stale checkout of another lane's
-repository, so do not commit or push from it. An `agent` change this lane
-believes is needed is a request to `vinc`.
-
-Handoff and goal documents are written by whichever host authored them, so
-`this host` in `~/codes/ceal/docs/handoff.md` means **`vinc`**. Resolve every
-such deictic reference against `hostname` before quoting a lane assignment, and
-write host names rather than pronouns into any lane statement you author.
-
-`oc:~/ceal` is another lane's working checkout carrying uncommitted work. Leave
-notes there as new untracked top-level `*.md` files; do not edit, stage, commit,
-clean, or rebase anything else.
-
 ## Frozen Paths
 
 Frozen compatibility inputs owned by `corca-ai/ceal`:
@@ -125,7 +93,7 @@ Gateway inputs above remain Gateway-owned compatibility material.
   review the author runs on their own work is not one. It is an authorization,
   not a quota, and a subagent is still the wrong tool for a lookup you can do in
   one read. What delegation does not transfer is trust: a subagent's finding is
-  a claim to verify, and this lane has already had a review state a verdict it
+  a claim to verify, and this repository has already had a review state a verdict it
   could not actually reach, because the agent had no `Bash` to diff against
   `HEAD`. Check what it could see before quoting its conclusion.
 - Treat unexpectedly slow tests as suspicious and fix the test shape in the same
