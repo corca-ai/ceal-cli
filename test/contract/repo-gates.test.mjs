@@ -185,6 +185,65 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	assert.doesNotMatch(enforced[1], /darwin|win32/u, "the floor may only be enforced where the platform proofs run");
 });
 
+// `npm ci` installs a platform binary only if `package-lock.json` carries that
+// platform's package. npm records the ones matching the host it resolved on, and
+// silently drops the rest when `node_modules` is present — so a maintainer on one
+// architecture regenerating the lock removes every other runner's toolchain, with
+// no error and no diff a reader would read as a break.
+//
+// That happened on 2026-08-08 (`d8fc5fd`): 6 of 8 `@biomejs/cli-*` and 25 of 26
+// `@esbuild/*` entries left the lock, `biome check .` — the FIRST command of
+// `npm run check` — died on every non-arm64 runner, and five consecutive
+// `check.yml` runs failed. The release lane runs the same gate on `linux-amd64`
+// and `darwin-arm64`, so the next tag would have burned on two of three legs.
+//
+// Derived from the runners the lanes actually declare, not a hardcoded list: a
+// new runner architecture must bring its toolchain with it.
+test("the lockfile carries a toolchain for every platform the lanes run on", () => {
+	const RUNNER_PLATFORMS = { ubuntu: "linux", macos: "darwin" };
+	const RUNNER_ARCHITECTURES = [
+		["-arm", "arm64"],
+		["", "x64"],
+	];
+	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
+	const runners = new Set(
+		workflows.flatMap((name) =>
+			Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {}).flatMap((job) =>
+				[job["runs-on"], ...(job.strategy?.matrix?.include ?? []).map((entry) => entry.runner ?? entry.os)]
+					.filter((value) => typeof value === "string" && !value.includes("${{"))
+					.map(String),
+			),
+		),
+	);
+	// macOS runners are arm64 whatever the image name says, so the suffix rule
+	// below only decides the Linux ones.
+	const required = new Set(
+		[...runners].map((runner) => {
+			const os = Object.entries(RUNNER_PLATFORMS).find(([image]) => runner.includes(image))?.[1];
+			assert.ok(os, `unknown runner image '${runner}'; teach this gate its platform before adding it to a lane`);
+			if (os === "darwin") return "darwin-arm64";
+			return `linux-${RUNNER_ARCHITECTURES.find(([suffix]) => suffix && runner.endsWith(suffix))?.[1] ?? "x64"}`;
+		}),
+	);
+	assert.ok(required.size >= 2, `only ${required.size} platform derived from ${runners.size} runners; this check would be near-vacuous`);
+
+	const lock = JSON.parse(read("package-lock.json"));
+	const present = new Set(Object.keys(lock.packages));
+	// Every optional dependency any package declares whose *name* carries one of
+	// those platforms. The name is what npm resolves against, so a missing entry
+	// is exactly an uninstallable toolchain — no registry access needed to tell.
+	const declared = [...new Set(Object.values(lock.packages).flatMap((entry) => Object.keys(entry.optionalDependencies ?? {})))];
+	assert.ok(declared.length > 0, "no optional platform dependencies found; this check would be vacuous");
+	const missing = declared.filter(
+		(name) => [...required].some((platform) => name.endsWith(platform)) && !present.has(`node_modules/${name}`),
+	);
+	assert.deepEqual(
+		missing,
+		[],
+		`package-lock.json is missing ${missing.length} platform package(s) a lane runner needs: ${missing.join(", ")}. Regenerate the lock without node_modules present — npm prunes the platforms it cannot see.`,
+	);
+});
+
 // The frozen packages are compatibility inputs this lane may not originate
 // edits in. Linting them would surface findings an agent cannot legally act on,
 // and the pressure to "just fix the lint error" is exactly how a frozen copy

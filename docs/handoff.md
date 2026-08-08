@@ -90,6 +90,40 @@ before a threshold is honest.
 from `## Debt` or do what the operator asked for. `ceal capabilities --fresh` and
 `ceal call` are live-session, provider-touching acts: approval first.
 
+## 2026-08-08 — CI had been red for five runs, and no gate could see it
+
+Found by reading `gh run list` after the first push of the coverage work. Not
+caused by it: `check.yml` had failed five consecutive runs, each in about 30s,
+every one dying on `biome check .` — the *first* command of `npm run check`.
+
+`d8fc5fd` ("delete the legacy cealctl lane") regenerated `package-lock.json` on
+this arm64 Linux host with `node_modules` present. npm records only the optional
+platform packages matching the tree it can see, so **6 of 8 `@biomejs/cli-*` and
+25 of 26 `@esbuild/*` entries left the lock**, with no error and no diff a reader
+would read as a break. `npm ci` on any other runner then installs no binary.
+
+The severity is the release lane, not the check lane. `ceal-release.yml:119` runs
+the same gate on `linux-amd64` and `darwin-arm64`, and esbuild is what builds the
+SEA — so **the next tag would have burned on two of three legs**, which is the one
+failure this repository says it cannot afford. The last release predates the
+break, so nothing shipped wrong.
+
+Why no gate caught it: every local `npm run check`, in that session and this one,
+passed — this host is the one architecture the lock still served. A host-shaped
+hole is invisible to a gate run on that host.
+
+**Fixed** by regenerating the lock in a clean room, manifests only and no
+`node_modules`, which restores all 31 entries. Verified equivalent otherwise: 31
+added, 0 removed, no version drift, no integrity change on any shared package.
+
+**Gated** by `repo-gates.test.mjs`, which derives the platforms from the runners
+every workflow declares and fails if the lock lacks a toolchain for one. Scoped
+rather than blanket, and checked both ways: dropping `@esbuild/linux-x64` or
+`@biomejs/cli-darwin-arm64` turns it red, dropping `@esbuild/win32-x64` does not,
+because no lane runs win32.
+
+Regenerate the lock with `node_modules` absent, or this comes back.
+
 ## 2026-08-08 — scripts/ is measured
 
 Slice 1 of the release-guard goal. `scripts/` now has the third `c8` target:
@@ -111,7 +145,10 @@ Two things the handoff's plan did not account for, both found by running it:
   floors are measured there and *extrapolated* to `linux-x64`, which is enforced
   too because it carries every platform proof. [gates.md](gates.md) states the
   extrapolation and why it is small. **The first `check.yml` run confirms it or
-  moves the number** — that is the one open thread in this slice.
+  moves the number** — and that has NOT happened yet: the first run after this
+  landed died at `biome check .` on the broken lockfile above, long before the
+  gate reached coverage. The floor is still an arm64 measurement asserted about
+  x64. The next green `ubuntu-24.04` run is the evidence.
 
 Falsified rather than assumed, per the goal's own acceptance bar: breaking `all`,
 `check-coverage`, the floor values, the release platform's place in the runner's
