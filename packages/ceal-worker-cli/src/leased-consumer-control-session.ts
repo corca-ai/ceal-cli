@@ -443,9 +443,7 @@ async function readProtectedSessionBeforeDeadline(
 	read: () => Promise<Uint8Array>,
 	close: () => Promise<void>,
 ): Promise<Uint8Array | null> {
-	const now = runtime.monotonicNow ?? monotonicNow;
-	const setTimer = runtime.setTimer ?? ((callback, milliseconds) => setTimeout(callback, milliseconds));
-	const clearTimer = runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
+	const { now, setTimer, clearTimer } = resolveTimerSeams(runtime);
 	const started = now();
 	let timedOut = false;
 	let timer: unknown;
@@ -528,9 +526,7 @@ async function requestControlBeforeDeadline(
 	signal?: AbortSignal,
 ): Promise<UnixSocketResponse> {
 	if (signal?.aborted) throw new Error("control_aborted");
-	const now = runtime.monotonicNow ?? monotonicNow;
-	const setTimer = runtime.setTimer ?? ((callback, milliseconds) => setTimeout(callback, milliseconds));
-	const clearTimer = runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
+	const { now, setTimer, clearTimer } = resolveTimerSeams(runtime);
 	const started = now();
 	let timedOut = false;
 	let timer: unknown;
@@ -564,13 +560,7 @@ function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close
 	const stream = createReadStream("/dev/null", { fd: PROTECTED_SESSION_FD, autoClose: true, highWaterMark: MAX_SESSION_BYTES });
 	return Object.freeze({
 		read: () => readBoundedStream(stream, MAX_SESSION_BYTES, () => stream.destroy()),
-		close: () =>
-			stream.destroyed
-				? Promise.resolve()
-				: new Promise<void>((resolve) => {
-						stream.once("close", () => resolve());
-						stream.destroy();
-					}),
+		close: () => closeReadable(stream),
 	});
 }
 
@@ -742,6 +732,23 @@ function onceAsync(action: () => Promise<void>): () => Promise<void> {
 		pending ??= action().catch(() => undefined);
 		return pending;
 	};
+}
+
+/**
+ * The three timer/clock seams, resolved once. Both deadline races in this module
+ * defaulted them with the same three lines; the lines below them differ, because
+ * each race owns its own deadline and its own mutable state.
+ */
+function resolveTimerSeams(runtime: LeasedConsumerControlSessionRuntime): Readonly<{
+	now: () => number;
+	setTimer: (callback: () => void, milliseconds: number) => unknown;
+	clearTimer: (timer: unknown) => void;
+}> {
+	return Object.freeze({
+		now: runtime.monotonicNow ?? monotonicNow,
+		setTimer: runtime.setTimer ?? ((callback, milliseconds) => setTimeout(callback, milliseconds)),
+		clearTimer: runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)),
+	});
 }
 
 function monotonicNow(): number {

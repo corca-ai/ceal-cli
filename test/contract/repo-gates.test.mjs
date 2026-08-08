@@ -44,6 +44,27 @@ function read(relative) {
 	return readFileSync(path.join(ROOT, relative), "utf8");
 }
 
+/**
+ * Repo-relative files under `directory`, recursively, that `matches` accepts.
+ * An absent directory yields nothing rather than throwing, because the
+ * workspaces this walks do not all carry every subdirectory.
+ *
+ * One walk, two callers: the @testOnly scan wanted sources and the suite scan
+ * wanted suites, and they had been written as two closures that differed only in
+ * the filter and the accumulator — which is exactly the difference this
+ * parameter is.
+ */
+function filesUnder(directory, matches) {
+	if (!existsSync(path.join(ROOT, directory))) return [];
+	const found = [];
+	for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
+		const relative = path.join(directory, entry.name);
+		if (entry.isDirectory()) found.push(...filesUnder(relative, matches));
+		else if (matches(entry.name)) found.push(relative);
+	}
+	return found;
+}
+
 // Two tests read the coverage runner: the one that checks how scripts/ is
 // measured, and the one that resolves `npm test` down to the two tiers. Naming
 // the path once means a rename cannot leave one of them reading a stale file.
@@ -561,22 +582,16 @@ test("no tracked source file is binary to a text search", () => {
 // a finding without being checked is the vacuous guard this repository keeps
 // removing, so the tag is only allowed where it is true.
 test("every @testOnly export is actually reached by a suite", () => {
+	const isSource = (name) => /\.(ts|mjs)$/u.test(name) && !name.endsWith(".d.ts");
 	const sources = [];
-	const walk = (directory) => {
-		for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
-			const relative = path.join(directory, entry.name);
-			if (entry.isDirectory()) walk(relative);
-			else if (/\.(ts|mjs)$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) sources.push(relative);
-		}
-	};
 	for (const workspace of manifest.workspaces) {
 		if (!existsSync(path.join(ROOT, workspace, "src"))) continue;
-		walk(path.join(workspace, "src"));
+		sources.push(...filesUnder(path.join(workspace, "src"), isSource));
 	}
 	// `scripts/` uses the same tag for the same purpose — `lint:reachability`
 	// exempts a tagged export exactly as `knip` does — so it is checked here too
 	// rather than in a second gate that could disagree with this one.
-	walk("scripts");
+	sources.push(...filesUnder("scripts", isSource));
 	assert.ok(sources.length > 0, "no workspace sources found; this check would be vacuous");
 
 	// The declaration that follows the tag, whether the tag sits in its own block
@@ -587,17 +602,10 @@ test("every @testOnly export is actually reached by a suite", () => {
 	// regex that silently stopped matching would otherwise turn this test green.
 	assert.ok(tagged.length > 0, "no @testOnly exports found; either the tag is gone or this scan stopped matching");
 
-	const suites = [];
-	const collect = (directory) => {
-		if (!existsSync(path.join(ROOT, directory))) return;
-		for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
-			const relative = path.join(directory, entry.name);
-			if (entry.isDirectory()) collect(relative);
-			else if (entry.name.endsWith(".test.mjs")) suites.push(read(relative));
-		}
-	};
-	collect("test");
-	for (const workspace of manifest.workspaces) collect(path.join(workspace, "test"));
+	const isSuite = (name) => name.endsWith(".test.mjs");
+	const suiteFiles = [...filesUnder("test", isSuite)];
+	for (const workspace of manifest.workspaces) suiteFiles.push(...filesUnder(path.join(workspace, "test"), isSuite));
+	const suites = suiteFiles.map((file) => read(file));
 	assert.ok(suites.length > 0, "no suites found; this check would be vacuous");
 	const suiteText = suites.join("\n");
 

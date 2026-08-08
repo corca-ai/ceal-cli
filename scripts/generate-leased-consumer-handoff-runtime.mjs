@@ -95,12 +95,6 @@ export function readCarrierContract(file) {
 	} catch {
 		throw new Error("invalid_carrier_contract");
 	}
-	const exact = (object, keys) =>
-		object &&
-		typeof object === "object" &&
-		!Array.isArray(object) &&
-		Object.keys(object).length === keys.length &&
-		keys.every((key) => key in object);
 	const errors = ["invalid_request", "leased_consumer_call_unavailable", "service_call_failed", "service_channel_unavailable"];
 	if (
 		!exact(value, ["schema_version", "argv", "stdin", "service_channel", "result", "non_claims"]) ||
@@ -142,12 +136,6 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	} catch {
 		throw new Error("invalid_control_session_contract");
 	}
-	const exact = (object, keys) =>
-		object &&
-		typeof object === "object" &&
-		!Array.isArray(object) &&
-		Object.keys(object).length === keys.length &&
-		keys.every((key) => key in object);
 	const v4Routes = {
 		acquire: "/api/ceal/agent/v1/control/acquire",
 		projection: "/api/ceal/agent/v1/control/projection",
@@ -226,6 +214,20 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	)
 		throw new Error("invalid_control_session_contract");
 	return Object.freeze({ bytes, value: Object.freeze(value), sha256: createHash("sha256").update(bytes).digest("hex") });
+}
+
+// Both contract readers assert exact key sets rather than "has at least these",
+// so an added field is a refusal instead of a silently ignored one. It was a
+// local closure in each of them, byte-identical; it captures nothing, so the
+// name stays and every call site is unchanged.
+function exact(object, keys) {
+	return (
+		object &&
+		typeof object === "object" &&
+		!Array.isArray(object) &&
+		Object.keys(object).length === keys.length &&
+		keys.every((key) => key in object)
+	);
 }
 
 function protocolVersionAtLeast(value, minimum) {

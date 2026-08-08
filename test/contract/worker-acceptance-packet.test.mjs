@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -14,6 +13,7 @@ import {
 	verifyProtocolProvenance,
 	WorkerAcceptanceError,
 } from "../../scripts/worker-acceptance-packet.mjs";
+import { scratchDir } from "../scratch-dir.mjs";
 
 // Contract tier and offline by design: every refusal below is a decision this
 // command makes before it would contact anything, and the whole point of the
@@ -21,12 +21,6 @@ import {
 // running it against a real install, which no gate can fabricate.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_BYTES = "#!/bin/sh\nexit 0\n";
-
-function scratch(context) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-acceptance-"));
-	context.after(() => rmSync(root, { recursive: true, force: true }));
-	return root;
-}
 
 function stageInstall(root, { manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES } = {}) {
 	const directory = path.join(root, "install", "releases", "0.66.1-linux-amd64-deadbeef");
@@ -66,7 +60,7 @@ function code(expected) {
 // binary resolved out of the checkout would make every row describe the source
 // tree the command was run from — the one thing it must never claim.
 test("a source-checkout or workspace binary is refused, not accepted as a weaker row", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const inRepo = path.join(ROOT, "scripts", "worker-acceptance-packet.mjs");
 	assert.throws(() => resolveInstalledBinary({ binary: inRepo }), code("source_checkout_substitution"));
 	for (const marker of ["node_modules", "dist", "packages"]) {
@@ -81,7 +75,7 @@ test("a source-checkout or workspace binary is refused, not accepted as a weaker
 
 // Three independent statements must agree; any one alone is a self-report.
 test("the installed bytes must agree with both the manifest and SHA256SUMS", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const good = stageInstall(root);
 	const inspected = inspectInstalledRelease(good.binary);
 	assert.equal(inspected.manifest.version, "0.66.1");
@@ -104,7 +98,7 @@ test("the installed bytes must agree with both the manifest and SHA256SUMS", (co
 // sets, so a version string names no particular artifact. The producer commit
 // and tree are what make the input immutable.
 test("a protocol input named by version alone, or by a source path, is refused", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { manifest } = stageInstall(root);
 	assert.equal(verifyProtocolProvenance(manifest, { repoRoot: root }).producer.commit, "c".repeat(40));
 
@@ -126,7 +120,7 @@ test("a protocol input named by version alone, or by a source path, is refused",
 // accepted. An installed release built against a different one is a real
 // disagreement, not a detail to report in a field nobody reads.
 test("a protocol producer disagreeing with the handoff lock is refused", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { manifest } = stageInstall(root);
 	writeFileSync(
 		path.join(root, "gateway-protocol-handoff-lock.json"),
@@ -147,7 +141,7 @@ test("a protocol producer disagreeing with the handoff lock is refused", (contex
 // the fields this command quotes only mean what it says they mean under the
 // schema it names.
 test("a release manifest of an unknown schema is refused before any field is read", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageInstall(root, { manifest: { schema_version: "ceal.worker_release_manifest.v2" } });
 	assert.throws(() => inspectInstalledRelease(binary), code("release_manifest_schema"));
 });
@@ -213,7 +207,7 @@ function stageWorkingInstall(root, options = {}) {
 // ships. The INSTALL still lives in a scratch directory, which is the
 // separation that matters: the packet describes an install, never the source.
 test("the packet describes the install it measured, and its non-claims follow what the run reached", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary, directory } = stageWorkingInstall(root);
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
 
@@ -251,7 +245,7 @@ test("the packet describes the install it measured, and its non-claims follow wh
 });
 
 test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
 
@@ -272,7 +266,7 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 // A discovery that exits non-zero is not a failure of the command — it is a row
 // the packet must report as unreached and then say so, rather than omitting.
 test("an unreached Gateway session is recorded and named in the non-claims", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root, { discoveryStatus: 3 });
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
 	assert.equal(packet.gateway_session.reached, false);
@@ -281,7 +275,7 @@ test("an unreached Gateway session is recorded and named in the non-claims", (co
 });
 
 test("a binary that cannot answer 'version' is refused rather than described", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageInstall(root, {
 		binaryBytes: "#!/bin/sh\nexit 9\n",
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
@@ -300,7 +294,7 @@ function runCli(args, options = {}) {
 }
 
 test("the CLI renders a human packet, emits JSON on request, and refuses malformed argv", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
 
 	const rendered = runCli(["--binary", binary]);
@@ -366,7 +360,7 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 // A call whose stdout carries no request_ref must leave the receipt null rather
 // than inventing one — the packet would otherwise claim a readback it never ran.
 test("a call with no request_ref leaves the receipt unclaimed", (context) => {
-	const root = scratch(context);
+	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageInstall(root, {
 		binaryBytes:
 			'#!/bin/sh\ncase "$1 $2" in\n  "version ") echo "version: 0.66.1" ;;\n  "call message.search") echo "status: refused" ;;\nesac\nexit 0\n',

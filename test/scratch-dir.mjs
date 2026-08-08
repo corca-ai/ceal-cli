@@ -1,0 +1,18 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+// Almost every suite here needs a temporary directory that is removed when the
+// test ends, and each had written the same three lines: mkdtemp under tmpdir,
+// register an `after` that force-removes it, hand back the path. Three lines is
+// small enough to retype and exactly big enough to get wrong in a way nothing
+// notices — a suite that forgets the `after` leaves a tree in `tmpdir()` on
+// every run, and a green suite says nothing about that.
+//
+// `context` is the node:test context, so cleanup is bound to the test that asked
+// for the directory rather than to the file.
+export function scratchDir(context, prefix) {
+	const root = mkdtempSync(path.join(tmpdir(), prefix));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	return root;
+}

@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.mjs";
+import { scratchDir } from "../scratch-dir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function fixture(context, files) {
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-reach-"));
-	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const root = scratchDir(context, "ceal-reach-");
 	mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
 	for (const [relative, contents] of Object.entries(files)) {
 		const absolute = path.join(root, relative);
@@ -117,8 +116,7 @@ test("an inline workflow script counts as a production consumer", (context) => {
 // analyzer over the commit before slice 2's deletions and it must name both
 // guards. Reconstructed with `git archive` so nothing is checked out.
 test("the two guards slice 2 deleted are exactly what this reports on the tree that held them", (context) => {
-	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-reach-history-"));
-	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const scratch = scratchDir(context, "ceal-reach-history-");
 	const archive = spawnSync("sh", ["-c", `git -C '${ROOT}' archive 0cce9f9^ | tar -x -C '${scratch}'`], { encoding: "utf8" });
 	// A shallow or rewritten clone cannot answer this, and inventing a verdict
 	// from a missing commit would be worse than saying so.

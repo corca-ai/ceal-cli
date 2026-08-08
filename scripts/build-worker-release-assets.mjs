@@ -5,7 +5,7 @@
 // the one signed release inventory that install-ceal.sh consumes.
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +15,8 @@ import {
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -68,7 +68,13 @@ export function parsePublishedWorkerReleaseInventory(bytes) {
 
 export async function composeWorkerReleaseAssets(options = {}, dependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
+	const output = inspectOutputDirectory(options.outputDirectory, {
+		repoRoot,
+		force: options.force === true,
+		subject: "Worker release assets output",
+		marker: MARKER,
+		fail,
+	});
 	// Canonicalize the stage so the native builder's no-symlink output guard
 	// accepts it on hosts whose temp root sits behind a symlink (macOS /var).
 	const stage = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-assets-")));
@@ -172,7 +178,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			writeFileSync(path.join(staging, INSTALLER_NAME), installer, { mode: 0o755 });
 			writeFileSync(path.join(staging, manifestName), manifestBytes, { mode: 0o644 });
 			writeChecksumInventory(staging);
-			publishOutput(staging, output);
+			publishOutputDirectory(staging, output);
 		} catch (error) {
 			rmSync(staging, { recursive: true, force: true });
 			throw error;
@@ -205,7 +211,13 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 
 export function mergeWorkerReleaseAssetSets(options = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
+	const output = inspectOutputDirectory(options.outputDirectory, {
+		repoRoot,
+		force: options.force === true,
+		subject: "Worker release assets output",
+		marker: MARKER,
+		fail,
+	});
 	const inputs = Array.isArray(options.inputs) ? options.inputs.map((value) => requireAssetDirectory(value)) : [];
 	if (inputs.length === 0) fail("merge_inputs_required", "Merging worker release assets requires at least one composed input set.");
 	const platforms = new Map();
@@ -300,7 +312,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		for (const entries of platforms.values())
 			for (const [name, entry] of entries) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
 		writeChecksumInventory(staging);
-		publishOutput(staging, output);
+		publishOutputDirectory(staging, output);
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
 		throw error;
@@ -430,30 +442,6 @@ function readStagedFile(file, code) {
 	if (!existsSync(file) || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())
 		fail(code, `Worker release asset input ${path.basename(file)} is unavailable.`);
 	return readFileSync(file);
-}
-
-function inspectOutput(value, repoRoot, force) {
-	if (typeof value !== "string" || !path.isAbsolute(value))
-		fail("invalid_output", "Worker release assets output must be an absolute directory.");
-	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
-		fail("unsafe_output", "Worker release assets output is too broad.");
-	assertNoSymlinkComponents(directory, fail, "Worker release assets output");
-	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("unsafe_output", "Worker release assets output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
-		fail("output_not_replaceable", "Use --force only with a marked worker release assets output.");
-	return { directory, force: true };
-}
-
-function publishOutput(staging, output) {
-	if (!output.force) {
-		renameSync(staging, output.directory);
-		return;
-	}
-	rmSync(output.directory, { recursive: true, force: true });
-	renameSync(staging, output.directory);
 }
 
 function sha256(bytes) {

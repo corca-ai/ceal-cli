@@ -2,18 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-	chmodSync,
-	copyFileSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,8 +16,8 @@ import {
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import {
 	WorkerReleaseInputError,
 	withWorkerReleaseDevelopmentInputsAsync,
@@ -63,7 +52,13 @@ export async function buildWorkerNativeArtifactFromDevelopmentInputs(options = {
 
 async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolveInputs) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
+	const output = inspectOutputDirectory(options.outputDirectory, {
+		repoRoot,
+		force: options.force === true,
+		subject: "Native worker artifact output",
+		marker: MARKER,
+		fail,
+	});
 	const platform = resolvePlatform(options.platform, dependencies);
 	try {
 		return await resolveInputs(
@@ -349,7 +344,7 @@ function materializeOutput({
 		writeFileSync(path.join(staging, "SHA256SUMS"), entries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", {
 			mode: 0o644,
 		});
-		publishOutput(staging, output);
+		publishOutputDirectory(staging, output);
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
 		throw error;
@@ -379,30 +374,6 @@ function resolvePlatform(value, dependencies) {
 function currentPlatform() {
 	const architecture = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "amd64" : process.arch;
 	return `${process.platform}-${architecture}`;
-}
-
-function inspectOutput(value, repoRoot, force) {
-	if (typeof value !== "string" || !path.isAbsolute(value))
-		fail("invalid_output", "Native worker artifact output must be an absolute directory.");
-	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
-		fail("unsafe_output", "Native worker artifact output is too broad.");
-	assertNoSymlinkComponents(directory, fail, "Native worker artifact output");
-	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("unsafe_output", "Native worker artifact output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
-		fail("output_not_replaceable", "Use --force only with a marked native worker artifact output.");
-	return { directory, force: true };
-}
-
-function publishOutput(staging, output) {
-	if (!output.force) {
-		renameSync(staging, output.directory);
-		return;
-	}
-	rmSync(output.directory, { recursive: true, force: true });
-	renameSync(staging, output.directory);
 }
 
 function resolvePostjectCli() {

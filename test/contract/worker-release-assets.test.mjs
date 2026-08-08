@@ -317,67 +317,45 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 
 	const platformManifest = path.join(inputs[1], "ceal-worker-release-manifest-linux-amd64.json");
 	const originalManifest = readFileSync(platformManifest);
-	const driftedManifest = JSON.parse(originalManifest);
-	driftedManifest.private_leased_consumer_carrier.contract_json = "{}";
-	writeFileSync(platformManifest, `${JSON.stringify(driftedManifest, null, 2)}\n`);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-carrier-drift"), inputs, repoRoot }),
-		hasCode("merge_private_carrier_contract_drift"),
-	);
-	writeFileSync(platformManifest, originalManifest);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-
-	const driftedHandoff = JSON.parse(readFileSync(platformManifest, "utf8"));
-	driftedHandoff.private_leased_consumer_handoff.sha256 = "0".repeat(64);
-	writeFileSync(platformManifest, `${JSON.stringify(driftedHandoff, null, 2)}\n`);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-handoff-drift"), inputs, repoRoot }),
-		hasCode("merge_private_carrier_handoff_drift"),
-	);
-	writeFileSync(platformManifest, originalManifest);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-
-	const driftedControlSession = JSON.parse(readFileSync(platformManifest, "utf8"));
-	driftedControlSession.private_leased_consumer_control_session.contract_json = "{}";
-	writeFileSync(platformManifest, `${JSON.stringify(driftedControlSession, null, 2)}\n`);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-control-session-drift"), inputs, repoRoot }),
-		hasCode("merge_private_control_session_contract_drift"),
-	);
-	writeFileSync(platformManifest, originalManifest);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-
-	// The three drifts above are cross-platform disagreements, which an identical
-	// drift on every leg escapes — that is what the case below covers. Protocol
-	// provenance is not that shape: it is compared against the lock, so an
-	// identical wrong producer on every platform still has to fail. Both of the
-	// ways it can be wrong are exercised, because they are different mistakes:
-	// bytes bound to another Gateway commit, and a manifest that names a version
-	// with no producer at all.
-	const driftedProducer = JSON.parse(originalManifest);
-	driftedProducer.protocol.producer = { ...LOCKED_PROTOCOL_PRODUCER, commit: "f".repeat(40) };
-	writeFileSync(platformManifest, `${JSON.stringify(driftedProducer, null, 2)}\n`);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-protocol-provenance-drift"), inputs, repoRoot }),
-		hasCode("merge_protocol_provenance_disagreement"),
-	);
-	writeFileSync(platformManifest, originalManifest);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-
-	const versionOnlyProtocol = JSON.parse(originalManifest);
-	versionOnlyProtocol.protocol.producer = undefined;
-	writeFileSync(platformManifest, `${JSON.stringify(versionOnlyProtocol, null, 2)}\n`);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-protocol-provenance-missing"), inputs, repoRoot }),
-		hasCode("merge_protocol_provenance_incomplete"),
-	);
-	writeFileSync(platformManifest, originalManifest);
-	rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	// One shape, five mutations. Each rewrites the linux-amd64 manifest, expects
+	// the merge to refuse with a named code, and restores — spelling that out five
+	// times hid the only thing that differs between them, which is the pair of
+	// (mutation, code).
+	//
+	// The first three are cross-platform disagreements, which an identical drift on
+	// every leg escapes; the case after this loop covers that. Protocol provenance
+	// is not that shape — it is compared against the lock, so an identical wrong
+	// producer on every platform still has to fail. Both of its ways of being
+	// wrong are here because they are different mistakes: bytes bound to another
+	// Gateway commit, and a manifest that names a version with no producer at all.
+	const driftCases = [
+		["carrier", (manifest) => (manifest.private_leased_consumer_carrier.contract_json = "{}"), "merge_private_carrier_contract_drift"],
+		["handoff", (manifest) => (manifest.private_leased_consumer_handoff.sha256 = "0".repeat(64)), "merge_private_carrier_handoff_drift"],
+		[
+			"control-session",
+			(manifest) => (manifest.private_leased_consumer_control_session.contract_json = "{}"),
+			"merge_private_control_session_contract_drift",
+		],
+		[
+			"protocol-provenance",
+			(manifest) => (manifest.protocol.producer = { ...LOCKED_PROTOCOL_PRODUCER, commit: "f".repeat(40) }),
+			"merge_protocol_provenance_disagreement",
+		],
+		["protocol-version-only", (manifest) => (manifest.protocol.producer = undefined), "merge_protocol_provenance_incomplete"],
+	];
+	for (const [label, mutate, expected] of driftCases) {
+		const drifted = JSON.parse(originalManifest);
+		mutate(drifted);
+		writeFileSync(platformManifest, `${JSON.stringify(drifted, null, 2)}\n`);
+		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+		assert.throws(
+			() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, `merged-${label}-drift`), inputs, repoRoot }),
+			hasCode(expected),
+			label,
+		);
+		writeFileSync(platformManifest, originalManifest);
+		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+	}
 
 	const identicallyDriftedControlSession = JSON.parse(originalManifest);
 	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_json = "{}";

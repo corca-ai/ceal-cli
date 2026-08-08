@@ -18,8 +18,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
-import { assertNoSymlinkComponents } from "./lib/safe-output-path.mjs";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,7 +45,13 @@ export function buildWorkerReleasePackageFromDevelopmentInputs(options = {}, dep
 
 function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInputs) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
-	const output = inspectOutput(options.outputDirectory, repoRoot, options.force === true);
+	const output = inspectOutputDirectory(options.outputDirectory, {
+		repoRoot,
+		force: options.force === true,
+		subject: "Worker package output",
+		marker: MARKER,
+		fail,
+	});
 	try {
 		return resolveInputs(
 			{ ...options, repoRoot },
@@ -309,7 +315,7 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 		writeFileSync(path.join(staging, "SHA256SUMS"), checksumEntries.map((entry) => `${entry.sha256}  ${entry.name}`).join("\n") + "\n", {
 			mode: 0o644,
 		});
-		publishOutput(staging, output);
+		publishOutputDirectory(staging, output);
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
 		throw error;
@@ -327,29 +333,6 @@ function resolveVersion(repoRoot, inputs) {
 		fail("version_mismatch", "Worker and client package versions must match exactly.");
 	}
 	return versions[0];
-}
-
-function inspectOutput(value, repoRoot, force) {
-	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", "Worker package output must be an absolute directory.");
-	const directory = path.resolve(value);
-	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
-		fail("unsafe_output", "Worker package output is too broad.");
-	assertNoSymlinkComponents(directory, fail, "Worker package output");
-	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("unsafe_output", "Worker package output must be a regular directory.");
-	if (!force || !existsSync(path.join(directory, MARKER)) || lstatSync(path.join(directory, MARKER)).isSymbolicLink())
-		fail("output_not_replaceable", "Use --force only with a marked worker package output.");
-	return { directory, force: true };
-}
-
-function publishOutput(staging, output) {
-	if (!output.force) {
-		renameSync(staging, output.directory);
-		return;
-	}
-	rmSync(output.directory, { recursive: true, force: true });
-	renameSync(staging, output.directory);
 }
 
 function assertRegularTree(root, code) {
