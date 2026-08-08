@@ -120,28 +120,46 @@ one more way a release tag can burn, and **a failed release tag cannot be
 reused**. That minute was measured on a development machine, not a
 `ubuntu-24.04-arm` runner.
 
-### B. Nothing re-asserts the pin between the build artifact and the stable pointer
+### B. Nothing re-asserts the pin before the artifact is signed
 
 The pin is asserted inside `withWorkerReleaseInputs*`
-(`scripts/worker-release-inputs.mjs:67`), which the build and compose scripts
-call. Afterwards nothing asks again: `sign-and-publish` verifies the assembled
-inventory but not the pin, and `ceal-worker-stable-rollback.yml` re-verifies
-signatures with `cosign` and moves the pointer.
+(`scripts/worker-release-inputs.mjs:67`) while each platform builds. Afterwards
+nothing asks again: `sign-and-publish`'s inventory verification
+(`ceal-release.yml:263-277`) checks digests, the exact file list, and that each
+manifest carries the right `version` and `platform` — bytes and shape, never
+`protocol.producer`.
 
-**The shape that works already exists**, so this is undecided rather than
-blocked. The signed manifest does record the protocol's producer identity —
-`repository`, `commit`, `tree` — and `verifyProtocolProvenance`
-(`scripts/worker-acceptance-packet.mjs:136`) already compares it against the lock
-and *fails closed* on disagreement at `:162`. `docs/acceptance/ceal-v0.67.1/linux-amd64.json`
-carries a real one. The [debt.md](debt.md) hole is a different field: the manifest
-records no **client** package, and says so while recording the protocol.
+**The comparison already exists and fails closed.** The manifest records the
+protocol producer's `repository`, `commit` and `tree`, and
+`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.mjs:136`) compares
+them against the lock, failing `protocol_provenance_disagreement` at `:162`.
+`docs/acceptance/ceal-v0.67.1/linux-amd64.json` carries a real one. So this is
+wiring, not design — and the [debt.md](debt.md) hole is a different field, the
+missing **client** package, which that entry names while recording the protocol.
 
-What is genuinely open is which lock a later stage compares against. Asserting
-today's lock at rollback would fail a correct rollback of an older release, so
-the rollback question is not the sign/publish question and the two should be
-settled separately rather than by one symmetric guard.
+But the catch today is late rather than absent: the only production caller is
+`buildAcceptancePacket` (`:205`), an operator command run against an *installed*
+release. The defect would surface after signing and publishing, and **a failed
+release tag cannot be reused**.
+
+**Wire it into `assemble`, not into `sign-and-publish`.** `assemble` already
+checks out the exact tag, so it holds the lock these artifacts were built
+against — which is why the "which lock" question does not arise here — and it
+already holds all three manifests and runs a repo script. `sign-and-publish`
+does neither: it downloads the artifact and never checks out, so putting the
+check there means adding source and a Node setup to the one job that carries the
+signing identity and the origin credentials. Two notes for whoever does it:
+`assemble` runs its merge on the runner's default Node rather than the pinned
+`22.22.1` the build legs use, and the check must fail the job rather than warn.
 
 ## Explicitly not in this goal
+
+**Re-asserting the pin at rollback.** `ceal-worker-stable-rollback.yml` re-verifies
+signatures and moves the pointer without asking about the pin, and that stays out
+of this goal deliberately. The correct pin there is the one the rolled-back
+release shipped with, not the lock on the branch the lane checks out, so the
+guard that fits B would fail a correct rollback. Settle "which lock" before
+anyone treats this as B's second half.
 
 The signed manifest's missing client identity, described in [debt.md](debt.md), is
 a real hole and is out of this goal: it is a manifest schema change that needs a

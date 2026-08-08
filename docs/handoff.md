@@ -40,8 +40,8 @@ action.
    returns success on a path the red test requires to fail closed.
 2. **`scripts/worker-acceptance-packet.mjs` at 52.64%** — slice 2's remaining
    mass. It is untested, not unreachable: `lint:reachability` reaches it through
-   the `accept:worker` entry. **The uncovered mass starts at `:191`, not `:407`
-   as this file previously said**, and seven functions are uncovered, not four.
+   the `accept:worker` entry. Seven functions are uncovered and the mass starts
+   at `:191`; read the coverage report rather than a range quoted here.
    Take it in rising cost: `parseArgs` (`:381`) and `render` (`:407`) are pure,
    but neither is exported yet; then `buildAcceptancePacket` (`:191`), which
    needs no live Gateway — it reaches one only through the binary it spawns, and
@@ -52,11 +52,12 @@ action.
    measurement, the four options and their costs are in
    [release-guard-reachability.md](release-guard-reachability.md#a-linux-arm64-is-signed-without-npm-run-check);
    `## Discuss` carries the question, not a second copy of the analysis.
-4. **Slice 3 B is undecided, not blocked.** The manifest does record the
-   protocol producer and `verifyProtocolProvenance` already compares it against
-   the lock and fails closed; what is open is which lock a rollback compares
-   against. Same doc, section B.
-5. Do not reopen the coverage run's cost as a performance goal — gates.md says why.
+4. **Slice 3 B is now ordinary work, not a decision.** `verifyProtocolProvenance`
+   already compares the manifest's protocol producer against the lock and fails
+   closed; nothing in the lane calls it, so the catch happens after signing.
+   Wire it into `assemble`, which holds the tag's lock and no signing identity —
+   not into `sign-and-publish`, which checks out nothing. Section B has the
+   detail; rollback is out of the goal, under `## Explicitly not in this goal`.
 
 ## Discuss
 
