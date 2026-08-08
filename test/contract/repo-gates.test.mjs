@@ -393,6 +393,80 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 	);
 });
 
+// The gate above reads the allowlist out of the classifier and runs it against
+// real paths, which proves the pattern. It does not execute one line of the
+// shell around that pattern, so every `case` arm, every `git` invocation and the
+// `decide_code` early exit went unproven — and the only way anyone had to see
+// them work was to push and read the run. That is a poor loop for the one thing
+// standing between a code change and no CI at all: the branch a maintainer most
+// wants to trust, the documentation-only skip, is also the branch a wrong push
+// range hides. So this runs the workflow's own script text against a throwaway
+// repository with commits shaped to hit each arm.
+//
+// It is the script text from the YAML, not a copy: a paraphrase here would pass
+// while the lane did something else.
+test("the scope classifier answers documentation-only, code, and every uncertain case", (context) => {
+	const classify = (parse(read(".github/workflows/check.yml")).jobs.scope?.steps ?? []).map((step) => step.run ?? "").join("\n");
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-scope-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const clone = path.join(scratch, "repo");
+	const script = path.join(scratch, "classify.sh");
+	writeFileSync(script, classify);
+
+	const git = (...args) => execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: "pipe" }).trim();
+	mkdirSync(path.join(clone, "docs"), { recursive: true });
+	mkdirSync(path.join(clone, "scripts"), { recursive: true });
+	execFileSync("git", ["init", "--quiet", "-b", "main", clone], { stdio: "pipe" });
+	// Identity on the command line rather than in the config: a CI runner has no
+	// global git identity, and `commit` refuses without one.
+	const commit = (message) => {
+		git("add", "-A");
+		git("-c", "user.email=gate@example.invalid", "-c", "user.name=gate", "commit", "--quiet", "-m", message);
+		return git("rev-parse", "HEAD");
+	};
+	writeFileSync(path.join(clone, "docs", "handoff.md"), "one\n");
+	writeFileSync(path.join(clone, "scripts", "build.mjs"), "one\n");
+	const seed = commit("seed");
+	writeFileSync(path.join(clone, "docs", "handoff.md"), "two\n");
+	const prose = commit("docs only");
+	writeFileSync(path.join(clone, "scripts", "build.mjs"), "two\n");
+	const code = commit("code");
+
+	const classifyRange = (env) => {
+		const output = path.join(scratch, "github-output");
+		writeFileSync(output, "");
+		const run = spawnSync("bash", [script], {
+			cwd: clone,
+			encoding: "utf8",
+			env: { ...process.env, GITHUB_OUTPUT: output, EVENT: "", BEFORE: "", BASE_REF: "", HEAD_SHA: "", ...env },
+		});
+		assert.equal(run.status, 0, `the classifier must always decide, not fail: ${run.stderr}`);
+		const decided = /^code=(true|false)$/mu.exec(readFileSync(output, "utf8"));
+		assert.ok(decided, `the classifier wrote no verdict: ${readFileSync(output, "utf8")}`);
+		return decided[1];
+	};
+
+	// The skip itself, over a *range* rather than a tip commit — reading the tip is
+	// how this was got wrong by hand once already, so the range here spans two
+	// commits of which only the second is prose.
+	assert.equal(classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: prose }), "false", "a documentation-only range must skip the gate");
+	// A range whose last commit is prose is still code if anything earlier moved
+	// code. This is the case the whole test exists for.
+	assert.equal(classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: code }), "true", "a range containing a code commit must run the gate");
+	assert.equal(classifyRange({ EVENT: "push", BEFORE: prose, HEAD_SHA: code }), "true", "a code change must run the gate");
+
+	// Fail-closed, one arm at a time. Each of these is a case the classifier
+	// cannot answer, and every one of them must run the lane.
+	for (const [label, env] of [
+		["a first push has no base", { EVENT: "push", BEFORE: "0".repeat(40), HEAD_SHA: code }],
+		["a force push may leave a base this clone lacks", { EVENT: "push", BEFORE: "d".repeat(40), HEAD_SHA: code }],
+		["a manual dispatch carries no range", { EVENT: "workflow_dispatch", HEAD_SHA: code }],
+		["a pull request whose base cannot be fetched", { EVENT: "pull_request", BASE_REF: "main", HEAD_SHA: code }],
+	]) {
+		assert.equal(classifyRange(env), "true", `${label}: an unclassifiable change must run the gate`);
+	}
+});
+
 // `ceal update` runs this installer and waits for it, so an unbounded fetch here
 // made that command unbounded too — no envelope, no exit, nothing an agent can
 // read. The bound belongs to every download rather than to the three that
