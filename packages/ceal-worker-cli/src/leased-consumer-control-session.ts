@@ -106,6 +106,20 @@ interface AbortableWritable {
 }
 
 /**
+ * The one rejection a shared-signal abort produces on its own. It is a distinct
+ * type rather than a message because the notification loop has to tell this
+ * apart from every other failure by identity: a string compare against
+ * `control_aborted` would also match an error a decoder or the Gateway happened
+ * to word that way.
+ */
+class ControlAbortedError extends Error {
+	constructor() {
+		super("control_aborted");
+		this.name = "ControlAbortedError";
+	}
+}
+
+/**
  * v4 writes one response per request and retains its established non-blocking
  * behavior. v5 can emit unsolicited notifications, so its selected transport
  * supplies a lifecycle signal and waits for the shared stream to drain.
@@ -125,7 +139,7 @@ export function writeLeasedConsumerAgentFrame(stream: AbortableWritable, frame: 
 		};
 		const abortWrite = () => {
 			stream.destroy();
-			finish(() => reject(new Error("control_aborted")));
+			finish(() => reject(new ControlAbortedError()));
 		};
 		if (signal.aborted) return abortWrite();
 		signal.addEventListener("abort", abortWrite, { once: true });
@@ -252,6 +266,7 @@ async function runLeasedConsumerNotificationStream(
 	emit: FrameEmitter,
 	runtime: LeasedConsumerNotificationRuntime = {},
 	signal?: AbortSignal,
+	isOwnedShutdown: () => boolean = () => false,
 ): Promise<boolean> {
 	const maximum = CONTROL_SESSION_CONTRACT.notification_channel?.maximum_frame_bytes ?? 4 * 1024;
 	const decodeNotification = runtime.decodeNotification ?? CANDIDATE_PROTOCOL.decodeCealLeasedConsumerCapabilityNotification;
@@ -263,6 +278,14 @@ async function runLeasedConsumerNotificationStream(
 		});
 		return true;
 	} catch (error) {
+		// Two questions, not one. The shared signal is aborted for either of the
+		// transport's two reasons, so `signal.aborted` alone says nothing about
+		// what ended THIS loop: a malformed frame, an FD5/EPIPE read, or a
+		// shared-stdout failure that merely raced with the owner's abort would be
+		// reported as a successful worker exit. Clean requires both that the
+		// worker's own normal-shutdown path ran and that the cancellation it
+		// raised is the error in hand.
+		if (isOwnedShutdown() && error instanceof ControlAbortedError) return true;
 		process.stderr.write(`ceal-worker notification-session failed: ${error instanceof Error ? error.message : "unknown"}\n`);
 		return false;
 	}
@@ -302,18 +325,27 @@ export async function runLeasedConsumerControlTransport(
 	};
 	let agentFinished = false;
 	let notificationEndedEarly = false;
-	const notification = runLeasedConsumerNotificationStream(notificationChannel.stream, serialEmit, notificationRuntime, abort.signal).then(
-		async (clean) => {
-			if (!agentFinished) {
-				notificationEndedEarly = true;
-				abort.abort();
-				await closeAgentStream();
-			}
-			return clean;
-		},
-	);
+	// Set only on the normal-shutdown path below, and read by the notification
+	// loop's classifier. The other `abort.abort()` in this function fires because
+	// the notification loop already ended, so it can never mark its own end clean.
+	let ownedShutdown = false;
+	const notification = runLeasedConsumerNotificationStream(
+		notificationChannel.stream,
+		serialEmit,
+		notificationRuntime,
+		abort.signal,
+		() => ownedShutdown,
+	).then(async (clean) => {
+		if (!agentFinished) {
+			notificationEndedEarly = true;
+			abort.abort();
+			await closeAgentStream();
+		}
+		return clean;
+	});
 	const controlClean = await runLeasedConsumerControlSession(agentStream, session, serialEmit, abort.signal);
 	agentFinished = true;
+	ownedShutdown = true;
 	abort.abort();
 	await notificationChannel.close();
 	const notificationClean = await notification;

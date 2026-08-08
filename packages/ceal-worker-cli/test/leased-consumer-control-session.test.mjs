@@ -344,7 +344,12 @@ test("FD5 ending aborts an outstanding Gateway request before its operation dead
 	assert.deepEqual(output, []);
 });
 
-test("Agent shutdown aborts a notification write stalled on stdout backpressure", async () => {
+// Driven through the shipped `writeLeasedConsumerAgentFrame` rather than a stub
+// that rejects with a hand-written error. The classifier this proves accepts
+// only the cancellation the real writer raises, so a stub emitter would be two
+// fakes agreeing with each other and would stay green with the writer's
+// rejection changed underneath it.
+test("Agent shutdown cleanly aborts a notification write stalled on stdout backpressure", async () => {
 	let markWriteStarted;
 	const writeStarted = new Promise((resolve) => {
 		markWriteStarted = resolve;
@@ -361,19 +366,28 @@ test("Agent shutdown aborts a notification write stalled on stdout backpressure"
 		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
 		await notificationsClosed;
 	}
+	let destroyed = 0;
+	// Backpressure with no drain: `write` never invokes its callback, so the only
+	// way this frame settles is the abort path.
+	const stalledStdout = {
+		write: () => {
+			markWriteStarted();
+			return false;
+		},
+		destroy: () => {
+			destroyed += 1;
+		},
+	};
 	const running = runLeasedConsumerControlTransport(
 		agentInput(),
 		{ dispatch: async () => assert.fail("no Agent frame expected") },
-		(_frame, signal) =>
-			new Promise((_resolve, reject) => {
-				markWriteStarted();
-				signal.addEventListener("abort", () => reject(new Error("control_aborted")), { once: true });
-			}),
+		(frame, signal) => writeLeasedConsumerAgentFrame(stalledStdout, frame, signal),
 		{ stream: notificationInput(), close: async () => closeNotifications() },
 		async () => {},
 		{ decodeNotification: (value) => value },
 	);
-	assert.equal(await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("stdout_not_cancelled"), 100))]), false);
+	assert.equal(await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("stdout_not_cancelled"), 100))]), true);
+	assert.equal(destroyed, 1);
 });
 
 test("the shipped Agent writer destroys a backpressured stdout stream and rejects exactly once on abort", async () => {
