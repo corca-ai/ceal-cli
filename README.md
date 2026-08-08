@@ -177,7 +177,9 @@ npm run lint         # biome check: lint + format + import order
 `npm run hooks:install` wires a `pre-push` hook that runs the iteration gate, or
 the full gate for a tag push — a failed release tag cannot be reused.
 `.github/workflows/check.yml` runs the full gate on every push and pull request
-to `main`; the other workflows are release lanes and trigger only on tags.
+to `main` that changes code; a documentation-only change runs no gate, because
+nothing its allowlist admits reaches a release input or a suite. The other
+workflows are release lanes and trigger only on tags.
 
 `npm run lint` runs `biome check .`, so formatting and import order are gated
 rather than merely suggested; `npm run lint:fix` applies every safe fix. The

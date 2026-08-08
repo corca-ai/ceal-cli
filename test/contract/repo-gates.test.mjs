@@ -257,28 +257,39 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	);
 });
 
-// macOS minutes bill at ten times Linux minutes, so the macOS leg is most of
-// this lane's cost and skipping it for prose is worth real money. The danger is
-// not the skip, it is the filter widening later: one `packages/` or `scripts/`
-// entry added to the allowlist would silently return this repository to the
-// state that burned `ceal-v0.66.0`, and nothing else would notice, because a
-// skipped job reports success. So the allowlist is asserted, not just its
-// existence.
-test("the check lane may skip the macOS gate only for documentation-only changes", () => {
+// Both gate legs are conditional now, so `scope` is no longer a cost optimisation
+// with an unconditional leg behind it — it is the only thing between a code
+// change and no CI at all. The danger was never the skip, it is the filter
+// widening later: one `packages/` or `scripts/` entry added to the allowlist
+// would silently return this repository to the state that burned
+// `ceal-v0.66.0`, and nothing else would notice, because a skipped job reports
+// success. That was true when one leg still ran; it is now the whole of the
+// protection. So the allowlist is asserted against real paths, not merely
+// asserted to exist.
+test("the check lane may skip a gate only for documentation-only changes", () => {
 	const workflow = parse(read(".github/workflows/check.yml"));
 	const conditional = Object.entries(workflow.jobs).filter(([, job]) => typeof job.if === "string");
-	assert.equal(conditional.length, 1, "exactly one check job may be conditional; every other leg must run unconditionally");
-	const [name, job] = conditional[0];
-	const runners = (job.strategy?.matrix?.include ?? []).map((entry) => String(entry.runner));
-	assert.ok(
-		runners.length > 0 && runners.every((runner) => runner.includes("macos")),
-		`only the macOS leg may be conditional, but '${name}' runs on ${runners.join(", ") || "no declared runner"}`,
-	);
-
-	// The condition must be the classifier's answer rather than anything a
-	// commit message or an actor could set.
-	assert.match(job.if, /needs\.scope\.outputs\.code == 'true'/u, `'${name}' must run whenever the scope job reports code`);
-	assert.ok([job.needs].flat().includes("scope"), `'${name}' must depend on the scope job it reads`);
+	// The classifier itself must not be conditional, or the answer every other job
+	// depends on could go unasked.
+	assert.ok(!conditional.some(([name]) => name === "scope"), "the scope job must run unconditionally; nothing else can decide for it");
+	assert.ok(conditional.length > 0, "at least one leg must be scope-gated, or the classifier decides nothing");
+	for (const [name, job] of conditional) {
+		// The condition must be the classifier's answer rather than anything a
+		// commit message, an actor, or a label could set.
+		assert.match(job.if, /^needs\.scope\.outputs\.code == 'true'$/u, `'${name}' must run on exactly the scope job's verdict`);
+		assert.ok([job.needs].flat().includes("scope"), `'${name}' must depend on the scope job it reads`);
+	}
+	// Every leg that runs the gate has to be reachable on a code change. A job
+	// gated on something the classifier cannot report 'true' for would look like a
+	// running gate and never run.
+	const gateJobs = Object.entries(workflow.jobs).filter(([, job]) => (job.steps ?? []).some(runsFinalGate));
+	assert.ok(gateJobs.length >= 2, "both the linux and the macOS gate legs must still exist");
+	for (const [name, job] of gateJobs) {
+		assert.ok(
+			typeof job.if !== "string" || job.if.includes("needs.scope.outputs.code"),
+			`'${name}' must be gated on the classifier or not at all`,
+		);
+	}
 
 	const classify = (workflow.jobs.scope?.steps ?? []).map((step) => step.run ?? "").join("\n");
 	assert.ok(classify.includes("git diff --name-only"), "the scope job must classify from the actual changed paths");
@@ -301,7 +312,19 @@ test("the check lane may skip the macOS gate only for documentation-only changes
 		"gateway-protocol-handoff-lock.json",
 		"skills/ceal-guide/SKILL.md",
 	]) {
-		assert.ok(!documentation.test(file), `${file} can change what a release builds, so it must run the macOS gate`);
+		assert.ok(!documentation.test(file), `${file} can change what a release builds, so it must run the gate`);
+	}
+	// The hand-written list above is a sample. This is the claim behind it, and it
+	// is the one that has to hold as the release inventory grows: nothing the
+	// release actually consumes may be classified as prose. `skills/ceal-guide`
+	// is the case that makes this worth deriving rather than listing — it is
+	// markdown, and it is a signed release asset.
+	const releaseInputs = JSON.parse(read("worker-release-inputs.json"));
+	const sourcePaths = JSON.stringify(releaseInputs).match(/"source_path":\s*"([^"]+)"/gu) ?? [];
+	assert.ok(sourcePaths.length > 0, "no release source paths found; this check would be vacuous");
+	for (const entry of sourcePaths) {
+		const source = /"source_path":\s*"([^"]+)"/u.exec(entry)[1];
+		assert.ok(!documentation.test(source), `${source} is a release input, so a change to it must never be classified as documentation`);
 	}
 	// Fail-open would be the expensive mistake here; fail-closed is the dangerous
 	// one. Every branch that cannot classify must run the lane.

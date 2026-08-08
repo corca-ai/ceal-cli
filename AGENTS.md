@@ -53,8 +53,12 @@ belongs in one of them, with the rule left here.
   off on purpose and `packages/ceal-protocol` is excluded on purpose — read
   [docs/gates.md](docs/gates.md) before changing either.
 - `.github/workflows/check.yml` runs the full gate on every push and pull request
-  to `main`. Every other workflow is a release lane triggered only on tags, so
-  none of them proves anything about a branch.
+  to `main` that its `scope` job classifies as code. Documentation-only changes
+  run no gate at all: nothing the allowlist admits is a release input or is read
+  by a suite. That makes `scope` the only thing between a code change and no CI,
+  so `repo-gates.test.mjs` asserts the allowlist against real paths and against
+  the release inventory. Every other workflow is a release lane triggered only on
+  tags, so none of them proves anything about a branch.
 - `npm run hooks:install` points `core.hooksPath` at `.githooks/`, whose
   `pre-push` runs the iteration gate — or the full gate for a tag push, because a
   failed release tag cannot be reused. Run it once per clone;

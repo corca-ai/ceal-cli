@@ -9,10 +9,27 @@ name: Check
 # macOS minutes bill at ten times Linux minutes, so the macOS leg is roughly
 # 85-90% of this lane's cost while being the shorter of the two jobs. Since
 # 2026-07-20 about 57% of the commits on main touched documentation only, and
-# for those the macOS leg can prove nothing the Linux leg does not. `scope`
-# classifies the change and `check-native` runs only when code moved. The filter
-# is an allowlist of documentation paths and fails toward running: anything it
-# cannot classify with certainty is treated as code.
+# for those neither leg can prove anything. `scope` classifies the change and
+# both gate jobs run only when code moved. The filter is an allowlist of
+# documentation paths and fails toward running: anything it cannot classify with
+# certainty is treated as code.
+#
+# The Linux leg was unconditional until 2026-08-08, on the argument that it was
+# the cheap one and the only one carrying the platform-gated proofs. Measuring
+# `scripts/` coverage put about 50s on it and prompted the re-read, and the
+# argument did not survive: nothing the allowlist admits is a release input or is
+# read by any suite — `worker-release-inputs.json` binds `packages/*` and
+# `skills/ceal-guide/SKILL.md`, and that guide path is classified as code — so a
+# change it admits cannot alter what a proof would prove. Running proofs over an
+# unchanged tree is not evidence, it is a repeat.
+#
+# What that shifts, and it is the thing to weigh before widening the allowlist
+# again: `scope` used to be a cost optimisation with an unconditional leg behind
+# it, and is now the only thing between a code change and no CI at all. The
+# allowlist is therefore asserted against real code paths in
+# `test/contract/repo-gates.test.mjs`, and any edit to this file is itself
+# classified as code, so widening it cannot ship without the full lane running on
+# the commit that widens it.
 #
 # The axis matters. An earlier proposal was to run macOS only for "native"
 # paths, and that would not have caught the break this leg exists for:
@@ -101,10 +118,15 @@ jobs:
           echo "code=false" >> "$GITHUB_OUTPUT"
           echo "Documentation-only change; skipping the native gate."
 
-  # Runs on every change, including documentation-only ones. It is the cheap leg
-  # and it is the one that carries the platform-gated proofs, so it stays
-  # unconditional.
+  # The leg that carries the platform-gated proofs: it is the only place
+  # `CEAL_REQUIRE_PLATFORM_PROOFS=1` is set, so a skipped installed-binary proof
+  # is a hard failure here and a silent skip everywhere else. That is why it runs
+  # for every code change however small — and why it does not run for changes the
+  # classifier admits as documentation, which by construction cannot move any
+  # input those proofs read.
   check:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     permissions:
       contents: read
     # Several suites await an HTTP server they also close; a wedged one would
