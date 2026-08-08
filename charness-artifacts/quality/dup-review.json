@@ -2,6 +2,76 @@
   "entries": [
     {
       "surface": "code",
+      "id": "17e36891f4f87883",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/generate-leased-consumer-handoff-runtime.mjs readCarrierContract vs readControlSessionContract. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers. What remains between the two readers is a read/parse preamble that differs in the error code it throws, and a non_claims tail; folding those costs a parameter to save four lines of boilerplate inside the validators that decide whether a contract is embeddable."
+    },
+    {
+      "surface": "code",
+      "id": "1f59a2daf80674cc",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "test/worker-release-installer.test.mjs against a two-line import span in scripts/build-worker-native-artifact.mjs. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import."
+    },
+    {
+      "surface": "code",
+      "id": "30f063d5eba3a7bd",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/generate-leased-consumer-handoff-runtime.mjs: the generator's own preamble (resolve root, verify the handoff, read the lock and the handoff) against verifyEmbeddedGatewayLeasedConsumerHandoffSource's. The duplication IS the independence. The verifier exists to re-derive what the generator derived and compare, so sharing the derivation would make it check the generator's answer against itself — a guard that cannot fail, which is the vacuous shape this repository keeps deleting."
+    },
+    {
+      "surface": "code",
+      "id": "4dafaa60cfc9ee07",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/generate-leased-consumer-handoff-runtime.mjs, overlapping window over the same two contract readers as 17e36891f4f87883 — the reported ranges share lines, because the detector anchored on the shared frozen return and grew the window across a function boundary in both directions. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "54accb51f9a3a7cc",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/build-worker-release-assets.mjs compose vs merge, and the native-artifact and release-package entries. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. Concretely the members share the two-line entry preamble, a mkdtemp stage in a try/finally, the result-envelope key order, and the terminal error funnel. Their substance is disjoint: compose cross-checks a built binary's embedded contracts against source and emits a per-platform manifest, merge reconciles N composed sets and re-asserts protocol provenance, native runs esbuild/postject, package wraps the consumer staging. Extracting the stage and envelope means passing a callback plus six to eight fields to rebuild four different result objects, which inverts control in the functions that decide what ships. The real duplication these files did carry was removed instead: publishOutput was byte-identical in all three and inspectOutput differed only in its subject noun, and both now live in scripts/lib/output-directory.mjs."
+    },
+    {
+      "surface": "code",
+      "id": "5c6b98e2882e1e45",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "packages/ceal-worker-cli control-session closeReadable/readProtectedSessionBeforeDeadline against the carrier's fd4 channel and readBoundedStream. Only the five-line destroy-and-await-close idiom corresponds; the larger halves of each reported span are unrelated functions the detector paired by line range. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "5f5c29172ed06436",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/generate-leased-consumer-handoff-runtime.mjs, the tail of each contract validator: the non_claims shape assertion and the frozen {bytes, value, sha256} return. Read both before classifying — they sit at the end of two different validation chains that throw different error codes (invalid_carrier_contract vs invalid_control_session_contract) over different required fields. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "692b0f2069fefe07",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "packages/ceal-worker-cli/src/leased-consumer-control-session.ts: the Agent control loop against consumeNdjson. Same shape, three observable differences, and the control loop is on the SHIPPED v4 path. The control loop caps the whole accumulated buffer before splitting; consumeNdjson caps each extracted line and the residual separately, so a read delivering many small frames over the cap is frame_too_large in one and fine in the other. An oversized single line is frame_too_large in one and invalid_frame in the other, and both names reach stderr verbatim. Only the control loop carries the dispatch, the abort recheck and the emit. Reshaping either onto the other moves a byte cap and renames an error on shipped v4."
+    },
+    {
+      "surface": "code",
+      "id": "6df6b80781ef0564",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "materializeOutput in scripts/build-worker-release-package.mjs against the one in scripts/build-worker-native-artifact.mjs. Genuinely similar and still not foldable: different parameter sets, different manifest schema_version, different artifact copy semantics (cpSync preserving the packed tarball vs copyFileSync plus chmod 0o755 on an executable), and different non_claims. What is shared is the stage-marker-manifest-checksums-publish skeleton, so folding means a callback in the middle of the two functions that decide what ships. The extractable part of that skeleton was extracted: the output-directory guard and the publish rename are now scripts/lib/output-directory.mjs."
+    },
+    {
+      "surface": "code",
+      "id": "949fa47905c8f03b",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "packages/ceal-worker-cli control-session seam helpers against the carrier's. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
       "id": "a1b5412a5f2feb47",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -12,7 +82,21 @@
       "id": "a24dc00b66631581",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
-      "note": "test/contract/repo-gates.test.mjs runs scripts/install-git-hooks.mjs against a throwaway clone twice, checking the hooksPath after each. The repetition IS the assertion \u2014 'an installed clone stays installed', which is the idempotence claim the second run exists to make \u2014 so factoring it into a helper would delete the property under test and leave one call. Pre-existing and untouched; it re-keyed on 2026-08-08 only because the coverage slice changed content inside the same detected member span."
+      "note": "test/contract/repo-gates.test.mjs runs scripts/install-git-hooks.mjs against a throwaway clone twice, checking the hooksPath after each. The repetition IS the assertion — 'an installed clone stays installed', which is the idempotence claim the second run exists to make — so factoring it into a helper would delete the property under test and leave one call. Pre-existing and untouched; it re-keyed on 2026-08-08 only because the coverage slice changed content inside the same detected member span."
+    },
+    {
+      "surface": "code",
+      "id": "a7fc6c4d435eaf51",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "scripts/verify-gateway-protocol-consumer.mjs against scripts/build-worker-release-package.mjs, whole-file. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. These two implement opposite strategies: the verifier runs a real npm install --offline and then refuses unless package-lock.json resolves the packed tarball with link !== true, which is its entire point; the package builder deliberately never installs and hand-stages node_modules so the build stays hermetic and injectable. Their pack helpers, smoke checks and asserted surfaces all differ. The only identical code is a three-line sha256."
+    },
+    {
+      "surface": "code",
+      "id": "bf2c5199ba5a6855",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "packages/ceal-worker-cli: the Uint8Array concatenation tail is identical, but the rest of each reported span is not — control-session:578-644 is its abort-aware postUnixSocket with a deadline and four error names, and the carrier's own postUnixSocket is a different function with different error names and a different byte cap. Within the control session there is one concat site, so there is nothing to hoist locally either. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
     },
     {
       "surface": "code",
@@ -27,6 +111,13 @@
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "test/contract/worker-gateway-handoff-archive.test.mjs. Both families are the table-driven refusal shape itself: clone the reviewed lock or inject a dependency, perturb one field, expect a coded refusal. Introduced as detectable on 2026-08-08 when deleting the dead resolveLockedGatewayHandoffArchive wrapper repointed twelve call sites at the longer consumeLockedGatewayHandoffArchiveSync, which biome then reflowed onto multiple lines. Removal was attempted twice before classifying: first a single refuses() helper, which traded these two families for two others, then refusesMutatedLock() plus refuses(), which collapsed every hand-written frame and left only the per-case mutation at the call site. What remains is the shape two sibling tests share by design. Collapsing further means merging them into one parametrized test, trading two named refusals with two distinct reasons - the Protocol binding and the Sigstore identity - for one opaque one. Not worth it: a named failing test is the output this suite exists to produce."
+    },
+    {
+      "surface": "code",
+      "id": "f1223900bb5c8651",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "Same materializeOutput pair as 6df6b80781ef0564, reported over a wider window. See that entry."
     }
   ],
   "fixable_ceiling": 0,
