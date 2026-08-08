@@ -116,27 +116,35 @@ reasoning and why it is in neither gate yet.
 
 What it gives, from a clean run: zero unused files, zero unused dependencies, and
 **15 unused exports plus 6 unused exported types, every one of them in
-`packages/ceal-worker-cli/src/`**. Not one is a false positive. Every one is
-defined in `src/`, referenced only from `test/`, and reached by no production
-path — which is nearer the reachability question than the third blocker predicted.
-In the TypeScript packages the `dist`/`src` split turns out to *help*: because
-suites import `dist/`, `knip` does not count a test as a consumer of `src/`, so
-the exact shape slice 2 deleted by hand shows up on this list instead of reading
-as used. Read that as scoped, not as the blind spot closing — it holds only where
-the compile step separates what tests import from what production imports.
+`packages/ceal-worker-cli/src/`**. None is a false positive *about what `knip`
+claims* — but `knip` claims a surplus `export` modifier, not unreachable code,
+and the difference is the whole point here. Only **6** of the 21 have no
+reference inside `src/` at all; the other 15 are live production code, and
+`CealHpkeError` alone is thrown from six lines of its own file. Reading the list
+as a delete-list would delete working code.
+[gates.md](gates.md#knip-and-why-it-is-not-in-either-gate-yet) carries the split
+and how to re-derive it.
 
-It is a list of questions, not verdicts, and triaging it is the next move: this
-package also ships `exports`, so a symbol with no in-repo production caller may
-still be consumed surface rather than dead code. Resolve each the way slice 2
-resolved its two — wire it into the real path, or delete it.
+So the six are the reachability candidates, and they are still questions rather
+than verdicts: this package ships `exports`, so a symbol with no in-repo
+production caller may be consumed surface. Resolve each the way slice 2 resolved
+its two — wire it into the real path, or delete it. The other 15 are a smaller,
+separate question about export surface, and they are not this goal.
 
 **Then a repo-owned production-reachability check for what `knip` cannot see.**
-`scripts/` is where it cannot see, and that is not a config gap: those suites
-import `scripts/*.mjs` directly, so `knip` counts a test as a consumer and both
-guards slice 2 deleted would have read as *used*. The configured run confirms it —
-it reports nothing at all under `scripts/`. Excluding tests from `entry` to force
-the question turns every test file into an "unused file", which trades one blind
-spot for a page of noise.
+`scripts/` is still where it cannot see, and the reason is worse than the config
+gap this section first assumed — there are two mechanisms, and each alone would
+have hidden both guards slice 2 deleted:
+
+- the top-level `scripts/*.mjs` are `entry` files, and `knip` reports no export
+  in an entry file;
+- under `scripts/lib/` it does report one, until a test imports it — and those
+  suites import `scripts/` directly, with no build step between the test consumer
+  and the production one.
+
+Excluding tests from `entry` to force the question turns every test file into an
+"unused file", which trades one blind spot for a page of noise. Undeclaring the
+entries would report every `scripts/*.mjs` as an unused file instead.
 
 The check we actually want is narrow — an export under `scripts/` that no
 production entry point reaches, walking static imports from the npm-script

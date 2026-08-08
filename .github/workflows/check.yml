@@ -88,7 +88,12 @@ jobs:
 
           case "$EVENT" in
             pull_request)
-              git fetch --no-tags --depth=0 origin "$BASE_REF" >/dev/null 2>&1 || decide_code "could not fetch the base ref"
+              # No --depth: git rejects `--depth=0` outright ("depth 0 is not a
+              # positive number"), so the flag that was meant to say "full
+              # history" made this arm fail every time and no pull request could
+              # ever be classified as documentation. The checkout above already
+              # fetched full history, so the default depth is what is wanted.
+              git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || decide_code "could not fetch the base ref"
               base="$(git merge-base "origin/$BASE_REF" "$HEAD_SHA")" || decide_code "no merge base with $BASE_REF"
               ;;
             push)

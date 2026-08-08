@@ -414,9 +414,11 @@ were almost entirely false positives; the four config entries below are what too
 that to zero unused files, zero unused dependencies, and a findings list whose
 every entry is a real question. Each entry earns its place:
 
-- `entry` names `src/bin.ts` alongside `src/index.ts` in the worker package.
-  `bin.ts` is an esbuild entry rather than a package export, so nothing in the
-  manifest points at it and `knip` would otherwise call the whole SEA graph dead.
+- `entry` names `src/bin.ts` alongside `src/index.ts` in the worker package. The
+  manifest's `bin` field points at `dist/bin.js`, not at the source `knip` reads,
+  so without the entry it calls the whole SEA graph dead — 7 unused files
+  including `bin.ts` itself and both leased-consumer modules. Drop the line and
+  re-run to see it.
 - `ignoreDependencies` carries `postject`, which the native build reaches through
   `require.resolve` rather than an import.
 - `ignoreBinaries` carries `nose` and `shellcheck`. Both are real dependencies of
@@ -428,21 +430,48 @@ every entry is a real question. Each entry earns its place:
   may act on.
 
 What survives is 15 unused exports and 6 unused exported types, all in
-`packages/ceal-worker-cli/src/`. **None of them is a false positive, and none of
-them is yet a verdict.** Every one is defined in `src/`, referenced from `test/`,
-and reached by no production path — the suites import `dist/`, so `knip` does not
-count those test references and reports the symbol as unused. That is the same
-`dist`/`src` split `c8` works around with `--src=dist`, and here it is useful
-rather than a defect: the list is close to the production-reachability question
-slice 4 exists to answer. It is not the answer, because this package also ships
-`exports`, so a symbol with no in-repo production caller may still be consumed
-surface.
+`packages/ceal-worker-cli/src/`. **Read what that means precisely, because it is
+not what it looks like.** `knip` reports an unnecessary `export` *modifier*, not
+unreachable code. The suites import `dist/`, so a test reference does not count
+as a consumer of `src/`; every symbol whose only out-of-file use is a test
+therefore appears here whatever production does with it *inside* its own file.
+Counting in-`src` references other than the definition splits the 21 in two:
+
+- **15 are live production code** with the export modifier as the only surplus.
+  `CealHpkeError` has 13 in-`src` references and is thrown at
+  `packages/ceal-worker-cli/src/hpke.ts:103` among others; `RECEIPT_SPOOL_MAX_ENTRIES`
+  bounds the spool at `src/receipt-spool.ts:221`. Deleting one of these deletes
+  working code.
+- **6 have no in-`src` reference at all** — `verifyCealDeviceProof`,
+  `sealCealHpkeMessage`, `classifiedClientSessionFailureReasons`,
+  `LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256`,
+  `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`, `CEAL_ACCEPTANCE_RECORD_SCHEMA`. These
+  are the reachability candidates, and still not verdicts: the package ships
+  `exports`, so a symbol with no in-repo caller may be consumed surface.
+
+Re-derive the split rather than trusting the counts here — `npx knip --reporter json`
+and `rg --word-regexp <symbol> packages/ceal-worker-cli/src`.
 
 So the tool is installed and configured, and it is in neither `npm run check` nor
 the hook. Wiring it in would either fail the gate on 21 untriaged questions or
 require suppressing them, and a suppressed finding is the vacuous guard this
 repository keeps removing. It joins a gate when the list is triaged;
 [release-guard-reachability.md](release-guard-reachability.md) owns that work.
+
+`knip` reports nothing under `scripts/` today, and that is a property of this
+config plus this tree rather than of the tool. Two separate mechanisms produce
+the silence, and both were checked with a planted export:
+
+- The 20 top-level `scripts/*.mjs` are declared `entry`, and `knip` does not
+  report exports in an entry file. A planted export in
+  `scripts/worker-release-inputs.mjs` goes unreported.
+- Under `scripts/lib/`, which is not entry, an export *is* reported — until a
+  test imports it, which every one of them does. Those suites import
+  `scripts/*.mjs` directly rather than a built copy, so unlike the TypeScript
+  packages there is no compile step separating a test consumer from a production
+  one.
+
+Either mechanism alone would have hidden both guards slice 2 deleted by hand.
 
 ## Probing An Installed Surface
 

@@ -394,14 +394,18 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 });
 
 // The gate above reads the allowlist out of the classifier and runs it against
-// real paths, which proves the pattern. It does not execute one line of the
-// shell around that pattern, so every `case` arm, every `git` invocation and the
-// `decide_code` early exit went unproven — and the only way anyone had to see
-// them work was to push and read the run. That is a poor loop for the one thing
-// standing between a code change and no CI at all: the branch a maintainer most
-// wants to trust, the documentation-only skip, is also the branch a wrong push
-// range hides. So this runs the workflow's own script text against a throwaway
-// repository with commits shaped to hit each arm.
+// real paths, which proves the pattern. It executes no line of the shell around
+// that pattern, so the only way anyone had to watch an arm decide was to push
+// and read the run. That is a poor loop for the one thing standing between a
+// code change and no CI at all, and it hides the mistake that is easiest to make
+// by hand: reading the tip commit instead of the pushed range. So this runs the
+// workflow's own script text against a throwaway repository.
+//
+// Every case below asserts the *reason* the classifier printed as well as the
+// verdict. Verdict alone would not distinguish an arm that decided from one that
+// fell through to a later `decide_code` — and since every fallthrough here lands
+// on `true`, four of the guards could be deleted with a verdict-only test still
+// green.
 //
 // It is the script text from the YAML, not a copy: a paraphrase here would pass
 // while the lane did something else.
@@ -413,10 +417,15 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 	const script = path.join(scratch, "classify.sh");
 	writeFileSync(script, classify);
 
-	const git = (...args) => execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: "pipe" }).trim();
+	// GIT_CONFIG_GLOBAL is neutralised for every git call, this test's and the
+	// classifier's: a maintainer running with `commit.gpgSign` or an excludesFile
+	// that ignores `*.mjs` would otherwise get a red gate describing their own
+	// machine rather than this repository.
+	const environment = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+	const git = (...args) => execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: "pipe", env: environment }).trim();
 	mkdirSync(path.join(clone, "docs"), { recursive: true });
 	mkdirSync(path.join(clone, "scripts"), { recursive: true });
-	execFileSync("git", ["init", "--quiet", "-b", "main", clone], { stdio: "pipe" });
+	execFileSync("git", ["init", "--quiet", "-b", "main", clone], { stdio: "pipe", env: environment });
 	// Identity on the command line rather than in the config: a CI runner has no
 	// global git identity, and `commit` refuses without one.
 	const commit = (message) => {
@@ -424,13 +433,19 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 		git("-c", "user.email=gate@example.invalid", "-c", "user.name=gate", "commit", "--quiet", "-m", message);
 		return git("rev-parse", "HEAD");
 	};
-	writeFileSync(path.join(clone, "docs", "handoff.md"), "one\n");
-	writeFileSync(path.join(clone, "scripts", "build.mjs"), "one\n");
+	const writeProse = (text) => writeFileSync(path.join(clone, "docs", "handoff.md"), text);
+	const writeCode = (text) => writeFileSync(path.join(clone, "scripts", "build.mjs"), text);
+	writeProse("one\n");
+	writeCode("one\n");
 	const seed = commit("seed");
-	writeFileSync(path.join(clone, "docs", "handoff.md"), "two\n");
+	writeProse("two\n");
 	const prose = commit("docs only");
-	writeFileSync(path.join(clone, "scripts", "build.mjs"), "two\n");
+	writeCode("two\n");
 	const code = commit("code");
+	// The ordering that matters: prose *after* code, so a range ending here has a
+	// documentation-only tip and a code commit inside it.
+	writeProse("three\n");
+	const proseAfterCode = commit("docs only, after code");
 
 	const classifyRange = (env) => {
 		const output = path.join(scratch, "github-output");
@@ -438,32 +453,68 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 		const run = spawnSync("bash", [script], {
 			cwd: clone,
 			encoding: "utf8",
-			env: { ...process.env, GITHUB_OUTPUT: output, EVENT: "", BEFORE: "", BASE_REF: "", HEAD_SHA: "", ...env },
+			env: { ...environment, GITHUB_OUTPUT: output, EVENT: "", BEFORE: "", BASE_REF: "", HEAD_SHA: "", ...env },
 		});
 		assert.equal(run.status, 0, `the classifier must always decide, not fail: ${run.stderr}`);
 		const decided = /^code=(true|false)$/mu.exec(readFileSync(output, "utf8"));
 		assert.ok(decided, `the classifier wrote no verdict: ${readFileSync(output, "utf8")}`);
-		return decided[1];
+		return { verdict: decided[1], reason: run.stdout };
 	};
 
-	// The skip itself, over a *range* rather than a tip commit — reading the tip is
-	// how this was got wrong by hand once already, so the range here spans two
-	// commits of which only the second is prose.
-	assert.equal(classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: prose }), "false", "a documentation-only range must skip the gate");
-	// A range whose last commit is prose is still code if anything earlier moved
-	// code. This is the case the whole test exists for.
-	assert.equal(classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: code }), "true", "a range containing a code commit must run the gate");
-	assert.equal(classifyRange({ EVENT: "push", BEFORE: prose, HEAD_SHA: code }), "true", "a code change must run the gate");
+	// The skip itself, over a range rather than a tip commit.
+	const skipped = classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: prose });
+	assert.equal(skipped.verdict, "false", "a documentation-only range must skip the gate");
+	assert.match(skipped.reason, /Documentation-only change/u);
 
-	// Fail-closed, one arm at a time. Each of these is a case the classifier
-	// cannot answer, and every one of them must run the lane.
-	for (const [label, env] of [
-		["a first push has no base", { EVENT: "push", BEFORE: "0".repeat(40), HEAD_SHA: code }],
-		["a force push may leave a base this clone lacks", { EVENT: "push", BEFORE: "d".repeat(40), HEAD_SHA: code }],
-		["a manual dispatch carries no range", { EVENT: "workflow_dispatch", HEAD_SHA: code }],
-		["a pull request whose base cannot be fetched", { EVENT: "pull_request", BASE_REF: "main", HEAD_SHA: code }],
+	// The case the whole test exists for: the tip is prose and the range is not.
+	// A classifier reading `git show HEAD` rather than the range answers `false`
+	// here, which is exactly the hand mistake this encodes against.
+	const spanning = classifyRange({ EVENT: "push", BEFORE: seed, HEAD_SHA: proseAfterCode });
+	assert.equal(spanning.verdict, "true", "a range whose tip is prose still runs the gate if it contains a code commit");
+	assert.match(spanning.reason, /these paths are not documentation:.*scripts\/build\.mjs/u);
+	assert.equal(classifyRange({ EVENT: "push", BEFORE: prose, HEAD_SHA: code }).verdict, "true", "a code change must run the gate");
+
+	// A pull request is the arm with no push history to fall back on, and it was
+	// broken from the day it was written: `--depth=0` is not a legal depth, so the
+	// fetch failed and every pull request ran the full lane no matter what it
+	// touched. Nothing noticed, because this repository has never opened one. So
+	// the documentation-only answer is proven here against a real fetchable
+	// remote rather than assumed.
+	const remote = path.join(scratch, "origin.git");
+	execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", remote], { stdio: "pipe", env: environment });
+	git("remote", "add", "origin", remote);
+	git("push", "--quiet", "origin", `${prose}:refs/heads/main`);
+	const request = classifyRange({ EVENT: "pull_request", BASE_REF: "main", HEAD_SHA: proseAfterCode });
+	assert.equal(request.verdict, "true", "a pull request carrying a code commit must run the gate");
+	git("push", "--quiet", "--force", "origin", `${code}:refs/heads/main`);
+	const prosePr = classifyRange({ EVENT: "pull_request", BASE_REF: "main", HEAD_SHA: proseAfterCode });
+	assert.equal(prosePr.verdict, "false", "a documentation-only pull request must skip the gate");
+	assert.match(prosePr.reason, /Documentation-only change/u);
+
+	// A branch sharing no ancestor with the base — a re-created `main`, a subtree
+	// import — is what makes `git merge-base` fail. Constructed rather than
+	// assumed, because the guard for it is otherwise indistinguishable from the
+	// `git diff` failure that would follow it.
+	git("checkout", "--quiet", "--orphan", "unrelated");
+	writeProse("orphan\n");
+	const orphan = commit("unrelated history");
+	git("checkout", "--quiet", "main");
+
+	// Fail-closed, one arm at a time, each pinned to the reason its own guard
+	// prints. Every one of these is a case the classifier cannot answer.
+	for (const [reason, env] of [
+		[/no previous commit to diff against/u, { EVENT: "push", BEFORE: "0".repeat(40), HEAD_SHA: code }],
+		[/the previous commit is not in this clone/u, { EVENT: "push", BEFORE: "d".repeat(40), HEAD_SHA: code }],
+		[/workflow_dispatch carries no diff range/u, { EVENT: "workflow_dispatch", HEAD_SHA: code }],
+		[/could not fetch the base ref/u, { EVENT: "pull_request", BASE_REF: "absent-branch", HEAD_SHA: code }],
+		[/no merge base with main/u, { EVENT: "pull_request", BASE_REF: "main", HEAD_SHA: orphan }],
+		// An empty range should not be reachable, and that is the reason to pin it:
+		// the arm exists to make "should not happen" run the lane rather than skip it.
+		[/the range reports no files/u, { EVENT: "push", BEFORE: code, HEAD_SHA: code }],
 	]) {
-		assert.equal(classifyRange(env), "true", `${label}: an unclassifiable change must run the gate`);
+		const decided = classifyRange(env);
+		assert.equal(decided.verdict, "true", `${reason}: an unclassifiable change must run the gate`);
+		assert.match(decided.reason, reason, "the guard that fired must be the one that owns this case");
 	}
 });
 
