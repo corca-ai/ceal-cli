@@ -81,12 +81,21 @@ latter's *statements* figure for a different purpose; do not read them as one.)
 findings at all, and one of them is exercised despite reading 0%. gates.md names
 which and why; read it before acting on a zero.
 
-## Slice 3 — the two structural holes the audit surfaced
+## Slice 3 — the two structural holes the audit surfaced — done
 
-**Decision-first.** Both are knowing holes with a stated tradeoff, so they are the
-operator's to settle before anything moves. Do not implement either unilaterally.
+Both were decision-first and both are settled. The operator chose to add
+`test:release` to the arm64 leg on 2026-08-08; B was already ordinary work by
+then. Both landed in `d08faab`, and the analysis below is kept as the reasoning
+the change carries, not as an open question.
 
-### A. `linux-arm64` is signed without `npm run check`
+Proof level reached: `npm run check:unit` green locally, with the workflow's new
+shape pinned by `test/contract/worker-release-assets.test.mjs` and the merge
+assertion falsified by two negative cases (`merge_protocol_provenance_disagreement`,
+`merge_protocol_provenance_incomplete`). **Neither has run in a release lane** —
+no tag has been cut since, so the arm64 leg's real cost on a `ubuntu-24.04-arm`
+runner is still the development-machine measurement quoted below.
+
+### A. `linux-arm64` is signed without `npm run check` — resolved
 
 `ceal-release.yml:65` sets `validate_source: "0"` for that leg alone and `:118`
 gates the whole gate on it. The leg still gets `tsc`, the SEA build, the native
@@ -120,7 +129,7 @@ one more way a release tag can burn, and **a failed release tag cannot be
 reused**. That minute was measured on a development machine, not a
 `ubuntu-24.04-arm` runner.
 
-### B. Nothing re-asserts the pin before the artifact is signed
+### B. Nothing re-asserts the pin before the artifact is signed — resolved
 
 The pin is asserted inside `withWorkerReleaseInputs*`
 (`scripts/worker-release-inputs.mjs:67`) while each platform builds. Afterwards
@@ -141,6 +150,13 @@ But the catch today is late rather than absent: the only production caller is
 `buildAcceptancePacket` (`:205`), an operator command run against an *installed*
 release. The defect would surface after signing and publishing, and **a failed
 release tag cannot be reused**.
+
+It went into the `merge` the `assemble` job runs, rather than into a new step
+beside it: `mergeWorkerReleaseAssetSets` already holds all three manifests and
+already runs three cross-platform manifest checks, so this is a fourth beside
+them. The rule itself moved to `scripts/lib/protocol-provenance.mjs` so the
+installed-release caller and the pre-signing caller cannot answer it
+differently. The original reasoning for the job choice follows.
 
 **Wire it into `assemble`, not into `sign-and-publish`.** `assemble` already
 checks out the exact tag, so it holds the lock these artifacts were built
