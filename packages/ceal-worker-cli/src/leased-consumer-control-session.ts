@@ -51,7 +51,7 @@ export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.arg
 const PROTECTED_SESSION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.protected_session.deadline_ms;
 const OPERATION_DEADLINE_BOUNDS_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_bounds_ms;
 /** The Gateway launcher injects the operative deadline; the contract keeps only its bounds. */
-export const LEASED_CONSUMER_OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
+const LEASED_CONSUMER_OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
 const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
 const MAX_SESSION_BYTES = CONTROL_SESSION_CONTRACT.protected_session.maximum_bytes;
 const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
@@ -87,6 +87,11 @@ export interface LeasedConsumerControlSessionRuntime {
  * Absent launcher input keeps the contract minimum (today's behavior); a
  * present but non-integer or out-of-bounds value fails closed before any
  * operation is served.
+ *
+ * Exported for the suite that drives its bounds directly; no other module calls
+ * it.
+ *
+ * @testOnly
  */
 export function resolveOperationDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
 	const raw = env[LEASED_CONSUMER_OPERATION_DEADLINE_ENV];

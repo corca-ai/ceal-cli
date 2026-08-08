@@ -23,7 +23,7 @@ const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
 const RELEASE_MANIFEST_SCHEMA = "ceal.worker_release_manifest.v1";
 
-export interface CealInstalledReleaseFacts {
+interface CealInstalledReleaseFacts {
 	platform: unknown;
 	release_version: unknown;
 	artifact_sha256: string;

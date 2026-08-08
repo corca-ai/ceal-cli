@@ -177,6 +177,8 @@ belongs in one of them, with the rule left here.
   the `-r`/`-E` reflex adds flags it does not need — in ripgrep those letters are
   `--replace` and `--encoding`, which swallow the pattern or rewrite the output
   into something that reads like a clean result.
+  One NUL byte also makes `rg` skip a file silently, so use `rg -na` outside this
+  repository. Inside it, `repo-gates.test.mjs` keeps tracked source free of them.
 - In `zsh`, never use `path` or `status` as a scratch or loop variable — both are
   tied to shell state. An unquoted parameter is also not word-split, so build
   multi-argument probes as arrays or `${=var}` rather than one bare string.

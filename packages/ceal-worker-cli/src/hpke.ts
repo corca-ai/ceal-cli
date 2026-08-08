@@ -68,6 +68,13 @@ const KEM_SUITE_ID = Buffer.concat([Buffer.from("KEM", "utf8"), i2osp(KEM_ID, 2)
 const X25519_SPKI_PREFIX = Buffer.from("302a300506032b656e032100", "hex");
 const X25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b656e04220420", "hex");
 
+/**
+ * Exported so the vector suite can assert `instanceof` together with `code`.
+ * Every open failure collapses to one code on purpose, so the class is what
+ * distinguishes a refusal this module raised from any other thrown Error.
+ *
+ * @testOnly
+ */
 export class CealHpkeError extends Error {
 	readonly code: string;
 	constructor(code: string, message: string) {
@@ -84,7 +91,7 @@ export interface CealHpkeKeyPair {
 	publicKey: Uint8Array;
 }
 
-export interface CealHpkeSealed {
+interface CealHpkeSealed {
 	/** The KEM encapsulated key: a raw 32-byte ephemeral X25519 public key. */
 	enc: Uint8Array;
 	/** AES-256-GCM ciphertext with its 16-byte tag appended, as RFC 9180 defines it. */

@@ -55,6 +55,13 @@ export interface CealDiscoveryCacheEntry {
 	discovery: Record<string, unknown>;
 }
 
+/**
+ * Exported so the suite can assert `instanceof` rather than a name string: an
+ * assertion on `error.name` passes for any Error carrying that name, which is
+ * exactly the substitution a refusal test must not accept.
+ *
+ * @testOnly
+ */
 export class CealDiscoveryCacheStoreError extends Error {
 	override readonly name = "CealDiscoveryCacheStoreError";
 	constructor(readonly code: "home_unavailable" | "unsafe_store") {

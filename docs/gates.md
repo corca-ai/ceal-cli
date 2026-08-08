@@ -406,13 +406,12 @@ Both skip loudly rather than failing when their tool is absent. A gate that
 no-ops silently while counted as part of the gate is the failure being avoided;
 saying "skipped, and here is what went unchecked" is not.
 
-## `knip`, And Why It Is Not In Either Gate Yet
+## `knip`, And What Its Zero Means
 
-`npm run lint:unused` is `knip`, configured by `knip.json`. It was tried
-config-less on 2026-07-26 and reported 3 unused files and 42 unused exports that
-were almost entirely false positives; the four config entries below are what took
-that to zero unused files, zero unused dependencies, and a findings list whose
-every entry is a real question. Each entry earns its place:
+`npm run lint:unused` is `knip`, configured by `knip.json`, and it runs inside
+both `npm run check` and `npm run check:unit` — about 2s. It reports nothing
+today, which is worth only as much as the config below is honest, so each entry
+earns its place:
 
 - `entry` names `src/bin.ts` alongside `src/index.ts` in the worker package. The
   manifest's `bin` field points at `dist/bin.js`, not at the source `knip` reads,
@@ -429,42 +428,27 @@ every entry is a real question. Each entry earns its place:
   excludes it: it is a frozen vendored copy, and a finding there is one no agent
   may act on.
 
-What survives is 16 findings, all in `packages/ceal-worker-cli/src/`. **Read what
-that means precisely, because it is not what it looks like.** `knip` reports an
-unnecessary `export` *modifier*, not unreachable code. The suites import `dist/`,
-so a test reference does not count as a consumer of `src/`; every symbol whose
-only out-of-file use is a test appears here whatever production does with it
-*inside* its own file. Counting in-`src` references other than the definition
-splits them:
+The findings it started with were 21, and reading them is what the tool is worth.
+`knip` reports a surplus `export` *modifier*, not unreachable code: suites import
+`dist/`, so a test reference never counts as a consumer of `src/`. Fifteen of the
+21 were live production code used inside their own file, so the whole list read
+as a delete-list would have deleted working code. What closed them:
 
-- **15 are live production code** with the export modifier as the only surplus.
-  `CealHpkeError` has 13 in-`src` references and is thrown at
-  `packages/ceal-worker-cli/src/hpke.ts:103` among others; `RECEIPT_SPOOL_MAX_ENTRIES`
-  bounds the spool at `src/receipt-spool.ts:221`. Deleting one of these deletes
-  working code.
-- **One is a blind spot rather than a finding.** `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`
-  is consumed by `scripts/probe-surface.mjs`, which imports `dist/agent-guide.js`;
-  `knip` does not trace that back to `src/`, so a wired production consumer still
-  reads as unused.
+- **Seven had no consumer at all.** The `export` came off; the declarations stay.
+- **Eleven exist for the suites.** They carry `@testOnly`, which `knip.json`'s
+  `tags` entry reads. The exception belongs at the declaration, where its reason
+  already was, not in a config allowlist a reader has to correlate.
+- **One was deleted and two were wired into production paths.**
+  [release-guard-reachability.md](release-guard-reachability.md) records those
+  three, because two of them were live defects rather than tidiness.
 
-The six that had no in-`src` reference at all were triaged, and
-[release-guard-reachability.md](release-guard-reachability.md) records what each
-became. Three were deliberate test-only exports and now carry `@testOnly`, which
-`knip.json`'s `tags` entry reads — the exception belongs at the declaration,
-where its reason already was, rather than in a config allowlist.
+`@testOnly` is a claim the tool obeys, so it is checked: `repo-gates.test.mjs`
+fails when a tagged export is reached by no suite. Without that, tagging a symbol
+nothing uses silences `knip` exactly as well as tagging one a suite needs.
 
-Re-derive the split rather than trusting the counts here — `npx knip --reporter json`
-and `rg --word-regexp <symbol> packages/ceal-worker-cli/src`.
-
-So the tool is installed and configured, and it is in neither `npm run check` nor
-the hook. Wiring it in would either fail the gate on 16 untriaged questions or
-require suppressing them, and a suppressed finding is the vacuous guard this
-repository keeps removing. It joins a gate when the list is triaged;
-[release-guard-reachability.md](release-guard-reachability.md) owns that work.
-
-`knip` reports nothing under `scripts/` today, and that is a property of this
-config plus this tree rather than of the tool. Two separate mechanisms produce
-the silence, and both were checked with a planted export:
+The reachability blind spot survives all of this and is why the zero is not the
+audit. `knip` reports nothing under `scripts/`, and two separate mechanisms
+produce that silence — both checked with a planted export:
 
 - The 20 top-level `scripts/*.mjs` are declared `entry`, and `knip` does not
   report exports in an entry file. A planted export in
@@ -476,6 +460,7 @@ the silence, and both were checked with a planted export:
   one.
 
 Either mechanism alone would have hidden both guards slice 2 deleted by hand.
+
 
 ## Probing An Installed Surface
 

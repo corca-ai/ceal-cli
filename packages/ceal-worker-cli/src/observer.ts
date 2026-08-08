@@ -45,6 +45,13 @@ const RECEIPT_SPOOL_NON_CLAIM =
 // total entries and retention.
 const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 
+/**
+ * Exported so the observer suite can build the page state directly instead of
+ * asserting on rendered output, which would prove the renderer rather than what
+ * it was given.
+ *
+ * @testOnly
+ */
 export async function buildObserverState(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	const now = runtime.now?.() ?? Date.now();
 	const receipts = await observeReceiptSpool(runtime);

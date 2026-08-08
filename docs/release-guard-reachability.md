@@ -110,20 +110,17 @@ per the table at the top. Slice 2 found both of its guards by hand. Two moves,
 decided, in this order:
 
 **Adopt `knip` — done.** Installed at `6.32.0` with `knip.json` and
-`npm run lint:unused`. The two one-line blockers were one line each as predicted;
-[gates.md](gates.md#knip-and-why-it-is-not-in-either-gate-yet) owns the config
-reasoning and why it is in neither gate yet.
+`npm run lint:unused`, and it runs inside both gates.
+[gates.md](gates.md#knip-and-what-its-zero-means) owns the config reasoning and
+what its zero does and does not mean.
 
-What it gives, from a clean run: zero unused files, zero unused dependencies, and
-**15 unused exports plus 6 unused exported types, every one of them in
-`packages/ceal-worker-cli/src/`**. None is a false positive *about what `knip`
-claims* — but `knip` claims a surplus `export` modifier, not unreachable code,
-and the difference is the whole point here. Only **6** of the 21 have no
-reference inside `src/` at all; the other 15 are live production code, and
-`CealHpkeError` alone is thrown from six lines of its own file. Reading the list
-as a delete-list would delete working code.
-[gates.md](gates.md#knip-and-why-it-is-not-in-either-gate-yet) carries the split
-and how to re-derive it.
+It opened with 21 findings and closes at 0. The reading matters more than either
+number: `knip` claims a surplus `export` modifier, not unreachable code, and only
+**6** of the 21 had no reference inside `src/` at all. The other 15 were live
+production code — `CealHpkeError` is thrown from six lines of its own file — so
+taking the list as a delete-list would have deleted working code. Seven lost the
+modifier, eleven are tagged `@testOnly` against a gate that checks the tag, and
+the six below were resolved on their merits.
 
 **The six are triaged.** None reaches the package's `exports` — no candidate
 appears in `index.ts` or `profile-store.ts` — so the "may be consumed surface"
@@ -160,14 +157,13 @@ distribution is the finding: only one of six was dead code.
     now, and the guard is falsifiable — deleting the comparison turns
     `test/leased-consumer-control-session.test.mjs` red, confirmed by doing it.
 
-The other 15 are a separate, smaller question about surplus export modifiers, and
-they are not this goal.
-
-One of the two wirings did **not** leave the list: `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`
-is still reported, because its new production consumer is a `scripts/` file
-importing `dist/`, which `knip` does not trace back to `src/`. Read that as the
-measurement it is — `knip`'s list is not the reachability signal, which is what
-the next move exists to build.
+Wiring one of them did **not** clear it from `knip`'s list, and that is the
+measurement to keep: `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`' new consumer is a
+`scripts/` file importing `dist/`, which `knip` does not trace back to `src/`. It
+is re-exported from `index.ts` now, so the guard reads it from the module it
+already resolves — one dist entry point for one guard — and `knip` stops
+reporting it because entry-file exports are never reported. Neither fact makes
+`knip` a reachability signal.
 
 **Then a repo-owned production-reachability check for what `knip` cannot see.**
 `scripts/` is still where it cannot see, and the reason is worse than the config

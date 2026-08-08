@@ -44,14 +44,7 @@ const MAX_EVENT_LINES = 5000;
 // re-surfaces solely as the parsed epoch — raw strings never pass through.
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
 
-export type CealAgentAuditEventKind =
-	| "user_message"
-	| "assistant_message"
-	| "tool_call"
-	| "tool_result"
-	| "reasoning"
-	| "session_state"
-	| "other";
+type CealAgentAuditEventKind = "user_message" | "assistant_message" | "tool_call" | "tool_result" | "reasoning" | "session_state" | "other";
 
 /**
  * Per-session token figures, present only when the runtime's own transcript
@@ -73,7 +66,7 @@ export interface CealAgentAuditTokenUsage {
 	cacheWriteTokens?: number;
 }
 
-export interface CealAgentAuditSessionEvents {
+interface CealAgentAuditSessionEvents {
 	scan: "complete" | "truncated";
 	eventCount: number;
 	kinds: Partial<Record<CealAgentAuditEventKind, number>>;
@@ -91,7 +84,7 @@ export interface CealAgentAuditSession {
 	events?: CealAgentAuditSessionEvents | "unreadable";
 }
 
-export interface CealAgentAuditAdapterState {
+interface CealAgentAuditAdapterState {
 	runtime: "claude" | "codex";
 	root: string;
 	health: "active" | "stale" | "inactive" | "unknown";

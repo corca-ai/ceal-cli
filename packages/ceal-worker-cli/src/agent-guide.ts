@@ -108,7 +108,7 @@ export function isCealAgentGuideHost(value: string | undefined): value is CealAg
 	return CEAL_AGENT_GUIDE_HOSTS.some((host) => host.agent === value);
 }
 
-export interface CealAgentGuideHostState {
+interface CealAgentGuideHostState {
 	agent: CealAgentGuideHost;
 	// `unresolved` is a configuration answer, not a registration answer: the host
 	// is supported and its route is advertised, but no directory was located, so

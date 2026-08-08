@@ -49,6 +49,11 @@ import {
 	subcommandsOf,
 } from "./subcommands.js";
 
+// Re-exported beside the route declarations because the probe guard resolves a
+// binary through this one module: it reads the routes to decide what may run,
+// and this set to decide what must be neutralized before anything runs. Two
+// dist entry points for one guard is a seam that can drift.
+export { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "./agent-guide.js";
 export type { CealSubcommandDefinition, CealSubcommandHandlers, CealSubcommandRouteKey } from "./subcommands.js";
 export { CEAL_SUBCOMMANDS, resolveSubcommandRoute, splitSubcommandRoute, subcommandRouteKey } from "./subcommands.js";
 export { renderPlainYamlDocument } from "./yaml.js";

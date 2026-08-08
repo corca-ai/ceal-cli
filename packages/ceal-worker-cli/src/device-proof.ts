@@ -20,6 +20,12 @@ const N_PUBLIC_KEY = 32;
 const N_PRIVATE_KEY = 32;
 const N_SIGNATURE = 64;
 
+/**
+ * Exported so the suite can assert `instanceof` together with `code` rather than
+ * matching a message.
+ *
+ * @testOnly
+ */
 export class CealDeviceProofError extends Error {
 	readonly code: string;
 	constructor(code: string, message: string) {

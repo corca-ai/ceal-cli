@@ -36,7 +36,15 @@ const SPOOL_STATUSES = new Set(["completed", "blocked", "error"]);
 const SPOOL_EVIDENCE = new Set(["readback_verified", "not_read_back", "readback_unavailable", "outcome_unknown"]);
 const MAX_AUDIT_REFS = 8;
 
+/**
+ * The spool bounds. Exported so the suite drives eviction and expiry from the
+ * declaration rather than from a copy of the numbers, which would let the two
+ * drift apart while the test kept passing against its own stale constant.
+ *
+ * @testOnly
+ */
 export const RECEIPT_SPOOL_MAX_ENTRIES = 200;
+/** @testOnly The retention half of the bounds above. */
 export const RECEIPT_SPOOL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 // Tolerated forward clock skew: an entry recorded further in the future could
 // never be expired by retention, so it is dropped instead of retained.
@@ -68,6 +76,11 @@ export interface CealReceiptSpoolState {
 	spoolPresent: boolean;
 }
 
+/**
+ * Exported so the suite can assert `instanceof` rather than a name string.
+ *
+ * @testOnly
+ */
 export class CealReceiptSpoolStoreError extends Error {
 	override readonly name = "CealReceiptSpoolStoreError";
 	constructor(readonly code: "home_unavailable" | "spool_busy" | "unsafe_store") {

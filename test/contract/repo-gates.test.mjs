@@ -518,6 +518,81 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 	}
 });
 
+// One NUL byte makes `rg` and `grep` classify a source file as binary, and both
+// then report nothing for it without saying why. That is not a search failing —
+// it is a search succeeding with a wrong answer, and an agent's "no caller"
+// claim is built out of exactly those zeroes. On 2026-08-08 a raw NUL in
+// `test/device-proof.test.mjs` hid an `instanceof` import from three searches in
+// a row and an export was deleted that a suite needed; only running the suite
+// disagreed. The byte was never needed: `"\0"` is the same bytes at runtime and
+// leaves the file text. So the rule is enforced rather than remembered.
+test("no tracked source file is binary to a text search", () => {
+	const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "buffer" })
+		.toString("utf8")
+		.split("\0")
+		.filter(Boolean)
+		// Only the extensions a reader searches. A real binary fixture may exist
+		// later, and it should be excluded here deliberately rather than by an
+		// extension list that happens not to name it.
+		.filter((file) => /\.(ts|mjs|cjs|js|json|md|ya?ml|sh)$/u.test(file));
+	assert.ok(tracked.length > 100, `only ${tracked.length} searchable files found; this check would be near-vacuous`);
+	const binary = tracked.filter((file) => readFileSync(path.join(ROOT, file)).includes(0));
+	assert.deepEqual(binary, [], 'a NUL byte hides this file from rg and grep; write it as "\\0" instead');
+});
+
+// `@testOnly` is how a source file declares that an `export` exists for the
+// suites rather than for a production caller, and `knip.json`'s `tags` entry
+// makes `npm run lint:unused` skip it. That is a claim, and on its own nothing
+// checks it: tagging a symbol nothing uses at all silences the tool just as
+// effectively as tagging one a suite genuinely needs — verified by planting a
+// tagged unused export and watching `knip` go quiet. An exception that suppresses
+// a finding without being checked is the vacuous guard this repository keeps
+// removing, so the tag is only allowed where it is true.
+test("every @testOnly export is actually reached by a suite", () => {
+	const sources = [];
+	const walk = (directory) => {
+		for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
+			const relative = path.join(directory, entry.name);
+			if (entry.isDirectory()) walk(relative);
+			else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) sources.push(relative);
+		}
+	};
+	for (const workspace of manifest.workspaces) {
+		if (!existsSync(path.join(ROOT, workspace, "src"))) continue;
+		walk(path.join(workspace, "src"));
+	}
+	assert.ok(sources.length > 0, "no workspace sources found; this check would be vacuous");
+
+	// The declaration that follows the tag, whether the tag sits in its own block
+	// or on one line with the rest of the docstring.
+	const DECLARED = /@testOnly[\s\S]*?\*\/\s*export\s+(?:async\s+)?(?:function|class|const|let|interface|type)\s+([A-Za-z0-9_$]+)/gu;
+	const tagged = sources.flatMap((file) => [...read(file).matchAll(DECLARED)].map((match) => ({ file, symbol: match[1] })));
+	// A positive control on the scan itself: the repository has these today, and a
+	// regex that silently stopped matching would otherwise turn this test green.
+	assert.ok(tagged.length > 0, "no @testOnly exports found; either the tag is gone or this scan stopped matching");
+
+	const suites = [];
+	const collect = (directory) => {
+		if (!existsSync(path.join(ROOT, directory))) return;
+		for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
+			const relative = path.join(directory, entry.name);
+			if (entry.isDirectory()) collect(relative);
+			else if (entry.name.endsWith(".test.mjs")) suites.push(read(relative));
+		}
+	};
+	collect("test");
+	for (const workspace of manifest.workspaces) collect(path.join(workspace, "test"));
+	assert.ok(suites.length > 0, "no suites found; this check would be vacuous");
+	const suiteText = suites.join("\n");
+
+	const unreached = tagged.filter(({ symbol }) => !new RegExp(`\\b${symbol}\\b`, "u").test(suiteText));
+	assert.deepEqual(
+		unreached.map(({ file, symbol }) => `${file}: ${symbol}`),
+		[],
+		"a @testOnly export that no suite imports is not test-only, it is unused — delete the export or the tag",
+	);
+});
+
 // `ceal update` runs this installer and waits for it, so an unbounded fetch here
 // made that command unbounded too — no envelope, no exit, nothing an agent can
 // read. The bound belongs to every download rather than to the three that
