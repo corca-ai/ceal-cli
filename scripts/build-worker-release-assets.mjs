@@ -466,17 +466,20 @@ function parseArgs(argv) {
 			options.force = true;
 			continue;
 		}
-		if (arg === "--input") {
+		// Consuming the operand and refusing a missing one is the same act for
+		// every valued flag; only where the value lands differs.
+		const takeValue = () => {
 			const value = rest[++index];
 			if (typeof value !== "string") fail("invalid_argument", "Worker release assets option requires a value.");
-			options.inputs.push(value);
+			return value;
+		};
+		if (arg === "--input") {
+			options.inputs.push(takeValue());
 			continue;
 		}
 		if (["--out", "--platform", "--version", "--gateway-handoff-archive"].includes(arg)) {
-			const value = rest[++index];
-			if (typeof value !== "string") fail("invalid_argument", "Worker release assets option requires a value.");
 			const name = arg === "--out" ? "outputDirectory" : arg === "--gateway-handoff-archive" ? "gatewayHandoffArchive" : arg.slice(2);
-			options[name] = value;
+			options[name] = takeValue();
 			continue;
 		}
 		fail("invalid_argument", "Unexpected worker release assets argument.");
