@@ -61,7 +61,9 @@ export const CEAL_SUBCOMMANDS = [
 		route: ["enroll"],
 		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
 		usage: "ceal session enroll --gateway <https-url> [--code-stdin]",
-		effect: "local_write",
+		// Exchanging the one-time code consumes it at the Gateway and creates a
+		// session there; deleting the local store does not give the code back.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_enrollment.v1",
 		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
@@ -80,7 +82,9 @@ export const CEAL_SUBCOMMANDS = [
 		route: ["adopt"],
 		description: "Adopt this device using a verified mailbox, with no operator-issued code.",
 		usage: "ceal session adopt --gateway <https-url> --email <address>",
-		effect: "local_write",
+		// Same remote effect as enroll, reached through a verified mailbox instead
+		// of an operator-issued code.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_adoption.v1",
 		recovery:
@@ -104,7 +108,10 @@ export const CEAL_SUBCOMMANDS = [
 		route: ["logout"],
 		description: "Revoke the Gateway session, then remove local session and cached state.",
 		usage: "ceal session logout",
-		effect: "local_write",
+		// Revokes the live Gateway session. This is the exact route whose
+		// misclassification put a state change inside a batch of read-only spot
+		// checks, which is why the effect field exists at all.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_logout.v1",
 		recovery: "Run 'ceal session' to confirm the local session is gone; a revoke failure preserves local state for a retry.",

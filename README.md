@@ -197,8 +197,15 @@ npm run probe -- ceal receipt show --help
 
 The guard resolves the route through the same declaration help renders from,
 refuses any route whose declared effect is not `read_only`, and runs in a
-throwaway `HOME`. `--allow-effect <effect>` opts into a declared write while
-keeping the isolation; nothing in the guard can reach real local state.
+throwaway `HOME`. `--allow-effect <effect>` opts into a declared *local* write
+while keeping the isolation; nothing in the guard can reach real local state.
+
+The effect vocabulary names remote change as well as local: `remote_write` is a
+route that changes the Gateway or a provider — `call`, and every `session`
+route. `--allow-effect` refuses it, because the throwaway `HOME` is what makes
+the hatch safe and it neutralizes local state only. It is what a route *may* do,
+not what one invocation does: `call` is `remote_write` even for a capability
+whose own effect is `read`.
 
 The composite extraction verifier still packs all four historical packages,
 installs them into an isolated consumer, and scans the archives for private

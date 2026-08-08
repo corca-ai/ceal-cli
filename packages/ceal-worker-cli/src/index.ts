@@ -92,7 +92,26 @@ export interface CealCommandDefinition {
 	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe" | "acceptance";
 	description: string;
 	usage: string;
-	effect: "read_only" | "local_write" | "read_only_or_local_write";
+	/**
+	 * What a route changes, and it is the only machine-readable safety field an
+	 * operator or an agent is told to read before typing one.
+	 *
+	 * `remote_write` is here because the vocabulary used to stop at this machine.
+	 * Everything a route could do to the Gateway or to a provider had to be
+	 * spelled `read_only` or `local_write`, so `call` — the one route that
+	 * executes a governed provider capability — declared the same effect as
+	 * `version`, and `session logout` declared the same effect as linking a guide
+	 * symlink. The incident that created this field was a state change hiding in
+	 * a batch of read-only spot checks; a vocabulary that cannot name a remote
+	 * change encodes half of that lesson and leaves the rest to prose.
+	 *
+	 * The classification is what a route MAY do, never what a particular
+	 * invocation happens to do. `call` is `remote_write` even for a capability
+	 * whose own effect is `read`: the route cannot promise which capability it
+	 * will be handed, and a field that is right most of the time is one nobody
+	 * can act on.
+	 */
+	effect: "read_only" | "local_write" | "read_only_or_local_write" | "remote_write";
 	evidence: "surface" | "surface_or_host_decision";
 	result_schema: string;
 	recovery: string;
@@ -130,7 +149,10 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		name: "session",
 		description: "Enroll an approved client device and inspect its renewable Gateway session.",
 		usage: "ceal session [enroll --gateway <https-url> [--code-stdin] | logout]",
-		effect: "local_write",
+		// The widest of its children. Enrolling and adopting consume a one-time
+		// approval at the Gateway and logging out revokes a live session there;
+		// none of the three is undone by deleting a local file.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.client_session.v1",
 		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
@@ -158,7 +180,11 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		name: "call",
 		description: "Invoke an approved capability and read back its Gateway audit event.",
 		usage: "ceal call <capability-id> --target <target-ref> [--profile <profile-ref>] [key=value ...]",
-		effect: "read_only",
+		// The one route that executes a governed provider capability. Some
+		// capabilities only read, and the client does discover each capability's
+		// own `read`/`write` effect — but that is per invocation, and this field
+		// is read before the route is typed.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.result.v2",
 		recovery:

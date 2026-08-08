@@ -20,6 +20,12 @@
 // throwaway HOME, so it can prove a local-write route's shape without touching
 // the operator's session. No flag ever grants the real HOME; use the installed
 // binary directly, on purpose, for that.
+//
+// `remote_write` is the one effect the hatch refuses. A throwaway HOME is what
+// makes the hatch safe, and it neutralizes LOCAL state only: it cannot take back
+// a revoked Gateway session, a consumed enrollment code, or a message posted to
+// a provider. An escape hatch whose safety argument does not cover the effect it
+// is being asked to permit is not an escape hatch.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,9 +59,15 @@ function fail(message) {
 
 const argv = process.argv.slice(2);
 const allowed = new Set(["read_only"]);
+// Named rather than derived from the declarations: this is the list the throwaway
+// HOME cannot make safe, so it must not widen just because a new route picked up
+// a new effect string.
+const NEVER_ALLOWED = new Set(["remote_write"]);
 while (argv[0] === "--allow-effect") {
 	const effect = argv[1];
 	if (!effect) fail("--allow-effect needs an effect name");
+	if (NEVER_ALLOWED.has(effect))
+		fail(`--allow-effect ${effect} is refused: a throwaway HOME neutralizes local state only, and cannot undo a Gateway or provider change`);
 	allowed.add(effect);
 	argv.splice(0, 2);
 }
@@ -99,11 +111,16 @@ for (let length = leading.length; length > 0; length -= 1) {
 const name = route.route ? `${command} ${route.route.join(" ")}` : command;
 const isHelp = tail.some((token) => token === "--help" || token === "-h");
 if (!isHelp && !allowed.has(route.effect)) {
-	fail(
-		`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n` +
-			`  A probe must not change state. Pass --allow-effect ${route.effect} to run it in the\n` +
-			`  throwaway HOME anyway, or run the installed binary directly and deliberately.`,
-	);
+	// The two refusals differ in what they offer, because offering a hatch this
+	// guard would then refuse is worse than offering none: it reads as "retry
+	// with a flag" for the one class of route where retrying is the mistake.
+	const remedy = NEVER_ALLOWED.has(route.effect)
+		? "  A probe must not change state, and no flag runs this one: a throwaway HOME\n" +
+			"  neutralizes local state only. Run the installed binary directly and\n" +
+			"  deliberately, against the session you mean to change."
+		: `  A probe must not change state. Pass --allow-effect ${route.effect} to run it in the\n` +
+			"  throwaway HOME anyway, or run the installed binary directly and deliberately.";
+	fail(`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n${remedy}`);
 }
 
 const home = mkdtempSync(path.join(tmpdir(), "ceal-probe-home-"));

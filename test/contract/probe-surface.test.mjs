@@ -67,9 +67,39 @@ test("a declared non-read-only route is refused as a probe", () => {
 		const result = probe(args);
 		assert.equal(result.status, 2, args.join(" "));
 		assert.match(result.stderr, /refusing '/u);
-		assert.match(result.stderr, /declared effect is (?:local_write|control_write), not read_only/u);
+		assert.match(result.stderr, /declared effect is (?:local_write|remote_write|control_write), not read_only/u);
 		assert.equal(result.stdout, "", `${args.join(" ")} must not run`);
 	}
+});
+
+// `call` is the route that executes a governed provider capability, and it
+// declared `read_only` until the vocabulary grew a term for a change that does
+// not happen on this machine. The guard admitted it for exactly as long as the
+// declaration lied, which is the whole point of deriving the guard from the
+// declaration: it is only ever as right as the field it reads.
+test("the route that reaches a provider is refused, and no flag opens it", () => {
+	const refused = probe(["ceal", "call", "message.search", "--target", `target:${"a".repeat(64)}`]);
+	assert.equal(refused.status, 2);
+	assert.match(refused.stderr, /declared effect is remote_write, not read_only/u);
+	assert.equal(refused.stdout, "");
+
+	// The escape hatch's safety argument is the throwaway HOME, and that covers
+	// local state only. Offering it here would read as "retry with a flag" for
+	// the one class of route where retrying is the mistake.
+	for (const args of [
+		["--allow-effect", "remote_write", "ceal", "call", "message.search"],
+		["--allow-effect", "remote_write", "ceal", "session", "logout"],
+	]) {
+		const hatched = probe(args);
+		assert.equal(hatched.status, 2, args.join(" "));
+		assert.match(hatched.stderr, /--allow-effect remote_write is refused/u);
+		assert.match(hatched.stderr, /cannot undo a Gateway or provider change/u);
+		assert.equal(hatched.stdout, "");
+	}
+
+	// And the refusal must not advertise a hatch this guard would then refuse.
+	assert.doesNotMatch(refused.stderr, /Pass --allow-effect/u);
+	assert.match(refused.stderr, /Run the installed binary directly/u);
 });
 
 test("help and read-only routes run, always in a throwaway HOME", () => {
