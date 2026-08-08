@@ -12,7 +12,21 @@
       "id": "a24dc00b66631581",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
-      "note": "test/contract/repo-gates.test.mjs runs scripts/install-git-hooks.mjs against a throwaway clone twice, checking the hooksPath after each. The repetition IS the assertion — 'an installed clone stays installed', which is the idempotence claim the second run exists to make — so factoring it into a helper would delete the property under test and leave one call. Pre-existing and untouched; it re-keyed on 2026-08-08 only because the coverage slice changed content inside the same detected member span."
+      "note": "test/contract/repo-gates.test.mjs runs scripts/install-git-hooks.mjs against a throwaway clone twice, checking the hooksPath after each. The repetition IS the assertion \u2014 'an installed clone stays installed', which is the idempotence claim the second run exists to make \u2014 so factoring it into a helper would delete the property under test and leave one call. Pre-existing and untouched; it re-keyed on 2026-08-08 only because the coverage slice changed content inside the same detected member span."
+    },
+    {
+      "surface": "code",
+      "id": "c83ae33ed13ca2bf",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "test/contract/worker-gateway-handoff-archive.test.mjs. Both families are the table-driven refusal shape itself: clone the reviewed lock or inject a dependency, perturb one field, expect a coded refusal. Introduced as detectable on 2026-08-08 when deleting the dead resolveLockedGatewayHandoffArchive wrapper repointed twelve call sites at the longer consumeLockedGatewayHandoffArchiveSync, which biome then reflowed onto multiple lines. Removal was attempted twice before classifying: first a single refuses() helper, which traded these two families for two others, then refusesMutatedLock() plus refuses(), which collapsed every hand-written frame and left only the per-case mutation at the call site. What remains is the shape two sibling tests share by design. Collapsing further means merging them into one parametrized test, trading two named refusals with two distinct reasons - the Protocol binding and the Sigstore identity - for one opaque one. Not worth it: a named failing test is the output this suite exists to produce."
+    },
+    {
+      "surface": "code",
+      "id": "df2e822ae4dc97ee",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "test/contract/worker-gateway-handoff-archive.test.mjs. Both families are the table-driven refusal shape itself: clone the reviewed lock or inject a dependency, perturb one field, expect a coded refusal. Introduced as detectable on 2026-08-08 when deleting the dead resolveLockedGatewayHandoffArchive wrapper repointed twelve call sites at the longer consumeLockedGatewayHandoffArchiveSync, which biome then reflowed onto multiple lines. Removal was attempted twice before classifying: first a single refuses() helper, which traded these two families for two others, then refusesMutatedLock() plus refuses(), which collapsed every hand-written frame and left only the per-case mutation at the call site. What remains is the shape two sibling tests share by design. Collapsing further means merging them into one parametrized test, trading two named refusals with two distinct reasons - the Protocol binding and the Sigstore identity - for one opaque one. Not worth it: a named failing test is the output this suite exists to produce."
     }
   ],
   "fixable_ceiling": 0,
