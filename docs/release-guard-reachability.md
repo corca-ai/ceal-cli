@@ -86,16 +86,60 @@ which and why; read it before acting on a zero.
 **Decision-first.** Both are knowing holes with a stated tradeoff, so they are the
 operator's to settle before anything moves. Do not implement either unilaterally.
 
-- **`linux-arm64` is signed without `npm run check`.** `ceal-release.yml:118` gates
-  the gate on `validate_source == '1'`. That leg gets `tsc`, the SEA build, the
-  native smoke and the pin guard through compose — but not `test:release`, so
-  `verifyGatewayProtocolConsumer`, the only proof that npm's resolver binds the
-  Gateway tarball rather than a workspace link, never runs against the bytes being
-  signed on that platform. The workflow comment at `:112-116` states the tradeoff,
-  so this is a knowing hole. Decide it deliberately rather than inheriting it.
-- **Nothing re-asserts the pin between the build artifact and the stable pointer.**
-  Neither the sign/publish job nor `ceal-worker-stable-rollback.yml` invokes the
-  guard. If compose's call is ever bypassed, no later stage asks again.
+### A. `linux-arm64` is signed without `npm run check`
+
+`ceal-release.yml:65` sets `validate_source: "0"` for that leg alone and `:118`
+gates the whole gate on it. The leg still gets `tsc`, the SEA build, the native
+smoke and the pin guard through compose. What it does not get is `test:release`,
+so **`verifyGatewayProtocolConsumer` never runs against the bytes signed on that
+platform** — the only proof that npm's resolver binds the packed Gateway tarball
+rather than the workspace symlink npm creates during development. Those two are
+indistinguishable from a passing build, which is why the proof exists.
+
+The workflow comment at `:106-116` states the tradeoff and its argument is "the
+source is identical on all three legs". That is true and beside the point: this
+proof is not about the source, it is about **npm's resolution on that runner**.
+The 2026-08-08 lockfile incident is the same axis — npm recorded only the
+optional platform packages matching the host it resolved on, and every non-arm64
+runner lost its toolchain.
+
+Measured before deciding, on a `linux-arm64` host: `npm run test:release` runs
+there and passes — 23 tests, 22 pass, 1 skip, about a minute. The consumer proof is not platform-gated
+(only `test/worker-release-installer.test.mjs` imports `test/platform-proof.mjs`),
+so the tier buys the missing proof on arm64 rather than skipping itself.
+
+| option | buys | costs |
+| --- | --- | --- |
+| leave it | nothing | the signed arm64 binary is permanently unproven on this axis |
+| **add `test:release` to that leg** | exactly the missing proof | ~1 min, **and the prewarm step at `:92` must be enabled for the leg too** or the packed-consumer proofs fail as `ENOTCACHED` |
+| full `npm run check` on all three | the above | also re-proves lint/unit/contract, which are architecture-independent — the waste the comment already argues against |
+| record an explicit non-claim | honesty | the hole stays |
+
+The serious argument for leaving it is not cost, it is that every added step is
+one more way a release tag can burn, and **a failed release tag cannot be
+reused**. That minute was measured on a development machine, not a
+`ubuntu-24.04-arm` runner.
+
+### B. Nothing re-asserts the pin between the build artifact and the stable pointer
+
+The pin is asserted inside `withWorkerReleaseInputs*`
+(`scripts/worker-release-inputs.mjs:67`), which the build and compose scripts
+call. Afterwards nothing asks again: `sign-and-publish` verifies the assembled
+inventory but not the pin, and `ceal-worker-stable-rollback.yml` re-verifies
+signatures with `cosign` and moves the pointer.
+
+**The shape that works already exists**, so this is undecided rather than
+blocked. The signed manifest does record the protocol's producer identity —
+`repository`, `commit`, `tree` — and `verifyProtocolProvenance`
+(`scripts/worker-acceptance-packet.mjs:136`) already compares it against the lock
+and *fails closed* on disagreement at `:162`. `docs/acceptance/ceal-v0.67.1/linux-amd64.json`
+carries a real one. The [debt.md](debt.md) hole is a different field: the manifest
+records no **client** package, and says so while recording the protocol.
+
+What is genuinely open is which lock a later stage compares against. Asserting
+today's lock at rollback would fail a correct rollback of an older release, so
+the rollback question is not the sign/publish question and the two should be
+settled separately rather than by one symmetric guard.
 
 ## Explicitly not in this goal
 
