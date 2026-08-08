@@ -34,16 +34,16 @@ action.
 
 ## Next Session
 
-1. **On the next documentation-only push, confirm the skip works**: `scope` should
-   report `code=false` and neither gate leg should run. One-shot per opportunity —
-   a code change spends it, so do this before item 2 if a docs push is pending.
-2. **Slice 2 of the goal**, starting at `worker-acceptance-packet.mjs` — the
-   largest unproven surface slice 1 exposed. See
-   [release-guard-reachability.md](release-guard-reachability.md) for the full
-   list and for why a zero is a question rather than a verdict.
-3. Then the two confirmed dead guards in the same slice. **Slice 3 after that is
-   decision-first**, not implementation: both items are knowing holes to settle
-   with the operator before anything moves.
+1. **Confirm the documentation-only CI skip.** It applies to the whole pushed
+   *range*, not the tip commit — checking `git status` is how this was got wrong
+   once already. Verify with `git diff --name-only origin/main..HEAD` before
+   pushing, and expect `scope` to report `code=false` with neither leg running.
+2. **Slice 2 continues at `worker-acceptance-packet.mjs`** — 52.64% statements,
+   everything from `:407`. The two dead guards it also named are deleted; see
+   [release-guard-reachability.md](release-guard-reachability.md), including the
+   premise that slice corrected and the open question it left.
+3. **Slice 3 is decision-first**, not implementation: both items are knowing holes
+   to settle with the operator before anything moves.
 4. Do not reopen the coverage run's cost as a performance goal. The obvious lever
    was measured and recovered ~9s of 52; gates.md says why the rest is the
    measurement rather than waste.

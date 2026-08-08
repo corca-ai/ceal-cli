@@ -8,10 +8,21 @@ would have passed on an emptied list. An 80% coverage floor was declared for
 months with nothing to measure it against. Requirement 3's chokepoint could be
 deleted in one line with every gate staying green. All four are fixed.
 
-The insight that makes this one goal rather than a list of chores: **measuring
-`scripts/` turns the reachability audit into a standing signal.** A guard nobody
-calls reads as 0% functions on every run, instead of needing the grep audit that
-found the holes below.
+The goal was written believing that measuring `scripts/` would turn the
+reachability audit into a standing signal — that a guard nobody calls would read
+as 0% functions. **Slice 2 disproved that on the very guards it was written
+about.** Both were exhaustively tested, so both sat inside files reading 91-94%
+function coverage while never being called from production.
+
+Two different defects, and coverage sees only one:
+
+| defect | coverage | how it was actually found |
+| --- | --- | --- |
+| untested surface | **yes** — reads low | `worker-acceptance-packet.mjs` at 52.64% |
+| production-unreachable | **no** — reads covered | grep with a positive control |
+
+So slice 1 is worth having and is not the audit. The second column still has no
+standing signal; see the open question at the end.
 
 ## Acceptance
 
@@ -44,21 +55,22 @@ Start here, because slice 1 named it and nothing on this list explains it:
   largest unproven surface in the release lane. Find out whether that is untested
   code or unreachable code before deciding which fix it needs.
 
-Then the two confirmed dead guards:
+**The two dead guards are deleted.** Both were introduced on 2026-07-23 and had
+**zero production callers at every commit in their history** — neither regressed,
+neither was ever wired. Recorded here because the reasoning generalises:
 
-- **`assertWorkerReleaseSourcePath`** (`scripts/worker-release-inputs.mjs:220`) has
-  no production caller. CONFIRMED with a positive control: the same search finds
-  `prepareWorkerReleaseConsumer` and `assertNoSymlinkComponents` at four and seven
-  production sites. What still holds the line is `assertInventory`'s overlap check
-  (`:252-260`), which constrains the inventory *file* and not the code — so any new
-  file-copy site added to the composer takes a path nothing validates. Either call
-  it at the `stageOwnedPackage` and guide-read sites, or delete it and stop
-  documenting an enforcement that does not exist.
-- **`resolveLockedGatewayHandoffArchive`**
-  (`scripts/worker-gateway-handoff-archive.mjs:34`) is test-only. Low severity —
-  its inner guards are shared with the production `consume*` variants — but the
-  tests exercise the unused wrapper, so it can drift from the consumed path with
-  nothing noticing.
+- **`assertWorkerReleaseSourcePath`** admitted a candidate release path if it was
+  under one of the three declared source paths and not under a forbidden one. The
+  proposed fix was to call it at the composer's copy sites — but every one of
+  those takes its path *from the inventory* (`inputs.client.source_path` and
+  friends), so the check would have compared a value against itself and could
+  never fail. Wiring it would have manufactured exactly the vacuous guard this
+  goal exists to remove. What survives is `assertInventory`'s overlap rule, which
+  constrains the inventory file rather than any copy, and now has its own test.
+- **`resolveLockedGatewayHandoffArchive`** was not a distinct capability: both
+  `consume*` variants return the same `{ resolution, lock }` when given no
+  `consume` dependency. Its twelve tests exercised the unused wrapper while the
+  consumed path went unproven; they call the sync variant now.
 
 Next by measurement, both branch coverage: `build-worker-release-assets.mjs` at
 66.44% and `verify-gateway-protocol-consumer.mjs` at 60.24%. (gates.md quotes the
@@ -90,3 +102,13 @@ The signed manifest's missing client identity, described in [debt.md](debt.md), 
 a real hole and is out of this goal: it is a manifest schema change that needs a
 release to prove, which makes it its own goal. Same for the README split and the
 runtime budgets, which need a sample window before a threshold is honest.
+
+## Open question — a standing signal for production-unreachability
+
+Coverage cannot supply one, per the table above. `knip` is the obvious candidate
+and is **not installed**: it was tried config-less on 2026-07-26 and reported
+"3 unused files / 42 unused exports, almost entirely false positives", with the
+verdict that it needs `entry`/`project` config to be usable. Note also that knip
+counts test files as consumers by default, so out of the box it would have called
+both deleted guards *used*. Whatever is adopted has to distinguish "reached by a
+test" from "reached by production", which is the whole difficulty.

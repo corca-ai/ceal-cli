@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveLockedGatewayHandoffArchive, WorkerGatewayHandoffArchiveError } from "../../scripts/worker-gateway-handoff-archive.mjs";
+import { consumeLockedGatewayHandoffArchiveSync, WorkerGatewayHandoffArchiveError } from "../../scripts/worker-gateway-handoff-archive.mjs";
 import { resolveWorkerReleaseInputsFromLockedGatewayArchive, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
@@ -15,7 +15,7 @@ const WORKFLOW_PATH = ".github/workflows/gateway-protocol-handoff-release.yml";
 test("resolves only a lock-bound exact Gateway archive through a disposable packet", (context) => {
 	const fixture = archiveFixture(context);
 	let packetDirectory;
-	const result = resolveLockedGatewayHandoffArchive(
+	const result = consumeLockedGatewayHandoffArchiveSync(
 		{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 		{
 			resolveInputs: (inputs) => {
@@ -47,7 +47,7 @@ test("refuses a changed archive or unsafe archive inventory before the input res
 	writeFileSync(fixture.archive, "changed bytes\n");
 	assert.throws(
 		() =>
-			resolveLockedGatewayHandoffArchive(
+			consumeLockedGatewayHandoffArchiveSync(
 				{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 				{
 					resolveInputs: () => assert.fail("changed archive must not reach input resolver"),
@@ -58,7 +58,7 @@ test("refuses a changed archive or unsafe archive inventory before the input res
 	const unsafe = archiveFixture(context, { extraFile: "unexpected" });
 	assert.throws(
 		() =>
-			resolveLockedGatewayHandoffArchive(
+			consumeLockedGatewayHandoffArchiveSync(
 				{ repoRoot: unsafe.repoRoot, archiveFile: unsafe.archive },
 				{
 					resolveInputs: () => assert.fail("unsafe inventory must not reach input resolver"),
@@ -77,7 +77,7 @@ test("a packet carrying a client tarball is refused as an inventory violation", 
 	const fixture = archiveFixture(context, { extraFile: "corca-ai-ceal-0.71.0.tgz" });
 	assert.throws(
 		() =>
-			resolveLockedGatewayHandoffArchive(
+			consumeLockedGatewayHandoffArchiveSync(
 				{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 				{ resolveInputs: () => assert.fail("a client tarball must not reach the input resolver") },
 			),
@@ -87,7 +87,7 @@ test("a packet carrying a client tarball is refused as an inventory violation", 
 
 test("verifies and extracts the private copied archive when the supplied path changes after copy", (context) => {
 	const fixture = archiveFixture(context);
-	const result = resolveLockedGatewayHandoffArchive(
+	const result = consumeLockedGatewayHandoffArchiveSync(
 		{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 		{
 			copyArchive: (source, destination) => {
@@ -116,7 +116,7 @@ test("the lock declares the Protocol binding and it must agree with the tag", (c
 	delete partial.protocol;
 	writeFileSync(lockPath, `${JSON.stringify(partial)}\n`);
 	assert.throws(
-		() => resolveLockedGatewayHandoffArchive({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
+		() => consumeLockedGatewayHandoffArchiveSync({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
 		hasArchiveCode("invalid_gateway_handoff_lock"),
 	);
 
@@ -126,7 +126,7 @@ test("the lock declares the Protocol binding and it must agree with the tag", (c
 	inconsistent.protocol.filename = "corca-ai-ceal-protocol-0.66.0.tgz";
 	writeFileSync(lockPath, `${JSON.stringify(inconsistent)}\n`);
 	assert.throws(
-		() => resolveLockedGatewayHandoffArchive({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
+		() => consumeLockedGatewayHandoffArchiveSync({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
 		hasArchiveCode("invalid_gateway_handoff_lock"),
 	);
 
@@ -137,7 +137,7 @@ test("the lock declares the Protocol binding and it must agree with the tag", (c
 	driftedProtocol.protocol.filename = "corca-ai-ceal-protocol-0.66.0.tgz";
 	writeFileSync(lockPath, `${JSON.stringify(driftedProtocol)}\n`);
 	assert.throws(
-		() => resolveLockedGatewayHandoffArchive({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
+		() => consumeLockedGatewayHandoffArchiveSync({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
 		hasArchiveCode("invalid_gateway_handoff_lock"),
 	);
 });
@@ -168,7 +168,7 @@ test("the lock must record the Sigstore identity its own tag implies", (context)
 		mutate(mutated);
 		writeFileSync(lockPath, `${JSON.stringify(mutated)}\n`);
 		assert.throws(
-			() => resolveLockedGatewayHandoffArchive({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
+			() => consumeLockedGatewayHandoffArchiveSync({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }),
 			hasArchiveCode("invalid_gateway_handoff_lock"),
 		);
 	}
@@ -183,7 +183,7 @@ test("a packet resolving to another producer identity or another Protocol digest
 		const fixture = archiveFixture(context);
 		assert.throws(
 			() =>
-				resolveLockedGatewayHandoffArchive(
+				consumeLockedGatewayHandoffArchiveSync(
 					{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 					{
 						resolveInputs: () => ({
@@ -198,7 +198,7 @@ test("a packet resolving to another producer identity or another Protocol digest
 	const fixture = archiveFixture(context);
 	assert.throws(
 		() =>
-			resolveLockedGatewayHandoffArchive(
+			consumeLockedGatewayHandoffArchiveSync(
 				{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 				{ resolveInputs: () => ({ ...fixture.resolution, protocol: { ...fixture.resolution.protocol, sha256: "d".repeat(64) } }) },
 			),

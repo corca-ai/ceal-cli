@@ -26,20 +26,15 @@ const ORIGIN = "https://ceal.borca.ai/releases/gateway-protocol-handoff";
 
 export const WorkerGatewayHandoffArchiveError = codedErrorClass("WorkerGatewayHandoffArchiveError");
 
-/**
- * Verifies a source-reviewed lock and a locally supplied archive, extracts the
- * exact packet into a disposable directory, and invokes the worker input
- * resolver. This function never downloads, uploads, installs, or releases.
- */
-export function resolveLockedGatewayHandoffArchive(options = {}, dependencies = {}) {
-	const prepared = prepareLockedGatewayHandoffArchive(options, dependencies);
-	try {
-		return { resolution: prepared.resolution, lock: prepared.lock };
-	} finally {
-		prepared.cleanup();
-	}
-}
-
+// `resolveLockedGatewayHandoffArchive` stood here from 2026-07-23 (437332a) and
+// never had a production caller — checked at every commit that touched it. It was
+// also not a distinct capability: both `consume*` variants below return exactly
+// `{ resolution, lock }` when no `consume` dependency is supplied, which is all it
+// did. Its tests exercised the unused wrapper, so the consumed path could have
+// drifted from the proven one with nothing noticing; they call the sync variant
+// now. Verifies a source-reviewed lock and a locally supplied archive, extracts
+// the exact packet into a disposable directory, and invokes the worker input
+// resolver. Neither variant downloads, uploads, installs, or releases.
 export function consumeLockedGatewayHandoffArchiveSync(options = {}, dependencies = {}) {
 	const prepared = prepareLockedGatewayHandoffArchive(options, dependencies);
 	try {

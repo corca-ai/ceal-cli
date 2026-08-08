@@ -3,8 +3,10 @@
 // packages; this measures `scripts/`, which is where the release lane's
 // production code lives and where nothing was measured at all — about 4.9k lines
 // of guards whose reachability had to be audited by hand, which is how
-// `assertWorkerReleaseSourcePath` and `resolveLockedGatewayHandoffArchive` came
-// to hold nothing without anything going red.
+// `assertWorkerReleaseSourcePath` and `resolveLockedGatewayHandoffArchive` each
+// stood for six weeks having never once been called. Note what that cost this
+// target: both were exhaustively *tested*, so both read as covered. Coverage
+// finds unexercised code; it cannot find code no production path reaches.
 //
 // Why a runner rather than a `c8` prefix in package.json:
 //

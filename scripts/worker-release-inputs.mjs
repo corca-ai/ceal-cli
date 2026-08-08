@@ -217,18 +217,6 @@ function lockBoundResolution(resolution, lock) {
 	};
 }
 
-export function assertWorkerReleaseSourcePath(inventory, candidate) {
-	const normalized = normalizeRelativePath(candidate);
-	if (inventory.forbidden_release_inputs.some((blocked) => normalized === blocked || normalized.startsWith(`${blocked}/`))) {
-		fail("forbidden_release_input", "Gateway-owned or legacy composite material is not a worker-release input.");
-	}
-	const allowed = [inventory.worker.source_path, inventory.client.source_path, inventory.guide.source_path];
-	if (!allowed.some((entry) => normalized === entry || normalized.startsWith(`${entry}/`))) {
-		fail("undeclared_release_input", "Worker release input is not declared by the owned-input inventory.");
-	}
-	return normalized;
-}
-
 function readInventory(filePath) {
 	return readJson(requireRegularFile(path.resolve(filePath), "invalid_inventory"), "invalid_inventory");
 }

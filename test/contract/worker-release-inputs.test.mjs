@@ -6,12 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-	assertWorkerReleaseSourcePath,
-	resolveWorkerReleaseDevelopmentInputs,
-	runCli,
-	WorkerReleaseInputError,
-} from "../../scripts/worker-release-inputs.mjs";
+import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -198,12 +193,28 @@ test("worker release inventory rejects Gateway and legacy composite paths", () =
 	// Gateway-owned source that must arrive as a signed artifact, and the npm
 	// staging lane is a different lane with a different tag.
 	assert.deepEqual([...inventory.forbidden_release_inputs].sort(), [".github/workflows/npm-package-stage.yml", "packages/ceal-protocol"]);
-	for (const blocked of inventory.forbidden_release_inputs) {
-		assert.throws(() => assertWorkerReleaseSourcePath(inventory, blocked), hasCode("forbidden_release_input"));
-	}
-	assert.equal(assertWorkerReleaseSourcePath(inventory, "packages/ceal-worker-cli/src/index.ts"), "packages/ceal-worker-cli/src/index.ts");
-	assert.equal(assertWorkerReleaseSourcePath(inventory, "packages/ceal-client/src/index.ts"), "packages/ceal-client/src/index.ts");
-	assert.throws(() => assertWorkerReleaseSourcePath(inventory, "README.md"), hasCode("undeclared_release_input"));
+	// What the list still does, now that `assertWorkerReleaseSourcePath` is gone: it
+	// constrains the inventory *file*, not any copy. The composer takes every path
+	// it stages straight from this inventory, so a per-path admission check there
+	// could only ever compare a value against itself. The overlap rule below is the
+	// enforcement that survives — declaring a path both owned and forbidden fails.
+	const tampered = path.join(mkdtempSync(path.join(tmpdir(), "ceal-forbidden-overlap-")), "worker-release-inputs.json");
+	writeFileSync(
+		tampered,
+		JSON.stringify({ ...inventory, forbidden_release_inputs: [...inventory.forbidden_release_inputs, inventory.worker.source_path] }),
+	);
+	assert.throws(
+		() =>
+			resolveWorkerReleaseDevelopmentInputs({
+				repoRoot: ROOT,
+				inventoryPath: tampered,
+				protocolTarball: path.join(ROOT, "absent.tgz"),
+				protocolProvenance: path.join(ROOT, "absent-provenance.json"),
+				controlConformance: path.join(ROOT, "absent-conformance.json"),
+				handoffManifest: path.join(ROOT, "absent-handoff.json"),
+			}),
+		hasCode("invalid_inventory"),
+	);
 });
 
 test("release CLI rejects raw handoff arguments and requires the reviewed archive lane", () => {
