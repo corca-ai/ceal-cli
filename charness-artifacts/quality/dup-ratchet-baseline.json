@@ -135,13 +135,6 @@
       ]
     },
     {
-      "fingerprint": "258866768462401e",
-      "member_hashes": [
-        "04ebfd9784022a82",
-        "ae817526011c42f6"
-      ]
-    },
-    {
       "fingerprint": "2a6fc0459424a823",
       "member_hashes": [
         "a26bd630f1866211",
@@ -672,6 +665,13 @@
       "member_hashes": [
         "013b4dd56272a356",
         "4d93eff4dd607724"
+      ]
+    },
+    {
+      "fingerprint": "b210cc531598933d",
+      "member_hashes": [
+        "90010ff72802f7a7",
+        "ae817526011c42f6"
       ]
     },
     {
