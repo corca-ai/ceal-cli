@@ -116,14 +116,25 @@ test("an inline workflow script counts as a production consumer", (context) => {
 // analyzer over the commit before slice 2's deletions and it must name both
 // guards. Reconstructed with `git archive` so nothing is checked out.
 test("the two guards slice 2 deleted are exactly what this reports on the tree that held them", (context) => {
-	const scratch = scratchDir(context, "ceal-reach-history-");
-	const archive = spawnSync("sh", ["-c", `git -C '${ROOT}' archive 0cce9f9^ | tar -x -C '${scratch}'`], { encoding: "utf8" });
 	// A shallow or rewritten clone cannot answer this, and inventing a verdict
 	// from a missing commit would be worse than saying so.
-	if (archive.status !== 0) {
-		context.skip(`the pre-deletion commit is not in this clone: ${archive.stderr}`);
+	//
+	// Asked of `git` on its own, BEFORE the pipeline. `sh` reports a pipeline's
+	// status from its LAST command, so `git archive ... | tar -x` reports `tar`'s
+	// verdict and the guard below could never see `git` fail. Observed on the
+	// GitHub macOS runner (run 31284777516): the skip did not fire, the directory
+	// was empty, and the test failed on a missing `package.json` as though the
+	// analyzer were broken. `tar` there accepted the empty stream a failed
+	// `git archive` leaves it — GNU `tar` on this host rejects it and exits 2,
+	// which is why every Linux leg hid this.
+	const present = spawnSync("git", ["-C", ROOT, "cat-file", "-e", "0cce9f9^^{commit}"], { encoding: "utf8" });
+	if (present.status !== 0) {
+		context.skip(`the pre-deletion commit is not in this clone: ${present.stderr.trim() || "0cce9f9^ is unreachable"}`);
 		return;
 	}
+	const scratch = scratchDir(context, "ceal-reach-history-");
+	const archive = spawnSync("sh", ["-c", `set -e; git -C '${ROOT}' archive 0cce9f9^ | tar -x -C '${scratch}'`], { encoding: "utf8" });
+	assert.equal(archive.status, 0, `extracting the pre-deletion tree failed: ${archive.stderr}`);
 	const reported = new Set(analyzeProductionReachability({ repoRoot: scratch }).findings.map(({ symbol }) => symbol));
 	for (const guard of ["assertWorkerReleaseSourcePath", "resolveLockedGatewayHandoffArchive"]) {
 		assert.ok(reported.has(guard), `${guard} was production-unreachable in that tree and must be reported`);
