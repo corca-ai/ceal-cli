@@ -53,7 +53,6 @@ skill_ergonomics_gate_rules:
   - progressive_disclosure_risk
 skill_ergonomics_skill_paths:
   - skills/ceal-guide/SKILL.md
-  - skills/cealctl-guide/SKILL.md
 runtime_profile_default: default
 concept_paths:
   - README.md

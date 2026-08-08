@@ -1,12 +1,10 @@
 // Every release script raises the same error shape: a stable `code` a caller can
 // branch on plus a human `message`. That shape was declared nine times by hand.
 //
-// `scripts/build-platform-binaries.mjs` and `scripts/build-release-manifest.mjs`
-// keep their own declarations. They are frozen compatibility material shared with
-// corca-ai/ceal, and making them import a new local module would break that copy
-// outright if the sync does not carry `scripts/lib/` — a worse outcome than a
-// duplicated six-line constructor. The duplication there is deliberate, not
-// missed.
+// Two of those nine copies survived here on purpose, because the frozen scripts
+// holding them could not import a local module without breaking the sync to
+// corca-ai/ceal. Those scripts are deleted, so the exemption is spent: a new
+// release script imports this, it does not redeclare the shape.
 
 /**
  * Builds an Error subclass carrying a `code`, with `name` set for readable

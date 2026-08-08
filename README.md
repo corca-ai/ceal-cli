@@ -11,10 +11,20 @@ public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
 - `corca-ai/ceal` owns `@corca-ai/ceal-protocol`, `cealctl`, `cealctl-guide`,
   their release/install contract, and canonical conformance.
 - The cealctl surface reached the migration ledger's Stage 5 deletion gate and is
-  gone from this tree — `corca-ai/ceal` had already moved past the copies kept
-  here. `packages/ceal-protocol` is the one frozen input left. Do not add a
-  Gateway/operator feature, release surface, guide, or command to it, and do not
-  re-vendor the deleted cealctl paths; consume the Gateway-issued artifact.
+  gone from this tree. It was not compatibility material by then, it was a stale
+  fork: `corca-ai/ceal` carried two source files this copy never had and six that
+  differed, had rewritten the operator guide wholesale under
+  `packages/official-skills`, and had moved the installer to
+  `packaging/cealctl/install-cealctl.sh`. What went with it —
+  `packages/ceal-operator-cli`, `skills/cealctl-guide`, `install.sh`,
+  `release-contract.json`, `ceal-cli-seed-manifest.json`,
+  `scripts/build-platform-binaries.mjs`, `scripts/build-release-manifest.mjs`,
+  `.github/workflows/cealctl-release.yml`, and the `test:legacy-compatibility`
+  suite that existed to audit them. Do not re-vendor any of it; read
+  `corca-ai/ceal`.
+- `packages/ceal-protocol` is the one frozen input left. Do not add a
+  Gateway/operator feature, release surface, guide, or command to it; consume the
+  Gateway-issued artifact and re-pin.
 
 `protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
 subtree the frozen protocol copy was taken from, alongside the protocol subtree
@@ -283,9 +293,6 @@ local archive consumer does not download Actions artifacts or claim cosign
 verification; the release workflow re-verifies the archive digest against the
 lock before building.
 
-The retired raw-input `worker-release:build` command is not an alternate
-release route. Its implementation remains an import-only development/test
-module and exits nonzero if invoked as a program.
 
 The package command makes an isolated packed `ceal` consumer candidate; the
 native command builds one host-native `ceal` executable from that internal

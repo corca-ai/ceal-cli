@@ -12,9 +12,7 @@
 // `lstatSync` never follows the link, so it is the only correct probe. A missing
 // component is a real state and not a failure: nothing can be redirected through
 // a path that does not exist yet, so the walk stops there.
-//
-// `scripts/build-platform-binaries.mjs` keeps its own copy on purpose — it is
-// frozen compatibility material this lane may not amend.
+
 import { lstatSync } from "node:fs";
 import path from "node:path";
 

@@ -1,9 +1,9 @@
 name: Ceal worker release
 
-# Worker-only release lane. The dual cealctl lane in cealctl-release.yml stays
-# frozen compatibility material; this workflow signs and publishes exactly the
-# worker asset inventory that install-ceal.sh verifies to the Ceal release
-# origin. GitHub supplies source and OIDC signing identity, never release
+# The release lane. It signs and publishes exactly the worker asset inventory
+# that install-ceal.sh verifies, to the Ceal release origin. The dual cealctl
+# lane that used to sit beside this one is deleted; corca-ai/ceal owns that
+# release path now. GitHub supplies source and OIDC signing identity, never release
 # artifact storage or the stable channel resolver.
 #
 # The tag push is the stable-release approval: only maintainers can push

@@ -7,8 +7,8 @@ Read the smallest truth surface that answers your question before widening
 scope, and update it when reality changes it:
 
 - [README.md](README.md) — ownership status and what each package directory is.
-- [docs/handoff.md](docs/handoff.md) — current state, `Next Session` work,
-  settled decisions, and the release lane.
+- [docs/handoff.md](docs/handoff.md) — current state, what the last session
+  settled, and the open debt to pick from.
 - [docs/gates.md](docs/gates.md) — why the lint exemptions, the probe rule, and
   the route/dispatch table are shaped the way they are.
 - [docs/release-and-enrollment.md](docs/release-and-enrollment.md) — the two
@@ -23,25 +23,15 @@ has grown an explanation belongs in one of them, with the rule left here.
 
 ## Frozen Paths
 
-`packages/ceal-protocol` is the one remaining frozen compatibility input owned by
-`corca-ai/ceal`. It is a vendored copy: consume the Gateway-issued artifact and
-re-pin, never originate an edit in it. `protocol-vendor-pin.json` is what makes
-that checkable.
-
-Everything else that was frozen here is gone. `corca-ai/ceal` owns and has moved
-past the cealctl surface, so `packages/ceal-operator-cli`, `skills/cealctl-guide`,
-`install.sh`, `release-contract.json`, `ceal-cli-seed-manifest.json`,
-`scripts/build-platform-binaries.mjs`, `scripts/build-release-manifest.mjs`, and
-`.github/workflows/cealctl-release.yml` were deleted rather than kept as stale
-forks of files this repository may not edit. Do not re-vendor any of them; read
-`corca-ai/ceal` instead. The worker source projection is likewise gone from
-`corca-ai/ceal` — Gateway consumes only the signed `vendor/ceal-cli` artifact, so
-there is no mirrored `packaging/ceal-cli-source/` path and no Gateway source copy
-to edit.
-
-`.github/workflows/npm-package-stage.yml` and its bare `v*` tags stay. That lane
-publishes `@corca-ai/ceal-protocol` and `@corca-ai/ceal`, both worker-lane
-packages; it is not cealctl material and it is not a worker-release input.
+- `packages/ceal-protocol` is the only frozen path. It is a vendored copy owned
+  by `corca-ai/ceal`: consume the Gateway-issued artifact and re-pin in one
+  commit, never originate an edit in it.
+- Do not re-vendor the deleted `cealctl` surface. `corca-ai/ceal` owns it and is
+  ahead of every copy this repository used to hold — [README.md](README.md) lists
+  what went and why.
+- `.github/workflows/npm-package-stage.yml` and its bare `v*` tags are worker-lane
+  material, not leftovers of the deleted lane. They are still not worker-release
+  inputs.
 
 ## Gates
 
@@ -110,8 +100,8 @@ packages; it is not cealctl material and it is not a worker-release input.
 
 ## Conventions
 
-- Speak to the operator in Korean unless they ask otherwise. Keep repo docs in
-  English except `docs/handoff.md`.
+- Speak to the operator in Korean unless they ask otherwise. Every repo doc is in
+  English, with no exceptions — `docs/handoff.md` used to be one and is not.
 - In `zsh`, never use `path` or `status` as a scratch or loop variable — both are
   tied to shell state. An unquoted parameter is also not word-split, so build
   multi-argument probes as arrays or `${=var}` rather than one bare string.

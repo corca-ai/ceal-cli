@@ -5,10 +5,9 @@
 //
 // Keeping it one function means a grammar fix (a missing value, an unknown
 // option, a duplicate) lands once rather than in whichever copies someone
-// remembers. `scripts/build-platform-binaries.mjs` and
-// `scripts/build-release-manifest.mjs` keep their own loops: they are frozen
-// compatibility material shared with corca-ai/ceal, and importing a new local
-// module would break that copy if the sync does not carry `scripts/lib/`.
+// remembers. Two frozen scripts kept their own loops because importing a local
+// module would have broken their sync to corca-ai/ceal; both are deleted, so
+// there is no longer a sanctioned second copy of this grammar.
 
 /**
  * Parses one release script's argv.
