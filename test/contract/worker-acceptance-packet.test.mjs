@@ -196,6 +196,17 @@ function lockedProducer() {
 	return { repository: gateway.repository, commit: gateway.commit, tree: gateway.tree };
 }
 
+// An install the command will actually describe rather than refuse: a binary
+// that answers, and a producer the repo's lock agrees with. `stageInstall` stays
+// the low-level fixture because the refusal tests above need to break exactly
+// one of those two properties at a time.
+function stageWorkingInstall(root, options = {}) {
+	return stageInstall(root, {
+		binaryBytes: stubBinary(options),
+		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+	});
+}
+
 // `repoRoot` is the real checkout, not a scratch fixture, because the first
 // thing this command does is refuse on a proof/ship protocol divergence — and
 // that refusal is only meaningful against the pin this repository actually
@@ -203,10 +214,7 @@ function lockedProducer() {
 // separation that matters: the packet describes an install, never the source.
 test("the packet describes the install it measured, and its non-claims follow what the run reached", (context) => {
 	const root = scratch(context);
-	const { binary, directory } = stageInstall(root, {
-		binaryBytes: stubBinary(),
-		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
-	});
+	const { binary, directory } = stageWorkingInstall(root);
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
 
 	assert.equal(packet.schema_version, "ceal.worker_acceptance_packet.v1");
@@ -244,10 +252,7 @@ test("the packet describes the install it measured, and its non-claims follow wh
 
 test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", (context) => {
 	const root = scratch(context);
-	const { binary } = stageInstall(root, {
-		binaryBytes: stubBinary(),
-		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
-	});
+	const { binary } = stageWorkingInstall(root);
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
 
 	assert.equal(packet.bounded_capability_call.capability, "message.search");
@@ -268,10 +273,7 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 // the packet must report as unreached and then say so, rather than omitting.
 test("an unreached Gateway session is recorded and named in the non-claims", (context) => {
 	const root = scratch(context);
-	const { binary } = stageInstall(root, {
-		binaryBytes: stubBinary({ discoveryStatus: 3 }),
-		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
-	});
+	const { binary } = stageWorkingInstall(root, { discoveryStatus: 3 });
 	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
 	assert.equal(packet.gateway_session.reached, false);
 	assert.equal(packet.gateway_session.exit_code, 3);
@@ -299,10 +301,7 @@ function runCli(args, options = {}) {
 
 test("the CLI renders a human packet, emits JSON on request, and refuses malformed argv", (context) => {
 	const root = scratch(context);
-	const { binary } = stageInstall(root, {
-		binaryBytes: stubBinary(),
-		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
-	});
+	const { binary } = stageWorkingInstall(root);
 
 	const rendered = runCli(["--binary", binary]);
 	assert.equal(rendered.status, 0, rendered.stderr);
