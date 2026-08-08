@@ -109,22 +109,34 @@ Coverage finds unexercised code; it cannot find code no production path reaches,
 per the table at the top. Slice 2 found both of its guards by hand. Two moves,
 decided, in this order:
 
-**Adopt `knip`.** Not conditional on it solving the reachability problem — it
-earns its place on unused files, unused exports and unused dependencies
-regardless. It is not installed today: tried config-less on 2026-07-26, it
-reported "3 unused files / 42 unused exports, almost entirely false positives",
-and the verdict was that it needs `entry`/`project` config. Two of the three
-blockers named there are one line of config each — `bin.ts` is an esbuild entry,
-`postject` resolves through `require.resolve`. The third is structural and
-deliberate: suites exercise `dist/`, not `src/`, which `gates.md` defends and
-which `c8` already works around with `--src=dist`. Configure it and see what it
-gives; do not refactor the repo to suit it before knowing that.
+**Adopt `knip` — done.** Installed at `6.32.0` with `knip.json` and
+`npm run lint:unused`. The two one-line blockers were one line each as predicted;
+[gates.md](gates.md#knip-and-why-it-is-not-in-either-gate-yet) owns the config
+reasoning and why it is in neither gate yet.
+
+What it gives, from a clean run: zero unused files, zero unused dependencies, and
+**15 unused exports plus 6 unused exported types, every one of them in
+`packages/ceal-worker-cli/src/`**. Not one is a false positive. Every one is
+defined in `src/`, referenced only from `test/`, and reached by no production
+path — which is nearer the reachability question than the third blocker predicted.
+In the TypeScript packages the `dist`/`src` split turns out to *help*: because
+suites import `dist/`, `knip` does not count a test as a consumer of `src/`, so
+the exact shape slice 2 deleted by hand shows up on this list instead of reading
+as used. Read that as scoped, not as the blind spot closing — it holds only where
+the compile step separates what tests import from what production imports.
+
+It is a list of questions, not verdicts, and triaging it is the next move: this
+package also ships `exports`, so a symbol with no in-repo production caller may
+still be consumed surface rather than dead code. Resolve each the way slice 2
+resolved its two — wire it into the real path, or delete it.
 
 **Then a repo-owned production-reachability check for what `knip` cannot see.**
-It cannot see this class by default, and that is not a config gap: `knip` counts
-test files as consumers, so both guards slice 2 deleted would have read as *used*.
-Excluding tests from `entry` to force the question turns every test file into an
-"unused file", which trades one blind spot for a page of noise.
+`scripts/` is where it cannot see, and that is not a config gap: those suites
+import `scripts/*.mjs` directly, so `knip` counts a test as a consumer and both
+guards slice 2 deleted would have read as *used*. The configured run confirms it —
+it reports nothing at all under `scripts/`. Excluding tests from `entry` to force
+the question turns every test file into an "unused file", which trades one blind
+spot for a page of noise.
 
 The check we actually want is narrow — an export under `scripts/` that no
 production entry point reaches, walking static imports from the npm-script

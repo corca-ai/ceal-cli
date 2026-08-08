@@ -406,6 +406,44 @@ Both skip loudly rather than failing when their tool is absent. A gate that
 no-ops silently while counted as part of the gate is the failure being avoided;
 saying "skipped, and here is what went unchecked" is not.
 
+## `knip`, And Why It Is Not In Either Gate Yet
+
+`npm run lint:unused` is `knip`, configured by `knip.json`. It was tried
+config-less on 2026-07-26 and reported 3 unused files and 42 unused exports that
+were almost entirely false positives; the four config entries below are what took
+that to zero unused files, zero unused dependencies, and a findings list whose
+every entry is a real question. Each entry earns its place:
+
+- `entry` names `src/bin.ts` alongside `src/index.ts` in the worker package.
+  `bin.ts` is an esbuild entry rather than a package export, so nothing in the
+  manifest points at it and `knip` would otherwise call the whole SEA graph dead.
+- `ignoreDependencies` carries `postject`, which the native build reaches through
+  `require.resolve` rather than an import.
+- `ignoreBinaries` carries `nose` and `shellcheck`. Both are real dependencies of
+  the two hook-local gates above and both are deliberately undeclared — they are
+  maintainer-local tools that stand aside on a host without them, so a manifest
+  entry would claim an install this repository does not require.
+- `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason `biome`
+  excludes it: it is a frozen vendored copy, and a finding there is one no agent
+  may act on.
+
+What survives is 15 unused exports and 6 unused exported types, all in
+`packages/ceal-worker-cli/src/`. **None of them is a false positive, and none of
+them is yet a verdict.** Every one is defined in `src/`, referenced from `test/`,
+and reached by no production path — the suites import `dist/`, so `knip` does not
+count those test references and reports the symbol as unused. That is the same
+`dist`/`src` split `c8` works around with `--src=dist`, and here it is useful
+rather than a defect: the list is close to the production-reachability question
+slice 4 exists to answer. It is not the answer, because this package also ships
+`exports`, so a symbol with no in-repo production caller may still be consumed
+surface.
+
+So the tool is installed and configured, and it is in neither `npm run check` nor
+the hook. Wiring it in would either fail the gate on 21 untriaged questions or
+require suppressing them, and a suppressed finding is the vacuous guard this
+repository keeps removing. It joins a gate when the list is triaged;
+[release-guard-reachability.md](release-guard-reachability.md) owns that work.
+
 ## Probing An Installed Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way

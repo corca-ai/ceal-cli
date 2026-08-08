@@ -1,0 +1,20 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"workspaces": {
+		".": {
+			"entry": ["scripts/*.mjs", "test/**/*.test.mjs"],
+			"project": ["scripts/**/*.mjs", "test/**/*.mjs"]
+		},
+		"packages/ceal-client": {
+			"entry": ["src/index.ts"],
+			"project": ["src/**/*.ts"]
+		},
+		"packages/ceal-worker-cli": {
+			"entry": ["src/index.ts", "src/bin.ts"],
+			"project": ["src/**/*.ts"]
+		}
+	},
+	"ignoreWorkspaces": ["packages/ceal-protocol"],
+	"ignoreDependencies": ["postject"],
+	"ignoreBinaries": ["nose", "shellcheck"]
+}
