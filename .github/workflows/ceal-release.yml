@@ -197,9 +197,17 @@ jobs:
 
   assemble:
     needs: build
-    # Push only. This is where the dry run stops: everything above it proves the
-    # build, and everything from here down writes to the release origin.
-    if: github.event_name == 'push'
+    # The dry run reaches this job too. It used to stop at `build` on the reading
+    # that "everything from here down writes to the release origin" — true of
+    # `sign-and-publish`, which holds the signing identity and the origin
+    # credentials, and not true of this job, which downloads build artifacts,
+    # merges them locally, and uploads one artifact. It has `contents: read` and
+    # no secrets, so there is nothing here for a dispatch to damage.
+    #
+    # What that reading cost: the merge is where the pre-signing protocol-pin
+    # assertion runs, so the first execution of any change to it was a real tag —
+    # the exact hazard `workflow_dispatch` was added to remove, left in place for
+    # half the lane. `sign-and-publish` still keeps its own `push` condition.
     permissions:
       contents: read
     timeout-minutes: 30

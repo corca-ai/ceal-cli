@@ -31,11 +31,24 @@ Then:
 
 ```
 npm ci → npm run check → commit → push main
-→ confirm origin/main is that commit → tag → watch
+→ confirm origin/main is that commit and its check.yml run is green
+→ dry-run the release lane → tag → watch
 → ceal update → readback
 ```
 
-`CHANGELOG.md` owns which tags are burned and why. A burned tag is never reused.
+**The dry run is a step, not an option, whenever the release lane itself
+changed.** `gh workflow run ceal-release.yml --ref main` builds, composes and
+merges exactly what a tag would and then stops: `sign-and-publish` is the one
+job gated on the push event, so a dispatch reaches neither the signing identity
+nor the origin credentials. Read the run before tagging —
+`gh run list --workflow=ceal-release.yml`.
+
+It exists because **a burned tag is never reused**, and without it the first
+execution of any change to that workflow is a real release. That is not
+hypothetical: `ceal-v0.67.0` burned on a flag that had landed one release
+earlier, and no `check.yml` leg is arm64, so nothing else could have caught it.
+
+`CHANGELOG.md` owns which tags are burned and why.
 
 ## Employee verified-email device adoption
 
