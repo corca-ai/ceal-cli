@@ -33,6 +33,12 @@ export function buildWorkerReleasePackage(options = {}, dependencies = {}) {
 	return buildWorkerReleasePackageWithInputs(options, dependencies, withWorkerReleaseInputs);
 }
 
+/**
+ * The development-input twin of the function above, for suites that must build a
+ * release package without the real release inventory. No lane calls it.
+ *
+ * @testOnly
+ */
 export function buildWorkerReleasePackageFromDevelopmentInputs(options = {}, dependencies = {}) {
 	return buildWorkerReleasePackageWithInputs(options, dependencies, withWorkerReleaseDevelopmentInputs);
 }

@@ -96,6 +96,12 @@ belongs in one of them, with the rule left here.
   floor only on the Linux hosts the floor was measured on — a macOS run skips
   platform proofs it is right to skip, and says the measurement it did not carry.
   Read its header before changing where it applies.
+- Two static gates run inside both `npm run check` and `npm run check:unit`:
+  `npm run lint:unused` (`knip`) and `npm run lint:reachability` (exports under
+  `scripts/` that no production path reaches). Both exempt a `@testOnly` export,
+  and `repo-gates.test.mjs` fails when a tagged export is reached by no suite —
+  so add the tag only where that is true. [docs/gates.md](docs/gates.md) says what
+  each one can and cannot see.
 - Two gates are **maintainer-local by design**, run by `.githooks/pre-push` and
   not by `npm run check`: `npm run check:duplication` (the boy-scout duplicate
   ratchet, needs `nose` plus the charness quality skill) and `npm run lint:shell`

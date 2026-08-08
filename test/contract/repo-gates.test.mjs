@@ -14,6 +14,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 	"test/contract/prewarm-offline-consumer-cache.test.mjs",
 	"test/contract/probe-surface.test.mjs",
+	"test/contract/production-reachability.test.mjs",
 	"test/contract/protocol-vendor-pin.test.mjs",
 	"test/contract/repo-build.test.mjs",
 	"test/contract/repo-gates.test.mjs",
@@ -554,13 +555,17 @@ test("every @testOnly export is actually reached by a suite", () => {
 		for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
 			const relative = path.join(directory, entry.name);
 			if (entry.isDirectory()) walk(relative);
-			else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) sources.push(relative);
+			else if (/\.(ts|mjs)$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) sources.push(relative);
 		}
 	};
 	for (const workspace of manifest.workspaces) {
 		if (!existsSync(path.join(ROOT, workspace, "src"))) continue;
 		walk(path.join(workspace, "src"));
 	}
+	// `scripts/` uses the same tag for the same purpose — `lint:reachability`
+	// exempts a tagged export exactly as `knip` does — so it is checked here too
+	// rather than in a second gate that could disagree with this one.
+	walk("scripts");
 	assert.ok(sources.length > 0, "no workspace sources found; this check would be vacuous");
 
 	// The declaration that follows the tag, whether the tag sits in its own block

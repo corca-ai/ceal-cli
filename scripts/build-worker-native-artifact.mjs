@@ -49,6 +49,14 @@ export async function buildWorkerNativeArtifact(options = {}, dependencies = {})
 	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseInputsAsync);
 }
 
+/**
+ * The development-input twin of the function above, for suites that must build a
+ * native artifact without the real release inventory. No lane calls it; that is
+ * the point, and the reason it is declared rather than left to read as a guard
+ * production forgot to wire.
+ *
+ * @testOnly
+ */
 export async function buildWorkerNativeArtifactFromDevelopmentInputs(options = {}, dependencies = {}) {
 	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseDevelopmentInputsAsync);
 }

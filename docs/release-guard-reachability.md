@@ -16,13 +16,14 @@ function coverage while never being called from production.
 
 Two different defects, and coverage sees only one:
 
-| defect | coverage | how it was actually found |
-| --- | --- | --- |
-| untested surface | **yes** — reads low | `worker-acceptance-packet.mjs` at 52.64% |
-| production-unreachable | **no** — reads covered | grep with a positive control |
+| defect | coverage | `knip` | standing signal |
+| --- | --- | --- | --- |
+| untested surface | **yes** — reads low | no | `npm run coverage:scripts` (slice 1) |
+| production-unreachable | **no** — reads covered | no — counts a test as a caller | `npm run lint:reachability` (slice 4) |
 
-So slice 1 is worth having and is not the audit. The second column still has no
-standing signal; see the open question at the end.
+So slice 1 is worth having and is not the audit. The second row had no standing
+signal when this was written; slice 4 built one, and proved it by rerunning it
+over the tree that held the two guards slice 2 found by hand.
 
 ## Acceptance
 
@@ -180,8 +181,37 @@ Excluding tests from `entry` to force the question turns every test file into an
 "unused file", which trades one blind spot for a page of noise. Undeclaring the
 entries would report every `scripts/*.mjs` as an unused file instead.
 
-The check we actually want is narrow — an export under `scripts/` that no
-production entry point reaches, walking static imports from the npm-script
-entries. It has no `dist`/`src` problem, and it can fail closed like the rest of
-the gates here. Size it against what `knip` already covers before building it, so
-it stays the narrow thing rather than a second general tool.
+**The check exists — `npm run lint:reachability`**, in both gates and in
+`test/contract/production-reachability.test.mjs`. It walks the production graph
+only: entries are the `node scripts/*.mjs` invocations declared in the manifest,
+in the lanes, and in the hook; edges are static relative imports; and a release
+lane's inline `node --input-type=module` step counts as a caller. Tests are not
+in the graph, which is the whole mechanism — a guard only its own suite calls is
+the defect being looked for. It reports two things: a module no entry reaches,
+and an export no production path reaches that its own module never calls either.
+The second condition is what keeps it out of `knip`'s territory; a surplus
+`export` modifier is not this check's business.
+
+**It was proven against the tree that held the defect, not against an imitation
+of it.** Run today's analyzer over `0cce9f9^`, reconstructed with `git archive`,
+and it names `assertWorkerReleaseSourcePath` and
+`resolveLockedGatewayHandoffArchive` — the two guards slice 2 found by hand after
+coverage and `knip` both read them as fine. That assertion is in the suite, and
+it skips loudly rather than passing on a clone without the commit.
+
+Its first run also produced one false positive and one real finding, and both are
+worth inheriting:
+
+- `parsePublishedWorkerReleaseInventory` read as unreached because the rollback
+  lane calls it from an inline workflow script. A check that is wrong on its first
+  run is a check that gets switched off, so workflow steps are in the graph now.
+- `verify-gateway-protocol-consumer.mjs` was reached by no entry at all: README
+  told operators to run it and the manifest never declared it. It has an npm
+  script now, and README points at that.
+
+What it does not cover, stated so a green run is not read as more than it is: only
+`scripts/`, only static imports — a dynamic `import()` is deliberately not an edge,
+because treating an unresolvable specifier as one would widen the graph until
+nothing could be unreachable — and a `@testOnly` export is exempt by declaration.
+That exemption is checked rather than trusted: `repo-gates.test.mjs` fails when a
+tagged export is reached by no suite.

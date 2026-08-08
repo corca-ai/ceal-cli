@@ -63,8 +63,8 @@ than its exclusion.
   `ceal` binary.
 
 A worker source build consumes only a supplied packed Gateway protocol artifact.
-Run `node scripts/verify-gateway-protocol-consumer.mjs --help` for that local,
-no-network consumer proof.
+Run `npm run verify:protocol-consumer -- --help` for that local, no-network
+consumer proof.
 
 `@corca-ai/ceal` names only the client SDK. It does not contain the CLI, Agent
 runner, Gateway server, or an umbrella SDK.

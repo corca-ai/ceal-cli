@@ -462,6 +462,40 @@ produce that silence — both checked with a planted export:
 Either mechanism alone would have hidden both guards slice 2 deleted by hand.
 
 
+## Production Reachability Under `scripts/`
+
+`npm run lint:reachability` answers the question the section above ends on, and
+runs in both gates. `scripts/lib/production-reachability.mjs` walks the
+production graph and nothing else: entries are the `node scripts/*.mjs`
+invocations the manifest, the lanes, and the hook declare; edges are static
+relative imports; a release lane's inline `node --input-type=module` step is a
+caller. Suites are not in the graph, which is the entire mechanism — a guard only
+its own test calls is the defect.
+
+It reports a module no entry reaches, and an export no production path reaches
+that its own module never calls either. That second condition is deliberate:
+without it every surplus `export` modifier would land here, which is `knip`'s
+question and would bury this one.
+
+Three properties are worth keeping when this is edited:
+
+- **It is parsed, not matched.** A regex that quietly stops matching leaves a
+  gate green while claiming to have walked the tree. The one regex that remains
+  locates an inline workflow *script*; its imports are then parsed. The first
+  version spanned from one `import` to a later `from`, read two adjacent
+  statements as one, and attributed the wrong symbol.
+- **A dynamic `import()` is not an edge.** It cannot be resolved without running
+  the program, and treating an unresolvable specifier as an edge widens the graph
+  until nothing can be unreachable.
+- **`@testOnly` exempts, and the exemption is checked.** `repo-gates.test.mjs`
+  fails when a tagged export is reached by no suite, in `scripts/` and in the
+  packages alike.
+
+The suite proves it on fixtures whose answer is known before it runs, and then on
+the real thing: it reconstructs `0cce9f9^` with `git archive` and requires the
+analyzer to name both guards slice 2 deleted by hand. On a clone without that
+commit it skips and says so rather than passing.
+
 ## Probing An Installed Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way
