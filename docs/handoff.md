@@ -2,7 +2,43 @@
 
 ## Workflow Trigger
 
-이 파일만 언급되면 아래 `## Current State`를 읽고, `## Debt`에서 고르거나 운영자가
+이 파일만 언급되면 아래 `## Next Session — 테스트 감사
+
+**지금 `npm run check:unit`이 1건 실패한다.** `cc29047`("fix(discovery): make the
+cache window one measured decision")이 `skills/ceal-guide/SKILL.md`를 고치면서
+`release-contract.json`의 기록된 digest를 갱신하지 않았다. 커밋별로 확인했고 그
+직전 커밋까지는 전부 일치한다. 아직 push되지 않았으므로 pre-push 게이트
+(`.githooks/pre-push` → `check:unit`)가 push 시점에 막을 상태다.
+
+착수 전에 알아둘 것: **그 digest는 릴리스가 소비하지 않는다.**
+`scripts/build-platform-binaries.mjs:126`의 `buildGuideAssets`는 파일에서 digest를
+직접 재계산해서 매니페스트에 싣고, 계약에 적힌 값은 읽지도 않는다. 따라서
+`release-contract.json`의 `guides[].sha256`은 **손으로 관리하는 파생값**이고 유일한
+소비자는 두 테스트의 동일성 단언뿐이다
+(`test/contract/worker-guide-contract.test.mjs:22`, `test/contract/guide-contract.test.mjs:29`).
+문서를 한 글자 고치면 무관한 파일의 상수를 손으로 맞춰야 하고, 두 파일이 같은
+트리에 있어 위조 방어도 되지 않는다.
+
+할 일:
+
+1. **가이드 digest 단언과 계약 필드를 없앨지 결정한다.** 단언만 지울지, 계약의
+   `guides[].sha256` 필드까지 지울지는 릴리스 매니페스트 스키마와 서명 자산
+   목록을 한 번 더 확인한 뒤 정한다. 같은 테스트의 나머지 단언(help 기반 발견을
+   가르치는지, 명령 스냅샷을 박아두지 않았는지, `--help`가 광고하는 라우트를
+   가이드가 베껴 쓰지 않는지)은 행위 계약이므로 유지 대상이다.
+2. **테스트가 통째로 불필요하면 지운다.** 남길 가치가 digest 한 줄뿐이라면 파일을
+   남길 이유가 없다.
+3. **`test/contract/` 전체를 같은 눈으로 감사한다.** 손으로 관리하는 파생값,
+   스냅샷 동일성, 그리고 리포 분리 이전의 레인 분업에서 생긴 계약이 더 있는지
+   본다. 판단 기준: 이 단언이 깨지는 것이 **실제 결함**을 뜻하는가, 아니면 파일
+   둘을 손으로 못 맞춘 것을 뜻하는가.
+
+`docs/requests/`를 참조하는 테스트는 **이 감사에서 예외로 두거나 신중히 판단할
+것.** 확인해 보니 잔재가 아니라, divergence를 선언하면 반드시 tracked 근거 문서를
+가리켜야 한다는 거버넌스 규칙이고 `README.md`, `AGENTS.md:67`, `docs/gates.md:136`
+세 곳이 같이 문서화하고 있다. 레인 잔재인 것은 그 디렉터리 안 파일들의 이름뿐이다.
+
+## Current State`를 읽고, `## Debt`에서 고르거나 운영자가
 지시한 작업을 시작한다. `ceal capabilities --fresh`와 `ceal call`은 실세션·provider
 동작이라 승인 후에만.
 
