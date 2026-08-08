@@ -335,12 +335,13 @@ run skips proofs that only *add* coverage on x64, and the entire arch-conditiona
 surface under `scripts/` is one ternary at `build-worker-native-artifact.mjs:372`
 whose covered and uncovered branch counts are symmetric between the two.
 
-**The first `check.yml` run is what makes that floor real, in both directions.**
-If x64 measures lower than arm64, the extrapolation was wrong and the floor moves
-down to what was measured. If it measures materially *higher*, the floor is loose
-by that margin on the only host that ever enforces it in CI, and an x64-only
-regression inside that margin lands green — so it moves up. Either way the number
-in `.c8rc.scripts.json` is provisional until a `ubuntu-24.04` run has printed one.
+**Both platforms are measured now, and the extrapolation was wrong in sign.**
+Run `31263490521` on `ubuntu-24.04` printed 80.59% statements / **72.60%**
+branches / 89.75% functions / 80.59% lines — identical to arm64 on three ratios
+and *lower* on branches, against the argument above that x64 runs strictly more
+proofs and so should measure at or above. It held because the floor sits about
+0.6 under, not because the reasoning was right. The floor is the lower of the two
+platforms and is no longer provisional; re-measure both before moving it.
 
 **What the report already says, and one thing it does not.** `lint-shell.mjs` at
 0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not

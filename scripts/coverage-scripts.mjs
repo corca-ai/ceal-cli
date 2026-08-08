@@ -41,16 +41,16 @@ const TIERS = "test:tiers";
 // one whose numbers must never be allowed to drop unnoticed — and
 // `repo-gates.test.mjs` asserts that it does.
 //
-// `linux-arm64` is here as well, and is in fact where the floors were measured,
-// because the maintainer host is arm64 and a gate no maintainer can run before
-// pushing is one CI discovers for them. Extending an arm64 measurement to x64 is
-// an extrapolation, and a small one: the arm64 run skips
-// `platformProofTest` proofs that only add coverage on x64, and the whole
-// arch-conditional surface under scripts/ is the one ternary at
-// build-worker-native-artifact.mjs:372, whose covered and uncovered branch counts
-// are symmetric between the two. So x64 should measure at or above arm64. If a
-// CI run ever shows otherwise, that is the measurement talking and the floor
-// moves to what it says.
+// `linux-arm64` is here as well, because the maintainer host is arm64 and a gate
+// no maintainer can run before pushing is one CI discovers for them.
+//
+// Both are measured now, and the floor is the lower of the two. It began as an
+// arm64 measurement extrapolated to x64 on the argument that x64 runs strictly
+// more proofs and so should measure at or above it. That argument was wrong in
+// sign and right in size: run 31263490521 gave x64 branches at 72.60 against
+// arm64's 72.68, identical on the other three ratios. The floor held because it
+// sits ~0.6 under, not because the prediction was right. Re-measure rather than
+// re-derive.
 const MEASURED_PLATFORMS = Object.freeze(["linux-arm64", "linux-x64"]);
 
 function runTiers(prefix) {

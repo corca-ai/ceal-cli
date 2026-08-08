@@ -144,11 +144,13 @@ Two things the handoff's plan did not account for, both found by running it:
 - **The maintainer host is `linux-arm64`, not the release platform.** So the
   floors are measured there and *extrapolated* to `linux-x64`, which is enforced
   too because it carries every platform proof. [gates.md](gates.md) states the
-  extrapolation and why it is small. **The first `check.yml` run confirms it or
-  moves the number** — and that has NOT happened yet: the first run after this
-  landed died at `biome check .` on the broken lockfile above, long before the
-  gate reached coverage. The floor is still an arm64 measurement asserted about
-  x64. The next green `ubuntu-24.04` run is the evidence.
+  extrapolation and why it is small. **Now confirmed**, after one false start —
+  the first run died at `biome check .` on the broken lockfile above. Run
+  `31263490521` on `ubuntu-24.04` gave 80.59 / **72.60** / 89.75 / 80.59: the same
+  as arm64 on three ratios and *lower* on branches, against the extrapolation's
+  claim that x64 should measure at or above. Wrong in sign, right in size, and it
+  held because the floor sits ~0.6 under. The floor stands at 80 / 72 / 89 / 80,
+  is now the lower of two measured platforms, and is no longer provisional.
 
 Falsified rather than assumed, per the goal's own acceptance bar: breaking `all`,
 `check-coverage`, the floor values, the release platform's place in the runner's
