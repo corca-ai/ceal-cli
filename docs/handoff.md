@@ -134,11 +134,22 @@ The mandated fresh-eye review found two things worth recording, both since fixed
   coverage floors out of `npm run check` and out of `check.yml` with every gate
   green. It is a hop in the resolved chain now.
 
-Cost, timed on this host: `npm run check` went from about 1m44s to **about 2m35s**.
-`check:unit` is unchanged. The overhead is `NODE_V8_COVERAGE` in every process the
-release tier spawns — package managers, compilers, SEA tooling — none of which can
-contribute `scripts/` coverage. Stripping it at those spawn sites would buy most
-of the minute back and is untaken debt.
+Cost, timed on this host: `npm run check` went from about 1m44s to **about
+2m34s** — three timed runs at 2m33s, 2m36s and 2m33s, the last of them after the
+one optimisation below, which is to say the optimisation does not surface above
+the spread at gate level. `check:unit` is unchanged at about 49s.
+
+That optimisation is also a correction. The overhead is `NODE_V8_COVERAGE`
+inherited by everything the tiers touch, and this handoff first recorded that
+stripping it at the spawn sites which cannot contribute `scripts/` coverage —
+package managers, compilers, SEA tooling — "would buy most of the minute back".
+**That was an inference from per-test timings and it was wrong.** Clearing it at
+`verify-gateway-protocol-consumer.mjs`'s `run()` helper, the single largest of
+those sites, recovered about 9 seconds of 52 on the tiers alone (2m03s to 1m54s)
+with no coverage lost — and nothing measurable on the full gate. The rest is
+V8 collecting coverage in the test processes themselves — the measurement, not
+waste — so **do not open this as a performance goal.** The only remaining lever is
+structural: drop the release tier and the floor drops to about 55%.
 
 ## 2026-08-08 — the legacy lane is gone
 

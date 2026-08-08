@@ -352,15 +352,31 @@ coverage lands under a temp path that remaps to nothing. A zero is therefore a
 question, not a verdict — the reachability claim needs the same positive control
 any absence claim needs.
 
-**The cost is real and it is on `npm run check` only.** Both tiers plain take
-about 1m11s on the maintainer host; under `c8` they take about 2m03s, which took
-the full gate from about 1m44s to about 2m35s (2m33s and 2m36s on two timed runs). `check:unit` is unchanged. The
-overhead is not the report but `NODE_V8_COVERAGE` in every process the release
-tier spawns — the package managers, compilers and SEA tooling whose coverage is
-discarded on remap, which also write about 100MB of raw profiles per run. The
-runner deletes that temp directory after a passing run. Stripping the variable at
-the spawn sites that can never contribute `scripts/` coverage would buy most of
-the minute back and is not done yet.
+**The cost is real, it is on `npm run check` only, and it is mostly
+irreducible.** Timed on the maintainer host: both tiers plain about 1m11s, under
+`c8` about 1m54s. `check:unit` is unchanged.
+
+The obvious lever was tried and mostly failed, which is the useful part. The
+overhead is `NODE_V8_COVERAGE` inherited by every process the tiers touch, and
+the four slowest release proofs — which spawn `npm`, `tsc` and the SEA tooling,
+none of which can contribute `scripts/` coverage — accounted for about 75s of it
+by per-test timing. Clearing the variable at
+`verify-gateway-protocol-consumer.mjs`'s `run()` helper, the single largest of
+those, recovered **about 9 seconds of 52** on the tiers alone and cost no
+coverage (that file went 82.20% to 82.59%, from the added comment; nothing else
+moved). On the full gate it does not surface at all: three timed runs gave
+2m33s, 2m36s and 2m33s, the last of them with the change in. So the cost is not
+concentrated in the spawned tooling after all: most of it is V8 collecting
+coverage in the test processes themselves, which is the measurement, not waste.
+Chasing the remaining spawn sites is not worth the production edits — the
+per-test timings say where the time went, and they were misleading about why.
+
+What is left to trade is structural, not incidental: measuring only the contract
+tier would be nearly free and would put the floor at about 55%.
+
+The run also writes about 100MB of raw profiles; the runner deletes that temp
+directory after a passing run and keeps it after a failing one, where it is the
+only way to re-report without paying for the tiers again.
 
 ## Two Gates That Live In The Hook
 

@@ -354,7 +354,18 @@ function readPackedManifest(tarball) {
 }
 
 function run(cwd, command, args, label) {
-	const result = spawnSync(command, args, { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NODE_PATH: "" } });
+	const result = spawnSync(command, args, {
+		cwd,
+		encoding: "utf8",
+		maxBuffer: 8 * 1024 * 1024,
+		// NODE_V8_COVERAGE is cleared for the same reason NODE_PATH is: this helper
+		// spawns a package manager and a compiler inside a staged consumer, and
+		// inheriting the parent's coverage collection makes them write profiles that
+		// remap to nothing here. Worth about 9s of the coverage run and no coverage
+		// at all — measured both ways, because the test this helper serves looked
+		// like the run's dominant cost and was not. docs/gates.md has the numbers.
+		env: { ...process.env, NODE_PATH: "", NODE_V8_COVERAGE: "" },
+	});
 	if (result.status !== 0) throw new GatewayProtocolConsumerError("command_failed", `Packed consumer ${label} failed.`);
 	return result;
 }
