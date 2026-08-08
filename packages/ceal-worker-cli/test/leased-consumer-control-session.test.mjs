@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	isInheritedNotificationChannelFd,
 	openLeasedConsumerControlSession,
 	resolveOperationDeadlineMs,
 	runLeasedConsumerControlTransport,
@@ -425,6 +428,76 @@ test("the shipped Agent writer destroys a backpressured stdout stream and reject
 		undefined,
 	);
 	assert.equal(v4Writes, 1);
+});
+
+// A stream whose `destroy()` errors its own pending write is what a real
+// `ERR_STREAM_DESTROYED` looks like if Node ever delivers it synchronously. The
+// classifier accepts only the cancellation, so an abort that rejected with the
+// teardown's error would turn every clean shutdown into exit 3 — and the stub
+// with the empty `destroy` above cannot tell the two orderings apart.
+test("the abort settles before teardown, so destroy's own error cannot become the rejection", async () => {
+	let callback;
+	const stream = {
+		write: (_frame, next) => {
+			callback = next;
+			return false;
+		},
+		destroy: () => callback?.(new Error("ERR_STREAM_DESTROYED")),
+	};
+	const abort = new AbortController();
+	const writing = writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal);
+	abort.abort();
+	await assert.rejects(writing, (error) => error.name === "ControlAbortedError");
+});
+
+// Asked of descriptors a real parent INHERITED to a real child, not of a
+// stubbed `fstatSync`. The defect this pins was an assumption about what a
+// child-stdio `pipe` IS — Gateway's is a Unix socketpair on Linux, and the
+// FIFO-only check refused the only channel production ever supplies. A faked
+// stat would have agreed with whichever assumption the test author held, which
+// is how the wrong one survived in the first place.
+test("FD5 accepts the inherited kinds Gateway and a supervisor supply, and refuses a file", (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-fd5-kind-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const entry = path.join(DIST, "leased-consumer-control-session.js");
+	const askChild = (fd5) => {
+		const child = spawnSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import(${JSON.stringify(`file://${entry}`)}).then((m) => process.stdout.write(String(m.isInheritedNotificationChannelFd(5))));`,
+			],
+			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", fd5], encoding: "utf8" },
+		);
+		assert.equal(child.status, 0, `child exited ${child.status}`);
+		return child.stdout;
+	};
+
+	// What `stdio: "pipe"` actually hands a child on this platform. Gateway
+	// launches the worker exactly this way.
+	assert.equal(askChild("pipe"), "true", "Gateway's own child-stdio pipe must be accepted");
+
+	// A named FIFO, which a supervisor or a harness may supply instead. Opened
+	// read-write so the open does not block waiting for a writer.
+	const fifoPath = path.join(scratch, "fifo");
+	execFileSync("mkfifo", [fifoPath]);
+	const fifoFd = openSync(fifoPath, "r+");
+	context.after(() => closeSync(fifoFd));
+	assert.equal(askChild(fifoFd), "true");
+	// Same descriptor, asked in this process too: the child answers about FD 5
+	// specifically, and this pins that the predicate — not the number 5 — is
+	// what decided.
+	assert.equal(isInheritedNotificationChannelFd(fifoFd), true);
+
+	// The refusal is the reason the predicate exists at all: a regular file is
+	// the substitution that would let FD5 name something on disk.
+	const filePath = path.join(scratch, "regular");
+	writeFileSync(filePath, "not a channel\n");
+	const fileFd = openSync(filePath, "r");
+	context.after(() => closeSync(fileFd));
+	assert.equal(askChild(fileFd), "false");
+	assert.equal(isInheritedNotificationChannelFd(fileFd), false);
 });
 
 test("each carrier binds only the socket path in its own protected session", async () => {

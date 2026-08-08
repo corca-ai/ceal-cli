@@ -424,6 +424,11 @@ earns its place:
   the two hook-local gates above and both are deliberately undeclared — they are
   maintainer-local tools that stand aside on a host without them, so a manifest
   entry would claim an install this repository does not require.
+  It also carries `mkfifo`, which is POSIX coreutils rather than an install: the
+  FD5 descriptor-kind test needs a real named FIFO, and Node cannot make one. The
+  test asks the predicate about real descriptors instead of a stubbed `fstatSync`
+  because the defect it pins was an assumption about what a child-stdio `pipe`
+  is — a faked stat would have agreed with the wrong assumption.
 - `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason `biome`
   excludes it: it is a frozen vendored copy, and a finding there is one no agent
   may act on.

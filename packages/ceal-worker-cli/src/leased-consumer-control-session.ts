@@ -137,9 +137,23 @@ export function writeLeasedConsumerAgentFrame(stream: AbortableWritable, frame: 
 			signal.removeEventListener("abort", abortWrite);
 			action();
 		};
+		// Settle BEFORE destroying. `destroy()` can invoke a pending write
+		// callback with its own error, and if that callback reaches `finish`
+		// first the promise rejects with `ERR_STREAM_DESTROYED` — an error this
+		// function caused, which the notification loop then reads as an
+		// independent failure and reports a clean shutdown as exit 3. Settling
+		// first makes the teardown's own error unreachable by construction
+		// rather than by trusting Node to defer the callback.
+		//
+		// A write error that lands strictly AFTER this point is dropped, and that
+		// is the intended answer, not a gap: past here the stream has been
+		// destroyed by this very path, so a late error cannot be told apart from
+		// the teardown's own. An error that was already in flight settles the
+		// promise on its own and stays a failure, which is the case the
+		// classification actually turns on.
 		const abortWrite = () => {
-			stream.destroy();
 			finish(() => reject(new ControlAbortedError()));
+			stream.destroy();
 		};
 		if (signal.aborted) return abortWrite();
 		signal.addEventListener("abort", abortWrite, { once: true });
@@ -352,11 +366,35 @@ export async function runLeasedConsumerControlTransport(
 	return controlClean && notificationClean && !notificationEndedEarly;
 }
 
+/**
+ * Whether FD5 is an inherited byte stream this worker may read as the
+ * notification channel.
+ *
+ * Gateway launches the worker with a child-stdio `pipe`, which on Linux is a
+ * Unix socketpair rather than a named FIFO, so a FIFO-only check refuses the
+ * one channel production actually supplies. A supervisor or a test may still
+ * hand over a real FIFO. Both are streams with no seek and no path.
+ *
+ * A regular file and a device descriptor stay refused. That is the point of
+ * asking at all: they are the substitutions that would let FD5 name something
+ * on disk, and this predicate is the only place that says so.
+ *
+ * Exported so the suite can put real descriptors of each kind in front of it —
+ * the mistake this fixes was an assumption about what a "pipe" is, which only a
+ * real descriptor can settle. No other module imports it.
+ *
+ * @testOnly
+ */
+export function isInheritedNotificationChannelFd(fd: number): boolean {
+	const stat = fstatSync(fd);
+	return stat.isFIFO() || stat.isSocket();
+}
+
 /** Opens inherited FD5 only when the embedded selected contract declares it. */
 export function openLeasedConsumerNotificationChannel(): LeasedConsumerNotificationChannel | undefined {
 	const contract = CONTROL_SESSION_CONTRACT.notification_channel;
 	if (!contract) return undefined;
-	if (!fstatSync(contract.child_fd).isFIFO()) throw new Error("missing_notification_channel");
+	if (!isInheritedNotificationChannelFd(contract.child_fd)) throw new Error("missing_notification_channel");
 	const stream = createReadStream("/dev/null", {
 		fd: contract.child_fd,
 		autoClose: true,
