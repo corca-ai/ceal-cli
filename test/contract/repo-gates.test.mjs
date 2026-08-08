@@ -40,8 +40,11 @@ const LEGACY_COMPATIBILITY_TESTS = [
 	"test/public-distribution.test.mjs",
 ];
 
-function nodeTestCommand(testFiles) {
-	return `node --test ${testFiles.join(" ")}`;
+function testFilesIn(script) {
+	return (script ?? "")
+		.split(/\s+/u)
+		.filter((token) => token.endsWith(".test.mjs"))
+		.sort();
 }
 
 function read(relative) {
@@ -61,13 +64,23 @@ function runsFinalGate(step) {
 // to route around. Both gates must carry it, or "green" means different things
 // depending on which command was typed.
 test("both gates run the linter, and the final gate runs every suite", () => {
-	assert.deepEqual(manifest.workspaces, ["packages/ceal-protocol", "packages/ceal-client", "packages/ceal-worker-cli"]);
+	// The claim is which package must not be a workspace, plus which three must
+	// be. An ordered deepEqual additionally fails on a legitimately added
+	// workspace, which is drift-reporting, not defect-reporting.
+	for (const owned of ["packages/ceal-protocol", "packages/ceal-client", "packages/ceal-worker-cli"]) {
+		assert.ok(manifest.workspaces.includes(owned), `${owned} must be a workspace`);
+	}
+	assert.ok(!manifest.workspaces.includes("packages/ceal-operator-cli"), "the frozen operator package must not be a workspace");
 	assert.match(manifest.scripts["check:unit"], /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm test/u);
 	// `biome check`, not `biome lint`: it also verifies formatting, so an
-	// unformatted commit fails the gate instead of merely drifting.
-	assert.equal(manifest.scripts.lint, "biome check .");
+	// unformatted commit fails the gate instead of merely drifting. Two separate
+	// claims — the subcommand and the scope — rather than one exact string, so a
+	// reporter or config flag is allowed but a narrowed scope is not.
+	assert.match(manifest.scripts.lint, /^biome check\b/u);
+	assert.ok(manifest.scripts.lint.split(/\s+/u).includes("."), "the linter must run over the whole tree");
+	assert.doesNotMatch(manifest.scripts.lint, /--changed|--staged|--since/u);
 	assert.match(manifest.scripts.build, /npm run build:worker/u);
 	assert.match(manifest.scripts["build:worker"], /^node scripts\/generate-leased-consumer-handoff-runtime[.]mjs/u);
 	assert.match(manifest.scripts["build:worker"], /packages\/ceal-protocol run build/u);
@@ -80,7 +93,10 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	}
 	assert.doesNotMatch(manifest.scripts["build:worker"], /packages\/ceal-operator-cli/u);
 	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
-	assert.equal(workerPackage.scripts.build, "tsc -p tsconfig.build.json");
+	assert.match(workerPackage.scripts.build, /^tsc -p tsconfig\.build\.json\b/u);
+	// A trailing `|| true` would make every type error a green build, which is the
+	// one thing loosening this assertion off exact equality must not permit.
+	assert.doesNotMatch(workerPackage.scripts.build, /\|\||;|--noEmit/u);
 });
 
 // The frozen packages are compatibility inputs this lane may not originate
@@ -347,10 +363,11 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 		const inline = /skip:\s*process\.(?:platform|arch)/u.test(source);
 		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.mjs`);
 	}
-	// The helper is only load-bearing if the two proofs that motivated it use it.
-	for (const suite of ["build-worker-release-artifact.test.mjs", "worker-release-installer.test.mjs"]) {
-		assert.match(read(path.join("test", suite)), /platformProofTest\(/u, `test/${suite} must declare its platform-gated proof`);
-	}
+	// The helper is only load-bearing if the proofs that motivated it use it, and
+	// that is an anti-vacuity floor, not an inventory. Naming the two suites here
+	// made a rename or a suite move look like a missing platform proof.
+	const declaring = suites.filter((suite) => /platformProofTest\(/u.test(read(path.join("test", suite))));
+	assert.ok(declaring.length >= 2, `only ${declaring.length} suite(s) declare a platform-gated proof through the shared helper`);
 });
 
 // Requirement 3 of the proof/ship divergence decision says worker release,
@@ -638,9 +655,21 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 // an accidental worker-source requirement.
 test("every test file under test/ belongs to one explicit worker or legacy suite", () => {
 	const scripts = manifest.scripts;
-	assert.equal(scripts["test:contract"], nodeTestCommand(WORKER_CONTRACT_TESTS));
-	assert.equal(scripts["test:release"], nodeTestCommand(WORKER_RELEASE_TESTS));
-	assert.equal(scripts["test:legacy-compatibility"], nodeTestCommand(LEGACY_COMPATIBILITY_TESTS));
+	// Which files each suite runs is the claim; the argument order and spacing of
+	// the `node --test` line are not. Exact equality made a reporter flag or a
+	// reordering fail as if a suite had lost coverage.
+	for (const [suite, declared] of [
+		["test:contract", WORKER_CONTRACT_TESTS],
+		["test:release", WORKER_RELEASE_TESTS],
+		["test:legacy-compatibility", LEGACY_COMPATIBILITY_TESTS],
+	]) {
+		// The file set is the claim, but the runner still has to be `node --test`:
+		// swapping it, or appending a name filter, would run almost nothing while
+		// every file stayed listed.
+		assert.match(scripts[suite], /^node --test /u, `${suite} must run through the node test runner`);
+		assert.doesNotMatch(scripts[suite], /--test-name-pattern|--test-skip-pattern/u);
+		assert.deepEqual(testFilesIn(scripts[suite]), [...declared].sort());
+	}
 	assert.match(scripts["check:unit"], /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:contract/u);
 	assert.match(scripts.test, /npm run test:release/u);
@@ -665,13 +694,9 @@ test("every test file under test/ belongs to one explicit worker or legacy suite
 	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory needs an explicit suite inventory entry");
 });
 
-// The contract suite only helps if it stays fast enough to sit in the iteration
-// gate. This is a ceiling on the count, not the runtime, because a runtime
-// assertion would be flaky on a loaded machine — but a file that belongs in the
-// release tier is usually obvious by name.
-test("the contract suite stays small enough to run on every push", () => {
-	assert.ok(
-		WORKER_CONTRACT_TESTS.length <= 20,
-		`test:contract has ${WORKER_CONTRACT_TESTS.length} files; re-check that each is still cheap`,
-	);
-});
+// A "the contract suite stays small enough to run on every push" test lived here
+// and asserted `WORKER_CONTRACT_TESTS.length <= 20` — a constant declared at the
+// top of this same file. It could only fail when a human edited that array, and
+// by its own comment it could not measure the runtime it was about. The rule it
+// meant to carry belongs to CLAUDE.md, which already says to time a gate with
+// `time npm run check` on the host in hand rather than trust a recorded figure.

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,10 +15,14 @@ const WORKER = { skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-c
 
 test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
+// The worker release lane declares its own guide asset in `worker-release-inputs.json`
+// and digests the file it actually ships, so nothing here restates a digest: this
+// suite asserts what the guide teaches, not that two files were hand-synchronized.
+// `release-contract.json` is a forbidden worker release input, and the digest it
+// records is the frozen legacy lane's own drift check — asserted for both guides
+// in `guide-contract.test.mjs`, alongside the lane that consumes it.
 test("the worker guide teaches help-driven discovery without command snapshots", () => {
-	const releaseContract = JSON.parse(readFileSync(path.join(ROOT, "release-contract.json"), "utf8"));
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
-	assert.equal(releaseContract.guides?.[WORKER.skill]?.sha256, createHash("sha256").update(guide).digest("hex"));
 	assert.match(guide, /^name: ceal-guide$/mu);
 	assert.match(guide, /\bceal --help\b/u);
 	assert.match(guide, /ceal <command> --help/u);
@@ -30,10 +33,18 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 		if (!["capabilities", "call", "receipt"].includes(route.name))
 			assert.doesNotMatch(guide, new RegExp(`\\bceal\\s+${route.name}(?:\\s|\u0060)`, "u"));
 	}
+	// Order and profile-scoping are the contract: discover, then resolve a target,
+	// then call, then read the receipt back, every step against a named profile.
+	// The flags inside each step are the guide's to choose — this used to pin
+	// `--fresh` on the first step, and `cc29047` broke it by deciding, with a
+	// recorded reason, that a warm catalog should not pay the discovery probe.
+	// A gate that a documented authoring decision breaks is not guarding behavior.
 	assert.match(
 		guide,
-		/ceal capabilities --profile <profile-ref> --fresh[\s\S]+ceal capabilities targets --profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u,
+		/ceal capabilities[^\n]*--profile <profile-ref>[\s\S]+ceal capabilities targets[^\n]*--profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u,
 	);
+	// Two non-claims the guide has to state, not two sentences it has to keep:
+	// reword them and this gate should be re-read, which is the point.
 	assert.match(guide, /catalog grant is not backend\s+readiness/u);
 	assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
 });

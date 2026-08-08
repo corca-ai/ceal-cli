@@ -15,18 +15,37 @@ import { parseAllDocuments } from "yaml";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
 const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-guide-contract-home-"));
-const CASES = [
-	{ skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-cli" },
-	{ skill: "cealctl-guide", binary: "cealctl", packageDir: "ceal-operator-cli" },
-];
+// The teaching contracts below cover the frozen operator guide only. Both guides
+// were asserted here and in `worker-guide-contract.test.mjs` from the lane split
+// until this file was narrowed; the worker suite — the one the pre-push and CI
+// gates actually run — carries every `ceal` assertion that used to be here except
+// the release-contract digest, which stays in this file (see below).
+const CASES = [{ skill: "cealctl-guide", binary: "cealctl", packageDir: "ceal-operator-cli" }];
+// The sibling the fallback contract is about is worker-owned and not a case here.
+const SIBLING_BINARY = "ceal";
 
 test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
-test("guide packages teach help-driven discovery without command snapshots", () => {
+// `release-contract.json` records a digest per guide, and `build-platform-binaries.mjs`
+// fails `guide_drift` when it does not match the file it is about to ship. That is a
+// live input to the frozen legacy lane, not a hand-maintained derived value with no
+// consumer — so it is asserted for *both* guides here, where the frozen lane is
+// tested, rather than in the worker suite that must not read this contract at all.
+// The cost is real and accepted: editing `skills/ceal-guide/SKILL.md` breaks a suite
+// no gate runs, and is only seen by whoever runs `npm run test:legacy-compatibility`.
+test("the release contract's guide digests match the guides the frozen lane would ship", () => {
 	const releaseContract = JSON.parse(readFileSync(path.join(ROOT, "release-contract.json"), "utf8"));
+	const digests = Object.entries(releaseContract.guides);
+	assert.ok(digests.length >= 2, "the contract must still declare both guide assets");
+	for (const [skill, declared] of digests) {
+		const guide = readFileSync(path.join(ROOT, declared.path), "utf8");
+		assert.equal(declared.sha256, createHash("sha256").update(guide).digest("hex"), `${skill} digest is stale`);
+	}
+});
+
+test("guide packages teach help-driven discovery without command snapshots", () => {
 	for (const item of CASES) {
 		const guide = readFileSync(path.join(ROOT, "skills", item.skill, "SKILL.md"), "utf8");
-		assert.equal(releaseContract.guides?.[item.skill]?.sha256, createHash("sha256").update(guide).digest("hex"));
 		assert.match(guide, new RegExp(`^name: ${item.skill}$`, "mu"));
 		assert.match(guide, new RegExp(`\\b${item.binary} --help\\b`, "u"));
 		assert.match(guide, new RegExp(`${item.binary} <command> --help`, "u"));
@@ -37,16 +56,7 @@ test("guide packages teach help-driven discovery without command snapshots", () 
 		// change would return [] and make the snapshot ban below vacuous.
 		assert.ok(routes.length > 0, `${item.binary} --help advertised no route; the help parser is not matching`);
 		for (const route of routes) {
-			const stableWorkerFlow = item.skill === "ceal-guide" && ["capabilities", "call", "receipt"].includes(route.name);
-			if (!stableWorkerFlow) assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
-		}
-		if (item.skill === "ceal-guide") {
-			assert.match(
-				guide,
-				/ceal capabilities --profile <profile-ref> --fresh[\s\S]+ceal capabilities targets --profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u,
-			);
-			assert.match(guide, /catalog grant is not backend\s+readiness/u);
-			assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
+			assert.doesNotMatch(guide, new RegExp(`\\b${item.binary}\\s+${route.name}(?:\\s|\u0060)`, "u"));
 		}
 	}
 });
@@ -55,18 +65,6 @@ test("cold-start customer intents select semantic leaves and preserve proof limi
 	const scenarios = [
 		{
 			...CASES[0],
-			prompt: "Find what Ceal can do safely.",
-			purpose: /Gateway-issued capabilities/u,
-			schema: "ceal.capabilities.v1",
-			assertResult: (value) => {
-				assert.equal(value.status, "unavailable");
-				assert.equal(value.proof_level, "surface");
-				assert.equal(value.live_gateway_checked, false);
-				assert.ok(value.non_claims.some((claim) => /No live Gateway discovery/u.test(claim)));
-			},
-		},
-		{
-			...CASES[1],
 			prompt: "Check whether cealctl is ready.",
 			purpose: /Check this binary and protocol surface/u,
 			schema: "cealctl.doctor.v1",
@@ -118,13 +116,12 @@ test("missing matching binary fails closed without a guessed fallback", () => {
 		assert.match(guide, /Do not fall\s+back to another guide, another binary, or a guessed command/u);
 
 		// The rule above is prose, so prove the guide obeys it rather than only
-		// stating it: the sibling binary may be *named* — `ceal-guide` names
-		// `cealctl` to refuse operator work — but never as a command to run,
-		// which is exactly the guessed fallback the rule forbids. This replaces an
+		// stating it: the sibling binary may be *named* — `cealctl-guide` names
+		// `ceal` to refuse worker work — but never as a command to run, which is
+		// exactly the guessed fallback the rule forbids. This replaces an
 		// assertion that spawned a path which never existed and so only proved
 		// that node exits non-zero on a missing script.
-		const sibling = CASES.find((other) => other.binary !== item.binary);
-		assert.ok(sibling, "the fallback contract needs a sibling binary to be about");
+		const sibling = { binary: SIBLING_BINARY };
 		assert.doesNotMatch(
 			guide,
 			new RegExp(`\\b${sibling.binary}\\s+(?!--help\\b)[a-z][a-z-]*`, "u"),
