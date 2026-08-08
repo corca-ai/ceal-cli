@@ -1,251 +1,65 @@
 # Session Handoff
 
-## Current correction — 2026-08-03 (vinc)
-
-The historical queue below is retained for provenance. This is the operative
-state for the next session.
-
-- Local commit `ccb04b9` consumes the Sigstore-verified
-  `gateway-protocol-handoff-v0.72.4` packet: Protocol `0.72.4`, producer
-  `corca-ai/ceal@c3f2df48`, and its safe Gateway-selected UDS path contract.
-  The lock, frozen Protocol tree, vendor pin, private control-session contract,
-  generated source, and release workflow literals now name one identity.
-- The root npm workspace now contains only protocol/client/worker. Frozen
-  `cealctl` remains archived in the tree but is outside install and CI, so its
-  old protocol pin cannot make a worker protocol update fail `npm ci`. A clean
-  offline `npm ci` and `npm run check:unit` both pass. The obsolete pre-v0.72
-  handoff parser and its unreachable contract test were removed; the current
-  release path is `worker-release-inputs.mjs` through
-  `worker-gateway-handoff-archive.mjs`.
-- `ceal update` TTY-only bounded progress is already in source and will ship in
-  this `0.72.7` worker release; stdout remains one YAML document for agents.
-- `npm run check` and a real linux-arm64 asset composition against the signed
-  archive pass locally. The remaining worker boundary is push/tag/publish;
-  this is not a Gateway apply or Agent activation. After the signed worker is
-  installed, update the Agent selection record from the published packet,
-  materialize its verified runtime, and perform the canary/cutover proof.
-- Related Agent preparation landed locally at
-  `corca-ai/ceal-agent@e954c03`: its installed-selection verifier recognizes
-  either exact result-control v2 or reply-control v3+the fixed reply route,
-  while serving preflight still refuses v2. `npm run check` passed (145 tests).
-
-Date: 2026-08-01 — **`gateway-protocol-handoff-v0.71.8`(protocol-only packet)을 검증·소비했고,
-`ceal-v0.72.0`은 이미 릴리스·게시됐다(stable 이동 완료).** `vinc`의 통합 운영 checkout은 이제
-result-carrier grammar 소비 상태를 `ceal-v0.72.1` 릴리스 후보로 만들고 있다. 이 레인은 `corca-ai/ceal-cli`만 다룬다.
-
-## Current slice — private control-session carrier (unreleased)
-
-- `packages/ceal-worker-cli/leased-consumer-control-session-contract.json`이
-  `gateway-protocol-handoff-v0.71.6`의 tag·commit·protocol subtree·archive digest,
-  보호 FD 4(8 KiB, 2초), 그리고 다섯 고정 UDS 경로를 한 계약으로 묶는다.
-- 생성된 계약 → 네이티브 산출물 → 플랫폼별 worker release manifest → platform merge가 같은
-  bytes/SHA-256을 요구한다. drift는 source build, compose, merge 중 하나에서 거부된다.
-- 이 바이너리는 **공개 명령이 아니며** Gateway socket 등록, credential 발급, Agent launch,
-  ingress 전환, provider 성공을 주장하지 않는다. 다음 Gateway slice가 별도로 등록·fence·apply하고,
-  그 다음에야 Mac/Narnia/Agent 실제 수용 테스트를 요청한다.
-- `vinc`는 현재 이 repository의 통합 운영 checkout(`/home/ubuntu/ceal-cli`)에서 구현·검증·
-  commit·publish할 수 있다. Narnia의 추가 source 작업을 기다리지 않는다.
-
-## 2026-08-01 — protocol-only 핸드오프 소비
-
-- 소비 커밋은 **`gateway-protocol-handoff-lock.json`**(신규) + vendored subtree +
-  `protocol-vendor-pin.json`을 한 커밋에 묶는다. 이전 `gateway-handoff-lock.json`은 **없어졌다.**
-- 팩킷이 바뀌었다: **client tarball이 없다.** 멤버는 marker·protocol tgz·manifest·
-  protocol provenance·**leased-consumer control conformance** 다섯 개. client는 원래도
-  `packages/ceal-client`에서 로컬로 팩킹됐고, 팩킷의 client는 검증 증인일 뿐이었다.
-  그래서 빌더는 안 바뀌고 **검증 표면만** 줄었다.
-- control conformance는 **해석하지 않는다.** manifest digest와 producer identity만 바인딩한다.
-  이 레포엔 control surface 구현이 없고, 그렇다고 주장하지도 않는다.
-- **`source.tree`를 얻는 경로가 바뀌었다.** 서명 아카이브는 빌드된 tgz만 담고 **프로토콜 소스
-  서브트리를 담지 않는다.** vendored 복사본은 운영자가 `~/codes/ceal`에 pull한 레퍼런스
-  체크아웃의 `cd350024:packages/ceal-protocol`에서 왔다. 다만 그 tree(`3ca6fe3a…`)는 **서명된
-  manifest/provenance가 선언**하는 값이라, 이번엔 복사본이 맞는지 레포 안에서 확인된다.
-  추가로 **vendored 소스가 빌드한 `dist/`가 게시 tgz의 `dist/`와 바이트 동일**함을 확인했다.
-- 그래서 pin의 non-claim 하나가 줄었다: `shipped.protocol_tree`는 더 이상 "확인 불가 관측"이
-  아니다. `source.commit`은 여전히 자기 기록이다.
-
 ## Workflow Trigger
 
-- 이 파일만 언급되면 **`## Waiting On`을 먼저 재라.** 답이 와 있으면 해당 항목으로
-  `charness:impl`을 시작하고, 아니면 `## Unblocked Now`에서 고른다.
-- **재계획도 chunked routing도 돌리지 말 것.**
-- 레인 간 답은 **세 곳**을 봐야 한다: `oc:~/ceal`의 untracked `to-narnia-*`, **`oc`의 로컬
-  커밋**(`git log origin/main..HEAD`), GitHub의 `corca-ai/ceal`. **우리가 보낸 `from-narnia-*`가
-  사라진 건 정상**(소화 후 삭제가 운영자 규칙) — 배송 실패로 오진하지 말 것. 두 번 틀렸다.
-- `ceal capabilities --fresh`, `ceal call`은 실세션·provider 동작이라 승인 후에만.
+이 파일만 언급되면 아래 `## Current State`를 읽고, `## Debt`에서 고르거나 운영자가
+지시한 작업을 시작한다. `ceal capabilities --fresh`와 `ceal call`은 실세션·provider
+동작이라 승인 후에만.
 
-## Current correction — 2026-07-30
+## 2026-08-08 — 이전 핸드오프를 폐기했다
 
-The following historical queue is retained for traceability, but its former
-handoff-origin and `session adopt` blockers are closed:
+이 파일에 있던 내용은 전부 걷어냈다. 두 가지 이유다.
 
-- Gateway handoff `v0.68.0` is publicly available at
-  `https://ceal.borca.ai/releases/gateway-handoff/gateway-handoff-v0.68.0/ceal-gateway-handoff-0.68.0.tar.gz`.
-  The object returned HTTP 200 from `vinc` on 2026-07-30 and matches the
-  `gateway-handoff-lock.json` SHA-256.
-- The source tree already contains `ceal session adopt`, Protocol 0.68.0's
-  device-enrollment decoder, and the RFC 9180 HPKE implementation/tests.
-- The branch also contains the reviewed private leased-consumer carrier. Its
-  complete `npm run check` passed on `vinc` on 2026-07-30, and this checkout's
-  `.githooks/pre-push` is installed.
+- **레인 개념이 사라졌다.** `to-narnia-*`/`from-narnia-*` 배턴 왕복, "레인 간 답은 세 곳을
+  봐야 한다", 호스트별 소유 표시 같은 것들은 리포 분리가 진행되던 동안의 라우팅 장치였다.
+  분리가 끝났으므로 더 이상 참이 아니다. `AGENTS.md`의 `## Host And Lane` 섹션도 같은 날
+  같은 이유로 제거했다.
+- **릴리스 상태가 세 판 낡았다.** 문서는 `ceal-v0.71.0`을 현재로 적고 있었으나 실제 태그는
+  `ceal-v0.74.0`이다. `0.68.0` 아카이브 404, HPKE 결정 대기, Mac 수용 레코드 대기 같은
+  대기 항목들도 그 시절 것이라 지금 상태를 반영한다고 볼 수 없다.
 
-The next CLI action is to prepare a new versioned worker release from these
-commits, prove the release workflow with a non-publishing dispatch, then tag
-only after explicit release approval. The remaining announcement blockers are
-not client-source blockers: Gateway apply/mail configuration and a consenting
-named-device acceptance record.
-
-## Historical Waiting On
-
-1. **Mac acceptance 레코드.** Mac에 `0.68.0`이 서명 검증되어 설치돼 있지만 **세션이 없다.**
-   등록 코드가 필요하고, 그건 게이트웨이 호스트에서 `cealctl`로 발급한다. 절차와 마찰은
-   [보고서](requests/2026-07-28-to-gateway-lane-client-onboarding-usability.md)에 있다.
-   **이게 오면 공지 문구에서 Mac을 뺄 이유가 사라진다. 그 전엔 반드시 빼야 한다.**
-   받는 법: 터미널 2줄(설치·`session enroll`) 뒤 `ceal acceptance emit --request-ref <ref>`.
-   clone도 `node`도 불필요하다. 결과를 `docs/acceptance/ceal-v0.69.0/darwin-arm64.yaml`로 커밋.
-2. ~~**`gateway-handoff-v0.68.0` 아카이브의 release origin 게시.**~~ **해소됨(2026-08-01).**
-   후속 protocol-only 핸드오프는 `releases/gateway-protocol-handoff/<tag>/`에 네 자산
-   (아카이브·`SHA256SUMS`·`.sig`·`.pem`)으로 게시돼 있고, 이 레인에서 전부 200으로 받아
-   검증했다. 아래 원문은 이력용으로 남긴다.
-   **30일짜리 Actions artifact로만 존재한다.** `.github/workflows/ceal-release.yml`은
-   `$GATEWAY_HANDOFF_ORIGIN/<tag>/<archive>`에서 받는데 그 경로는 **현재 404**다.
-   lock/vendor는 끝났지만 **이 상태로는 어떤 worker 릴리스도 태그 즉시 죽는다**(그리고
-   태그는 재사용 불가). `vinc` 소유. 2026-07-28에 이미 같은 요청을 보냈다
-   ([publish-handoff-archive-to-release-origin](requests/2026-07-28-to-gateway-lane-publish-handoff-archive-to-release-origin.md)).
-3. **v2 픽스처** `d7c8ae0f…`의 릴리스 경계 인계, 그리고 sanitize 시 `instance_ref`/
-   `profile_ref` 필요 여부(기본값 **유지**로 구현돼 있음).
-4. **provenance seam 답.** Agent lease/event/requester를 Gateway audit event에 묶는
-   계약이 **없다.** `receipt.request_ref` ↔ audit `request_id` 결합만 있고, 그건 사후
-   조인이라 Agent 자기 로그만큼만 믿을 수 있다. 제안(`ceal.request_provenance.v1`,
-   audit 영속화·receipt 반환, 선택적 caller-supplied `--request-ref`)은 패킷 §5와
-   `oc:~/ceal`의 `2026-07-29-from-narnia-…-provenance-seam-request.md`에 있다.
-   **세 조각 중 protocol/Gateway 둘은 `vinc` 소유라 이 레인 혼자 못 낸다.**
-   답이 오면 이 레인은 `ceal call`의 `--agent-lease` 등 옵션만 붙이면 된다.
-
-## Unblocked Now
-
-- **`ceal session adopt` 구현.** 이게 지금 이 레인의 차단 과제다(게이트웨이 요청:
-  `oc:~/ceal/2026-07-29-to-narnia-verified-email-first-device-consumer-unblock.md`).
-  protocol이 도착했으니 private schema를 발명할 이유가 없다 — Gateway 소유 decoder만 쓴다.
-  착수 전에 **HPKE 결정**을 먼저 받아라: 요구 스위트는
-  `DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/AES-256-GCM`인데 **Node 22에 네이티브 HPKE가 없다.**
-  프리미티브(Ed25519·X25519 `diffieHellman`·`hkdfSync`·AES-256-GCM)는 전부 있으니 RFC 9180
-  base mode를 직접 조립할 수는 있으나, 그건 **서명 릴리스에 자작 암호를 넣는 것**이다.
-  대안은 의존성 추가인데 현재 번들 런타임 의존성은 `yaml` 하나뿐이다. 운영자 결정 사항.
-- **`x-ceal-announcement-policy: v2` 활성화가 이제 가능하다.** vendored `0.67.0` 디코더가
-  **capability 20개 전부**를 바인딩한다(`resource.resolve`가 provider별 2항목, Calendar,
-  Drive search, Sheets 포함) — 라이브 카탈로그의 20개와 같은 집합이다. 제가 보고했던 차단
-  사유(닫힌 5개 표)는 해소됐다. 헤더는 **아직 안 보낸다**; 켜는 건 별도 변경 + 별도 증거다.
-- 아래 `Debt`의 항목들.
+이력이 필요하면 `git log -- docs/handoff.md`에 그대로 남아 있다. 릴리스 provenance
+패킷은 `docs/requests/`에 있고 **지우지 않았다** — `test/contract/protocol-vendor-pin.test.mjs`가
+그 경로를 참조한다.
 
 ## Current State
 
-- **`ceal-v0.71.0` 게시됨.** 소스 커밋 `d07300f…`, 릴리스 run `30686719029`(성공), 네 플랫폼
-  전부 서명·게시. stable 포인터가 `0.70.0` → `0.71.0`으로 이동
-  (`sha256sums_sha256 dbdc5e5b…`). 태그 전에 브랜치 게이트 `30686625997` 초록 확인.
-  `npm run check` **36.4s**(narnia, 36코어).
-- **clean-machine linux-amd64 증거**: 공개 origin에서만 받아 `cosign verify-blob` **Verified
-  OK**(identity `…/ceal-release.yml@refs/tags/ceal-v0.71.0`), 바이너리 sha256 `c087bd6f…`,
-  `ceal version` → `0.71.0` / protocol `1.3.0`, signed manifest가 protocol `0.71.6`·
-  producer `cd350024…`·subtree `3ca6fe3a…`를 바인딩. **설치 스크립트 증거도 실세션도 아니다.**
-- **반환 패킷**: [to-gateway-lane-protocol-handoff-v0.71.6-consumed-and-released](requests/2026-08-01-to-gateway-lane-protocol-handoff-v0.71.6-consumed-and-released.md).
-- **lock은 이제 `gateway-protocol-handoff-v0.71.6`**: producer `cd350024…`, tree `24897031…`,
-  protocol subtree `3ca6fe3a…`, archive `6a979c63…`, manifest `ab2f0be8…`,
-  protocol tgz `fa841862…`, Actions run `30684849631`.
-  아카이브·SHA256SUMS·Sigstore 인증서/서명(워크플로 identity 정확 일치)·멤버 인벤토리·
-  manifest/provenance/conformance 상호 digest를 전부 재검증했다. pin은 `agreed`.
-- **v0.71.3/.4/.5는 소비 실패분이다.** 선택·재시도 금지(게이트웨이 지시).
-- **릴리스 워크플로 origin이 lock에서 파생된다.** 예전엔 `GATEWAY_HANDOFF_ORIGIN`만 하드코딩
-  리터럴이라 origin 이동 때 자기 치유가 안 됐다. 이제 셋 다 lock 대조다.
-- **이전 릴리스**: `ceal-v0.69.0` 게시, stable 포인터가 `0.68.0` → `0.69.0`으로 이동.
-  `ceal-v0.67.0`은 **탔다**(linux-arm64, 미발행 — 핀 금지). `0.67.1`·`0.68.0`은 게시돼 있고
-  `v0.66.1`을 소비한다.
-- **lock은 이제 `gateway-handoff-v0.68.0`**(2026-07-29, `cfa6c28`): producer `844b19ce…`,
-  tree `0771d062…`, protocol subtree `eea361e5…`, archive `8928840a…`, manifest
-  `b0bd766a…`. archive는 로컬에서 sha256·cosign(게이트웨이 태그 identity) 둘 다 재검증했고
-  vendored subtree는 `HEAD:packages/ceal-protocol`이 `eea361e5…`로 정확히 일치한다.
-  pin은 `agreed`. **`@corca-ai/ceal-protocol@0.68.0`이 `device-enrollment`를 root export로
-  싣는다**(15개 심볼 확인) — `ceal session adopt`의 전제가 갖춰졌다.
-  소비 dependency 셋(client·worker-cli·**frozen operator-cli**)은 계약 테스트가 요구하는
-  대로 함께 `0.68.0`으로 올렸다. operator-cli의 버전 단언 수정은 sync의 파생 결과이지
-  독립 편집이 아니다(테스트 주석이 그 선례를 이미 적어두고 있다).
-- **이전 lock `gateway-handoff-v0.67.0`**: producer `0261f0a4…`, protocol subtree
-  `58d7d639…`, archive `94093501…`. **게시된 `ceal-v0.69.0` 바이너리가 담은 건 이쪽이다.**
-- **lock이 이제 Protocol/Client 쌍을 선언한다.** 이전엔 두 tarball 이름을 handoff 태그에서
-  유도해서, Protocol 0.67.0 + Client 0.69.0인 진짜 쌍을 **소비할 수 없었다.** 게이트웨이가
-  packer에서 푼 결합이 우리 소비자에도 있었고, **모든 픽스처가 두 패키지에 같은 버전을 써서
-  픽스처가 버그와 합의**하고 있었다. 지금 픽스처는 Client 버전을 태그와 일부러 다르게 둔다.
-- **증거**(`linux-amd64`): `docs/acceptance/ceal-v0.69.0/linux-amd64.yaml`,
-  blob `d2d99610…`, sha256 `7995ff66…`. 서명 설치 → guide → 실세션(`instance:ceal-prod`,
-  20 capability) → bounded read → receipt `verified`/`succeeded`/`allowed`.
-  [반환 패킷](requests/2026-07-28-to-gateway-lane-v0.69.0-released-and-evidenced.md).
-- **`ceal-agent` 소비 패킷 반환**(2026-07-29, `dfd3405` 푸시됨):
-  [packet](requests/2026-07-29-to-ceal-agent-lane-source-owner-consumption-packet.json).
-  current `0.69.0` + rollback `0.68.0`의 signed envelope, 설치 선택, embedded
-  provenance, CLI 계약, seam 상태를 pin 가능한 JSON 하나로 묶었다. **새 기능 없음.**
-  `ceal-agent`가 "Actions artifact의 `artifact_state: unsigned_build_candidate`이라
-  서명본이 없다"고 읽었던 건 오독이다 — 그 필드는 compose 시점 자기 서술이라 **게시본
-  manifest에도 같은 값이 남는다.** 서명 판정은 오직 `.pem`/`.sig` sidecar다. 다시 물어올
-  질문이라 패킷 맨 앞에 교정으로 박아뒀다.
-- **`ceal acceptance emit`**(0.68.0부터): 설치본이 체크아웃 없이 레코드를 만든다. `--binary`가
-  없고(실행 중 바이너리를 잰다), **provider 호출을 하지 않으며**(`--request-ref`는 읽기).
-- **브랜치 `client-protocol-0.67.0-sync` @ `fd771d46…`는 소임을 다했다.** `main`이 이제 그
-  선언을 정당하게 담는다. 삭제 가능하나, 그쪽 기록이 가리킬까 봐 남겨뒀다.
-- **2026-07-28 측정**: `check` 45~52s, `check:unit` 21.4s(36코어).
-- **2026-07-30 gate ownership**: branch pre-push and `check.yml` now run only
-  explicit worker test inventories: client/worker unit tests, worker contract
-  tests (including `ceal-guide`), and worker release proofs. `cealctl`,
-  `cealctl-guide`, and legacy dual-release checks require the explicit
-  `npm run test:legacy-compatibility` audit and cannot re-enter branch CI through
-  a glob. The frozen protocol is still built solely as the client type-check
-  input; this does **not** claim artifact-only protocol consumption in this
-  repository.
+리포에서 직접 확인한 것만 적는다.
 
-## Discuss
+- 버전 `0.74.0`(루트와 `packages/ceal-worker-cli` 동일), 최신 태그 `ceal-v0.74.0`.
+- 직전 두 커밋: `cc29047` discovery 캐시 창을 하나의 측정된 결정으로 정리, `1ec4154`
+  서명된 `gateway-protocol-handoff-v0.72.12` 소비.
+- `gateway-protocol-handoff-lock.json`이 handoff 소비의 단일 기록이다.
 
-- **공지 문구에서 Mac을 빼야 한다.** 빌드·서명은 네 플랫폼 다 되지만 **설치+세션 증거는
-  `linux-amd64`뿐**이다. capability도 20개 중 1개만 provider에 도달했다.
-- **온보딩이 공지의 가장 약한 표면이다.** 사람 하나 온보딩에 운영자가 5단계를 밟고, 그중
-  하나는 전체 레지스트리 교체다. 이메일은 절차 어디에도 안 들어간다. 공지 대상을 운영자가
-  직접 챙길 범위로 한정하거나, self-serve seam을 먼저 넣어야 한다. 전부 `vinc` 소유다.
+그 밖의 현재 상태는 **재도출해야 한다.** 이 문서에 남아 있던 수치와 digest는 신뢰하지 말고
+lock, 태그, 워크플로 실행 기록에서 다시 읽어라.
 
 ## Debt
 
-- **acceptance 레코드의 receipt 가지가 allow-list가 아니다.** 게이트웨이 receipt events를
-  projection 없이 통과시켜서 `membership_ref`·`subject_ref`가 실린다. 게이트웨이가 발급한
-  식별자를 게이트웨이에 돌려주는 것이라 유출은 아니지만, 레코드 자신의 "assembled by
-  allow-list" 문구가 그 가지에 대해선 과장이다. 게이트웨이에도 보고했다.
-- **signed release manifest에 client 패키지가 없다. 2026-08-01에 더 나빠졌다.**
-  `ceal-worker-release-manifest-<platform>.json`은 protocol만 기록한다. 예전엔 `@corca-ai/ceal`
-  수치가 lock → archive digest → 게이트웨이 팩킷의 client 레코드로 **전이적으로** 커버됐는데,
-  protocol-only 팩킷엔 client tarball이 없다. **그 전이 경로 자체가 사라졌다.** client 바이트에
-  대한 외부 증인은 이제 **없고**, 소비자에겐 순수 source-owner 주장만 남는다(원래도 게이트웨이가
-  우리 client를 패킹하던 게 이상한 배치였다 — 소유는 이 레인이다). 진짜 해법은 manifest 스키마에
-  client를 넣는 것이고, 그건 릴리스에 영향을 주는 변경이라 이 슬라이스에서 하지 않았다.
-- **`@corca-ai/ceal@0.69.0`이 두 개의 서로 다른 tarball을 가리킨다.** `v0.67.0` handoff의
-  것은 `085839e1…`(게시된 `ceal-v0.69.0` 바이너리가 담은 것), `v0.68.0` handoff의 것은
-  `50405db9…`다. protocol dependency가 `0.67.0`→`0.68.0`으로 바뀌었는데 client 버전은 안
-  올랐다. 버전 문자열이 더 이상 바이트를 식별하지 못한다 — `ceal-agent`에 보낸 패킷은
-  게시된 릴리스 기준이라 여전히 맞지만, 다음 릴리스는 같은 이름의 다른 바이트를 담는다.
-  `vinc`에 알려야 한다.
-- **레코드가 두 형식이다**: 리포 스크립트는 JSON, 설치형 명령은 YAML(모든 공개 명령이 YAML
-  한 문서라는 게이트 때문). 같은 스키마에 형식 둘은 소비자에게 지저분하다.
-- **요구 3에 행위 테스트가 없다.** 다섯 경로의 발산 거부는 `repo-gates.test.mjs`의 소스 형태
+이전 핸드오프에서 넘어온 리포 범위 항목들이다. **전부 미재확인**이므로, 착수 전에 아직
+참인지부터 확인할 것.
+
+- **signed release manifest에 client 패키지가 없다.** `ceal-worker-release-manifest-<platform>.json`은
+  protocol만 기록한다. protocol-only 팩킷으로 바뀌면서 client 바이트를 덮던 전이 경로가
+  사라졌고, 소비자에겐 source-owner 주장만 남는다. 진짜 해법은 manifest 스키마에 client를
+  넣는 것이고 릴리스에 영향을 주는 변경이다.
+- **acceptance 레코드의 receipt 가지가 allow-list가 아니다.** Gateway receipt event를 projection
+  없이 통과시켜 `membership_ref`·`subject_ref`가 실린다. Gateway가 발급한 식별자를 Gateway에
+  돌려주는 것이라 유출은 아니지만, 레코드의 "assembled by allow-list" 문구가 그 가지에
+  대해서는 과장이다.
+- **레코드가 두 형식이다.** 리포 스크립트는 JSON, 설치형 명령은 YAML(모든 공개 명령이 YAML
+  한 문서라는 게이트 때문). 같은 스키마에 형식이 둘이면 소비자에게 지저분하다.
+- **CI에 macOS 설치 레그가 없다.** `require_platform_proofs`는 릴리스·설치기 테스트 스위트
+  얘기이므로 이 공백의 근거로 인용하면 틀린다. 그 플래그를 `linux-*` 전체에 요구한 것이
+  `ceal-v0.67.0`을 태웠고, 지금은 `linux-amd64`로 좁혀 게이트가 지킨다.
+- **worker `createLock`의 잔여 경합**이 미해결이다.
+- **요구 3에 행위 테스트가 없다.** 다섯 경로의 발산 거부가 `repo-gates.test.mjs`의 소스 형태
   게이트로만 붙들려 있다. live pin이 수렴 상태라 행위로 falsify가 안 된다.
-- ~~**동결 경로 우회**: `shipped.protocol_tree`까지 함께 위조하면 통과한다.~~ **닫혔다
-  (2026-08-01).** protocol-only 핸드오프가 producer의 protocol subtree를 선언하고 lock이 그걸
-  싣기 때문에, pin이 다른 값을 적으면 `shipped_lock_mismatch`로 죽는다. 남은 한계는 그대로다 —
-  이건 **로컬 파일 둘의 대조**이지 remote 확인이 아니고, `source.commit`은 여전히 자기 기록이다.
-- **worker `createLock`의 잔여 경합**은 이 레인 소유이고 미해결.
-- **CI에 macOS 설치 레그가 없다.** `require_platform_proofs`는 릴리스·설치기 **테스트 스위트**
-  얘기라 이 공백의 근거로 인용하면 틀린다. 그 플래그를 `linux-*` 전체에 요구한 것이
-  `ceal-v0.67.0`을 태웠다 — 지금은 `linux-amd64`로 좁혔고 게이트가 지킨다.
-- 나머지는 해당 주석·[gates.md](gates.md)가 소유한다.
+
+나머지는 해당 주석과 [gates.md](gates.md)가 소유한다.
 
 ## References
 
-- [Gateway 레인 답·계약](requests/from-gateway-lane/) — **원문이 authoritative**
-- [이 레인이 보낸 것](requests/) — v2 디코더 분석, 증거 패킷 둘, 호환성 입력, 순서 교착,
-  온보딩 보고서, 동결 경로 통보
 - [게이트 상세](gates.md) · [릴리스·재등록 절차](release-and-enrollment.md) ·
   [운영자 수용 천장](operator-acceptance.md)
+- [릴리스 provenance 패킷](requests/) — 이력이자 테스트가 참조하는 경로
