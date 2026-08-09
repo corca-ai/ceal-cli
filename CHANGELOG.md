@@ -54,6 +54,26 @@ that passed without proving what they named.
 - `install-git-hooks.mjs --check` called a clone installed on the config key
   alone, though git silently skips a hook it cannot execute.
 
+**A second pass, from the reader's side rather than the release lane's.**
+
+- `ceal call` now carries `cache_origin`, which the Protocol calls the sole
+  live-vs-replay discriminator. Without it an agent reported an hour-old cache
+  replay as a live provider readback, because a replay carries the same audit
+  evidence a fresh serve does. The Gateway's `redaction` statement travels too.
+- `registered_host_count` counted host directories that merely resolved, so an
+  operator who had never registered a guide emitted an acceptance record claiming
+  two registrations.
+- A single dropped connection no longer discards a `session adopt` the employee
+  already completed in a browser; a transient poll error is a wait tick, bounded
+  by the same local ceiling.
+- The shipped guide no longer tells agents that every command answers `ok` — one
+  document is frozen for update compatibility and answers none.
+
+Gate cost came down with no proof weakened: toolchain children no longer inherit
+the coverage collector, and the darwin native-artifact test stopped staging a
+real packed consumer it stubs everything else about. A compile failure now
+carries the compiler's own output instead of asserting a source defect.
+
 ## 0.75.0 (`ceal-v0.75.0`)
 
 **The `effect` field now names a change that does not happen on this machine.**

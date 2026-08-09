@@ -39,7 +39,9 @@ Read the counts rather than trusting them here; each line names the command.
 - **All three gates are green on this host**, including the two maintainer-local
   ones: `npm run check`, `npm run check:duplication`, `npm run lint:shell`. The
   ratchet had been failing before this session and its stale control-loop entry
-  is rotated and corrected. `origin/main` was green on CI before these commits —
+  is rotated and corrected. Time a gate yourself rather than trusting a figure:
+  this host is 2-core and its wall clock swung by minutes across runs today.
+  `origin/main` was green on CI before these commits —
   `gh run list --workflow=check.yml`; that baseline is not to be assumed.
 - **Proof level reached is local suite plus repo gate.** No installed release,
   and no live `session enroll`/`adopt` against a real Gateway; both declare

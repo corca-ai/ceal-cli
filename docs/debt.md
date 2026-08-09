@@ -37,6 +37,18 @@ Everything else not listed is owned by the comment at the site and by
   destructive-cleanup half is fixed and pinned by a named test; what remains is
   recorded at the site in `packages/ceal-worker-cli/src/local-store-lock.ts`,
   which owns the detail and why an `ino` comparison cannot settle it.
+- **Two published acceptance records overstate guide registration.**
+  `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were emitted while
+  `registered_host_count` counted resolved host directories rather than
+  registrations. The emitters are fixed; the records are historical artifacts and
+  were left as written rather than rewritten after the fact.
+- **Incremental TypeScript builds are measured but not taken.** The gate compiles
+  the owned packages once and several test processes compile them again; measure
+  it with `tsc -p tsconfig.build.json --incremental --tsBuildInfoFile <tmp>`
+  twice. Declined here for two reasons: `packages/ceal-protocol` is the frozen
+  path and may not be edited, which removes a third of the win, and build
+  staleness semantics in a release-proof repo deserve their own slice rather than
+  a rider.
 - **Nothing structural stops a new direct session writer.** The identity
   transition contract lives in `session-replacement.ts`, but a future command
   that calls `runtime.saveSession` itself bypasses it, which is exactly how issue
