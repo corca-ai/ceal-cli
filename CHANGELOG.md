@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.75.0 (`ceal-v0.75.0`)
+
+**The `effect` field now names a change that does not happen on this machine.**
+Its vocabulary stopped at the local filesystem, so `ceal call` — the one route
+that executes a governed provider capability — declared the same effect as `ceal
+version`, and `ceal session logout` declared the same effect as linking a guide
+symlink. That field is what an operator or an agent is told to read before typing
+a route, and `npm run probe` derives its refusal from it, so the sanctioned probe
+path admitted the route that can write to a provider.
+
+- `remote_write` is the new term. `call` and every `session` route carry it:
+  enrolling and adopting consume a one-time approval at the Gateway, and logging
+  out revokes a live session. None is undone by deleting a local file.
+- It classifies what a route MAY do. `call` stays `remote_write` even for a
+  capability whose own effect is `read`, because the field is read before the
+  route is typed.
+- `ceal <route> --help` and `ceal commands` report the new value.
+- `npm run probe --allow-effect remote_write` is refused: that hatch's safety
+  argument is its throwaway `HOME`, which cannot take back a revoked session, a
+  consumed enrollment code, or a posted message.
+
+The release lane gained two proofs and lost a blind spot. The `linux-arm64` leg
+now runs `test:release`, so the packed-Gateway-consumer proof finally covers the
+one signed binary that had never been asked whether npm's resolver bound the
+packed tarball rather than a workspace symlink. The asset merge re-asserts the
+protocol pin before anything is signed, instead of catching a disagreement only
+against an already-published release. Both were first executed by a dispatch dry
+run rather than by a tag, which is now possible because `assemble` is reachable
+without one.
+
 ## 0.72.9 (`ceal-v0.72.9`)
 
 `ceal-v0.72.8` is burned: its tagged composer refused the v4 control

@@ -23,30 +23,29 @@ Read the counts rather than trusting them here; each line names the command.
   it — `node -p 'require("./package.json").version'`, `git describe --tags
   --abbrev=0`. `repo-gates` fails a commit whose manifests disagree, so one read
   answers for all three.
-- The working tree is clean and `npm run check` is green.
-- **Nothing in the unpushed range has been seen by CI**
-  (`git log --oneline origin/main..HEAD`), and the baseline is not green either:
-  the newest `check.yml` run on `origin/main` was **cancelled**, so the last
-  green is the commit before it — `gh run list --workflow=check.yml`.
-- **No release lane has run since the lane itself changed.** The arm64
-  `test:release` leg and the pre-signing pin assertion are proven by the contract
-  tier and by local falsification only; neither has executed on a runner. The
-  dispatch dry run now reaches both, and
-  [release-and-enrollment.md](release-and-enrollment.md) `## Release` makes it a
-  step.
+- The working tree is clean, `npm run check` is green, and `origin/main` is green
+  on CI — `gh run list --workflow=check.yml`. That baseline had been broken for a
+  while and is not to be assumed; read it.
+- **Both slice 3 changes have executed on real runners without spending a tag.**
+  A dispatch dry run of `ceal-release.yml` reached all three build legs and
+  `assemble`, with `sign-and-publish` skipped. On the `linux-arm64` leg the gate
+  is skipped as designed and `Prove the packed Gateway consumer on the ungated
+  leg` ran. `gh run list --workflow=ceal-release.yml` has it.
 
 ## Next Session
 
-1. **Dry-run the release lane, then decide on a tag.**
-   `gh workflow run ceal-release.yml --ref main`, then
-   `gh run list --workflow=ceal-release.yml`. This is the first execution of both
-   slice 3 changes; a burned tag is never reused, and the dry run is what keeps
-   this off one.
-2. **Issue 12 is reported but deliberately left open.** Closure routes through
-   the cross-repo C11a final batch. Nothing here has been pushed or released, and
-   the whole v5 notification path is latent — the shipped
-   `leased-consumer-control-session-contract.json` is `.v2` with no
+1. **Watch the release tag, then read back an installed binary.** The procedure
+   is [release-and-enrollment.md](release-and-enrollment.md) `## Release`, and it
+   does not end at the tag: `ceal update` then a readback is what turns a passing
+   lane into installed-release proof. Everything before that is source proof, and
+   naming it as more would be the overclaim `AGENTS.md` `## Claims And Proof`
+   forbids.
+2. **Issue 12 is reported and deliberately left open.** Closure routes through
+   the cross-repo C11a final batch. The whole v5 notification path is latent —
+   the shipped `leased-consumer-control-session-contract.json` is `.v2` with no
    `notification_channel`, so production takes the v4 branch and none of it runs.
+   Nothing in this release changes shipped v4 behaviour except the `effect`
+   vocabulary.
 
 ## Discuss
 
