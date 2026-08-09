@@ -32,20 +32,36 @@ Read the counts rather than trusting them here; each line names the command.
   is skipped as designed and `Prove the packed Gateway consumer on the ungated
   leg` ran. `gh run list --workflow=ceal-release.yml` has it.
 
+- **`ceal-v0.75.0` is released and read back on this host.** `ceal update` took
+  it from 0.73.0, the installed artifact digest matches the published
+  `SHA256SUMS`, and the acceptance packet reports digests agreeing across bytes,
+  manifest and `SHA256SUMS` with the protocol producer agreeing with the lock.
+  A live discovery reached `instance:ceal-prod` and was accepted. Re-emit with
+  `node scripts/worker-acceptance-packet.mjs --binary "$(command -v ceal)"` —
+  through `npm run accept:worker` the guard refuses, correctly, because npm puts
+  the workspace symlink on PATH ahead of the install.
+- **Proof level reached: installed release plus live host decision.** Provider
+  execution is not claimed: no bounded capability call was requested, and `call`
+  is now `remote_write`.
+
 ## Next Session
 
-1. **Watch the release tag, then read back an installed binary.** The procedure
-   is [release-and-enrollment.md](release-and-enrollment.md) `## Release`, and it
-   does not end at the tag: `ceal update` then a readback is what turns a passing
-   lane into installed-release proof. Everything before that is source proof, and
-   naming it as more would be the overclaim `AGENTS.md` `## Claims And Proof`
-   forbids.
-2. **Issue 12 is reported and deliberately left open.** Closure routes through
+1. **Issue 10 is the direct successor to what just shipped.** This release made
+   `session enroll`/`adopt`/`logout` declare `remote_write` because they consume
+   a one-time Gateway approval or revoke a live session. Issue 10 says those same
+   routes still overwrite a live session with no refusal, no `--force`, no
+   Gateway revoke and no spool cleanup — so the declaration is now truthful and
+   the behaviour still is not.
+2. **Issue 6 is the one with someone else's clock on it.** Gateway compatibility
+   retirement is blocked on this consumer's cutover, and the ledger lives in
+   `corca-ai/ceal`, not here. Read its status there before ranking it below 10.
+   A related gap surfaced during issue 12: the vendored protocol is `0.72.12`
+   while that issue names a packed `0.72.13` selected-v5 candidate this checkout
+   does not have, so its candidate proof could not run.
+3. **Issue 12 is reported and deliberately left open.** Closure routes through
    the cross-repo C11a final batch. The whole v5 notification path is latent —
    the shipped `leased-consumer-control-session-contract.json` is `.v2` with no
    `notification_channel`, so production takes the v4 branch and none of it runs.
-   Nothing in this release changes shipped v4 behaviour except the `effect`
-   vocabulary.
 
 ## Discuss
 
