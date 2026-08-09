@@ -64,7 +64,8 @@ recovery, and successor acquisition races.
 
 ## Non-Claims
 
-- This is local source/test proof until a signed installed worker is released.
-- The one-time legacy-to-atomic update condition is owned by
-  `docs/release-and-enrollment.md` and remains tracked in `docs/debt.md` until
-  that migration is accepted.
+- At slice close this was local source/test proof; the later signed release and
+  installed readback are owned by the `ceal-v0.76.0` release record.
+- The one-time legacy-to-atomic update condition remains owned by
+  `docs/release-and-enrollment.md`. It was satisfied before the first installed
+  update, so the temporary tracking item has been removed from `docs/debt.md`.

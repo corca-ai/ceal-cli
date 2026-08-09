@@ -68,5 +68,5 @@ closed instead of following a renamed directory.
 
 ## Next Slice
 
-Continue the release dry run, immutable tag workflow, public artifact
-verification, and installed Linux readback.
+Run the remaining installed-macOS acceptance and retain the explicit no-live-
+Gateway/provider claim unless that separate readback is authorized and proved.
