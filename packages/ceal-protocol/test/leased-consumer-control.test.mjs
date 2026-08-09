@@ -11,6 +11,9 @@ import {
 	CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+	CEAL_LEASED_CONSUMER_CAPABILITY_NOTIFICATION_SCHEMA,
+	CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_REQUEST_SCHEMA,
+	CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_RESPONSE_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA,
@@ -21,6 +24,7 @@ import {
 	CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA,
+	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA,
 	decodeCealLeasedConsumerControlRequest,
 	decodeCealLeasedConsumerControlResponse,
 	decodeCealLeasedConsumerControlSession,
@@ -30,10 +34,19 @@ import {
 	decodeCealLeasedConsumerReplyControlResponse,
 	decodeCealLeasedConsumerCapabilityControlRequest,
 	decodeCealLeasedConsumerCapabilityControlResponse,
+	decodeCealLeasedConsumerCapabilityNotification,
+	decodeCealLeasedConsumerNotificationControlRequest,
+	decodeCealLeasedConsumerNotificationControlResponse,
 } from "../dist/index.js";
 
 const lease = { event_ref: "event:one", lease_ref: "lease:one", lease_fence: 1, delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };
 const leaseInput = { event_ref: lease.event_ref, lease_ref: lease.lease_ref, lease_fence: lease.lease_fence };
+const notificationBinding = {
+	kind: "abort_requested", notification_sequence: 1,
+	event_ref: "event:one", event_revision: 3,
+	runner_ref: "runner:agent", consumer_ref: "consumer:worker", consumer_generation: 7,
+	lease_ref: "lease:one", lease_fence: 5,
+};
 
 test("leased-consumer control decoders accept only the protected session and five exact operation shapes", () => {
 	assert.deepEqual(decodeCealLeasedConsumerControlSession({
@@ -189,7 +202,7 @@ test("capability control v4 carries generic read and write results through exact
 			status: "available", event_ref: "event:one", event_revision: 1,
 			normalized_projection_ref: "projection:one", normalized_projection_revision: 1,
 			conversation_ref: `conversation:${"9".repeat(64)}`,
-			requester: { subject_ref: "subject:alice", display_name: "Alice" },
+			requester: { subject_ref: "subject:alice", display_name: "Alice", provider_identity: { provider: "slack", account_id: "U0ALICE0001" } },
 			attachments: { count: 0, set_ref: null },
 			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded" },
 			capability_contexts: [
@@ -199,6 +212,13 @@ test("capability control v4 carries generic read and write results through exact
 		},
 	};
 	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(projection).operation, "projection");
+	for (const provider_identity of [
+		{ provider: "Slack", account_id: "U0ALICE0001" },
+		{ provider: "slack", account_id: "" },
+		{ provider: "slack", account_id: "U0ALICE0001", channel_id: "C0123456789" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({
+		...projection, result: { ...projection.result, requester: { ...projection.result.requester, provider_identity } },
+	}), TypeError);
 });
 
 test("capability control v4 rejects provider-shaped handles and custody fields", () => {
@@ -276,6 +296,37 @@ test("capability control v4 rejects provider-shaped handles and custody fields",
 	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({ ...projection, result: { ...projection.result, capability_contexts } }), TypeError);
 });
 
+test("projection context accepts the scheduled trigger marker and rejects any other trigger", () => {
+	// Regression (ceal-dev S7 rehearsal, 2026-08-06): the projection store and
+	// consumer resolver admitted context.trigger="scheduled" while this decoder
+	// still rejected it, collapsing the serving response into a silent
+	// control_unavailable supervisor halt.
+	const capabilityProjection = (context) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "projection",
+		result: {
+			status: "available", event_ref: "event:one", event_revision: 1,
+			normalized_projection_ref: "projection:one", normalized_projection_revision: 1,
+			conversation_ref: `conversation:${"9".repeat(64)}`,
+			requester: { subject_ref: "subject:alice" },
+			attachments: { count: 0, set_ref: null },
+			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded", context },
+			capability_contexts: [{ capability_id: "message.search", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }],
+		},
+	});
+	const scheduled = { conversation_kind: "channel", is_thread_reply: true, trigger: "scheduled" };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(capabilityProjection(scheduled)).operation, "projection");
+	assert.equal(decodeCealLeasedConsumerControlResponse({
+		schema_version: CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA, operation: "projection",
+		result: { status: "available", event_ref: "event:one", event_revision: 1, normalized_projection_ref: "projection:one", normalized_projection_revision: 1, projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded", context: scheduled } },
+	}).operation, "projection");
+	for (const context of [
+		{ conversation_kind: "channel", is_thread_reply: true, trigger: "cron" },
+		{ conversation_kind: "channel", is_thread_reply: true, trigger: null },
+		{ conversation_kind: "channel", trigger: "scheduled" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(capabilityProjection(context)), TypeError);
+});
+
 test("capability control v4 write results carry one target and an ordered continuation message group", () => {
 	const messages = (count) => Array.from({ length: count }, (_, index) => ({ kind: "message", ref: `message:${index.toString(16).padStart(64, "0")}` }));
 	const result = (handles) => ({
@@ -311,6 +362,94 @@ test("capability control v4 recheck requires the abort_requested transport flag"
 	assert.throws(() => decodeCealLeasedConsumerReplyControlResponse({ schema_version: CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA, operation: "recheck", result: { status: "active", lease, abort_requested: false } }), TypeError);
 });
 
+test("capability control v5 notification and receipt bind one exact lease without provider payload", () => {
+	const notification = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_NOTIFICATION_SCHEMA, ...notificationBinding };
+	assert.deepEqual(decodeCealLeasedConsumerCapabilityNotification(notification), notification);
+	const request = {
+		schema_version: CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_REQUEST_SCHEMA,
+		operation: "notification_receipt", input: notificationBinding,
+	};
+	const response = {
+		schema_version: CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_RESPONSE_SCHEMA,
+		operation: "notification_receipt", result: { status: "receipt_recorded" },
+	};
+	assert.equal(decodeCealLeasedConsumerNotificationControlRequest(request).operation, "notification_receipt");
+	assert.equal(decodeCealLeasedConsumerNotificationControlResponse(response).operation, "notification_receipt");
+	for (const status of ["receipt_recorded", "receipt_replayed", "notification_stale", "authentication_failed", "control_unavailable"]) {
+		assert.equal(decodeCealLeasedConsumerNotificationControlResponse({ ...response, result: { status } }).operation, "notification_receipt");
+	}
+	for (const mutate of [
+		(value) => { value.notification_sequence = 0; },
+		(value) => { value.event_revision = 0; },
+		(value) => { value.consumer_generation = 0; },
+		(value) => { value.kind = "provider_abort"; },
+		(value) => { value.runner_ref = "U01234567"; },
+		(value) => { value.channel_id = "C01234567"; },
+		(value) => { value.payload = { text: "stop" }; },
+	]) {
+		const bad = structuredClone(notification); mutate(bad);
+		assert.throws(() => decodeCealLeasedConsumerCapabilityNotification(bad));
+		assert.throws(() => decodeCealLeasedConsumerNotificationControlRequest({ ...request, input: Object.fromEntries(Object.entries(bad).filter(([key]) => key !== "schema_version")) }));
+	}
+	assert.throws(() => decodeCealLeasedConsumerNotificationControlResponse({ ...response, result: { status: "receipt_recorded", abort_cleared: true } }));
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(request), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response), TypeError);
+});
+
+test("capability control v5 alone accepts one exact typed Agent-control projection", () => {
+	const controlProjection = {
+		schema_version: "ceal.gateway_normalized_agent_control_projection.v1",
+		control: {
+			token: `ceal-control-v1.${"a".repeat(43)}`,
+			authority: "original_requester",
+			actor_subject_ref: "subject:alice",
+			origin: {
+				event_ref: "event:origin", event_revision: 2,
+				normalized_projection_ref: "projection:origin", normalized_projection_revision: 3,
+			},
+		},
+	};
+	const result = {
+		status: "available", event_ref: "event:control", event_revision: 1,
+		normalized_projection_ref: "projection:control", normalized_projection_revision: 1,
+		conversation_ref: `conversation:${"b".repeat(64)}`,
+		requester: { subject_ref: "subject:alice" }, attachments: { count: 0, set_ref: null },
+		projection: controlProjection, capability_contexts: [],
+	};
+	const v5 = { schema_version: CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_RESPONSE_SCHEMA, operation: "projection", result };
+	const v4 = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "projection", result };
+	assert.equal(decodeCealLeasedConsumerNotificationControlResponse(v5).operation, "projection");
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(v4), TypeError);
+	for (const mutate of [
+		(value) => { value.projection.control.handler_id = "exit"; },
+		(value) => { value.projection.control.authority = "operator"; },
+		(value) => { value.projection.control.origin.event_revision = 0; },
+		(value) => { value.capability_contexts = [{ capability_id: "message.create" }]; },
+	]) {
+		const bad = structuredClone(v5); mutate(bad.result);
+		assert.throws(() => decodeCealLeasedConsumerNotificationControlResponse(bad), TypeError);
+	}
+});
+
+test("capability control v5 alone accepts one exact lifecycle effect on control completion", () => {
+	const input = {
+		...leaseInput, disposition: "completed", agent_run_ref: "agent-run:control-one",
+		control_effect: { schema_version: "ceal.gateway_leased_agent_control_effect.v1", effect: "conversation.lifecycle.exit" },
+	};
+	const v5 = { schema_version: CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_REQUEST_SCHEMA, operation: "complete", input };
+	const v4 = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "complete", input };
+	assert.equal(decodeCealLeasedConsumerNotificationControlRequest(v5).operation, "complete");
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(v4), TypeError);
+	for (const mutate of [
+		(value) => { value.control_effect.effect = "message.delete"; },
+		(value) => { value.control_effect.handler_id = "exit"; },
+		(value) => { value.disposition = "failed"; },
+	]) {
+		const bad = structuredClone(v5); mutate(bad.input);
+		assert.throws(() => decodeCealLeasedConsumerNotificationControlRequest(bad), TypeError);
+	}
+});
+
 test("capability control v4 declares enumerate/resolve/presentation with display-name resolve reads", () => {
 	const call = (capability_id, arguments_, idempotency_key) => ({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
@@ -324,11 +463,36 @@ test("capability control v4 declares enumerate/resolve/presentation with display
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("presentation.activity.set", { schema_version: "ceal.gateway_leased_agent_presentation_activity_arguments.v1", activity: "typing" }, "run:activity:1")).operation, "call");
 	// The closed semantic presentation DTO rides message writes; markup is rejected.
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.create", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, reply_to: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: "ceal.gateway_leased_agent_message_presentation.v1", intent: "progress", abortable: true, phase: "reading thread" } }, "run:write:1")).operation, "call");
+	const neutralControls = [{ token: "agent-token:opaque", label: "종료" }];
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, intent: "progress", abortable: true, controls: neutralControls } }, "run:write:2")).operation, "call");
+	const completedHistory = { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, intent: "progress", abortable: true, phase: "work_execution", completed_phases: ["request_review"], controls: [] };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: completedHistory }, "run:write:history")).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { ...completedHistory, phase: undefined, completed_phases: [] } }, "run:write:empty-history")).operation, "call");
 	for (const bad of [
 		call("message.enumerate", { schema_version: "ceal.gateway_leased_agent_message_enumerate_arguments.v1", limit: 129 }),
 		call("resource.resolve", { schema_version: "ceal.gateway_leased_agent_resource_resolve_arguments.v1", kind: "channel", query: "x" }),
 		call("presentation.activity.set", { schema_version: "ceal.gateway_leased_agent_presentation_activity_arguments.v1", activity: "typing" }),
 		call("message.create", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, reply_to: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: "ceal.gateway_leased_agent_message_presentation.v1", intent: "progress", abortable: true, blocks: [] } }, "run:write:1"),
+		call("message.create", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, reply_to: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: "ceal.gateway_leased_agent_message_presentation.v1", intent: "progress", abortable: true, controls: neutralControls } }, "run:write:1"),
+		call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: "ceal.gateway_leased_agent_message_presentation.v1", intent: "progress", abortable: true, phase: "work_execution", completed_phases: ["request_review"] } }, "run:write:v1-history"),
+		...[
+			{ completed_phases: ["request_review", "request_review"] },
+			{ completed_phases: ["information_gathering", "request_review"] },
+			{ completed_phases: ["request_review", "work_execution"] },
+			{ completed_phases: ["request_review", "unknown"] },
+			{ completed_phases: ["request_review", "information_gathering", "work_execution", "result_check"] },
+			{ phase: undefined, completed_phases: ["request_review"] },
+			{ intent: "final", completed_phases: [] },
+		].map((mutation) => call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { ...completedHistory, ...mutation } }, "run:write:bad-history")),
+		...[
+			{ controls: undefined },
+			{ controls: Array.from({ length: 9 }, (_, index) => ({ token: `token:${index}`, label: "control" })) },
+			{ controls: [{ token: "x".repeat(513), label: "control" }] },
+			{ controls: [{ token: "agent-token", label: "" }] },
+			{ controls: [{ token: "agent-token", label: "control", handler: "exit" }] },
+			{ controls: [{ token: "agent-token", label: "control", action: "exit" }] },
+			{ controls: [{ token: "agent-token", label: "control", kind: "exit" }] },
+		].map(({ controls }) => call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, intent: "progress", abortable: true, ...(controls === undefined ? {} : { controls }) } }, "run:write:2")),
 	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(bad), TypeError);
 
 	const response = (result) => ({ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result } });

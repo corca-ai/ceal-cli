@@ -108,3 +108,14 @@ restate its conclusions, only that the tag it concerns does not exist yet.
 - This request does not assert that 0.72.13 is otherwise ready to ship, or that
   re-vendoring it would leave the worker's v4 path unaffected. `docs/debt.md`
   carries the v4 `decodeProjectionRequester` reasoning that a re-vendor retires.
+
+## Fulfillment
+
+The requested public handoff was published as
+`gateway-protocol-handoff-v0.72.13` from Gateway commit
+`b644bdcc1883a12f30dec9f15a918eca3676b740`. The repo-owned bootstrap verified
+the four public assets, checksum inventory, exact Sigstore workflow identity,
+remote tag commit, archive inventory, and signed packet before this repository
+consumed it. `gateway-protocol-handoff-lock.json` owns the resulting immutable
+tuple; this historical request remains unchanged above so its original absence
+claim is not rewritten as if it had never been true.

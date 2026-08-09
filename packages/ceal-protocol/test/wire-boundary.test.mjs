@@ -628,16 +628,16 @@ test("legacy write fixtures keep only generic write-boundary validation in the p
 	const discoverRequest = envelope("discover", { capability_id: "message.search" });
 	const discovery = discoveryResponse(discoverRequest);
 	discovery.value.capabilities.push({
-		capability_id: "message.create", label: "Reply to one approved message", effect: "write", target_requirement: "required",
+		capability_id: "message.create", label: "Send or reply with one governed message", effect: "write", target_requirement: "required",
 		input_contract: {
-			schema_version: "ceal.message_create_input.v1", required: ["reply_to", "text", "idempotency_key"],
+			schema_version: "ceal.message_create_input.v1", required: ["text", "idempotency_key"],
 			reply_to: { type: "string", format: "message_ref" },
 			text: { type: "string", min_bytes: 1, max_bytes: 8192 },
 			idempotency_key: { type: "string", format: "safe_idempotency_key", min_bytes: 1, max_bytes: 128 },
 		},
 		evidence_requirement: "gateway_audit",
 		write_contract: {
-			side_effect_class: "append_reply", idempotency: "required", dry_run: "unsupported",
+			side_effect_class: "append_message", idempotency: "required", dry_run: "unsupported",
 			attribution: "subject", compensation: "irreversible", provider_readback: "required",
 		},
 	});

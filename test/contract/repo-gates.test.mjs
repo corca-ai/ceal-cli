@@ -11,6 +11,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
 const WORKER_CONTRACT_TESTS = [
+	"packages/ceal-protocol/test/conformance.test.mjs",
+	"packages/ceal-protocol/test/device-enrollment.test.mjs",
+	"packages/ceal-protocol/test/enrollment.test.mjs",
+	"packages/ceal-protocol/test/leased-consumer-control.test.mjs",
+	"packages/ceal-protocol/test/personal-client-session.test.mjs",
+	"packages/ceal-protocol/test/protocol-negotiation.test.mjs",
+	"packages/ceal-protocol/test/wire-boundary.test.mjs",
 	"test/contract/gateway-handoff-bootstrap.test.mjs",
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 	"test/contract/one-fact-one-home.test.mjs",

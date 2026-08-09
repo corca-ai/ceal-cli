@@ -11,42 +11,6 @@ Work that belongs to the standing goal lives in
 Everything else not listed is owned by the comment at the site and by
 [gates.md](gates.md).
 
-- **The vendored `packages/ceal-protocol` is behind its owner, and no local check
-  can say so.** `protocol-vendor-pin.json` records Gateway commit `f9a02ff2…`;
-  `git -C ../ceal rev-parse HEAD:packages/ceal-protocol` answers a different tree,
-  and `git -C ../ceal log --oneline f9a02ff2..HEAD -- packages/ceal-protocol`
-  lists what moved. That is not a defect on its own — the pin is an identity, and
-  its own non-claims say the check reaches no remote. What makes it worth carrying
-  is that some of those commits widened `decodeProjectionRequester`, which the
-  worker reaches on the **v4** path it consumes
-  (`packages/ceal-protocol/src/leased-consumer-control.ts:594` →`:600`), and the
-  worker's decoders are closed exact-key validators.
-  Checked on 2026-08-09 and currently safe, but only by reading the owner: the
-  Gateway strips the new fields from v4 output —
-  `scripts/agent-runtime/gateway-leased-consumer-control-dispatcher.mjs:95` passes
-  `v5Request(request)` as `includeProviderIdentity`, and `:224` omits the field
-  when it is false. Re-derive that from the emitting code, not from this note or
-  from `charness-artifacts/critique/2026-08-08-c13-requester-provider-identity-premortem.md`,
-  before the next release that keeps a stale pin. Re-syncing is the standing
-  answer and **it is now blocked outside this repository**, which is a different
-  reason from the one recorded before. The owner's local checkout carries
-  0.72.13 with the symbol the v5 gate needs, but it is unpushed work —
-  `git -C ../ceal show origin/main:packages/ceal-protocol/package.json` still
-  says 0.72.12 — and the highest signed handoff is still
-  `gateway-protocol-handoff-v0.72.12`
-  (`git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-*'`).
-  This is an order rather than a deadlock, and the unrun step is theirs: their
-  handoff workflow triggers on its own tag and names no worker input. Moving
-  the copy without a matching lock fails `proof_shipment_protocol_divergence`,
-  which is fatal, so re-vendoring today closes more paths than it opens.
-  [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
-  is the tracked request and carries the re-checks.
-  **That deferral expires with the v5 release.** The v5 gate in
-  `leased-consumer-control-session.ts` requires
-  `decodeCealLeasedConsumerCapabilityNotification` to be a function, which the
-  vendored 0.72.12 does not export and the owner's 0.72.13 does — so a v5
-  release cannot be cut without re-vendoring, and the "Gateway strips to v4"
-  reasoning above stops applying the moment this worker declares v5.
 - **CI runs macOS but proves no install there.** `check.yml`'s `check-native` leg
   and the release lane's `darwin-arm64` build both set
   `require_platform_proofs: "0"`, and `test/platform-proof.mjs` grants a non-skip

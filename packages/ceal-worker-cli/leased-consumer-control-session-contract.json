@@ -1,5 +1,5 @@
 {
-	"schema_version": "ceal.worker_private_leased_consumer_control_session_contract.v2",
+	"schema_version": "ceal.worker_private_leased_consumer_control_session_contract.v3",
 	"argv": [
 		"--internal-leased-consumer-control-session"
 	],
@@ -9,10 +9,16 @@
 		"maximum_bytes": 8192,
 		"deadline_ms": 2000
 	},
+	"notification_channel": {
+		"child_fd": 5,
+		"schema_version": "ceal.leased_consumer_capability_notification.v5",
+		"framing": "ndjson",
+		"maximum_frame_bytes": 4096
+	},
 	"agent_ipc": {
 		"transport": "stdin_stdout_ndjson",
-		"request_schema_version": "ceal.leased_consumer_capability_control_request.v4",
-		"response_schema_version": "ceal.leased_consumer_capability_control_response.v4",
+		"request_schema_version": "ceal.leased_consumer_capability_control_request.v5",
+		"response_schema_version": "ceal.leased_consumer_capability_control_response.v5",
 		"maximum_frame_bytes": 32768,
 		"serial": true
 	},
@@ -27,20 +33,22 @@
 			"projection": "/api/ceal/agent/v1/control/projection",
 			"recheck": "/api/ceal/agent/v1/control/recheck",
 			"call": "/api/ceal/agent/v1/call",
-			"complete": "/api/ceal/agent/v1/control/complete"
+			"complete": "/api/ceal/agent/v1/control/complete",
+			"notification_receipt": "/api/ceal/agent/v1/control/notification-receipt"
 		}
 	},
 	"gateway_protocol_handoff": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
-		"gateway_tag": "gateway-protocol-handoff-v0.72.12",
-		"gateway_commit": "f9a02ff20076f550a9ef5bed29bae9bcd5771445",
-		"protocol_tree": "8c2668bf779ec35cf0631ac32d05be3d7c9a5ae0",
-		"archive_sha256": "167e98abaac9f7ad4018866963535575f8bd742f5b24a3b890428c3bbcd30ea6"
+		"gateway_tag": "gateway-protocol-handoff-v0.72.13",
+		"gateway_commit": "b644bdcc1883a12f30dec9f15a918eca3676b740",
+		"protocol_tree": "07c79e9626a1ef0be3c3a3092ebff48a4433d70d",
+		"archive_sha256": "c7c410b48eb65c0a463d0e86090e8a86a67ab8a4ef3eb6a0d12ff7aee05ef7ec"
 	},
 	"non_claims": [
 		"This private contract is not a public ceal command or an Agent effect API.",
-		"A release manifest containing this contract does not register a Gateway route, issue a credential, launch an Agent, or prove a successful capability call.",
-		"The Agent IPC caller receives only framed requests and responses; it never receives the protected Gateway credential or chooses a socket path.",
+		"A release manifest containing this contract does not register a Gateway route, issue a credential, launch an Agent, deliver a notification, or prove a successful capability call.",
+		"The Agent IPC caller receives only bounded framed requests, responses, and Gateway-authored notifications; it never receives the protected Gateway credential or chooses a socket path.",
+		"A notification receipt proves only delivery to Agent IPC. It does not clear the Gateway's durable abort request or prove provider execution stopped.",
 		"The carrier uses only the safe socket path decoded from its Gateway-issued protected session."
 	]
 }

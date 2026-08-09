@@ -209,25 +209,31 @@ test("private control-session release input accepts only its exact capability-co
 		path.join(root, "gateway-protocol-handoff-lock.json"),
 		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
 	);
-	writeFileSync(contractPath, CONTROL_SESSION_CONTRACT_BYTES);
+	const legacy = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	legacy.schema_version = "ceal.worker_private_leased_consumer_control_session_contract.v2";
+	delete legacy.notification_channel;
+	legacy.agent_ipc.request_schema_version = "ceal.leased_consumer_capability_control_request.v4";
+	legacy.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v4";
+	delete legacy.gateway.routes.notification_receipt;
+	writeFileSync(contractPath, `${JSON.stringify(legacy, null, 2)}\n`);
 	const accepted = readControlSessionContract(contractPath, { repoRoot: root }).value;
 	assert.equal(accepted.agent_ipc.request_schema_version, "ceal.leased_consumer_capability_control_request.v4");
 	assert.equal(accepted.schema_version, "ceal.worker_private_leased_consumer_control_session_contract.v2");
 	assert.deepEqual(accepted.gateway.operation_deadline_bounds_ms, { minimum: 30000, maximum: 600000 });
-	const legacyDeadline = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	const legacyDeadline = structuredClone(legacy);
 	legacyDeadline.gateway.operation_deadline_ms = 30000;
 	delete legacyDeadline.gateway.operation_deadline_bounds_ms;
 	writeFileSync(contractPath, `${JSON.stringify(legacyDeadline, null, 2)}\n`);
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
-	const wideBounds = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	const wideBounds = structuredClone(legacy);
 	wideBounds.gateway.operation_deadline_bounds_ms.maximum = 700000;
 	writeFileSync(contractPath, `${JSON.stringify(wideBounds, null, 2)}\n`);
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
-	const mixed = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	const mixed = structuredClone(legacy);
 	mixed.agent_ipc.response_schema_version = "ceal.leased_consumer_control_response.v1";
 	writeFileSync(contractPath, `${JSON.stringify(mixed, null, 2)}\n`);
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
-	const stalePathContract = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	const stalePathContract = structuredClone(legacy);
 	stalePathContract.gateway.socket_path = "/run/ceal/leased-consumer-control-v1.sock";
 	writeFileSync(contractPath, `${JSON.stringify(stalePathContract, null, 2)}\n`);
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);

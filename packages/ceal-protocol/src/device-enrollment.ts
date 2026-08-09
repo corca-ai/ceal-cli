@@ -311,7 +311,7 @@ function decodePendingPollResult(record: Record<string, unknown>): CealDeviceEnr
 function decodeSealedPollResult(record: Record<string, unknown>): CealDeviceEnrollmentPollResponse {
 	requireExactKeys(record, ["binding", "ciphertext", "encapsulated_key", "schema_version", "status", "suite"]);
 	if (record.suite !== CEAL_DEVICE_ENROLLMENT_HPKE_SUITE || !publicKey(record.encapsulated_key)
-		|| typeof record.ciphertext !== "string" || !BASE64URL_CIPHERTEXT.test(record.ciphertext)) invalid();
+		|| typeof record.ciphertext !== "string" || !canonicalBase64url(record.ciphertext, BASE64URL_CIPHERTEXT)) invalid();
 	decodeCealDeviceEnrollmentDeliveryBinding(record.binding);
 	return record as unknown as CealDeviceEnrollmentPollResponse;
 }
@@ -351,7 +351,13 @@ function requireExactKeys(record: Record<string, unknown>, expected: readonly st
 function safeRef(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
 function publicKey(value: unknown): value is string { return typeof value === "string" && publicKeyValue(value); }
 function publicKeyValue(value: string): boolean {
-	return BASE64URL_32_BYTES.test(value) && !Buffer.from(value, "base64url").every((byte) => byte === 0);
+	const decoded = canonicalBase64url(value, BASE64URL_32_BYTES);
+	return decoded !== null && !decoded.every((byte) => byte === 0);
+}
+function canonicalBase64url(value: string, pattern: RegExp): Buffer | null {
+	if (!pattern.test(value)) return null;
+	const decoded = Buffer.from(value, "base64url");
+	return decoded.toString("base64url") === value ? decoded : null;
 }
 function opaqueHandle(value: unknown): value is string { return typeof value === "string" && BASE64URL_32_BYTES.test(value); }
 function sha256(value: unknown): value is string { return typeof value === "string" && SHA256_HEX.test(value); }

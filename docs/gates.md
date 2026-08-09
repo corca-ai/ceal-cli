@@ -140,6 +140,14 @@ the Git index, and the working tree:
 - **shipped** — the protocol subtree inside the locked handoff archive that
   `gateway-protocol-handoff-lock.json` binds a release to consume.
 
+The frozen package suite is part of `test:contract`. One owner test imports
+`scripts/test-support/base64url.mjs`, which sits outside the pinned package
+subtree in the Gateway repository. This repository copies that test-only helper
+at the same path; `protocol-vendor-pin.json` records its owner blob and
+`protocol-vendor-pin.test.mjs` hashes the local file against it. The helper is
+not production or release input, but leaving it unbound would make the exact
+frozen suite silently depend on a second freehand implementation.
+
 *source* against *vendored* is the drift check, and it fails on a committed edit
 (the recorded tree stops matching `HEAD:packages/ceal-protocol`) and on an
 uncommitted one (a committed tree hash cannot see a mid-sync working tree). Both

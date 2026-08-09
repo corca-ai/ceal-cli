@@ -1,35 +1,36 @@
 {
-  "schema_version": "ceal.worker_gateway_protocol_handoff_lock.v1",
+  "schema_version": "ceal.worker_gateway_protocol_handoff_lock.v2",
   "status": "locked",
   "gateway": {
     "repository": "corca-ai/ceal",
     "workflow_path": ".github/workflows/gateway-protocol-handoff-release.yml",
-    "commit": "f9a02ff20076f550a9ef5bed29bae9bcd5771445",
-    "tree": "be7b3daab7b63bc01d539ecdf1913368919abb2e",
-    "protocol_tree": "8c2668bf779ec35cf0631ac32d05be3d7c9a5ae0",
-    "tag": "gateway-protocol-handoff-v0.72.12",
-    "actions_run_id": 31020694456,
+    "commit": "b644bdcc1883a12f30dec9f15a918eca3676b740",
+    "tree": "0a6a30d6f3d76077eb4ade02c43a069120011169",
+    "protocol_tree": "07c79e9626a1ef0be3c3a3092ebff48a4433d70d",
+    "tag": "gateway-protocol-handoff-v0.72.13",
+    "actions_run_id": 31324956418,
     "origin": "https://ceal.borca.ai/releases/gateway-protocol-handoff"
   },
   "protocol": {
     "package": "@corca-ai/ceal-protocol",
-    "version": "0.72.12",
-    "filename": "corca-ai-ceal-protocol-0.72.12.tgz",
-    "sha256": "2f275bf098fd97377a062cf53ff9c21cd81827603a2bd43f21248c5303491519"
+    "version": "0.72.13",
+    "filename": "corca-ai-ceal-protocol-0.72.13.tgz",
+    "sha256": "cdcad0444df6a614b97be1ae4edf2a0b1de9cc04c82fe0888b0be43cde18f4e0"
   },
   "archive": {
-    "filename": "ceal-gateway-protocol-handoff-0.72.12.tar.gz",
-    "sha256": "167e98abaac9f7ad4018866963535575f8bd742f5b24a3b890428c3bbcd30ea6",
-    "handoff_manifest_sha256": "511e4304767b18a354abf8ce2eec6242f6169c2b3d57ccba2377bc85d6d632d7"
+    "filename": "ceal-gateway-protocol-handoff-0.72.13.tar.gz",
+    "sha256": "c7c410b48eb65c0a463d0e86090e8a86a67ab8a4ef3eb6a0d12ff7aee05ef7ec",
+    "handoff_manifest_sha256": "dccba7259eddc6d4dad2e8e7e65d51b958ed425aaa16ab06960ce84e2587ccdb"
   },
   "reviewed_signature": {
-    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.12",
+    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.13",
     "oidc_issuer": "https://token.actions.githubusercontent.com",
-    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/31020694456/attempts/1"
+    "workflow_sha": "b644bdcc1883a12f30dec9f15a918eca3676b740",
+    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/31324956418/attempts/1"
   },
   "non_claims": [
-    "This lock records identities a maintainer verified once, at consumption time, against the immutable Gateway origin. Nothing in this repository re-fetches the archive or re-checks the Sigstore certificate on its own.",
-    "The release lane binds the downloaded archive by `archive.sha256` alone. `reviewed_signature` is the recorded provenance of that digest, not a signature this repository verifies during a release.",
-    "`gateway.tree` and `gateway.protocol_tree` are the producer identities the signed handoff manifest declares. `protocol_tree` is the one this repository can confirm locally, because the vendored copy hashes to it."
+    "This lock records one public signed handoff and remote tag readback at consumption time; it does not promise that either surface remains available later.",
+    "The worker release lane binds the downloaded archive by `archive.sha256` after this review; it does not re-run the public Sigstore verification while building.",
+    "Gateway tree identities come from the signed handoff manifest. The consumer separately proves the frozen Protocol tree after it is vendored."
   ]
 }

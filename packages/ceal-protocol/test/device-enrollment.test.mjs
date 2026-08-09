@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { generateKeyPairSync, sign, verify } from "node:crypto";
 import test from "node:test";
+import { nonCanonicalBase64urlAlias } from "../../../scripts/test-support/base64url.mjs";
 import {
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
@@ -75,6 +76,10 @@ test("device enrollment start names raw-key algorithms and embeds the required p
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, client: { ...startRequest.client, features: [CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE, CEAL_DEVICE_ENROLLMENT_FEATURE] } }), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, recipient_public_key: startRequest.proof_public_key }), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, recipient_public_key: "A".repeat(43) }), TypeError);
+	const recipientAlias = nonCanonicalBase64urlAlias(RECIPIENT_KEY);
+	assert.deepEqual(Buffer.from(recipientAlias, "base64url"), Buffer.from(RECIPIENT_KEY, "base64url"));
+	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, recipient_public_key: recipientAlias }), TypeError);
+	assert.throws(() => deviceEnrollmentPublicKeyFingerprint(recipientAlias), TypeError);
 	assert.throws(() => decodeCealDeviceEnrollmentStartRequest({ ...startRequest, client: { ...startRequest.client, protocol_version: "1.2.0" } }), TypeError);
 	assert.equal(decodeCealDeviceEnrollmentStartResult({
 		schema_version: "ceal.device_enrollment_start_result.v1", status: "pending",
@@ -139,9 +144,11 @@ test("sealed delivery binds canonical HPKE info/AAD and rejects a decrypted iden
 	]));
 	const sealed = decodeCealDeviceEnrollmentPollResponse({
 		schema_version: "ceal.device_enrollment_poll_result.v1", status: "sealed", suite: CEAL_DEVICE_ENROLLMENT_HPKE_SUITE,
-		binding, encapsulated_key: RECIPIENT_KEY, ciphertext: "D".repeat(23),
+		binding, encapsulated_key: RECIPIENT_KEY, ciphertext: Buffer.alloc(17, 3).toString("base64url"),
 	});
 	assert.equal(sealed.status, "sealed");
+	assert.throws(() => decodeCealDeviceEnrollmentPollResponse({ ...sealed, encapsulated_key: nonCanonicalBase64urlAlias(RECIPIENT_KEY) }), TypeError);
+	assert.throws(() => decodeCealDeviceEnrollmentPollResponse({ ...sealed, ciphertext: nonCanonicalBase64urlAlias(sealed.ciphertext) }), TypeError);
 	const payload = decodeCealDeviceEnrollmentSealedPayload({
 		schema_version: "ceal.enrollment_result.v1", ok: true,
 		profile_ref: binding.profile_ref, membership_ref: binding.membership_ref, registration_ref: binding.registration_ref,

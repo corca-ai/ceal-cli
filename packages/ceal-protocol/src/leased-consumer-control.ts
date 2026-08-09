@@ -1,9 +1,14 @@
 /**
  * Canonical private control-session records for a Gateway-owned leased
- * consumer. These records never carry a personal session, provider identity,
- * endpoint selector, or Agent-supplied service authority.
+ * consumer. These records never carry a personal session, provider credential
+ * or locator, endpoint selector, or Agent-supplied service authority. Selected
+ * v5 may disclose one bounded requester account identity beside an opaque
+ * subject ref; that context is neither a locator nor authority.
  */
 import { requireJsonByteSize } from "./gateway-validation-primitives.js";
+import {
+	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_LABEL_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_TOKEN_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_MAX_CONTROLS, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, validCealLeasedConsumerCompletedPhaseHistory, type CealLeasedConsumerMessagePresentation,
+} from "./leased-consumer-presentation.js";
 export const CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA = "ceal.leased_consumer_control_session.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA = "ceal.leased_consumer_control_request.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_control_response.v1" as const;
@@ -36,7 +41,6 @@ export const CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA = "ceal.gate
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_resource_read_data.v1" as const;
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_data.v1" as const;
-export const CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA = "ceal.gateway_leased_agent_message_presentation.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_reaction_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA = "ceal.gateway_leased_agent_message_reaction_data.v1" as const;
 export const CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_usergroups_list_arguments.v1" as const;
@@ -227,21 +231,6 @@ export type CealLeasedConsumerCapabilityArguments =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA; upload_ref: string; chunk_index: number; chunk_count: number; sha256: string; bytes_base64: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA; artifact_ref: string; title?: string; reply_to?: string };
 
-/**
- * Closed semantic presentation DTO (S1 decision, 2026-08-04): the Agent
- * declares run semantics (intent, abortability, phase); the provider
- * connector owns rendering. Never provider block markup.
- */
-export interface CealLeasedConsumerMessagePresentation {
-	schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA;
-	intent: "progress" | "final" | "stop" | "transient_notice";
-	abortable: boolean;
-	phase?: string;
-	/** Semantic progress plan (S3): ordered bounded steps the connector
-	 * renders; never provider markup. */
-	plan?: readonly { text: string; status: "pending" | "active" | "completed" }[];
-}
-
 export type CealLeasedConsumerCapabilityControlResponse =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA; operation: "acquire"; result: CealLeasedConsumerControlAcquireResult }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA; operation: "projection"; result: CealLeasedConsumerCapabilityProjectionResult }
@@ -278,7 +267,7 @@ export type CealLeasedConsumerCapabilityProjectionResult =
 		 * typed, so the Agent falls back explicitly instead of degrading
 		 * silently.
 		 */
-		requester: { subject_ref: string; display_name?: string };
+		requester: { subject_ref: string; display_name?: string; provider_identity?: { provider: string; account_id: string } };
 		/**
 		 * Inbound attachment boundary (S2, 2026-08-04): the projection states
 		 * how many verified inbound attachments the event carries and the
@@ -361,7 +350,7 @@ export type CealLeasedConsumerResultControlCallResult =
 export interface CealLeasedConsumerNormalizedProjection {
 	schema_version: "ceal.gateway_normalized_projection.v1";
 	text: string;
-	context?: { conversation_kind: "channel" | "dm" | "group"; is_thread_reply: boolean };
+	context?: { conversation_kind: "channel" | "dm" | "group"; is_thread_reply: boolean; trigger?: "scheduled" };
 }
 
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -604,11 +593,18 @@ function decodeCapabilityProjectionResult(value: Record<string, unknown>): void 
 }
 function decodeProjectionRequester(value: unknown): void {
 	const record = requireRecord(value);
-	requireExactKeys(record, ["display_name", "subject_ref"], ["display_name"]);
+	requireExactKeys(record, ["display_name", "provider_identity", "subject_ref"], ["display_name", "provider_identity"]);
 	if (!safeRef(record.subject_ref) || !(record.subject_ref as string).startsWith("subject:")) invalid();
 	// Slack-shaped requester identifiers must never ride the subject ref.
 	if (/^subject:(?:[UW][A-Z0-9]{4,})$/u.test(record.subject_ref as string)) invalid();
 	if (record.display_name !== undefined && (!safeText(record.display_name, 512) || (record.display_name as string).length === 0)) invalid();
+	if (record.provider_identity !== undefined) decodeProviderIdentity(record.provider_identity);
+}
+function decodeProviderIdentity(value: unknown): void {
+	const record = requireRecord(value);
+	requireExactKeys(record, ["account_id", "provider"]);
+	if (typeof record.provider !== "string" || !/^[a-z][a-z0-9_-]{1,39}$/u.test(record.provider)
+		|| !safeText(record.account_id, 128) || (record.account_id as string).length === 0) invalid();
 }
 function decodeProjectionAttachments(value: unknown): void {
 	const record = requireRecord(value);
@@ -783,17 +779,29 @@ function decodePresentationActivityArguments(value: unknown): void {
 }
 function decodeMessagePresentation(value: unknown): void {
 	const record = requireRecord(value);
-	requireExactKeys(record, ["abortable", "intent", "phase", "plan", "schema_version"], ["phase", "plan"]);
-	if (record.schema_version !== CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA || !["progress", "final", "stop", "transient_notice"].includes(record.intent as string) || typeof record.abortable !== "boolean") invalid();
+	const v2 = record.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA;
+	if (v2) requireExactKeys(record, ["abortable", "completed_phases", "controls", "intent", "phase", "plan", "schema_version"], ["completed_phases", "phase", "plan"]);
+	else requireExactKeys(record, ["abortable", "intent", "phase", "plan", "schema_version"], ["phase", "plan"]);
+	if ((!v2 && record.schema_version !== CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA) || !["progress", "final", "stop", "transient_notice"].includes(record.intent as string) || typeof record.abortable !== "boolean") invalid();
 	if (record.phase !== undefined && (!safeText(record.phase, 256) || (record.phase as string).length === 0)) invalid();
-	if (record.plan !== undefined) decodePresentationPlan(record.plan);
+	if (record.plan !== undefined) decodePresentationPlan(record.plan); if (v2) decodePresentationV2(record);
 }
+function decodePresentationV2(record: Record<string, unknown>): void { decodePresentationControls(record.controls); if (!validCealLeasedConsumerCompletedPhaseHistory(record)) invalid(); }
 function decodePresentationPlan(value: unknown): void {
 	if (!Array.isArray(value) || value.length > 16) invalid();
 	for (const item of value) {
 		const record = requireRecord(item);
 		requireExactKeys(record, ["status", "text"]);
 		if (!safeText(record.text, 512) || (record.text as string).length === 0 || !["pending", "active", "completed"].includes(record.status as string)) invalid();
+	}
+}
+function decodePresentationControls(value: unknown): void {
+	if (!Array.isArray(value) || value.length > CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_MAX_CONTROLS) invalid();
+	for (const item of value) {
+		const record = requireRecord(item);
+		requireExactKeys(record, ["label", "token"]);
+		if (!safeText(record.token, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_TOKEN_MAX_BYTES) || (record.token as string).length === 0
+			|| !safeText(record.label, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_LABEL_MAX_BYTES) || (record.label as string).length === 0) invalid();
 	}
 }
 type CapabilityResultRule = (effect: unknown, handles: readonly unknown[], data: unknown) => boolean;
@@ -934,7 +942,11 @@ function decodeReplyResult(value: Record<string, unknown>): void {
 function decodeTerminal(value: Record<string, unknown>): void { requireExactKeys(value, ["status"]); if (!TERMINAL_STATUSES.has(value.status as CealLeasedConsumerControlTerminalResult["status"])) invalid(); }
 function decodeLease(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, ["delivery_attempt", "event_ref", "expires_at", "lease_fence", "lease_ref"]); if (!safeRef(record.event_ref) || !safeRef(record.lease_ref) || !positive(record.lease_fence) || !positive(record.delivery_attempt) || !timestamp(record.expires_at)) invalid(); }
 function decodeProjection(value: unknown): void { const record = requireRecord(value); requireExactKeys(record, Object.hasOwn(record, "context") ? ["context", "schema_version", "text"] : ["schema_version", "text"]); if (record.schema_version !== "ceal.gateway_normalized_projection.v1" || !safeText(record.text, 16_384) || (record.context !== undefined && !projectionContext(record.context))) invalid(); }
-function projectionContext(value: unknown): boolean { if (!record(value)) return false; const context = value as Record<string, unknown>; return exactKeys(context, ["conversation_kind", "is_thread_reply"]) && ["channel", "dm", "group"].includes(context.conversation_kind as string) && typeof context.is_thread_reply === "boolean"; }
+// `trigger` is the optional scheduled-tick marker (Goal 6 S3). It must stay in
+// lockstep with the projection store and the consumer-side projection resolver:
+// a decoder that rejects a stored key collapses the serving response into a
+// silent `control_unavailable` halt (ceal-dev rehearsal, 2026-08-06).
+function projectionContext(value: unknown): boolean { if (!record(value)) return false; const context = value as Record<string, unknown>; const keys = Object.hasOwn(context, "trigger") ? ["conversation_kind", "is_thread_reply", "trigger"] : ["conversation_kind", "is_thread_reply"]; if (Object.hasOwn(context, "trigger") && context.trigger !== "scheduled") return false; return exactKeys(context, keys) && ["channel", "dm", "group"].includes(context.conversation_kind as string) && typeof context.is_thread_reply === "boolean"; }
 // A protected session is the sole socket authority. Keep the permitted value
 // portable and incapable of targeting the Gateway administration listener;
 // consumers must not substitute an ambient or contract-literal path.
