@@ -14,6 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveAnchoredDirectory } from "./local-store-anchor.js";
 
 // The mutual exclusion every local store under HOME uses to make a
 // read-modify-write of its state file atomic across separate `ceal` processes.
@@ -100,7 +101,7 @@ async function acquireLock(options: LocalStoreLockOptions): Promise<() => void> 
 			if (nonce)
 				return () => {
 					try {
-						releaseLock(anchored.options.lockPath, nonce);
+						releaseLock(anchored.options, nonce);
 					} finally {
 						closeSync(anchored.parentHandle);
 					}
@@ -126,10 +127,13 @@ function anchorLockParent(options: LocalStoreLockOptions): { options: LocalStore
 	try {
 		const stat = fstatSync(parentHandle);
 		if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o700) options.onUnsafe();
-		const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : process.platform === "darwin" ? "/dev/fd" : undefined;
-		if (!descriptorRoot) options.onUnsafe();
+		const anchoredOptions = { ...options };
+		Object.defineProperty(anchoredOptions, "lockPath", {
+			enumerable: true,
+			get: () => path.join(resolveAnchoredDirectory(parentHandle, stat, 0o700, options.onUnsafe), name),
+		});
 		return {
-			options: { ...options, lockPath: path.join(descriptorRoot, String(parentHandle), name) },
+			options: anchoredOptions,
 			parentHandle,
 		};
 	} catch (error) {
@@ -147,21 +151,21 @@ function createLock(options: LocalStoreLockOptions): string | null {
 	if (!lockPathAbsentOrEmpty(options)) return null;
 
 	const nonce = randomBytes(16).toString("hex");
-	const candidate = `${options.lockPath}.candidate-${process.pid}-${nonce}`;
+	const candidate = () => `${options.lockPath}.candidate-${process.pid}-${nonce}`;
 	try {
-		mkdirSync(candidate, { mode: 0o700 });
-		writeFileSync(path.join(candidate, LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+		mkdirSync(candidate(), { mode: 0o700 });
+		writeFileSync(path.join(candidate(), LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
 	} catch {
 		// The candidate name includes a fresh nonce and is never shared, so this is
 		// the one cleanup in acquisition whose path identity is self-authenticating.
-		rmSync(candidate, { recursive: true, force: true });
+		rmSync(candidate(), { recursive: true, force: true });
 		options.onUnsafe();
 	}
 	try {
-		renameSync(candidate, options.lockPath);
+		renameSync(candidate(), options.lockPath);
 		return nonce;
 	} catch (error) {
-		rmSync(candidate, { recursive: true, force: true });
+		rmSync(candidate(), { recursive: true, force: true });
 		if (nodeErrorCode(error) === "EEXIST" || nodeErrorCode(error) === "ENOTEMPTY") return null;
 		options.onUnsafe();
 	}
@@ -186,13 +190,13 @@ async function waitForLock(options: LocalStoreLockOptions, deadline: number): Pr
 	await sleep(options.pollMs ?? LOCK_POLL_MS);
 }
 
-function releaseLock(lockPath: string, nonce: string): void {
+function releaseLock(options: LocalStoreLockOptions, nonce: string): void {
 	// Release only our own lock: a lock reclaimed as stale by another process
 	// may already be held by someone else, and removing it would hand the same
 	// state file to two writers at once.
-	const owner = readLockOwner(lockPath);
+	const owner = readLockOwner(() => options.lockPath);
 	if (!owner || owner.nonce !== nonce) return;
-	rmSync(lockPath, { recursive: true, force: true });
+	rmSync(options.lockPath, { recursive: true, force: true });
 }
 
 function removeStaleLock(options: LocalStoreLockOptions): boolean {
@@ -214,9 +218,9 @@ function quarantineStaleLock(options: LocalStoreLockOptions, owner: StaleLockGen
 	// non-empty tombstone instead of renaming the successor that now occupies the
 	// stable lock path.
 	const suffix = "nonce" in owner ? owner.nonce : `invalid-${owner.invalidGeneration}`;
-	const quarantine = `${options.lockPath}.reclaimed-${suffix}`;
+	const quarantine = () => `${options.lockPath}.reclaimed-${suffix}`;
 	try {
-		renameSync(options.lockPath, quarantine);
+		renameSync(options.lockPath, quarantine());
 		return true;
 	} catch (error) {
 		if (nodeErrorCode(error) === "ENOENT") return true;
@@ -226,10 +230,10 @@ function quarantineStaleLock(options: LocalStoreLockOptions, owner: StaleLockGen
 	}
 }
 
-function assertQuarantine(options: LocalStoreLockOptions, quarantine: string, owner: StaleLockGeneration): void {
+function assertQuarantine(options: LocalStoreLockOptions, quarantine: () => string, owner: StaleLockGeneration): void {
 	let stat: Stats;
 	try {
-		stat = lstatSync(quarantine);
+		stat = lstatSync(quarantine());
 	} catch {
 		options.onUnsafe();
 	}
@@ -244,7 +248,7 @@ function assertQuarantine(options: LocalStoreLockOptions, quarantine: string, ow
 	// delete/recreate design could not obtain from an inode comparison.
 	if (lockGeneration(stat) !== owner.invalidGeneration) options.onUnsafe();
 	try {
-		if (readdirSync(quarantine).length === 0) options.onUnsafe();
+		if (readdirSync(quarantine()).length === 0) options.onUnsafe();
 	} catch {
 		options.onUnsafe();
 	}
@@ -255,10 +259,9 @@ function staleLockOwner(
 ): { pid: number; nonce: string } | { invalidGeneration: string } | "initializing" | "absent" {
 	const lock = readSafeLockDirectory(options);
 	if (!lock) return "absent";
-	const ownerPath = path.join(options.lockPath, LOCK_OWNER);
 	let owner: Stats;
 	try {
-		owner = lstatSync(ownerPath);
+		owner = lstatSync(path.join(options.lockPath, LOCK_OWNER));
 	} catch {
 		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	}
@@ -271,7 +274,7 @@ function staleLockOwner(
 	// and from then on every session refresh, enroll, logout, and receipt append
 	// failed as `unsafe_store` with nothing anywhere to clear it. The mode check
 	// above is the security one and still refuses.
-	const parsed = readLockOwner(options.lockPath);
+	const parsed = readLockOwner(() => options.lockPath);
 	if (!parsed)
 		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	return parsed;
@@ -312,9 +315,9 @@ function processMissing(pid: number, options: LocalStoreLockOptions): boolean {
 	}
 }
 
-function readLockOwner(lockPath: string): { pid: number; nonce: string } | null {
+function readLockOwner(lockPath: () => string): { pid: number; nonce: string } | null {
 	try {
-		const value = JSON.parse(readFileSync(path.join(lockPath, LOCK_OWNER), "utf8"));
+		const value = JSON.parse(readFileSync(path.join(lockPath(), LOCK_OWNER), "utf8"));
 		if (
 			!value ||
 			typeof value !== "object" ||

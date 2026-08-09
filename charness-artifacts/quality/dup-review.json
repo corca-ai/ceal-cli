@@ -296,6 +296,13 @@
 		},
 		{
 			"surface": "code",
+			"id": "011f1d4590e7f666",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of 79824a3f9251e5bf after the local-store guard extraction changed the detector family graph. Both members remain the independent agent-audit walkers reviewed there; neither member changed in this slice, and the attempted extraction still expands the family across unrelated filesystem-policy boundaries."
+		},
+		{
+			"surface": "code",
 			"id": "79824a3f9251e5bf",
 			"class": "intentional",
 			"reviewed_at": "2026-08-09",

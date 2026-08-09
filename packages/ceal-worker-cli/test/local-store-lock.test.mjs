@@ -5,6 +5,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
 import { withLocalStoreLock } from "../dist/local-store-lock.js";
 
 // Every branch below was uncovered on both sides of the extraction that made
@@ -20,6 +21,23 @@ class TestUnsafe extends Error {
 class TestBusy extends Error {
 	name = "TestBusy";
 }
+
+test("Darwin resolves an opened directory descriptor again after the directory is renamed", { skip: process.platform !== "darwin" }, () => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-darwin-anchor-"));
+	const directory = path.join(root, "store");
+	const moved = path.join(root, "moved-store");
+	mkdirSync(directory, { mode: 0o700 });
+	const handle = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+	try {
+		const expected = fs.fstatSync(handle);
+		fs.renameSync(directory, moved);
+		const resolved = resolveAnchoredDirectory(handle, expected, 0o700, () => assert.fail("descriptor anchor was refused"));
+		assert.equal(fs.realpathSync(resolved), fs.realpathSync(moved));
+	} finally {
+		fs.closeSync(handle);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 function options(directory, overrides = {}) {
 	return {
@@ -107,6 +125,22 @@ test("release stays anchored when the visible parent is swapped", async () => {
 
 		assert.equal(existsSync(victimLock), true, "release must not follow the replacement parent to an outside lock");
 		assert.equal(existsSync(path.join(moved, "test.lock")), false, "release must remove its own anchored lock generation");
+	});
+});
+
+test("candidate initialization re-resolves the opened parent after its visible name is replaced", async () => {
+	await withStore(async (root) => {
+		const directory = path.join(root, "store");
+		const moved = path.join(root, "moved-store");
+		mkdirSync(directory, { mode: 0o700 });
+		const { withLocalStoreLock: raced } = await import(parentSwapAfterCandidateMkdir(root, directory, moved));
+		let entered = false;
+		await raced(options(directory), async () => {
+			entered = true;
+		});
+		assert.equal(entered, true);
+		assert.deepEqual(readdirSync(directory), [], "candidate work must not enter the replacement parent");
+		assert.equal(existsSync(path.join(moved, "test.lock")), false, "release must follow the opened parent after publication");
 	});
 });
 
@@ -314,11 +348,28 @@ test("a late stale-lock reclaimer cannot move the successor generation", async (
 	});
 });
 
+test("stale quarantine re-resolves both rename paths after the visible parent is replaced", async () => {
+	await withStore(async (root) => {
+		const directory = path.join(root, "store");
+		const moved = path.join(root, "moved-store");
+		mkdirSync(directory, { mode: 0o700 });
+		writeOwnedLock(options(directory).lockPath, await deadPid());
+		const { withLocalStoreLock: raced } = await import(parentSwapBeforeQuarantine(root, directory, moved));
+		let entered = false;
+		await raced(options(directory), async () => {
+			entered = true;
+		});
+		assert.equal(entered, true);
+		assert.deepEqual(readdirSync(directory), [], "quarantine must not enter the replacement parent");
+		assert.equal(existsSync(path.join(moved, "test.lock")), false);
+	});
+});
+
 const FOREIGN_NONCE = "c".repeat(32);
 
 function successorBeforeCandidatePublish(directory) {
-	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
-	const anchor = "renameSync(candidate, options.lockPath);";
+	const source = injectableLockSource();
+	const anchor = "renameSync(candidate(), options.lockPath);";
 	assert.ok(source.includes(anchor), "the create path no longer matches the candidate-publish seam");
 	const injected = [
 		"{ const __lp = options.lockPath;",
@@ -332,12 +383,12 @@ function successorBeforeCandidatePublish(directory) {
 }
 
 function successorBeforeLateQuarantine(directory) {
-	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
-	const anchor = "renameSync(options.lockPath, quarantine);";
+	const source = injectableLockSource();
+	const anchor = "renameSync(options.lockPath, quarantine());";
 	assert.ok(source.includes(anchor), "the stale path no longer matches the quarantine seam");
 	const injected = [
 		"{ const __lp = options.lockPath;",
-		"  renameSync(__lp, quarantine);",
+		"  renameSync(__lp, quarantine());",
 		"  mkdirSync(__lp, { mode: 0o700 });",
 		`  writeFileSync(path.join(__lp, "owner.json"), ${JSON.stringify(`${JSON.stringify({ pid: process.pid, nonce: FOREIGN_NONCE })}\n`)}, { flag: "wx", mode: 0o600 });`,
 		"}",
@@ -345,6 +396,42 @@ function successorBeforeLateQuarantine(directory) {
 	const module = path.join(directory, "late-quarantine-lock.mjs");
 	writeFileSync(module, source.replace(anchor, `${injected}\n${anchor}`));
 	return module;
+}
+
+function parentSwapAfterCandidateMkdir(moduleDirectory, directory, moved) {
+	const source = injectableLockSource();
+	const anchor = "mkdirSync(candidate(), { mode: 0o700 });";
+	assert.ok(source.includes(anchor), "the create path no longer matches the candidate-mkdir seam");
+	const injected = [
+		anchor,
+		`renameSync(${JSON.stringify(directory)}, ${JSON.stringify(moved)});`,
+		`mkdirSync(${JSON.stringify(directory)}, { mode: 0o700 });`,
+	].join("\n");
+	const module = path.join(moduleDirectory, "candidate-parent-swap-lock.mjs");
+	writeFileSync(module, source.replace(anchor, injected));
+	return module;
+}
+
+function parentSwapBeforeQuarantine(moduleDirectory, directory, moved) {
+	const source = injectableLockSource();
+	const anchor = "renameSync(options.lockPath, quarantine());";
+	assert.ok(source.includes(anchor), "the stale path no longer matches the parent-swap seam");
+	const injected = [
+		`renameSync(${JSON.stringify(directory)}, ${JSON.stringify(moved)});`,
+		`mkdirSync(${JSON.stringify(directory)}, { mode: 0o700 });`,
+		anchor,
+	].join("\n");
+	const module = path.join(moduleDirectory, "quarantine-parent-swap-lock.mjs");
+	writeFileSync(module, source.replace(anchor, injected));
+	return module;
+}
+
+function injectableLockSource() {
+	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
+	const relativeImport = 'from "./local-store-anchor.js";';
+	assert.ok(source.includes(relativeImport), "the lock no longer imports its shared anchor beside itself");
+	const anchorUrl = new URL("../dist/local-store-anchor.js", import.meta.url).href;
+	return source.replace(relativeImport, `from ${JSON.stringify(anchorUrl)};`);
 }
 
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {

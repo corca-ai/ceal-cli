@@ -1,5 +1,6 @@
-import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, unlinkSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, type Stats, unlinkSync } from "node:fs";
 import path from "node:path";
+import { resolveAnchoredDirectory } from "./local-store-anchor.js";
 
 // The filesystem safety checks every local store under HOME performs before it
 // reads or writes: refuse a symlink, refuse the wrong file type, and hold the
@@ -100,6 +101,10 @@ function nodeErrorCode(error: unknown): string | undefined {
  */
 export function assertDirectory(directory: string, unsafe: UnsafeStore, requireMode = false): void {
 	const stat = lstatSync(directory);
+	assertDirectoryStat(stat, unsafe, requireMode);
+}
+
+function assertDirectoryStat(stat: Stats, unsafe: UnsafeStore, requireMode: boolean): void {
 	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
 	if (requireMode && modeOf(stat) !== DIRECTORY_MODE) unsafe();
 }
@@ -110,15 +115,9 @@ export function assertDirectory(directory: string, unsafe: UnsafeStore, requireM
  * must already satisfy the caller's directory contract.
  */
 export function assertDirectoryIfPresent(directory: string, unsafe: UnsafeStore, requireMode = false): boolean {
-	let stat: ReturnType<typeof lstatSync>;
-	try {
-		stat = lstatSync(directory);
-	} catch (error) {
-		if (nodeErrorCode(error) === "ENOENT") return false;
-		unsafe();
-	}
-	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
-	if (requireMode && modeOf(stat) !== DIRECTORY_MODE) unsafe();
+	const existing = existingPathOperation(() => lstatSync(directory), unsafe);
+	if (!existing.found) return false;
+	assertDirectoryStat(existing.value, unsafe, requireMode);
 	return true;
 }
 
@@ -127,6 +126,15 @@ export function assertFile(file: string, unsafe: UnsafeStore, requireMode = fals
 	const stat = lstatSync(file);
 	if (stat.isSymbolicLink() || !stat.isFile()) unsafe();
 	if (requireMode && modeOf(stat) !== FILE_MODE) unsafe();
+}
+
+function existingPathOperation<T>(operation: () => T, unsafe: UnsafeStore): { found: true; value: T } | { found: false } {
+	try {
+		return { found: true, value: operation() };
+	} catch (error) {
+		if (nodeErrorCode(error) === "ENOENT") return { found: false };
+		unsafe();
+	}
 }
 
 /**
@@ -155,35 +163,22 @@ export function removeOwnedFile(directory: string, file: string, unsafe: UnsafeS
 	try {
 		const directoryStat = fstatSync(directoryHandle);
 		if (!directoryStat.isDirectory() || modeOf(directoryStat) !== DIRECTORY_MODE) unsafe();
-		const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : process.platform === "darwin" ? "/dev/fd" : undefined;
-		if (!descriptorRoot) unsafe();
-		const anchoredFile = path.join(descriptorRoot, String(directoryHandle), path.basename(file));
-		let fileHandle: number;
-		try {
-			fileHandle = openSync(anchoredFile, constants.O_RDONLY | constants.O_NOFOLLOW);
-		} catch (error) {
-			if (nodeErrorCode(error) === "ENOENT") return false;
-			unsafe();
-		}
+		const anchoredFile = () =>
+			path.join(resolveAnchoredDirectory(directoryHandle, directoryStat, DIRECTORY_MODE, unsafe), path.basename(file));
+		const openedFile = existingPathOperation(() => openSync(anchoredFile(), constants.O_RDONLY | constants.O_NOFOLLOW), unsafe);
+		if (!openedFile.found) return false;
+		const fileHandle = openedFile.value;
 		try {
 			const opened = fstatSync(fileHandle);
 			// A second hard link would let a store unlink a name it never created.
 			if (!opened.isFile() || opened.nlink !== 1) unsafe();
 			beforeUnlink?.();
-			let named: ReturnType<typeof lstatSync>;
-			try {
-				named = lstatSync(anchoredFile);
-			} catch (error) {
-				if (nodeErrorCode(error) === "ENOENT") return false;
-				unsafe();
-			}
+			const namedFile = existingPathOperation(() => lstatSync(anchoredFile()), unsafe);
+			if (!namedFile.found) return false;
+			const named = namedFile.value;
 			if (named.isSymbolicLink() || !named.isFile() || named.dev !== opened.dev || named.ino !== opened.ino) unsafe();
-			try {
-				unlinkSync(anchoredFile);
-			} catch (error) {
-				if (nodeErrorCode(error) === "ENOENT") return false;
-				unsafe();
-			}
+			const unlinked = existingPathOperation(() => unlinkSync(anchoredFile()), unsafe);
+			if (!unlinked.found) return false;
 			return true;
 		} finally {
 			closeSync(fileHandle);

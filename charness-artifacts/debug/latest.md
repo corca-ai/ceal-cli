@@ -1,137 +1,130 @@
-# Debug Review
-Date: 2026-08-05
+# Darwin Local Store Lock Debug
+Date: 2026-08-09
 
 ## Problem
 
-After a previously successful Calendar call, `ceal capabilities --fresh` returned
-`ok: false`, `status: unavailable`, and `error.kind: gateway_request_failed`.
+The first pushed `0.76.0` candidate passed Linux but failed the macOS full gate
+because every local-store writer that acquired the shared lock returned its
+typed `unsafe_store` failure.
 
 ## Correct Behavior
 
-Given a current email-first Ceal session and a granted Calendar Profile, live
-capability discovery should return Calendar capability contracts and bounded
-targets; a read-only Calendar request should then complete with verified
-Gateway readback.
+Given an owner-only local store on Linux or macOS, when a Ceal command acquires
+its lock, then the lock must publish one complete owner generation atomically,
+exclude concurrent writers, and never follow a substituted store parent.
 
 ## Observed Facts
 
-- Host is `narnia`; installed binary is `/home/hwidong/.local/bin/ceal`, version
-  `0.72.9`, protocol `1.3.0`.
-- `ceal session` reports the email-first subject, `profile:work`, and a current
-  access token after renewal.
-- The local discovery cache from `2026-08-04T22:37:40Z` contains
-  `calendar.availability`, `calendar.event.get`, and `calendar.event.search`.
-- The local receipt spool records a successful `calendar.event.get` at
-  `2026-08-04T22:39:56Z`.
-- Repeated `ceal capabilities --profile profile:work --fresh` calls fail at the
-  live catalog route with `gateway_request_failed`; no provider action is
-  claimed for those requests.
-- Live target selection succeeds for `calendar.event.search --match calendar`.
-  It returns two granted targets, both advertising `readiness: degraded`.
-- A bounded search on `target:calendar:adf1817b9c0b90ff27bbc5c2` for
-  2026-08-05 KST completed. Receipt `ceal:5ae5e1e2-f04d-4214-a1fb-3fb4dbc86561:call`
-  is `verified`, `authorization: allowed`, `outcome: succeeded`.
+- GitHub run `31327563111`, macOS job `93280263494`, reached the worker suite
+  and reported 51 failures; representative receipt-spool failures originate in
+  `createLock` and surface `CealReceiptSpoolStoreError: unsafe_store`.
+- The same commit passed the local Linux full gate and its pre-push iteration
+  gate. The failure is host-specific, not a general lock-state fixture failure.
+- `anchorLockParent` maps the open parent descriptor to `/proc/self/fd` on Linux
+  and `/dev/fd` on Darwin, then appends child names below that path.
+- `removeOwnedFile` independently made the same mapping, so its two macOS
+  substitution/cleanup tests fail at the same descriptor-path boundary.
+- Darwin exposes `/dev/fd/<n>` as a descriptor entry, not a traversable
+  directory. Apple's `fd(4)` description and the observed stack both contradict
+  the Linux-derived assumption that children can be created below it.
 
 ## Reproduction
 
-```sh
-ceal capabilities --profile profile:work --fresh
-```
-
-The smallest successful contrast is:
-
-```sh
-ceal capabilities targets --profile profile:work \
-  --capability calendar.event.search --match calendar --limit 5
-```
+- Released runner reproduction: `npm run check` in job `93280263494` on
+  `macos-15-arm64`.
+- Smallest checked-in consumer: the first acquisition in
+  `packages/ceal-worker-cli/test/local-store-lock.test.mjs`; it succeeds on
+  Linux and reaches `onUnsafe` from `createLock` on the macOS runner.
 
 ## Candidate Causes
 
-- The Gateway full-catalog route currently emits a new or unrecognized typed
-  error; the target-scoped route remains healthy.
-- Full-catalog serialization or policy projection is failing while the bounded
-  Calendar projection remains valid.
-- The local session, TLS path, or Calendar grant is invalid.
+- Darwin `/dev/fd/<n>` does not support child-path traversal used for the lock
+  candidate and stable name.
+- APFS directory-rename collision rules differ from Linux and reject candidate
+  publication after candidate creation.
+- macOS runner umask or mode reporting widens the parent/candidate mode and the
+  safety checks refuse it.
+- Parallel tests leave a live or malformed lock generation that contaminates
+  later cases.
 
 ## Hypothesis
 
-- The failure is route-specific at the Gateway catalog boundary, and the exact
-  server reason is hidden by the installed worker's fallback classifier.
-  Disconfirmer: a successful full-catalog discovery response, or a Gateway
-  audit/log record exposing a different failure class.
+- The static Darwin `/dev/fd/<parent-fd>/<child>` anchor is the cause. If true,
+  resolving the open descriptor to its current real directory path, verifying
+  that path against the descriptor identity, and using that verified path for
+  the operation will make the smallest lock test and its parent-swap sibling
+  pass on macOS. | disconfirmer: a macOS probe shows descriptor realpath cannot
+  be resolved/re-anchored, or the focused lock suite still fails before rename.
 
 ## Verification
 
-- Confirmed route-specific behavior: full catalog fails, target selection
-  succeeds, and Calendar provider read plus receipt readback succeeds in the
-  same current session.
-- Disconfirmed a general session/TLS/Calendar-grant failure as the cause of
-  this read: the same binding reached the provider with `authorization: allowed`.
-- Exact Gateway-side cause remains candidate because the CLI renders unknown
-  Gateway failure codes as `gateway_request_failed`.
+- Confirmed at the failing boundary: all representative failures enter
+  `createLock`; Linux passes; the one platform branch that differs supplies a
+  non-traversable Darwin descriptor path.
+- Pending repair proof: focused macOS lock tests and the complete macOS gate.
 
 ## Root Cause
 
-Confirmed at the observable boundary: the full capability-catalog discovery
-route is rejected while scoped target discovery and Calendar calls work. The
-underlying Gateway rejection reason is not recoverable from this worker result;
-`classifyGatewayFailure` falls back to `gateway_request_failed` for an unknown
-or unrecognized error code (`packages/ceal-worker-cli/src/call-result-output.ts:360`).
+The lock treated Linux procfs descriptor links and Darwin descriptor devices as
+one path abstraction. Both identify an open descriptor, but only the Linux path
+can be traversed as the opened directory. The shared lock therefore refused its
+first ordinary Darwin mutation before any user state could be written.
 
 ## Invariant Proof
 
-- Invariant: when Gateway discovery emits a route-specific failure, the worker
-  must surface the exact safe failure class before an agent claims catalog
-  availability.
-- Producer Proof: live Gateway target discovery and the verified Calendar
-  receipt prove the scoped routes are independently reachable; the full catalog
-  produces the structured rejection envelope.
-- Final-Consumer Proof: installed `ceal` surfaces `ok: false` and
-  `error.kind: gateway_request_failed` for the full catalog.
-- Interface-Shape Sibling Scan: compared catalog discovery, target selection,
-  and call/readback routes; only the unfiltered catalog route fails.
-- Non-Claims: no Gateway logs, raw error code, or full catalog response was
-  available; no policy or provider configuration was changed.
+- Invariant: when the lock opens an owner-only store parent, every later lock
+  mutation must resolve to that same directory identity before the CLI can
+  report the local operation as successful.
+- Producer Proof: `anchorLockParent` holds an `O_DIRECTORY|O_NOFOLLOW` handle
+  and its `fstat` identity.
+- Final-Consumer Proof: pending; the macOS full gate must exercise session,
+  cache, receipt, and guide consumers without `unsafe_store`.
+- Interface-Shape Sibling Scan: every store reaches the same shared lock; the
+  candidate publish, stale quarantine, and release paths all consume its path.
+- Non-Claims: no released macOS binary or live Gateway/provider call is proven.
 
 ## Detection Gap
 
-- Client error classifier | unknown Gateway codes collapse into the generic
-  `gateway_request_failed` (`packages/ceal-worker-cli/src/call-result-output.ts:360`)
-  | expose a safe, versioned catalog-route failure class or Gateway diagnostic
-  reference without leaking provider or credential data.
+- Local full gate | ran only on Linux before push | require the existing macOS
+  `check.yml` leg to pass before the release dry run or tag.
+- Lock unit tests | asserted substitution safety but not that the descriptor
+  anchor itself is traversable on every supported host | retain a Darwin path
+  resolution/re-anchoring assertion through the focused suite.
 
 ## Sibling Search
 
-- Mental model: a successful provider call implies every discovery route is
-  healthy; the live evidence disproves that.
-- Discovery-route axis: full catalog versus bounded target selection | decision:
-  keep route-specific status and diagnose independently | proof: live commands.
-- Execution axis: Calendar search call versus discovery | decision: call only
-  with Gateway-issued target refs and contracts | proof: verified receipt.
-- cross-file: Gateway error taxonomy and client `classifyGatewayFailure` need a
-  versioned contract; follow-up: catalog-discovery-error-taxonomy.
+- Mental model: a descriptor exposed in a filesystem namespace is necessarily
+  a directory path on every POSIX host.
+- same layer: candidate publish, wait/quarantine, release, owned-file cleanup |
+  decision: one platform-aware resolver, not copied fallbacks | proof: source
+  census.
+- abstraction up: session, discovery, receipt, and guide stores | decision:
+  unchanged callers; all consume the shared invariant | proof: CI failure set.
+- specialization down: Linux `/proc/self/fd` | decision: retain the stronger
+  directly traversable anchor | proof: full Linux gate.
+- cross-file: release workflow macOS leg | decision: keep it mandatory before
+  tag; it is the final-consumer host proof.
 
 ## Seam Risk
 
-- Interrupt ID: capability-catalog-gateway-seam
-- Risk Class: external-seam, repeated-symptom
-- Seam: Gateway full discovery response/error -> installed worker classifier.
-- Disproving Observation: a fresh full catalog succeeds or exposes a typed
-  error that the worker already preserves.
-- What Local Reasoning Cannot Prove: the Gateway's current server-side route
-  condition or its provider configuration.
+- Interrupt ID: darwin-local-store-lock-anchor
+- Risk Class: external-seam, host-disproves-local
+- Seam: Node filesystem path API -> Darwin descriptor namespace -> local store.
+- Disproving Observation: the focused and full macOS suites acquire, contend,
+  quarantine, and release without acting on a substituted parent.
+- What Local Reasoning Cannot Prove: Darwin descriptor realpath behavior after
+  a parent rename; the hosted macOS runner must prove it.
 - Generalization Pressure: factor-now
 
 ## Interrupt Decision
 
 - Resolution: open
-- Critique Required: no
+- Critique Required: yes
 - Next Step: spec
-- Handoff Artifact: charness-artifacts/spec/2026-08-05-capability-catalog-discovery-error-contract.md
+- Handoff Artifact: charness-artifacts/spec/2026-08-09-darwin-local-store-lock-anchor.md
 
 ## Prevention
 
-Keep scoped target discovery and execution usable as separate proof levels, but
-preserve a safe Gateway error taxonomy for the catalog route so an agent can
-distinguish transient Gateway rejection, catalog serialization failure, and
-authorization denial without guessing.
+Treat descriptor identity and descriptor-path traversal as separate platform
+capabilities. Keep the macOS full gate ahead of every release tag and preserve
+the parent-substitution regression at the shared lock boundary.
