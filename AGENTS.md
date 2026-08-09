@@ -18,6 +18,8 @@ belongs in one of them, with the rule left here.
   the route/dispatch table are shaped the way they are.
 - [docs/release-and-enrollment.md](docs/release-and-enrollment.md) — the two
   standing procedures, step by step.
+- [docs/defect-sweep.md](docs/defect-sweep.md) — how to sweep, and the one
+  measurement that would say whether the defect stream is converging.
 - [docs/operator-acceptance.md](docs/operator-acceptance.md) — what a maintainer
   can prove without a Gateway session, and what a release tag needs first.
 - `worker-release-inputs.json`, `gateway-protocol-handoff-lock.json` — release and
@@ -146,12 +148,12 @@ belongs in one of them, with the rule left here.
 
 ## One Fact, One Home
 
-The measured-number rule above is one instance of a law this repository has
-rediscovered locally at least a dozen times and never written down whole —
-`rg -n "cannot desync|one table|second copy|derive from|hand-copy" src scripts test`
-finds each rediscovery in its own words. Written once, it is: **a fact gets one
-home, and every other place that needs it derives from that home.** Its two
-violations are the same break seen from either side.
+The measured-number rule above is one instance of a law this repository had
+rediscovered locally, in its own words, at many sites before it was ever written
+down whole — [docs/defect-sweep.md](docs/defect-sweep.md) owns the search that
+lists them. Written once, it is: **a fact gets one home, and every other place
+that needs it derives from that home.** Its two violations are the same break
+seen from either side.
 
 - **One concept, several representations.** Two implementations of one framing
   rule, two writers spelling out one envelope, a literal in a shell script for a
@@ -165,6 +167,7 @@ violations are the same break seen from either side.
 Every defect found in the 2026-08-09 sweeps sat on one side or the other, and the
 places where a fact was forced into one home — `CEAL_SUBCOMMANDS` deriving routes
 and dispatch, `CLIENT_SESSION_FAILURES` deriving both readers — produced none.
+This section itself is one home: a rule stated here is not restated elsewhere.
 
 Two working rules follow. **When you fix an invariant, look for its other half**:
 the sweeps' most productive move was finding where an already-learned rule was
