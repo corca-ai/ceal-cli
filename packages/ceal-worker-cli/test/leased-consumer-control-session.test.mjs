@@ -457,31 +457,32 @@ test("the abort settles before teardown, so destroy's own error cannot become th
 // FIFO-only check refused the only channel production ever supplies. A faked
 // stat would have agreed with whichever assumption the test author held, which
 // is how the wrong one survived in the first place.
-// The shutdown hang, pinned by whether a child process actually exits.
+// The shutdown hang, pinned by whether a child process actually exits, on the
+// descriptor kind Gateway actually supplies.
 //
 // A blocking descriptor read through `fs.createReadStream({ fd })` is served on
 // a libuv threadpool thread, and once that read is in flight nothing retires it:
 // `destroy()` does not, `close` never fires, and closing the descriptor
 // afterwards does not either. The shutdown await never settles and the process
-// never exits. Bounding the await — the fix `docs/debt.md` used to name — makes
-// `closeReadable` return and leaves the process alive, which reads as fixed.
+// never exits. Bounding the await makes `closeReadable` return and leaves the
+// process alive, which reads as fixed — so the assertion here is a child's exit,
+// not a value in this process.
 //
-// The assertion is therefore a child's exit, not a value in this process, and
-// both arms run. The control arm builds the stream the old way and must hang;
+// `stdio: "pipe"` is deliberate and is the whole reason this is faithful: on
+// Linux that hands the child a Unix socketpair end, which is what Gateway
+// launches the worker with. The test above pins that fact separately.
+//
+// Each arm spawns its own child and so gets its own descriptor. That is not
+// tidiness. An earlier version reused one descriptor across both arms, and
+// because `net.Socket` sets `O_NONBLOCK` on the shared open file description,
+// the second arm inherited a non-blocking descriptor, read `EAGAIN`, and did not
+// hang — which was written up as a limitation of the harness before the review
+// re-ran it.
+//
+// Both arms run. The control arm builds the stream the old way and must hang;
 // without it, the fixed arm's pass would be indistinguishable from a harness
 // that could never fail.
-//
-// The child opens its own FIFO rather than being handed one, and that is a
-// limitation to state rather than hide. Handing the descriptor down through
-// `stdio` does *not* reproduce: the child's read comes back `EAGAIN` instead of
-// parking, even though the descriptor arrives with `O_NONBLOCK` clear
-// (`/proc/self/fdinfo/5`). So this pins the property the fix establishes — which
-// constructor strands a process on a blocking descriptor — and does not prove
-// how Gateway's socketpair behaves on the real launch path. That reachability is
-// unproven here.
-test("a parked read on a blocking descriptor does not keep the worker alive", (context) => {
-	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-shutdown-"));
-	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+test("a parked read on an inherited socketpair does not keep the worker alive", () => {
 	const transport = `file://${path.join(DIST, "private-worker-transport.js")}`;
 	const run = (open) =>
 		spawnSync(
@@ -490,15 +491,9 @@ test("a parked read on a blocking descriptor does not keep the worker alive", (c
 				"--input-type=module",
 				"-e",
 				`import(${JSON.stringify(transport)}).then(async (m) => {
-					const { execFileSync } = await import("node:child_process");
-					const { openSync } = await import("node:fs");
-					const nodePath = await import("node:path");
-					const fifo = nodePath.join(${JSON.stringify(scratch)}, "fifo-" + process.pid);
-					execFileSync("mkfifo", [fifo]);
-					// The read-write end keeps the reader from seeing EOF and keeps
-					// the read-only open below from blocking on a missing writer.
-					openSync(fifo, "r+");
-					const fd = openSync(fifo, "r");
+					const { fstatSync } = await import("node:fs");
+					if (!fstatSync(5).isSocket()) throw new Error("fixture did not supply a socket on FD 5");
+					const fd = 5;
 					const stream = ${open};
 					void (async () => { try { for await (const chunk of stream) void chunk; } catch { /* teardown */ } })();
 					await new Promise((resolve) => setTimeout(resolve, 100));
@@ -508,7 +503,7 @@ test("a parked read on a blocking descriptor does not keep the worker alive", (c
 			],
 			// No `process.exit` in the child on purpose: whether Node's loop drains
 			// is the whole question, and an explicit exit would answer it falsely.
-			{ stdio: ["ignore", "pipe", "inherit"], encoding: "utf8", timeout: 5_000 },
+			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", "pipe"], encoding: "utf8", timeout: 5_000 },
 		);
 
 	const fixed = run("m.openInheritedReadable(fd)");
@@ -518,7 +513,8 @@ test("a parked read on a blocking descriptor does not keep the worker alive", (c
 
 	// The control. If this ever stops hanging, the harness has stopped being able
 	// to see the defect and the three assertions above have stopped meaning
-	// anything.
+	// anything. A crash or a bad fixture gives `signal: null` with a non-zero
+	// status, so this cannot pass by failing early.
 	const blocking = run('(await import("node:fs")).createReadStream("/dev/null", { fd, autoClose: true, highWaterMark: 4096 })');
 	assert.notEqual(blocking.signal, null, "the control arm must hang, or this test cannot fail");
 });

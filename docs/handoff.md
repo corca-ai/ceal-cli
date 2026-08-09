@@ -39,8 +39,10 @@ Read the facts rather than trusting them here; each line names how.
   Bounding `closeReadable` settles the await and leaves the process alive; the
   fix is `openInheritedReadable` adopting the descriptor with `net.Socket`. The
   test's control arm hangs on purpose so the fixed arm cannot pass vacuously, and
-  reverting the fix turns it red. What stays open is a reachability claim, not the
-  defect — [debt.md](debt.md) says which and why it may not be worth a slice.
+  reverting the fix turns it red. It is pinned on the descriptor Gateway actually
+  supplies, and the hang reproduces there — an earlier reading that it did not
+  came from the harness, not the tree. [debt.md](debt.md) keeps both wrong
+  readings, because the second one survived a commit.
 - **The Gateway blocker is an order, not a deadlock, and the unrun step is
   theirs.** Their handoff workflow triggers on its own tag and names no worker
   input — `rg -n 'ceal-cli|vendor/|worker'` over
