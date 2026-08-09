@@ -306,6 +306,13 @@ export function sanitizedAcceptanceRecord(packet) {
 	const call = packet.bounded_capability_call;
 	return {
 		schema_version: "ceal.worker_acceptance_result.v2",
+		// The shipped guide tells an agent to branch on `ok`, "which every command
+		// answers". The installed emitter learned that and this one did not, so the
+		// artifact a maintainer produces from a checkout read as `ok: undefined` to
+		// any reader following the instruction. Same invariant, the other half.
+		command: "ceal",
+		ok: true,
+		status: "emitted",
 		emitted_by: "source_checkout",
 		installed_client: {
 			platform: client.platform,
@@ -344,7 +351,20 @@ export function sanitizedAcceptanceRecord(packet) {
 					elapsed_ms: call.elapsed_ms,
 					evidence: call.evidence,
 					request_ref: call.request_ref,
-					receipt: call.receipt,
+					// Projected by declared key, not copied: the installed emitter builds
+					// this row the same way, and passing the object through is how an
+					// identity ref rode into a published record in the first place.
+					receipt: call.receipt
+						? {
+								readback_status: call.receipt.readback_status,
+								outcome: call.receipt.outcome,
+								authorization: call.receipt.authorization,
+								audit_refs: call.receipt.audit_refs,
+								gateway_elapsed_ms: call.receipt.gateway_elapsed_ms,
+								exit_code: call.receipt.exit_code,
+								elapsed_ms: call.receipt.elapsed_ms,
+							}
+						: null,
 				}
 			: null,
 		non_claims: [

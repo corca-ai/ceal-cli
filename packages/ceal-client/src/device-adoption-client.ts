@@ -103,7 +103,7 @@ async function exchange(endpoint: URL, body: unknown, fetchFn: typeof globalThis
 			redirect: "error",
 			signal: controller.signal,
 		});
-		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, invalidResponse);
+		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
 		if (!declaresJsonContentType(response)) invalidResponse();
 		try {
 			return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));

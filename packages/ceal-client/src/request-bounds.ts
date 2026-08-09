@@ -46,7 +46,12 @@ export function resolveRequestBounds(
 	return { fetchFn, timeoutMs };
 }
 
-/** The one spelling of the content type every Gateway response must declare. */
+/**
+ * The content type the three session-lifecycle clients require, spelled once for
+ * them. Not the whole package's: `http-transport.ts` keeps a deliberately more
+ * permissive check that admits `application/…+json`, because the Gateway result
+ * route may negotiate a suffixed type and a session exchange may not.
+ */
 export function declaresJsonContentType(response: Response): boolean {
 	return response.headers.get("content-type")?.toLowerCase().startsWith("application/json") === true;
 }
@@ -63,6 +68,15 @@ function mergeChunks(chunks: readonly Uint8Array[], total: number): Uint8Array {
 }
 
 /**
+ * How strictly a declared `content-length` is read. The Gateway transport and the
+ * three session clients disagree, and the disagreement is deliberate: `digits`
+ * refuses anything that is not a plain run of digits, `safe_integer` accepts what
+ * `Number()` parses and refuses what it cannot represent exactly. Naming the two
+ * is what keeps a shared reader from quietly picking one for both.
+ */
+export type DeclaredLengthRule = "digits" | "safe_integer";
+
+/**
  * Reads a response body to EOF without ever retaining more than `maximum` bytes,
  * refusing before the first read when the declared `content-length` already says
  * it will not fit.
@@ -77,13 +91,24 @@ function mergeChunks(chunks: readonly Uint8Array[], total: number): Uint8Array {
 export async function readBoundedResponseBody(
 	response: Response,
 	maximum: number,
+	declaredLength: DeclaredLengthRule,
 	refuseMalformed: () => never,
 	refuseTooLarge: () => never = refuseMalformed,
 ): Promise<Uint8Array> {
 	const declared = response.headers.get("content-length");
 	if (declared !== null) {
-		if (!/^\d+$/u.test(declared)) refuseMalformed();
-		if (Number(declared) > maximum) refuseTooLarge();
+		if (declaredLength === "digits") {
+			// `"1e3"`, `" 12 "` and `""` are malformed here and are values there.
+			if (!/^\d+$/u.test(declared)) refuseMalformed();
+			if (Number(declared) > maximum) refuseTooLarge();
+		} else {
+			const parsed = Number(declared);
+			// A header too large to be a safe integer is malformed here and merely
+			// too-large under `digits`. The two rules genuinely disagree, which is why
+			// this is a named choice at each call site and not one tidied predicate.
+			if (!Number.isSafeInteger(parsed) || parsed < 0) refuseMalformed();
+			if (parsed > maximum) refuseTooLarge();
+		}
 	}
 	if (!response.body) refuseMalformed();
 	const reader = response.body.getReader();

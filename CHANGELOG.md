@@ -33,9 +33,12 @@ Three of them hand-copied a timeout default, the `1..120_000` ceiling, a
 byte-capped response reader and the JSON content-type check; the fourth declared
 its own ceiling. Raising the timeout an operator actually waits meant finding
 four literals in four files with a green gate either way. Each transport still
-owns its own default and its own cap. The Gateway transport's distinction between
-`response_too_large` and `invalid_response` is now a parameter the session
-clients deliberately collapse, rather than a difference that could go missing.
+owns its own default and its own cap. Two differences that a shared reader would
+have quietly picked a side on are named parameters instead: the Gateway transport
+distinguishes `response_too_large` from `invalid_response` where the session
+clients collapse both, and the two read a declared `content-length` under
+genuinely different rules — `"1e3"` is a length to one and malformed to the
+other. That branch had no test on either side; it does now.
 
 **The status-versus-body guard in the Gateway transport is tested.** A non-2xx
 response carrying a body that claims `ok: true` is refused, and the decoder
@@ -68,6 +71,12 @@ there and unused by this one path.
   reads the installed binary's rendered stdout — so a contract test binds the
   script's output to the declaration. Under `.v1` they had drifted into different
   field sets with nothing checking.
+
+Both emitters also answer `ok`, `command` and `status` now. The shipped guide
+tells an agent to branch on `ok`, "which every command answers"; the installed
+emitter had learned that and the checkout-side one had not, so the artifact a
+maintainer produces from a checkout read as `ok: undefined` — falsy — to a reader
+following the instruction. The same fix at the other half of its own invariant.
 
 Records already published under `docs/acceptance/` stay `.v1` and stay as
 written.

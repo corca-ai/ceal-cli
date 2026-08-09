@@ -138,6 +138,44 @@ function readChecksum(file: string, name: string): string | undefined {
  * @testOnly The values are used by `projectBoundedCall` below; the export exists
  * so the contract test asserts against this declaration rather than a copy.
  */
+export const CEAL_ACCEPTANCE_TOP_LEVEL_KEYS = Object.freeze([
+	"schema_version",
+	"command",
+	"ok",
+	"status",
+	"emitted_by",
+	"installed_client",
+	"gateway_protocol_input",
+	"guide",
+	"gateway_session",
+	"bounded_capability_call",
+	"non_claims",
+] as const);
+
+/**
+ * `exit_code` is null on the installed side, which observes no subprocess to have
+ * one, and the key stays so both emitters answer one key set.
+ *
+ * @testOnly Used by `projectByKeys` below; the export exists so the contract test
+ * asserts against this declaration rather than a copy.
+ */
+export const CEAL_ACCEPTANCE_GUIDE_KEYS = Object.freeze(["status", "exit_code", "registered_host_count"] as const);
+
+/** @testOnly Same reason as the list above. */
+export const CEAL_ACCEPTANCE_SESSION_KEYS = Object.freeze([
+	"reached",
+	"exit_code",
+	"elapsed_ms",
+	"instance_ref",
+	"profile_ref",
+	"negotiated_protocol_version",
+	"host_decision",
+	"catalog_source",
+	"live_gateway_checked",
+	"capability_count",
+] as const);
+
+/** @testOnly Same reason as the lists above. */
 export const CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS = Object.freeze([
 	"capability",
 	"target",
@@ -235,18 +273,27 @@ export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<
 			client_protocol_version: parts.clientProtocolVersion,
 		},
 		gateway_protocol_input: release.protocol,
-		guide: { status: parts.guide.status, registered_host_count: parts.guide.registered_host_count },
-		gateway_session: {
-			reached: true,
-			elapsed_ms: session.elapsed_ms,
-			instance_ref: session.instance_ref,
-			profile_ref: session.profile_ref,
-			negotiated_protocol_version: session.negotiated_protocol_version,
-			host_decision: session.host_decision,
-			catalog_source: session.catalog_source,
-			live_gateway_checked: true,
-			capability_count: session.capability_count,
-		},
+		guide: projectByKeys(
+			{ status: parts.guide.status, exit_code: null, registered_host_count: parts.guide.registered_host_count },
+			CEAL_ACCEPTANCE_GUIDE_KEYS,
+		),
+		gateway_session: projectByKeys(
+			{
+				reached: true,
+				// This command IS the binary; there is no spawned process whose exit code
+				// it could report. The key stays so both emitters answer one key set.
+				exit_code: null,
+				elapsed_ms: session.elapsed_ms,
+				instance_ref: session.instance_ref,
+				profile_ref: session.profile_ref,
+				negotiated_protocol_version: session.negotiated_protocol_version,
+				host_decision: session.host_decision,
+				catalog_source: session.catalog_source,
+				live_gateway_checked: true,
+				capability_count: session.capability_count,
+			},
+			CEAL_ACCEPTANCE_SESSION_KEYS,
+		),
 		bounded_capability_call: projectBoundedCall(parts.boundedCall),
 		non_claims: acceptanceNonClaims(parts),
 	};
@@ -259,12 +306,17 @@ export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<
  * a declared key that the caller omits still appears, as `null`, so the two
  * emitters cannot answer one schema with different key sets.
  */
+/** Every declared key, `null` where the caller had none, and nothing else. */
+function projectByKeys(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+	return Object.fromEntries(keys.map((key) => [key, source[key] ?? null]));
+}
+
 function projectBoundedCall(call: CealAcceptanceBoundedCall | null): Record<string, unknown> | null {
 	if (!call) return null;
 	const source = call as unknown as Record<string, unknown>;
-	const row = Object.fromEntries(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS.map((key) => [key, source[key] ?? null]));
+	const row = projectByKeys(source, CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS);
 	const receipt = source.receipt as Record<string, unknown> | null | undefined;
-	row.receipt = receipt ? Object.fromEntries(CEAL_ACCEPTANCE_RECEIPT_KEYS.map((key) => [key, receipt[key] ?? null])) : null;
+	row.receipt = receipt ? projectByKeys(receipt, CEAL_ACCEPTANCE_RECEIPT_KEYS) : null;
 	return row;
 }
 

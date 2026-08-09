@@ -132,6 +132,7 @@ function readBoundedResponse(response: Response, maximum: number): Promise<Uint8
 	return readBoundedResponseBody(
 		response,
 		maximum,
+		"safe_integer",
 		() => {
 			throw new CealHttpTransportError("invalid_response", response.status);
 		},

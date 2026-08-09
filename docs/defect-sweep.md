@@ -111,6 +111,14 @@ enumeration's blind spot is real and this is its instrument.
 refuted on evidence, not waved off. The lenses that read a whole file said so;
 none of the six left an area unstated.
 
+**The fresh-eye review of the fixes found seven more, and three were the fixer's
+own.** A projection applied at one emitter and not its sibling; a binding test
+that compared a fixture against itself and so could not fail; a commit message
+claiming one key set where two still differed. That is the same shape the sweep
+was about, produced while fixing it — which is the argument for the review being
+mandatory rather than discretionary. Both reviews in this session found a real
+defect the gate could not see.
+
 ## The finite task the sweeps converged on
 
 `AGENTS.md` `## One Fact, One Home` states the law. Its second working rule names

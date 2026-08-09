@@ -87,7 +87,7 @@ async function requestSession<T>(input: {
 			redirect: "error",
 			signal: controller.signal,
 		});
-		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, invalidResponse);
+		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
 		if (!declaresJsonContentType(response)) invalidResponse();
 		let parsed: unknown;
 		try {

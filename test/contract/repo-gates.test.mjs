@@ -311,12 +311,18 @@ test("the linter and formatter both run, and both exclude the frozen package", (
 // A pipeline's status is the last command's without `pipefail`, so what a missing
 // `pipefail` can hide is a failure of whatever is to the LEFT. These produce text
 // and have no failure worth reading.
-const HARMLESS_PIPE_PRODUCER = /^(printf|echo|cat|ls|find|yes|seq)$/u;
+const HARMLESS_PIPE_PRODUCER = /^(printf|echo|cat|ls|find|yes|seq|sort)$/u;
 
 // The command that would actually run immediately left of a pipe: the first word
 // after the last shell separator or substitution opener.
+//
+// `{` and `(` open a group or a subshell, but `${var}` and `$(cmd)` are
+// expansions, not separators. Splitting on those made `printf "${a[@]}"` read as
+// a command named `a[@]}"` — so an argument could decide whether its own command
+// counted as harmless. `$(` still splits, because what follows it really is a
+// fresh command.
 function lastCommand(segment) {
-	const tail = segment.split(/\$\(|&&|\|\||;|\{|\(/u).pop() ?? "";
+	const tail = segment.split(/\$\(|&&|\|\||;|(?<!\$)\{|(?<!\$)\(/u).pop() ?? "";
 	return tail.trim().split(/\s+/u)[0] ?? "";
 }
 
@@ -381,30 +387,58 @@ test("every workflow run block that reads a pipeline's status asks for pipefail"
 // the rollback lane's published-inventory parser, whose entire job is to name
 // what is wrong with a published inventory.
 //
-// Same stated limit as the pipe sweep: it recognises the construct written with
-// a space, `< <(`, which is the only way bash accepts it.
+// Both spellings are scanned: redirected (`< <(cmd)`) and argument position
+// (`diff <(cmd) <(cmd)`), and a substitution whose body runs onto later lines is
+// read to its matching paren rather than skipped — the rollback lane's own
+// offender was written that way, so a line-at-a-time scan could not see the very
+// defect this gate exists for. A substitution is judged by EVERY command in its
+// pipeline, using the pipe sweep's own harmless-producer vocabulary, so
+// `<(printf x | node …)` is an offender even though its head is harmless.
+/** Every process-substitution body in one run block, each read to its matching paren. */
+function processSubstitutions(run) {
+	const bodies = [];
+	for (let index = run.indexOf("<("); index !== -1; index = run.indexOf("<(", index + 2)) {
+		if (/^\s*#/u.test(run.slice(run.lastIndexOf("\n", index) + 1, index))) continue;
+		let depth = 1;
+		let cursor = index + 2;
+		while (cursor < run.length && depth > 0) {
+			if (run[cursor] === "(") depth += 1;
+			else if (run[cursor] === ")") depth -= 1;
+			cursor += 1;
+		}
+		bodies.push(run.slice(index + 2, depth === 0 ? cursor - 1 : run.length));
+	}
+	return bodies;
+}
+
 test("no workflow run block reads a producer's output through a process substitution", () => {
 	const offenders = [];
 	forEachWorkflowRunBlock((step, where) => {
-		for (const line of step.run.split("\n")) {
-			if (/^\s*#/u.test(line)) continue;
-			const substitution = /<\s+<\((.*)$/u.exec(line)?.[1];
-			if (substitution === undefined) continue;
-			// A process substitution opens with its producer, so the first word is
-			// the command whose status is at stake — no `lastCommand` walk needed.
-			// What IS shared with the pipe sweep is the answer to "which producers
-			// carry no status worth reading", so the two halves of one rule cannot
-			// come to disagree about what is harmless.
-			const producer = substitution.trim().split(/\s+/u)[0] ?? "";
-			if (HARMLESS_PIPE_PRODUCER.test(producer)) continue;
-			offenders.push(`${where} :: ${line.trim()}`);
+		for (const body of processSubstitutions(step.run)) {
+			const stages = body.split(" | ").map((stage) => lastCommand(stage));
+			if (stages.every((stage) => HARMLESS_PIPE_PRODUCER.test(stage))) continue;
+			offenders.push(`${where} :: ${body.split("\n")[0].trim()}`);
 		}
 	});
-	// Positive control: the construct this searches for is one the sweep can see,
-	// and a producer that can fail is not waved through as harmless.
-	assert.match("mapfile -t a < <(node -e 1)", /<\s+<\(/u);
+	// Positive controls: both spellings are seen, a body that runs onto later lines
+	// is seen, a pipeline is judged by every stage rather than its head, and a
+	// harmless producer is still waved through.
+	assert.deepEqual(processSubstitutions("mapfile -t a < <(node -e 1)"), ["node -e 1"]);
+	assert.deepEqual(processSubstitutions("diff -u <(printf a) <(node -e 1)"), ["printf a", "node -e 1"]);
+	assert.deepEqual(processSubstitutions("mapfile -t a < <(\n  node -e 1\n)"), ["\n  node -e 1\n"]);
 	assert.equal(HARMLESS_PIPE_PRODUCER.test(lastCommand("node -e 1")), false);
-	assert.equal(HARMLESS_PIPE_PRODUCER.test(lastCommand("printf '%s' x")), true);
+	assert.equal(
+		"printf x | node -e 1".split(" | ").every((stage) => HARMLESS_PIPE_PRODUCER.test(lastCommand(stage))),
+		false,
+		"a harmless head must not wave through a pipeline whose tail can fail",
+	);
+	assert.equal(
+		"printf x | sort".split(" | ").every((stage) => HARMLESS_PIPE_PRODUCER.test(lastCommand(stage))),
+		true,
+	);
+	// An expansion in the arguments must not decide what the command is called.
+	assert.equal(lastCommand(`printf '%s' "\${expected[@]}"`), "printf");
+	assert.equal(lastCommand("{ node -e 1"), "node");
 	assert.deepEqual(offenders, [], "a run block reads a process substitution and would lose the producer's exit status");
 });
 

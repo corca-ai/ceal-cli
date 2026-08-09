@@ -93,13 +93,6 @@
     },
     {
       "surface": "code",
-      "id": "5b8a4b02318d3bd9",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-client/src/enrollment-client.ts exchange against device-adoption-client.ts start/poll. What is left after this session moved the timeout resolution, the configured-timeout ceiling, the content-type predicate and the bounded read into request-bounds.ts is the part that is genuinely each route's own: a different Gateway route, a different request schema constant, a different decoder, and different input validation. The remaining similarity is the AbortController/setTimeout/try-finally frame around them, which is the shape of any timed fetch and carries no fact that could drift."
-    },
-    {
-      "surface": "code",
       "id": "5c6b98e2882e1e45",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -209,6 +202,13 @@
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "packages/ceal-worker-cli: the Uint8Array concatenation tail is identical, but the rest of each reported span is not — control-session:578-644 is its abort-aware postUnixSocket with a deadline and four error names, and the carrier's own postUnixSocket is a different function with different error names and a different byte cap. Within the control session there is one concat site, so there is nothing to hoist locally either. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "c57b5f9c174eae3d",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Rotated from 5b8a4b02318d3bd9 because the declared-length rule became a named argument at each call site. packages/ceal-client/src/enrollment-client.ts exchange against device-adoption-client.ts start/poll. What is left after this session moved the timeout resolution, the configured-timeout ceiling, the content-type predicate and the bounded read into request-bounds.ts is the part that is genuinely each route's own: a different Gateway route, a different request schema constant, a different decoder, and different input validation. The remaining similarity is the AbortController/setTimeout/try-finally frame around them, which is the shape of any timed fetch and carries no fact that could drift."
     },
     {
       "surface": "code",

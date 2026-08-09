@@ -5,7 +5,13 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS, CEAL_ACCEPTANCE_RECEIPT_KEYS } from "../../packages/ceal-worker-cli/dist/acceptance-record.js";
+import {
+	CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS,
+	CEAL_ACCEPTANCE_GUIDE_KEYS,
+	CEAL_ACCEPTANCE_RECEIPT_KEYS,
+	CEAL_ACCEPTANCE_SESSION_KEYS,
+	CEAL_ACCEPTANCE_TOP_LEVEL_KEYS,
+} from "../../packages/ceal-worker-cli/dist/acceptance-record.js";
 import {
 	buildAcceptancePacket,
 	inspectInstalledRelease,
@@ -465,11 +471,97 @@ test("a field added to the packet does not travel into the record by default", (
 // this test is what binds the script to them. Without it the two drifted into
 // different field sets under one schema version, which is what docs/debt.md
 // recorded and what a consumer of the record could not have detected.
-test("the checkout emitter's bounded-call row carries exactly the keys the record schema declares", () => {
+test("the checkout emitter answers the record schema with exactly its declared key sets", () => {
 	const packet = packetFixture();
+	// Fields the emitter was never told to emit are handed in on every nested
+	// object. An allow-list that copies its input by reference passes a key-set
+	// comparison against the fixture it was given, which is how the first cut of
+	// this test asserted nothing about the receipt row: it compared the emitter's
+	// output to the very object it had just handed the emitter.
+	packet.guide.registered_hosts = ["/home/someone/.claude/skills"];
+	packet.gateway_session.raw_access_token = "ceal_personal_secret";
 	packet.bounded_capability_call = {
 		capability: "message.search",
 		target: `target:${"a".repeat(8)}`,
+		status: "succeeded",
+		exit_code: 0,
+		elapsed_ms: 12,
+		evidence: "audited_call",
+		request_ref: "ceal:fixture:call",
+		operator_home: "/home/someone",
+		receipt: {
+			readback_status: "verified",
+			outcome: "succeeded",
+			authorization: "allowed",
+			audit_refs: ["gateway-audit:fixture"],
+			gateway_elapsed_ms: 7,
+			exit_code: 0,
+			elapsed_ms: 4,
+			membership_ref: "membership:someone",
+			subject_ref: "subject:someone",
+			events: [{ subject_ref: "subject:someone" }],
+		},
+	};
+	const record = sanitizedAcceptanceRecord(packet);
+	const sorted = (value) => [...value].sort();
+	assert.deepEqual(Object.keys(record).sort(), sorted(CEAL_ACCEPTANCE_TOP_LEVEL_KEYS));
+	assert.deepEqual(Object.keys(record.guide).sort(), sorted(CEAL_ACCEPTANCE_GUIDE_KEYS));
+	assert.deepEqual(Object.keys(record.gateway_session).sort(), sorted(CEAL_ACCEPTANCE_SESSION_KEYS));
+	assert.deepEqual(Object.keys(record.bounded_capability_call).sort(), sorted(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS));
+	assert.deepEqual(Object.keys(record.bounded_capability_call.receipt).sort(), sorted(CEAL_ACCEPTANCE_RECEIPT_KEYS));
+	assert.doesNotMatch(JSON.stringify(record), /membership_ref|subject_ref|operator_home|raw_access_token|registered_hosts|"events"/u);
+	// Positive control: the evidence each row exists to carry did survive.
+	assert.equal(record.bounded_capability_call.request_ref, "ceal:fixture:call");
+	assert.deepEqual(record.bounded_capability_call.receipt.audit_refs, ["gateway-audit:fixture"]);
+	// The shipped guide tells a reader to branch on `ok`; both emitters answer it.
+	assert.equal(record.ok, true);
+	assert.equal(record.command, "ceal");
+	assert.equal(record.status, "emitted");
+	assert.equal(record.emitted_by, "source_checkout");
+});
+
+// The two emitters cannot share an implementation, so this is what makes "one
+// schema, one key set" true rather than asserted. It compares two live outputs,
+// not either one against a list, so a key added to one alone turns it red.
+test("both emitters answer the record schema with the same key sets", async () => {
+	const { buildAcceptanceRecord } = await import("../../packages/ceal-worker-cli/dist/acceptance-record.js");
+	const installed = buildAcceptanceRecord({
+		release: {
+			platform: "linux-amd64",
+			release_version: "0.75.0",
+			artifact_sha256: "a".repeat(64),
+			artifact_state: "signed",
+			manifest: "ceal-worker-release-manifest-linux-amd64.json",
+			digest_agreement: "binary_bytes_manifest_and_sha256sums_agree",
+			protocol: {},
+		},
+		reportedVersion: "0.75.0",
+		clientProtocolVersion: "1.3.0",
+		guide: { status: "available", registered_host_count: 1 },
+		session: {
+			instance_ref: "instance:x",
+			profile_ref: "profile:x",
+			negotiated_protocol_version: "1.3.0",
+			host_decision: "accepted",
+			catalog_source: "live_discovery",
+			capability_count: 1,
+			elapsed_ms: 1,
+		},
+		boundedCall: {
+			capability: null,
+			target: null,
+			status: "verified",
+			exit_code: null,
+			elapsed_ms: null,
+			evidence: null,
+			request_ref: "ceal:x:call",
+			receipt: { readback_status: "verified", outcome: "succeeded", authorization: "allowed", audit_refs: [], gateway_elapsed_ms: null },
+		},
+	});
+	const packet = packetFixture();
+	packet.bounded_capability_call = {
+		capability: "message.search",
+		target: "target:aaaaaaaa",
 		status: "succeeded",
 		exit_code: 0,
 		elapsed_ms: 12,
@@ -479,15 +571,23 @@ test("the checkout emitter's bounded-call row carries exactly the keys the recor
 			readback_status: "verified",
 			outcome: "succeeded",
 			authorization: "allowed",
-			audit_refs: ["gateway-audit:fixture"],
+			audit_refs: [],
 			gateway_elapsed_ms: 7,
 			exit_code: 0,
 			elapsed_ms: 4,
 		},
 	};
-	const record = sanitizedAcceptanceRecord(packet);
-	assert.deepEqual(Object.keys(record.bounded_capability_call).sort(), [...CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS].sort());
-	assert.deepEqual(Object.keys(record.bounded_capability_call.receipt).sort(), [...CEAL_ACCEPTANCE_RECEIPT_KEYS].sort());
+	const checkout = sanitizedAcceptanceRecord(packet);
+	assert.equal(installed.schema_version, checkout.schema_version);
+	const keys = (value) => Object.keys(value).sort();
+	assert.deepEqual(keys(installed), keys(checkout));
+	assert.deepEqual(keys(installed.guide), keys(checkout.guide));
+	assert.deepEqual(keys(installed.gateway_session), keys(checkout.gateway_session));
+	assert.deepEqual(keys(installed.bounded_capability_call), keys(checkout.bounded_capability_call));
+	assert.deepEqual(keys(installed.bounded_capability_call.receipt), keys(checkout.bounded_capability_call.receipt));
+	// `emitted_by` is the key that must NOT agree in value; it is what tells the
+	// two documents apart for a reader holding both.
+	assert.notEqual(installed.emitted_by, checkout.emitted_by);
 });
 
 // The released record docs/acceptance/ceal-v0.69.0/linux-amd64.yaml carries

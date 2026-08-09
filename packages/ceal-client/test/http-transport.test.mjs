@@ -201,6 +201,36 @@ test("HTTP transport refuses a non-2xx response whose body claims success", asyn
 	assert.equal((await createCealClient(ok).request(request)).ok, true);
 });
 
+// The declared-length branch had no test on either side of the refactor that
+// moved it into request-bounds.ts, so nothing would have said if its two codes
+// swapped. They are different answers to the caller: `invalid_response` means the
+// header is not a length, `response_too_large` means it is one and it does not fit.
+test("HTTP transport tells a malformed content-length from an oversized one", async () => {
+	const body = { ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: {} };
+	const cases = [
+		["not-a-number", "invalid_response"],
+		["-5", "invalid_response"],
+		["12.5", "invalid_response"],
+		// Too large to be an exact integer: malformed, not merely oversized. The
+		// session clients answer the other way on this input, on purpose.
+		["99999999999999999999", "invalid_response"],
+		["300000", "response_too_large"],
+	];
+	for (const [declared, code] of cases) {
+		const transport = createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "safe-token",
+			maxResponseBytes: 1024,
+			fetchFn: async () =>
+				new globalThis.Response(JSON.stringify(body), {
+					status: 200,
+					headers: { "content-type": "application/json", "content-length": declared },
+				}),
+		});
+		await assert.rejects(createCealClient(transport).request(request), hasTransportCode(code), declared);
+	}
+});
+
 test("HTTP transport keeps discovery, allowed call, and policy denial responses correlated to their operations", async () => {
 	const discoveryRequest = {
 		request_id: "request:discover:001",
