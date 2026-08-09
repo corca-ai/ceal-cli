@@ -22,10 +22,14 @@ Read the counts rather than trusting them here; each line names the command.
 
 - The released version is what `package.json` says and the tag that matches it —
   `node -p 'require("./package.json").version'`, `git describe --tags --abbrev=0`.
-- **Nothing is pushed.** Every commit since `ceal-v0.75.0` is local, and one
-  carries `Closes #10`, so pushing closes that issue. The push has been offered
-  and declined twice.
-- **Issue 10 is fixed, and three sweeps then closed defects it did not cause.**
+- **Everything is pushed and CI is green on it.** `git rev-list --count
+  origin/main..HEAD` answers the count; `gh run list --workflow=check.yml` reads
+  the run. Seventeen commits went in one push and cost one run, because
+  `check.yml` declares `concurrency: cancel-in-progress`.
+- **Issue 10 is closed and verified**, by `Closes #10` on `e8f2c44` — re-read it
+  with the `issue` skill's `verify-closeout --expect-state CLOSED`, not from
+  here.
+- **Issue 10's fix is one of many; two sweeps then closed defects it did not cause.**
   `CHANGELOG.md` `## Unreleased` holds all of it; the release step folds that
   section into the version it cuts. Two published acceptance records under
   `docs/acceptance/` overstate guide registration and were left as written —
@@ -47,8 +51,8 @@ Read the counts rather than trusting them here; each line names the command.
 - **All three gates are green here**, the two maintainer-local ones included:
   `npm run check`, `npm run check:duplication`, `npm run lint:shell`. Time a gate
   yourself rather than trusting a figure — this host is 2-core and its wall clock
-  swung by minutes across runs. `origin/main` was green on CI before these
-  commits — `gh run list --workflow=check.yml`; do not assume it.
+  swung by minutes across runs. CI is green on `origin/main` too, but read the
+  run rather than trusting this line.
 - **Proof level reached is local suite plus repo gate.** No installed release and
   no live `session enroll`/`adopt` against a real Gateway; both are
   `remote_write`. To re-emit acceptance for the installed `ceal-v0.75.0`, call
@@ -57,10 +61,12 @@ Read the counts rather than trusting them here; each line names the command.
 
 ## Next Session
 
-1. **Ask about pushing.** Declined twice now, so nothing depends on it. If
-   approved, push and then verify with the `issue` skill's `issue_tool.py
-   verify-closeout --carrier direct-commit --commit-ref <ref> --expect-state
-   CLOSED`.
+1. **Ask about the release tag.** `docs/operator-acceptance.md` `## Before
+   Spending A Release Tag` owns what to confirm first, and all of it is free:
+   repository variable and secret, push/tag rights, and the vendor pin. A tag is
+   not retryable, so spend those reads before spending a version. The tag is the
+   only way to reach a proof level above `surface`, because the acceptance packet
+   needs a real installed release.
 2. **Re-run the structural lens, not another scope re-sweep.**
    [defect-sweep.md](defect-sweep.md) `## The denominator-gap sweep` records why:
    the invariant enumeration cannot see a rule enforced nowhere, and the lens
