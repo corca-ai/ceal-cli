@@ -11,6 +11,25 @@ Work that belongs to the standing goal lives in
 Everything else not listed is owned by the comment at the site and by
 [gates.md](gates.md).
 
+- **The vendored `packages/ceal-protocol` is behind its owner, and no local check
+  can say so.** `protocol-vendor-pin.json` records Gateway commit `f9a02ff2…`;
+  `git -C ../ceal rev-parse HEAD:packages/ceal-protocol` answers a different tree,
+  and `git -C ../ceal log --oneline f9a02ff2..HEAD -- packages/ceal-protocol`
+  lists what moved. That is not a defect on its own — the pin is an identity, and
+  its own non-claims say the check reaches no remote. What makes it worth carrying
+  is that some of those commits widened `decodeProjectionRequester`, which the
+  worker reaches on the **v4** path it consumes
+  (`packages/ceal-protocol/src/leased-consumer-control.ts:594` →`:600`), and the
+  worker's decoders are closed exact-key validators.
+  Checked on 2026-08-09 and currently safe, but only by reading the owner: the
+  Gateway strips the new fields from v4 output —
+  `scripts/agent-runtime/gateway-leased-consumer-control-dispatcher.mjs:95` passes
+  `v5Request(request)` as `includeProviderIdentity`, and `:224` omits the field
+  when it is false. Re-derive that from the emitting code, not from this note or
+  from `charness-artifacts/critique/2026-08-08-c13-requester-provider-identity-premortem.md`,
+  before the next release that keeps a stale pin. Re-syncing is the standing
+  answer; it was declined here because `../ceal` had uncommitted work in flight
+  and vendoring a half-finished tree is worse than vendoring an old one.
 - **The signed release manifest has no client package.**
   `ceal-worker-release-manifest-<platform>.json` records only the protocol, so a
   consumer is left with a source-owner claim. The fix puts the client in the
