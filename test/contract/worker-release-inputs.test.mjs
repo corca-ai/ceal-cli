@@ -186,7 +186,7 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent }), WorkerReleaseInputError);
 });
 
-test("worker release inventory rejects Gateway and legacy composite paths", () => {
+test("worker release inventory rejects Gateway and legacy composite paths", (context) => {
 	const inventory = JSON.parse(readFileSync(path.join(ROOT, "worker-release-inputs.json"), "utf8"));
 	// The loop below iterates whatever the file happens to contain, so on its own
 	// it would stay green if someone emptied the list. `verify-worker-release-inputs.mjs`
@@ -200,7 +200,9 @@ test("worker release inventory rejects Gateway and legacy composite paths", () =
 	// it stages straight from this inventory, so a per-path admission check there
 	// could only ever compare a value against itself. The overlap rule below is the
 	// enforcement that survives — declaring a path both owned and forbidden fails.
-	const tampered = path.join(mkdtempSync(path.join(tmpdir(), "ceal-forbidden-overlap-")), "worker-release-inputs.json");
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-forbidden-overlap-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const tampered = path.join(scratch, "worker-release-inputs.json");
 	writeFileSync(
 		tampered,
 		JSON.stringify({ ...inventory, forbidden_release_inputs: [...inventory.forbidden_release_inputs, inventory.worker.source_path] }),
