@@ -27,6 +27,10 @@ exclude concurrent writers, and never follow a substituted store parent.
 - Darwin exposes `/dev/fd/<n>` as a descriptor entry, not a traversable
   directory. Apple's `fd(4)` description and the observed stack both contradict
   the Linux-derived assumption that children can be created below it.
+- Follow-up run `31328528711`, macOS job `93282848863`, disproved the first
+  repair hypothesis: Node also could not recover the opened directory pathname
+  with `realpathSync('/dev/fd/<n>')`; the checked-in Darwin seam test reached
+  its explicit `descriptor anchor was refused` disconfirmer.
 
 ## Reproduction
 
@@ -49,12 +53,13 @@ exclude concurrent writers, and never follow a substituted store parent.
 
 ## Hypothesis
 
-- The static Darwin `/dev/fd/<parent-fd>/<child>` anchor is the cause. If true,
-  resolving the open descriptor to its current real directory path, verifying
-  that path against the descriptor identity, and using that verified path for
-  the operation will make the smallest lock test and its parent-swap sibling
-  pass on macOS. | disconfirmer: a macOS probe shows descriptor realpath cannot
-  be resolved/re-anchored, or the focused lock suite still fails before rename.
+- The static Darwin `/dev/fd/<parent-fd>/<child>` anchor is the cause, and Node
+  exposes no traversable or pathname-recovering descriptor surface there. If
+  true, verifying the caller's visible parent against the held descriptor
+  immediately before every path operation will restore ordinary macOS locks;
+  a rename or substitution will fail closed without touching its replacement.
+  | disconfirmer: the ordinary focused lock suite still fails, or a parent-swap
+  test mutates the replacement parent.
 
 ## Verification
 
@@ -67,7 +72,8 @@ exclude concurrent writers, and never follow a substituted store parent.
 
 The lock treated Linux procfs descriptor links and Darwin descriptor devices as
 one path abstraction. Both identify an open descriptor, but only the Linux path
-can be traversed as the opened directory. The shared lock therefore refused its
+can be traversed as the opened directory, and Node cannot recover the Darwin
+descriptor's pathname with `realpath`. The shared lock therefore refused its
 first ordinary Darwin mutation before any user state could be written.
 
 ## Invariant Proof
@@ -112,8 +118,9 @@ first ordinary Darwin mutation before any user state could be written.
 - Seam: Node filesystem path API -> Darwin descriptor namespace -> local store.
 - Disproving Observation: the focused and full macOS suites acquire, contend,
   quarantine, and release without acting on a substituted parent.
-- What Local Reasoning Cannot Prove: Darwin descriptor realpath behavior after
-  a parent rename; the hosted macOS runner must prove it.
+- What Local Reasoning Cannot Prove: the verified visible-path implementation's
+  ordinary and fail-closed behavior on Darwin; the hosted macOS runner must
+  prove it.
 - Generalization Pressure: factor-now
 
 ## Interrupt Decision

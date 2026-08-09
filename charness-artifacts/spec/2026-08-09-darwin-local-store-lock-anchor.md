@@ -20,15 +20,19 @@ typed user-visible outcomes may not.
 Replace the static descriptor-root string in both the lock and owned-file
 cleanup with one shared anchored-parent abstraction. Linux may keep direct
 `/proc/self/fd/<fd>` traversal. Darwin must
-derive the current real directory path from its still-open descriptor, verify
-the resolved path has the descriptor's device/inode and owner-only mode, and
-resolve again at each mutation boundary that can follow a parent rename.
+verify the caller's visible parent has the held descriptor's device/inode and
+owner-only mode immediately before each path operation. Node cannot recover or
+traverse a directory pathname from Darwin `/dev/fd`; a rename or substitution
+therefore fails closed instead of following either path.
 
 ## Fixed Decisions
 
 - Keep the parent descriptor open from acquisition through release.
 - Never fall back to the unverified original user-visible parent after a
   substitution is detected.
+- Darwin may leave the current private candidate or owned lock generation for
+  later stale recovery when its parent is renamed; it must not redirect cleanup
+  into the replacement parent.
 - Candidate publication remains a complete private directory followed by one
   same-parent atomic rename.
 - Candidate, stable lock, quarantine, owner read, and release paths derive from
@@ -37,12 +41,13 @@ resolve again at each mutation boundary that can follow a parent rename.
 - Unsupported or unverifiable host behavior fails closed as the caller's typed
   `unsafe_store` outcome.
 
-## Probe Questions
+## Resolved Probes
 
-- Does `realpathSync('/dev/fd/<open-directory-fd>')` on the GitHub macOS runner
-  return the directory's current path after that directory is renamed?
-- Does APFS preserve the candidate-to-stable directory rename collision
-  outcomes the lock classifies as contention?
+- GitHub macOS run `31328528711`, job `93282848863`, disproved descriptor
+  pathname recovery: `realpathSync('/dev/fd/<open-directory-fd>')` was refused
+  both before ordinary lock work and after rename.
+- The next host proof therefore tests verified visible-path operation and
+  fail-closed parent replacement, not descriptor-path recovery.
 
 ## Deferred Decisions
 
@@ -73,7 +78,8 @@ resolve again at each mutation boundary that can follow a parent rename.
 - Two processes still serialize and a dead owner is still reclaimed.
 - Candidate publication never exposes a lock without its owner record.
 - Replacing the visible parent during the critical section cannot remove or
-  replace a victim lock; release targets the opened parent or fails closed.
+  replace a victim lock; Linux targets the opened parent and Darwin fails
+  closed without following the replacement.
 - The full Linux and macOS gates pass on the same commit.
 
 ## Acceptance Checks
@@ -96,11 +102,13 @@ runner owns final host proof; local Linux evidence cannot substitute for it.
   `charness-artifacts/debug/latest.md`.
 - Seam Summary: a Linux descriptor-path property was generalized to Darwin and
   failed only at the hosted host boundary.
-- Chosen Next Step: probe and implement one platform-aware anchored resolver.
+- Chosen Next Step: verify the visible Darwin parent against the held
+  descriptor at every operation boundary.
 - Impl Status: blocked pending the smallest Darwin-capable resolver slice.
 - Impl Status Reason: the tag is irreversible and current main CI is red.
-- What Disproving Observation Is Resolved: macOS must prove descriptor
-  realpath/re-anchoring through the parent-swap test and full consumer suite.
+- What Disproving Observation Is Resolved: macOS disproved descriptor
+  realpath/re-anchoring; the replacement must pass the parent-swap tests and
+  full consumer suite by failing closed on rename.
 
 ## Canonical Artifact
 
@@ -108,7 +116,7 @@ This file is the implementation contract until the macOS gate is green.
 
 ## First Implementation Slice
 
-Refactor `local-store-lock.ts` so every path is requested from the held parent
-anchor, add a Darwin-specific resolution seam test without weakening the
-existing parent-swap test, then run focused Linux proof and push for exact
-macOS CI proof.
+Refactor `local-store-lock.ts` so every path verifies the visible parent against
+the held descriptor, add a Darwin-specific fail-closed seam test without
+weakening the existing victim-preservation assertions, then run focused Linux
+proof and push for exact macOS CI proof.

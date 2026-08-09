@@ -130,7 +130,7 @@ function anchorLockParent(options: LocalStoreLockOptions): { options: LocalStore
 		const anchoredOptions = { ...options };
 		Object.defineProperty(anchoredOptions, "lockPath", {
 			enumerable: true,
-			get: () => path.join(resolveAnchoredDirectory(parentHandle, stat, 0o700, options.onUnsafe), name),
+			get: () => path.join(resolveAnchoredDirectory(parentHandle, parent, stat, 0o700, options.onUnsafe), name),
 		});
 		return {
 			options: anchoredOptions,

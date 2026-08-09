@@ -164,7 +164,7 @@ export function removeOwnedFile(directory: string, file: string, unsafe: UnsafeS
 		const directoryStat = fstatSync(directoryHandle);
 		if (!directoryStat.isDirectory() || modeOf(directoryStat) !== DIRECTORY_MODE) unsafe();
 		const anchoredFile = () =>
-			path.join(resolveAnchoredDirectory(directoryHandle, directoryStat, DIRECTORY_MODE, unsafe), path.basename(file));
+			path.join(resolveAnchoredDirectory(directoryHandle, directory, directoryStat, DIRECTORY_MODE, unsafe), path.basename(file));
 		const openedFile = existingPathOperation(() => openSync(anchoredFile(), constants.O_RDONLY | constants.O_NOFOLLOW), unsafe);
 		if (!openedFile.found) return false;
 		const fileHandle = openedFile.value;

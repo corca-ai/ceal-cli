@@ -197,13 +197,17 @@ test("removeOwnedFile keeps deletion anchored when the visible parent is swapped
 	mkdirSync(victimDirectory, { mode: 0o700 });
 	writeFileSync(victim, "do not delete", { mode: 0o600 });
 
-	assert.equal(
+	const removeAfterSwap = () =>
 		removeOwnedFile(directory, file, unsafe, () => {
 			renameSync(directory, openedParent);
 			symlinkSync(victimDirectory, directory);
-		}),
-		true,
-	);
+		});
+	if (process.platform === "darwin") assert.throws(removeAfterSwap, Refused);
+	else assert.equal(removeAfterSwap(), true);
 	assert.equal(existsSync(victim), true, "the replacement parent's same-named file is outside the opened directory");
-	assert.equal(existsSync(path.join(openedParent, path.basename(file))), false, "the originally opened store file is the one removed");
+	assert.equal(
+		existsSync(path.join(openedParent, path.basename(file))),
+		process.platform === "darwin",
+		"Linux removes through its descriptor path; Darwin fails closed after the parent rename",
+	);
 });

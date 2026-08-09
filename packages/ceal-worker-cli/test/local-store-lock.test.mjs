@@ -22,7 +22,7 @@ class TestBusy extends Error {
 	name = "TestBusy";
 }
 
-test("Darwin resolves an opened directory descriptor again after the directory is renamed", { skip: process.platform !== "darwin" }, () => {
+test("Darwin refuses a visible directory path after the opened directory is renamed", { skip: process.platform !== "darwin" }, () => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-darwin-anchor-"));
 	const directory = path.join(root, "store");
 	const moved = path.join(root, "moved-store");
@@ -31,8 +31,10 @@ test("Darwin resolves an opened directory descriptor again after the directory i
 	try {
 		const expected = fs.fstatSync(handle);
 		fs.renameSync(directory, moved);
-		const resolved = resolveAnchoredDirectory(handle, expected, 0o700, () => assert.fail("descriptor anchor was refused"));
-		assert.equal(fs.realpathSync(resolved), fs.realpathSync(moved));
+		assert.throws(
+			() => resolveAnchoredDirectory(handle, directory, expected, 0o700, () => assert.fail("descriptor anchor was refused")),
+			/descriptor anchor was refused/u,
+		);
 	} finally {
 		fs.closeSync(handle);
 		rmSync(root, { recursive: true, force: true });
@@ -124,7 +126,11 @@ test("release stays anchored when the visible parent is swapped", async () => {
 		});
 
 		assert.equal(existsSync(victimLock), true, "release must not follow the replacement parent to an outside lock");
-		assert.equal(existsSync(path.join(moved, "test.lock")), false, "release must remove its own anchored lock generation");
+		assert.equal(
+			existsSync(path.join(moved, "test.lock")),
+			process.platform === "darwin",
+			"Linux releases through its descriptor path; Darwin leaves the generation stale and fails closed internally",
+		);
 	});
 });
 
@@ -135,10 +141,12 @@ test("candidate initialization re-resolves the opened parent after its visible n
 		mkdirSync(directory, { mode: 0o700 });
 		const { withLocalStoreLock: raced } = await import(parentSwapAfterCandidateMkdir(root, directory, moved));
 		let entered = false;
-		await raced(options(directory), async () => {
+		const run = raced(options(directory), async () => {
 			entered = true;
 		});
-		assert.equal(entered, true);
+		if (process.platform === "darwin") await assert.rejects(run, TestUnsafe);
+		else await run;
+		assert.equal(entered, process.platform !== "darwin");
 		assert.deepEqual(readdirSync(directory), [], "candidate work must not enter the replacement parent");
 		assert.equal(existsSync(path.join(moved, "test.lock")), false, "release must follow the opened parent after publication");
 	});
@@ -356,12 +364,14 @@ test("stale quarantine re-resolves both rename paths after the visible parent is
 		writeOwnedLock(options(directory).lockPath, await deadPid());
 		const { withLocalStoreLock: raced } = await import(parentSwapBeforeQuarantine(root, directory, moved));
 		let entered = false;
-		await raced(options(directory), async () => {
+		const run = raced(options(directory), async () => {
 			entered = true;
 		});
-		assert.equal(entered, true);
+		if (process.platform === "darwin") await assert.rejects(run, TestUnsafe);
+		else await run;
+		assert.equal(entered, process.platform !== "darwin");
 		assert.deepEqual(readdirSync(directory), [], "quarantine must not enter the replacement parent");
-		assert.equal(existsSync(path.join(moved, "test.lock")), false);
+		assert.equal(existsSync(path.join(moved, "test.lock")), process.platform === "darwin");
 	});
 });
 
