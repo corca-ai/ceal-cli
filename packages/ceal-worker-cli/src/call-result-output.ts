@@ -4,6 +4,7 @@ import {
 	type CealGatewayCallValue,
 } from "@corca-ai/ceal-protocol";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
+import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 
@@ -200,6 +201,7 @@ export function writeCallUnavailable(
 ): number {
 	const requestWasIssued = typeof requestId === "string";
 	const sessionFailure = isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : null;
+	const sessionUnavailable = reason === "session_unavailable";
 	emitCallResult(
 		io,
 		{
@@ -217,12 +219,17 @@ export function writeCallUnavailable(
 				kind: reason,
 				...(sessionFailure
 					? { retryable: sessionFailure.retryable, message: sessionFailure.message, next_action: sessionFailure.nextAction }
-					: {
-							message: "The capability call could not be completed.",
-							next_action: requestWasIssued
-								? `${unknownOutcomeCaution(capabilityEffect)}Run 'ceal receipt show ${requestId}' after a short wait to read the Gateway outcome; while that reference has no audited outcome the Gateway answers 'audit_event_not_found'.`
-								: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
-						}),
+					: sessionUnavailable
+						? {
+								message: "No Gateway-issued client session is configured for this client.",
+								next_action: SESSION_SETUP_NEXT_ACTION,
+							}
+						: {
+								message: "The capability call could not be completed.",
+								next_action: requestWasIssued
+									? `${unknownOutcomeCaution(capabilityEffect)}Run 'ceal receipt show ${requestId}' after a short wait to read the Gateway outcome; while that reference has no audited outcome the Gateway answers 'audit_event_not_found'.`
+									: "Run 'ceal capabilities' and verify the client Session, Profile membership, and target Grant.",
+							}),
 			},
 		},
 		record,

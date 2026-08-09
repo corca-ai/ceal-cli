@@ -1,4 +1,4 @@
-import type { CealCommandDefinition } from "./command-definitions.js";
+import { type CealCommandDefinition, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 
 export type CealCommandName = CealCommandDefinition["name"];
 
@@ -64,8 +64,7 @@ export const CEAL_SUBCOMMANDS = [
 		effect: "read_only",
 		evidence: "surface",
 		result_schema: "ceal.client_session.v1",
-		recovery:
-			"If no session is configured, descend to 'ceal session enroll --help' or 'ceal session adopt --help'; otherwise run 'ceal capabilities' for live Gateway proof.",
+		recovery: `${SESSION_SETUP_NEXT_ACTION} If a session is configured, run 'ceal capabilities' for live Gateway proof.`,
 	},
 	{
 		parent: "session",

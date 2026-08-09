@@ -32,7 +32,11 @@ import {
 	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
-import { type CealCommandDefinition, CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT } from "./command-definitions.js";
+import {
+	type CealCommandDefinition,
+	CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT,
+	SESSION_SETUP_NEXT_ACTION,
+} from "./command-definitions.js";
 import { commandRecovery, findCealCommand, runCealStaticCommand, writeCliError as writeError } from "./command-surface.js";
 import { type CealDiscoveryCacheKey, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "./discovery-cache.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
@@ -120,16 +124,19 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 	const requestRef = parsed.values.get("--request-ref");
 	const profileOption = parsed.values.get("--profile");
 
-	const reading = readInstalledReleaseFacts(process.execPath);
+	const reading = (runtime.readInstalledReleaseFacts ?? readInstalledReleaseFacts)(process.execPath);
 	if (!reading.ok) return writeAcceptanceRefusal(reading.code, reading.message, io);
 
-	const access = await resolveStoredGatewayAccess(io, runtime, profileOption);
+	const access = await resolveStoredGatewayAccessResult(runtime, profileOption);
 	if (!access.ok) {
+		const sessionFailure = access.origin === "client_session" ? classifyClientSessionFailure(access.reason) : undefined;
+		const unconfigured = access.origin === "unconfigured";
 		return writeAcceptanceRefusal(
-			"gateway_session_unavailable",
-			"No current Gateway session, so no live evidence can be produced.",
+			sessionFailure?.kind ?? (unconfigured ? "gateway_session_unavailable" : access.reason),
+			sessionFailure?.message ??
+				(unconfigured ? "No current Gateway session, so no live evidence can be produced." : "The stored Gateway session could not be loaded."),
 			io,
-			"Run 'ceal session enroll --gateway <https-url>' with a code from the organization administrator, then re-run.",
+			`${sessionFailure?.nextAction ?? (unconfigured ? SESSION_SETUP_NEXT_ACTION : "Run 'ceal session status' and correct the reported local configuration.")} Then re-run 'ceal acceptance emit'.`,
 		);
 	}
 
@@ -729,6 +736,11 @@ interface GatewayAccess {
 }
 
 type GatewayAccessResolution = { ok: true; value: GatewayAccess } | { ok: false; exitCode: number };
+type StoredGatewayAccessResolution =
+	| { ok: true; value: GatewayAccess }
+	| { ok: false; origin: "unconfigured"; reason: "session_unavailable" }
+	| { ok: false; origin: "client_session"; reason: string }
+	| { ok: false; origin: "gateway_access"; reason: "session_load_failed" };
 
 async function resolveGatewayAccess(
 	options: readonly string[],
@@ -748,11 +760,26 @@ async function resolveStoredGatewayAccess(
 	runtime: CealCommandRuntime,
 	selectedProfile?: string,
 ): Promise<GatewayAccessResolution> {
-	if (!runtime.loadSession) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
+	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile);
+	if (resolution.ok) return resolution;
+	const exitCode =
+		resolution.origin === "unconfigured"
+			? writeCapabilitiesUnavailable(io)
+			: resolution.origin === "client_session"
+				? writeClientSessionUnavailable(resolution.reason, io)
+				: writeGatewayUnavailable(resolution.reason, io);
+	return { ok: false, exitCode };
+}
+
+async function resolveStoredGatewayAccessResult(
+	runtime: CealCommandRuntime,
+	selectedProfile?: string,
+): Promise<StoredGatewayAccessResolution> {
+	if (!runtime.loadSession) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 	try {
 		const loaded = await runtime.loadSession();
 		const session = loaded ? await ensureCurrentSession(loaded, runtime) : null;
-		if (!session) return { ok: false, exitCode: writeCapabilitiesUnavailable(io) };
+		if (!session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 		return {
 			ok: true,
 			value: {
@@ -764,11 +791,9 @@ async function resolveStoredGatewayAccess(
 			},
 		};
 	} catch (error) {
-		const exitCode =
-			error instanceof CealClientSessionError
-				? writeClientSessionUnavailable(error.code, io)
-				: writeGatewayUnavailable("session_load_failed", io);
-		return { ok: false, exitCode };
+		return error instanceof CealClientSessionError
+			? { ok: false, origin: "client_session", reason: error.code }
+			: { ok: false, origin: "gateway_access", reason: "session_load_failed" };
 	}
 }
 
@@ -1047,6 +1072,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 			"The Gateway receipt could not be read.",
 			io,
 			isClassifiedClientSessionFailure(resolved.reason) ? classifyClientSessionFailure(resolved.reason) : undefined,
+			resolved.reason === "session_unavailable" ? SESSION_SETUP_NEXT_ACTION : undefined,
 		);
 	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {

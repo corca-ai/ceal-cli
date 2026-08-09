@@ -1180,6 +1180,38 @@ test("bare and explicit local session status agree without presenting untested r
 	assert.equal(Object.hasOwn(payload, "renewal_available"), false);
 });
 
+test("generic no-session recovery presents both approved setup routes", async () => {
+	const recovery = CEAL_COMMANDS.find((command) => command.name === "session").recovery;
+	const statusRecovery = CEAL_SUBCOMMANDS.find(
+		(subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "status",
+	).recovery;
+	assert.match(recovery, /ceal session enroll --help/u);
+	assert.match(recovery, /ceal session adopt --help/u);
+	assert.ok(statusRecovery.startsWith(recovery));
+
+	const status = await yamlRun(["session", "status"], 0, { loadSession: async () => null });
+	const logout = await yamlRun(["session", "logout"], 0, {
+		loadSession: async () => null,
+		removeSession: async () => assert.fail("an absent session must not be removed"),
+	});
+	const capabilities = await yamlRun(["capabilities"], 3, { loadSession: async () => null });
+	const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
+		loadSession: async () => null,
+	});
+	const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, { loadSession: async () => null });
+	const acceptance = await yamlRun(["acceptance", "emit"], 3, {
+		loadSession: async () => null,
+		readInstalledReleaseFacts: installedReleaseReading,
+	});
+	assert.equal(status.next_action, recovery);
+	assert.equal(logout.next_action, recovery);
+	assert.equal(capabilities.error.next_action, recovery);
+	assert.equal(call.error.next_action, recovery);
+	assert.equal(receipt.error.next_action, recovery);
+	assert.equal(acceptance.schema_version, "ceal.worker_acceptance_result.v2");
+	assert.equal(acceptance.error.next_action, `${recovery} Then re-run 'ceal acceptance emit'.`);
+});
+
 test("ambiguous renewal response tells the employee not to replay a one-time refresh credential", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
@@ -1196,7 +1228,8 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 			assert.equal(capabilities.error.retryable, false);
 			assert.match(capabilities.error.message, /may already have been consumed/u);
 			assert.match(capabilities.error.next_action, /Do not retry the same command/u);
-			assert.match(capabilities.error.next_action, /replacement device-enrollment code/u);
+			assert.match(capabilities.error.next_action, /ceal session enroll --help/u);
+			assert.match(capabilities.error.next_action, /ceal session adopt --help/u);
 			assert.equal(current.renewalBlockedReason, "outcome_unknown");
 			assert.equal(refreshCalls(), 1);
 
@@ -1209,12 +1242,14 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 			assert.equal(call.error.kind, "session_renewal_unavailable");
 			assert.equal(call.error.retryable, false);
 			assert.match(call.error.next_action, /Do not retry the same command/u);
+			assert.match(call.error.next_action, /ceal session adopt --help/u);
 			assert.equal(Object.hasOwn(call, "receipt"), false);
 
 			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
 			assert.equal(receipt.error.kind, "session_renewal_unavailable");
 			assert.equal(receipt.error.retryable, false);
 			assert.match(receipt.error.next_action, /Do not retry the same command/u);
+			assert.match(receipt.error.next_action, /ceal session adopt --help/u);
 		},
 		{ invalidRefreshResponse: true },
 	);
@@ -1222,13 +1257,30 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 
 test("a refresh never reaches the Gateway when its pre-send quarantine cannot persist", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, refreshCalls }) => {
-		const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+		const runtime = {
 			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
 			saveSession: async () => {
 				throw new Error("disk unavailable");
 			},
-		});
+		};
+		const payload = await yamlRun(["capabilities", "--fresh"], 3, runtime);
+		assert.equal(payload.schema_version, "ceal.client_session.v1");
 		assert.equal(payload.error.kind, "session_save_failed");
+		assert.match(payload.error.message, /stored Gateway session could not be used safely/u);
+		assert.match(payload.error.next_action, /ceal session status/u);
+		assert.doesNotMatch(payload.error.next_action, /network reachability/u);
+		assert.doesNotMatch(payload.error.next_action, /device-enrollment code/u);
+
+		const acceptance = await yamlRun(["acceptance", "emit"], 3, {
+			...runtime,
+			readInstalledReleaseFacts: installedReleaseReading,
+		});
+		assert.equal(acceptance.schema_version, "ceal.worker_acceptance_result.v2");
+		assert.equal(acceptance.error.kind, "session_save_failed");
+		assert.match(acceptance.error.message, /stored Gateway session could not be used safely/u);
+		assert.match(acceptance.error.next_action, /ceal session status/u);
+		assert.doesNotMatch(acceptance.error.next_action, /network reachability/u);
+		assert.doesNotMatch(acceptance.error.next_action, /device-enrollment code/u);
 		assert.equal(refreshCalls(), 0);
 	});
 });
@@ -1245,7 +1297,8 @@ test("typed Gateway refresh denial requires reenrollment instead of retry", asyn
 			});
 			assert.equal(payload.error.kind, "refresh_invalid");
 			assert.equal(payload.error.retryable, false);
-			assert.match(payload.error.next_action, /replacement device-enrollment code/u);
+			assert.match(payload.error.next_action, /ceal session enroll --help/u);
+			assert.match(payload.error.next_action, /ceal session adopt --help/u);
 			assert.equal(current.renewalBlockedReason, "refresh_invalid");
 			assert.equal(refreshCalls(), 1);
 			const blockedRetry = await yamlRun(["capabilities"], 3, {
@@ -1354,6 +1407,7 @@ test("session logout revokes the server session before removing every session-de
 		});
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
+		assert.equal(payload.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
 		assert.deepEqual(revoked, [oldRefreshToken]);
 		assert.deepEqual(cleared.sort(), ["discovery_cache", "receipt_spool", "session"]);
 	});
@@ -2884,7 +2938,8 @@ test("capabilities reports an honest Gateway-required unavailable surface withou
 	// meant `session` until `update` was inserted above it. Deriving the expected
 	// text from the table is what makes a future reordering fail here.
 	assert.equal(payload.error.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
-	assert.match(payload.error.next_action, /device-enrollment code/u);
+	assert.match(payload.error.next_action, /ceal session enroll --help/u);
+	assert.match(payload.error.next_action, /ceal session adopt --help/u);
 	assert.equal(Object.hasOwn(payload, "next_actions"), false);
 });
 
@@ -3675,6 +3730,21 @@ async function withRenewingGateway(callback, options = {}) {
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
+}
+
+function installedReleaseReading() {
+	return {
+		ok: true,
+		facts: {
+			platform: "linux-amd64",
+			release_version: WORKER_PACKAGE_VERSION,
+			artifact_sha256: "a".repeat(64),
+			artifact_state: "built",
+			manifest: "ceal-worker-release-manifest-linux-amd64.json",
+			digest_agreement: "binary_bytes_manifest_and_sha256sums_agree",
+			protocol: {},
+		},
+	};
 }
 
 function storedSession(endpoint, overrides = {}) {

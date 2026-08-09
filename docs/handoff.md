@@ -13,6 +13,11 @@ release only from one coherent pinned input slice.
 
 ## Current State
 
+- The current branch contains unpushed worker-side user improvements through
+  session-status discovery, static-command startup, session-bound receipt
+  history, atomic local-store lock publication, and complete generic onboarding
+  recovery. The last slice and its proof live in
+  [2026-08-09-session-onboarding-recovery.md](../charness-artifacts/impl/2026-08-09-session-onboarding-recovery.md).
 - Gate builds, package-local test/coverage hooks, and release fixtures now share
   the `dist` owner documented in [gates.md](gates.md). The current-slice contract
   and proof commands live in

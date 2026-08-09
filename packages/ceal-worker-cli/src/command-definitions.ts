@@ -29,6 +29,13 @@ export interface CealCommandDefinition {
 
 export const CEAL_CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 
+const SESSION_SETUP_ROUTE_CHOICES =
+	"'ceal session enroll --help' for an operator-issued code or 'ceal session adopt --help' if you have a current verified-mailbox invitation";
+
+export const SESSION_SETUP_NEXT_ACTION = `Run 'ceal session status'. If it is unconfigured, choose ${SESSION_SETUP_ROUTE_CHOICES}.`;
+
+export const SESSION_REPLACEMENT_NEXT_ACTION = `Ask the organization administrator to approve a replacement session. Choose ${SESSION_SETUP_ROUTE_CHOICES}.`;
+
 export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "version",
@@ -68,7 +75,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.client_session.v1",
-		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
+		recovery: SESSION_SETUP_NEXT_ACTION,
 	},
 	{
 		name: "guide",
@@ -87,7 +94,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
-		recovery: "Configure a Gateway-issued client session, then run 'ceal capabilities' and descend to a bounded target selection.",
+		recovery: `${SESSION_SETUP_NEXT_ACTION} Then run 'ceal capabilities' and descend to a bounded target selection.`,
 	},
 	{
 		name: "call",

@@ -1,6 +1,7 @@
 import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
@@ -83,7 +84,7 @@ function configuredSessionSummary(session: CealStoredSession, now: number): Reco
 		raw_token_visible: false,
 		proof_level: "local_state",
 		next_action: session.renewalBlockedReason
-			? "Do not retry a session refresh. Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'."
+			? `Do not retry a session refresh. ${SESSION_REPLACEMENT_NEXT_ACTION}`
 			: "Run 'ceal capabilities' to verify live Gateway access.",
 	};
 }
@@ -109,7 +110,7 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 		refresh_token_absolute_expires_at: null,
 		raw_token_visible: false,
 		proof_level: "local_state",
-		next_action: "Run 'ceal session enroll --help'.",
+		next_action: SESSION_SETUP_NEXT_ACTION,
 	};
 }
 
@@ -286,7 +287,7 @@ function writeAlreadyLoggedOut(io: CealCliIo): number {
 		local_session_removed: false,
 		raw_token_visible: false,
 		proof_level: "local_state",
-		next_action: "Run 'ceal session enroll --help' to configure a session.",
+		next_action: SESSION_SETUP_NEXT_ACTION,
 	});
 }
 
@@ -300,7 +301,7 @@ function writeLoggedOut(io: CealCliIo): number {
 		local_session_removed: true,
 		raw_token_visible: false,
 		proof_level: "host_decision",
-		next_action: "Run 'ceal session enroll --help' to configure another session.",
+		next_action: SESSION_SETUP_NEXT_ACTION,
 	});
 }
 
@@ -463,11 +464,11 @@ interface ClientSessionFailureDisposition {
 }
 
 // A session whose refresh credential can no longer produce a session: the local
-// state is intact but useless, and only a new enrollment moves it forward.
+// state is intact but useless, and only a replacement session moves it forward.
 const NOT_RENEWABLE: ClientSessionFailureDisposition = {
 	retryable: false,
 	message: "The stored Gateway session can no longer be renewed.",
-	nextAction: "Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
+	nextAction: SESSION_REPLACEMENT_NEXT_ACTION,
 };
 
 /**
@@ -489,8 +490,7 @@ const CLIENT_SESSION_FAILURES: Readonly<Record<string, ClientSessionFailureDispo
 		retryable: false,
 		message:
 			"The Gateway did not return a usable response while renewing the stored session; the one-time refresh credential may already have been consumed.",
-		nextAction:
-			"Do not retry the same command. Ask the organization administrator for a replacement device-enrollment code, then run 'ceal session enroll --help'.",
+		nextAction: `Do not retry the same command. ${SESSION_REPLACEMENT_NEXT_ACTION}`,
 	},
 	session_revocation_unavailable: {
 		retryable: true,
@@ -528,8 +528,7 @@ export function classifyClientSessionFailure(reason: string): { kind: string; re
 		kind: SAFE_REASON_TOKEN.test(reason) ? reason : UNCLASSIFIED_REASON_KIND,
 		retryable: false,
 		message: "The stored Gateway session could not be used safely.",
-		nextAction:
-			"Run 'ceal session status' to inspect local state, then correct the reported local configuration or ask the organization administrator for a replacement device-enrollment code.",
+		nextAction: "Run 'ceal session status' to inspect local state, then correct the reported local configuration.",
 	};
 }
 

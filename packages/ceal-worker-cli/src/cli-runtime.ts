@@ -1,4 +1,5 @@
 import type { CealDeviceAdoptionClient, CealPersonalClientSessionClient } from "@corca-ai/ceal";
+import type { CealInstalledReleaseReading } from "./acceptance-record.js";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
@@ -71,6 +72,8 @@ export interface CealCommandRuntime {
 	// drill-down); null declares a rejected runtime/ref grammar.
 	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
 	runStableUpdate?: (options?: CealStableUpdateOptions) => Promise<CealStableUpdateResult>;
+	/** Test/embedding hook; the shipped CLI always inspects its running executable. */
+	readInstalledReleaseFacts?: (binaryPath: string) => CealInstalledReleaseReading;
 	/** Real executable path for managed-install observation (`ceal observe`). */
 	executablePath?: string;
 	/** Test/embedding hook: receives the live observer URL and a closer. */
