@@ -104,15 +104,17 @@ runner owns final host proof; local Linux evidence cannot substitute for it.
   failed only at the hosted host boundary.
 - Chosen Next Step: verify the visible Darwin parent against the held
   descriptor at every operation boundary.
-- Impl Status: blocked pending the smallest Darwin-capable resolver slice.
-- Impl Status Reason: the tag is irreversible and current main CI is red.
+- Impl Status: complete.
+- Impl Status Reason: commit `f86de98` passed GitHub run `31328838700` on both
+  hosted macOS and Linux after the first realpath design was disproved.
 - What Disproving Observation Is Resolved: macOS disproved descriptor
   realpath/re-anchoring; the replacement must pass the parent-swap tests and
   full consumer suite by failing closed on rename.
 
 ## Canonical Artifact
 
-This file is the implementation contract until the macOS gate is green.
+This file records the completed implementation contract. Closeout evidence is
+in `charness-artifacts/impl/2026-08-09-darwin-local-store-lock-anchor.md`.
 
 ## First Implementation Slice
 

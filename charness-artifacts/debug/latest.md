@@ -66,7 +66,9 @@ exclude concurrent writers, and never follow a substituted store parent.
 - Confirmed at the failing boundary: all representative failures enter
   `createLock`; Linux passes; the one platform branch that differs supplies a
   non-traversable Darwin descriptor path.
-- Pending repair proof: focused macOS lock tests and the complete macOS gate.
+- Repair proof: exact source commit `f86de98fac4d3f629f1c74ba64785d5da124032a`
+  passed GitHub run `31328838700`; macOS job `93283655563` and Linux job
+  `93283655579` both completed the full gate.
 
 ## Root Cause
 
@@ -83,8 +85,9 @@ first ordinary Darwin mutation before any user state could be written.
   report the local operation as successful.
 - Producer Proof: `anchorLockParent` holds an `O_DIRECTORY|O_NOFOLLOW` handle
   and its `fstat` identity.
-- Final-Consumer Proof: pending; the macOS full gate must exercise session,
-  cache, receipt, and guide consumers without `unsafe_store`.
+- Final-Consumer Proof: macOS job `93283655563` exercised session, cache,
+  receipt, guide, ordinary acquisition, and the Darwin fail-closed seam without
+  an unexpected `unsafe_store`.
 - Interface-Shape Sibling Scan: every store reaches the same shared lock; the
   candidate publish, stale quarantine, and release paths all consume its path.
 - Non-Claims: no released macOS binary or live Gateway/provider call is proven.
@@ -125,7 +128,7 @@ first ordinary Darwin mutation before any user state could be written.
 
 ## Interrupt Decision
 
-- Resolution: open
+- Resolution: resolved
 - Critique Required: yes
 - Next Step: spec
 - Handoff Artifact: charness-artifacts/spec/2026-08-09-darwin-local-store-lock-anchor.md

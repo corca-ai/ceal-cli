@@ -21,24 +21,21 @@ Gateway Protocol handoff without weakening its proof boundary.
   route startup, secret-free `--timing` JSONL on stderr, truthful recovery and
   effects, atomic local-store locking, identity-bound receipt history, and the
   concurrency/error-reporting fixes recorded under `charness-artifacts/impl/`.
-- The manifests and lockfile are prepared for `0.76.0`, but the release proof,
-  main push, dispatch dry run, tag, public workflow, installed update, and final
-  handoff refresh have not yet completed. Do not describe this candidate as
-  released.
+- The manifests and lockfile are prepared for `0.76.0`. Source commit `f86de98`
+  is pushed and GitHub run `31328838700` passed the full gate on both hosted
+  macOS and Linux, including the Darwin local-store repair. The dispatch dry
+  run, tag, public workflow, installed update, and final handoff refresh have
+  not yet completed. Do not describe this candidate as released.
 
 ## Next Session
 
-1. Run the full local gate and maintainer-local duplication and shell gates.
-2. Commit the version/release-record slice, then perform the required fresh-eye
-   release-claim review.
-3. Push `main`, match `origin/main`, and read the exact commit's `check.yml` run.
-4. Dispatch and read the `ceal-release.yml` dry run because the workflow changed.
-5. Create and push `ceal-v0.76.0`, watch the tag workflow, and verify the public
+1. Dispatch and read the `ceal-release.yml` dry run because the workflow changed.
+2. Create and push `ceal-v0.76.0`, watch the tag workflow, and verify the public
    release inventory, checksums, and signatures.
-6. Confirm no legacy `ceal` process is running, then run `ceal update` and the
+3. Confirm no legacy `ceal` process is running, then run `ceal update` and the
    local installed readbacks. Leave macOS install and live Gateway/provider
    readback explicitly unclaimed.
-7. Refresh this handoff and the release record to the evidence actually reached,
+4. Refresh this handoff and the release record to the evidence actually reached,
    commit that documentation, and push it.
 
 ## References
