@@ -58,6 +58,13 @@
     },
     {
       "surface": "code",
+      "id": "387c2bf200d349cb",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/index.ts writeAcceptanceRefusal against writeError. Both write the shared error envelope, and they differ in exactly the two things a shared helper would have to take as parameters: the result schema and the exit code. The comment above writeAcceptanceRefusal states why the schema differs — the acceptance command answers its own schema on failure so a caller parses one shape and reads ok, rather than switching schemas on the unhappy path — and the exit codes are 3 and 2 because one is a refusal about an installed release and the other is a usage error. Surfaced now only because bumping the acceptance schema to .v2 re-keyed the family; the pair and its reasoning predate this session. Folding them would put the schema-on-failure decision one argument away from the usage-error path."
+    },
+    {
+      "surface": "code",
       "id": "4d047b071bc45bee",
       "class": "intentional",
       "reviewed_at": "2026-08-09",

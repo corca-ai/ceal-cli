@@ -15,18 +15,6 @@ Everything else not listed is owned by the comment at the site and by
   `ceal-worker-release-manifest-<platform>.json` records only the protocol, so a
   consumer is left with a source-owner claim. The fix puts the client in the
   manifest schema, which is release-affecting.
-- **The acceptance record's receipt branch is not an allow-list, in both
-  emitters.** It passes a Gateway receipt event through without projection, so
-  `membership_ref` and `subject_ref` ride along —
-  `packages/ceal-worker-cli/src/acceptance-record.ts` for the installed command
-  and `scripts/worker-acceptance-packet.mjs` for the repo script, whose own
-  non-claim advertises the result as a sanitized projection. Fixing one leaves
-  the other leaking; a released artifact under `docs/acceptance/` shows both refs.
-- **The two acceptance emitters disagree about more than serialization.** The
-  repo script writes JSON under `--json` and a hand-rolled line render by
-  default; the installed command writes YAML. The sharper problem is that both
-  declare `ceal.worker_acceptance_result.v1` while carrying different field sets
-  — compare `bounded_capability_call` in each.
 - **CI runs macOS but proves no install there.** `check.yml`'s `check-native` leg
   and the release lane's `darwin-arm64` build both set
   `require_platform_proofs: "0"`, and `test/platform-proof.mjs` grants a non-skip
@@ -50,11 +38,14 @@ Everything else not listed is owned by the comment at the site and by
   a `destroy()`. The suite cannot express it: every fixture models the channel as
   a generator whose close is a graceful EOF, which differs in kind from
   `destroy()`. Fix alongside the rest of the v5 path, not before.
-- **Two published acceptance records overstate guide registration.**
-  `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were emitted while
-  `registered_host_count` counted resolved host directories rather than
-  registrations. The emitters are fixed; the records are historical artifacts and
-  were left as written rather than rewritten after the fact.
+- **Two published acceptance records overstate guide registration, and one leaks
+  identity refs.** `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were
+  emitted while `registered_host_count` counted resolved host directories rather
+  than registrations, and `ceal-v0.69.0/linux-amd64.yaml` carries
+  `membership_ref` and `subject_ref` from the pre-`.v2` emitter. Both emitters are
+  fixed; the records are historical artifacts and were left as written rather
+  than rewritten after the fact. Anyone re-publishing them owes a re-emit, not an
+  edit.
 - **Incremental TypeScript builds are measured but not taken.** The gate compiles
   the owned packages once and several test processes compile them again; measure
   it with `tsc -p tsconfig.build.json --incremental --tsBuildInfoFile <tmp>`

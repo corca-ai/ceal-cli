@@ -5,6 +5,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS, CEAL_ACCEPTANCE_RECEIPT_KEYS } from "../../packages/ceal-worker-cli/dist/acceptance-record.js";
 import {
 	buildAcceptancePacket,
 	inspectInstalledRelease,
@@ -327,7 +328,7 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 	const sanitized = runCli(["--binary", binary, "--sanitized"]);
 	assert.equal(sanitized.status, 0, sanitized.stderr);
 	const record = JSON.parse(sanitized.stdout);
-	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	assert.doesNotMatch(sanitized.stdout, new RegExp(root.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 	assert.equal(record.bounded_capability_call, null);
 
@@ -442,7 +443,7 @@ test("the sanitized record omits every host-local path and keeps the Gateway's o
 	assert.equal(record.installed_client.artifact_sha256, packet.installed_client.artifact_sha256);
 	assert.equal(record.installed_client.digest_agreement, packet.installed_client.digest_agreement);
 	assert.deepEqual(record.gateway_protocol_input, packet.gateway_protocol_input);
-	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	// The packet's own non-claims travel, plus one naming the omission.
 	assert.equal(record.non_claims[0], "fixture non-claim");
 	assert.match(record.non_claims.at(-1), /sanitized projection/u);
@@ -456,4 +457,51 @@ test("a field added to the packet does not travel into the record by default", (
 	packet.invented_top_level = { path: "/home/someone/secret" };
 	const serialized = JSON.stringify(sanitizedAcceptanceRecord(packet));
 	assert.doesNotMatch(serialized, /operator_home|raw_access_token|invented_top_level|secret/u);
+});
+
+// Two emitters answer `ceal.worker_acceptance_result`, and they cannot share an
+// implementation — one decodes Gateway events, the other reads the installed
+// binary's rendered stdout. So the field lists live in acceptance-record.ts and
+// this test is what binds the script to them. Without it the two drifted into
+// different field sets under one schema version, which is what docs/debt.md
+// recorded and what a consumer of the record could not have detected.
+test("the checkout emitter's bounded-call row carries exactly the keys the record schema declares", () => {
+	const packet = packetFixture();
+	packet.bounded_capability_call = {
+		capability: "message.search",
+		target: `target:${"a".repeat(8)}`,
+		status: "succeeded",
+		exit_code: 0,
+		elapsed_ms: 12,
+		evidence: "audited_call",
+		request_ref: "ceal:fixture:call",
+		receipt: {
+			readback_status: "verified",
+			outcome: "succeeded",
+			authorization: "allowed",
+			audit_refs: ["gateway-audit:fixture"],
+			gateway_elapsed_ms: 7,
+			exit_code: 0,
+			elapsed_ms: 4,
+		},
+	};
+	const record = sanitizedAcceptanceRecord(packet);
+	assert.deepEqual(Object.keys(record.bounded_capability_call).sort(), [...CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS].sort());
+	assert.deepEqual(Object.keys(record.bounded_capability_call.receipt).sort(), [...CEAL_ACCEPTANCE_RECEIPT_KEYS].sort());
+});
+
+// The released record docs/acceptance/ceal-v0.69.0/linux-amd64.yaml carries
+// `membership_ref` and `subject_ref` because the installed emitter shipped the
+// decoded Gateway audit event whole. Neither emitter's key list admits them now,
+// and this asserts the property rather than re-listing the forbidden names in a
+// second place: an identity ref can only arrive inside a key nobody declared.
+test("no bounded-call key admits a Gateway identity ref", () => {
+	const forbidden = ["membership_ref", "subject_ref", "registration_ref", "client_ref", "grant_snapshot", "events"];
+	for (const name of forbidden) {
+		assert.equal(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS.includes(name), false, `${name} is declared on the bounded-call row`);
+		assert.equal(CEAL_ACCEPTANCE_RECEIPT_KEYS.includes(name), false, `${name} is declared on the receipt row`);
+	}
+	// Positive control: the lists are not empty and do declare what they should.
+	assert.equal(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS.includes("request_ref"), true);
+	assert.equal(CEAL_ACCEPTANCE_RECEIPT_KEYS.includes("audit_refs"), true);
 });

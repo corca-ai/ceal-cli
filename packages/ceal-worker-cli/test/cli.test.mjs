@@ -4159,7 +4159,7 @@ function acceptanceParts(overrides = {}) {
 			capability_count: 20,
 			elapsed_ms: 1234,
 		},
-		receipt: null,
+		boundedCall: null,
 		...overrides,
 	};
 }
@@ -4179,7 +4179,7 @@ test("the emitted acceptance record never carries a host path, however the parts
 	assert.equal(record.installed_client.digest_agreement, "binary_bytes_manifest_and_sha256sums_agree");
 	assert.equal(record.guide.registered_host_count, 2);
 	assert.equal(record.gateway_session.instance_ref, "instance:ceal-prod");
-	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v1");
+	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	assert.equal(record.emitted_by, "installed_client");
 });
 
@@ -4193,7 +4193,7 @@ test("the emitted acceptance record answers the success predicate its own refusa
 	assert.equal(record.command, "ceal");
 	assert.equal(record.status, "emitted");
 	// Both halves of the schema must stay one shape for a caller with one reader.
-	assert.match(workerSource(), /schema_version: "ceal\.worker_acceptance_result\.v1",\s*\n\s*command: "ceal",\s*\n\s*ok: false/u);
+	assert.match(workerSource(), /schema_version: "ceal\.worker_acceptance_result\.v2",\s*\n\s*command: "ceal",\s*\n\s*ok: false/u);
 });
 
 test("the record states what it did not do, including that it called no provider", () => {
@@ -4211,10 +4211,61 @@ test("the record states what it did not do, including that it called no provider
 	// With a read-back receipt the provider-execution non-claim is dropped,
 	// because one did happen — under `ceal call`, not under this command.
 	const withCall = buildAcceptanceRecord(
-		acceptanceParts({ receipt: { request_ref: "ceal:x:call", readback_status: "verified", events: [] } }),
+		acceptanceParts({
+			boundedCall: {
+				capability: null,
+				target: null,
+				status: "verified",
+				exit_code: null,
+				elapsed_ms: null,
+				evidence: null,
+				request_ref: "ceal:x:call",
+				receipt: { readback_status: "verified", outcome: "succeeded", authorization: "allowed", audit_refs: [], gateway_elapsed_ms: null },
+			},
+		}),
 	);
 	assert.doesNotMatch(withCall.non_claims.join("\n"), /provider_execution_not_reached/u);
 	assert.match(withCall.non_claims.join("\n"), /performed no provider call/u);
+});
+
+// docs/acceptance/ceal-v0.69.0/linux-amd64.yaml carries `membership_ref` and
+// `subject_ref` because this builder used to emit whatever bounded-call object it
+// was handed, and the acceptance path handed it the decoded Gateway audit event.
+// The projection is now by declared key, so this asserts the property — an
+// undeclared key cannot travel — rather than re-listing the forbidden names.
+test("a bounded-call field the builder was never told to emit does not travel", () => {
+	const record = buildAcceptanceRecord(
+		acceptanceParts({
+			boundedCall: {
+				capability: null,
+				target: null,
+				status: "verified",
+				exit_code: null,
+				elapsed_ms: null,
+				evidence: null,
+				request_ref: "ceal:x:call",
+				receipt: {
+					readback_status: "verified",
+					outcome: "succeeded",
+					authorization: "allowed",
+					audit_refs: ["gateway-audit:one"],
+					gateway_elapsed_ms: 7,
+					membership_ref: "membership:hwidong-work",
+					subject_ref: "subject:hwidong",
+				},
+				events: [{ subject_ref: "subject:hwidong" }],
+			},
+		}),
+	);
+	const serialized = JSON.stringify(record);
+	assert.doesNotMatch(serialized, /membership_ref|subject_ref|"events"/u);
+	// Positive control: the evidence the row exists to carry did survive.
+	assert.equal(record.bounded_capability_call.request_ref, "ceal:x:call");
+	assert.deepEqual(record.bounded_capability_call.receipt.audit_refs, ["gateway-audit:one"]);
+	assert.equal(record.bounded_capability_call.receipt.gateway_elapsed_ms, 7);
+	// Every declared key is present even when the caller omitted it, so the two
+	// emitters answer one schema with one key set.
+	assert.equal(record.bounded_capability_call.receipt.exit_code, null);
 });
 
 test("a build tree is refused as an installed release rather than described as one", () => {

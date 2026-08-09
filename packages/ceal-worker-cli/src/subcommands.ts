@@ -175,7 +175,7 @@ export const CEAL_SUBCOMMANDS = [
 		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
-		result_schema: "ceal.worker_acceptance_result.v1",
+		result_schema: "ceal.worker_acceptance_result.v2",
 		recovery:
 			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; a build tree is refused because it is not an installed release.",
 		notes: [

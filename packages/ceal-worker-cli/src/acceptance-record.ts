@@ -122,6 +122,62 @@ function readChecksum(file: string, name: string): string | undefined {
 	return undefined;
 }
 
+/**
+ * The one declaration of what a `bounded_capability_call` row may contain, and
+ * of what its receipt may contain.
+ *
+ * Two emitters answer this schema — this module for the installed binary, and
+ * `scripts/worker-acceptance-packet.mjs` from a checkout — and they cannot share
+ * an implementation: one holds decoded Gateway events, the other only the
+ * installed binary's rendered stdout, and making the script import this package
+ * would give a script that deliberately needs no build a build dependency. So
+ * the field lists live here and `test/contract/worker-acceptance-packet.test.mjs`
+ * binds the script's output to them. Until this existed the two emitters
+ * declared one schema version while carrying different field sets.
+ *
+ * @testOnly The values are used by `projectBoundedCall` below; the export exists
+ * so the contract test asserts against this declaration rather than a copy.
+ */
+export const CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS = Object.freeze([
+	"capability",
+	"target",
+	"status",
+	"exit_code",
+	"elapsed_ms",
+	"evidence",
+	"request_ref",
+	"receipt",
+] as const);
+
+/**
+ * Refs only. The Gateway audit event carries `membership_ref`, `subject_ref`,
+ * `registration_ref`, `client_ref` and a grant snapshot, and this record leaves
+ * the machine — a released record under `docs/acceptance/ceal-v0.69.0/` shows
+ * two of those because the installed emitter used to ship the raw event.
+ *
+ * @testOnly Same reason as the list above.
+ */
+export const CEAL_ACCEPTANCE_RECEIPT_KEYS = Object.freeze([
+	"readback_status",
+	"outcome",
+	"authorization",
+	"audit_refs",
+	"gateway_elapsed_ms",
+	"exit_code",
+	"elapsed_ms",
+] as const);
+
+export interface CealAcceptanceBoundedCall {
+	capability: unknown;
+	target: unknown;
+	status: unknown;
+	exit_code: number | null;
+	elapsed_ms: number | null;
+	evidence: unknown;
+	request_ref: unknown;
+	receipt: Record<string, unknown> | null;
+}
+
 export interface CealAcceptanceRecordParts {
 	release: CealInstalledReleaseFacts;
 	reportedVersion: unknown;
@@ -136,7 +192,7 @@ export interface CealAcceptanceRecordParts {
 		capability_count: number;
 		elapsed_ms: number;
 	};
-	receipt: Record<string, unknown> | null;
+	boundedCall: CealAcceptanceBoundedCall | null;
 }
 
 /**
@@ -158,7 +214,7 @@ export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<
 		// through a constant would pass `tsc` and fail that gate. A constant no
 		// emitter may use is not a constant, which is why there is no longer one
 		// here for a reader to reach for.
-		schema_version: "ceal.worker_acceptance_result.v1",
+		schema_version: "ceal.worker_acceptance_result.v2",
 		// The refusal writer for this same schema carries `command`, `ok` and
 		// `status`, and the shipped guide tells an agent to branch on `ok`, "which
 		// every command answers". This document answered none of them, so the one
@@ -191,9 +247,25 @@ export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<
 			live_gateway_checked: true,
 			capability_count: session.capability_count,
 		},
-		bounded_capability_call: parts.receipt,
+		bounded_capability_call: projectBoundedCall(parts.boundedCall),
 		non_claims: acceptanceNonClaims(parts),
 	};
+}
+
+/**
+ * Projects the row through the declared key lists rather than emitting the object
+ * it was handed. That makes the allow-list mechanical: a field added to
+ * `CealAcceptanceBoundedCall` cannot travel until it is also declared above, and
+ * a declared key that the caller omits still appears, as `null`, so the two
+ * emitters cannot answer one schema with different key sets.
+ */
+function projectBoundedCall(call: CealAcceptanceBoundedCall | null): Record<string, unknown> | null {
+	if (!call) return null;
+	const source = call as unknown as Record<string, unknown>;
+	const row = Object.fromEntries(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS.map((key) => [key, source[key] ?? null]));
+	const receipt = source.receipt as Record<string, unknown> | null | undefined;
+	row.receipt = receipt ? Object.fromEntries(CEAL_ACCEPTANCE_RECEIPT_KEYS.map((key) => [key, receipt[key] ?? null])) : null;
+	return row;
 }
 
 // Derived from what the run actually reached, so a row that was skipped says so
@@ -208,8 +280,16 @@ function acceptanceNonClaims(parts: CealAcceptanceRecordParts): readonly string[
 		// machine and it must not be the thing that took a provider action.
 		"This command performed no provider call. Any bounded-call row below is a read-back of a call that `ceal call` already made.",
 	];
-	if (!parts.receipt) {
+	if (!parts.boundedCall) {
 		claims.push("provider_execution_not_reached: no request reference was supplied, so no provider action or receipt is claimed.");
+	} else {
+		// The row's shape is shared with the checkout-side emitter, which performs
+		// the call itself. This command never does, so the fields that describe
+		// making a call are null here rather than absent — an absent key would read
+		// as a schema difference between two records that answer one schema.
+		claims.push(
+			"The bounded-call row's capability, target, evidence and process fields are null because this command reads back a call it did not make; only the checkout-side emitter fills them.",
+		);
 	}
 	if (parts.release.artifact_state !== "signed") {
 		claims.push(

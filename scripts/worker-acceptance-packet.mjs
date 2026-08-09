@@ -217,16 +217,23 @@ export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability
 		let receipt;
 		if (requestRef) {
 			const shown = runBinary(binaryPath, ["receipt", "show", requestRef]);
+			// Field-for-field the installed emitter's receipt row, in the order
+			// CEAL_ACCEPTANCE_RECEIPT_KEYS declares. That list is the one home and
+			// the contract test binds this object to it; the two cannot share an
+			// implementation because this side has only rendered stdout to read.
 			receipt = {
 				readback_status: scalar(shown.stdout, "status"),
-				exit_code: shown.status,
-				elapsed_ms: shown.elapsed_ms,
-				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => match[1]),
 				outcome: scalar(shown.stdout, "outcome"),
 				authorization: scalar(shown.stdout, "authorization"),
-				gateway_elapsed_ms: Number(scalar(shown.stdout, "gateway_elapsed_ms")),
+				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => match[1]),
+				gateway_elapsed_ms: Number.isFinite(Number(scalar(shown.stdout, "gateway_elapsed_ms")))
+					? Number(scalar(shown.stdout, "gateway_elapsed_ms"))
+					: null,
+				exit_code: shown.status,
+				elapsed_ms: shown.elapsed_ms,
 			};
 		}
+		// In the order CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS declares.
 		packet.bounded_capability_call = {
 			capability,
 			target,
@@ -298,7 +305,8 @@ export function sanitizedAcceptanceRecord(packet) {
 	const session = packet.gateway_session;
 	const call = packet.bounded_capability_call;
 	return {
-		schema_version: "ceal.worker_acceptance_result.v1",
+		schema_version: "ceal.worker_acceptance_result.v2",
+		emitted_by: "source_checkout",
 		installed_client: {
 			platform: client.platform,
 			release_version: client.release_version,

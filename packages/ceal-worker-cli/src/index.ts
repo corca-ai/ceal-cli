@@ -8,7 +8,7 @@ import type {
 	CealGatewayHandshakeValue,
 } from "@corca-ai/ceal-protocol";
 import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
-import { buildAcceptanceRecord, readInstalledReleaseFacts } from "./acceptance-record.js";
+import { buildAcceptanceRecord, type CealAcceptanceBoundedCall, readInstalledReleaseFacts } from "./acceptance-record.js";
 import { type CealAgentGuideHost, countRegisteredGuideHosts, isCealAgentGuideHost } from "./agent-guide.js";
 import {
 	type CealCallResultRecorder,
@@ -215,7 +215,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
-		result_schema: "ceal.worker_acceptance_result.v1",
+		result_schema: "ceal.worker_acceptance_result.v2",
 		recovery:
 			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; an installed release is required and a build tree is refused.",
 	},
@@ -356,7 +356,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 		// Read back a receipt only when one is named. This command never calls a
 		// provider, so the bounded row is evidence of an act that already happened
 		// under its own command and its own audit event.
-		let receipt: Record<string, unknown> | null = null;
+		let boundedCall: CealAcceptanceBoundedCall | null = null;
 		if (requestRef !== undefined) {
 			const readback = await requestReceiptReadback(
 				access.value.storedSession as CealStoredSession,
@@ -365,7 +365,29 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				runtime,
 			);
 			if (!readback.readback.ok) return writeAcceptanceGatewayFailure(readback.readback.error, io);
-			receipt = { request_ref: requestRef, readback_status: "verified", events: readback.readback.value.events };
+			// Through the same projection `ceal receipt show` renders, not around it.
+			// This branch used to attach the decoded Gateway events whole, so
+			// `membership_ref` and `subject_ref` travelled in a document that leaves
+			// the machine — `docs/acceptance/ceal-v0.69.0/linux-amd64.yaml` shows both.
+			const projected = readback.readback.value.events.map((event) => projectReceiptEvent(event));
+			boundedCall = {
+				capability: null,
+				target: null,
+				status: "verified",
+				exit_code: null,
+				elapsed_ms: null,
+				evidence: null,
+				request_ref: requestRef,
+				receipt: {
+					readback_status: "verified",
+					outcome: projected.at(-1)?.outcome ?? null,
+					authorization: projected.at(-1)?.authorization ?? null,
+					audit_refs: projected.map((event) => event.ref),
+					gateway_elapsed_ms: lastGatewayElapsedMs(projected),
+					exit_code: null,
+					elapsed_ms: null,
+				},
+			};
 		}
 
 		const guide = runtime.inspectAgentGuide?.();
@@ -388,7 +410,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 					capability_count: discovery.value.capabilities.length,
 					elapsed_ms: Date.now() - startedAt,
 				},
-				receipt,
+				boundedCall,
 			}),
 		);
 	} catch {
@@ -1451,6 +1473,15 @@ function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unkno
 	};
 }
 
+/** The last event that carried Gateway timing, which is the one the readback is about. */
+function lastGatewayElapsedMs(projected: readonly Record<string, unknown>[]): number | null {
+	for (let index = projected.length - 1; index >= 0; index -= 1) {
+		const timing = projected[index]?.timing as { gateway_elapsed_ms?: unknown } | undefined;
+		if (typeof timing?.gateway_elapsed_ms === "number") return timing.gateway_elapsed_ms;
+	}
+	return null;
+}
+
 function safeGatewayElapsed(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
@@ -1799,7 +1830,7 @@ function writeAcceptanceRefusal(kind: string, message: string, io: CealCliIo, ne
 		// `ceal capabilities` does. A caller parses one shape and reads `ok`;
 		// switching schemas on failure would make the unhappy path the one nobody
 		// wrote a reader for.
-		schema_version: "ceal.worker_acceptance_result.v1",
+		schema_version: "ceal.worker_acceptance_result.v2",
 		command: "ceal",
 		ok: false,
 		status: "error",

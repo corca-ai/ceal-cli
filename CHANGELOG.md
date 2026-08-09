@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+**The acceptance record stops shipping Gateway identity refs, and its two
+emitters now answer one schema with one field set —
+`ceal.worker_acceptance_result.v2`.** The installed command attached the decoded
+Gateway audit event whole, so `membership_ref`, `subject_ref`,
+`registration_ref`, `client_ref` and the grant snapshot travelled in a document
+whose own comment claimed an allow-list. `docs/acceptance/ceal-v0.69.0/linux-amd64.yaml`
+shows two of them. The projection `ceal receipt show` already used was right
+there and unused by this one path.
+
+- The bounded-call row is now assembled from a declared key list rather than from
+  whatever object the caller supplied, so an undeclared field cannot ride along
+  and a declared one the caller omits still appears as `null`.
+- Both emitters carry `emitted_by`, and the checkout-side one fills the fields it
+  can actually observe; the installed one writes `null` for the ones it did not
+  do and says so in its non-claims rather than omitting the keys.
+- The two cannot share an implementation — one decodes Gateway events, the other
+  reads the installed binary's rendered stdout — so a contract test binds the
+  script's output to the declaration. Under `.v1` they had drifted into different
+  field sets with nothing checking.
+
+Records already published under `docs/acceptance/` stay `.v1` and stay as
+written.
+
 **The private leased-consumer carrier's outbound service call now has a
 deadline.** It read its service channel off FD 4 under a 2,000 ms bound and then
 called the service with no bound at all, on either transport. Against a peer that
