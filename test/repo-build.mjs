@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -39,7 +39,7 @@ const OWNER_WRITE_GRACE_MS = 2_000;
 // come back to later is not.
 export function withBuiltPackages(packagePaths, read) {
 	return withDistLock(() => {
-		for (const packagePath of packagePaths) ensureBuilt(packagePath);
+		for (const packagePath of packagePaths) ensurePackageBuilt(packagePath);
 		return read();
 	});
 }
@@ -47,7 +47,7 @@ export function withBuiltPackages(packagePaths, read) {
 // Exported so the memo can be proven against a counter instead of a real `tsc`
 // run, which would make the contract tier a writer of the `dist` its sibling
 // tests execute.
-export function ensureBuilt(packagePath, build = runNpmBuild) {
+export function ensurePackageBuilt(packagePath, build = runNpmBuild) {
 	const key = path.normalize(packagePath);
 	if (BUILT.has(key)) return false;
 	build(key);
@@ -56,7 +56,18 @@ export function ensureBuilt(packagePath, build = runNpmBuild) {
 }
 
 function runNpmBuild(packagePath) {
-	execFileSync("npm", ["run", "build"], { cwd: path.join(REPO_ROOT, packagePath), stdio: "pipe", env: toolchainEnv() });
+	const packageRoot = path.join(REPO_ROOT, packagePath);
+	const cache = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-tsbuildinfo", `${path.basename(packagePath)}.tsbuildinfo`);
+	// TypeScript trusts an incremental record even if somebody removed its emitted
+	// tree. Every repo-owned clean removes the whole directory, so absence is the
+	// fail-closed signal that the cache must go with it.
+	if (!existsSync(path.join(packageRoot, "dist"))) rmSync(cache, { force: true });
+	mkdirSync(path.dirname(cache), { recursive: true });
+	execFileSync("npm", ["run", "build", "--", "--incremental", "--tsBuildInfoFile", cache], {
+		cwd: packageRoot,
+		stdio: "pipe",
+		env: toolchainEnv(),
+	});
 }
 
 // Exported so the mutex can be proven against a cheap body instead of only
@@ -156,4 +167,10 @@ function sleep(ms) {
 	// The callers are synchronous fixture builders, so this has to block the thread
 	// rather than yield to the event loop.
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	const packagePaths = process.argv.slice(2);
+	if (packagePaths.length === 0) throw new Error("usage: node test/repo-build.mjs <package-path> [...]");
+	withBuiltPackages(packagePaths, () => undefined);
 }

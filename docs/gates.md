@@ -85,6 +85,15 @@ writer: `ensurePackageBuilt` in `test/repo-build.mjs`, an inter-process mutex â€
 `mkdir` as the atomic test-and-set â€” plus an in-process memo. A fixture that
 needs a current `dist` asks for it there rather than building its own.
 
+The same owner now serves the root build and package-local `pretest` /
+`precoverage` hooks. The root coverage command suppresses those lifecycle hooks
+only after `build:worker` has produced all three workspace trees, so the gate
+does not ask a second process to rebuild what it is about to read. The owner
+passes an incremental build-info path under `node_modules/.cache` to each
+package's existing build command; it removes that record when `dist` is absent,
+so a clean cannot turn a stale compiler record into a missing release tree.
+`prepack` remains an independent clean build.
+
 Three things keep this honest, and none of them is the tier passing, because a
 race that loses is silent:
 
@@ -95,6 +104,11 @@ race that loses is silent:
 - The same file forbids any other fixture under `test/` from invoking
   `npm run build` itself, because a new one that did would reintroduce exactly
   this race and pass its own tests.
+- `repo-gates.test.mjs` binds the root build and coverage routes, while
+  `repo-build.test.mjs` binds every owned package's standalone test and coverage
+  hooks to the writer. Keeping those assertions at the two consumer boundaries
+  caught the client test script that still built outside the owner during this
+  change's fresh-eye review.
 - The stale-lock break exists so a process killed while holding the lock costs
   the next run a warning rather than a hang.
 

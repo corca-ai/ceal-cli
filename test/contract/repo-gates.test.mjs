@@ -109,11 +109,14 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.doesNotMatch(manifest.scripts.lint, /--changed|--staged|--since/u);
 	assert.match(manifest.scripts.build, /npm run build:worker/u);
 	assert.match(manifest.scripts["build:worker"], /^node scripts\/generate-leased-consumer-handoff-runtime[.]mjs/u);
-	assert.match(manifest.scripts["build:worker"], /packages\/ceal-protocol run build/u);
+	assert.match(
+		manifest.scripts["build:worker"],
+		/node test\/repo-build[.]mjs packages\/ceal-protocol packages\/ceal-client packages\/ceal-worker-cli$/u,
+	);
 	for (const ownerPackage of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
-		assert.match(manifest.scripts["build:worker"], new RegExp(`${ownerPackage} run build`, "u"));
 		assert.match(manifest.scripts.coverage, new RegExp(`${ownerPackage} run coverage`, "u"));
 	}
+	assert.equal((manifest.scripts.coverage.match(/--ignore-scripts/gu) ?? []).length, 2, "root coverage must reuse build:worker output");
 	assert.doesNotMatch(manifest.scripts.coverage, /packages\/ceal-protocol/u);
 	// `test:unit` IS the coverage run. Running the suites plainly and then again
 	// under c8 paid for the same 275 tests twice and let the floor apply to a

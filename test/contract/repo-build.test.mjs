@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
-import { ensureBuilt, REPO_ROOT, withDistLock } from "../repo-build.mjs";
+import { ensurePackageBuilt, REPO_ROOT, withDistLock } from "../repo-build.mjs";
 
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const HELPER = path.join(REPO_ROOT, "test", "repo-build.mjs");
@@ -126,17 +126,25 @@ test("the lock is released even when the guarded body throws", () => {
 	assert.equal(existsSync(LOCK), false);
 });
 
-test("ensureBuilt runs the build exactly once per package per process", () => {
+test("ensurePackageBuilt runs the build exactly once per package per process", () => {
 	// Injected builder, so this proves the memo without writing the `dist` that
 	// this tier's sibling tests are executing.
 	const calls = [];
 	const build = (packagePath) => calls.push(packagePath);
-	assert.equal(ensureBuilt("packages/fixture-a", build), true);
-	assert.equal(ensureBuilt("packages/fixture-a", build), false);
+	assert.equal(ensurePackageBuilt("packages/fixture-a", build), true);
+	assert.equal(ensurePackageBuilt("packages/fixture-a", build), false);
 	// Spelling the same path differently must not buy a second build.
-	assert.equal(ensureBuilt("packages/./fixture-a", build), false);
-	assert.equal(ensureBuilt("packages/fixture-b", build), true);
+	assert.equal(ensurePackageBuilt("packages/./fixture-a", build), false);
+	assert.equal(ensurePackageBuilt("packages/fixture-b", build), true);
 	assert.deepEqual(calls, ["packages/fixture-a", "packages/fixture-b"]);
+});
+
+test("standalone package tests enter the dist owner", () => {
+	for (const packageName of ["ceal-client", "ceal-worker-cli"]) {
+		const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", packageName, "package.json"), "utf8"));
+		assert.equal(manifest.scripts.precoverage, `node ../../test/repo-build.mjs packages/${packageName}`);
+		assert.equal(manifest.scripts.pretest, `node ../../test/repo-build.mjs packages/${packageName}`);
+	}
 });
 
 // The mutex only protects `dist` if every fixture goes through it. A new fixture

@@ -53,7 +53,12 @@ skill_ergonomics_gate_rules:
   - progressive_disclosure_risk
 skill_ergonomics_skill_paths:
   - skills/ceal-guide/SKILL.md
-runtime_profile_default: default
+runtime_profile_default: local-linux-aarch64-2cpu
+runtime_budget_profiles:
+  local-linux-aarch64-2cpu:
+    budgets:
+      iteration gate: 109500
+      tag push, full gate: 227000
 # The worker CLI is invoked by an agent once per step, so process start is a real
 # cost centre and not a micro-benchmark. `--help` is the cheapest route that
 # still pays the whole bootstrap: argv parse, command table, help render. Marked

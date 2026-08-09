@@ -105,27 +105,6 @@ Everything else not listed is owned by the comment at the site and by
   fixed; the records are historical artifacts and were left as written rather
   than rewritten after the fact. Anyone re-publishing them owes a re-emit, not an
   edit.
-- **The gate builds the same packages twice and caches nothing, and this entry's
-  reason for declining it was wrong.** It said the frozen `packages/ceal-protocol`
-  may not be edited, which removes a third of the win. The flag does not need the
-  package edited — `npm --prefix packages/ceal-protocol run build -- --incremental
-  --tsBuildInfoFile <gitignored>` passes it through to `tsc` from the root.
-  Two separate costs, and both were measured on 2026-08-09 rather than argued
-  about; `charness-artifacts/quality/2026-08-09-quality-review.md` holds the
-  figures and the commands that reproduce them. First, `build:worker` builds the
-  client and the worker and then `precoverage` in each package builds them again;
-  a `dist` digest before and after the second build is identical, so it produces
-  nothing. Second, nothing is incremental, so an unchanged tree pays a full
-  compile every run — including the frozen package, which can only change when
-  the vendored copy does, and `verify-protocol-vendor-pin.mjs` already detects
-  that.
-  The repo owns the concept the first one bypasses: `ensurePackageBuilt` in
-  `test/repo-build.mjs` gives `dist` one writer, and `docs/gates.md`
-  `## The Release Tier Runs In Parallel` says why. The fix is to route
-  `precoverage`/`pretest` through it, not to add a check.
-  **This is scheduled rather than carried** — [handoff.md](handoff.md) owns it as
-  the next action, because it touches `prepack` and so the release path, and a
-  release is the next thing anyway.
 - **Nothing structural stops a new direct session writer.** The identity
   transition contract lives in `session-replacement.ts`, but a future command
   that calls `runtime.saveSession` itself bypasses it, which is exactly how issue
