@@ -454,6 +454,11 @@ earns its place:
   test asks the predicate about real descriptors instead of a stubbed `fstatSync`
   because the defect it pins was an assumption about what a child-stdio `pipe`
   is — a faked stat would have agreed with the wrong assumption.
+  `cosign` and `openssl` are explicit release-maintainer tools used only by the
+  public Gateway handoff bootstrap: Cosign verifies the keyless signature and
+  OpenSSL reads the signed Actions run identity from its certificate. They are
+  not package runtime dependencies, and the bootstrap fails closed when either
+  executable is absent.
 - `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason `biome`
   excludes it: it is a frozen vendored copy, and a finding there is one no agent
   may act on.

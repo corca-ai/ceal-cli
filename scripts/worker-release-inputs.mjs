@@ -37,6 +37,12 @@ const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "protocolProvenance", "contro
 
 export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
+const GATEWAY_PROTOCOL_REQUIREMENT = Object.freeze({
+	package: PROTOCOL_PACKAGE,
+	source_repository: "corca-ai/ceal",
+	required_exports: Object.freeze([".", "./conformance"]),
+});
+
 // Re-raised as this module's error type so a caller catching WorkerReleaseInputError
 // sees the refusal rather than an unrelated exception escaping the release lane.
 // The code is carried through unchanged: `proof_shipment_protocol_divergence` is
@@ -80,21 +86,15 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	) {
 		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
 	}
-	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
-	const control = readJson(controlConformance, "invalid_control_conformance");
-	const handoff = readJson(handoffManifest, "invalid_handoff_manifest");
-	if (sha256(readFileSync(handoffManifest)) !== expectedHandoffSha256) {
-		fail("handoff_trust_mismatch", "Gateway handoff manifest does not match the caller-approved digest.");
-	}
-	const packet = validateHandoffPacket({
-		inventory,
-		control,
+	const packet = validateGatewayHandoffPacketFiles({
 		controlConformance,
-		handoff,
+		handoffManifest,
 		protocolTarball,
 		protocolProvenance,
-		provenance,
+		expectedHandoffSha256,
+		requirement: inventory.required_gateway_protocol,
 	});
+	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
 	const protocol = validateProtocolArtifact({ inventory, repoRoot, protocolTarball, provenance, protocolRecord: packet.protocol });
 	return {
 		schema_version: "ceal.worker_release_input_resolution.v1",
@@ -113,6 +113,43 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 			...inventory.non_claims,
 			"This caller-supplied digest binds exact local input bytes; it does not authenticate who supplied that digest or packet.",
 		],
+	};
+}
+
+/**
+ * Validates the signed packet's extracted files without consulting the worker's
+ * current lock, vendored tree, or package dependency versions. The public
+ * bootstrap and the locked release-input resolver therefore share one packet
+ * grammar while keeping authentication separate from package consumption.
+ */
+export function validateGatewayHandoffPacketFiles(options = {}) {
+	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
+	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
+	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
+	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
+	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
+	if (new Set([protocolTarball, protocolProvenance, controlConformance, handoffManifest].map(path.dirname)).size !== 1) {
+		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
+	}
+	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
+	const control = readJson(controlConformance, "invalid_control_conformance");
+	const handoff = readJson(handoffManifest, "invalid_handoff_manifest");
+	if (sha256(readFileSync(handoffManifest)) !== expectedHandoffSha256) {
+		fail("handoff_trust_mismatch", "Gateway handoff manifest does not match the caller-approved digest.");
+	}
+	const packet = validateHandoffPacket({
+		requirement: options.requirement ?? GATEWAY_PROTOCOL_REQUIREMENT,
+		control,
+		controlConformance,
+		handoff,
+		protocolTarball,
+		protocolProvenance,
+		provenance,
+	});
+	return {
+		producer: { ...handoff.producer },
+		protocol: packet.protocol,
+		control_conformance: packet.control_conformance,
 	};
 }
 
@@ -296,7 +333,7 @@ function assertProtocolRequirement(protocol) {
 	}
 }
 
-function validateHandoffPacket({ inventory, control, controlConformance, handoff, protocolTarball, protocolProvenance, provenance }) {
+function validateHandoffPacket({ requirement, control, controlConformance, handoff, protocolTarball, protocolProvenance, provenance }) {
 	if (
 		!isPlainObject(handoff) ||
 		handoff.schema_version !== HANDOFF_SCHEMA ||
@@ -309,7 +346,7 @@ function validateHandoffPacket({ inventory, control, controlConformance, handoff
 	const producer = handoff.producer;
 	if (
 		!isPlainObject(producer) ||
-		producer.repository !== inventory.required_gateway_protocol.source_repository ||
+		producer.repository !== requirement.source_repository ||
 		!GIT_OBJECT_ID.test(producer.commit ?? "") ||
 		!GIT_OBJECT_ID.test(producer.tree ?? "") ||
 		!GIT_OBJECT_ID.test(producer.protocol_tree ?? "") ||
@@ -328,7 +365,7 @@ function validateHandoffPacket({ inventory, control, controlConformance, handoff
 	assertPackedPackage({
 		tarball: protocolTarball,
 		record: protocol,
-		expectedName: inventory.required_gateway_protocol.package,
+		expectedName: requirement.package,
 		code: "protocol_artifact_mismatch",
 	});
 	const controlRecord = assertControlConformanceSidecar({ handoff, control, controlConformance, producer });

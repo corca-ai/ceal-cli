@@ -196,7 +196,12 @@ function assertArchiveLockBinding(archive, lock) {
 }
 
 function assertArchiveInventory(archive, lock) {
-	const expected = packetMembers(lock);
+	assertGatewayHandoffArchiveInventory(archive, lock.protocol.filename);
+}
+
+/** Shared exact-member and regular-file check for pre-lock and locked consumers. */
+export function assertGatewayHandoffArchiveInventory(archive, protocolFilename) {
+	const expected = packetMembersForProtocol(protocolFilename);
 	const members = listArchive(archive);
 	if (JSON.stringify([...members].sort()) !== JSON.stringify(expected)) {
 		fail("gateway_handoff_archive_inventory", "Gateway handoff archive does not contain the exact locked packet inventory.");
@@ -207,13 +212,15 @@ function assertArchiveInventory(archive, lock) {
 	}
 }
 
-function extractArchive(archive, destination) {
+export function extractGatewayHandoffArchive(archive, destination) {
 	try {
 		execFileSync("tar", ["-xzf", archive, "-C", destination, "--no-same-owner", "--no-same-permissions"], { stdio: "pipe" });
 	} catch {
 		fail("gateway_handoff_archive_extract_failed", "Gateway handoff archive could not be safely extracted.");
 	}
 }
+
+const extractArchive = extractGatewayHandoffArchive;
 
 function assertExtractedPacket(directory, lock) {
 	const expected = packetMembers(lock);
@@ -226,7 +233,14 @@ function assertExtractedPacket(directory, lock) {
 }
 
 function packetMembers(lock) {
-	return [...HANDOFF_FILES, lock.protocol.filename].sort();
+	return packetMembersForProtocol(lock.protocol.filename);
+}
+
+function packetMembersForProtocol(protocolFilename) {
+	if (typeof protocolFilename !== "string" || !/^corca-ai-ceal-protocol-\d+\.\d+\.\d+\.tgz$/u.test(protocolFilename)) {
+		fail("gateway_handoff_archive_inventory", "Gateway handoff Protocol filename is invalid.");
+	}
+	return [...HANDOFF_FILES, protocolFilename].sort();
 }
 
 function listArchive(archive) {

@@ -26,6 +26,25 @@ tuple only from those verified bytes and certificate claims. If no repo-owned
 command performs that bootstrap, stop rather than reconstructing it from a
 Gateway checkout or hand-editing a lock from memory.
 
+The reviewed signature block records the certificate workflow SHA, and it must
+equal the candidate lock's Gateway commit. That makes the certificate binding
+recoverable from the reviewed lock instead of relying on a maintainer's memory
+of the Cosign invocation. Remote tag resolution is bounded and accepts either a
+lightweight tag or the peeled commit of an annotated tag; a tag-object identity
+is never recorded as the producer commit.
+
+The repo-owned bootstrap is:
+
+```
+npm run bootstrap:gateway-handoff -- --tag gateway-protocol-handoff-v<version>
+```
+
+It writes nothing below this repository. On success it retains the verified
+four-asset download in a private OS-temporary directory and emits both its
+absolute archive path and the mechanically derived candidate lock as JSON.
+Use that archive for the input slice and apply that lock value exactly; a local
+Gateway checkout is not a substitute.
+
 With that candidate verified, update
 `gateway-protocol-handoff-lock.json`, `protocol-vendor-pin.json`, the frozen
 `packages/ceal-protocol` tree, the private control-session contract, generated
