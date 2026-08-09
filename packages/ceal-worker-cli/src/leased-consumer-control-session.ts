@@ -245,17 +245,24 @@ async function runLeasedConsumerControlSession(
 		for await (const chunk of stream) {
 			if (!(chunk instanceof Uint8Array)) throw new Error("invalid_stream");
 			pending += decoder.decode(chunk, { stream: true });
-			if (Buffer.byteLength(pending, "utf8") > MAX_FRAME_BYTES) throw new Error("frame_too_large");
 			for (;;) {
 				const newline = pending.indexOf("\n");
 				if (newline < 0) break;
 				const text = pending.slice(0, newline);
 				pending = pending.slice(newline + 1);
 				if (text.length === 0 || text.endsWith("\r")) throw new Error("invalid_frame");
+				if (Buffer.byteLength(text, "utf8") > MAX_FRAME_BYTES) throw new Error("frame_too_large");
 				const response = await session.dispatch(new TextEncoder().encode(text), signal);
 				if (signal?.aborted) throw new Error("control_aborted");
 				await emit(response, signal);
 			}
+			// The ceiling belongs to one frame, not to whatever a writer happened to
+			// hand over in a single chunk. Measured on the accumulated buffer it
+			// refused two legal frames batched into one write — and refused them
+			// before dispatching the first, so the Agent got neither answer — and
+			// refused a frame of exactly the maximum, which `parseStrictJson`
+			// accepts. `consumeNdjson` below is the shape this now matches.
+			if (Buffer.byteLength(pending, "utf8") > MAX_FRAME_BYTES) throw new Error("frame_too_large");
 		}
 		pending += decoder.decode();
 		if (pending.length !== 0) throw new Error("unterminated_frame");

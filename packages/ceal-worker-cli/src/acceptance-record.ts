@@ -159,6 +159,14 @@ export function buildAcceptanceRecord(parts: CealAcceptanceRecordParts): Record<
 		// emitter may use is not a constant, which is why there is no longer one
 		// here for a reader to reach for.
 		schema_version: "ceal.worker_acceptance_result.v1",
+		// The refusal writer for this same schema carries `command`, `ok` and
+		// `status`, and the shipped guide tells an agent to branch on `ok`, "which
+		// every command answers". This document answered none of them, so the one
+		// artifact an outsider produces to prove a release read as `ok: undefined`
+		// — falsy — to any reader that followed the instruction.
+		command: "ceal",
+		ok: true,
+		status: "emitted",
 		emitted_by: "installed_client",
 		installed_client: {
 			platform: release.platform,

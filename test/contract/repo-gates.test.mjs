@@ -1032,9 +1032,14 @@ test("every formatting-only commit is recorded for git blame to ignore", () => {
 test("the pre-push hook is checked in and its installer reports honestly", () => {
 	assert.ok(existsSync(path.join(ROOT, ".githooks/pre-push")), ".githooks/pre-push must be checked in");
 	const hook = read(".githooks/pre-push");
-	assert.match(hook, /npm run check:unit/u);
+	assert.match(hook, /npm run check:unit$/mu);
 	// A tag push is the expensive one, so it must not settle for the fast gate.
-	assert.match(hook, /npm run check\b/u);
+	// `/npm run check\b/` was the assertion here and it could not tell the two
+	// apart: `\b` matches between `k` and `:`, so the iteration-gate line alone
+	// satisfied both, and deleting the tag branch outright left this test green.
+	// Anchor the full-gate command to end of line, and require it to be the one
+	// the tag branch reaches.
+	assert.match(hook, /^\s*run_phase "tag push[^"]*" npm run check$/mu);
 	assert.equal(manifest.scripts["hooks:install"], "node scripts/install-git-hooks.mjs");
 });
 

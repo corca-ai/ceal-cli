@@ -5,7 +5,6 @@ import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
-import { CealSessionStoreError } from "./profile-store.js";
 import {
 	type CealRevokeDisposition,
 	type CealSessionCommit,
@@ -17,6 +16,7 @@ import {
 	sessionIdentityConflictFields,
 	sessionReplacementFields,
 	sessionReplacementNextAction,
+	sessionStoreFailureCode,
 } from "./session-replacement.js";
 import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 
@@ -409,10 +409,6 @@ function assertSessionIdentity(current: CealStoredSession, expected: CealStoredS
 		[current.instanceRef, expected.instanceRef],
 	];
 	if (bindings.some(([actual, expectedValue]) => actual !== expectedValue)) throw new CealClientSessionError("binding_changed");
-}
-
-function sessionStoreFailureCode(error: unknown): string {
-	return error instanceof CealSessionStoreError ? error.code : "session_save_failed";
 }
 
 function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult): CealStoredSession {

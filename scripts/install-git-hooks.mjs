@@ -48,13 +48,25 @@ if (!existsSync(HOOKS_DIR) || !statSync(HOOKS_DIR).isDirectory()) {
 const current = configuredHooksPath();
 
 if (checkOnly) {
-	if (current === RELATIVE_HOOKS_DIR) {
-		console.log(`install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR} (installed).`);
+	// `core.hooksPath` alone is not enforcement. git silently skips a hook it
+	// cannot execute — it says so only under `advice.ignoredHook` — and the
+	// executable bit is exactly what the restore below exists because it does not
+	// survive every checkout path. Answering "installed" on the strength of the
+	// config key told a clone in that state that it was enforcing the only gate
+	// this repository actually enforces, and a release tag cut there would have
+	// run nothing.
+	const pushHook = path.join(HOOKS_DIR, "pre-push");
+	const executable = existsSync(pushHook) && (statSync(pushHook).mode & 0o100) !== 0;
+	if (current === RELATIVE_HOOKS_DIR && executable) {
+		console.log(`install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR} and pre-push is executable (installed).`);
 		process.exit(0);
 	}
 	console.error(
-		`install-git-hooks: core.hooksPath is ${current === "" ? "unset" : current}, expected ${RELATIVE_HOOKS_DIR}.\n` +
-			"This clone does not run the pre-push gate. Install it with: npm run hooks:install",
+		current === RELATIVE_HOOKS_DIR
+			? `install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR}, but ${RELATIVE_HOOKS_DIR}/pre-push is ${existsSync(pushHook) ? "not executable" : "missing"}.\n` +
+					"git skips a hook it cannot execute, so this clone does not run the pre-push gate. Repair it with: npm run hooks:install"
+			: `install-git-hooks: core.hooksPath is ${current === "" ? "unset" : current}, expected ${RELATIVE_HOOKS_DIR}.\n` +
+					"This clone does not run the pre-push gate. Install it with: npm run hooks:install",
 	);
 	process.exit(1);
 }

@@ -274,7 +274,12 @@ verify_version_output() {
   grep -qx "schema_version: ceal.version.v1" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
   grep -qx "command: ceal" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
   grep -qx "version: ${VERSION#ceal-v}" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
-  grep -qx "protocol_version: 1.3.0" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
+  # Shape, never the value. This installer does not consume the protocol version,
+  # and the generation that runs during `ceal update` is the installed one — so a
+  # literal here does not fence the new release, it fences every already-installed
+  # client out of the first release that bumps the protocol. That is the same
+  # trap the comment above records for added lines, reached through a changed one.
+  grep -qE "^protocol_version: [0-9]+\.[0-9]+\.[0-9]+$" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
   grep -qx "credential_context: gateway_issued_client_session" "$stdout_path" || fail "ceal reported an invalid version YAML document for $VERSION"
 }
 

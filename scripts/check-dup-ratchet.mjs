@@ -92,4 +92,6 @@ const result = spawnSync("python3", [path.join(skillDir, GATE), "--repo-root", "
 	stdio: "inherit",
 });
 if (result.error) skip(`could not run the ratchet (${result.error.message})`);
-process.exit(result.status ?? 0);
+// A null status means the ratchet died on a signal. `?? 0` called that a pass,
+// on the one gate whose whole job is to refuse a regression.
+process.exit(result.status ?? 1);

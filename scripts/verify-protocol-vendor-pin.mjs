@@ -175,7 +175,12 @@ export function validateProtocolVendorPin({
 	if (candidate.shipped.status === "agreed" && !converged) {
 		throw new ProtocolVendorPinError(
 			"undeclared_divergence",
-			"The pin claims the vendored and shipped protocol trees agree, but it records two different trees.",
+			// Name the two values the verdict was actually computed from. This said
+			// "two different trees" while `converged` compares commits, so a
+			// maintainer whose tag it blocked was sent to compare two fields that
+			// are equal in every pin this check passes.
+			`The pin claims the vendored and shipped protocol identities agree, but it records two different Gateway commits ` +
+				`(source.commit ${candidate.source.commit}, ${candidate.shipped.lock_file} gateway.commit ${lockedCommit}).`,
 		);
 	}
 	if (candidate.shipped.status === "diverged") {

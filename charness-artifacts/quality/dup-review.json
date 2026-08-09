@@ -58,10 +58,10 @@
     },
     {
       "surface": "code",
-      "id": "692b0f2069fefe07",
+      "id": "f948de0e7162c83e",
       "class": "intentional",
-      "reviewed_at": "2026-08-08",
-      "note": "packages/ceal-worker-cli/src/leased-consumer-control-session.ts: the Agent control loop against consumeNdjson. Same shape, three observable differences, and the control loop is on the SHIPPED v4 path. The control loop caps the whole accumulated buffer before splitting; consumeNdjson caps each extracted line and the residual separately, so a read delivering many small frames over the cap is frame_too_large in one and fine in the other. An oversized single line is frame_too_large in one and invalid_frame in the other, and both names reach stderr verbatim. Only the control loop carries the dispatch, the abort recheck and the emit. Reshaping either onto the other moves a byte cap and renames an error on shipped v4."
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/leased-consumer-control-session.ts: the Agent control loop against consumeNdjson. Rotated from 692b0f2069fefe07 because the control loop changed. The prior note recorded the accumulated-buffer cap as one of three observable differences and treated reshaping it as a cost; it was a defect. MAX_FRAME_BYTES is a per-frame ceiling and the loop measured it against `pending` right after appending a chunk, so a chunk at the stream's own highWaterMark arriving behind any partial tail killed the session with frame_too_large before the first legal frame was dispatched, leaving the Agent with neither answer nor oracle. The cap now measures each extracted frame and the residual separately, which is consumeNdjson's shape. Two differences remain and are why these stay separate: an oversized single line is frame_too_large here and invalid_frame there, and both names reach stderr verbatim on the SHIPPED v4 path; and only the control loop carries the dispatch, the abort recheck and the emit. Folding them now would rename an error on shipped v4 to save the split loop."
     },
     {
       "surface": "code",
@@ -125,6 +125,27 @@
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "Same materializeOutput pair as 6df6b80781ef0564, reported over a wider window. See that entry."
+    },
+    {
+      "surface": "code",
+      "id": "caa050ba4ec0bcd0",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/session-replacement.ts endedPreviousSessionAction against scripts/verify-gateway-protocol-consumer.mjs artifactSpecifier. Two unrelated one-line functions that share only the shape `function f(x) { return `...${x}`; }` — one composes an operator next_action for a failed session write, the other builds an npm file: specifier. They are in different packages, have no caller in common, and share no concept. There is nothing to extract that would not be a helper named after a template literal."
+    },
+    {
+      "surface": "code",
+      "id": "9c35ab8ee2005928",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/profile-store.ts createCealSessionStore against discovery-cache.ts createCealDiscoveryCacheStore. Surfaced when the session store's locked handle gained `save` for the identity-replacement guard (issue 10). The parallel is the store-factory shape: guard the home, join a path, return load/save/remove. What differs is the whole reason each exists — the session store requires owner-only modes, takes a cross-process state lock with its own busy code, and refuses an unsafe directory; the cache is advisory and degrades to a live probe on any anomaly, so it deliberately does not. This is the same argument recorded for the carrier/control-session pair in 17e36891f4f87883: giving two independent safety surfaces a shared factory re-creates the single point of drift, in the code that decides whether a credential file may be written."
+    },
+    {
+      "surface": "code",
+      "id": "79824a3f9251e5bf",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/agent-audit.ts: the lstat-or-mark-partial block in collectCodexSessions against the one in codexDayDirectories. Predates this session — neither member was touched by the change that surfaced it, and the family is in neither the gate baseline nor this file, so the ratchet had been failing on it. Classified rather than extracted on measured evidence, not preference: extracting the eight lines into a statOrPartial(target, walk) helper was tried and re-run through the gate, and it removed this two-member family while creating a FIVE-member one spanning both collectors and three spans of local-store-guards.ts — the two walkers differ mainly in that block, so removing it makes them converge. Trading a local pair for a cross-module family in the inventory path is the worse position, and the walk already reports `partial` correctly in both places."
     }
   ],
   "fixable_ceiling": 0,

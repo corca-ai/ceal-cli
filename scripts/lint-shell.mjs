@@ -47,4 +47,6 @@ if (spawnSync("shellcheck", ["--version"], { stdio: "ignore" }).status !== 0) {
 const result = spawnSync("shellcheck", ["-s", "sh", "--severity=warning", ...SHELL_FILES], { cwd: ROOT, stdio: "inherit" });
 if (result.error) exitWith("lint-shell", `could not run shellcheck (${result.error.message})`, 2);
 if (result.status === 0) process.stderr.write(`lint-shell: ${SHELL_FILES.length} shell files clean\n`);
-process.exit(result.status ?? 0);
+// A null status means shellcheck died on a signal, which is not a clean run.
+// `?? 0` reported one, the way `coverage-scripts.mjs` deliberately does not.
+process.exit(result.status ?? 1);

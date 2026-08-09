@@ -32,7 +32,7 @@ jobs:
         run: npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
       - name: Install and verify exact source
         run: |
-          set -eu
+          set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
           npm run check
           [ "$(npm --version)" = "11.18.0" ]
@@ -45,7 +45,7 @@ jobs:
           BOOTSTRAP_COMPLETE: ${{ vars.CEAL_NPM_BOOTSTRAP_COMPLETE }}
           TAG: ${{ github.ref_name }}
         run: |
-          set -eu
+          set -euo pipefail
           version="${TAG#v}"
           [ "$BOOTSTRAP_COMPLETE" = "true" ] \
             || { echo "The first direct 2FA bootstrap must finish before staged publishing is enabled." >&2; exit 1; }
@@ -70,7 +70,7 @@ jobs:
           APPROVED_PROTOCOL_SHA256: ${{ vars.CEAL_NPM_APPROVED_PROTOCOL_SHA256 }}
           TAG: ${{ github.ref_name }}
         run: |
-          set -eu
+          set -euo pipefail
           version="${TAG#v}"
           mkdir npm-stage-inputs npm-stage-results
           (cd packages/ceal-protocol && npm pack --ignore-scripts --json --pack-destination "$GITHUB_WORKSPACE/npm-stage-inputs")
@@ -85,7 +85,12 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          set -eu
+          # `pipefail` is load-bearing here, not hygiene: both publishes below run
+          # through `tee`, and without it the step reports `tee`'s status. A
+          # publish that failed on 2FA, a 403, or a registry 5xx left an exit-0
+          # step, let the second publish proceed from a half-staged pair, and
+          # summarized both packages as staged on a green run.
+          set -euo pipefail
           version="${TAG#v}"
           release_tag="candidate-${version//./-}"
           npm stage publish "npm-stage-inputs/corca-ai-ceal-protocol-${version}.tgz" \

@@ -188,8 +188,28 @@ async function withCommitStore<T>(runtime: CealCommandRuntime, action: (store: C
 	if (runtime.withSessionStateLock) return runtime.withSessionStateLock(action);
 	const load = runtime.loadSession;
 	const save = runtime.saveSession;
-	if (!load || !save) throw new CealSessionCommitError("session_runtime_unavailable");
+	// Both commands refuse before spending a credential when either is absent, so
+	// this is the type system's copy of that guard rather than a second policy.
+	if (!load || !save) throw new CealSessionStoreError("home_unavailable");
 	return action({ load, save });
+}
+
+/**
+ * One revocation request. Its two callers differ only in how they read the
+ * answer, so the request lives once and each caller owns its own reading — the
+ * shape that stops one of them from quietly inheriting the other's policy.
+ */
+async function requestRevocation(
+	session: CealStoredSession,
+	runtime: CealCommandRuntime,
+): Promise<{ revoked: true } | { denied: string } | { transport: string }> {
+	const create = runtime.createClientSessionClient ?? createCealPersonalClientSessionClient;
+	try {
+		const response = await create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
+		return response.ok ? { revoked: true } : { denied: response.error.code };
+	} catch (error) {
+		return { transport: clientSessionTransportFailure(error, "revocation") };
+	}
 }
 
 /**
@@ -202,14 +222,10 @@ async function withCommitStore<T>(runtime: CealCommandRuntime, action: (store: C
  * operator the recovery text is speaking to.
  */
 async function revoke(session: CealStoredSession, runtime: CealCommandRuntime): Promise<CealRevokeDisposition> {
-	const create = runtime.createClientSessionClient ?? createCealPersonalClientSessionClient;
-	try {
-		const response = await create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
-		if (response.ok) return "revoked";
-		return RETIRED_REFRESH_CODES.has(response.error.code) ? "already_unusable" : "unavailable";
-	} catch {
-		return "unavailable";
-	}
+	const outcome = await requestRevocation(session, runtime);
+	if ("revoked" in outcome) return "revoked";
+	if ("denied" in outcome) return RETIRED_REFRESH_CODES.has(outcome.denied) ? "already_unusable" : "unavailable";
+	return "unavailable";
 }
 
 const RETIRED_REFRESH_CODES: ReadonlySet<string> = new Set(["refresh_revoked", "refresh_invalid", "refresh_expired", "refresh_replayed"]);
@@ -220,13 +236,9 @@ const RETIRED_REFRESH_CODES: ReadonlySet<string> = new Set(["refresh_revoked", "
  * reports the reason rather than a revocation it did not perform.
  */
 export async function revokeClientSession(session: CealStoredSession, runtime: CealCommandRuntime): Promise<string | null> {
-	const create = runtime.createClientSessionClient ?? createCealPersonalClientSessionClient;
-	try {
-		const response = await create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
-		return !response.ok && response.error.code !== "refresh_revoked" ? response.error.code : null;
-	} catch (error) {
-		return clientSessionTransportFailure(error, "revocation");
-	}
+	const outcome = await requestRevocation(session, runtime);
+	if ("revoked" in outcome) return null;
+	return "denied" in outcome ? (outcome.denied === "refresh_revoked" ? null : outcome.denied) : outcome.transport;
 }
 
 // Logout leaves no session-derived local state behind, and the receipt spool is
@@ -264,13 +276,7 @@ export function clientSessionTransportFailure(error: unknown, operation: "renewa
 	return code;
 }
 
-class CealSessionCommitError extends Error {
-	constructor(readonly code: string) {
-		super("Ceal session store unavailable.");
-	}
-}
-
-function sessionStoreFailureCode(error: unknown): string {
-	if (error instanceof CealSessionCommitError) return error.code;
+/** The store's own reason when it has one; anything else is a failed write. */
+export function sessionStoreFailureCode(error: unknown): string {
 	return error instanceof CealSessionStoreError ? error.code : "session_save_failed";
 }

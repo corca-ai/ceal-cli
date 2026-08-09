@@ -4067,6 +4067,19 @@ test("the emitted acceptance record never carries a host path, however the parts
 	assert.equal(record.emitted_by, "installed_client");
 });
 
+// The guide this repository ships tells an agent to branch on `ok`, "which every
+// command answers". The refusal writer for this schema answers it; the success
+// document did not, so a reader following the shipped instruction read a
+// successful acceptance run as falsy and reported the release unproven.
+test("the emitted acceptance record answers the success predicate its own refusal and guide promise", () => {
+	const record = buildAcceptanceRecord(acceptanceParts());
+	assert.equal(record.ok, true);
+	assert.equal(record.command, "ceal");
+	assert.equal(record.status, "emitted");
+	// Both halves of the schema must stay one shape for a caller with one reader.
+	assert.match(workerSource(), /schema_version: "ceal\.worker_acceptance_result\.v1",\s*\n\s*command: "ceal",\s*\n\s*ok: false/u);
+});
+
 test("the record states what it did not do, including that it called no provider", () => {
 	const withoutCall = buildAcceptanceRecord(acceptanceParts());
 	const claims = withoutCall.non_claims.join("\n");
