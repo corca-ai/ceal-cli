@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
+import { scratchDir } from "../scratch-dir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -228,8 +229,7 @@ test("release CLI rejects raw handoff arguments and requires the reviewed archiv
 });
 
 function handoffFixture(context) {
-	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-inputs-")));
-	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const root = scratchDir(context, "ceal-worker-release-inputs-");
 	const protocol = packedPackage(root, {
 		name: "@corca-ai/ceal-protocol",
 		exports: { ".": "./dist/index.js", "./conformance": "./dist/conformance.js" },

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { assertNoSymlinkComponents } from "../../scripts/lib/safe-output-path.mjs";
+import { scratchDir } from "../scratch-dir.mjs";
 
 class GuardError extends Error {
 	constructor(code, message) {
@@ -23,9 +23,7 @@ function fail(code, message) {
 // under test, and the refuse-cases pass for the wrong one. It burned the
 // `ceal-v0.66.0` tag, since the release lane is the only lane that runs macOS.
 function scratch(context) {
-	const directory = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-safe-output-")));
-	context.after(() => rmSync(directory, { recursive: true, force: true }));
-	return directory;
+	return scratchDir(context, "ceal-safe-output-");
 }
 
 // The regression this guard was rewritten for. Three of five hand-copied

@@ -16,6 +16,13 @@
     },
     {
       "surface": "code",
+      "id": "2d2c1bd4107cc298",
+      "class": "intentional",
+      "reviewed_at": "2026-08-08",
+      "note": "test/contract/worker-release-inputs.test.mjs handoffFixture against test/worker-release-package-fixture.mjs packedProtocolFixture. Both assemble a Gateway protocol handoff directory, and they must not share one: they belong to different tiers for a reason each tier depends on. The contract-tier fixture is offline and synthetic — it writes a fabricated packed package, so `test:contract` never builds or packs anything and stays runnable on a host that cannot. The release-tier one packs the real workspace package through withBuiltPackages/packPackage under the shared build lock, which is the whole point of the tier that proves the shipped artifact. Folding them means either making the contract tier build real packages, which is the cost that tier is shaped to avoid, or making the release fixture synthetic, which deletes what it proves. Surfaced on 2026-08-08 only because routing this suite through test/scratch-dir.mjs re-keyed the family; the similarity itself is older than that change."
+    },
+    {
+      "surface": "code",
       "id": "30f063d5eba3a7bd",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
