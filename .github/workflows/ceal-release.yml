@@ -240,7 +240,7 @@ jobs:
       - name: Merge one worker release inventory
         id: release-set
         run: |
-          set -eu
+          set -euo pipefail
           node scripts/build-worker-release-assets.mjs merge \
             --out "$RUNNER_TEMP/dist" \
             --input "$PWD/handoff/linux-arm64" \
@@ -292,7 +292,7 @@ jobs:
           ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
           TAG: ${{ github.ref_name }}
         run: |
-          set -eu
+          set -euo pipefail
           observed="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }

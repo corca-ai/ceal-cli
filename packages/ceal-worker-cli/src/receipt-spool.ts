@@ -133,8 +133,7 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 			recordDrop(directory, path.join(directory, DROPS_FILE));
 		},
 		async remove() {
-			removeSpool(file);
-			removeSpool(path.join(directory, DROPS_FILE));
+			return removeUnderLock(directory, file);
 		},
 	};
 }
@@ -199,9 +198,16 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 const SPOOL_LOCK_DIRECTORY = "receipt-spool.lock";
 const SPOOL_LOCK_MAX_WAIT_MS = 5_000;
 
-async function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
-	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
-	prepareDirectory(directory, unsafeReceiptSpool);
+// The append takes the lock for its read-modify-write; the removal did not, so a
+// clear that raced an in-flight append lost to it — the append's rename recreated
+// the file with every pre-removal entry. That is the failure this module's lock
+// exists to prevent, reached from the other side: the spool carries no identity
+// discriminator, so a spool resurrected across a logout or an identity
+// replacement renders two subjects' history as one.
+// One home for this store's exclusion, because the append had these terms and the
+// removal did not, and the removal is what a clear races. A second spelling is how
+// the two drift back apart.
+async function underSpoolLock(directory: string, action: () => void): Promise<void> {
 	return withLocalStoreLock(
 		{
 			lockPath: path.join(directory, SPOOL_LOCK_DIRECTORY),
@@ -211,10 +217,22 @@ async function appendEntry(directory: string, file: string, entry: CealReceiptSp
 				throw new CealReceiptSpoolStoreError("spool_busy");
 			},
 		},
-		async () => {
-			writeAppendedSpool(directory, file, entry, now);
-		},
+		async () => action(),
 	);
+}
+
+async function removeUnderLock(directory: string, file: string): Promise<void> {
+	if (!existsSync(directory)) return;
+	return underSpoolLock(directory, () => {
+		removeSpool(file);
+		removeSpool(path.join(directory, DROPS_FILE));
+	});
+}
+
+async function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
+	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
+	prepareDirectory(directory, unsafeReceiptSpool);
+	return underSpoolLock(directory, () => writeAppendedSpool(directory, file, entry, now));
 }
 
 function writeAppendedSpool(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {

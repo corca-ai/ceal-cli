@@ -118,6 +118,19 @@ interface CealAgentGuideHostState {
 	registered: boolean;
 }
 
+/**
+ * How many hosts this guide is actually registered with.
+ *
+ * It lives here, beside `hostStates`, because two emitters each derived it and
+ * both derived it wrong: they counted `registration_path`, which a merely
+ * `staged` host carries too, so an operator who had never run `guide register`
+ * reported registrations nobody made. `registered` is the state that says a
+ * registration happened, and this is the one place that reads it for a count.
+ */
+export function countRegisteredGuideHosts(state: CealAgentGuideState | undefined): number {
+	return state?.hosts?.filter((host) => host.registered).length ?? 0;
+}
+
 export interface CealAgentGuideState {
 	// About this document, not about a host: did the command answer? Per-host
 	// registration lives in `hosts` and nowhere else, so there is no summary to

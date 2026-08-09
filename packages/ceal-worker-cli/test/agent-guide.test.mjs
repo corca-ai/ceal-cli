@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createCealAgentGuideStore, detectCealAgentGuideHost } from "../dist/agent-guide.js";
+import { countRegisteredGuideHosts, createCealAgentGuideStore, detectCealAgentGuideHost } from "../dist/agent-guide.js";
 
 test("Codex guide registration follows the role current pointer across releases", () => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-")));
@@ -103,6 +103,13 @@ test("each agent host registers independently and status reports both", () => {
 			{ agent: "codex", status: "staged", registration_path: path.join(root, ".codex", "skills", "ceal-guide"), registered: false },
 			{ agent: "claude", status: "registered", registration_path: claudeRegistration, registered: true },
 		]);
+		// The count the acceptance record publishes follows `registered`, not the
+		// presence of a path — a `staged` host carries a path too, and counting
+		// paths made a host that was never registered read as one that was. This
+		// asserts the derivation against a real store rather than an injected
+		// number, which is how the wrong count survived a passing suite.
+		assert.equal(countRegisteredGuideHosts(store.inspect()), 1);
+		assert.equal(store.inspect().hosts.filter((host) => host.registration_path).length, 2, "and the paths it must not count are present");
 		// There is no top-level per-host reading left to mistake for the whole answer.
 		assert.equal("registered" in store.inspect(), false);
 		assert.equal(store.register("codex").hosts.find((host) => host.agent === "codex").registered, true);

@@ -709,15 +709,33 @@ test("capabilities points an unregistered running host at the guide, and stays s
 // everywhere, so derive the sweep from the command table rather than hand-picking
 // surfaces: `ok` must be present, agree with the exit code, and imply an
 // `error.kind` when false.
+// Frozen: the installer that runs during `ceal update` is the installed
+// generation's, and older generations compare that document byte for byte, so
+// adding a field there breaks the upgrade path for every already-installed
+// client. It stays byte-stable until no installed client compares it whole.
+// CHANGELOG.md records which release proved this; do not restate a release
+// number here.
+const OK_SWEEP_EXEMPT = ["version"];
+
+// The list above is the one place the code records that a command answers no
+// `ok`. The shipped guide teaches agents to branch on `ok`, so the two must agree
+// or an agent reads a success as a failure — which is what happened: the guide
+// sentence was written true, the exemption was added the same day to restore the
+// upgrade path, and nothing bound them, so the guide overclaimed for weeks. Bind
+// the count, not the wording: a second exemption makes the guide's "one document"
+// false and fails here.
+test("the guide's account of the success predicate matches the exemptions the code takes", () => {
+	assert.deepEqual(OK_SWEEP_EXEMPT, ["version"], "a new exemption owes the shipped guide a rewrite; it promises exactly one document");
+	const guide = readFileSync(new URL("../../../skills/ceal-guide/SKILL.md", import.meta.url), "utf8");
+	assert.match(guide, /One installed document[\s\S]{0,240}answers no `ok`/u);
+	// It must not name the command: the guide contract forbids command snapshots,
+	// so the property is what an agent can act on.
+	assert.doesNotMatch(guide, /\bceal\s+version\b/u);
+});
+
 test("every command answers one success predicate that agrees with its exit code", async () => {
 	for (const command of CEAL_COMMANDS) {
-		// `ceal version` is frozen: the installer that runs during `ceal update` is
-		// the installed generation's, and older generations compare that document
-		// byte for byte, so adding a field there breaks the upgrade path for every
-		// already-installed client. It stays byte-stable until no installed client
-		// compares it whole. CHANGELOG.md records which release proved this; do not
-		// restate a release number here.
-		if (command.name === "version") continue;
+		if (OK_SWEEP_EXEMPT.includes(command.name)) continue;
 		const args =
 			command.name === "call"
 				? ["call", "message.search", "--target", "target:team-inbox", "query=launch"]
@@ -1072,6 +1090,35 @@ test("capabilities fails closed for malformed absolute refresh expiry before a r
 		assert.equal(payload.status, "unavailable");
 		assert.equal(payload.error.kind, "refresh_expired");
 		assert.equal(refreshCalls(), 0);
+	});
+});
+
+// `device-adoption.ts` states the rule this pins: a Gateway-issued wall-clock
+// timestamp compared against a separate device's clock falsely rejects a fresh
+// credential on a skewed host. It was enforced for the adoption challenge and not
+// for the refresh token, where the local refusal was worse — `refresh_expired`
+// classifies NOT_RENEWABLE and sends the operator to spend a replacement
+// enrollment code for a session the Gateway would have renewed.
+test("a host clock past the refresh token's absolute expiry still lets the Gateway answer", async () => {
+	await withRenewingGateway(async ({ endpoint, refreshCalls, newAccessToken, oldRefreshToken }) => {
+		let saved = null;
+		const payload = await yamlRun(["capabilities"], 0, {
+			loadSession: async () =>
+				storedSession(endpoint, {
+					expiresAt: "2020-01-01T00:00:00.000Z",
+					refreshToken: oldRefreshToken,
+					// The Gateway renews it; only this host's clock says otherwise.
+					refreshTokenAbsoluteExpiresAt: "2026-07-01T00:00:00.000Z",
+				}),
+			saveSession: async (session) => {
+				saved = session;
+			},
+			nextRequestId: () => "narnia:skewed:001",
+			now: () => Date.parse("2099-01-01T00:00:00.000Z"),
+		});
+		assert.equal(payload.status, "available");
+		assert.equal(refreshCalls(), 1, "the Gateway must be asked rather than pre-empted by this machine's clock");
+		assert.equal(saved.accessToken, newAccessToken);
 	});
 });
 

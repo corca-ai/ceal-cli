@@ -37,6 +37,18 @@ Everything else not listed is owned by the comment at the site and by
   destructive-cleanup half is fixed and pinned by a named test; what remains is
   recorded at the site in `packages/ceal-worker-cli/src/local-store-lock.ts`,
   which owns the detail and why an `ino` comparison cannot settle it.
+- **The v5 notification channel would hang the worker on shutdown.**
+  `openLeasedConsumerNotificationChannel` returns `undefined` today — the shipped
+  `leased-consumer-control-session-contract.json` declares no
+  `notification_channel`, confirmed by parsing
+  `LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON` — so this is latent, not live.
+  When v5 ships it becomes a blocker: `closeReadable` destroys an `fs.ReadStream`
+  over an inherited blocking socket, and neither `close` nor `error` fires, so
+  the shutdown await never settles and the process never exits. Reproduce with a
+  child holding a socketpair end on the contract's fd, a parked `for await`, and
+  a `destroy()`. The suite cannot express it: every fixture models the channel as
+  a generator whose close is a graceful EOF, which differs in kind from
+  `destroy()`. Fix alongside the rest of the v5 path, not before.
 - **Two published acceptance records overstate guide registration.**
   `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were emitted while
   `registered_host_count` counted resolved host directories rather than

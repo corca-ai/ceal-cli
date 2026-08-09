@@ -9,7 +9,7 @@ import type {
 } from "@corca-ai/ceal-protocol";
 import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
 import { buildAcceptanceRecord, readInstalledReleaseFacts } from "./acceptance-record.js";
-import { type CealAgentGuideHost, isCealAgentGuideHost } from "./agent-guide.js";
+import { type CealAgentGuideHost, countRegisteredGuideHosts, isCealAgentGuideHost } from "./agent-guide.js";
 import {
 	type CealCallResultRecorder,
 	type CealCapabilityEffect,
@@ -377,12 +377,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				clientProtocolVersion: PROTOCOL_VERSION,
 				guide: {
 					status: guide?.status ?? "unavailable",
-					// `registration_path` is set for every host whose root merely
-					// resolved — `hostStates` gives a `staged` host one too, and carries
-					// the truth in `registered`. Counting paths made an operator who had
-					// never run `guide register` emit a record claiming both hosts were
-					// registered, and two published acceptance records say so.
-					registered_host_count: guide?.hosts?.filter((host) => host.registered).length ?? 0,
+					registered_host_count: countRegisteredGuideHosts(guide),
 				},
 				session: {
 					instance_ref: handshake.value.instance_ref,

@@ -150,6 +150,36 @@ test("retries inside one run reuse the same device keys", async () => {
 	assert.equal(new Set(world.gateway.polls.map((poll) => poll.signature)).size, 1, "the same challenge signature is reused, not re-minted");
 });
 
+// By the time polling matters the employee has verified a mailbox in a browser
+// and may have waited out an operator approval, and the device keys exist only in
+// this process — the leaf help says interrupting requires a fresh adoption. One
+// dropped connection used to spend all of that to report a packet.
+test("a transient poll failure is another wait, not the end of an adoption the employee already completed", async () => {
+	const world = createWorld({ pendingPolls: 1, retryAfterMs: 5_000, transientPollFailures: 2 });
+	assert.equal(await run(world), 0);
+	assert.equal(world.result().status, "adopted");
+	assert.equal(world.saved.length, 1);
+	// Before the Gateway has answered once it has named no interval, so those
+	// waits use the local floor; once it names one, that is what a later failed
+	// poll waits. The client never invents a pace the Gateway did state.
+	assert.deepEqual(world.slept, [1_000, 1_000, 5_000]);
+
+	// It stays bounded by the same local ceiling, not by a separate counter: a
+	// Gateway that never answers still ends, and ends as a wait timeout.
+	const silent = createWorld({ transientPollFailures: 10_000, retryAfterMs: 30_000 });
+	assert.equal(await run(silent), 3);
+	assert.equal(silent.result().error.kind, "wait_timeout");
+	assert.equal(silent.saved.length, 0);
+});
+
+test("a malformed poll response stays terminal, because retrying returns the same answer", async () => {
+	const world = createWorld({ transientPollFailures: 1, transientPollCode: "invalid_response" });
+	assert.equal(await run(world), 3);
+	assert.equal(world.result().error.kind, "malformed_response");
+	assert.deepEqual(world.slept, [], "a terminal outcome must not be waited on");
+	assert.equal(world.saved.length, 0);
+});
+
 // Each of these is a distinguishable, fail-closed outcome. The assertion that
 // matters in every one is the same: no session was written.
 test("every tampered delivery fails closed with its own error kind", async () => {
@@ -405,6 +435,7 @@ function createGateway(options) {
 	};
 	let remaining = pendingPolls;
 	let approvalRemaining = approvalRequiredPolls;
+	let transientFailures = options.transientPollFailures ?? 0;
 
 	state.client = {
 		async start(request) {
@@ -429,6 +460,10 @@ function createGateway(options) {
 		async poll(request) {
 			state.calledRoutes.poll = true;
 			state.polls.push(request);
+			if (transientFailures > 0) {
+				transientFailures -= 1;
+				throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError(options.transientPollCode ?? "request_timeout");
+			}
 			if (remaining > 0) {
 				remaining -= 1;
 				return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "pending", retry_after_ms: retryAfterMs };

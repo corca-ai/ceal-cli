@@ -342,7 +342,7 @@ async function renewSession(
 		throw new CealClientSessionError(
 			session.renewalBlockedReason === "outcome_unknown" ? "session_renewal_unavailable" : session.renewalBlockedReason,
 		);
-	const refresh = requireRefreshContext(session, now);
+	const refresh = requireRefreshContext(session);
 	// Write before send.  A v1 refresh can commit before its response reaches us;
 	// if this durable write fails, no process is allowed to send the one-time
 	// credential because it could not prove a later replay will be stopped.
@@ -370,9 +370,18 @@ function sessionIsCurrent(session: CealStoredSession, now: number): boolean {
 	return Date.parse(session.expiresAt) > now + 60_000;
 }
 
-function requireRefreshContext(session: CealStoredSession, now: number): string {
-	const expiresAt = Date.parse(session.refreshTokenAbsoluteExpiresAt);
-	if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+function requireRefreshContext(session: CealStoredSession): string {
+	// Only the store's own integrity is judged here. Whether the credential has
+	// expired is the Gateway's answer, not this machine's: `device-adoption.ts`
+	// states the rule for the adoption challenge — comparing a Gateway-issued
+	// wall-clock timestamp against a separate device's clock falsely rejects a
+	// fresh credential on a skewed host — and the same rule holds for a refresh
+	// token. It was enforced there and not here, and here it was worse: the local
+	// refusal is `refresh_expired`, which classifies NOT_RENEWABLE and sends the
+	// operator to spend a replacement enrollment code for a session the Gateway
+	// would have renewed. `refreshSession` already stores and classifies the
+	// Gateway's own `refresh_expired`.
+	if (!Number.isFinite(Date.parse(session.refreshTokenAbsoluteExpiresAt))) {
 		throw new CealClientSessionError("refresh_expired");
 	}
 	return session.refreshToken;

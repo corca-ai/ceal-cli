@@ -144,6 +144,35 @@ belongs in one of them, with the rule left here.
   slice when the cost is local; record an unavoidable slow gate as explicit debt
   with its command and elapsed time.
 
+## One Fact, One Home
+
+The measured-number rule above is one instance of a law this repository has
+rediscovered locally at least a dozen times and never written down whole —
+`rg -n "cannot desync|one table|second copy|derive from|hand-copy" src scripts test`
+finds each rediscovery in its own words. Written once, it is: **a fact gets one
+home, and every other place that needs it derives from that home.** Its two
+violations are the same break seen from either side.
+
+- **One concept, several representations.** Two implementations of one framing
+  rule, two writers spelling out one envelope, a literal in a shell script for a
+  value a package owns, prose in a guide restating a contract the binary owns. The
+  copies do not stay equal, and the one that is wrong is silent.
+- **One representation, several concepts.** A name covering two ideas — "resolved"
+  standing in for "registered", a Gateway denial and an unreachable Gateway in one
+  outcome type, a frame ceiling applied to an accumulated buffer, `check` and
+  `check:unit` under one pattern. The reader cannot tell which idea they hold.
+
+Every defect found in the 2026-08-09 sweeps sat on one side or the other, and the
+places where a fact was forced into one home — `CEAL_SUBCOMMANDS` deriving routes
+and dispatch, `CLIENT_SESSION_FAILURES` deriving both readers — produced none.
+
+Two working rules follow. **When you fix an invariant, look for its other half**:
+the sweeps' most productive move was finding where an already-learned rule was
+enforced at one call site and not its sibling. And **when a second home is
+unavoidable, make the derivation mechanical or make a gate bind the two** — prose
+in a review file saying two copies may differ is a claim no gate checks, and one
+such note ratified a real defect for a day.
+
 ## Boundaries
 
 - Commit locally by default with an intent-focused subject. Ask before any push,

@@ -301,6 +301,68 @@ test("the linter and formatter both run, and both exclude the frozen package", (
 	);
 });
 
+// `lint:shell` covers exactly two checked-in shell files by name, and no linter
+// reads a workflow's `run:` block, so the shell inside CI had no gate at all. The
+// class this catches is one defect, precisely: `npm stage publish … | tee` under
+// `set -eu` reported `tee`'s status, so a publish that failed on 2FA or a 403
+// left an exit-0 step and a summary claiming both packages staged. `zsh` and
+// `bash` alike need `pipefail` for `$?` to be the pipeline's; the repo contract
+// says so for interactive shells and CI is where it costs a release.
+// A pipeline's status is the last command's without `pipefail`, so what a missing
+// `pipefail` can hide is a failure of whatever is to the LEFT. These produce text
+// and have no failure worth reading.
+const HARMLESS_PIPE_PRODUCER = /^(printf|echo|cat|ls|find|yes|seq)$/u;
+
+// The command that would actually run immediately left of a pipe: the first word
+// after the last shell separator or substitution opener.
+function lastCommand(segment) {
+	const tail = segment.split(/\$\(|&&|\|\||;|\{|\(/u).pop() ?? "";
+	return tail.trim().split(/\s+/u)[0] ?? "";
+}
+
+test("every workflow run block that reads a pipeline's status asks for pipefail", () => {
+	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
+	assert.ok(workflows.length > 3, `only ${workflows.length} workflows scanned; the sweep is not reaching .github/workflows`);
+	const offenders = [];
+	let scanned = 0;
+	for (const name of workflows) {
+		for (const job of Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {})) {
+			for (const step of job.steps ?? []) {
+				if (typeof step.run !== "string") continue;
+				scanned += 1;
+				// Only a pipe whose LEFT side can fail meaningfully matters. A `printf`
+				// or `find` on the left cannot, which is why the two workflows that
+				// still run `set -eu` are not offenders — the sweep says so by looking
+				// rather than by exempting them by name.
+				// A pipe is spelled with spaces around it here; a `case` alternation is
+				// not (`""|0000…)`), which is how the two are told apart without
+				// parsing shell. The limit is real and stated rather than hidden: a
+				// pipe written `a|b` is missed.
+				//
+				// What matters is the command on the LEFT of the pipe, wherever it
+				// sits — a producer that cannot meaningfully fail carries no status to
+				// lose, and it is just as often inside `$( )` as at the start of a
+				// line. Reading only the line start exempted the wrong things.
+				const risky = step.run
+					.split("\n")
+					.filter((line) => !/^\s*#/u.test(line))
+					.filter((line) =>
+						line
+							.split(" | ")
+							.slice(0, -1)
+							.some((left) => !HARMLESS_PIPE_PRODUCER.test(lastCommand(left))),
+					);
+				if (risky.length === 0) continue;
+				if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(step.run)) {
+					offenders.push(`${name} :: ${step.name ?? "(unnamed step)"} :: ${risky[0].trim()}`);
+				}
+			}
+		}
+	}
+	assert.ok(scanned > 10, `only ${scanned} run blocks scanned; the sweep is not reaching them`);
+	assert.deepEqual(offenders, [], "a run block pipes into a command and would report the wrong exit status");
+});
+
 // Release workflows trigger on tags only, so without this lane the first CI run
 // for a change is its release run — and a failed release tag cannot be reused.
 test("a non-tag CI lane runs the full gate on main", () => {

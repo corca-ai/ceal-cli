@@ -193,6 +193,34 @@ test("a lost receipt is counted so the observer can say the history is incomplet
 	});
 });
 
+// The append takes the spool lock for its read-modify-write; the removal did not,
+// so a clear racing an in-flight append lost to it and the append's rename
+// recreated the file with every pre-removal entry. The spool carries no identity
+// discriminator, so a resurrected spool renders two subjects' history as one —
+// the failure logout's cleanup exists to prevent, reached from the other side.
+test("clearing the spool contends for the same lock the append holds", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry({ requestRef: "narnia:call:1:call" }));
+		const lockPath = path.join(home, ".ceal", "receipt-spool.lock");
+		// This process is unquestionably alive, so the dead-owner reclamation path
+		// cannot fire — the same construction `local-store-lock.test.mjs` uses.
+		mkdirSync(lockPath, { mode: 0o700, recursive: true });
+		writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: process.pid, nonce: "a".repeat(32) })}\n`, { mode: 0o600 });
+
+		const pending = store.remove();
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		// The wait is the assertion. Walking past a held lock is what let a clear
+		// race an in-flight append, whose rename then recreated the spool with
+		// every pre-removal entry — two subjects' history under one identity, the
+		// failure this cleanup exists to prevent.
+		assert.equal(existsSync(spoolFile(home)), true, "the removal must wait for the holder rather than walk past it");
+		rmSync(lockPath, { recursive: true, force: true });
+		await pending;
+		assert.equal(existsSync(spoolFile(home)), false, "and complete once the holder is gone");
+	});
+});
+
 test("the drop counter is bounded and never becomes a failure of its own", async () => {
 	await withHome(async (home) => {
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
