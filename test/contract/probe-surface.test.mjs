@@ -121,6 +121,13 @@ test("the child's own declared effect decides, not the parent's", () => {
 	const status = probe(["ceal", "guide", "status"]);
 	assert.match(status.stderr, /effect: read_only.*throwaway HOME/u);
 	assert.match(status.stdout, /^schema_version: ceal\.guide\.v1$/mu);
+
+	// The session parent is remote_write because some children enroll or revoke,
+	// while this explicit local summary is safe to probe in isolation.
+	const sessionStatus = probe(["ceal", "session", "status"]);
+	assert.match(sessionStatus.stderr, /effect: read_only.*throwaway HOME/u);
+	assert.match(sessionStatus.stdout, /^schema_version: ceal\.client_session\.v1$/mu);
+	assert.match(sessionStatus.stdout, /^status: unconfigured$/mu);
 });
 
 test("the escape hatch is explicit and still isolated", () => {

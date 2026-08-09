@@ -331,6 +331,12 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 	}
 });
 
+test("parent session help advertises force for both replacement-capable routes", async () => {
+	const { stdout } = await run(["session", "--help"]);
+	const usage = stdout.split("\n")[0];
+	assert.equal((usage.match(/\[--force\]/gu) ?? []).length, 2);
+});
+
 // Every declared route must emit a schema the package actually writes, so a
 // leaf cannot advertise a `Result schema` no code produces.
 test("declared result schemas exist in the emitting package", () => {
@@ -372,6 +378,38 @@ test("a help token anywhere resolves to the nearest declared leaf", async () => 
 	const named = await run(["help", "capabilities", "bogus"]);
 	assert.equal(named.code, 2);
 	assert.match(named.stdout, /^ {2}kind: invalid_argument$/mu);
+});
+
+test("a malformed known route points at the nearest help that can correct it", async () => {
+	const cases = [
+		{ args: ["version", "unexpected"], nextAction: "Run 'ceal version --help'." },
+		{ args: ["commands", "unexpected"], nextAction: "Run 'ceal commands --help'." },
+		{ args: ["update", "unexpected"], nextAction: "Run 'ceal update --help'." },
+		{ args: ["help", "capabilities", "bogus"], nextAction: "Run 'ceal capabilities --help'." },
+		{ args: ["help", "session", "status", "unexpected"], nextAction: "Run 'ceal session status --help'." },
+		{ args: ["help", "session", "enroll", "unexpected"], nextAction: "Run 'ceal session enroll --help'." },
+		{ args: ["help", "session", "logout", "unexpected"], nextAction: "Run 'ceal session logout --help'." },
+		{ args: ["help", "session", "adopt", "unexpected"], nextAction: "Run 'ceal session adopt --help'." },
+		{ args: ["session", "bogus"], nextAction: "Run 'ceal session --help'." },
+		{ args: ["session", "status", "unexpected"], nextAction: "Run 'ceal session status --help'." },
+		{ args: ["session", "enroll"], nextAction: "Run 'ceal session enroll --help'." },
+		{ args: ["session", "logout", "unexpected"], nextAction: "Run 'ceal session logout --help'." },
+		{ args: ["session", "adopt"], nextAction: "Run 'ceal session adopt --help', then supply" },
+	];
+	for (const { args, nextAction } of cases) {
+		const payload = await yamlRun(args, 2, {
+			runStableUpdate: () => assert.fail("an invalid update must not run"),
+			loadSession: () => assert.fail("invalid session arguments must not read state"),
+		});
+		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
+		assert.ok(payload.error.next_action.startsWith(nextAction), `${args.join(" ")}: ${payload.error.next_action}`);
+	}
+});
+
+test("session recovery strings point at the probe-safe status leaf", () => {
+	const source = workerSource();
+	assert.match(source, /Run 'ceal session status' to/u);
+	assert.doesNotMatch(source, /Run 'ceal session' to/u);
 });
 
 test("every public command emits one YAML document without a format flag", async () => {
@@ -1122,11 +1160,20 @@ test("a host clock past the refresh token's absolute expiry still lets the Gatew
 	});
 });
 
-test("a local session summary does not present an untested refresh credential as live renewal", async () => {
-	const payload = await yamlRun(["session"], 0, {
-		loadSession: async () => storedSession("https://gateway.example.test", { expiresAt: "2020-01-01T00:00:00.000Z" }),
+test("bare and explicit local session status agree without presenting untested renewal as live", async () => {
+	let loads = 0;
+	const runtime = {
+		loadSession: async () => {
+			loads += 1;
+			return storedSession("https://gateway.example.test", { expiresAt: "2020-01-01T00:00:00.000Z" });
+		},
+		saveSession: () => assert.fail("session status is read-only"),
 		now: () => Date.parse("2026-07-13T00:00:00.000Z"),
-	});
+	};
+	const payload = await yamlRun(["session"], 0, runtime);
+	const explicit = await yamlRun(["session", "status"], 0, runtime);
+	assert.deepEqual(explicit, payload);
+	assert.equal(loads, 2);
 	assert.equal(payload.schema_version, "ceal.client_session.v1");
 	assert.equal(payload.renewal_configured, true);
 	assert.equal(payload.renewal_status, "not_checked");

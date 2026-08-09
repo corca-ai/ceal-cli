@@ -1,7 +1,7 @@
 import type { CealCliIo } from "./cli-runtime.js";
 import { CEAL_COMMANDS, CEAL_CREDENTIAL_CONTEXT, type CealCommandDefinition } from "./command-definitions.js";
 import { writeHelp, writeYaml } from "./output.js";
-import { CEAL_SUBCOMMANDS, type CealSubcommandDefinition, findSubcommand, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
+import { CEAL_SUBCOMMANDS, type CealSubcommandDefinition, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
 
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
 
@@ -29,7 +29,8 @@ export async function runCealStaticCommand(args: readonly string[], io: CealCliI
 	const options = args.slice(1);
 	const requestedHelp = helpRequest(command, options);
 	if (requestedHelp !== undefined) return writeHelp(requestedHelp, io);
-	if (!commandAcceptsOptions(command.name, options)) return writeCliError("invalid_argument", "Invalid ceal command options.", io);
+	if (!commandAcceptsOptions(command.name, options))
+		return writeCliError("invalid_argument", "Invalid ceal command options.", io, `Run 'ceal ${command.name} --help'.`);
 	if (command.name === "version") {
 		const { writeVersion } = await import("./version-surface.js");
 		return writeVersion(io);
@@ -95,10 +96,15 @@ function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
 	const command = findCealCommand(args[0]);
 	if (!command) return writeCliError("unknown_command", "Unknown ceal command.", io);
 	if (args.length === 1) return writeHelp(commandHelp(command), io);
-	const subcommand = findSubcommand(command.name, args.slice(1));
-	return subcommand
+	const { subcommand, rest } = splitSubcommandRoute(command.name, args.slice(1));
+	return subcommand && rest.length === 0
 		? writeHelp(subcommandHelp(subcommand), io)
-		: writeCliError("invalid_argument", "Help requires one public command name or subcommand route.", io);
+		: writeCliError(
+				"invalid_argument",
+				"Help requires one public command name or subcommand route.",
+				io,
+				`Run 'ceal ${command.name}${subcommand ? ` ${subcommand.route.join(" ")}` : ""} --help'.`,
+			);
 }
 
 function commandHelp(command: CealCommandDefinition): string {

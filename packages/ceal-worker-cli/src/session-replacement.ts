@@ -162,8 +162,8 @@ export function sessionIdentityConflictFields(
 			message: `This host already holds a session for a different identity; the enrolled one differs in ${changedBindings.join(", ")}.`,
 			next_action:
 				issuedSessionRevoked === "revoked"
-					? `Run 'ceal session' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; the session this attempt created has been revoked.`
-					: `Run 'ceal session' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; report to your operator that the session this attempt created could not be revoked (${issuedSessionRevoked}).`,
+					? `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; the session this attempt created has been revoked.`
+					: `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; report to your operator that the session this attempt created could not be revoked (${issuedSessionRevoked}).`,
 		},
 	};
 }

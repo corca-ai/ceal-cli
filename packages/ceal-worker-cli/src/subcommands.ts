@@ -58,6 +58,17 @@ export const CEAL_SUBCOMMANDS = [
 	},
 	{
 		parent: "session",
+		route: ["status"],
+		description: "Inspect this host's locally stored Gateway session without contacting the Gateway.",
+		usage: "ceal session status",
+		effect: "read_only",
+		evidence: "surface",
+		result_schema: "ceal.client_session.v1",
+		recovery:
+			"If no session is configured, descend to 'ceal session enroll --help' or 'ceal session adopt --help'; otherwise run 'ceal capabilities' for live Gateway proof.",
+	},
+	{
+		parent: "session",
 		route: ["enroll"],
 		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
 		usage: "ceal session enroll --gateway <https-url> [--code-stdin] [--force]",
@@ -92,7 +103,7 @@ export const CEAL_SUBCOMMANDS = [
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_adoption.v1",
 		recovery:
-			"Run 'ceal session' to confirm which identity this host holds. Every failure before the store is written leaves it untouched; only a '--force' replacement can end the stored session, and a failure after that says so in its own next action.",
+			"Run 'ceal session status' to confirm which identity this host holds. Every failure before the store is written leaves it untouched; only a '--force' replacement can end the stored session, and a failure after that says so in its own next action.",
 		notes: [
 			"The mailbox is verified by the employee in a browser. This command never opens",
 			"the verifier, submits its form, or handles the mailbox token.",
@@ -122,7 +133,7 @@ export const CEAL_SUBCOMMANDS = [
 		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_logout.v1",
-		recovery: "Run 'ceal session' to confirm the local session is gone; a revoke failure preserves local state for a retry.",
+		recovery: "Run 'ceal session status' to confirm the local session is gone; a revoke failure preserves local state for a retry.",
 	},
 	{
 		parent: "capabilities",
@@ -190,7 +201,7 @@ export function subcommandsOf(parent: CealCommandName): readonly CealSubcommandD
 	return CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
 }
 
-export function findSubcommand(parent: CealCommandName, route: readonly string[]): CealSubcommandDefinition | undefined {
+function findSubcommand(parent: CealCommandName, route: readonly string[]): CealSubcommandDefinition | undefined {
 	return subcommandsOf(parent).find(
 		(subcommand) => subcommand.route.length === route.length && subcommand.route.every((token, index) => token === route[index]),
 	);

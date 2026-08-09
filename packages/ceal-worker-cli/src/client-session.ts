@@ -28,7 +28,10 @@ const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 export const SESSION_ROUTES: CealSubcommandHandlers<"session", SessionRouteHandler> = {
 	adopt: (rest, io, runtime) => adoptSession(rest, io, runtime),
 	enroll: (rest, io, runtime) => enrollSession(rest, io, runtime),
-	logout: (rest, io, runtime) => (rest.length === 0 ? runSessionLogout(io, runtime) : writeEnrollmentInvalidArgument(io)),
+	logout: (rest, io, runtime) =>
+		rest.length === 0 ? runSessionLogout(io, runtime) : writeSessionInvalidArgument("logout", "Invalid session logout options.", io),
+	status: (rest, io, runtime) =>
+		rest.length === 0 ? showSession(io, runtime) : writeSessionInvalidArgument("status", "Invalid session status options.", io),
 };
 
 type SessionRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => Promise<number> | number;
@@ -38,7 +41,8 @@ export async function runSession(options: readonly string[], io: CealCliIo, runt
 	// resolved from the declared subcommand table, so help, acceptance, and
 	// dispatch cannot diverge.
 	const resolved = resolveSubcommandRoute("session", options, SESSION_ROUTES);
-	if (!resolved) return options.length === 0 ? showSession(io, runtime) : writeEnrollmentInvalidArgument(io);
+	if (!resolved)
+		return options.length === 0 ? showSession(io, runtime) : writeSessionInvalidArgument(undefined, "Invalid session action.", io);
 	return resolved.handler(resolved.rest, io, runtime);
 }
 
@@ -111,7 +115,7 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 
 async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseEnrollmentOptions(options);
-	if (!parsed.ok) return writeEnrollmentInvalidArgument(io);
+	if (!parsed.ok) return writeSessionInvalidArgument("enroll", "Invalid session enrollment options.", io);
 	if (!runtime.saveSession || !runtime.loadSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
 	// Read the store before the code is read or spent. An enrollment code is
 	// one-time: discovering that this host's session file is unreadable *after*
@@ -525,7 +529,7 @@ export function classifyClientSessionFailure(reason: string): { kind: string; re
 		retryable: false,
 		message: "The stored Gateway session could not be used safely.",
 		nextAction:
-			"Run 'ceal session' to inspect local state, then correct the reported local configuration or ask the organization administrator for a replacement device-enrollment code.",
+			"Run 'ceal session status' to inspect local state, then correct the reported local configuration or ask the organization administrator for a replacement device-enrollment code.",
 	};
 }
 
@@ -551,14 +555,18 @@ function parseEnrollmentOptions(
 	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive", force: parsed.flags.has("--force") };
 }
 
-function writeEnrollmentInvalidArgument(io: CealCliIo): number {
+function writeSessionInvalidArgument(route: "status" | "enroll" | "logout" | undefined, message: string, io: CealCliIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.error.v1",
 		command: "ceal",
 		ok: false,
 		status: "error",
 		credential_context: CREDENTIAL_CONTEXT,
-		error: { kind: "invalid_argument", message: "Invalid session enrollment options.", next_action: "Run 'ceal --help'." },
+		error: {
+			kind: "invalid_argument",
+			message,
+			next_action: `Run 'ceal session${route ? ` ${route}` : ""} --help'.`,
+		},
 	});
 	return 2;
 }

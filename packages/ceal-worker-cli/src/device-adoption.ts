@@ -97,7 +97,8 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			{
 				code: "invalid_argument",
 				message: "Usage: ceal session adopt --gateway <https-url> --email <address> [--force]",
-				nextAction: "Supply the Gateway your organization published and the mailbox that received the invitation.",
+				nextAction:
+					"Run 'ceal session adopt --help', then supply the Gateway your organization published and the mailbox that received the invitation.",
 			},
 			2,
 		);
@@ -118,7 +119,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 		return writeAdoptionFailure(io, {
 			code: "session_load_failed",
 			message: "This host's existing session store could not be read, so an adoption could not decide what it would replace.",
-			nextAction: "Run 'ceal session' to inspect local state, then correct the reported local configuration and start again.",
+			nextAction: "Run 'ceal session status' to inspect local state, then correct the reported local configuration and start again.",
 		});
 	}
 

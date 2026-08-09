@@ -60,7 +60,8 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	{
 		name: "session",
 		description: "Enroll an approved client device and inspect its renewable Gateway session.",
-		usage: "ceal session [enroll --gateway <https-url> [--code-stdin] | logout]",
+		usage:
+			"ceal session [status | enroll --gateway <https-url> [--code-stdin] [--force] | adopt --gateway <https-url> --email <address> [--force] | logout]",
 		// The widest of its children. Enrolling and adopting consume a one-time
 		// approval at the Gateway and logging out revokes a live session there;
 		// none of the three is undone by deleting a local file.
