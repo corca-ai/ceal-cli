@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, fstatSync } from "node:fs";
+import { fstatSync } from "node:fs";
 import * as CealProtocol from "@corca-ai/ceal-protocol";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
@@ -16,6 +16,7 @@ import {
 	closeReadable,
 	isJsonContentType,
 	onceAsync,
+	openInheritedReadable,
 	postUnixSocket,
 	raceDeadline,
 	readBeforeDeadline,
@@ -422,11 +423,7 @@ export function openLeasedConsumerNotificationChannel(): LeasedConsumerNotificat
 	const contract = CONTROL_SESSION_CONTRACT.notification_channel;
 	if (!contract) return undefined;
 	if (!isInheritedNotificationChannelFd(contract.child_fd)) throw new Error("missing_notification_channel");
-	const stream = createReadStream("/dev/null", {
-		fd: contract.child_fd,
-		autoClose: true,
-		highWaterMark: contract.maximum_frame_bytes,
-	});
+	const stream = openInheritedReadable(contract.child_fd);
 	return Object.freeze({
 		stream,
 		close: () => closeReadable(stream),
@@ -549,7 +546,7 @@ async function requestControlBeforeDeadline(
 
 function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close: () => Promise<void> }> {
 	if (!fstatSync(PROTECTED_SESSION_FD).isFIFO()) throw new Error("missing_session");
-	const stream = createReadStream("/dev/null", { fd: PROTECTED_SESSION_FD, autoClose: true, highWaterMark: MAX_SESSION_BYTES });
+	const stream = openInheritedReadable(PROTECTED_SESSION_FD);
 	return Object.freeze({
 		read: () => readBoundedStream(stream, MAX_SESSION_BYTES, () => stream.destroy()),
 		close: () => closeReadable(stream),

@@ -11,7 +11,14 @@ protocol's public surface.
 
 ## What is true today, and how to re-check each line
 
-- **The owner has the symbol.** Build the owner's copy and read its public index:
+- **The owner has the symbol, in work it has not pushed.** The local checkout's
+  `HEAD` is far ahead of its own `origin/main` and zero behind —
+  `git -C ../ceal rev-list --count origin/main..HEAD` and its reverse — and
+  0.72.13 lives only in that unpushed range:
+  `git -C ../ceal show origin/main:packages/ceal-protocol/package.json` still
+  says 0.72.12 while `git -C ../ceal show HEAD:...` says 0.72.13. So a tag cut
+  today would tag work no clone or CI runner can see. Build the local copy and
+  read its public index:
   `npm --prefix ../ceal/packages/ceal-protocol run build` then
   `node -p 'Object.keys(await import("../ceal/packages/ceal-protocol/dist/index.js")).length'`
   — 140 exports, among them
@@ -41,10 +48,24 @@ blocking release, packing, and the acceptance packet. Today the pin is `agreed`
 and those paths are open. A declared divergence is a quarantine rather than a
 clearance, so declaring it here buys nothing either.
 
+## This is an order, not a deadlock
+
+The Gateway lane's C11a batch is recorded as waiting on a worker release, and
+that is true of its *final* step. It is worth saying plainly that nothing in the
+producing workflow waits on this lane:
+`.github/workflows/gateway-protocol-handoff-release.yml` in `corca-ai/ceal`
+triggers only on a `gateway-protocol-handoff-v*.*.*` tag push, and
+`rg -n 'ceal-cli|vendor/|worker' <that file>` finds nothing while
+`rg -c 'ceal-protocol' <that file>` finds two — the positive control for that
+absence. The handoff can be cut without any worker artifact.
+
+The order is therefore one-directional: handoff tag, then a v5-capable worker
+release, then the Gateway's consumption of it. This lane cannot move first.
+
 ## What unblocks it
 
 A `gateway-protocol-handoff-v0.72.13` release on the Gateway
-protocol-handoff origin, with the archive, the protocol tarball digest, and the
+protocol-handoff origin, cut from pushed work, with the archive, the protocol tarball digest, and the
 Sigstore provenance the existing lock records for 0.72.12. This repository then
 re-vendors the copy and re-pins `protocol-vendor-pin.json` and
 `gateway-protocol-handoff-lock.json` in one commit, per `AGENTS.md`

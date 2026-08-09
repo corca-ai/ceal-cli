@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, fstatSync } from "node:fs";
+import { fstatSync } from "node:fs";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
 	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
@@ -14,6 +14,7 @@ import {
 	concatBytes,
 	isJsonContentType,
 	onceAsync,
+	openInheritedReadable,
 	postUnixSocket,
 	raceDeadline,
 	readBeforeDeadline,
@@ -194,15 +195,13 @@ async function sendCarrierRequestBeforeDeadline(
 }
 
 function createFd4Channel(): { readonly read: () => Promise<Uint8Array>; readonly close: () => Promise<void> } {
-	// `fd` prevents opening this placeholder path. A 8KiB high-water mark keeps
-	// the pipe reader bounded even before the record cap rejects a second chunk.
-	// The stream owns FD 4: destroying it first and waiting for `close` avoids a
-	// concurrent raw close while libuv still has a read in flight.
 	// Probe before creating a libuv reader. The launch contract supplies a pipe:
 	// accepting an arbitrary inherited descriptor would not be a protected
 	// one-shot channel, and can make libuv abort when a host-reserved FD closes.
+	// The stream owns FD 4: destroying it first and waiting for `close` avoids a
+	// concurrent raw close while libuv still has a read in flight.
 	if (!fstatSync(4).isFIFO()) throw new Error("missing_channel");
-	const stream = createReadStream("/dev/null", { fd: 4, autoClose: true, highWaterMark: MAX_CHANNEL_BYTES });
+	const stream = openInheritedReadable(4);
 	return {
 		read: () => readBoundedStream(stream, MAX_CHANNEL_BYTES, () => stream.destroy()),
 		close: () => closeReadable(stream),

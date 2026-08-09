@@ -29,10 +29,14 @@ Everything else not listed is owned by the comment at the site and by
   from `charness-artifacts/critique/2026-08-08-c13-requester-provider-identity-premortem.md`,
   before the next release that keeps a stale pin. Re-syncing is the standing
   answer and **it is now blocked outside this repository**, which is a different
-  reason from the one recorded before. The owner checkout is clean and carries
-  0.72.13 with the symbol the v5 gate needs, but the highest signed handoff is
-  still `gateway-protocol-handoff-v0.72.12` —
-  `git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-*'`. Moving
+  reason from the one recorded before. The owner's local checkout carries
+  0.72.13 with the symbol the v5 gate needs, but it is unpushed work —
+  `git -C ../ceal show origin/main:packages/ceal-protocol/package.json` still
+  says 0.72.12 — and the highest signed handoff is still
+  `gateway-protocol-handoff-v0.72.12`
+  (`git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-*'`).
+  This is an order rather than a deadlock, and the unrun step is theirs: their
+  handoff workflow triggers on its own tag and names no worker input. Moving
   the copy without a matching lock fails `proof_shipment_protocol_divergence`,
   which is fatal, so re-vendoring today closes more paths than it opens.
   [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
@@ -71,33 +75,27 @@ Everything else not listed is owned by the comment at the site and by
   destructive-cleanup half is fixed and pinned by a named test; what remains is
   recorded at the site in `packages/ceal-worker-cli/src/local-store-lock.ts`,
   which owns the detail and why an `ino` comparison cannot settle it.
-- **The v5 notification channel would hang the worker on shutdown, and the fix
-  is not the one this entry used to name.** `openLeasedConsumerNotificationChannel`
-  returns `undefined` today — the shipped
-  `leased-consumer-control-session-contract.json` declares no
-  `notification_channel` — so this is latent, not live. When v5 ships it becomes a
-  blocker.
-  Reproduced on 2026-08-09 with a real blocking FIFO fd, a parked `for await` and
-  a `destroy()`, and isolated with two controls: the hang needs a **blocking fd**
-  *and* an **in-flight read**. Drop either — open the fd `O_NONBLOCK`, or destroy
-  before a read is parked — and `close` fires in a millisecond and the process
-  exits.
-  What the reproduction changed is the fix. Bounding `closeReadable` (now in
-  `packages/ceal-worker-cli/src/private-worker-transport.ts`) makes the shutdown
-  await settle, and **the process still never exits**: the read is parked in a
-  libuv threadpool thread nothing in userland can retire, and closing the fd
-  afterwards does not retire it either. A fix aimed only at `closeReadable` would
-  have read as done and changed nothing — which is why this entry now says so.
-  The measured fix is to never hand a blocking fd to `fs.createReadStream`.
-  Adopting the same fd with `new net.Socket({ fd })` puts it in non-blocking mode,
-  and the same reproduction then fires `close` in 3ms, unwinds the parked reader
-  with `ERR_STREAM_PREMATURE_CLOSE`, and exits 0. That is a transport change with
-  its own semantics — `net.Socket` is a duplex with different EOF and error
-  behaviour, and the FD-kind predicate in the suite is written against the current
-  shape — so it is its own slice, not a rider.
-  **This is no longer "not before".** The Gateway lane needs a worker release that
-  actually carries the v5 contract, so the v5 path is the next release's content.
-  Fix it in that slice, ahead of the tag.
+- **The v5 shutdown hang is closed, and what is left is a reachability claim
+  nobody has proven.** All three inherited channels now go through
+  `openInheritedReadable` in
+  `packages/ceal-worker-cli/src/private-worker-transport.ts`, which adopts the
+  descriptor with `net.Socket` so libuv reads it non-blocking on the event loop.
+  `closeReadable` is bounded as well, and that bound is defence in depth rather
+  than the fix — it was measured making the shutdown await settle while the
+  process still never exited, which is the shape that would have shipped as done.
+  `packages/ceal-worker-cli/test/leased-consumer-control-session.test.mjs` pins it
+  with two arms, and the control arm hangs on purpose so the fixed arm's pass
+  cannot be vacuous. Reverting `openInheritedReadable` to the old stream turns it
+  red; that was run.
+  **What is not proven is that the hang was reachable on the real launch path.**
+  The reproduction needs the process to open the blocking descriptor itself.
+  Handing one down through `stdio` did *not* reproduce — the child's read returns
+  `EAGAIN` rather than parking, even though the descriptor arrives with
+  `O_NONBLOCK` clear (`/proc/self/fdinfo/5`). Gateway supplies a socketpair, which
+  was not tested. So the fix is right about which constructor strands a process,
+  and silent about whether production would have hit it. Settling that needs a
+  real socketpair on the contract's fd, and it is worth a slice only if something
+  else wants the answer.
 - **Two published acceptance records overstate guide registration, and one leaks
   identity refs.** `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were
   emitted while `registered_host_count` counted resolved host directories rather

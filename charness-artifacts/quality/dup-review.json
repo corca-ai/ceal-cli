@@ -293,6 +293,20 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-09",
 			"note": "validCapabilityId in capability-arguments.ts and isSafeProfileRef in index.ts, both now `typeof value === \"string\" && CEAL_SAFE_REF.test(value)`. This is the same language idiom already classified as 04c7c82dc0fc3ac7, re-keyed because the regexes stopped being literals and became one imported symbol — the fix for the real duplicate is what made the surviving idiom look identical. The shared fact, the grammar, now has exactly one home in safe-ref.ts, and npm run lint:duplicate-literal is what keeps it there. Note for a later reader: isSafeProfileRef tests the unprefixed grammar while the `profile:` prefixed one exists at CEAL_SAFE_PROFILE_REF, which is a naming question that predates this session and was not changed here."
+		},
+		{
+			"surface": "code",
+			"id": "1741d1184920c656",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Rotated from d8d1dd48d66959bf, which this session classified hours earlier for the same pair and the same reason. The import blocks of leased-consumer-carrier.ts and leased-consumer-control-session.ts re-keyed again because the two private modes now also share openInheritedReadable — the family grows every time a duplicate between them is removed, which is the opposite of what it looks like. Import statements are not a shared fact; there is nothing to extract."
+		},
+		{
+			"surface": "code",
+			"id": "b02b98a4301bc555",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Two single call lines in test/worker-release-installer.test.mjs (:199, :240), both untouched by this session and differing in the argument under test — the literal \"stable\" against a real TAG, which is the distinction each case exists to make. Collapsing them into a table would hide which of the two a failure came from. Re-keyed by line offsets moving elsewhere in the run, not by an edit here."
 		}
 	],
 	"fixable_ceiling": 0,

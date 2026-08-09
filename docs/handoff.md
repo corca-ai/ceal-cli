@@ -35,28 +35,33 @@ Read the facts rather than trusting them here; each line names how.
   the v5 gate needs 0.72.13. Re-vendoring without a matching lock fails
   `proof_shipment_protocol_divergence`, which is fatal. The tracked request is
   [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md).
-- **The v5 shutdown hang is reproduced and its recorded fix was wrong.** Bounding
-  `closeReadable` settles the await and the process still never exits; the
-  measured fix is `net.Socket({ fd })` rather than `fs.createReadStream({ fd })`.
-  [debt.md](debt.md) carries the reproduction, the two controls, and why it is
-  its own slice.
+- **The v5 shutdown hang is closed, and its recorded fix had been wrong.**
+  Bounding `closeReadable` settles the await and leaves the process alive; the
+  fix is `openInheritedReadable` adopting the descriptor with `net.Socket`. The
+  test's control arm hangs on purpose so the fixed arm cannot pass vacuously, and
+  reverting the fix turns it red. What stays open is a reachability claim, not the
+  defect — [debt.md](debt.md) says which and why it may not be worth a slice.
+- **The Gateway blocker is an order, not a deadlock, and the unrun step is
+  theirs.** Their handoff workflow triggers on its own tag and names no worker
+  input — `rg -n 'ceal-cli|vendor/|worker'` over
+  `.github/workflows/gateway-protocol-handoff-release.yml` in `../ceal` finds
+  nothing while `rg -c 'ceal-protocol'` finds two. Their 0.72.13 is committed
+  locally and **not pushed to their own origin**:
+  `git -C ../ceal show origin/main:packages/ceal-protocol/package.json` still says
+  0.72.12. So "waiting on a worker release" is true of their last step and hides
+  their first one.
 - **All gates are green** — `npm run check`, `npm run check:duplication`,
   `npm run lint:shell`. Time them yourself.
 
 ## Next Session
 
-1. **Close the v5 shutdown hang**, in its own slice, using the measured fix in
-   [debt.md](debt.md) rather than the one the entry used to name. It is a
-   transport change: `net.Socket` is a duplex with different EOF and error
-   behaviour, and the FD-kind predicate in the suite is written against
-   `fs.ReadStream`. The reproduction in that entry is what the fix owes a red run
-   against first.
-2. **Ask the operator before doing anything with the protocol pin.** Item 1 above
-   does not need it. The re-vendor does, and it cannot be done here until the
-   Gateway publishes the handoff — check the request's re-checks before assuming
-   either way.
-3. **Then scope the rest of the v5 release**: the control-session contract bump
-   to `.v3`, and the release tag itself.
+1. **Bump the control-session contract to `.v3`.** Not started. It is the last
+   worker-side item of the v5 release that does not wait on the Gateway.
+2. **Do not touch the protocol pin until the Gateway tags.** The re-vendor cannot
+   be done here, and re-checking that is three commands —
+   [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
+   carries them. Ask the operator before anything that writes to that lane.
+3. **Then the release tag.**
 4. **Ask the operator for approval before the tag.** Confirm the free
    preconditions first — [operator-acceptance.md](operator-acceptance.md)
    `## Before Spending A Release Tag` lists them and all are reads. A tag is not

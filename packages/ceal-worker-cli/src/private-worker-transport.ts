@@ -1,4 +1,5 @@
 import { request as httpRequest } from "node:http";
+import { Socket } from "node:net";
 
 /**
  * The one home for the two private worker modes' shared transport shape: the
@@ -106,7 +107,58 @@ export async function readBeforeDeadline(
 	}
 }
 
-/** Destroys a readable and resolves only once it has actually closed. */
+/**
+ * How long a shutdown waits for a readable it has destroyed to say it closed.
+ *
+ * Defence in depth, not the fix. `openInheritedReadable` is what stops a read
+ * parking a thread nothing can retire; this bound is what keeps a stream that
+ * misbehaves anyway from turning a shutdown into a hang. Short because a
+ * well-behaved destroy answers in single-digit milliseconds — measured at 3ms on
+ * a real FIFO — and because an unanswered one is not going to answer later.
+ */
+const CLOSE_READABLE_DEADLINE_MS = 250;
+
+/**
+ * Adopts an inherited descriptor as a readable, in the one way that does not
+ * strand the process.
+ *
+ * The launch contract hands this worker a FIFO or socket end on a fixed FD, and
+ * an inherited descriptor is *blocking*. `fs.createReadStream({ fd })` reads a
+ * blocking descriptor on a libuv threadpool thread, and once such a read is in
+ * flight nothing in userland retires it: `destroy()` does not, `close` never
+ * fires, and closing the descriptor afterwards does not either. The shutdown
+ * await never settles and the process never exits.
+ *
+ * Reproduced on 2026-08-09 with a real FIFO, and isolated with two controls —
+ * the hang needs a blocking descriptor *and* an in-flight read; drop either and
+ * `close` fires in a millisecond. `docs/debt.md` carries the run.
+ *
+ * `net.Socket` is the fix rather than a bound on the wait, because libuv puts an
+ * adopted descriptor into non-blocking mode and reads it on the event loop. Data
+ * delivery and clean EOF are identical to the stream this replaced; what changes
+ * is that a destroy is answered.
+ *
+ * One home for all three inherited channels, because "which stream constructor"
+ * is exactly the kind of fact that was hand-copied into three modules and would
+ * have been fixed in one.
+ */
+export function openInheritedReadable(fd: number): AsyncIterable<Uint8Array> & {
+	readonly destroyed: boolean;
+	destroy: () => void;
+	once: (event: string, listener: () => void) => unknown;
+} {
+	return new Socket({ fd, readable: true, writable: false });
+}
+
+/**
+ * Destroys a readable and resolves once it has closed, or once the deadline
+ * above expires.
+ *
+ * The deadline is not cosmetic and it is not sufficient: a shutdown that cannot
+ * be told the stream closed must still return, and a caller that returns is
+ * still not a process that exits. Read `openInheritedReadable` for the half that
+ * makes the process exit.
+ */
 export function closeReadable(stream: {
 	readonly destroyed?: boolean;
 	destroy: () => void;
@@ -114,7 +166,16 @@ export function closeReadable(stream: {
 }): Promise<void> {
 	if (stream.destroyed) return Promise.resolve();
 	return new Promise<void>((resolve) => {
-		stream.once("close", resolve);
+		const timer = setTimeout(settle, CLOSE_READABLE_DEADLINE_MS);
+		function settle(): void {
+			clearTimeout(timer);
+			resolve();
+		}
+		// `error` as well as `close`: a destroyed socket can answer with either,
+		// and waiting only for `close` is how one of these two events became a
+		// shutdown that never returned.
+		stream.once("close", settle);
+		stream.once("error", settle);
 		stream.destroy();
 	});
 }
