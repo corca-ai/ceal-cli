@@ -3,6 +3,7 @@ import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
+import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
 // source ("what did this client's token do"). It records an allowlisted
@@ -28,9 +29,9 @@ const MAX_RECORDED_DROPS = 4096;
 const NO_DROPS = { count: 0, atLeast: false } as const;
 const { O_APPEND, O_CREAT, O_NOFOLLOW, O_WRONLY } = constants;
 const SPOOL_SCHEMA_VERSION = "ceal.receipt_spool.v1";
-// Mirrors the protocol's safe-ref grammar: every spooled field must already be
-// a bounded reference/code token, so free text cannot enter the spool.
-const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+// Every spooled field must already be a bounded reference/code token, so free
+// text cannot enter the spool. The grammar itself lives in `safe-ref.ts`.
+const SAFE_REF = CEAL_SAFE_REF;
 const CALL_RESULT_SCHEMA_VERSION = "ceal.result.v2";
 const SPOOL_STATUSES = new Set(["completed", "blocked", "error"]);
 const SPOOL_EVIDENCE = new Set(["readback_verified", "not_read_back", "readback_unavailable", "outcome_unknown"]);
@@ -259,6 +260,21 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 	});
 }
 
+// @lockFree: this is the module's third writer and the only one outside
+// `underSpoolLock`, deliberately. It runs on the append's failure path
+// (`bin.ts`'s `append(entry).catch(() => recordDrop())`), and one of the reasons
+// an append fails is `spool_busy` — the lock itself. Taking that lock here would
+// stop the counter recording in the case it exists to record, which is worse
+// than the race it would close.
+//
+// So the two claims in this file are both true of different things: the counter
+// needs no lock against another *append*, for the O_APPEND reason at the top of
+// this file. What it is not protected against is a *clear*, and naming that here
+// is the honest half — `removeUnderLock` deletes `DROPS_FILE` under the lock,
+// which does not close the race while this writer stays outside it, so a drop
+// recorded concurrently with a logout can recreate the file and carry one byte
+// into the next identity's count. `docs/debt.md` carries the structural fix,
+// which is to give the counter an identity discriminator rather than a lock.
 function recordDrop(directory: string, file: string): void {
 	try {
 		prepareDirectory(directory, unsafeReceiptSpool);

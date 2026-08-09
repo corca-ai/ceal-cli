@@ -104,6 +104,13 @@ belongs in one of them, with the rule left here.
   and `repo-gates.test.mjs` fails when a tagged export is reached by no suite —
   so add the tag only where that is true. [docs/gates.md](docs/gates.md) says what
   each one can and cannot see.
+- Two more static gates run in both tiers and exist to make `## One Fact, One
+  Home` mechanical: `npm run lint:store-lock` (every writer of a lock-guarded
+  store is under the lock or `@lockFree` at its declaration) and
+  `npm run lint:duplicate-literal` (no non-trivial regex spelled in two owned
+  modules). Both carry escape hatches that fail loudly rather than silently, and
+  both were falsified against `ceal-v0.75.0` before being armed —
+  [docs/gates.md](docs/gates.md) says what each can and cannot see.
 - Two gates are **maintainer-local by design**, run by `.githooks/pre-push` and
   not by `npm run check`: `npm run check:duplication` (the boy-scout duplicate
   ratchet, needs `nose` plus the charness quality skill) and `npm run lint:shell`

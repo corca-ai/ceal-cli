@@ -3,6 +3,7 @@ import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
+import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
 const STATE_LOCK_MAX_WAIT_MS = 30_000;
@@ -258,7 +259,7 @@ function validateRefreshSession(value: CandidateSession): void {
 
 function validateSessionReferences(value: CandidateSession): void {
 	for (const key of ["profileRef", "membershipRef", "registrationRef", "clientRef", "subjectRef", "instanceRef"] as const) {
-		if (typeof value[key] !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value[key])) {
+		if (typeof value[key] !== "string" || !CEAL_SAFE_REF.test(value[key])) {
 			throw new CealSessionStoreError("invalid_store");
 		}
 	}

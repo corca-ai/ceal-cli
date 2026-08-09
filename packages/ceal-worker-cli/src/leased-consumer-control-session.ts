@@ -23,6 +23,7 @@ import {
 	type UnixSocketErrorNames,
 	type UnixSocketResponse,
 } from "./private-worker-transport.js";
+import { parseStrictJson } from "./strict-json.js";
 
 /**
  * The generator emits the contract text and its digest together, and the native
@@ -553,89 +554,6 @@ function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close
 		read: () => readBoundedStream(stream, MAX_SESSION_BYTES, () => stream.destroy()),
 		close: () => closeReadable(stream),
 	});
-}
-
-function parseStrictJson(bytes: Uint8Array, maximum: number): unknown {
-	if (bytes.byteLength === 0 || bytes.byteLength > maximum) throw new Error("invalid_json");
-	const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-	const value = JSON.parse(text) as unknown;
-	assertNoDuplicateJsonKeys(text);
-	return value;
-}
-
-function assertNoDuplicateJsonKeys(text: string): void {
-	let index = 0;
-	const space = () => {
-		while (/\s/u.test(text[index] ?? "")) index += 1;
-	};
-	const string = () => {
-		const start = index;
-		if (text[index] !== '"') throw new Error("invalid_json");
-		index += 1;
-		while (index < text.length) {
-			const character = text[index];
-			if (character === "\\") index += 2;
-			else {
-				index += 1;
-				if (character === '"') return JSON.parse(text.slice(start, index)) as string;
-			}
-		}
-		throw new Error("invalid_json");
-	};
-	const value = (): void => {
-		space();
-		if (text[index] === "{") {
-			index += 1;
-			const keys = new Set<string>();
-			space();
-			if (text[index] === "}") {
-				index += 1;
-				return;
-			}
-			for (;;) {
-				space();
-				const key = string();
-				if (keys.has(key)) throw new Error("duplicate_json_key");
-				keys.add(key);
-				space();
-				if (text[index++] !== ":") throw new Error("invalid_json");
-				value();
-				space();
-				if (text[index] === "}") {
-					index += 1;
-					return;
-				}
-				if (text[index++] !== ",") throw new Error("invalid_json");
-			}
-		}
-		if (text[index] === "[") {
-			index += 1;
-			space();
-			if (text[index] === "]") {
-				index += 1;
-				return;
-			}
-			for (;;) {
-				value();
-				space();
-				if (text[index] === "]") {
-					index += 1;
-					return;
-				}
-				if (text[index++] !== ",") throw new Error("invalid_json");
-			}
-		}
-		if (text[index] === '"') {
-			string();
-			return;
-		}
-		const match = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(text.slice(index));
-		if (!match) throw new Error("invalid_json");
-		index += match[0].length;
-	};
-	value();
-	space();
-	if (index !== text.length) throw new Error("invalid_json");
 }
 
 function assertEmbeddedControlSessionContract(

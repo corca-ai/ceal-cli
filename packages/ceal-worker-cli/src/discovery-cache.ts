@@ -3,6 +3,7 @@ import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost
@@ -36,7 +37,7 @@ export const DEFAULT_DISCOVERY_CACHE_TTL_MS = 1_800_000;
 
 const CACHE_FILE = "client-discovery-cache.json";
 const CACHE_SCHEMA_VERSION = "ceal.client_discovery_cache.v1";
-const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const SAFE_REF = CEAL_SAFE_REF;
 const CACHED_DISCOVERY_REQUEST_ID = "cache:discovery";
 const CACHED_DISCOVERY_PROOF_REF = "cache:local";
 

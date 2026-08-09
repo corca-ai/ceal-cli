@@ -12,6 +12,7 @@ const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"
 
 const WORKER_CONTRACT_TESTS = [
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
+	"test/contract/one-fact-one-home.test.mjs",
 	"test/contract/prewarm-offline-consumer-cache.test.mjs",
 	"test/contract/probe-surface.test.mjs",
 	"test/contract/production-reachability.test.mjs",

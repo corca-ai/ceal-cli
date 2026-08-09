@@ -39,6 +39,7 @@ import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeHelp, writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
+import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import {
 	CEAL_SUBCOMMANDS,
 	type CealSubcommandDefinition,
@@ -1043,7 +1044,7 @@ function isValidTargetCatalogSelection(
 }
 
 function isSafeCursor(value: string): boolean {
-	return /^cursor:[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u.test(value);
+	return CEAL_SAFE_CURSOR.test(value);
 }
 function isSafeTargetMatch(value: string): boolean {
 	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048 && !hasControlCharacter(value);
@@ -1661,7 +1662,7 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 }
 
 function isSafeRequestRef(value: string | undefined): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value);
+	return typeof value === "string" && CEAL_SAFE_REQUEST_REF.test(value);
 }
 
 type ReceiptRouteParser = (rest: readonly string[]) => { requestRef: string; profileRef?: string } | null;
@@ -1708,7 +1709,7 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 }
 
 function isSafeProfileRef(value: string | undefined): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
+	return typeof value === "string" && CEAL_SAFE_REF.test(value);
 }
 
 function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {
@@ -1716,6 +1717,9 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 	for (const operand of operands) {
 		const separator = operand.indexOf("=");
 		const key = separator > 0 ? operand.slice(0, separator) : "";
+		// @separateGrammar: the operand-key grammar. It coincides with
+		// `client-session.ts`'s reason-code token and is not the same fact — one
+		// bounds what an operator may type, the other what the Gateway may say.
 		if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key) || parsed.has(key)) return null;
 		parsed.set(key, operand.slice(separator + 1));
 	}
@@ -1762,8 +1766,8 @@ function parseGatewayOptions(options: readonly string[]): ParsedGatewayOptions {
 	const profileRef = parsed.values.get("--profile");
 	const requestId = parsed.values.get("--request-id");
 	if (!endpoint || !profileRef || !requestId) return invalidGatewayOptions();
-	if (!/^profile:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(profileRef)) return invalidGatewayOptions();
-	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,117}$/u.test(requestId)) return invalidGatewayOptions();
+	if (!CEAL_SAFE_PROFILE_REF.test(profileRef)) return invalidGatewayOptions();
+	if (!CEAL_SAFE_REQUEST_ID.test(requestId)) return invalidGatewayOptions();
 	return { ok: true, endpoint, profileRef, requestId };
 }
 

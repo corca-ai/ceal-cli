@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -21,5 +21,24 @@ import path from "node:path";
 export function scratchDir(context, prefix) {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
+	return root;
+}
+
+/**
+ * A scratch directory pre-populated with a file map, keyed by repo-relative
+ * path. Parent directories are created for you.
+ *
+ * The analyzer suites all need this and each had written the same loop. The
+ * duplicate ratchet caught the second copy on the day `one-fact-one-home` landed
+ * — a suite proving two one-fact-one-home detectors reproducing the defect in
+ * its own fixtures, which is the pattern those detectors exist to find.
+ */
+export function scratchTree(context, prefix, files) {
+	const root = scratchDir(context, prefix);
+	for (const [relative, contents] of Object.entries(files)) {
+		const absolute = path.join(root, relative);
+		mkdirSync(path.dirname(absolute), { recursive: true });
+		writeFileSync(absolute, contents);
+	}
 	return root;
 }

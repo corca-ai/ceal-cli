@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.mjs";
-import { scratchDir } from "../scratch-dir.mjs";
+import { scratchDir, scratchTree } from "../scratch-dir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function fixture(context, files) {
-	const root = scratchDir(context, "ceal-reach-");
+	const root = scratchTree(context, "ceal-reach-", files);
+	// The analyzer reads this directory whether or not a fixture declares a
+	// workflow, so it has to exist even when the file map is silent about it.
 	mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
-	for (const [relative, contents] of Object.entries(files)) {
-		const absolute = path.join(root, relative);
-		mkdirSync(path.dirname(absolute), { recursive: true });
-		writeFileSync(absolute, contents);
-	}
 	return root;
 }
 

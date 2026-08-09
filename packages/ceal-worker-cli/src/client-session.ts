@@ -511,6 +511,10 @@ const CLIENT_SESSION_FAILURES: Readonly<Record<string, ClientSessionFailureDispo
 // a contract field readers branch on, and a Gateway-supplied string of arbitrary
 // shape does not belong in it.
 const UNCLASSIFIED_REASON_KIND = "session_unusable";
+// @separateGrammar: this is the shape of *our own* reason codes, and it
+// coincides with the CLI's operand-key grammar in `index.ts` without being the
+// same fact. Merging the two would let a change to what an operand key may look
+// like decide what the Gateway is allowed to call a failure.
 const SAFE_REASON_TOKEN = /^[a-z][a-z0-9_]{0,63}$/u;
 
 export function classifyClientSessionFailure(reason: string): { kind: string; retryable: boolean; message: string; nextAction: string } {

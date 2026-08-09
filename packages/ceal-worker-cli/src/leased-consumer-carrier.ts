@@ -21,6 +21,8 @@ import {
 	type UnixSocketErrorNames,
 	type UnixSocketResponse,
 } from "./private-worker-transport.js";
+import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { parseStrictJson } from "./strict-json.js";
 
 const CARRIER_CONTRACT = verifyEmbeddedCarrierContract();
 const CHANNEL_SCHEMAS = CARRIER_CONTRACT.serviceChannelSchemas;
@@ -39,7 +41,7 @@ const SOCKET_ERROR_NAMES = Object.freeze({
 	responseFailed: "socket_response_failed",
 	requestFailed: "socket_request_failed",
 });
-const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+const SAFE_REF = CEAL_SAFE_REQUEST_REF;
 
 /** Internal-only argv token; derived from the signed release contract and absent from the public command registry. */
 export const LEASED_CONSUMER_CARRIER_ARGV = CARRIER_CONTRACT.argv;
@@ -454,88 +456,6 @@ async function readBoundedWebResponse(response: globalThis.Response, maximum: nu
 	} finally {
 		reader.releaseLock();
 	}
-}
-
-function parseStrictJson(bytes: Uint8Array): unknown {
-	const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-	const value = JSON.parse(text) as unknown;
-	assertNoDuplicateJsonKeys(text);
-	return value;
-}
-
-function assertNoDuplicateJsonKeys(text: string): void {
-	let index = 0;
-	const whitespace = () => {
-		while (/\s/u.test(text[index] ?? "")) index += 1;
-	};
-	const string = () => {
-		const start = index;
-		if (text[index] !== '"') throw new Error("invalid_json");
-		index += 1;
-		while (index < text.length) {
-			const character = text[index];
-			if (character === "\\") index += 2;
-			else {
-				index += 1;
-				if (character === '"') return JSON.parse(text.slice(start, index)) as string;
-			}
-		}
-		throw new Error("invalid_json");
-	};
-	const value = (): void => {
-		whitespace();
-		if (text[index] === "{") {
-			index += 1;
-			const keys = new Set<string>();
-			whitespace();
-			if (text[index] === "}") {
-				index += 1;
-				return;
-			}
-			for (;;) {
-				whitespace();
-				const key = string();
-				if (keys.has(key)) throw new Error("duplicate_json_key");
-				keys.add(key);
-				whitespace();
-				if (text[index++] !== ":") throw new Error("invalid_json");
-				value();
-				whitespace();
-				if (text[index] === "}") {
-					index += 1;
-					return;
-				}
-				if (text[index++] !== ",") throw new Error("invalid_json");
-			}
-		}
-		if (text[index] === "[") {
-			index += 1;
-			whitespace();
-			if (text[index] === "]") {
-				index += 1;
-				return;
-			}
-			for (;;) {
-				value();
-				whitespace();
-				if (text[index] === "]") {
-					index += 1;
-					return;
-				}
-				if (text[index++] !== ",") throw new Error("invalid_json");
-			}
-		}
-		if (text[index] === '"') {
-			string();
-			return;
-		}
-		const match = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/u.exec(text.slice(index));
-		if (!match) throw new Error("invalid_json");
-		index += match[0].length;
-	};
-	value();
-	whitespace();
-	if (index !== text.length) throw new Error("invalid_json");
 }
 
 function plainRecord(value: unknown): value is JsonRecord {

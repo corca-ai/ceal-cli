@@ -1,7 +1,9 @@
+import { CEAL_SAFE_REF, CEAL_SAFE_TARGET_REF } from "./safe-ref.js";
+
 export function validCapabilityId(value: string | undefined): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
+	return typeof value === "string" && CEAL_SAFE_REF.test(value);
 }
 
 export function validTargetRef(value: string | undefined): value is string {
-	return typeof value === "string" && /^target:[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/u.test(value);
+	return typeof value === "string" && CEAL_SAFE_TARGET_REF.test(value);
 }

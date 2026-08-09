@@ -36,6 +36,20 @@ Everything else not listed is owned by the comment at the site and by
   vendored 0.72.12 does not export and the owner's 0.72.13 does — so a v5
   release cannot be cut without re-vendoring, and the "Gateway strips to v4"
   reasoning above stops applying the moment this worker declares v5.
+- **The receipt spool's drop counter can carry one byte across an identity
+  change, and no lock can fix it.** `recordDrop` in
+  `packages/ceal-worker-cli/src/receipt-spool.ts` is `@lockFree` on purpose — the
+  tag at the declaration owns the reasoning — so `removeUnderLock`'s removal of
+  `DROPS_FILE` under the spool lock does not close the clear-versus-append race
+  it looks like it closes. A drop recorded while another process runs
+  `ceal session logout` or an `--force` replacement can recreate the file, and
+  `ceal observe` then reports that byte against the incoming identity. The fix is
+  structural rather than a lock: give the counter an identity discriminator, so a
+  resurrected byte cannot be attributed to a session that did not produce it.
+  That changes the on-disk shape of `receipt-spool-drops`, which is why it is its
+  own slice and not a rider on the gate that found it. Found by
+  `npm run lint:store-lock` on 2026-08-09; the same check reports it again the
+  moment the tag comes off.
 - **The signed release manifest has no client package.**
   `ceal-worker-release-manifest-<platform>.json` records only the protocol, so a
   consumer is left with a source-owner claim. The fix puts the client in the

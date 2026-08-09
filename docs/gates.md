@@ -512,6 +512,101 @@ the real thing: it reconstructs `0cce9f9^` with `git archive` and requires the
 analyzer to name both guards slice 2 deleted by hand. On a clone without that
 commit it skips and says so rather than passing.
 
+## The Two Checks That Arm `One Fact, One Home`
+
+`AGENTS.md` `## One Fact, One Home` states a law that, until 2026-08-09, no gate
+could see. Every gate here is a graph walk over *symbols* — `tsc` following
+`CEAL_SUBCOMMANDS` from route to dispatch, `knip` and `lint:reachability`
+walking the import graph, `check:duplication` walking token blocks — so the law
+was enforced exactly where the fact had already been made a symbol with an edge,
+and nowhere else. Every survivor of every sweep in that range lived in the
+complement of that set. These two checks read the complement. Both run in
+`npm run check` and `npm run check:unit`, and
+`test/contract/one-fact-one-home.test.mjs` proves each on fixtures whose answer
+is known before it runs.
+
+### `lint:store-lock` — enumerate a resource's writers
+
+`scripts/check-store-lock-census.mjs` reports every writer that reaches a
+lock-guarded local store without the module's lock. The rule is narrow on
+purpose: it says nothing about whether a module *should* own a lock, only that
+inside a module which has already declared one by calling a `with…Lock` helper,
+every writer is under it or carries `@lockFree` with a reason at the
+declaration.
+
+It exists because of a measurement rather than a theory, and the measurement is
+re-runnable: extract the release baseline (`git archive ceal-v0.75.0`) and point
+the analyzer at it. It reports two writers in `receipt-spool.ts`. One is the
+defect a sweep found by hand a day later; the other is the writer that sweep's
+own fix left outside the lock it introduced. Neither was visible to any gate,
+because a reviewer is handed one site and its named sibling and never an
+enumerated population. That is the whole query.
+
+`@lockFree` is a claim at the declaration, echoed in the check's own output so
+the exemption is visible on every run rather than only in a diff. What it cannot
+see is stated rather than glossed: only top-level `function` declarations, and
+no cross-module caller — a mutator exported and called unguarded from another
+file is missed. The census line naming which modules own a lock is the
+protection against the worse failure, a lock helper renamed out of the shape and
+the whole check silently reporting zero over nothing.
+
+That protection has a bound worth naming, because the fresh-eye review named it.
+`test/contract/one-fact-one-home.test.mjs` pins `receipt-spool.ts` and
+`profile-store.ts` into the has-a-lock set *by name*, so renaming either store's
+real primitive goes red. A **third** store introduced later with a misnamed
+wrapper from day one has no such pin and would be skipped in silence. Add its
+name to that test when you add the store; the census output is where you would
+notice, and only if you read it.
+
+### `lint:duplicate-literal` — one grammar, one home
+
+`scripts/check-duplicate-literal.mjs` reports every non-trivial regex literal
+spelled in two or more owned modules. `check:duplication` cannot answer this and
+it is worth being exact about why, because for a day a review file said the
+opposite: that ratchet's unit is a repeated *block*, so it read the
+`typeof value === "string" && REGEX.test(value)` predicate as one clone family
+and `charness-artifacts/quality/dup-review.json` accepted it with the reason
+"each site tests a different regex against a different domain". Six of those
+regexes were byte-identical. A block-level detector cannot see inside the block,
+so the reviewed note ratified the duplicate it was dismissing — which is the
+failure `AGENTS.md` names, a claim in prose that no gate checks.
+
+The unit is therefore the literal. The triviality floor lives in
+`scripts/lib/duplicate-literal.mjs` as the single home for that number and was
+measured rather than chosen: below it the population is language idiom, above it
+every group is a grammar with a domain. Restricting it to regex literals was
+also measured — extending the same walk to strings and numbers takes the report
+from a handful of groups to well over a hundred error codes, import specifiers
+and unit conversions, and a check that fires that often is off within a week.
+
+Two escape hatches exist and they are deliberately not one, because they name
+different things:
+
+- **`@separateGrammar`**, an inline tag, is for two facts that coincide. A
+  Gateway reason code and a CLI operand key are both lowercase-snake and merging
+  them would be wrong. Every site in a group must carry it; tagging one member
+  of a six-file group would otherwise silence the other five. It covers the
+  statement it sits above and nothing else — the first version walked every
+  ancestor, so a tag justifying one literal exempted an unrelated literal in the
+  same function, which is a mute button with a reason attached.
+- **The exemption table** is for one fact whose single home a boundary forbids.
+  Today that is the refresh-token grammar: `packages/ceal-protocol` owns it and
+  is frozen, and the client SDK ships standalone and may not import the worker.
+
+Neither is a mute button, and the table only stopped being one under
+falsification. Keyed by literal alone it exempted a *third* copy silently — the
+entry said "this pattern may repeat" rather than "these two sites hold it". An
+entry now pins its exact file set, a copy anywhere else is a finding, and an
+entry whose literal has stopped being duplicated fails on its own.
+
+The blind spot is worth stating because it is the inverse of the check's own
+purpose: it matches literal text exactly, so it sees the duplication and not the
+drift that follows. Edit one of two copies and the group disappears. That is why
+the second homes are additionally bound by assertion in
+`test/contract/one-fact-one-home.test.mjs`, reading three separate modules so
+the binding cannot be vacuous the way a fixture compared against its own
+producer was.
+
 ## Probing An Installed Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way

@@ -119,6 +119,87 @@ was about, produced while fixing it — which is the argument for the review bei
 mandatory rather than discretionary. Both reviews in this session found a real
 defect the gate could not see.
 
+## The two-scope re-sweep, 2026-08-09
+
+The two moves in `## What would end this` were run together rather than chosen
+between: both scopes re-swept at the depth their prior pass used, then what they
+found taken into gates. Same discipline — distinct lenses, no shared framing,
+every finding put to a skeptic prompted to refute.
+
+| lens | pass | reported | survived refutation | predates |
+| --- | --- | --- | --- | --- |
+| structural, unenforced rules | 2nd | 1 | 1 | 1 |
+| state, time, concurrency | 3rd | 1 | 1 | 1 |
+
+**Both survive as misses, and the second one's history was got wrong twice
+before it was got right.** `recordDrop` writes the receipt spool's drop counter
+outside the lock that `removeUnderLock` and `appendEntry` both take. The lens
+reported that as new since the baseline, the parent repeated it, and the commit
+shipped saying so. It is false: at `ceal-v0.75.0` `appendEntry` already took
+`withLocalStoreLock`, and `removeSpool` and `recordDrop` were both outside it —
+`git show ceal-v0.75.0:packages/ceal-worker-cli/src/receipt-spool.ts` shows the
+lock at the append. Commit 52d8a45 fixed one of the two unlocked writers and left
+the other. So the asymmetry predates the baseline and every sweep walked past it,
+like every other survivor in this record.
+
+**The disproof was in the parent's own terminal, on the run it cited as
+evidence.** The census reports a `clean` list of the writers it found *under* the
+lock, and at the baseline that list is `["writeAppendedSpool"]` — the append,
+already locked. The parent read the findings line and not the line above it. The
+fresh-eye review caught it by reading the same output. That is the third time in
+this range a review found the fixer's own defect, and the first time the fixer
+had already been handed the evidence.
+
+**The structural survivor was the safe-ref grammar with no home**, spelled as its
+own literal at six sites across the two owned packages, with three more
+prefixed budgets nobody had noticed. `packages/ceal-protocol` declares the
+grammar and does not re-export it, so no site could have imported it.
+
+**Neither count licenses "converging", and the reason is the same as before:
+depth.** Both passes were run by different agents against denominators that are
+not the same file set, and the structural population shrank between passes
+because the prior pass's fixes removed instances from it. What the run does
+establish is a second and third comparable point, and a shift in where the
+marginal effort belongs: away from sweep depth over old code, and toward
+bounding the blast radius of fixes.
+
+### What went into gates, and what each one is measured to catch
+
+Two detectors now run in both tiers — `npm run lint:store-lock` and
+`npm run lint:duplicate-literal`. [gates.md](gates.md) owns their reasoning and
+their blind spots. What belongs here is the falsification, because "would have
+caught" is a claim:
+
+- Point either analyzer at the release baseline (`git archive ceal-v0.75.0`).
+  The census reports the receipt-spool defect a sweep later found by hand **and**
+  the writer the fix for it left behind. The literal check reports five groups,
+  including the `application/json` pair commit 779768b removed by hand — so it
+  was red on a real defect and went green when the fix landed.
+- Both were falsified in the other direction too, on the tree and on fixtures.
+  Two of those runs found a defect in the gate itself. The exemption table, keyed
+  by literal alone, passed a *third* copy of an exempted grammar in silence; it
+  pins its site set now. And `@separateGrammar` walked every ancestor, so a tag
+  written to justify one literal silenced an unrelated one in the same function —
+  the fresh-eye review's find, now bounded to the tagged statement and pinned by
+  a test that goes red when the bound comes off. The first version of that test
+  put the tag on a *sibling* statement and so could not fail either way, which is
+  the same defect one layer up.
+
+**Three patterns from the record are named and not yet gated**, and naming them
+is the useful part of an ungated pattern:
+
+- *Fix scoped to the reported instance rather than to the invariant's
+  population.* This is the generator, not an instance — the fix for this class
+  reproduces it, measured here and recorded again in `## The denominator-gap
+  sweep`. `lint:store-lock` catches the one shape of it that is a lock; the
+  general form has no detector, and the mandated fresh-eye review is still the
+  only control.
+- *A test that exists and cannot fail.* Mechanically detectable by mutation, and
+  rejected here on cost: a useful run executes the suite once per mutant.
+- *One name, two lifecycle stages* — a frame ceiling read against an accumulated
+  buffer, a directory that resolved reported as a host that registered. Every
+  instance is type-correct at both ends, which is exactly why nothing sees it.
+
 ## What would end this, and what would not
 
 Four passes ran on 2026-08-09 — two sweeps and the two fresh-eye reviews the
@@ -144,9 +225,9 @@ change the situation, and neither is another general sweep:
    another pass, because it keeps working after the session ends and a sweep does
    not. As examples only, not a checklist: sibling call sites of a guarded call,
    two writers of one store, two spellings of one bound. Any instrument that
-   mechanically binds two homes counts. `check:duplication` already does this for
-   one half of `## One Fact, One Home`; for the other half the search that finds
-   `check:duplication` in `package.json` and `.githooks/pre-push` finds nothing.
+   mechanically binds two homes counts. Two now exist —
+   `## The two-scope re-sweep` records what they are measured to catch — and
+   three named patterns still have none.
 
 And a standing consequence for whoever fixes: **the mandated fresh-eye review is
 the control, not a formality.** The one measurement here of a fixer working

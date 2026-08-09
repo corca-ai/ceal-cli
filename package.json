@@ -17,7 +17,7 @@
 		"build": "npm run build:worker",
 		"build:worker": "node scripts/generate-leased-consumer-handoff-runtime.mjs && npm --prefix packages/ceal-protocol run build && npm --prefix packages/ceal-client run build && npm --prefix packages/ceal-worker-cli run build",
 		"test:unit": "npm run coverage",
-		"test:contract": "node --test test/contract/gateway-leased-consumer-call-handoff.test.mjs test/contract/prewarm-offline-consumer-cache.test.mjs test/contract/probe-surface.test.mjs test/contract/production-reachability.test.mjs test/contract/protocol-vendor-pin.test.mjs test/contract/repo-build.test.mjs test/contract/repo-gates.test.mjs test/contract/safe-output-path.test.mjs test/contract/script-lib.test.mjs test/contract/worker-acceptance-packet.test.mjs test/contract/worker-gateway-handoff-archive.test.mjs test/contract/worker-guide-contract.test.mjs test/contract/worker-release-assets.test.mjs test/contract/worker-release-inputs.test.mjs",
+		"test:contract": "node --test test/contract/gateway-leased-consumer-call-handoff.test.mjs test/contract/prewarm-offline-consumer-cache.test.mjs test/contract/one-fact-one-home.test.mjs test/contract/probe-surface.test.mjs test/contract/production-reachability.test.mjs test/contract/protocol-vendor-pin.test.mjs test/contract/repo-build.test.mjs test/contract/repo-gates.test.mjs test/contract/safe-output-path.test.mjs test/contract/script-lib.test.mjs test/contract/worker-acceptance-packet.test.mjs test/contract/worker-gateway-handoff-archive.test.mjs test/contract/worker-guide-contract.test.mjs test/contract/worker-release-assets.test.mjs test/contract/worker-release-inputs.test.mjs",
 		"test:release": "node --test test/gateway-protocol-consumer.test.mjs test/worker-native-artifact.test.mjs test/worker-release-installer.test.mjs test/worker-release-package.test.mjs",
 		"test:tiers": "npm run test:contract && npm run test:release",
 		"test": "npm run test:unit && npm run coverage:scripts",
@@ -25,8 +25,8 @@
 		"coverage:scripts": "node scripts/coverage-scripts.mjs",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
-		"check": "npm run lint && npm run lint:unused && npm run lint:reachability && npm run build && npm test",
-		"check:unit": "npm run lint && npm run lint:unused && npm run lint:reachability && npm run build && npm run test:unit && npm run test:contract",
+		"check": "npm run lint && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm test",
+		"check:unit": "npm run lint && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm run test:unit && npm run test:contract",
 		"check:protocol-dev": "node scripts/verify-protocol-vendor-pin.mjs --development && npm --prefix packages/ceal-client test",
 		"hooks:install": "node scripts/install-git-hooks.mjs",
 		"probe": "node scripts/probe-surface.mjs",
@@ -40,7 +40,9 @@
 		"release:worker:assets": "node scripts/build-worker-release-assets.mjs",
 		"prewarm:offline-cache": "node scripts/prewarm-offline-consumer-cache.mjs",
 		"verify:protocol-consumer": "node scripts/verify-gateway-protocol-consumer.mjs",
-		"lint:reachability": "node scripts/check-production-reachability.mjs"
+		"lint:reachability": "node scripts/check-production-reachability.mjs",
+		"lint:store-lock": "node scripts/check-store-lock-census.mjs",
+		"lint:duplicate-literal": "node scripts/check-duplicate-literal.mjs"
 	},
 	"dependencies": {
 		"yaml": "2.9.0"
