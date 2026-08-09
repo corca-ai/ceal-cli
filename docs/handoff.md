@@ -23,8 +23,8 @@ Read the counts rather than trusting them here; each line names the command.
 - The released version is what `package.json` says and the tag that matches it —
   `node -p 'require("./package.json").version'`, `git describe --tags --abbrev=0`.
 - **Nothing is pushed.** Every commit since `ceal-v0.75.0` is local, and one
-  carries `Closes #10`, so pushing closes that issue. The push was offered and
-  declined once.
+  carries `Closes #10`, so pushing closes that issue. The push has been offered
+  and declined twice.
 - **Issue 10 is fixed, and three sweeps then closed defects it did not cause.**
   `CHANGELOG.md` `## Unreleased` holds all of it; the release step folds that
   section into the version it cuts. Two published acceptance records under

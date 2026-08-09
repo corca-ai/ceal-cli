@@ -42,7 +42,8 @@ Everything else not listed is owned by the comment at the site and by
   `leased-consumer-control-session-contract.json` declares no
   `notification_channel`, confirmed by parsing
   `LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON` — so this is latent, not live.
-  When v5 ships it becomes a blocker: `closeReadable` destroys an `fs.ReadStream`
+  When v5 ships it becomes a blocker: `closeReadable`, now in
+  `packages/ceal-worker-cli/src/private-worker-transport.ts`, destroys an `fs.ReadStream`
   over an inherited blocking socket, and neither `close` nor `error` fires, so
   the shutdown await never settles and the process never exits. Reproduce with a
   child holding a socketpair end on the contract's fd, a parked `for await`, and
