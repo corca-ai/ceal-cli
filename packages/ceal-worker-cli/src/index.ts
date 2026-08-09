@@ -40,6 +40,7 @@ import { writeHelp, writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { sessionIdentityDiscriminator } from "./session-identity.js";
 import {
 	CEAL_SUBCOMMANDS,
 	type CealSubcommandDefinition,
@@ -1524,21 +1525,22 @@ function writeReceiptError(
 // through the spool's allowlist and appends it. Every failure is swallowed so
 // a broken spool can never change a call's output or exit code, and a
 // receipt-less envelope (pre-issue failure) projects to nothing.
-function callResultRecorder(runtime: CealCommandRuntime): CealCallResultRecorder | undefined {
+function callResultRecorder(runtime: CealCommandRuntime, session: CealStoredSession): CealCallResultRecorder | undefined {
 	const record = runtime.recordReceiptSpool;
 	if (!record) return undefined;
 	const drop = runtime.recordReceiptSpoolDrop;
+	const identity = sessionIdentityDiscriminator(session);
 	return (envelope) => {
 		try {
 			const entry = receiptSpoolEntryFromCallResult(envelope, runtime.now?.() ?? Date.now());
-			if (entry) return record(entry);
+			if (entry) return record(identity, entry);
 			// A receipt this client could not project is a lost receipt, not an
 			// absent one, so it is counted rather than passed over. Without this
 			// the observer renders a short history with nothing marking the gap.
-			if (callResultCarriesReceipt(envelope)) drop?.();
+			if (callResultCarriesReceipt(envelope)) drop?.(identity);
 		} catch {
 			/* spool failure must never change call behavior */
-			drop?.();
+			drop?.(identity);
 		}
 	};
 }
@@ -1552,7 +1554,7 @@ async function executeCall(
 	runtime: CealCommandRuntime,
 	capabilityEffect?: CealCapabilityEffect,
 ): Promise<number> {
-	const record = callResultRecorder(runtime);
+	const record = callResultRecorder(runtime, initialSession);
 	let completed: { value: CealGatewayCallValue; events: unknown; session: CealStoredSession } | null = null;
 	try {
 		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);

@@ -1362,7 +1362,7 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 				let id = 0;
 				return () => `narnia:spool:${++id}`;
 			})(),
-			recordReceiptSpool: (entry) => spooled.push(entry),
+			recordReceiptSpool: (_identity, entry) => spooled.push(entry),
 			now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 		});
 		assert.equal(payload.status, "completed");
@@ -1395,12 +1395,12 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 test("a pre-issue call failure is not spooled while an issued unknown-outcome failure is", async () => {
 	const spooled = [];
 	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-		recordReceiptSpool: (entry) => spooled.push(entry),
+		recordReceiptSpool: (_identity, entry) => spooled.push(entry),
 	});
 	assert.deepEqual(spooled, []);
 	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
 		loadSession: async () => storedSession("http://127.0.0.1:9"),
-		recordReceiptSpool: (entry) => spooled.push(entry),
+		recordReceiptSpool: (_identity, entry) => spooled.push(entry),
 		now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 	});
 	assert.deepEqual(spooled, [
@@ -3992,7 +3992,7 @@ test("a receipt this client cannot project is counted, not passed over", async (
 			// Not a safe-ref: spaces and a slash are outside the spool's grammar,
 			// so the receipt is real and the projection still refuses it.
 			nextRequestId: () => "narnia opaque/1",
-			recordReceiptSpool: (entry) => spooled.push(entry),
+			recordReceiptSpool: (_identity, entry) => spooled.push(entry),
 			recordReceiptSpoolDrop: () => {
 				drops += 1;
 			},
@@ -4062,7 +4062,7 @@ test("a receipt the packaged bin could not spool is counted rather than lost sil
 			assert.equal(parseYaml(result.stdout).status, "completed");
 			const drops = path.join(home, ".ceal", "receipt-spool-drops");
 			assert.equal(existsSync(drops), true, "a swallowed spool append must still leave a counted drop");
-			assert.equal(statSync(drops).size, 1);
+			assert.match(readFileSync(drops, "utf8"), /^ceal\.receipt_spool_drops\.v2 [a-f0-9]{64}\n\.$/u);
 			assert.equal(statSync(drops).mode & 0o777, 0o600);
 		} finally {
 			rmSync(home, { recursive: true, force: true });

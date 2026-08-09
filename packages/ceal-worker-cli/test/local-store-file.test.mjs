@@ -81,7 +81,7 @@ test("the receipt spool keeps the sweep it already had", async (context) => {
 	const home = withHome(context);
 	const directory = path.join(home, ".ceal");
 	const orphan = plantStaleTemporary(directory, "receipt-spool");
-	await createCealReceiptSpoolStore(home).append(SPOOL_ENTRY);
+	await createCealReceiptSpoolStore(home).append("a".repeat(64), SPOOL_ENTRY);
 	assert.equal(existsSync(orphan), false);
 });
 

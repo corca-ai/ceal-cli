@@ -24,7 +24,7 @@ import { inspectInstalledWorkerRelease } from "./stable-update.js";
 export interface CealObserverRuntime {
 	loadSession?: () => Promise<CealStoredSession | null>;
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
-	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
+	loadReceiptSpool?: (session: CealStoredSession | null) => Promise<CealReceiptSpoolState | null>;
 	inspectAgentAudit?: () => CealAgentAuditState;
 	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
 	inspectAgentGuide?: () => CealAgentGuideState;
@@ -54,8 +54,11 @@ const RECEIPT_SPOOL_RENDER_LIMIT = 20;
  */
 export async function buildObserverState(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	const now = runtime.now?.() ?? Date.now();
-	const receipts = await observeReceiptSpool(runtime);
-	const session = await observeSession(runtime);
+	// Load the session once. Both projections must describe the same local
+	// identity even when enrollment replaces the stored session mid-request.
+	const sessionSnapshot = await observeSession(runtime);
+	const receipts = await observeReceiptSpool(runtime, sessionSnapshot.stored);
+	const session = sessionSnapshot.observed;
 	const discoveryCache = await observeDiscoveryCache(runtime, now);
 	const agentActivity = observeAgentAudit(runtime);
 	return {
@@ -288,11 +291,11 @@ function absentReceiptsNote(spool: CealReceiptSpoolState | null): string {
 	return "No call outcomes are within the retention window, and receipt appends were lost as well.";
 }
 
-async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
+async function observeReceiptSpool(runtime: CealObserverRuntime, session: CealStoredSession | null): Promise<Record<string, unknown>> {
 	if (!runtime.loadReceiptSpool) return { status: "unavailable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
 	let spool: CealReceiptSpoolState | null;
 	try {
-		spool = await runtime.loadReceiptSpool();
+		spool = await runtime.loadReceiptSpool(session);
 	} catch {
 		return { status: "unreadable", non_claim: RECEIPT_SPOOL_NON_CLAIM };
 	}
@@ -337,29 +340,34 @@ async function observeReceiptSpool(runtime: CealObserverRuntime): Promise<Record
 	};
 }
 
-async function observeSession(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
-	if (!runtime.loadSession) return { status: "unavailable" };
+async function observeSession(
+	runtime: CealObserverRuntime,
+): Promise<{ stored: CealStoredSession | null; observed: Record<string, unknown> }> {
+	if (!runtime.loadSession) return { stored: null, observed: { status: "unavailable" } };
 	let session: CealStoredSession | null;
 	try {
 		session = await runtime.loadSession();
 	} catch {
-		return { status: "unreadable" };
+		return { stored: null, observed: { status: "unreadable" } };
 	}
-	if (!session) return { status: "absent" };
+	if (!session) return { stored: null, observed: { status: "absent" } };
 	// Structural allowlist: token fields are never read into this projection.
 	return {
-		status: "present",
-		gateway_endpoint: session.gatewayEndpoint,
-		profile_ref: session.profileRef,
-		membership_ref: session.membershipRef,
-		registration_ref: session.registrationRef,
-		client_ref: session.clientRef,
-		subject_ref: session.subjectRef,
-		instance_ref: session.instanceRef,
-		expires_at: session.expiresAt,
-		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
-		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
-		secrets: "redacted",
+		stored: session,
+		observed: {
+			status: "present",
+			gateway_endpoint: session.gatewayEndpoint,
+			profile_ref: session.profileRef,
+			membership_ref: session.membershipRef,
+			registration_ref: session.registrationRef,
+			client_ref: session.clientRef,
+			subject_ref: session.subjectRef,
+			instance_ref: session.instanceRef,
+			expires_at: session.expiresAt,
+			refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
+			refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
+			secrets: "redacted",
+		},
 	};
 }
 

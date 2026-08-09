@@ -59,10 +59,10 @@ export interface CealCommandRuntime {
 	registerAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;
 	// Client-local receipt spool (advisory allowlisted call-outcome metadata;
 	// failures never change call behavior). See receipt-spool.ts.
-	recordReceiptSpool?: (entry: CealReceiptSpoolEntry) => void;
+	recordReceiptSpool?: (identity: string, entry: CealReceiptSpoolEntry) => void;
 	/** Count one receipt that could not be spooled, so `ceal observe` can say so. */
-	recordReceiptSpoolDrop?: () => void;
-	loadReceiptSpool?: () => Promise<CealReceiptSpoolState | null>;
+	recordReceiptSpoolDrop?: (identity: string) => void;
+	loadReceiptSpool?: (session: CealStoredSession | null) => Promise<CealReceiptSpoolState | null>;
 	// Read-only agent-runtime transcript inventory plus bounded normalized
 	// event summaries (ceal-audit; transcript text never surfaces). See
 	// agent-audit.ts.

@@ -9,10 +9,21 @@ import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discover
 import { runCealCommand } from "../dist/index.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
-import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
+import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
 
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
+const TEST_SPOOL_IDENTITY = "a".repeat(64);
+
+function createCealReceiptSpoolStore(home, now = Date.now) {
+	const store = createRawReceiptSpoolStore(home, now);
+	return {
+		load: () => store.load(TEST_SPOOL_IDENTITY),
+		append: (value) => store.append(TEST_SPOOL_IDENTITY, value),
+		recordDrop: () => store.recordDrop(TEST_SPOOL_IDENTITY),
+		remove: () => store.remove(),
+	};
+}
 
 test("ceal observe serves redacted cached state on a guarded loopback page", async (context) => {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-observer-home-"));
@@ -750,6 +761,60 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"),
 		false,
 	);
+});
+
+test("observer binds its session and receipt projections to one session snapshot", async () => {
+	const oldSession = {
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:old",
+		membershipRef: "membership:old",
+		registrationRef: "registration:old",
+		clientRef: "client:old",
+		subjectRef: "subject:old",
+		instanceRef: "instance:old",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-07-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	};
+	const replacement = {
+		...oldSession,
+		profileRef: "profile:new",
+		membershipRef: "membership:new",
+		registrationRef: "registration:new",
+		clientRef: "client:new",
+		subjectRef: "subject:new",
+		instanceRef: "instance:new",
+	};
+	let sessionReads = 0;
+	const state = await buildObserverState({
+		// If the observer reads twice, this models enrollment replacing the session
+		// between the receipt projection and the visible session projection.
+		loadSession: async () => (++sessionReads === 1 ? oldSession : replacement),
+		loadReceiptSpool: async (session) => {
+			assert.equal(session, oldSession, "the receipt loader must receive the exact projected session snapshot");
+			return {
+				entries: [
+					{
+						recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
+						requestRef: "narnia:old:receipt",
+						status: "completed",
+						evidence: "readback_verified",
+						auditRefs: [],
+					},
+				],
+				bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
+				drops: { count: 0, atLeast: false },
+				spoolPresent: true,
+			};
+		},
+		now: () => Date.parse("2026-07-24T00:01:00.000Z"),
+	});
+
+	assert.equal(sessionReads, 1);
+	assert.equal(state.session.profile_ref, "profile:old");
+	assert.equal(state.receipts.entries[0].request_ref, "narnia:old:receipt");
 });
 
 // The observer and the store both answer "is this cache entry still fresh", and

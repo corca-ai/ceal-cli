@@ -16,6 +16,7 @@ import {
 } from "./leased-consumer-control-session.js";
 import { createCealSessionStore } from "./profile-store.js";
 import { createCealReceiptSpoolStore } from "./receipt-spool.js";
+import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { createCealStableUpdateRunner } from "./stable-update.js";
 
 if (process.argv.slice(2).length === 1 && process.argv[2] === LEASED_CONSUMER_CARRIER_ARGV) {
@@ -138,19 +139,24 @@ function runPublicCli(): void {
 			// The .catch keeps a rejected or contended write from becoming an
 			// unhandled rejection.
 			recordReceiptSpool: receiptSpool
-				? (entry) => {
+				? (identity, entry) => {
 						// The swallow stays — a spool failure may not change a call's
 						// result — but it now leaves a trace, so the observer can report
 						// an incomplete history rather than a quietly short one.
-						void receiptSpool.append(entry).catch(() => receiptSpool.recordDrop());
+						void receiptSpool.append(identity, entry).catch(() => receiptSpool.recordDrop(identity));
 					}
 				: undefined,
 			recordReceiptSpoolDrop: receiptSpool
-				? () => {
-						void receiptSpool.recordDrop();
+				? (identity) => {
+						void receiptSpool.recordDrop(identity);
 					}
 				: undefined,
-			loadReceiptSpool: receiptSpool ? () => receiptSpool.load() : undefined,
+			loadReceiptSpool:
+				receiptSpool && sessionStore
+					? async (session) => {
+							return session ? receiptSpool.load(sessionIdentityDiscriminator(session)) : null;
+						}
+					: undefined,
 			removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
 			inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now()),
 			inspectAgentSession: (runtimeName, sessionRef) =>

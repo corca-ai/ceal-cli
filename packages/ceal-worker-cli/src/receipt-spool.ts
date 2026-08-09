@@ -4,6 +4,7 @@ import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
+import { validSessionIdentityDiscriminator } from "./session-identity.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
 // source ("what did this client's token do"). It records an allowlisted
@@ -18,9 +19,10 @@ import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 const SPOOL_FILE = "receipt-spool.json";
 // Drops are counted in their own file, not in the spool, because a drop is by
-// definition a moment when the spool could not be written. One byte is appended
-// per drop with O_APPEND, which POSIX makes atomic below PIPE_BUF, so the
-// counter needs no lock of its own — the size is the count.
+// definition a moment when the spool could not be written. The first line binds
+// the file to a session-identity digest; one byte is appended per drop with
+// O_APPEND, which POSIX makes atomic below PIPE_BUF, so the counter needs no
+// lock of its own.
 const DROPS_FILE = "receipt-spool-drops";
 // A pathological caller cannot grow the counter without bound; past this the
 // observer reports "at least" rather than an exact figure, which is the honest
@@ -28,7 +30,8 @@ const DROPS_FILE = "receipt-spool-drops";
 const MAX_RECORDED_DROPS = 4096;
 const NO_DROPS = { count: 0, atLeast: false } as const;
 const { O_APPEND, O_CREAT, O_NOFOLLOW, O_WRONLY } = constants;
-const SPOOL_SCHEMA_VERSION = "ceal.receipt_spool.v1";
+const SPOOL_SCHEMA_VERSION = "ceal.receipt_spool.v2";
+const DROPS_SCHEMA_VERSION = "ceal.receipt_spool_drops.v2";
 // Every spooled field must already be a bounded reference/code token, so free
 // text cannot enter the spool. The grammar itself lives in `safe-ref.ts`.
 const SAFE_REF = CEAL_SAFE_REF;
@@ -36,6 +39,7 @@ const CALL_RESULT_SCHEMA_VERSION = "ceal.result.v2";
 const SPOOL_STATUSES = new Set(["completed", "blocked", "error"]);
 const SPOOL_EVIDENCE = new Set(["readback_verified", "not_read_back", "readback_unavailable", "outcome_unknown"]);
 const MAX_AUDIT_REFS = 8;
+const FOREIGN_SPOOL = Symbol("foreign_receipt_spool");
 
 /**
  * The spool bounds. Exported so the suite drives eviction and expiry from the
@@ -91,15 +95,15 @@ export class CealReceiptSpoolStoreError extends Error {
 
 export interface CealReceiptSpoolStore {
 	/** Load the spooled entries, or null on any absence/anomaly (soft miss). */
-	load(): Promise<CealReceiptSpoolState | null>;
-	append(entry: CealReceiptSpoolEntry): Promise<void>;
+	load(identity: string): Promise<CealReceiptSpoolState | null>;
+	append(identity: string, entry: CealReceiptSpoolEntry): Promise<void>;
 	/**
 	 * Record that one receipt append was lost. The recording call site swallows
 	 * every append failure so a spool cannot change call behavior, which used to
 	 * mean a lost receipt left no trace at all — the observer then under-reported
 	 * without being able to say so. This must never throw for the same reason.
 	 */
-	recordDrop(): Promise<void>;
+	recordDrop(identity: string): Promise<void>;
 	remove(): Promise<void>;
 }
 
@@ -108,9 +112,19 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, SPOOL_FILE);
 	return {
-		async load() {
-			const drops = readDrops(path.join(directory, DROPS_FILE));
-			const state = readSpool(directory, file, now(), drops);
+		async load(identity) {
+			assertIdentity(identity);
+			const drops = readDrops(path.join(directory, DROPS_FILE), identity);
+			const state = readSpool(directory, file, identity, now(), drops);
+			if (state === FOREIGN_SPOOL)
+				return drops.count > 0
+					? {
+							entries: [],
+							bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS },
+							drops,
+							spoolPresent: false,
+						}
+					: null;
 			// A present-but-unusable file is an anomaly the observer should show
 			// as unreadable, not an empty history; append still soft-misses.
 			if (state === null && existsSync(file)) throw new CealReceiptSpoolStoreError("unsafe_store");
@@ -127,11 +141,13 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 				};
 			return state;
 		},
-		async append(entry) {
-			await appendEntry(directory, file, entry, now());
+		async append(identity, entry) {
+			assertIdentity(identity);
+			await appendEntry(directory, file, identity, entry, now());
 		},
-		async recordDrop() {
-			recordDrop(directory, path.join(directory, DROPS_FILE));
+		async recordDrop(identity) {
+			if (!validSessionIdentityDiscriminator(identity)) return;
+			recordDrop(directory, path.join(directory, DROPS_FILE), identity);
 		},
 		async remove() {
 			return removeUnderLock(directory, file);
@@ -202,9 +218,9 @@ const SPOOL_LOCK_MAX_WAIT_MS = 5_000;
 // The append takes the lock for its read-modify-write; the removal did not, so a
 // clear that raced an in-flight append lost to it — the append's rename recreated
 // the file with every pre-removal entry. That is the failure this module's lock
-// exists to prevent, reached from the other side: the spool carries no identity
-// discriminator, so a spool resurrected across a logout or an identity
-// replacement renders two subjects' history as one.
+// exists to prevent, reached from the other side. The identity discriminator now
+// prevents a resurrected old spool from being attributed to a replacement
+// session; the lock still prevents a clear from being immediately undone.
 // One home for this store's exclusion, because the append had these terms and the
 // removal did not, and the removal is what a clear races. A second spelling is how
 // the two drift back apart.
@@ -230,13 +246,13 @@ async function removeUnderLock(directory: string, file: string): Promise<void> {
 	});
 }
 
-async function appendEntry(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
+async function appendEntry(directory: string, file: string, identity: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
 	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
 	prepareDirectory(directory, unsafeReceiptSpool);
-	return underSpoolLock(directory, () => writeAppendedSpool(directory, file, entry, now));
+	return underSpoolLock(directory, () => writeAppendedSpool(directory, file, identity, entry, now));
 }
 
-function writeAppendedSpool(directory: string, file: string, entry: CealReceiptSpoolEntry, now: number): void {
+function writeAppendedSpool(directory: string, file: string, identity: string, entry: CealReceiptSpoolEntry, now: number): void {
 	// `requireFileMode: false`: this append is about to rewrite the file at 0o600
 	// regardless, so refusing to *read* it over a mode bit would silently replace a
 	// valid history with a one-entry spool — and record no drop, because the append
@@ -244,7 +260,8 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 	// Genuinely unusable content still soft-misses, which is the deliberate
 	// behaviour pinned in `receipt-spool.test.mjs`; only the repairable anomaly is
 	// no longer treated as an empty history.
-	const existing = readSpool(directory, file, now, NO_DROPS, false)?.entries ?? [];
+	const prior = readSpool(directory, file, identity, now, NO_DROPS, false);
+	const existing = prior === FOREIGN_SPOOL ? [] : (prior?.entries ?? []);
 	// Size and retention bounds are enforced on every append (and read applies
 	// the same retention window), so the spool cannot grow past its declared
 	// bounds even if the clock or an old file disagrees.
@@ -255,7 +272,7 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 		directory,
 		file,
 		prefix: "receipt-spool",
-		contents: `${JSON.stringify(serializeSpool(entries), null, 2)}\n`,
+		contents: `${JSON.stringify(serializeSpool(identity, entries), null, 2)}\n`,
 		unsafe: unsafeReceiptSpool,
 	});
 }
@@ -269,17 +286,26 @@ function writeAppendedSpool(directory: string, file: string, entry: CealReceiptS
 //
 // So the two claims in this file are both true of different things: the counter
 // needs no lock against another *append*, for the O_APPEND reason at the top of
-// this file. What it is not protected against is a *clear*, and naming that here
-// is the honest half — `removeUnderLock` deletes `DROPS_FILE` under the lock,
-// which does not close the race while this writer stays outside it, so a drop
-// recorded concurrently with a logout can recreate the file and carry one byte
-// into the next identity's count. `docs/debt.md` carries the structural fix,
-// which is to give the counter an identity discriminator rather than a lock.
-function recordDrop(directory: string, file: string): void {
+// this file. It is not protected against a *clear*: a delayed old process can
+// recreate the file after logout or replacement. The identity header is the
+// structural boundary for that race. A current-identity reader refuses the old
+// bytes, and a later current-identity write replaces them rather than merging
+// two subjects' loss accounting.
+function recordDrop(directory: string, file: string, identity: string): void {
 	try {
 		prepareDirectory(directory, unsafeReceiptSpool);
-		const existing = dropsFileStat(file);
-		if (existing && existing.size >= MAX_RECORDED_DROPS) return;
+		const existing = readDropFile(file);
+		if (!existing || existing.identity !== identity) {
+			writeCealLocalStoreFile({
+				directory,
+				file,
+				prefix: "receipt-spool-drops",
+				contents: `${DROPS_SCHEMA_VERSION} ${identity}\n.`,
+				unsafe: unsafeReceiptSpool,
+			});
+			return;
+		}
+		if (existing.count >= MAX_RECORDED_DROPS) return;
 		// O_NOFOLLOW rather than an existence check: `existsSync` follows symlinks
 		// and reports false for a dangling one, so a planted link would have been
 		// created and written through — the one write in this module that could
@@ -300,10 +326,23 @@ function recordDrop(directory: string, file: string): void {
 	}
 }
 
-function readDrops(file: string): { count: number; atLeast: boolean } {
-	const stat = dropsFileStat(file);
-	if (!stat) return NO_DROPS;
-	return { count: stat.size, atLeast: stat.size >= MAX_RECORDED_DROPS };
+function readDrops(file: string, identity: string): { count: number; atLeast: boolean } {
+	const drops = readDropFile(file);
+	if (!drops || drops.identity !== identity) return NO_DROPS;
+	return { count: drops.count, atLeast: drops.count >= MAX_RECORDED_DROPS };
+}
+
+function readDropFile(file: string): { identity: string; count: number } | null {
+	if (!dropsFileStat(file)) return null;
+	try {
+		const [header, body = ""] = readFileSync(file, "utf8").split("\n", 2);
+		const [schema, identity, ...extra] = header.split(" ");
+		if (schema !== DROPS_SCHEMA_VERSION || !validSessionIdentityDiscriminator(identity) || extra.length > 0 || !/^\.*$/u.test(body))
+			return null;
+		return { identity, count: body.length };
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -326,10 +365,11 @@ function dropsFileStat(file: string): { size: number } | null {
 function readSpool(
 	directory: string,
 	file: string,
+	identity: string,
 	now: number,
 	drops: { count: number; atLeast: boolean },
 	requireFileMode = true,
-): CealReceiptSpoolState | null {
+): CealReceiptSpoolState | typeof FOREIGN_SPOOL | null {
 	if (!existsSync(file)) return null;
 	if (!safeExistingFile(directory, file, requireFileMode)) return null;
 	let parsed: unknown;
@@ -338,7 +378,10 @@ function readSpool(
 	} catch {
 		return null;
 	}
-	if (!isRecord(parsed) || parsed.schema_version !== SPOOL_SCHEMA_VERSION || !Array.isArray(parsed.entries)) return null;
+	if (!isRecord(parsed) || !Array.isArray(parsed.entries)) return null;
+	if (parsed.schema_version === "ceal.receipt_spool.v1") return FOREIGN_SPOOL;
+	if (parsed.schema_version !== SPOOL_SCHEMA_VERSION || !validSessionIdentityDiscriminator(parsed.identity)) return null;
+	if (parsed.identity !== identity) return FOREIGN_SPOOL;
 	// Individually invalid or retention-expired entries are dropped instead of
 	// poisoning the whole spool; retention applies on read too, so a dormant
 	// client cannot serve entries past the advertised window.
@@ -361,9 +404,10 @@ function removeSpool(file: string): void {
 	if (removableFile(file)) rmSync(file, { force: true });
 }
 
-function serializeSpool(entries: readonly CealReceiptSpoolEntry[]): Record<string, unknown> {
+function serializeSpool(identity: string, entries: readonly CealReceiptSpoolEntry[]): Record<string, unknown> {
 	return {
 		schema_version: SPOOL_SCHEMA_VERSION,
+		identity,
 		entries: entries.map((entry) => ({
 			recorded_at: new Date(entry.recordedAt).toISOString(),
 			request_ref: entry.requestRef,
@@ -375,6 +419,10 @@ function serializeSpool(entries: readonly CealReceiptSpoolEntry[]): Record<strin
 			...(entry.errorKind === undefined ? {} : { error_kind: entry.errorKind }),
 		})),
 	};
+}
+
+function assertIdentity(identity: string): void {
+	if (!validSessionIdentityDiscriminator(identity)) throw new CealReceiptSpoolStoreError("unsafe_store");
 }
 
 function parseEntry(value: unknown): CealReceiptSpoolEntry | null {

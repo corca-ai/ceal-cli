@@ -1,6 +1,7 @@
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealCommandRuntime } from "./cli-runtime.js";
 import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
+import { changedSessionIdentityBindings } from "./session-identity.js";
 
 // One home holds exactly one session (`profile-store.ts`, `~/.ceal/client-session.json`),
 // so `session enroll` and `session adopt` are not only first-configuration
@@ -25,14 +26,6 @@ import { CealSessionStoreError, type CealStoredSession } from "./profile-store.j
  * mints new ones for the same subject on the same instance. Comparing them
  * would refuse the recovery path this guard exists to keep open.
  */
-const IDENTITY_BINDINGS = [
-	["gateway_endpoint", (session: CealStoredSession) => session.gatewayEndpoint],
-	["profile_ref", (session: CealStoredSession) => session.profileRef],
-	["membership_ref", (session: CealStoredSession) => session.membershipRef],
-	["subject_ref", (session: CealStoredSession) => session.subjectRef],
-	["instance_ref", (session: CealStoredSession) => session.instanceRef],
-] as const;
-
 /** How an accepted or refused session write disposed of the credential it displaced. */
 export type CealRevokeDisposition = "revoked" | "already_unusable" | "unavailable" | "not_applicable";
 
@@ -79,7 +72,7 @@ export async function commitEnrolledSession(
 	try {
 		return await withCommitStore(runtime, async (store) => {
 			const current = await store.load();
-			const changed = current ? changedIdentityBindings(current, incoming) : [];
+			const changed = current ? changedSessionIdentityBindings(current, incoming) : [];
 			if (current && changed.length > 0 && !force) {
 				return { ok: false, reason: "identity_conflict", changedBindings: changed, issuedSessionRevoked: await revoke(incoming, runtime) };
 			}
@@ -132,11 +125,6 @@ export function endedPreviousSessionAction(ordinary: string): string {
 
 function lowerFirst(value: string): string {
 	return value.charAt(0).toLowerCase() + value.slice(1);
-}
-
-/** The identity bindings on which a stored session and an incoming one disagree. */
-function changedIdentityBindings(current: CealStoredSession, incoming: CealStoredSession): readonly string[] {
-	return IDENTITY_BINDINGS.filter(([, read]) => read(current) !== read(incoming)).map(([name]) => name);
 }
 
 /**
@@ -246,8 +234,9 @@ export async function revokeClientSession(session: CealStoredSession, runtime: C
 // and target refs for thirty days. Leaving it made `ceal observe` render a full
 // month of a revoked binding's history beside `Session (absent)`, while the
 // comment here claimed the opposite. A `--force` replacement inherits the same
-// duty for the same reason: the spool carries no identity discriminator, so a
-// spool kept across a substitution renders two subjects' history as one. Both
+// duty for the same reason. The spool now carries an identity discriminator as
+// defense in depth against a delayed old process that writes after this clear;
+// cleanup still removes the displaced identity's advisory bytes promptly. Both
 // stores are advisory, so neither removal may block an operation that already
 // revoked — a logout that half-failed must still report the revocation it did
 // perform.

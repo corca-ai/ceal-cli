@@ -6,13 +6,25 @@ import path from "node:path";
 import test from "node:test";
 import {
 	CealReceiptSpoolStoreError,
-	createCealReceiptSpoolStore,
+	createCealReceiptSpoolStore as createRawReceiptSpoolStore,
 	RECEIPT_SPOOL_MAX_ENTRIES,
 	RECEIPT_SPOOL_RETENTION_MS,
 	receiptSpoolEntryFromCallResult,
 } from "../dist/receipt-spool.js";
+import { changedSessionIdentityBindings, sessionIdentityDiscriminator } from "../dist/session-identity.js";
 
 const BASE_TIME = Date.parse("2026-07-24T12:00:00.000Z");
+const TEST_IDENTITY = "a".repeat(64);
+
+function createCealReceiptSpoolStore(home, now = Date.now, identity = TEST_IDENTITY) {
+	const store = createRawReceiptSpoolStore(home, now);
+	return {
+		load: () => store.load(identity),
+		append: (value) => store.append(identity, value),
+		recordDrop: () => store.recordDrop(identity),
+		remove: () => store.remove(),
+	};
+}
 
 function entry(overrides = {}) {
 	return {
@@ -41,6 +53,46 @@ test("receipt spool appends owner-only and reads entries back", async () => {
 		await store.remove();
 		assert.equal(await store.load(), null);
 	});
+});
+
+test("receipt spool never attributes delayed old-session state to its replacement", async () => {
+	await withHome(async (home) => {
+		const raw = createRawReceiptSpoolStore(home, () => BASE_TIME);
+		const oldIdentity = "a".repeat(64);
+		const newIdentity = "b".repeat(64);
+
+		await raw.append(oldIdentity, entry({ requestRef: "narnia:call:old:call" }));
+		await raw.recordDrop(oldIdentity);
+		await raw.remove();
+
+		// An already-running old process can finish after replacement cleanup. Its
+		// advisory bytes may reappear, but their identity must make them invisible
+		// to the new session rather than merge two subjects in `ceal observe`.
+		await raw.append(oldIdentity, entry({ requestRef: "narnia:call:late-old:call" }));
+		await raw.recordDrop(oldIdentity);
+		assert.equal(await raw.load(newIdentity), null);
+
+		await raw.append(newIdentity, entry({ requestRef: "narnia:call:new:call" }));
+		await raw.recordDrop(newIdentity);
+		const current = await raw.load(newIdentity);
+		assert.deepEqual(
+			current.entries.map((value) => value.requestRef),
+			["narnia:call:new:call"],
+		);
+		assert.deepEqual(current.drops, { count: 1, atLeast: false });
+		assert.equal(await raw.load(oldIdentity), null, "the current write replaces the stale identity instead of merging it");
+	});
+});
+
+test("receipt attribution derives from the same stable bindings as session replacement", () => {
+	const current = storedIdentitySession();
+	const reenrolled = { ...current, registrationRef: "registration:new", clientRef: "client:new" };
+	assert.deepEqual(changedSessionIdentityBindings(current, reenrolled), []);
+	assert.equal(sessionIdentityDiscriminator(current), sessionIdentityDiscriminator(reenrolled));
+
+	const replacement = { ...reenrolled, subjectRef: "subject:other" };
+	assert.deepEqual(changedSessionIdentityBindings(current, replacement), ["subject_ref"]);
+	assert.notEqual(sessionIdentityDiscriminator(current), sessionIdentityDiscriminator(replacement));
 });
 
 test("receipt spool enforces entry-count and retention bounds on append", async () => {
@@ -145,7 +197,7 @@ function appendInChildProcess(home, requestRef, startAt) {
 		const margin = startAt - Date.now();
 		await new Promise((resolve) => setTimeout(resolve, Math.max(0, margin - 20)));
 		while (Date.now() < startAt) {}
-		await store.append({
+		await store.append(${JSON.stringify("a".repeat(64))}, {
 			recordedAt: Date.now(),
 			requestRef: process.env.SPOOL_REQUEST_REF,
 			status: "completed",
@@ -225,7 +277,7 @@ test("the drop counter is bounded and never becomes a failure of its own", async
 	await withHome(async (home) => {
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
-		writeFileSync(dropsFile(home), ".".repeat(4096), { mode: 0o600 });
+		writeFileSync(dropsFile(home), `ceal.receipt_spool_drops.v2 ${TEST_IDENTITY}\n${".".repeat(4096)}`, { mode: 0o600 });
 		await store.recordDrop();
 		// No spool file was ever written here, which is the case where every
 		// receipt this client tried to record was lost. Reporting that as "no
@@ -333,6 +385,41 @@ test("receipt spool load reports a present-but-unusable file while append still 
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await store.append(entry());
 		assert.deepEqual((await store.load()).entries, [entry()]);
+	});
+});
+
+test("a safe legacy spool is never attributed to the current session", async () => {
+	await withHome(async (home) => {
+		const legacy = entry({ requestRef: "narnia:legacy:receipt" });
+		writeFileSync(
+			spoolFile(home),
+			JSON.stringify({
+				schema_version: "ceal.receipt_spool.v1",
+				entries: [
+					{
+						recorded_at: new Date(legacy.recordedAt).toISOString(),
+						request_ref: legacy.requestRef,
+						status: legacy.status,
+						evidence: legacy.evidence,
+						audit_refs: legacy.auditRefs,
+					},
+				],
+			}),
+			{ mode: 0o600 },
+		);
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		assert.equal(await store.load(), null);
+
+		const current = entry({ requestRef: "narnia:current:receipt" });
+		await store.append(current);
+		assert.deepEqual((await store.load()).entries, [current]);
+		const persisted = JSON.parse(readFileSync(spoolFile(home), "utf8"));
+		assert.equal(persisted.schema_version, "ceal.receipt_spool.v2");
+		assert.equal(persisted.identity, TEST_IDENTITY);
+		assert.deepEqual(
+			persisted.entries.map((value) => value.request_ref),
+			[current.requestRef],
+		);
 	});
 });
 
@@ -474,6 +561,23 @@ test("call-result projection keeps only allowlisted metadata and skips receipt-l
 		null,
 	);
 });
+
+function storedIdentitySession() {
+	return {
+		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+		profileRef: "profile:test",
+		membershipRef: "membership:test",
+		registrationRef: "registration:test",
+		clientRef: "client:test",
+		subjectRef: "subject:test",
+		instanceRef: "instance:test",
+		accessToken: "secret",
+		expiresAt: "2099-01-01T00:00:00.000Z",
+		refreshToken: "refresh",
+		refreshTokenIdleExpiresAt: "2099-01-02T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-01-03T00:00:00.000Z",
+	};
+}
 
 function dropsFile(home) {
 	return path.join(home, ".ceal", "receipt-spool-drops");
