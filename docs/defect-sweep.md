@@ -78,6 +78,39 @@ site checked held it. That is the first evidence that `## One Fact, One Home` is
 actually enforced where it has been applied, and it is why the day's one find sat
 in the module that had no shared home at all.
 
+## The denominator-gap sweep, 2026-08-09
+
+The first re-sweep's two weakest lenses declared large unread areas. This run read
+exactly those, plus one lens for the structural question the invariant enumeration
+cannot reach by construction. Same discipline: distinct lenses, no shared framing,
+every finding put to a skeptic prompted to refute it.
+
+| lens | reported | survived refutation | predates |
+| --- | --- | --- | --- |
+| release build scripts | 1 | 1 | 1 |
+| release support scripts | 1 | 0 | — |
+| workflow remainder | 1 | 1 | 1 |
+| worker CLI tests, read in full | 1 | 0 | — |
+| client SDK tests | 1 | 1 | 1 |
+| structural, unenforced rules | 2 | 2 | 2 |
+
+**All five survivors predate the baseline, and all five are one shape.** A rule
+enforced at one site and not at its sibling: the merge step re-read one of three
+private release inputs from the checkout; the pipe rule's sibling construct went
+unguarded; three of four client transports hand-copied bounds the fourth declared
+once; a live guard had no test while its neighbours did; one store spelled its
+schema version five times while both siblings named theirs once. Every fix is in
+`## Unreleased`.
+
+**The structural lens is the one to run again.** It was built to see what the
+enumeration cannot — a rule enforced nowhere — and it produced two of the five
+survivors on its first outing, both in code no earlier pass had questioned. The
+enumeration's blind spot is real and this is its instrument.
+
+**Two zeros here are honest and two are earned.** The two refuted findings were
+refuted on evidence, not waved off. The lenses that read a whole file said so;
+none of the six left an area unstated.
+
 ## The finite task the sweeps converged on
 
 `AGENTS.md` `## One Fact, One Home` states the law. Its second working rule names

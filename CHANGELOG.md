@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+**The merge step now re-reads every private release input from the checkout, not
+just one of the three.** Composing a per-platform asset set verified the carrier
+contract, the control-session contract and the Gateway handoff against the
+source. Merging the platform sets into the one signed inventory re-verified only
+the control-session contract; the other two were checked for cross-platform
+agreement alone. Agreement cannot see a corruption that hit every leg
+identically, and every leg staging from one stale or tampered snapshot is the
+ordinary way to reach exactly that. The third sibling was doing it right and the
+two beside it were not.
+
+- All three are now compared per platform against the checkout, and the
+  cross-platform `Set` checks are gone rather than kept: once every leg must
+  equal the source it equals every other leg, so those checks could no longer
+  fail and would have read as guards while proving nothing.
+- The identical-drift case, which the suite covered for the control-session
+  contract only, now covers all three.
+
+**A producer's failure inside a process substitution no longer disappears in the
+rollback lane.** `mapfile -t assets < <(node ...)` reports `mapfile`'s status, so
+a `published_inventory_malformed` refusal — whose entire job is naming what is
+wrong with a published inventory — became an empty array and, later, missing-file
+noise about assets that were never fetched. Mid-incident that points the operator
+at the network. The repo already knew this rule for pipes; the gate that enforced
+it now enforces the sibling construct too, and both halves read "which producers
+carry no status worth reading" from one place.
+
+**The client SDK's four transports share one home for their request bounds.**
+Three of them hand-copied a timeout default, the `1..120_000` ceiling, a
+byte-capped response reader and the JSON content-type check; the fourth declared
+its own ceiling. Raising the timeout an operator actually waits meant finding
+four literals in four files with a green gate either way. Each transport still
+owns its own default and its own cap. The Gateway transport's distinction between
+`response_too_large` and `invalid_response` is now a parameter the session
+clients deliberately collapse, rather than a difference that could go missing.
+
+**The status-versus-body guard in the Gateway transport is tested.** A non-2xx
+response carrying a body that claims `ok: true` is refused, and the decoder
+branches only on the body, so that state is reachable — a proxy serving a stale
+cached success on an error status reaches it. The guard was live and had no test,
+so a refactor that dropped it would have shipped a success to the caller with
+nothing red.
+
+**The session store's two schema versions have one name each.** They were bare
+literals at five sites while both sibling stores in the same directory held
+theirs at one constant, so a third version had five places to find and nothing to
+catch the one that was missed.
+
 **The acceptance record stops shipping Gateway identity refs, and its two
 emitters now answer one schema with one field set —
 `ceal.worker_acceptance_result.v2`.** The installed command attached the decoded

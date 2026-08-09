@@ -322,12 +322,14 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// times hid the only thing that differs between them, which is the pair of
 	// (mutation, code).
 	//
-	// The first three are cross-platform disagreements, which an identical drift on
-	// every leg escapes; the case after this loop covers that. Protocol provenance
-	// is not that shape — it is compared against the lock, so an identical wrong
-	// producer on every platform still has to fail. Both of its ways of being
-	// wrong are here because they are different mistakes: bytes bound to another
-	// Gateway commit, and a manifest that names a version with no producer at all.
+	// Every one of these is now compared against the checkout, so none of them
+	// escapes by drifting identically on every leg — the loop after this one proves
+	// that for all three private inputs. It used to be true only of the
+	// control-session contract and of protocol provenance; the carrier contract and
+	// the Gateway handoff were checked for cross-platform agreement alone, which an
+	// identical corruption walks straight through. Protocol provenance carries two
+	// cases because they are different mistakes: bytes bound to another Gateway
+	// commit, and a manifest that names a version with no producer at all.
 	const driftCases = [
 		["carrier", (manifest) => (manifest.private_leased_consumer_carrier.contract_json = "{}"), "merge_private_carrier_contract_drift"],
 		["handoff", (manifest) => (manifest.private_leased_consumer_handoff.sha256 = "0".repeat(64)), "merge_private_carrier_handoff_drift"],
@@ -343,35 +345,67 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 		],
 		["protocol-version-only", (manifest) => (manifest.protocol.producer = undefined), "merge_protocol_provenance_incomplete"],
 	];
-	for (const [label, mutate, expected] of driftCases) {
-		const drifted = JSON.parse(originalManifest);
-		mutate(drifted);
-		writeFileSync(platformManifest, `${JSON.stringify(drifted, null, 2)}\n`);
+	// One shape, both populations. A drift case is: mutate the manifest, write it
+	// wherever this population says, expect the named refusal, restore. Which legs
+	// get written is the ONLY difference between drifting one leg and drifting all
+	// of them, and spelling the rest twice is what let the two populations cover
+	// different sets of inputs without anyone noticing.
+	const writeOneLeg = (body) => {
+		writeFileSync(platformManifest, body);
 		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-		assert.throws(
-			() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, `merged-${label}-drift`), inputs, repoRoot }),
-			hasCode(expected),
-			label,
-		);
-		writeFileSync(platformManifest, originalManifest);
-		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
-	}
+	};
+	const writeEveryLeg = (body) => {
+		for (const input of inputs) {
+			const name = `ceal-worker-release-manifest-${input.endsWith("linux-amd64") ? "linux-amd64" : "linux-arm64"}.json`;
+			writeFileSync(path.join(input, name), body);
+			rewriteInventoryDigest(input, name);
+		}
+	};
+	const expectRefusals = (cases, write, prefix) => {
+		for (const [label, mutate, expected] of cases) {
+			const drifted = JSON.parse(originalManifest);
+			mutate(drifted);
+			write(`${JSON.stringify(drifted, null, 2)}\n`);
+			assert.throws(
+				() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, `merged-${prefix}${label}-drift`), inputs, repoRoot }),
+				hasCode(expected),
+				`${prefix}${label}`,
+			);
+			write(originalManifest);
+		}
+	};
+	expectRefusals(driftCases, writeOneLeg, "");
 
-	const identicallyDriftedControlSession = JSON.parse(originalManifest);
-	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_json = "{}";
-	identicallyDriftedControlSession.private_leased_consumer_control_session.contract_sha256 = "0".repeat(64);
-	for (const input of inputs) {
-		const manifestPath = path.join(
-			input,
-			`ceal-worker-release-manifest-${input.endsWith("linux-amd64") ? "linux-amd64" : "linux-arm64"}.json`,
-		);
-		writeFileSync(manifestPath, `${JSON.stringify(identicallyDriftedControlSession, null, 2)}\n`);
-		rewriteInventoryDigest(input, path.basename(manifestPath));
-	}
-	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-identical-control-session-drift"), inputs, repoRoot }),
-		hasCode("merge_private_control_session_contract_drift"),
-	);
+	// The corruption that agreement alone cannot see: every leg wrong, identically.
+	// That is the ordinary shape, not an exotic one — every leg stages from one
+	// snapshot, so a stale or tampered snapshot reaches all of them the same way.
+	const identicalDriftCases = [
+		[
+			"control-session",
+			(manifest) => {
+				manifest.private_leased_consumer_control_session.contract_json = "{}";
+				manifest.private_leased_consumer_control_session.contract_sha256 = "0".repeat(64);
+			},
+			"merge_private_control_session_contract_drift",
+		],
+		[
+			"carrier",
+			(manifest) => {
+				manifest.private_leased_consumer_carrier.contract_json = "{}";
+				manifest.private_leased_consumer_carrier.contract_sha256 = "0".repeat(64);
+			},
+			"merge_private_carrier_contract_drift",
+		],
+		[
+			"handoff",
+			(manifest) => {
+				manifest.private_leased_consumer_handoff.sha256 = "0".repeat(64);
+			},
+			"merge_private_carrier_handoff_drift",
+		],
+	];
+	expectRefusals(identicalDriftCases, writeEveryLeg, "identical-");
+
 	for (const input of inputs) {
 		const manifestPath = path.join(
 			input,

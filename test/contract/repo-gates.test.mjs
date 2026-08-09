@@ -320,47 +320,92 @@ function lastCommand(segment) {
 	return tail.trim().split(/\s+/u)[0] ?? "";
 }
 
-test("every workflow run block that reads a pipeline's status asks for pipefail", () => {
+/**
+ * Both halves of the shell-status rule walk the same population. The walk lives
+ * here so they cannot come to disagree about what a run block is, and each half
+ * supplies only the per-line judgement that is actually its own.
+ */
+function forEachWorkflowRunBlock(visit) {
 	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
 	assert.ok(workflows.length > 3, `only ${workflows.length} workflows scanned; the sweep is not reaching .github/workflows`);
-	const offenders = [];
 	let scanned = 0;
 	for (const name of workflows) {
 		for (const job of Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {})) {
 			for (const step of job.steps ?? []) {
 				if (typeof step.run !== "string") continue;
 				scanned += 1;
-				// Only a pipe whose LEFT side can fail meaningfully matters. A `printf`
-				// or `find` on the left cannot, which is why the two workflows that
-				// still run `set -eu` are not offenders — the sweep says so by looking
-				// rather than by exempting them by name.
-				// A pipe is spelled with spaces around it here; a `case` alternation is
-				// not (`""|0000…)`), which is how the two are told apart without
-				// parsing shell. The limit is real and stated rather than hidden: a
-				// pipe written `a|b` is missed.
-				//
-				// What matters is the command on the LEFT of the pipe, wherever it
-				// sits — a producer that cannot meaningfully fail carries no status to
-				// lose, and it is just as often inside `$( )` as at the start of a
-				// line. Reading only the line start exempted the wrong things.
-				const risky = step.run
-					.split("\n")
-					.filter((line) => !/^\s*#/u.test(line))
-					.filter((line) =>
-						line
-							.split(" | ")
-							.slice(0, -1)
-							.some((left) => !HARMLESS_PIPE_PRODUCER.test(lastCommand(left))),
-					);
-				if (risky.length === 0) continue;
-				if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(step.run)) {
-					offenders.push(`${name} :: ${step.name ?? "(unnamed step)"} :: ${risky[0].trim()}`);
-				}
+				visit(step, `${name} :: ${step.name ?? "(unnamed step)"}`);
 			}
 		}
 	}
 	assert.ok(scanned > 10, `only ${scanned} run blocks scanned; the sweep is not reaching them`);
+}
+
+test("every workflow run block that reads a pipeline's status asks for pipefail", () => {
+	const offenders = [];
+	forEachWorkflowRunBlock((step, where) => {
+		// Only a pipe whose LEFT side can fail meaningfully matters. A `printf`
+		// or `find` on the left cannot, which is why the two workflows that
+		// still run `set -eu` are not offenders — the sweep says so by looking
+		// rather than by exempting them by name.
+		// A pipe is spelled with spaces around it here; a `case` alternation is
+		// not (`""|0000…)`), which is how the two are told apart without
+		// parsing shell. The limit is real and stated rather than hidden: a
+		// pipe written `a|b` is missed.
+		//
+		// What matters is the command on the LEFT of the pipe, wherever it
+		// sits — a producer that cannot meaningfully fail carries no status to
+		// lose, and it is just as often inside `$( )` as at the start of a
+		// line. Reading only the line start exempted the wrong things.
+		const risky = step.run
+			.split("\n")
+			.filter((line) => !/^\s*#/u.test(line))
+			.filter((line) =>
+				line
+					.split(" | ")
+					.slice(0, -1)
+					.some((left) => !HARMLESS_PIPE_PRODUCER.test(lastCommand(left))),
+			);
+		if (risky.length === 0) return;
+		if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(step.run)) {
+			offenders.push(`${where} :: ${risky[0].trim()}`);
+		}
+	});
 	assert.deepEqual(offenders, [], "a run block pipes into a command and would report the wrong exit status");
+});
+
+// The other half of the rule above. `set -e` and `pipefail` both fail to see a
+// command inside a process substitution: `mapfile -t a < <(node ...)` reports
+// mapfile's status, never node's, so a refusal the producer was written to raise
+// becomes an empty array and a confusing failure somewhere downstream. This bit
+// the rollback lane's published-inventory parser, whose entire job is to name
+// what is wrong with a published inventory.
+//
+// Same stated limit as the pipe sweep: it recognises the construct written with
+// a space, `< <(`, which is the only way bash accepts it.
+test("no workflow run block reads a producer's output through a process substitution", () => {
+	const offenders = [];
+	forEachWorkflowRunBlock((step, where) => {
+		for (const line of step.run.split("\n")) {
+			if (/^\s*#/u.test(line)) continue;
+			const substitution = /<\s+<\((.*)$/u.exec(line)?.[1];
+			if (substitution === undefined) continue;
+			// A process substitution opens with its producer, so the first word is
+			// the command whose status is at stake — no `lastCommand` walk needed.
+			// What IS shared with the pipe sweep is the answer to "which producers
+			// carry no status worth reading", so the two halves of one rule cannot
+			// come to disagree about what is harmless.
+			const producer = substitution.trim().split(/\s+/u)[0] ?? "";
+			if (HARMLESS_PIPE_PRODUCER.test(producer)) continue;
+			offenders.push(`${where} :: ${line.trim()}`);
+		}
+	});
+	// Positive control: the construct this searches for is one the sweep can see,
+	// and a producer that can fail is not waved through as harmless.
+	assert.match("mapfile -t a < <(node -e 1)", /<\s+<\(/u);
+	assert.equal(HARMLESS_PIPE_PRODUCER.test(lastCommand("node -e 1")), false);
+	assert.equal(HARMLESS_PIPE_PRODUCER.test(lastCommand("printf '%s' x")), true);
+	assert.deepEqual(offenders, [], "a run block reads a process substitution and would lose the producer's exit status");
 });
 
 // Release workflows trigger on tags only, so without this lane the first CI run

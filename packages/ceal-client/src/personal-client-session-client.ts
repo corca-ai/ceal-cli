@@ -6,6 +6,13 @@ import {
 	decodeCealClientRefreshResponse,
 	decodeCealClientRevokeResponse,
 } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
+	CEAL_SESSION_CLIENT_TIMEOUT_MS,
+	declaresJsonContentType,
+	readBoundedResponseBody,
+	resolveRequestBounds,
+} from "./request-bounds.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealPersonalClientSessionClient {
@@ -26,19 +33,15 @@ export class CealPersonalClientSessionError extends Error {
 	}
 }
 
-const MAX_RESPONSE_BYTES = 64 * 1024;
 const REFRESH_TOKEN = /^ceal_refresh_[A-Za-z0-9_-]{43}$/u;
 
 export function createCealPersonalClientSessionClient(
 	options: CreateCealPersonalClientSessionClientOptions,
 ): CealPersonalClientSessionClient {
 	const endpoint = safeEndpoint(options.endpoint);
-	const fetchFn = options.fetchFn ?? globalThis.fetch;
-	if (typeof fetchFn !== "function") throw new CealPersonalClientSessionError("invalid_configuration");
-	const timeoutMs = options.timeoutMs ?? 10_000;
-	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+	const { fetchFn, timeoutMs } = resolveRequestBounds(options, CEAL_SESSION_CLIENT_TIMEOUT_MS, () => {
 		throw new CealPersonalClientSessionError("invalid_configuration");
-	}
+	});
 	return {
 		refresh: (refreshToken) =>
 			requestSession({
@@ -84,8 +87,8 @@ async function requestSession<T>(input: {
 			redirect: "error",
 			signal: controller.signal,
 		});
-		const bytes = await readBounded(response);
-		if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
+		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, invalidResponse);
+		if (!declaresJsonContentType(response)) invalidResponse();
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -130,33 +133,6 @@ function safeEndpoint(value: string | URL): URL {
 function childEndpoint(endpoint: URL, action: "refresh" | "revoke"): URL {
 	const result = new URL(endpoint);
 	result.pathname = `${result.pathname.replace(/\/$/u, "")}/${action}`;
-	return result;
-}
-
-async function readBounded(response: Response): Promise<Uint8Array> {
-	const declared = response.headers.get("content-length");
-	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) invalidResponse();
-	if (!response.body) invalidResponse();
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		if (!value) continue;
-		total += value.byteLength;
-		if (total > MAX_RESPONSE_BYTES) {
-			await reader.cancel();
-			invalidResponse();
-		}
-		chunks.push(value);
-	}
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
 	return result;
 }
 

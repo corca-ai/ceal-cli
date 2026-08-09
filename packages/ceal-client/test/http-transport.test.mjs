@@ -175,6 +175,32 @@ test("HTTP transport returns a valid failure envelope on non-2xx", async () => {
 	assert.deepEqual(await createCealClient(transport).request(request), failure);
 });
 
+// The decoder branches purely on the body's own `ok`, never on transport status
+// (packages/ceal-protocol/src/index.ts), so a non-2xx carrying a schema-valid
+// success body is a reachable state — a proxy serving a stale cached success on
+// an error status is the ordinary way to reach it. The guard that refuses it had
+// no test at all, so a refactor that dropped or inverted it would have shipped
+// a success to the caller with nothing red.
+test("HTTP transport refuses a non-2xx response whose body claims success", async () => {
+	// A body the decoder genuinely accepts, so the refusal can only come from the
+	// status disagreement and not from the body being unreadable.
+	const stale = handshakeResponse(request);
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(stale, { status: 502 }),
+	});
+	await assert.rejects(createCealClient(transport).request(request), hasTransportCode("invalid_response"));
+	// Positive control: the same body on a 2xx is accepted, so the refusal is
+	// about the status disagreement and not about the body being unreadable.
+	const ok = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(stale, { status: 200 }),
+	});
+	assert.equal((await createCealClient(ok).request(request)).ok, true);
+});
+
 test("HTTP transport keeps discovery, allowed call, and policy denial responses correlated to their operations", async () => {
 	const discoveryRequest = {
 		request_id: "request:discover:001",

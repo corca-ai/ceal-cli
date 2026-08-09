@@ -23,6 +23,13 @@
     },
     {
       "surface": "code",
+      "id": "1e80e28196c18b08",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "The three-line execFileSync(\"git\", args, {encoding:'utf8', stdio:['ignore','pipe','ignore']}) wrapper in scripts/verify-gateway-protocol-consumer.mjs and scripts/verify-protocol-vendor-pin.mjs. Both members are untouched by this session; the family surfaced only because other families around them re-keyed. It is the idiom for 'read one git value and treat a failure as absent', and the two differ in the variable naming their own module uses for the repo root. Same class as the already-classified boilerplate families: extracting three lines into a shared scripts/lib helper buys one more import in each file and a shared module whose only content is a spawn call."
+    },
+    {
+      "surface": "code",
       "id": "1f59a2daf80674cc",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -51,10 +58,10 @@
     },
     {
       "surface": "code",
-      "id": "322b1b9b02a1ca23",
+      "id": "3771d509a91610f1",
       "class": "intentional",
       "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-client/src/http-transport.ts mergeChunks against packages/ceal-worker-cli/src/private-worker-transport.ts concatBytes. Both join already-bounded chunks, and they sit on opposite sides of a package boundary: ceal-worker-cli depends on @corca-ai/ceal, not the reverse, so folding them means exporting an internal buffer helper from the client SDK public surface. That trades a three-line idiom for a published API this repo would then owe compatibility to. The shared home this session created is deliberately worker-internal."
+      "note": "Rotated from 7e808d06536d42f7 because the two validators shifted line ranges as the merge loop was folded. scripts/build-worker-release-assets.mjs carrierContractIdentity against carrierHandoffIdentity. Two validators of two different manifest records - one a contract with a sha256 plus embedded JSON text, the other a handoff descriptor with a path, digest, source repository and vector ids - that became more alike this session because both gained the source comparison the control-session check already had. Their shapes differ in what they read and in the four codes they raise, and a shared validator would have to take the field list, the comparison and both codes as parameters, which is the whole of each function. The one fact they now share, that a merged manifest is compared against the checkout rather than only against its siblings, is enforced by the single loop that calls all three."
     },
     {
       "surface": "code",
@@ -62,6 +69,13 @@
       "class": "intentional",
       "reviewed_at": "2026-08-09",
       "note": "packages/ceal-worker-cli/src/index.ts writeAcceptanceRefusal against writeError. Both write the shared error envelope, and they differ in exactly the two things a shared helper would have to take as parameters: the result schema and the exit code. The comment above writeAcceptanceRefusal states why the schema differs — the acceptance command answers its own schema on failure so a caller parses one shape and reads ok, rather than switching schemas on the unhappy path — and the exit codes are 3 and 2 because one is a refusal about an installed release and the other is a usage error. Surfaced now only because bumping the acceptance schema to .v2 re-keyed the family; the pair and its reasoning predate this session. Folding them would put the schema-on-failure decision one argument away from the usage-error path."
+    },
+    {
+      "surface": "code",
+      "id": "4925978468652c57",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Two single-line members inside test/worker-release-installer.test.mjs, both untouched by this session and surfaced only by re-keying elsewhere. A one-line family is below the size at which extraction can carry a fact; nothing here can drift independently of the assertion it sits in."
     },
     {
       "surface": "code",
@@ -76,6 +90,13 @@
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "scripts/generate-leased-consumer-handoff-runtime.mjs, overlapping window over the same two contract readers as 17e36891f4f87883 — the reported ranges share lines, because the detector anchored on the shared frozen return and grew the window across a function boundary in both directions. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "5b8a4b02318d3bd9",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-client/src/enrollment-client.ts exchange against device-adoption-client.ts start/poll. What is left after this session moved the timeout resolution, the configured-timeout ceiling, the content-type predicate and the bounded read into request-bounds.ts is the part that is genuinely each route's own: a different Gateway route, a different request schema constant, a different decoder, and different input validation. The remaining similarity is the AbortController/setTimeout/try-finally frame around them, which is the shape of any timed fetch and carries no fact that could drift."
     },
     {
       "surface": "code",
@@ -125,6 +146,20 @@
       "class": "intentional",
       "reviewed_at": "2026-08-09",
       "note": "packages/ceal-worker-cli/src/agent-audit.ts: the lstat-or-mark-partial block in collectCodexSessions against the one in codexDayDirectories. Predates this session — neither member was touched by the change that surfaced it, and the family is in neither the gate baseline nor this file, so the ratchet had been failing on it. Classified rather than extracted on measured evidence, not preference: extracting the eight lines into a statOrPartial(target, walk) helper was tried and re-run through the gate, and it removed this two-member family while creating a FIVE-member one spanning both collectors and three spans of local-store-guards.ts — the two walkers differ mainly in that block, so removing it makes them converge. Trading a local pair for a cross-module family in the inventory path is the worse position, and the walk already reports `partial` correctly in both places."
+    },
+    {
+      "surface": "code",
+      "id": "7e808d06536d42f7",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "The same pair as 3771d509a91610f1 at a wider span: scripts/build-worker-release-assets.mjs carrierContractIdentity against carrierHandoffIdentity. Classified for the reason recorded there — two validators of two different manifest records, whose shapes and four failure codes differ, that became more alike because both gained the source comparison the control-session check already had."
+    },
+    {
+      "surface": "code",
+      "id": "815924d1f8835a0b",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Rotated from a85485e50a914bbb because the client-side copy moved again as the shared home settled. Rotated from 322b1b9b02a1ca23 because the client-side copy moved into packages/ceal-client/src/request-bounds.ts, the shared home this session created. packages/ceal-client/src/http-transport.ts mergeChunks against packages/ceal-worker-cli/src/private-worker-transport.ts concatBytes. Both join already-bounded chunks, and they sit on opposite sides of a package boundary: ceal-worker-cli depends on @corca-ai/ceal, not the reverse, so folding them means exporting an internal buffer helper from the client SDK public surface. That trades a three-line idiom for a published API this repo would then owe compatibility to. The shared home this session created is deliberately worker-internal."
     },
     {
       "surface": "code",
@@ -198,10 +233,31 @@
     },
     {
       "surface": "code",
+      "id": "e98c8b5f7077e97d",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "The import block of ./request-bounds.js in the three ceal-client session transports. This is the detector reporting the extraction it asked for: the three modules now import the same shared home, so their import statements match. Import statements are not extractable, and a1b5412a5f2feb47 records the one attempt on that class turning one family into three."
+    },
+    {
+      "surface": "code",
+      "id": "eb85d25d1bd9e729",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "The compose/merge halves of build-worker-release-assets.mjs against the file templates of build-worker-native-artifact.mjs and build-worker-release-package.mjs. Detector artifact of the template every script in scripts/ follows: shebang, node: import block, ROOT computation, exported codedErrorClass, local fail/sha256/readJson, parseArgs and the import.meta.url main guard. Same class as the already-classified a1b5412a5f2feb47 and 1f59a2daf80674cc. Two of the four members are untouched by this session; the family surfaced because the merge half gained the carrier and handoff source comparisons."
+    },
+    {
+      "surface": "code",
       "id": "f1223900bb5c8651",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "Same materializeOutput pair as 6df6b80781ef0564, reported over a wider window. See that entry."
+    },
+    {
+      "surface": "code",
+      "id": "f7722ad3b07fcfed",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-client/src/request-bounds.ts readBoundedResponseBody against packages/ceal-worker-cli/src/leased-consumer-carrier.ts readBoundedWebResponse. The bounded streamed read, once per package. They sit on opposite sides of a package boundary - ceal-worker-cli depends on @corca-ai/ceal, not the reverse - so folding them means publishing an internal reader on the client SDK surface this repo would then owe compatibility to. Each package now holds exactly one copy, which is the reachable end state; private-worker-transport.ts and request-bounds.ts are what removed the copies that used to exist beside them."
     },
     {
       "surface": "code",

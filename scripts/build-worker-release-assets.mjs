@@ -246,7 +246,14 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
 	if (platforms.size === 0) fail("merge_input_incomplete", "Merged worker release set names no platform.");
+	// All three private inputs are re-read from the checkout and compared, not
+	// only agreed across platforms. Cross-platform agreement alone accepts a
+	// corruption that hit every leg identically, which is the ordinary shape when
+	// every leg stages from one stale snapshot. Only the control-session check
+	// used to do this; the two beside it checked agreement and stopped.
 	let sourceControlSessionContract;
+	let sourceCarrierContract;
+	let sourceCarrierHandoff;
 	try {
 		sourceControlSessionContract = readControlSessionContract(path.join(repoRoot, PRIVATE_CONTROL_SESSION_CONTRACT_PATH), { repoRoot });
 	} catch {
@@ -255,36 +262,27 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 			"Merged worker release assets require a valid source private control-session contract.",
 		);
 	}
-	const carrierContracts = new Set(
-		[...platforms.entries()].map(([platform, entries]) =>
-			carrierContractIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes),
-		),
-	);
-	if (carrierContracts.size !== 1)
-		fail(
-			"merge_private_carrier_contract_drift",
-			"Merged worker release assets require one identical private carrier contract across every platform.",
-		);
-	const carrierHandoffs = new Set(
-		[...platforms.entries()].map(([platform, entries]) =>
-			carrierHandoffIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes),
-		),
-	);
-	if (carrierHandoffs.size !== 1)
-		fail(
-			"merge_private_carrier_handoff_drift",
-			"Merged worker release assets require one identical private Gateway handoff across every platform.",
-		);
-	const controlSessionContracts = new Set(
-		[...platforms.entries()].map(([platform, entries]) =>
-			controlSessionContractIdentity(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes, sourceControlSessionContract),
-		),
-	);
-	if (controlSessionContracts.size !== 1)
-		fail(
-			"merge_private_control_session_contract_drift",
-			"Merged worker release assets require one identical private control-session contract across every platform.",
-		);
+	try {
+		sourceCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
+	} catch {
+		fail("merge_private_carrier_contract_invalid", "Merged worker release assets require a valid source private carrier contract.");
+	}
+	try {
+		sourceCarrierHandoff = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot });
+	} catch {
+		fail("merge_private_carrier_handoff_invalid", "Merged worker release assets require a valid source private Gateway handoff.");
+	}
+	// Each platform manifest is compared against the checkout, one at a time.
+	// There is no cross-platform agreement check beside this any more: once every
+	// leg must equal the source, every leg equals every other leg, so a `Set`
+	// size check could no longer fail and would read as a guard while proving
+	// nothing. Agreement is the consequence; equality with the source is the rule.
+	for (const [platform, entries] of platforms) {
+		const manifestBytes = entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes;
+		carrierContractIdentity(manifestBytes, sourceCarrierContract);
+		carrierHandoffIdentity(manifestBytes, sourceCarrierHandoff);
+		controlSessionContractIdentity(manifestBytes, sourceControlSessionContract);
+	}
 	// The last point at which a protocol-producer disagreement is still cheap.
 	// The pin is asserted while each platform BUILDS, and after that nothing
 	// asked again: the signing job verifies digests, the file list, and each
@@ -344,7 +342,7 @@ function readInventory(directory) {
 	return entries.map((entry) => [entry[2], entry[1]]);
 }
 
-function carrierContractIdentity(bytes) {
+function carrierContractIdentity(bytes, sourceCarrierContract) {
 	try {
 		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
 		const carrier = manifest?.private_leased_consumer_carrier;
@@ -357,8 +355,14 @@ function carrierContractIdentity(bytes) {
 			!carrier.contract_json.startsWith("{")
 		)
 			throw new Error("invalid_manifest");
+		if (carrier.contract_sha256 !== sourceCarrierContract.sha256 || carrier.contract_json !== sourceCarrierContract.bytes.toString("utf8"))
+			fail(
+				"merge_private_carrier_contract_drift",
+				"Merged worker release assets refuse a carrier contract that differs from the source contract.",
+			);
 		return `${carrier.contract_sha256}:${carrier.contract_json}`;
-	} catch {
+	} catch (error) {
+		if (error instanceof WorkerReleaseAssetsError) throw error;
 		fail(
 			"merge_private_carrier_contract_invalid",
 			"Merged worker release assets require each platform manifest to declare a valid private carrier contract.",
@@ -366,7 +370,7 @@ function carrierContractIdentity(bytes) {
 	}
 }
 
-function carrierHandoffIdentity(bytes) {
+function carrierHandoffIdentity(bytes, sourceCarrierHandoff) {
 	try {
 		const handoff = JSON.parse(bytes?.toString("utf8") ?? "")?.private_leased_consumer_handoff;
 		if (
@@ -379,8 +383,17 @@ function carrierHandoffIdentity(bytes) {
 			handoff.vector_ids.some((value) => typeof value !== "string")
 		)
 			throw new Error("invalid_manifest");
+		// The manifest field IS the verifier's return value, the same way compose
+		// writes it, so the comparison is over the whole record rather than a digest
+		// inside it.
+		if (JSON.stringify(handoff) !== JSON.stringify(sourceCarrierHandoff))
+			fail(
+				"merge_private_carrier_handoff_drift",
+				"Merged worker release assets refuse a Gateway handoff that differs from the source handoff.",
+			);
 		return JSON.stringify(handoff);
-	} catch {
+	} catch (error) {
+		if (error instanceof WorkerReleaseAssetsError) throw error;
 		fail(
 			"merge_private_carrier_handoff_invalid",
 			"Merged worker release assets require each platform manifest to declare a valid private Gateway handoff.",

@@ -81,13 +81,22 @@ jobs:
             --certificate-github-workflow-repository "corca-ai/ceal-cli" \
             --certificate-github-workflow-ref "refs/tags/$TAG" \
             "$readback_dir/SHA256SUMS" >/dev/null
-          mapfile -t inventory_assets < <(
+          # Assigned first, then read. `set -e` does not see the exit status of a
+          # command inside a process substitution, so `mapfile < <(node ...)` turns
+          # a `published_inventory_malformed` refusal into an empty array and the
+          # job fails later with missing-file noise about assets it never fetched.
+          # The parser's whole job is to name what is wrong with a published
+          # inventory; swallowing that mid-rollback points the operator at the
+          # network instead. Same rule as the pipefail one in AGENTS.md
+          # `## Conventions`, at the sibling construct it did not name.
+          inventory_listing="$(
             node --input-type=module -e '
               import { readFileSync } from "node:fs";
               import { parsePublishedWorkerReleaseInventory } from "./scripts/build-worker-release-assets.mjs";
               for (const asset of parsePublishedWorkerReleaseInventory(readFileSync(process.argv[1], "utf8"))) console.log(asset);
             ' "$readback_dir/SHA256SUMS"
-          )
+          )"
+          mapfile -t inventory_assets <<< "$inventory_listing"
           primary=(SHA256SUMS "${inventory_assets[@]}")
           for asset in "${inventory_assets[@]}"; do
             curl --fail --silent --show-error --location "$version_url/$asset" --output "$readback_dir/$asset"

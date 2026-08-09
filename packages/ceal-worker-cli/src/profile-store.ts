@@ -134,10 +134,24 @@ async function withStateLock<T>(directory: string, action: () => Promise<T>): Pr
 	);
 }
 
+/**
+ * The store's two schema versions, named once. The sibling stores in this
+ * directory each hold theirs at one constant (`CACHE_SCHEMA_VERSION`,
+ * `SPOOL_SCHEMA_VERSION`); this one spelled its two as bare literals at five
+ * sites, so a third version would have five places to find and nothing to catch
+ * the one that was missed.
+ *
+ * `V2` is not a replacement for `V1`. A record carries V2 exactly when it holds a
+ * renewal-blocked reason, so both remain current and the read path must keep
+ * accepting either.
+ */
+const SESSION_STORE_SCHEMA_V1 = "ceal.client_session_store.v1";
+const SESSION_STORE_SCHEMA_V2 = "ceal.client_session_store.v2";
+
 function serializeSession(session: CealStoredSession): Record<string, unknown> {
 	const blockedReason = session.renewalBlockedReason;
 	return {
-		schema_version: blockedReason ? "ceal.client_session_store.v2" : "ceal.client_session_store.v1",
+		schema_version: blockedReason ? SESSION_STORE_SCHEMA_V2 : SESSION_STORE_SCHEMA_V1,
 		gateway_endpoint: session.gatewayEndpoint,
 		profile_ref: session.profileRef,
 		membership_ref: session.membershipRef,
@@ -172,8 +186,8 @@ function parseSession(value: unknown): CealStoredSession {
 		"schema_version",
 		"subject_ref",
 	];
-	const expectedKeys = record.schema_version === "ceal.client_session_store.v2" ? [...baseKeys, "renewal_blocked_reason"] : baseKeys;
-	if (record.schema_version !== "ceal.client_session_store.v1" && record.schema_version !== "ceal.client_session_store.v2")
+	const expectedKeys = record.schema_version === SESSION_STORE_SCHEMA_V2 ? [...baseKeys, "renewal_blocked_reason"] : baseKeys;
+	if (record.schema_version !== SESSION_STORE_SCHEMA_V1 && record.schema_version !== SESSION_STORE_SCHEMA_V2)
 		throw new CealSessionStoreError("invalid_store");
 	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify([...expectedKeys].sort())) {
 		throw new CealSessionStoreError("invalid_store");
@@ -191,9 +205,9 @@ function parseSession(value: unknown): CealStoredSession {
 		refreshToken: record.refresh_token,
 		refreshTokenIdleExpiresAt: record.refresh_token_idle_expires_at,
 		refreshTokenAbsoluteExpiresAt: record.refresh_token_absolute_expires_at,
-		...(record.schema_version === "ceal.client_session_store.v2" ? { renewalBlockedReason: record.renewal_blocked_reason } : {}),
+		...(record.schema_version === SESSION_STORE_SCHEMA_V2 ? { renewalBlockedReason: record.renewal_blocked_reason } : {}),
 	};
-	if (record.schema_version === "ceal.client_session_store.v2" && !validBlockedReason(record.renewal_blocked_reason))
+	if (record.schema_version === SESSION_STORE_SCHEMA_V2 && !validBlockedReason(record.renewal_blocked_reason))
 		throw new CealSessionStoreError("invalid_store");
 	validateSession(session);
 	return session as CealStoredSession;

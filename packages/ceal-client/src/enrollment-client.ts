@@ -1,4 +1,11 @@
 import { CEAL_ENROLLMENT_EXCHANGE_SCHEMA, type CealEnrollmentResponse, decodeCealEnrollmentResponse } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
+	CEAL_SESSION_CLIENT_TIMEOUT_MS,
+	declaresJsonContentType,
+	readBoundedResponseBody,
+	resolveRequestBounds,
+} from "./request-bounds.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealEnrollmentClient {
@@ -18,16 +25,11 @@ export class CealEnrollmentClientError extends Error {
 	}
 }
 
-const MAX_RESPONSE_BYTES = 64 * 1024;
-
 export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOptions): CealEnrollmentClient {
 	const endpoint = enrollmentEndpoint(options.endpoint);
-	const fetchFn = options.fetchFn ?? globalThis.fetch;
-	if (typeof fetchFn !== "function") throw new CealEnrollmentClientError("invalid_configuration");
-	const timeoutMs = options.timeoutMs ?? 10_000;
-	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+	const { fetchFn, timeoutMs } = resolveRequestBounds(options, CEAL_SESSION_CLIENT_TIMEOUT_MS, () => {
 		throw new CealEnrollmentClientError("invalid_configuration");
-	}
+	});
 	return {
 		async exchange(code) {
 			if (!/^[A-Za-z0-9_-]{32,256}$/u.test(code)) throw new CealEnrollmentClientError("invalid_configuration");
@@ -45,8 +47,8 @@ export function createCealEnrollmentClient(options: CreateCealEnrollmentClientOp
 					redirect: "error",
 					signal: controller.signal,
 				});
-				const bytes = await readBounded(response);
-				if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
+				const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, invalidResponse);
+				if (!declaresJsonContentType(response)) invalidResponse();
 				let parsed: unknown;
 				try {
 					parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -88,33 +90,6 @@ function enrollmentEndpoint(value: string | URL): URL {
 	}
 	endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, "")}/enroll`;
 	return endpoint;
-}
-
-async function readBounded(response: Response): Promise<Uint8Array> {
-	const declared = response.headers.get("content-length");
-	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) invalidResponse();
-	if (!response.body) invalidResponse();
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		if (!value) continue;
-		total += value.byteLength;
-		if (total > MAX_RESPONSE_BYTES) {
-			await reader.cancel();
-			invalidResponse();
-		}
-		chunks.push(value);
-	}
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return result;
 }
 
 function invalidResponse(): never {

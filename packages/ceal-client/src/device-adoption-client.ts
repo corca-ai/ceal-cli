@@ -9,6 +9,13 @@ import {
 	decodeCealDeviceEnrollmentStartRequest,
 	decodeCealDeviceEnrollmentStartResult,
 } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
+	CEAL_SESSION_CLIENT_TIMEOUT_MS,
+	declaresJsonContentType,
+	readBoundedResponseBody,
+	resolveRequestBounds,
+} from "./request-bounds.js";
 
 // Transport for the two verified-email first-device adoption routes. It carries
 // typed requests and hands back Gateway-decoded responses; every decision about
@@ -38,17 +45,12 @@ export class CealDeviceAdoptionClientError extends Error {
 	}
 }
 
-const MAX_RESPONSE_BYTES = 64 * 1024;
-
 export function createCealDeviceAdoptionClient(options: CreateCealDeviceAdoptionClientOptions): CealDeviceAdoptionClient {
 	const startEndpoint = routeEndpoint(options.endpoint, "adopt/start");
 	const pollEndpoint = routeEndpoint(options.endpoint, "adopt/poll");
-	const fetchFn = options.fetchFn ?? globalThis.fetch;
-	if (typeof fetchFn !== "function") throw new CealDeviceAdoptionClientError("invalid_configuration");
-	const timeoutMs = options.timeoutMs ?? 10_000;
-	if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+	const { fetchFn, timeoutMs } = resolveRequestBounds(options, CEAL_SESSION_CLIENT_TIMEOUT_MS, () => {
 		throw new CealDeviceAdoptionClientError("invalid_configuration");
-	}
+	});
 	return {
 		async start(request) {
 			// Encoded through the Protocol decoder rather than sent as supplied, so
@@ -101,8 +103,8 @@ async function exchange(endpoint: URL, body: unknown, fetchFn: typeof globalThis
 			redirect: "error",
 			signal: controller.signal,
 		});
-		const bytes = await readBounded(response);
-		if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) invalidResponse();
+		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, invalidResponse);
+		if (!declaresJsonContentType(response)) invalidResponse();
 		try {
 			return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 		} catch {
@@ -139,33 +141,6 @@ function routeEndpoint(value: string | URL, route: string): URL {
 	}
 	endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, "")}/${route}`;
 	return endpoint;
-}
-
-async function readBounded(response: Response): Promise<Uint8Array> {
-	const declared = response.headers.get("content-length");
-	if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) invalidResponse();
-	if (!response.body) invalidResponse();
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		if (!value) continue;
-		total += value.byteLength;
-		if (total > MAX_RESPONSE_BYTES) {
-			await reader.cancel();
-			invalidResponse();
-		}
-		chunks.push(value);
-	}
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return result;
 }
 
 function invalidResponse(): never {

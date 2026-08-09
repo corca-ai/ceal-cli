@@ -4,6 +4,7 @@ import {
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
 } from "@corca-ai/ceal-protocol";
+import { CEAL_MAX_CONFIGURED_TIMEOUT_MS, readBoundedResponseBody } from "./request-bounds.js";
 
 export type CealHttpTransportErrorCode =
 	| "invalid_configuration"
@@ -54,11 +55,11 @@ export const CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER = "x-ceal-audit-timing";
 // Capability calls can legitimately traverse a bounded provider page before
 // the Gateway serializes its minimized result. Ten seconds cut off a completed
 // Gateway call just before its response reached an agent, so keep the default
-// below the existing two-minute hard cap while leaving room for that bounded
+// below the shared two-minute hard cap while leaving room for that bounded
 // read path and ordinary cold-start latency.
 export const CEAL_DEFAULT_HTTP_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
-const MAX_TIMEOUT_MS = 120_000;
+
 const MAX_CONFIGURED_RESPONSE_BYTES = 1024 * 1024;
 
 export function createCealHttpTransport(options: CreateCealHttpTransportOptions): CealClientTransport {
@@ -66,7 +67,7 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 	const accessToken = validateAccessToken(options.accessToken);
 	const fetchFn = options.fetchFn ?? globalThis.fetch;
 	if (typeof fetchFn !== "function") throw new CealHttpTransportError("invalid_configuration");
-	const timeoutMs = boundedInteger(options.timeoutMs ?? CEAL_DEFAULT_HTTP_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
+	const timeoutMs = boundedInteger(options.timeoutMs ?? CEAL_DEFAULT_HTTP_TIMEOUT_MS, 1, CEAL_MAX_CONFIGURED_TIMEOUT_MS);
 	const maxResponseBytes = boundedInteger(options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES, 1, MAX_CONFIGURED_RESPONSE_BYTES);
 
 	return {
@@ -127,50 +128,17 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 	};
 }
 
-async function readBoundedResponse(response: Response, maximum: number): Promise<Uint8Array> {
-	validateDeclaredLength(response, maximum);
-	if (!response.body) throw new CealHttpTransportError("invalid_response", response.status);
-	const reader = response.body.getReader();
-	try {
-		return await consumeResponseBody(reader, maximum, response.status);
-	} finally {
-		reader.releaseLock();
-	}
-}
-
-function validateDeclaredLength(response: Response, maximum: number): void {
-	const declaredLength = response.headers.get("content-length");
-	if (declaredLength === null) return;
-	const parsed = Number(declaredLength);
-	if (!Number.isSafeInteger(parsed) || parsed < 0) throw new CealHttpTransportError("invalid_response", response.status);
-	if (parsed > maximum) throw new CealHttpTransportError("response_too_large", response.status);
-}
-
-async function consumeResponseBody(reader: ReadableStreamDefaultReader<Uint8Array>, maximum: number, status: number): Promise<Uint8Array> {
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		if (!value) continue;
-		total += value.byteLength;
-		if (total > maximum) {
-			await reader.cancel();
-			throw new CealHttpTransportError("response_too_large", status);
-		}
-		chunks.push(value);
-	}
-	return mergeChunks(chunks, total);
-}
-
-function mergeChunks(chunks: Uint8Array[], total: number): Uint8Array {
-	const result = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return result;
+function readBoundedResponse(response: Response, maximum: number): Promise<Uint8Array> {
+	return readBoundedResponseBody(
+		response,
+		maximum,
+		() => {
+			throw new CealHttpTransportError("invalid_response", response.status);
+		},
+		() => {
+			throw new CealHttpTransportError("response_too_large", response.status);
+		},
+	);
 }
 
 function decodeResponse<R extends CealGatewayRequest>(

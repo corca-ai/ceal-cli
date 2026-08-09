@@ -31,15 +31,19 @@ Read the counts rather than trusting them here; each line names the command.
   `docs/acceptance/` overstate guide registration and were left as written —
   [debt.md](debt.md) says so.
 - **The sweeps converged on one shape**, now stated once as `AGENTS.md`
-  `## One Fact, One Home`. The 2026-08-09 re-sweep applied its second working
-  rule and found the enforcement holding at every sibling it enumerated; the one
-  defect it did find was in the module that had no shared home at all.
-- **The two private worker modes now share `private-worker-transport.ts`.** Each
-  still owns its deadlines, caps, and error vocabulary. Six duplicate families
-  the ratchet then raised are classified in
-  `charness-artifacts/quality/dup-review.json` with their reasoning; four are
-  artifacts of the extraction itself, and re-folding them was declined for
-  reasons each entry states.
+  `## One Fact, One Home`. Both 2026-08-09 re-sweeps found only that shape, and
+  the enumeration found the enforcement holding at every sibling it could reach.
+- **Three shared homes were created and the copies routed through them**:
+  `packages/ceal-worker-cli/src/private-worker-transport.ts`,
+  `packages/ceal-client/src/request-bounds.ts`, and the acceptance record's
+  declared key lists. Each caller still owns its own deadlines, caps, and error
+  vocabulary — the first cut of the worker one did not, and renamed shipped
+  stderr names until a fresh-eye review caught it.
+- **Every duplicate family the ratchet then raised is classified** in
+  `charness-artifacts/quality/dup-review.json` with its reasoning. Most are
+  artifacts of the extractions themselves — import blocks, one-line idioms — and
+  each entry says why re-folding was declined. Read the entry before re-opening
+  one.
 - **All three gates are green here**, the two maintainer-local ones included:
   `npm run check`, `npm run check:duplication`, `npm run lint:shell`. Time a gate
   yourself rather than trusting a figure — this host is 2-core and its wall clock
@@ -57,22 +61,23 @@ Read the counts rather than trusting them here; each line names the command.
    approved, push and then verify with the `issue` skill's `issue_tool.py
    verify-closeout --carrier direct-commit --commit-ref <ref> --expect-state
    CLOSED`.
-2. **Re-sweep the state/time/concurrency scope, and only that one.**
-   [defect-sweep.md](defect-sweep.md) `## The first re-sweep` records why: it is
-   the one scope with a find, so a second pass over it is the one that yields a
-   rate rather than another zero over an unstated area. Same scope statement,
-   same denominator discipline.
-3. **Close the release-path lens's denominator gap before comparing its zero to
-   anything.** That lens left most of `scripts/` unread and said so; the zero is
-   real over what it covered and says nothing about what it did not.
+2. **Re-run the structural lens, not another scope re-sweep.**
+   [defect-sweep.md](defect-sweep.md) `## The denominator-gap sweep` records why:
+   the invariant enumeration cannot see a rule enforced nowhere, and the lens
+   built for that blind spot produced two of that run's five survivors on its
+   first outing. The scope re-sweeps have now covered their declared gaps.
+3. **The remaining debt is the four items that are still open on purpose.**
+   [debt.md](debt.md) has them; three carry their own "not before" and the fourth
+   is the release-manifest client package, which is release-affecting.
 
 ## Discuss
 
-- **The sample still cannot support "converging" or "diverging".** One re-sweep
-  has now run and produced one comparable data point on one scope, with a miss
-  rather than a new defect — [defect-sweep.md](defect-sweep.md) has the table and
-  the caveat on the two lenses that left area unread. Two of the four zeros are
-  partly reduced coverage, not evidence.
+- **The sample now says "misses, not new defects", and still not "converging".**
+  Two runs, ten lenses, six survivors — [defect-sweep.md](defect-sweep.md) has
+  both tables. Every survivor predates `ceal-v0.75.0` and every one is the same
+  shape: a rule enforced at one site and not at its sibling. That is a claim
+  about what the stream *is*, not about whether it is shrinking; no scope has yet
+  been swept twice at equal depth.
 - **Issue 12 stays open** and is not an action here: closure routes through the
   cross-repo C11a final batch. Its v5 notification path is latent — the shipped
   contract declares no `notification_channel` — and [debt.md](debt.md) records
