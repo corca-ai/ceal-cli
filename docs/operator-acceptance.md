@@ -65,7 +65,11 @@ access has no substitute and no fallback path:
 - any live capability, receipt, or audit readback — requires the session that
   code produces
 - a dev-instance re-enrollment — **destroys this host's existing prod binding**,
-  so it is never a casual verification step
+  so it is never a casual verification step. The client now refuses it rather
+  than performing it silently: enrolling or adopting a different identity names
+  the bindings that changed and revokes the session it declined to keep, and
+  `--force` is the only path that replaces one. That turns a silent loss into a
+  deliberate one; it does not give the prod binding back.
 
 The route in: ask the Gateway lane operator directly. This lane's standing
 practice is to leave the request as a written prompt under `docs/requests/`, so

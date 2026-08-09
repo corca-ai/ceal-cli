@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+**`session enroll` and `session adopt` no longer hand this host's identity over
+in silence.** A home holds exactly one session, so running either against a
+configured host substitutes the subject, Profile and membership behind every
+later `ceal call` — and both used to do it by writing straight over the store,
+with no refusal, no revoke of the session they displaced, and no cleanup of the
+local audit state it produced. The operator saw `status: enrolled`.
+
+- An enrollment or adoption whose identity differs from the stored one is
+  refused, and the refusal names which bindings changed rather than reporting
+  that something did.
+- The comparison can only happen after the Gateway has issued the session, so a
+  refusal revokes what it refused. It does not leave a live session this host can
+  no longer reach.
+- `--force` is the deliberate path. It revokes the displaced session first, then
+  writes, then clears the discovery cache and receipt spool — the spool carries
+  no identity discriminator, so one kept across a substitution renders two
+  subjects' history as one. A write that fails after that revocation revokes the
+  session it was going to store and says the previous one is gone.
+- Every write ends the credential it displaces, renewal included: one home has
+  one slot, so a refresh token the store no longer names is one no local command
+  can revoke, and it stayed usable until its TTL. A renewal keeps the audit
+  history of the identity it renews; every other write clears it.
+- Re-enrolling the *same* identity still passes with no flag, including from an
+  unrenewable session whose credential the Gateway will no longer honor. That is
+  the recovery path the CLI's own `NOT_RENEWABLE` text sends operators to, and a
+  guard that closed it would have been a worse bug than the one it fixed.
+- Both routes now refuse before a one-time code is read, or before an employee is
+  asked to verify a mailbox, when this host's session store cannot be read.
+
+Closes #10.
+
 ## 0.75.0 (`ceal-v0.75.0`)
 
 **The `effect` field now names a change that does not happen on this machine.**

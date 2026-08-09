@@ -1,9 +1,4 @@
-import {
-	CealEnrollmentClientError,
-	CealPersonalClientSessionError,
-	createCealEnrollmentClient,
-	createCealPersonalClientSessionClient,
-} from "@corca-ai/ceal";
+import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
 import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
 import { adoptSession } from "./device-adoption.js";
@@ -11,6 +6,18 @@ import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { CealSessionStoreError } from "./profile-store.js";
+import {
+	type CealRevokeDisposition,
+	type CealSessionCommit,
+	clearSessionDerivedState,
+	clientSessionTransportFailure,
+	commitEnrolledSession,
+	endedPreviousSessionAction,
+	revokeClientSession,
+	sessionIdentityConflictFields,
+	sessionReplacementFields,
+	sessionReplacementNextAction,
+} from "./session-replacement.js";
 import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
@@ -105,19 +112,36 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeEnrollmentInvalidArgument(io);
-	if (!runtime.saveSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	if (!runtime.saveSession || !runtime.loadSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	// Read the store before the code is read or spent. An enrollment code is
+	// one-time: discovering that this host's session file is unreadable *after*
+	// the Gateway has consumed it costs the operator a replacement code.
+	try {
+		await runtime.loadSession();
+	} catch {
+		return writeEnrollmentUnavailable("session_load_failed", io);
+	}
 	const code = await readEnrollmentCode(parsed.input, runtime);
 	if (!code.ok) return writeEnrollmentUnavailable(code.error, io);
+	let stored: CealStoredSession;
 	try {
 		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code.value);
 		if (!response.ok) return writeEnrollmentRejected(response.error.code, io);
-		const stored = toStoredSession(parsed.gateway, response);
-		await runtime.saveSession(stored);
-		return writeEnrollmentSuccess(parsed.gateway, stored, io);
+		stored = toStoredSession(parsed.gateway, response);
 	} catch (error) {
 		const reason = error instanceof CealEnrollmentClientError ? error.code : "session_save_failed";
 		return writeEnrollmentUnavailable(reason, io);
 	}
+	const commit = await commitEnrolledSession(stored, runtime, parsed.force);
+	if (!commit.ok) {
+		if (commit.reason === "identity_conflict") return writeEnrollmentConflict(commit.changedBindings, commit.issuedSessionRevoked, io);
+		return writeEnrollmentUnavailable(
+			commit.code,
+			io,
+			commit.previousSessionEnded ? endedPreviousSessionAction(enrollmentRecoveryAction(commit.code)) : undefined,
+		);
+	}
+	return writeEnrollmentSuccess(parsed.gateway, stored, commit, io);
 }
 
 async function readEnrollmentCode(
@@ -171,13 +195,19 @@ function toStoredSession(
 	};
 }
 
-function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toStoredSession>, io: CealCliIo): number {
+function writeEnrollmentSuccess(
+	gateway: string,
+	response: ReturnType<typeof toStoredSession>,
+	commit: CealSessionCommit & { ok: true },
+	io: CealCliIo,
+): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1",
 		command: "ceal",
 		ok: true,
 		status: "enrolled",
 		enrollment_kind: "preapproved_client_device",
+		...sessionReplacementFields(commit),
 		gateway_endpoint: gateway,
 		profile_ref: response.profileRef,
 		membership_ref: response.membershipRef,
@@ -192,8 +222,22 @@ function writeEnrollmentSuccess(gateway: string, response: ReturnType<typeof toS
 		refresh_token_absolute_expires_at: response.refreshTokenAbsoluteExpiresAt,
 		raw_token_visible: false,
 		proof_level: "host_decision",
-		next_action: "Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
+		next_action: sessionReplacementNextAction(
+			commit,
+			"Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
+		),
 	});
+}
+
+function writeEnrollmentConflict(changedBindings: readonly string[], issuedSessionRevoked: CealRevokeDisposition, io: CealCliIo): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_enrollment.v1",
+		command: "ceal",
+		ok: false,
+		enrollment_kind: "preapproved_client_device",
+		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "'ceal session enroll --force'"),
+	});
+	return 3;
 }
 
 async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -203,7 +247,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 			.withSessionStateLock(async (store) => {
 				const session = await store.load();
 				if (!session) return writeAlreadyLoggedOut(io);
-				const revokeFailure = await revokeClientSession(session);
+				const revokeFailure = await revokeClientSession(session, runtime);
 				if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
 				await store.remove();
 				await clearSessionDerivedState(runtime);
@@ -217,7 +261,7 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 		return writeEnrollmentUnavailable("session_load_failed", io);
 	}
 	if (!session) return writeAlreadyLoggedOut(io);
-	const revokeFailure = await revokeClientSession(session);
+	const revokeFailure = await revokeClientSession(session, runtime);
 	if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
 	try {
 		await runtime.removeSession();
@@ -240,36 +284,6 @@ function writeAlreadyLoggedOut(io: CealCliIo): number {
 		proof_level: "local_state",
 		next_action: "Run 'ceal session enroll --help' to configure a session.",
 	});
-}
-
-async function revokeClientSession(session: CealStoredSession): Promise<string | null> {
-	try {
-		const response = await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
-		return !response.ok && response.error.code !== "refresh_revoked" ? response.error.code : null;
-	} catch (error) {
-		return clientSessionTransportFailure(error, "revocation");
-	}
-}
-
-// Logout leaves no session-derived local state behind, and the receipt spool is
-// session-derived: it holds this session's request refs, audit refs, capability
-// and target refs for thirty days. Leaving it made `ceal observe` render a full
-// month of a revoked binding's history beside `Session (absent)`, while the
-// comment here claimed the opposite. Both stores are advisory, so neither
-// removal may block a successful logout — a logout that half-failed must still
-// report the revocation it did perform.
-async function clearSessionDerivedState(runtime: CealCommandRuntime): Promise<void> {
-	await clearAdvisoryStore(runtime.removeDiscoveryCache);
-	await clearAdvisoryStore(runtime.removeReceiptSpool);
-}
-
-async function clearAdvisoryStore(remove: (() => Promise<void>) | undefined): Promise<void> {
-	if (!remove) return;
-	try {
-		await remove();
-	} catch {
-		/* advisory local state: never block the logout that already revoked */
-	}
 }
 
 function writeLoggedOut(io: CealCliIo): number {
@@ -370,17 +384,6 @@ async function refreshSession(session: CealStoredSession, refreshToken: string) 
 	} catch (error) {
 		throw new CealClientSessionError(clientSessionTransportFailure(error, "renewal"));
 	}
-}
-
-function clientSessionTransportFailure(error: unknown, operation: "renewal" | "revocation"): string {
-	const code = error instanceof CealPersonalClientSessionError ? error.code : "request_failed";
-	// The transport client deliberately cannot claim why a peer returned no
-	// valid Gateway response.  Keep that uncertainty explicit at the session
-	// boundary instead of presenting it as a rejected or unusable enrollment.
-	if (code === "request_timeout" || code === "request_failed" || code === "invalid_response") {
-		return `session_${operation}_unavailable`;
-	}
-	return code;
 }
 
 function assertSessionBindings(session: CealStoredSession, response: CealClientRefreshResult): void {
@@ -530,11 +533,13 @@ export function classifiedClientSessionFailureReasons(): readonly string[] {
 	return Object.keys(CLIENT_SESSION_FAILURES);
 }
 
-function parseEnrollmentOptions(options: readonly string[]): { ok: true; gateway: string; input: "interactive" | "stdin" } | { ok: false } {
-	const parsed = parseNamedOptions(options, new Set(["--gateway"]), new Set(["--code-stdin"]));
+function parseEnrollmentOptions(
+	options: readonly string[],
+): { ok: true; gateway: string; input: "interactive" | "stdin"; force: boolean } | { ok: false } {
+	const parsed = parseNamedOptions(options, new Set(["--gateway"]), new Set(["--code-stdin", "--force"]));
 	const gateway = parsed?.values.get("--gateway");
 	if (parsed?.operands.length !== 0 || !gateway) return { ok: false };
-	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive" };
+	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive", force: parsed.flags.has("--force") };
 }
 
 function writeEnrollmentInvalidArgument(io: CealCliIo): number {
@@ -565,7 +570,7 @@ function writeEnrollmentRejected(code: string, io: CealCliIo): number {
 	return 3;
 }
 
-function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
+function writeEnrollmentUnavailable(reason: string, io: CealCliIo, nextAction?: string): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1",
 		command: "ceal",
@@ -575,7 +580,7 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo): number {
 		error: {
 			kind: reason,
 			message: "The device enrollment could not be completed.",
-			next_action: enrollmentRecoveryAction(reason),
+			next_action: nextAction ?? enrollmentRecoveryAction(reason),
 		},
 	});
 	return 3;

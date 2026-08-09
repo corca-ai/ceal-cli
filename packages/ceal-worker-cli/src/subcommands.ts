@@ -60,7 +60,7 @@ export const CEAL_SUBCOMMANDS = [
 		parent: "session",
 		route: ["enroll"],
 		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
-		usage: "ceal session enroll --gateway <https-url> [--code-stdin]",
+		usage: "ceal session enroll --gateway <https-url> [--code-stdin] [--force]",
 		// Exchanging the one-time code consumes it at the Gateway and creates a
 		// session there; deleting the local store does not give the code back.
 		effect: "remote_write",
@@ -70,10 +70,14 @@ export const CEAL_SUBCOMMANDS = [
 		notes: [
 			"The code is never a command operand: it is read through a hidden terminal",
 			"prompt, or from stdin only for approved non-interactive automation.",
+			"This home holds one session. Enrolling an identity that differs from the",
+			"stored one is refused, names the bindings that changed, and revokes the",
+			"session the attempt created; renewing the same identity needs no flag.",
 		],
 		options: [
 			"  --gateway <https-url>   Gateway client endpoint that approved this device.",
 			"  --code-stdin            Read the code from stdin only for non-interactive approved automation.",
+			"  --force                 Replace a stored session that names a different identity, revoking it first.",
 			"  (default)               On a safe terminal, prompt for the code with hidden input.",
 		],
 	},
@@ -81,17 +85,20 @@ export const CEAL_SUBCOMMANDS = [
 		parent: "session",
 		route: ["adopt"],
 		description: "Adopt this device using a verified mailbox, with no operator-issued code.",
-		usage: "ceal session adopt --gateway <https-url> --email <address>",
+		usage: "ceal session adopt --gateway <https-url> --email <address> [--force]",
 		// Same remote effect as enroll, reached through a verified mailbox instead
 		// of an operator-issued code.
 		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.session_adoption.v1",
 		recovery:
-			"Run 'ceal session' to confirm whether a session exists; every failure of this command leaves the store untouched, so it is always safe to start again.",
+			"Run 'ceal session' to confirm which identity this host holds. Every failure before the store is written leaves it untouched; only a '--force' replacement can end the stored session, and a failure after that says so in its own next action.",
 		notes: [
 			"The mailbox is verified by the employee in a browser. This command never opens",
 			"the verifier, submits its form, or handles the mailbox token.",
+			"This home holds one session. Adopting an identity that differs from the",
+			"stored one is refused, names the bindings that changed, and revokes the",
+			"session the attempt created; re-adopting the same identity needs no flag.",
 			"Compare both printed fingerprints against the verification page before",
 			"confirming. If either differs, stop.",
 			"Device keys live in this process only. Interrupting the command discards them",
@@ -101,6 +108,7 @@ export const CEAL_SUBCOMMANDS = [
 		options: [
 			"  --gateway <https-url>   Gateway client endpoint your organization published.",
 			"  --email <address>       Mailbox that received the invitation.",
+			"  --force                 Replace a stored session that names a different identity, revoking it first.",
 		],
 	},
 	{

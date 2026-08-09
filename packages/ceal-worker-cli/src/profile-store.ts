@@ -33,6 +33,11 @@ export class CealSessionStoreError extends Error {
 
 export interface CealLockedSessionStore {
 	load(): Promise<CealStoredSession | null>;
+	// Unconditional write, for the enrollment paths that decide what may replace
+	// what by comparing identities rather than by matching a refresh token. A
+	// rotation still uses `replace`, whose compare-and-set is what stops two
+	// renewals from committing the same one-time credential twice.
+	save(session: CealStoredSession): Promise<void>;
 	replace(expectedRefreshToken: string, session: CealStoredSession): Promise<void>;
 	remove(): Promise<void>;
 }
@@ -64,6 +69,7 @@ export function createCealSessionStore(home: string | undefined): {
 			return withStateLock(directory, async () =>
 				action({
 					load: async () => readSessionFile(directory, file),
+					save: async (session) => writeSessionFile(directory, file, session),
 					replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
 					remove: async () => removeSessionFile(directory, file),
 				}),

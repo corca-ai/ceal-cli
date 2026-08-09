@@ -1,4 +1,4 @@
-import type { CealDeviceAdoptionClient } from "@corca-ai/ceal";
+import type { CealDeviceAdoptionClient, CealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
@@ -99,4 +99,12 @@ export interface CealCommandRuntime {
 	 * `@corca-ai/ceal`. Absent in the shipped binary, which builds the real one.
 	 */
 	createDeviceAdoptionClient?: (options: { endpoint: string }) => CealDeviceAdoptionClient;
+	/**
+	 * Personal client-session transport factory, for the same reason as the
+	 * adoption seam above: `session adopt` binds an https Gateway origin the
+	 * Protocol will not let a loopback test server stand in for, so the
+	 * revocation an identity replacement performs there is otherwise unreachable
+	 * from a test. Absent in the shipped binary, which builds the real one.
+	 */
+	createClientSessionClient?: (options: { endpoint: string }) => CealPersonalClientSessionClient;
 }

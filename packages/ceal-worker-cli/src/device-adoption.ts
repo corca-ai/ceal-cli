@@ -25,6 +25,14 @@ import { generateCealHpkeKeyPair, openCealHpkeMessage } from "./hpke.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
+import {
+	type CealRevokeDisposition,
+	commitEnrolledSession,
+	endedPreviousSessionAction,
+	sessionIdentityConflictFields,
+	sessionReplacementFields,
+	sessionReplacementNextAction,
+} from "./session-replacement.js";
 
 // `ceal session adopt`: the employee-facing verified-email device flow.
 //
@@ -85,17 +93,29 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			io,
 			{
 				code: "invalid_argument",
-				message: "Usage: ceal session adopt --gateway <https-url> --email <address>",
+				message: "Usage: ceal session adopt --gateway <https-url> --email <address> [--force]",
 				nextAction: "Supply the Gateway your organization published and the mailbox that received the invitation.",
 			},
 			2,
 		);
 	}
-	if (!runtime.saveSession) {
+	if (!runtime.saveSession || !runtime.loadSession) {
 		return writeAdoptionFailure(io, {
 			code: "session_runtime_unavailable",
 			message: "This host has no writable session store, so an adopted session could not be kept.",
 			nextAction: "Run from a host with a home directory this user owns.",
+		});
+	}
+	// Read the store before the employee is asked for anything. A session this
+	// host cannot read is a session this command cannot decide it may replace,
+	// and finding that out after a mailbox verification wastes the employee's.
+	try {
+		await runtime.loadSession();
+	} catch {
+		return writeAdoptionFailure(io, {
+			code: "session_load_failed",
+			message: "This host's existing session store could not be read, so an adoption could not decide what it would replace.",
+			nextAction: "Run 'ceal session' to inspect local state, then correct the reported local configuration and start again.",
 		});
 	}
 
@@ -176,6 +196,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			return await completeAdoption(io, runtime, {
 				gateway: parsed.gateway,
 				origin: parsed.origin,
+				force: parsed.force,
 				started,
 				recipientPrivateKey: recipient.privateKey,
 				proofPublicKey,
@@ -212,6 +233,7 @@ async function completeAdoption(
 	delivery: {
 		gateway: string;
 		origin: string;
+		force: boolean;
 		started: CealDeviceEnrollmentStartResult;
 		recipientPrivateKey: Uint8Array;
 		proofPublicKey: string;
@@ -288,15 +310,21 @@ async function completeAdoption(
 		refreshTokenIdleExpiresAt: payload.refresh_token_idle_expires_at,
 		refreshTokenAbsoluteExpiresAt: payload.refresh_token_absolute_expires_at,
 	};
-	try {
-		await runtime.saveSession?.(stored);
-	} catch {
+	// A sealed delivery proves the Gateway meant this session for this device. It
+	// does not say this host is free to give the identity behind `ceal call` away,
+	// and that is a separate refusal with a separate remedy.
+	const commit = await commitEnrolledSession(stored, runtime, delivery.force);
+	if (!commit.ok) {
+		if (commit.reason === "identity_conflict") {
+			return writeAdoptionConflict(io, commit.changedBindings, commit.issuedSessionRevoked);
+		}
 		// Nothing is claimed as adopted here. The session existed only in memory
 		// and is dropped with this process.
+		const retry = "Check the permissions on the Ceal state directory, then run 'ceal session adopt' again.";
 		return writeAdoptionFailure(io, {
-			code: "session_save_failed",
+			code: commit.code,
 			message: "The adopted session could not be written to this host's session store.",
-			nextAction: "Check the permissions on the Ceal state directory, then run 'ceal session adopt' again.",
+			nextAction: commit.previousSessionEnded ? endedPreviousSessionAction(retry) : retry,
 		});
 	}
 
@@ -305,6 +333,7 @@ async function completeAdoption(
 		command: "ceal",
 		ok: true,
 		status: "adopted",
+		...sessionReplacementFields(commit),
 		// Preserve the v1 literal for installed consumers. The Gateway decides
 		// whether this transaction is first-device or approval-held; that richer
 		// admission meaning needs its paired Protocol result contract rather than
@@ -330,7 +359,10 @@ async function completeAdoption(
 			"This host verified the sealed delivery and stored a session; it did not verify the mailbox, which the employee did in a browser.",
 			"This adoption grants only this device session. Additional devices, permission changes, and offboarding remain separately governed.",
 		],
-		next_action: "Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
+		next_action: sessionReplacementNextAction(
+			commit,
+			"Run 'ceal capabilities' to verify the stored session, Profile membership, and Gateway binding.",
+		),
 	});
 }
 
@@ -426,15 +458,32 @@ function writeAdoptionFailure(io: CealCliIo, outcome: AdoptionOutcome, exitCode 
 	return exitCode;
 }
 
-function parseAdoptionOptions(options: readonly string[]): { ok: true; gateway: string; origin: string; email: string } | { ok: false } {
-	const parsed = parseNamedOptions(options, new Set(["--gateway", "--email"]), new Set());
-	if (!parsed || parsed.operands.length > 0 || parsed.flags.size > 0) return { ok: false };
+// Distinct from every outcome above: the Gateway did its part, and this host
+// refused. `session_written: false` is the same claim the other failures make,
+// so a caller that already branches on it needs no new rule to stay correct.
+function writeAdoptionConflict(io: CealCliIo, changedBindings: readonly string[], issuedSessionRevoked: CealRevokeDisposition): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_adoption.v1",
+		command: "ceal",
+		ok: false,
+		enrollment_kind: "verified_email_first_device",
+		credential_context: CREDENTIAL_CONTEXT,
+		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "'ceal session adopt --force'"),
+	});
+	return 3;
+}
+
+function parseAdoptionOptions(
+	options: readonly string[],
+): { ok: true; gateway: string; origin: string; email: string; force: boolean } | { ok: false } {
+	const parsed = parseNamedOptions(options, new Set(["--gateway", "--email"]), new Set(["--force"]));
+	if (!parsed || parsed.operands.length > 0) return { ok: false };
 	const gateway = parsed.values.get("--gateway");
 	const email = parsed.values.get("--email");
 	if (typeof gateway !== "string" || typeof email !== "string") return { ok: false };
 	const origin = gatewayOrigin(gateway);
 	if (!origin) return { ok: false };
-	return { ok: true, gateway, origin, email };
+	return { ok: true, gateway, origin, email, force: parsed.flags.has("--force") };
 }
 
 // The origin is what the Protocol binds every later check to, so it is derived

@@ -216,8 +216,97 @@ test("a second run adopts as a new transaction rather than resuming the first", 
 	assert.notEqual(first.gateway.start.proof_public_key, second.gateway.start.proof_public_key);
 });
 
-function run(world) {
-	return adoptSession(["--gateway", GATEWAY, "--email", EMAIL], world.io, world.runtime);
+// One home holds one session, so a successful adoption is also a replacement
+// decision. These four fix which decision it makes, because the sealed-delivery
+// proof above says the Gateway meant this session for this device and says
+// nothing about whether this host may hand the identity behind `ceal call` over.
+
+test("re-adopting the identity this host already holds needs no flag and keeps its history", async () => {
+	const world = createWorld({ storedSession: storedSession() });
+	assert.equal(await run(world), 0);
+	const result = world.result();
+	assert.equal(result.status, "adopted");
+	assert.equal(result.session_replacement, "same_identity");
+	assert.equal(result.local_derived_state_cleared, false);
+	assert.deepEqual(world.removedStores, [], "a renewal keeps the audit history of the identity it renews");
+	// It still ends the credential it displaced: one home has one slot, so a
+	// refresh token the store no longer names is unreachable from this host.
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_previous"],
+	);
+	assert.equal(result.previous_session_revoked, "revoked");
+	assert.equal(world.storedSession().accessToken, "ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A");
+});
+
+test("adopting over a different identity is refused by name, keeps the stored session, and ends the one it refused", async () => {
+	const world = createWorld({ storedSession: storedSession({ subjectRef: "subject:someone-else", instanceRef: "instance:ceal-dev" }) });
+	assert.equal(await run(world), 3);
+	const result = world.result();
+	assert.equal(result.ok, false);
+	assert.equal(result.status, "conflict");
+	assert.equal(result.error.kind, "session_identity_conflict");
+	assert.equal(result.session_written, false);
+	assert.deepEqual(result.changed_bindings, ["subject_ref", "instance_ref"]);
+	assert.match(result.error.next_action, /--force/u);
+	assert.equal(world.saved.length, 0);
+	assert.equal(world.storedSession().subjectRef, "subject:someone-else", "the identity this host holds is the one it keeps");
+	// The refusal happens after the Gateway has issued a session, so the refusal
+	// owns ending it; leaving it live is the orphan this guard exists to prevent.
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A"],
+	);
+	assert.equal(result.issued_session_revoked, "revoked");
+});
+
+test("--force replaces a different identity, revoking it first and clearing what it produced", async () => {
+	const world = createWorld({ storedSession: storedSession({ subjectRef: "subject:someone-else", refreshToken: "ceal_refresh_outgoing" }) });
+	assert.equal(await run(world, ["--force"]), 0);
+	const result = world.result();
+	assert.equal(result.status, "adopted");
+	assert.equal(result.session_replacement, "replaced");
+	assert.equal(result.previous_session_revoked, "revoked");
+	assert.equal(result.local_derived_state_cleared, true);
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_outgoing"],
+		"the credential that ends is the one being displaced, not the one just adopted",
+	);
+	// The receipt spool carries no identity discriminator, so a spool kept across
+	// a substitution renders two subjects' history as one.
+	assert.deepEqual(world.removedStores.sort(), ["discovery-cache", "receipt-spool"]);
+	assert.equal(world.storedSession().subjectRef, "subject:employee");
+});
+
+test("a session store this host cannot read stops the adoption before the employee is asked for anything", async () => {
+	const world = createWorld({ loadFails: true });
+	assert.equal(await run(world), 3);
+	assert.equal(world.result().error.kind, "session_load_failed");
+	assert.deepEqual(world.gateway.calledRoutes, {}, "no transaction may start against a store whose contents are unknown");
+	assert.equal(world.stderrText(), "", "and the employee is shown no verification URL");
+});
+
+function storedSession(overrides = {}) {
+	return {
+		gatewayEndpoint: GATEWAY,
+		profileRef: "profile:work",
+		membershipRef: "membership:1",
+		registrationRef: "registration:0",
+		clientRef: "client:previous",
+		subjectRef: "subject:employee",
+		instanceRef: "instance:ceal-prod",
+		accessToken: "ceal_personal_previous",
+		expiresAt: new Date(NOW + 3600_000).toISOString(),
+		refreshToken: "ceal_refresh_previous",
+		refreshTokenIdleExpiresAt: new Date(NOW + 86_400_000).toISOString(),
+		refreshTokenAbsoluteExpiresAt: new Date(NOW + 604_800_000).toISOString(),
+		...overrides,
+	};
+}
+
+function run(world, extraOptions = []) {
+	return adoptSession(["--gateway", GATEWAY, "--email", EMAIL, ...extraOptions], world.io, world.runtime);
 }
 
 function fingerprint(publicKey) {
@@ -229,6 +318,9 @@ function createWorld(options = {}) {
 	const stderr = [];
 	const saved = [];
 	const slept = [];
+	const revoked = [];
+	const removedStores = [];
+	let stored = options.storedSession ?? null;
 	let clock = options.localWallClock ?? NOW;
 	let monotonicClock = 0;
 	const gateway = createGateway(options);
@@ -237,16 +329,42 @@ function createWorld(options = {}) {
 		io: { stdout: { write: (chunk) => stdout.push(chunk) }, stderr: { write: (chunk) => stderr.push(chunk) } },
 		saved,
 		slept,
+		revoked,
+		removedStores,
+		storedSession: () => stored,
 		readSecretCalls: 0,
 		gateway,
 		stdoutText: () => stdout.join(""),
 		stderrText: () => stderr.join(""),
 		result: () => parseYamlish(stdout.join("")),
 		runtime: {
+			loadSession: async () => {
+				if (options.loadFails) throw new Error("unreadable store");
+				return stored;
+			},
 			saveSession: async (session) => {
 				if (options.saveFails) throw new Error("read-only store");
+				stored = session;
 				saved.push(session);
 			},
+			removeDiscoveryCache: async () => {
+				removedStores.push("discovery-cache");
+			},
+			removeReceiptSpool: async () => {
+				removedStores.push("receipt-spool");
+			},
+			// The Protocol binds this flow to an https origin, so the revocation an
+			// identity replacement performs has no loopback server to reach. The
+			// transport itself is proven against a real socket in `@corca-ai/ceal`;
+			// what this seam proves is which credential this command decides to end.
+			createClientSessionClient: ({ endpoint }) => ({
+				revoke: async (refreshToken) => {
+					revoked.push({ endpoint, refreshToken });
+					return options.revokeDeniedCode
+						? { ok: false, error: { code: options.revokeDeniedCode, message: "denied", next_action: "none" } }
+						: { ok: true, schema_version: "ceal.client_session_revoke_result.v1" };
+				},
+			}),
 			readSecret: async () => {
 				throw new Error("adoption must never read an enrollment code");
 			},

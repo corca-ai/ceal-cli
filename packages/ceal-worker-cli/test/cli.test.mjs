@@ -744,15 +744,174 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 		let stored = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
+			loadSession: async () => null,
 			saveSession: async (session) => {
 				stored = session;
 			},
 		});
 		assert.equal(payload.status, "enrolled");
+		assert.equal(payload.session_replacement, "first_session");
 		assert.equal(payload.raw_token_visible, false);
 		assert.equal(stored.accessToken, token);
 		assert.match(stored.refreshToken, /^ceal_refresh_/u);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
+	});
+});
+
+// One home holds one session (`~/.ceal/client-session.json`), so an enrollment
+// run against a configured host is a substitution of the identity behind every
+// later `ceal call`. These fix that the substitution is refused by name, that the
+// documented recovery from an unrenewable session is not caught by the refusal,
+// and that a deliberate replacement leaves nothing of the identity it displaced.
+test("enrolling the identity this host already holds is the documented recovery, needs no flag, and keeps its history", async () => {
+	await withEnrollmentGateway(async ({ endpoint, revoked }) => {
+		let stored = null;
+		const cleared = [];
+		// Exactly the state `NOT_RENEWABLE` sends an operator to re-enroll from,
+		// and with a different registration and client ref, because a replacement
+		// code mints new ones for the same subject.
+		const previous = storedSession(endpoint, {
+			registrationRef: "registration:previous",
+			clientRef: "client:previous",
+			refreshToken: `ceal_refresh_${"O".repeat(43)}`,
+			renewalBlockedReason: "refresh_replayed",
+		});
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => previous,
+			saveSession: async (session) => {
+				stored = session;
+			},
+			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
+			removeReceiptSpool: async () => cleared.push("receipt-spool"),
+		});
+		assert.equal(payload.status, "enrolled");
+		assert.equal(payload.session_replacement, "same_identity");
+		assert.equal(payload.local_derived_state_cleared, false);
+		assert.deepEqual(cleared, [], "a renewal keeps the audit history of the identity it renews");
+		// It still ends the credential it displaced. One home has one slot, so a
+		// refresh token the store no longer names is one no local command can
+		// revoke, and it would otherwise stay usable until its TTL.
+		assert.deepEqual(revoked, [`ceal_refresh_${"O".repeat(43)}`]);
+		assert.equal(payload.previous_session_revoked, "revoked");
+		assert.equal(stored.subjectRef, "subject:hwidong");
+	});
+});
+
+test("enrolling a different identity is refused by name, keeps the stored session, and revokes the session it refused", async () => {
+	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
+		const previous = storedSession(endpoint, {
+			profileRef: "profile:other",
+			subjectRef: "subject:someone-else",
+			instanceRef: "instance:ceal-dev",
+			refreshToken: `ceal_refresh_${"O".repeat(43)}`,
+		});
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => previous,
+			saveSession: async () => assert.fail("a refused enrollment must not write"),
+		});
+		assert.equal(payload.ok, false);
+		assert.equal(payload.status, "conflict");
+		assert.equal(payload.error.kind, "session_identity_conflict");
+		assert.equal(payload.session_written, false);
+		assert.deepEqual(payload.changed_bindings, ["profile_ref", "subject_ref", "instance_ref"]);
+		assert.match(payload.error.next_action, /--force/u);
+		// The Gateway has already issued the session by the time identities can be
+		// compared, so the refusal owns ending it rather than leaving an orphan
+		// this host can no longer reach.
+		assert.deepEqual(revoked, [refreshToken]);
+		assert.equal(payload.issued_session_revoked, "revoked");
+	});
+});
+
+test("a refusal whose own session could not be revoked says so rather than reporting a clean refusal", async () => {
+	await withEnrollmentGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+				readSecret: async () => "E".repeat(48),
+				loadSession: async () =>
+					storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: `ceal_refresh_${"O".repeat(43)}` }),
+				saveSession: async () => assert.fail("a refused enrollment must not write"),
+			});
+			assert.equal(payload.error.kind, "session_identity_conflict");
+			assert.equal(payload.issued_session_revoked, "already_unusable");
+			assert.match(payload.error.next_action, /could not be revoked/u);
+		},
+		{ revokeDeniedCode: "refresh_invalid" },
+	);
+});
+
+test("--force replaces a different identity, revoking it first and clearing the local state it produced", async () => {
+	await withEnrollmentGateway(async ({ endpoint, revoked }) => {
+		let stored = null;
+		const cleared = [];
+		const outgoing = `ceal_refresh_${"O".repeat(43)}`;
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
+			saveSession: async (session) => {
+				stored = session;
+			},
+			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
+			removeReceiptSpool: async () => cleared.push("receipt-spool"),
+		});
+		assert.equal(payload.status, "enrolled");
+		assert.equal(payload.session_replacement, "replaced");
+		assert.equal(payload.previous_session_revoked, "revoked");
+		assert.equal(payload.local_derived_state_cleared, true);
+		assert.deepEqual(revoked, [outgoing], "the credential that ends is the displaced one, not the one just enrolled");
+		// The receipt spool carries no identity discriminator, so a spool kept
+		// across a substitution renders two subjects' history as one — the failure
+		// the logout path already fixed once.
+		assert.deepEqual(cleared.sort(), ["discovery-cache", "receipt-spool"]);
+		assert.equal(stored.subjectRef, "subject:hwidong");
+	});
+});
+
+test("a replacement whose displaced credential the Gateway will not honor still proceeds and says so", async () => {
+	await withEnrollmentGateway(
+		async ({ endpoint }) => {
+			let stored = null;
+			// The worst case the recovery text names: an `outcome_unknown` session
+			// whose refresh token may already have rotated server-side. Refusing to
+			// replace it because its dead credential cannot be revoked would strand
+			// exactly the operator that text is speaking to.
+			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
+				readSecret: async () => "E".repeat(48),
+				loadSession: async () =>
+					storedSession(endpoint, {
+						subjectRef: "subject:someone-else",
+						refreshToken: `ceal_refresh_${"O".repeat(43)}`,
+						renewalBlockedReason: "outcome_unknown",
+					}),
+				saveSession: async (session) => {
+					stored = session;
+				},
+			});
+			assert.equal(payload.session_replacement, "replaced");
+			assert.equal(payload.previous_session_revoked, "already_unusable");
+			assert.equal(stored.subjectRef, "subject:hwidong");
+		},
+		{ revokeDeniedCode: "refresh_replayed" },
+	);
+});
+
+test("an unreadable session store stops an enrollment before the one-time code is read", async () => {
+	await withEnrollmentGateway(async ({ endpoint }) => {
+		let codeRead = false;
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+			readSecret: async () => {
+				codeRead = true;
+				return "E".repeat(48);
+			},
+			loadSession: async () => {
+				throw new Error("unreadable store");
+			},
+			saveSession: async () => assert.fail("must not save"),
+		});
+		assert.equal(payload.error.kind, "session_load_failed");
+		assert.equal(codeRead, false, "a one-time code is not spent to discover the store cannot be read");
 	});
 });
 
@@ -763,6 +922,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stored = null;
 		const result = await run(["session", "enroll", "--gateway", endpoint], {
 			isInteractiveTerminal: () => true,
+			loadSession: async () => null,
 			promptEnrollmentCode: async () => {
 				prompted += 1;
 				return "E".repeat(48);
@@ -784,6 +944,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let consumed = false;
 		const nonInteractive = await yamlRun(["session", "enroll", "--gateway", endpoint], 3, {
 			isInteractiveTerminal: () => false,
+			loadSession: async () => null,
 			promptEnrollmentCode: async () => {
 				consumed = true;
 				return "E".repeat(48);
@@ -801,6 +962,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stdinRead = false;
 		const ttyStdin = await yamlRun(["session", "enroll", "--gateway", endpoint, "--code-stdin"], 3, {
 			isInputTerminal: () => true,
+			loadSession: async () => null,
 			readSecret: async () => {
 				stdinRead = true;
 				return "E".repeat(48);
@@ -844,6 +1006,7 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 	try {
 		const payload = await yamlRun(["session", "enroll", "--gateway", `http://127.0.0.1:${address.port}/gateway/client`, "--code-stdin"], 3, {
 			readSecret: async () => code,
+			loadSession: async () => null,
 			saveSession: async () => {
 				saved = true;
 			},
@@ -2434,6 +2597,51 @@ test("packaged bin persists an enrolled session with owner-only modes", async ()
 	});
 });
 
+// The decision tests above drive the command through injected runtime seams,
+// which do not take the session state lock. The shipped binary always does
+// (`bin.ts` supplies `withSessionStateLock` under the same condition as
+// `saveSession`), so the refusal is proven once against the real locked store
+// and a real file rather than only against the fallback the suite exercises.
+test("packaged bin refuses a second enrollment for a different identity and leaves the stored session on disk", async () => {
+	await withEnrollmentGateway(
+		async ({ endpoint, token, revoked }) => {
+			const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-replace-"));
+			const sessionPath = path.join(home, ".ceal", "client-session.json");
+			try {
+				const first = await runBin(["session", "enroll", "--gateway", endpoint, "--code-stdin"], `${"E".repeat(48)}\n`, { HOME: home });
+				assert.equal(first.code, 0, first.stdout);
+				const second = await runBin(["session", "enroll", "--gateway", endpoint, "--code-stdin"], `${"E".repeat(48)}\n`, { HOME: home });
+				assert.equal(second.code, 3, second.stdout);
+				assert.match(second.stdout, /session_identity_conflict/u);
+				assert.match(second.stdout, /subject_ref/u);
+				assert.equal(
+					JSON.parse(readFileSync(sessionPath, "utf8")).access_token,
+					token,
+					"the identity on disk is the one this host consented to",
+				);
+				assert.deepEqual(revoked, [`ceal_refresh_${"S".repeat(43)}`], "the refused enrollment's own session is the one that ends");
+
+				const forced = await runBin(["session", "enroll", "--gateway", endpoint, "--code-stdin", "--force"], `${"E".repeat(48)}\n`, {
+					HOME: home,
+				});
+				assert.equal(forced.code, 0, forced.stdout);
+				assert.match(forced.stdout, /session_replacement: replaced/u);
+				assert.equal(JSON.parse(readFileSync(sessionPath, "utf8")).subject_ref, "subject:someone-else");
+				assert.deepEqual(revoked, [`ceal_refresh_${"S".repeat(43)}`, `ceal_refresh_${"R".repeat(43)}`], "then the displaced one does");
+			} finally {
+				rmSync(home, { recursive: true, force: true });
+			}
+		},
+		{
+			identities: [
+				{},
+				{ subject_ref: "subject:someone-else", refresh_token: `ceal_refresh_${"S".repeat(43)}` },
+				{ subject_ref: "subject:someone-else", refresh_token: `ceal_refresh_${"T".repeat(43)}` },
+			],
+		},
+	);
+});
+
 test("separate ceal processes serialize an in-flight single-use client refresh", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-refresh-lock-"));
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
@@ -3133,15 +3341,38 @@ async function runBin(args, stdin, env = {}) {
 	}
 }
 
-async function withEnrollmentGateway(callback) {
+async function withEnrollmentGateway(callback, options = {}) {
 	const token = `ceal_personal_${"T".repeat(43)}`;
 	const refreshToken = `ceal_refresh_${"R".repeat(43)}`;
+	// The same server answers revocation, so an enrollment that ends a session —
+	// the one it refuses to keep, or the one it replaces — is proven against a
+	// real socket rather than an injected stub.
+	const revoked = [];
+	// One entry per enrollment exchange, so a test can make the second one buy a
+	// different identity than the first.
+	const identities = options.identities ?? [];
+	let exchanges = 0;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		if (request.url === "/gateway/client/revoke") {
+			revoked.push(body.refresh_token);
+			response.writeHead(200, { "content-type": "application/json" });
+			response.end(
+				options.revokeDeniedCode
+					? JSON.stringify({
+							schema_version: "ceal.client_revoke_result.v1",
+							ok: false,
+							error: { code: options.revokeDeniedCode, message: "Gateway refused the revocation.", next_action: "Ask an operator." },
+						})
+					: JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }),
+			);
+			return;
+		}
 		assert.equal(request.url, "/gateway/client/enroll");
 		assert.equal(body.code, "E".repeat(48));
+		const identity = identities[exchanges++] ?? {};
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(
 			JSON.stringify({
@@ -3158,6 +3389,7 @@ async function withEnrollmentGateway(callback) {
 				refresh_token: refreshToken,
 				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
 				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+				...identity,
 			}),
 		);
 	});
@@ -3168,7 +3400,7 @@ async function withEnrollmentGateway(callback) {
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
 	try {
-		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token });
+		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token, refreshToken, revoked });
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}

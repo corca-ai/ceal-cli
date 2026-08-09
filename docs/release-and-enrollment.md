@@ -79,7 +79,11 @@ device has produced the required acceptance evidence.
 ## Additional device and recovery enrollment
 
 A worker session binds one instance, so switching is locally destructive. Do this
-only when the current binding is genuinely finished with.
+only when the current binding is genuinely finished with. The client enforces
+that now: an enrollment or adoption naming a different identity is refused with
+the changed bindings listed, and only `--force` replaces one — revoking the
+displaced session and clearing the local state it produced. Re-enrolling the
+same identity, which is what an unrenewable session needs, takes no flag.
 
 On the Gateway host (`ssh oc`), use the owner copy at
 `~/ceal/packages/ceal-operator-cli`. The installed `cealctl 0.65.3` there is the
@@ -96,6 +100,10 @@ Then locally:
 ```
 ceal session enroll --gateway <https-url> --code-stdin
 ```
+
+Add `--force` only when this host already holds a session for another identity
+and that binding is genuinely finished with; the command names what would change
+before you decide.
 
 A web-shell activation code is not this code: `ceal-ops admin-api invite` can
 never carry `ceal.client.enroll`.
