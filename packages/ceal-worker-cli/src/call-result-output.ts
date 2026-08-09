@@ -64,6 +64,44 @@ export function gatewayResultIdentity(
 	return { gateway: { instance_ref: session.instanceRef, profile_ref: profileRef ?? session.profileRef } };
 }
 
+// The Gateway's read cache replays the original serve's `non_claims` verbatim,
+// because the data really was provider-fetched once. `cache_origin` is therefore
+// the SOLE live-vs-replay discriminator the Protocol offers, and it says so at
+// `gateway-response-types.ts` — a decoder that must tell a fresh serve from a
+// replay MUST branch on its presence. Dropping it here handed an agent an
+// hour-old replay under `evidence: readback_verified`, with nothing left in the
+// document to notice it by. `redaction` travels for the same reason at one
+// remove: a class the Gateway withheld otherwise reads as one the provider does
+// not have.
+function servedResultProvenance(value: CealGatewayCallValue): Record<string, unknown> {
+	return {
+		...(value.cache_origin ? { cache_origin: value.cache_origin } : {}),
+		...(value.redaction?.omitted_classes?.length ? { redaction: value.redaction } : {}),
+	};
+}
+
+/**
+ * Everything a served result says regardless of whether its audit readback
+ * landed. Both writers below build it from here rather than each spelling it
+ * out, because the two spellings had already drifted once: `cache_origin` and
+ * `redaction` were missing from both, and a fix applied to one of them would
+ * have left the other silently answering with less.
+ */
+function servedResultHead(
+	value: CealGatewayCallValue,
+	session: CealStoredSession | null,
+	parsed: CealParsedCapabilityCall,
+): Record<string, unknown> {
+	return {
+		schema_version: "ceal.result.v2",
+		capability: parsed.capabilityId,
+		target: parsed.targetRef,
+		...gatewayResultIdentity(session, parsed.profileRef),
+		data: value.data,
+		...servedResultProvenance(value),
+	};
+}
+
 export function writeCallCompleted(
 	value: CealGatewayCallValue,
 	events: unknown,
@@ -80,13 +118,9 @@ export function writeCallCompleted(
 	return emitCallResult(
 		io,
 		{
-			schema_version: "ceal.result.v2",
 			ok: true,
 			status: "completed",
-			capability: parsed.capabilityId,
-			target: parsed.targetRef,
-			...gatewayResultIdentity(session, parsed.profileRef),
-			data: value.data,
+			...servedResultHead(value, session, parsed),
 			receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
 		},
 		record,
@@ -140,13 +174,9 @@ export function writeCallIncomplete(
 	emitCallResult(
 		io,
 		{
-			schema_version: "ceal.result.v2",
 			ok: false,
 			status: "error",
-			capability: parsed.capabilityId,
-			target: parsed.targetRef,
-			...gatewayResultIdentity(session, parsed.profileRef),
-			data: value.data,
+			...servedResultHead(value, session, parsed),
 			receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
 			error: {
 				kind: reason,

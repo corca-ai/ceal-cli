@@ -79,6 +79,9 @@ const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 // deployed 30-minute device-registration window, so the normal terminal path
 // is the Gateway's explicit `expired` response.
 const MAX_LOCAL_WAIT_MS = 35 * 60 * 1000;
+// Only ever used when the Gateway did not answer, so it named no interval of its
+// own. A Gateway-supplied interval is still honored exactly.
+const POLL_RETRY_FLOOR_MS = 1_000;
 
 interface AdoptionOutcome {
 	code: string;
@@ -177,6 +180,10 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 	const sleep = runtime.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const localDeadline = monotonicNow() + MAX_LOCAL_WAIT_MS;
 	let approvalWaitAnnounced = false;
+	// Retained across iterations so a poll that never returned still has an
+	// interval to wait, and so a run of failures is bounded by the same local
+	// ceiling every other wait answers to rather than by a separate counter.
+	let retryAfterMs = POLL_RETRY_FLOOR_MS;
 
 	while (true) {
 		let response: Awaited<ReturnType<typeof client.poll>>;
@@ -188,7 +195,19 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 				signature,
 			} as Parameters<typeof client.poll>[0]);
 		} catch (error) {
-			return writeAdoptionFailure(io, transportOutcome(error, "poll"));
+			// By this point the employee has already verified a mailbox in a browser
+			// and may have waited out an operator approval, and the device keys exist
+			// only in this process — the leaf help says so: interrupting requires a
+			// fresh adoption. Ending that on one dropped connection spends the
+			// human's work to report a packet. A timeout or a failed request is
+			// another wait tick, bounded by the same local ceiling below; a malformed
+			// response or an unusable configuration stays terminal, because retrying
+			// those returns the same answer.
+			const outcome = transportOutcome(error, "poll");
+			if (outcome.code !== "request_timeout" && outcome.code !== "request_failed") return writeAdoptionFailure(io, outcome);
+			if (monotonicNow() + retryAfterMs > localDeadline) return writeAdoptionFailure(io, waitTimeout());
+			await sleep(retryAfterMs);
+			continue;
 		}
 
 		if (response.status === "failed") return writeAdoptionFailure(io, failureOutcome(response.code));
@@ -206,6 +225,9 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 				ciphertext: response.ciphertext,
 			});
 		}
+		// The Gateway's own interval, remembered so a later poll that returns
+		// nothing at all still has one to wait.
+		retryAfterMs = Math.max(response.retry_after_ms, POLL_RETRY_FLOOR_MS);
 		if (response.status === "approval_required" && !approvalWaitAnnounced) {
 			io.stderr.write("Mailbox verified. Waiting for operator approval. This command will continue automatically.\n");
 			approvalWaitAnnounced = true;
@@ -216,13 +238,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 		// wall-clock comparison would reject a valid confirmation on a skewed
 		// device. The local monotonic ceiling merely prevents an unavailable
 		// Gateway from keeping this process alive indefinitely.
-		if (monotonicNow() + response.retry_after_ms > localDeadline) {
-			return writeAdoptionFailure(io, {
-				code: "wait_timeout",
-				message: "The Gateway did not finish this adoption within the local safety window.",
-				nextAction: "Check Gateway reachability and run 'ceal session adopt' again; the previous device keys are discarded.",
-			});
-		}
+		if (monotonicNow() + response.retry_after_ms > localDeadline) return writeAdoptionFailure(io, waitTimeout());
 		await sleep(response.retry_after_ms);
 	}
 }
@@ -385,6 +401,14 @@ function presentVerification(io: CealCliIo, started: CealDeviceEnrollmentStartRe
 // mismatch in the middle survivable.
 function grouped(fingerprint: string): string {
 	return (fingerprint.match(/.{1,8}/gu) ?? [fingerprint]).join(" ");
+}
+
+function waitTimeout(): AdoptionOutcome {
+	return {
+		code: "wait_timeout",
+		message: "The Gateway did not finish this adoption within the local safety window.",
+		nextAction: "Check Gateway reachability and run 'ceal session adopt' again; the previous device keys are discarded.",
+	};
 }
 
 function failureOutcome(code: "unsupported_feature" | "recovery_required" | "expired"): AdoptionOutcome {

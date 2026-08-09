@@ -107,6 +107,22 @@ test("darwin native build removes, injects, then ad-hoc signs in order", async (
 		{ outputDirectory: output, ...fixture },
 		{
 			currentPlatform: () => "darwin-arm64",
+			// Every other step of this build is stubbed, because the assertions below
+			// are about darwin step order, platform propagation and artifact naming.
+			// Staging the real packed consumer proved none of them and cost more than
+			// the rest of the test put together; the unstubbed path is proven by the
+			// linux test above, which asserts the consumer smoke it produces.
+			prepareConsumer: ({ stage }) => {
+				const consumerDirectory = path.join(stage, "consumer");
+				const workerBin = path.join(consumerDirectory, "node_modules", ".bin", "ceal");
+				mkdirSync(path.dirname(workerBin), { recursive: true });
+				writeFileSync(workerBin, "#!/usr/bin/env node\n");
+				return {
+					worker: { name: "ceal-worker-cli-fixture.tgz", bytes: 1, sha256: "0".repeat(64), path: path.join(stage, "fixture.tgz") },
+					consumerSmoke: { resolved: "packed", fixture: true },
+					consumer: { directory: consumerDirectory, workerBin },
+				};
+			},
 			bundle: async ({ bundlePath }) => writeFileSync(bundlePath, "bundle\n"),
 			createBlob: ({ blobPath }) => writeFileSync(blobPath, "blob\n"),
 			copyRuntime: ({ artifactPath }) => writeFileSync(artifactPath, "runtime\n"),

@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:f
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
 
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -55,7 +56,7 @@ export function ensureBuilt(packagePath, build = runNpmBuild) {
 }
 
 function runNpmBuild(packagePath) {
-	execFileSync("npm", ["run", "build"], { cwd: path.join(REPO_ROOT, packagePath), stdio: "pipe" });
+	execFileSync("npm", ["run", "build"], { cwd: path.join(REPO_ROOT, packagePath), stdio: "pipe", env: toolchainEnv() });
 }
 
 // Exported so the mutex can be proven against a cheap body instead of only

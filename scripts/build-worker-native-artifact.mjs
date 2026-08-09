@@ -94,7 +94,13 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 							"Worker native artifacts require generated Gateway handoff bytes to match the SHA-locked source handoff.",
 						);
 					}
-					const packed = prepareWorkerReleaseConsumer({
+					// Reached through `dependencies` like every other step, so a test
+					// about step order, platform propagation or artifact naming can
+					// stub it the way it already stubs bundle, blob, runtime copy,
+					// injection, signing and smoke. The real staging is proven by the
+					// test that exercises this path unstubbed; the darwin ordering test
+					// was paying seven seconds for a fixture it asserts nothing about.
+					const packed = (dependencies.prepareConsumer ?? prepareWorkerReleaseConsumer)({
 						repoRoot,
 						stage,
 						inputs,

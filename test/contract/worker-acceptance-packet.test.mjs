@@ -226,7 +226,11 @@ test("the packet describes the install it measured, and its non-claims follow wh
 
 	assert.equal(packet.guide.status, "registered");
 	assert.equal(packet.guide.exit_code, 0);
-	assert.equal(packet.guide.registered_hosts.length, 2);
+	// A resolved host path is not a registration: `hostStates` gives a `staged`
+	// host one too. The count must follow `registered`, which this fixture leaves
+	// false on both hosts.
+	assert.equal(packet.guide.resolved_host_paths.length, 2);
+	assert.equal(packet.guide.registered_host_count, 0);
 
 	assert.equal(packet.gateway_session.reached, true);
 	assert.equal(packet.gateway_session.instance_ref, "instance:fixture");
@@ -301,7 +305,7 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 	assert.equal(rendered.status, 0, rendered.stderr);
 	assert.match(rendered.stdout, /^installed: {2}0[.]66[.]1 linux-amd64 {2}[0-9a-f]{64}$/mu);
 	assert.match(rendered.stdout, /^ {12}digests agree: bytes = manifest = SHA256SUMS$/mu);
-	assert.match(rendered.stdout, /^guide: {6}registered \(2 host paths\)$/mu);
+	assert.match(rendered.stdout, /^guide: {6}registered \(0 registered of 2 resolved hosts\)$/mu);
 	assert.match(rendered.stdout, /^gateway: {4}instance:fixture protocol 0[.]65[.]0 allow in \d+ms$/mu);
 	assert.match(rendered.stdout, /^call: {7}not requested$/mu);
 	assert.match(rendered.stdout, /^non_claims:$/mu);
@@ -391,7 +395,12 @@ function packetFixture() {
 			client_protocol_version: "1.3.0",
 		},
 		gateway_protocol_input: { package: "@corca-ai/ceal-protocol", producer: { repository: "corca-ai/ceal" } },
-		guide: { status: "registered", exit_code: 0, registered_hosts: ["/home/someone/.claude/skills", "/home/someone/.codex/skills"] },
+		guide: {
+			status: "registered",
+			exit_code: 0,
+			resolved_host_paths: ["/home/someone/.claude/skills", "/home/someone/.codex/skills"],
+			registered_host_count: 2,
+		},
 		gateway_session: {
 			reached: true,
 			exit_code: 0,
@@ -421,7 +430,7 @@ test("the sanitized record omits every host-local path and keeps the Gateway's o
 	// is caught too.
 	assert.doesNotMatch(serialized, /\/home\/someone/u, "the record leaked a host filesystem path");
 	assert.equal(Object.hasOwn(record.installed_client, "binary_path"), false);
-	assert.equal(Object.hasOwn(record.guide, "registered_hosts"), false);
+	assert.equal(Object.hasOwn(record.guide, "resolved_host_paths"), false);
 	// The count is the evidence; the paths were the leak.
 	assert.equal(record.guide.registered_host_count, 2);
 

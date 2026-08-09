@@ -377,7 +377,12 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				clientProtocolVersion: PROTOCOL_VERSION,
 				guide: {
 					status: guide?.status ?? "unavailable",
-					registered_host_count: guide?.hosts?.filter((host) => host.registration_path).length ?? 0,
+					// `registration_path` is set for every host whose root merely
+					// resolved — `hostStates` gives a `staged` host one too, and carries
+					// the truth in `registered`. Counting paths made an operator who had
+					// never run `guide register` emit a record claiming both hosts were
+					// registered, and two published acceptance records say so.
+					registered_host_count: guide?.hosts?.filter((host) => host.registered).length ?? 0,
 				},
 				session: {
 					instance_ref: handshake.value.instance_ref,
@@ -763,6 +768,12 @@ function runGuideAction(
 // was asked? It is not "the state is good" — `ceal session` reporting
 // `unconfigured` answered correctly, while `ceal capabilities` without a session
 // could not answer at all. That is why `ok` tracks the exit code exactly.
+//
+// `ceal version` is the one surface that answers no `ok`, and it stays that way:
+// its document is frozen byte for byte because an installed generation compares
+// it during `ceal update`. "Every surface" above means every surface a reader may
+// branch on; the shipped guide names the exception so an agent does not read that
+// document's missing `ok` as a failure.
 
 function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register" = "status", agent: CealAgentGuideHost = "codex"): number {
 	writeYaml(io.stdout, {

@@ -81,6 +81,10 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
 5. Parse the complete stdout YAML document. Branch on `ok`, which every command
    answers with the same meaning — whether the command answered what it was
    asked, not whether the state is good — and which agrees with the exit code.
+   One installed document is deliberately frozen byte for byte, because an
+   installed client compares it while upgrading, and it therefore answers no `ok`
+   at all. A document carrying no `ok` key is read by its exit code alone: at
+   exit 0 it answered. Absence is not a false `ok`.
    When `ok` is false, read `error.kind`; that is the one error key on every
    surface. Then inspect status, evidence, claim, next-action, artifact, and
    readback fields that are actually present, and the issuing `gateway` block

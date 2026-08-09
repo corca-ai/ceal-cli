@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
 import { withBuiltPackages } from "./repo-build.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -96,6 +97,7 @@ function packPackage(root, sourcePath, declaredExports) {
 			cwd: packageDirectory,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
+			env: toolchainEnv(),
 		}),
 	)[0];
 	const tarball = path.join(root, packed.filename);

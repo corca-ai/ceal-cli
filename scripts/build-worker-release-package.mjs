@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { toolchainEnv } from "./lib/toolchain-env.mjs";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -203,10 +204,31 @@ function compilePackage(packageDirectory, dependencyRoot, dependencies) {
 		(dependencies.runCompiler ?? execFileSync)(process.execPath, [compiler, "-p", "tsconfig.build.json"], {
 			cwd: packageDirectory,
 			stdio: "pipe",
+			env: toolchainEnv(),
 		});
-	} catch {
-		fail("worker_package_build_failed", "Worker-owned TypeScript source did not compile against the supplied Protocol artifact.");
+	} catch (error) {
+		// The bare message named a source defect for every way tsc can fail,
+		// including the ways that are not about the source at all — an OOM kill or
+		// a missing compiler read as "your TypeScript does not compile", and cost a
+		// re-run to find out otherwise. tsc writes its diagnostics to stdout, so
+		// carry both streams and the signal.
+		fail(
+			"worker_package_build_failed",
+			`Worker-owned TypeScript source did not compile against the supplied Protocol artifact.${compilerDiagnosis(error)}`,
+		);
 	}
+}
+
+// `execFileSync` attaches the captured streams and the terminating signal to the
+// thrown error; a stubbed compiler may attach neither, so every part is optional.
+function compilerDiagnosis(error) {
+	if (!error || typeof error !== "object") return "";
+	const streams = [error.stdout, error.stderr]
+		.map((stream) => (stream === undefined || stream === null ? "" : String(stream).trim()))
+		.filter((text) => text.length > 0)
+		.join("\n");
+	const signal = typeof error.signal === "string" && error.signal ? ` (compiler terminated by ${error.signal})` : "";
+	return streams.length > 0 ? `${signal} Compiler output: ${streams.slice(0, 4000)}` : signal;
 }
 
 function packPackage(packageDirectory, outputDirectory, dependencies) {
@@ -217,6 +239,7 @@ function packPackage(packageDirectory, outputDirectory, dependencies) {
 			cwd: packageDirectory,
 			encoding: "utf8",
 			maxBuffer: 1024 * 1024,
+			env: toolchainEnv(),
 		});
 	} catch {
 		fail("worker_package_pack_failed", "Worker-owned package could not be packed.");

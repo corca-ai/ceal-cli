@@ -37,10 +37,10 @@
     },
     {
       "surface": "code",
-      "id": "54accb51f9a3a7cc",
+      "id": "adfa8ccb9c834a89",
       "class": "intentional",
-      "reviewed_at": "2026-08-08",
-      "note": "scripts/build-worker-release-assets.mjs compose vs merge, and the native-artifact and release-package entries. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. Concretely the members share the two-line entry preamble, a mkdtemp stage in a try/finally, the result-envelope key order, and the terminal error funnel. Their substance is disjoint: compose cross-checks a built binary's embedded contracts against source and emits a per-platform manifest, merge reconciles N composed sets and re-asserts protocol provenance, native runs esbuild/postject, package wraps the consumer staging. Extracting the stage and envelope means passing a callback plus six to eight fields to rebuild four different result objects, which inverts control in the functions that decide what ships. The real duplication these files did carry was removed instead: publishOutput was byte-identical in all three and inspectOutput differed only in its subject noun, and both now live in scripts/lib/output-directory.mjs."
+      "reviewed_at": "2026-08-09",
+      "note": "scripts/build-worker-release-assets.mjs compose vs merge, and the native-artifact and release-package entries. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. Concretely the members share the two-line entry preamble, a mkdtemp stage in a try/finally, the result-envelope key order, and the terminal error funnel. Their substance is disjoint: compose cross-checks a built binary's embedded contracts against source and emits a per-platform manifest, merge reconciles N composed sets and re-asserts protocol provenance, native runs esbuild/postject, package wraps the consumer staging. Extracting the stage and envelope means passing a callback plus six to eight fields to rebuild four different result objects, which inverts control in the functions that decide what ships. The real duplication these files did carry was removed instead: publishOutput was byte-identical in all three and inspectOutput differed only in its subject noun, and both now live in scripts/lib/output-directory.mjs. Rotated from 54accb51f9a3a7cc: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
     },
     {
       "surface": "code",
@@ -93,10 +93,10 @@
     },
     {
       "surface": "code",
-      "id": "a7fc6c4d435eaf51",
+      "id": "6bf41592e993a677",
       "class": "intentional",
-      "reviewed_at": "2026-08-08",
-      "note": "scripts/verify-gateway-protocol-consumer.mjs against scripts/build-worker-release-package.mjs, whole-file. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. These two implement opposite strategies: the verifier runs a real npm install --offline and then refuses unless package-lock.json resolves the packed tarball with link !== true, which is its entire point; the package builder deliberately never installs and hand-stages node_modules so the build stays hermetic and injectable. Their pack helpers, smoke checks and asserted surfaces all differ. The only identical code is a three-line sha256."
+      "reviewed_at": "2026-08-09",
+      "note": "scripts/verify-gateway-protocol-consumer.mjs against scripts/build-worker-release-package.mjs, whole-file. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. These two implement opposite strategies: the verifier runs a real npm install --offline and then refuses unless package-lock.json resolves the packed tarball with link !== true, which is its entire point; the package builder deliberately never installs and hand-stages node_modules so the build stays hermetic and injectable. Their pack helpers, smoke checks and asserted surfaces all differ. The only identical code is a three-line sha256. Rotated from a7fc6c4d435eaf51: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
     },
     {
       "surface": "code",
@@ -146,6 +146,20 @@
       "class": "intentional",
       "reviewed_at": "2026-08-09",
       "note": "packages/ceal-worker-cli/src/agent-audit.ts: the lstat-or-mark-partial block in collectCodexSessions against the one in codexDayDirectories. Predates this session — neither member was touched by the change that surfaced it, and the family is in neither the gate baseline nor this file, so the ratchet had been failing on it. Classified rather than extracted on measured evidence, not preference: extracting the eight lines into a statOrPartial(target, walk) helper was tried and re-run through the gate, and it removed this two-member family while creating a FIVE-member one spanning both collectors and three spans of local-store-guards.ts — the two walkers differ mainly in that block, so removing it makes them converge. Trading a local pair for a cross-module family in the inventory path is the worse position, and the walk already reports `partial` correctly in both places."
+    },
+    {
+      "surface": "code",
+      "id": "4d047b071bc45bee",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/device-adoption.ts: the `waitTimeout()` outcome against the `recovery_required` branch of `failureOutcome`. Both are `AdoptionOutcome` literals — code, message, nextAction — so the detector is matching the type's own shape, not shared logic. They are also deliberately separate surfaces: `failureOutcome` maps codes the GATEWAY returned, `waitTimeout` names a purely local ceiling this client imposed. Folding the local one into the Gateway table would make an operator reading `error.kind` unable to tell which side ended the adoption."
+    },
+    {
+      "surface": "code",
+      "id": "5ebf240efc8ec5ee",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/call-result-output.ts: `writeCallCompleted` against `writeCallIncomplete` and the two head helpers. What was genuinely shared has already been extracted this session, into `servedResultHead` and `servedResultProvenance` — and that extraction is the fix for a real defect, because the two writers had each spelled the head out and both were silently missing `cache_origin`, the Protocol's sole live-vs-replay discriminator. What the detector still sees is the emitCallResult call and the ok/status/receipt lines, which are exactly the fields that must differ between a verified completion and an unread audit. Folding those would parameterise the difference and leave nothing readable at either call site."
     }
   ],
   "fixable_ceiling": 0,

@@ -189,7 +189,11 @@ export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability
 		guide: {
 			status: scalar(guide.stdout, "status"),
 			exit_code: guide.status,
-			registered_hosts: [...guide.stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]),
+			// A `registration_path` is present for every host whose root merely
+			// resolved, so counting paths reported registration this host never
+			// performed. `registered` is the state that says it did.
+			resolved_host_paths: [...guide.stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]),
+			registered_host_count: (guide.stdout.match(/^\s*registered: true$/gmu) ?? []).length,
 		},
 		gateway_session: {
 			reached: discovery.status === 0,
@@ -285,8 +289,9 @@ function nonClaims(packet) {
  * What is deliberately KEPT: `instance_ref` and `profile_ref`. Both are
  * Gateway-issued identifiers being returned to the Gateway that issued them, so
  * withholding them protects nobody and costs the record its binding to a
- * session. `registered_hosts` becomes a count: the number is the evidence
- * ("guide registration reached N hosts"), the paths are the leak.
+ * session. The host paths are dropped and only `registered_host_count` survives:
+ * the number is the evidence ("guide registration reached N hosts"), the paths
+ * are the leak.
  */
 export function sanitizedAcceptanceRecord(packet) {
 	const client = packet.installed_client;
@@ -308,7 +313,7 @@ export function sanitizedAcceptanceRecord(packet) {
 		guide: {
 			status: packet.guide.status,
 			exit_code: packet.guide.exit_code,
-			registered_host_count: packet.guide.registered_hosts.length,
+			registered_host_count: packet.guide.registered_host_count,
 		},
 		gateway_session: {
 			reached: session.reached,
@@ -380,7 +385,9 @@ function render(packet) {
 	lines.push(
 		`            lock agreement: commit=${packet.gateway_protocol_input.lock_agreement.commit_matches} tree=${packet.gateway_protocol_input.lock_agreement.tree_matches}`,
 	);
-	lines.push(`guide:      ${packet.guide.status} (${packet.guide.registered_hosts.length} host paths)`);
+	lines.push(
+		`guide:      ${packet.guide.status} (${packet.guide.registered_host_count} registered of ${packet.guide.resolved_host_paths.length} resolved hosts)`,
+	);
 	const session = packet.gateway_session;
 	lines.push(
 		`gateway:    ${session.instance_ref} protocol ${session.negotiated_protocol_version} ${session.host_decision} in ${session.elapsed_ms}ms`,

@@ -55,6 +55,35 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 	assert.doesNotMatch(packedPaths, /cealctl|operator/u);
 });
 
+// The compile failure used to report one sentence for every way tsc can fail,
+// including the ways that are not about the source — an OOM kill read as "your
+// TypeScript does not compile", and the diagnosis cost a re-run of the tier.
+test("a failed worker compile carries the compiler's own output and its terminating signal", (context) => {
+	const fixture = packedProtocolFixture(context);
+	const output = path.join(fixture.root, "worker-package-compile-failure");
+	const killed = Object.assign(new Error("Command failed"), {
+		stdout: "src/index.ts(1,1): error TS2307: Cannot find module '@corca-ai/ceal-protocol'.",
+		stderr: "",
+		signal: "SIGKILL",
+	});
+	assert.throws(
+		() =>
+			buildWorkerReleasePackageFromDevelopmentInputs(
+				{ repoRoot: ROOT, outputDirectory: output, ...fixture },
+				{
+					runCompiler: () => {
+						throw killed;
+					},
+				},
+			),
+		(error) =>
+			error instanceof WorkerReleasePackageError &&
+			error.code === "worker_package_build_failed" &&
+			/SIGKILL/u.test(error.message) &&
+			/TS2307/u.test(error.message),
+	);
+});
+
 test("production package build accepts only the locked archive lane", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));

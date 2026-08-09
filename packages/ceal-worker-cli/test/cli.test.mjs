@@ -614,13 +614,24 @@ test("every declared guide register route names a supported agent host", async (
 		assert.equal(subcommand.route.length, 2, subcommand.usage);
 		assert.equal(isCealAgentGuideHost(subcommand.route[1]), true, subcommand.usage);
 	}
-	// The dispatcher refuses an unsupported host instead of falling back to the
-	// default one; no store hook may be reached.
+	// An unsupported host never falls back to the default one, and no store hook is
+	// reached. Two guards can answer this, and asserting only `invalid_argument`
+	// could not tell them apart — it passed while the host guard it named was
+	// unreachable, so deleting that guard left this green. Pin which one answers.
 	const refused = await run(["guide", "register", "gemini"], {
 		registerAgentGuide: () => assert.fail("an unsupported agent host must not reach the store"),
 	});
 	assert.equal(refused.code, 2);
 	assert.match(refused.stdout, /^ {2}kind: invalid_argument$/mu);
+	// The route table has no `["register", "gemini"]` row, so dispatch refuses
+	// before the host guard is entered.
+	assert.match(refused.stdout, /Invalid guide action/u);
+	// `runGuideRegister`'s own "Unsupported guide agent host." guard is deliberately
+	// unreachable from argv — its comment says what it is for, a declared route
+	// added without its host row — and the loop above is what proves that case, by
+	// asserting every declared register route's host token. Asserting the guard's
+	// message here would only re-assert this dispatch refusal under another name.
+	assert.doesNotMatch(refused.stdout, /Unsupported guide agent host/u);
 });
 
 // corca-ai/ceal-cli#4 item 2: nothing in the binary told an agent the guide
@@ -1541,6 +1552,60 @@ test("call refuses to claim completion when audit readback has no verified event
 	assert.equal(payload.error.kind, "audit_readback_missing");
 });
 
+// The Protocol calls `cache_origin` the SOLE live-vs-replay discriminator: a
+// cache serve replays the original serve's `non_claims` verbatim, so nothing else
+// in the document distinguishes an hour-old replay from a fresh provider read.
+// The envelope used to copy `data` alone, and the guide tells an agent to report
+// completion once audit evidence is present — which a replay carries.
+test("a served call result carries the cache and redaction provenance a reader needs to tell a replay from a live read", () => {
+	const render = (extra) => {
+		let stdout = "";
+		writeCallCompleted(
+			{
+				schema_version: "ceal.gateway_call_result.v1",
+				capability_id: "file.search",
+				grant_ref: "grant:workspace-file-search",
+				grant_revision: 7,
+				target_ref: "target:workspace",
+				data: { schema_version: "ceal.file_search_result.v1", results: [] },
+				redaction: { state: "applied", omitted_classes: [] },
+				host_decision: "accepted",
+				proof_level: "host_decision",
+				non_claims: ["production_audit_not_reached"],
+				...extra,
+			},
+			[{ event_ref: "audit:1" }],
+			"request:1",
+			{
+				stdout: {
+					write: (chunk) => {
+						stdout += String(chunk);
+					},
+				},
+				stderr: { write() {} },
+			},
+			null,
+			{ capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search" },
+		);
+		return parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	};
+
+	const replay = render({
+		cache_origin: { schema_version: "ceal.gateway_cache_origin.v1", origin_at: "2026-08-09T00:00:00.000Z", age_ms: 3_600_000 },
+		redaction: { state: "applied", omitted_classes: ["raw_provider_ids"] },
+	});
+	assert.equal(replay.status, "completed");
+	assert.equal(replay.cache_origin.age_ms, 3_600_000);
+	assert.equal(replay.cache_origin.origin_at, "2026-08-09T00:00:00.000Z");
+	assert.deepEqual(replay.redaction.omitted_classes, ["raw_provider_ids"]);
+
+	// A fresh serve must stay distinguishable by ABSENCE, so neither field may be
+	// emitted empty — that would make the discriminator always present and useless.
+	const live = render({});
+	assert.equal(Object.hasOwn(live, "cache_origin"), false);
+	assert.equal(Object.hasOwn(live, "redaction"), false);
+});
+
 // corca-ai/ceal-cli#3: two instances answer with the same profile name, the same
 // client, and cross-stable target refs, so a result that does not name its
 // issuing Gateway cannot be attributed after the fact. A study mixed 2,387
@@ -1681,6 +1746,10 @@ test("compatibility result data passes through without a client-side message pro
 			text: "Full authorized message text.",
 			offset: 0,
 		},
+		// `data` is untouched, which is what this test is about. The Gateway's own
+		// redaction statement travels beside it rather than being folded into it:
+		// dropped, a withheld class read as one the provider does not have.
+		redaction: { state: "applied", omitted_classes: ["credential_material"] },
 		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
 	});
 });
