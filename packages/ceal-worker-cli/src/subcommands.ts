@@ -1,4 +1,4 @@
-import type { CealCommandDefinition } from "./index.js";
+import type { CealCommandDefinition } from "./command-definitions.js";
 
 export type CealCommandName = CealCommandDefinition["name"];
 

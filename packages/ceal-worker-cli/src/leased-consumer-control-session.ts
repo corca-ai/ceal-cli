@@ -11,6 +11,7 @@ import {
 import {
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
+	LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV,
 } from "./generated/leased-consumer-control-session-contract.js";
 import {
 	closeReadable,
@@ -66,7 +67,7 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(verifiedControlSessionContractJson()
 		routes: Readonly<Record<string, string>>;
 	}>;
 }>;
-export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = CONTROL_SESSION_CONTRACT.argv[0];
+export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV;
 const PROTECTED_SESSION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.protected_session.deadline_ms;
 const OPERATION_DEADLINE_BOUNDS_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_bounds_ms;
 /** The Gateway launcher injects the operative deadline; the contract keeps only its bounds. */
@@ -602,7 +603,7 @@ function assertEmbeddedControlSessionContract(
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse === "function";
 	if (
 		(!v4 && !v5) ||
-		value.argv[0] !== "--internal-leased-consumer-control-session" ||
+		value.argv[0] !== LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV ||
 		value.protected_session.child_fd !== 4 ||
 		value.protected_session.schema_version !== "ceal.leased_consumer_control_session.v1" ||
 		value.protected_session.maximum_bytes !== CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES ||

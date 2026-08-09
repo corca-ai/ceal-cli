@@ -7,7 +7,6 @@ import type {
 	CealGatewayDiscoveryValue,
 	CealGatewayHandshakeValue,
 } from "@corca-ai/ceal-protocol";
-import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
 import { buildAcceptanceRecord, type CealAcceptanceBoundedCall, readInstalledReleaseFacts } from "./acceptance-record.js";
 import { type CealAgentGuideHost, countRegisteredGuideHosts, isCealAgentGuideHost } from "./agent-guide.js";
 import {
@@ -33,45 +32,29 @@ import {
 	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
+import { type CealCommandDefinition, CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT } from "./command-definitions.js";
+import { commandRecovery, findCealCommand, runCealStaticCommand, writeCliError as writeError } from "./command-surface.js";
 import { type CealDiscoveryCacheKey, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "./discovery-cache.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
-import { writeHelp, writeYaml } from "./output.js";
+import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
-import {
-	CEAL_SUBCOMMANDS,
-	type CealSubcommandDefinition,
-	type CealSubcommandHandlers,
-	findSubcommand,
-	resolveSubcommandRoute,
-	splitSubcommandRoute,
-	subcommandsOf,
-} from "./subcommands.js";
+import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
+import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION } from "./worker-identity.js";
 
 // Re-exported beside the route declarations because the probe guard resolves a
 // binary through this one module: it reads the routes to decide what may run,
 // and this set to decide what must be neutralized before anything runs. Two
 // dist entry points for one guard is a seam that can drift.
 export { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "./agent-guide.js";
+export type { CealCommandDefinition } from "./command-definitions.js";
+export { CEAL_COMMANDS } from "./command-definitions.js";
 export type { CealSubcommandDefinition, CealSubcommandHandlers, CealSubcommandRouteKey } from "./subcommands.js";
 export { CEAL_SUBCOMMANDS, resolveSubcommandRoute, splitSubcommandRoute, subcommandRouteKey } from "./subcommands.js";
 export { renderPlainYamlDocument } from "./yaml.js";
-
-// Read from the manifest npm already owns rather than retyped here. The release
-// smoke test compares this against `package.json` by running the built binary,
-// so a drifted literal used to fail a tagged run — late, and only on a host that
-// runs that platform-gated proof. Deriving it removes the drift instead of
-// catching it. `dist` and `src` both sit one level below the package root, and
-// esbuild inlines the JSON when the single-executable binary is bundled, so the
-// specifier resolves identically in source, in `dist`, and inside the artifact.
-import packageJson from "../package.json" with { type: "json" };
-
-const CEAL_PACKAGE_VERSION: string = packageJson.version;
-const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
-const PROTOCOL_VERSION = CEAL_PROTOCOL_VERSION;
 
 // 0xCEA1: a stable, unregistered default so the printed observer URL is
 // predictable across sessions; --port 0 selects an ephemeral port instead.
@@ -90,203 +73,12 @@ class CealKnownPreProviderCallError extends Error {
 
 export type { CealCliIo, CealCommandRuntime, CealStableUpdateResult } from "./cli-runtime.js";
 
-export interface CealCommandDefinition {
-	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe" | "acceptance";
-	description: string;
-	usage: string;
-	/**
-	 * What a route changes, and it is the only machine-readable safety field an
-	 * operator or an agent is told to read before typing one.
-	 *
-	 * `remote_write` is here because the vocabulary used to stop at this machine.
-	 * Everything a route could do to the Gateway or to a provider had to be
-	 * spelled `read_only` or `local_write`, so `call` — the one route that
-	 * executes a governed provider capability — declared the same effect as
-	 * `version`, and `session logout` declared the same effect as linking a guide
-	 * symlink. The incident that created this field was a state change hiding in
-	 * a batch of read-only spot checks; a vocabulary that cannot name a remote
-	 * change encodes half of that lesson and leaves the rest to prose.
-	 *
-	 * The classification is what a route MAY do, never what a particular
-	 * invocation happens to do. `call` is `remote_write` even for a capability
-	 * whose own effect is `read`: the route cannot promise which capability it
-	 * will be handed, and a field that is right most of the time is one nobody
-	 * can act on.
-	 */
-	effect: "read_only" | "local_write" | "read_only_or_local_write" | "remote_write";
-	evidence: "surface" | "surface_or_host_decision";
-	result_schema: string;
-	recovery: string;
-}
-
-export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
-	{
-		name: "version",
-		description: "Show CLI and protocol versions.",
-		usage: "ceal version",
-		effect: "read_only",
-		evidence: "surface",
-		result_schema: "ceal.version.v1",
-		recovery: "Run 'ceal version' again after installing or updating the CLI.",
-	},
-	{
-		name: "commands",
-		description: "Discover worker-facing commands.",
-		usage: "ceal commands",
-		effect: "read_only",
-		evidence: "surface",
-		result_schema: "ceal.commands.v1",
-		recovery: "Descend with 'ceal <command> --help' before invoking a command.",
-	},
-	{
-		name: "update",
-		description: "Install the latest stable signed worker release into this local prefix.",
-		usage: "ceal update",
-		effect: "local_write",
-		evidence: "surface",
-		result_schema: "ceal.update.v1",
-		recovery: "Reinstall an explicitly approved signed worker release if this installed CLI cannot update itself.",
-	},
-	{
-		name: "session",
-		description: "Enroll an approved client device and inspect its renewable Gateway session.",
-		usage: "ceal session [enroll --gateway <https-url> [--code-stdin] | logout]",
-		// The widest of its children. Enrolling and adopting consume a one-time
-		// approval at the Gateway and logging out revokes a live session there;
-		// none of the three is undone by deleting a local file.
-		effect: "remote_write",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.client_session.v1",
-		recovery: "Ask the organization administrator to confirm approved access and issue a replacement device-enrollment code, then retry.",
-	},
-	{
-		name: "guide",
-		description: "Inspect or register the signed agent guide for this installed Ceal release.",
-		usage: "ceal guide [status | register codex | register claude]",
-		effect: "read_only_or_local_write",
-		evidence: "surface",
-		result_schema: "ceal.guide.v1",
-		recovery: "Run 'ceal guide status', then register only through an explicitly supported local agent host.",
-	},
-	{
-		name: "capabilities",
-		description: "Discover Gateway-issued capabilities and select bounded targets.",
-		usage:
-			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
-		effect: "read_only",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.capabilities.v1",
-		recovery: "Configure a Gateway-issued client session, then run 'ceal capabilities' and descend to a bounded target selection.",
-	},
-	{
-		name: "call",
-		description: "Invoke an approved capability and read back its Gateway audit event.",
-		usage: "ceal call <capability-id> --target <target-ref> [--profile <profile-ref>] [key=value ...]",
-		// The one route that executes a governed provider capability. Some
-		// capabilities only read, and the client does discover each capability's
-		// own `read`/`write` effect — but that is per invocation, and this field
-		// is read before the route is typed.
-		effect: "remote_write",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.result.v2",
-		recovery:
-			"Run 'ceal capabilities', then select a target for that same capability with 'ceal capabilities targets --capability <capability-id>'. Do not mix a target returned for another capability.",
-	},
-	{
-		name: "receipt",
-		description: "Inspect safe Gateway evidence for one audited capability call outcome.",
-		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
-		effect: "read_only",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.receipt.v1",
-		recovery:
-			"Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
-	},
-	{
-		name: "observe",
-		description: "Serve a loopback-only read-only page over this client's cached local state.",
-		usage: "ceal observe [--port <0|1024-65535>]",
-		effect: "read_only",
-		evidence: "surface",
-		result_schema: "ceal.observe.v1",
-		recovery: "Open the printed 127.0.0.1 URL in a local browser; stop the observer with Ctrl-C.",
-	},
-	{
-		name: "acceptance",
-		description: "Emit installed-client acceptance evidence for this exact installed release.",
-		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
-		effect: "read_only",
-		evidence: "surface_or_host_decision",
-		result_schema: "ceal.worker_acceptance_result.v2",
-		recovery:
-			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; an installed release is required and a build tree is refused.",
-	},
-];
-
-const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
-
-// Read a command's recovery line by the name it is about. A positional index is
-// how the wrong one shipped: `CEAL_COMMANDS[2].recovery` meant `session` when it
-// was written, then `update` was inserted above it, and a logged-out
-// `ceal capabilities` began telling the operator to reinstall the binary instead
-// of to get a session. Nothing caught it, because an index is still valid after
-// it starts pointing somewhere else.
-function commandRecovery(name: CealCommandDefinition["name"]): string {
-	const command = COMMAND_BY_NAME.get(name);
-	if (!command) throw new Error(`no ceal command is named ${name}`);
-	return command.recovery;
-}
-const TOP_LEVEL_HELP = [
-	"Usage: ceal <command> [options]",
-	"",
-	"Worker-facing Ceal client. Organization authority and credentials remain with the Gateway.",
-	"Named options follow required positionals, are order-independent, and may be supplied once.",
-	"",
-	"Commands:",
-	...CEAL_COMMANDS.map((command) => `  ${command.name.padEnd(14)} ${command.description}`),
-	"",
-	"Run: ceal <command> --help",
-].join("\n");
-
 export async function runCealCommand(args: readonly string[], io: CealCliIo, runtime: CealCommandRuntime = {}): Promise<number> {
-	if (topLevelHelpRequested(args)) return writeHelp(TOP_LEVEL_HELP, io);
-	if (args[0] === "help") return writeRequestedHelp(args.slice(1), io);
-	const command = COMMAND_BY_NAME.get(args[0] as CealCommandDefinition["name"]);
-	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
-	const options = args.slice(1);
-	const requestedHelp = helpRequest(command, options);
-	if (requestedHelp !== undefined) return writeHelp(requestedHelp, io);
-	if (!commandAcceptsOptions(command.name, options)) return writeError("invalid_argument", "Invalid ceal command options.", io);
-	return runKnownCommand(command.name, options, io, runtime);
-}
-
-function topLevelHelpRequested(args: readonly string[]): boolean {
-	return args.length === 0 || (args.length === 1 && (isHelpToken(args[0]) || args[0] === "help"));
-}
-
-function commandAcceptsOptions(command: CealCommandDefinition["name"], options: readonly string[]): boolean {
-	return (
-		options.length === 0 ||
-		command === "guide" ||
-		command === "capabilities" ||
-		command === "session" ||
-		command === "call" ||
-		command === "receipt" ||
-		command === "observe" ||
-		command === "acceptance"
-	);
-}
-
-// A help token anywhere in the tail is a read-only help request, never an
-// operand. Position-sensitive handling let `ceal session enroll --gateway
-// --help` reach the enrollment runner, which prompts for a credential before it
-// can fail — and let a guessed route dead-end at the top of the tree. Resolve
-// the longest declared route the leading positionals name, and fall back to the
-// parent leaf, whose `Subcommands:` block names the routes that do exist.
-function helpRequest(command: CealCommandDefinition, options: readonly string[]): string | undefined {
-	if (!options.some(isHelpToken)) return undefined;
-	const { subcommand } = splitSubcommandRoute(command.name, options);
-	return subcommand ? subcommandHelp(subcommand) : commandHelp(command);
+	const staticResult = await runCealStaticCommand(args, io);
+	if (staticResult !== undefined) return staticResult;
+	const command = findCealCommand(args[0]);
+	if (!command) throw new Error("static command dispatch did not handle an unknown command");
+	return runKnownCommand(command.name, args.slice(1), io, runtime);
 }
 
 async function runKnownCommand(
@@ -295,8 +87,6 @@ async function runKnownCommand(
 	io: CealCliIo,
 	runtime: CealCommandRuntime,
 ): Promise<number> {
-	if (command === "version") return writeVersion(io);
-	if (command === "commands") return writeCommands(io);
 	if (command === "update") return runUpdate(io, runtime);
 	if (command === "guide") return runGuide(options, io, runtime);
 	if (command === "session") return runSession(options, io, runtime);
@@ -563,133 +353,6 @@ function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
 	return result.status === "unavailable" ? 3 : 0;
-}
-
-function writeRequestedHelp(args: readonly string[], io: CealCliIo): number {
-	if (args.length === 0) return writeError("invalid_argument", "Help requires one public command name.", io);
-	const command = COMMAND_BY_NAME.get(args[0] as CealCommandDefinition["name"]);
-	if (!command) return writeError("unknown_command", "Unknown ceal command.", io);
-	if (args.length === 1) return writeHelp(commandHelp(command), io);
-	const subcommand = findSubcommand(command.name, args.slice(1));
-	return subcommand
-		? writeHelp(subcommandHelp(subcommand), io)
-		: writeError("invalid_argument", "Help requires one public command name or subcommand route.", io);
-}
-
-function commandHelp(command: CealCommandDefinition): string {
-	const options = commandHelpOptions(command.name);
-	const subcommands = subcommandsOf(command.name);
-	return [
-		`Usage: ${command.usage}`,
-		"",
-		command.description,
-		"Named options follow required positionals, are order-independent, and may be supplied once.",
-		"",
-		`Effect: ${command.effect}`,
-		`Evidence: ${command.evidence}`,
-		`Result schema: ${command.result_schema}`,
-		`Recovery/readback: ${command.recovery}`,
-		"",
-		...(subcommands.length === 0
-			? []
-			: ["Subcommands:", ...subcommandRows(subcommands), `Run: ceal ${command.name} <subcommand> --help for that leaf's own contract.`, ""]),
-		"Options:",
-		...options,
-		"  -h, --help  Show this help without performing work.",
-	].join("\n");
-}
-
-// Align on the widest route so a multi-word route such as `register codex` keeps
-// the two-space column separator that makes each row machine-readable.
-function subcommandRows(subcommands: readonly CealSubcommandDefinition[]): readonly string[] {
-	const width = Math.max(...subcommands.map((subcommand) => subcommand.route.join(" ").length));
-	return subcommands.map((subcommand) => `  ${subcommand.route.join(" ").padEnd(width)}  ${subcommand.description}`);
-}
-
-function subcommandHelp(subcommand: CealSubcommandDefinition): string {
-	return [
-		`Usage: ${subcommand.usage}`,
-		"",
-		subcommand.description,
-		...(subcommand.notes ?? []),
-		"Named options follow required positionals, are order-independent, and may be supplied once.",
-		"",
-		`Effect: ${subcommand.effect}`,
-		`Evidence: ${subcommand.evidence}`,
-		`Result schema: ${subcommand.result_schema}`,
-		`Recovery/readback: ${subcommand.recovery}`,
-		"",
-		"Options:",
-		...(subcommand.options ?? []),
-		"  -h, --help  Show this help without performing work.",
-	].join("\n");
-}
-
-function commandHelpOptions(name: CealCommandDefinition["name"]): readonly string[] {
-	if (name === "capabilities")
-		return [
-			"  --profile <profile-ref> Select one Profile for this request without re-login.",
-			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
-			"  --detail                Include each capability's full input_contract (default: concise).",
-			"  --endpoint <https-url>  Gateway client endpoint.",
-			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
-			"  --token-stdin           Read the Gateway-issued client token from stdin.",
-		];
-	if (name === "call")
-		return [
-			"  <capability-id>          Capability returned by 'ceal capabilities'.",
-			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
-			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
-			"  key=value               Capability input; repeat only fields in the discovered input contract.",
-			"                          Gateway validates capability-specific grammar and current Profile scope.",
-		];
-	if (name === "acceptance")
-		return [
-			"  --request-ref <ref>     'receipt.request_ref' from a completed 'ceal call'; embeds its verified receipt.",
-			"  --profile <profile-ref> Select one assigned Profile for this read without re-login.",
-			"                          Emits no host paths. Performs a live discovery; never performs a provider call.",
-		];
-	if (name === "observe")
-		return [
-			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
-			"                          Serves cached session/capability/install/guide state and spooled call-outcome metadata.",
-			"                          No admin surface, no provider credentials, no live refresh.",
-		];
-	return [];
-}
-
-function writeVersion(io: CealCliIo): number {
-	return writeYaml(io.stdout, {
-		schema_version: "ceal.version.v1",
-		command: "ceal",
-		version: CEAL_PACKAGE_VERSION,
-		protocol_version: PROTOCOL_VERSION,
-		supported_gateway_protocol_range: CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE,
-		credential_context: CREDENTIAL_CONTEXT,
-	});
-}
-
-function writeCommands(io: CealCliIo): number {
-	return writeYaml(io.stdout, {
-		schema_version: "ceal.commands.v1",
-		command: "ceal",
-		ok: true,
-		credential_context: CREDENTIAL_CONTEXT,
-		commands: CEAL_COMMANDS,
-		// Keep the machine-readable inventory at the same depth as installed help:
-		// an agent that parses this document must not see fewer routes than the
-		// prose surface advertises.
-		subcommands: CEAL_SUBCOMMANDS.map((subcommand) => ({
-			parent: subcommand.parent,
-			route: [...subcommand.route],
-			description: subcommand.description,
-			usage: subcommand.usage,
-			effect: subcommand.effect,
-			evidence: subcommand.evidence,
-			result_schema: subcommand.result_schema,
-			recovery: subcommand.recovery,
-		})),
-	});
 }
 
 type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandRuntime) => number;
@@ -1848,25 +1511,4 @@ function writeAcceptanceRefusal(kind: string, message: string, io: CealCliIo, ne
 		},
 	});
 	return 3;
-}
-
-function writeError(
-	kind: "unknown_command" | "invalid_argument",
-	message: string,
-	io: CealCliIo,
-	nextAction = "Run 'ceal --help'.",
-): number {
-	writeYaml(io.stdout, {
-		schema_version: "ceal.error.v1",
-		command: "ceal",
-		ok: false,
-		status: "error",
-		credential_context: CREDENTIAL_CONTEXT,
-		error: { kind, message, next_action: nextAction },
-	});
-	return 2;
-}
-
-function isHelpToken(value: string | undefined): boolean {
-	return value === "--help" || value === "-h";
 }

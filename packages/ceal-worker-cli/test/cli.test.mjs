@@ -4070,7 +4070,7 @@ test("a receipt the packaged bin could not spool is counted rather than lost sil
 	});
 });
 
-test("the packaged bin answers an unexpected failure with an error envelope and a failing exit code", async () => {
+test("the packaged bin keeps static help ahead of the full runtime and contains an unexpected runtime failure", async () => {
 	// bin.js's rejection handler is the one surface no input reaches: every
 	// command path inside runCealCommand converts its own failures into a
 	// result envelope, which is why deleting `process.exitCode = 3` there left
@@ -4083,38 +4083,77 @@ test("the packaged bin answers an unexpected failure with an error envelope and 
 		const stubDist = path.join(root, "dist");
 		mkdirSync(stubDist);
 		for (const name of readdirSync(realDist)) {
-			if (name === "index.js") continue;
+			if (name === "index.js" || name === "private-bin-runtime.js") continue;
 			// bin.js is copied, not linked: ESM resolves a symlinked module's
 			// imports from its realpath, so a linked bin.js would reach straight
 			// past the stub and load the real index.js beside the original.
-			if (name === "bin.js") copyFileSync(path.join(realDist, name), path.join(stubDist, name));
+			if (name === "bin.js" || name === "public-bin-runtime.js") copyFileSync(path.join(realDist, name), path.join(stubDist, name));
 			else symlinkSync(path.join(realDist, name), path.join(stubDist, name));
 		}
-		// Everything but runCealCommand stays real, including the
-		// renderPlainYamlDocument the handler itself uses to write the envelope.
+		// Everything but runCealCommand stays real. A marker at module evaluation
+		// proves help never reaches this full-runtime boundary; the rejecting export
+		// then reaches the packaged bin's unexpected-failure handler.
+		const runtimeMarker = path.join(root, "full-runtime-loaded");
+		const privateRuntimeMarker = path.join(root, "private-runtime-loaded");
 		writeFileSync(
 			path.join(stubDist, "index.js"),
 			[
+				'import { writeFileSync } from "node:fs";',
+				`writeFileSync(${JSON.stringify(runtimeMarker)}, "loaded");`,
 				`export * from ${JSON.stringify(path.join(realDist, "index.js"))};`,
 				"export function runCealCommand() {",
 				'\treturn Promise.reject(new Error("injected unexpected failure"));',
 				"}",
 			].join("\n"),
 		);
+		writeFileSync(
+			path.join(stubDist, "private-bin-runtime.js"),
+			[
+				'import { writeFileSync } from "node:fs";',
+				`writeFileSync(${JSON.stringify(privateRuntimeMarker)}, "loaded");`,
+				"export function runPrivateCli() { return Promise.resolve(undefined); }",
+			].join("\n"),
+		);
 		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-unexpected-home-"));
-		const child = spawn(process.execPath, [path.join(stubDist, "bin.js"), "capabilities"], {
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, HOME: home },
-		});
-		let stdout = "";
-		child.stdout.setEncoding("utf8");
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk;
-		});
-		const code = await new Promise((resolve, reject) => {
-			child.once("error", reject);
-			child.once("close", resolve);
-		});
+		const runStub = async (args) => {
+			const child = spawn(process.execPath, [path.join(stubDist, "bin.js"), ...args], {
+				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, HOME: home },
+			});
+			let stdout = "";
+			let stderr = "";
+			child.stdout.setEncoding("utf8");
+			child.stderr.setEncoding("utf8");
+			child.stdout.on("data", (chunk) => {
+				stdout += chunk;
+			});
+			child.stderr.on("data", (chunk) => {
+				stderr += chunk;
+			});
+			const code = await new Promise((resolve, reject) => {
+				child.once("error", reject);
+				child.once("close", resolve);
+			});
+			return { code, stdout, stderr };
+		};
+		for (const staticArgs of [
+			["--help"],
+			["session", "enroll", "--gateway", "--help"],
+			["commands"],
+			["version"],
+			["not-a-command"],
+			["version", "unexpected"],
+		]) {
+			const result = await runStub(staticArgs);
+			assert.ok([0, 2].includes(result.code), `${staticArgs.join(" ")}: ${result.stderr}`);
+			assert.equal(existsSync(runtimeMarker), false, `${staticArgs.join(" ")} evaluated the full runtime`);
+			assert.equal(existsSync(privateRuntimeMarker), false, `${staticArgs.join(" ")} evaluated the private runtime`);
+		}
+		const privateArg = JSON.parse(readFileSync(new URL("../leased-consumer-carrier-contract.json", import.meta.url), "utf8")).argv[0];
+		assert.equal((await runStub([privateArg])).code, 2, "the marker stub deliberately declines the private request");
+		assert.equal(existsSync(privateRuntimeMarker), true, "the contract-derived private argv must evaluate only its private runtime");
+		assert.equal(existsSync(runtimeMarker), false, "a private argv must not evaluate the public full runtime");
+		const { code, stdout } = await runStub(["capabilities"]);
 		rmSync(home, { recursive: true, force: true });
 		const payload = parseYaml(stdout);
 		assert.equal(payload.schema_version, "ceal.error.v1");

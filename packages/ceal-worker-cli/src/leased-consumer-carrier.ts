@@ -3,6 +3,7 @@ import { fstatSync } from "node:fs";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
 	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
+	LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV,
 } from "./generated/leased-consumer-carrier-contract.js";
 import {
 	GATEWAY_LEASED_CONSUMER_HANDOFF_JSON,
@@ -45,7 +46,7 @@ const SOCKET_ERROR_NAMES = Object.freeze({
 const SAFE_REF = CEAL_SAFE_REQUEST_REF;
 
 /** Internal-only argv token; derived from the signed release contract and absent from the public command registry. */
-export const LEASED_CONSUMER_CARRIER_ARGV = CARRIER_CONTRACT.argv;
+export const LEASED_CONSUMER_CARRIER_ARGV = LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -390,7 +391,7 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v2" ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
-		typeof value.argv[0] !== "string" ||
+		value.argv[0] !== LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV ||
 		!plainRecord(value.stdin) ||
 		!sameKeys(value.stdin, ["maximum_bytes", "schema_version"]) ||
 		value.stdin.schema_version !== "ceal.gateway_leased_consumer_call_request.v1" ||
