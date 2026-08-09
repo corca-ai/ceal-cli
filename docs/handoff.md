@@ -45,17 +45,11 @@ Read the counts rather than trusting them here; each line names the command.
 
 1. **Ask about pushing the issue 10 commit, then verify the closeout.** It is the
    only thing between a finished fix and a closed issue.
-2. **Issue 6 needs its author, not this lane.** Its premise is stale: the ledger
-   and the `repository-extraction:retirement:status` command it cites were
-   retired with the 2026-07-30 signed-artifact cutover, and
-   `docs/specs/gateway-operator-cli-ownership-cutover.spec.md` in `../ceal` says
-   they must not be restored or read as readiness. Retirement no longer turns on
-   this consumer. Rewriting or closing it is a GitHub write.
-3. **A structural gate for direct session writers is now carried debt.** Issue 10
+2. **A structural gate for direct session writers is now carried debt.** Issue 10
    happened because a command wrote the session store without going through a
    transition contract, and nothing structural stops the next one.
    [debt.md](debt.md) says why a regex sweep was rejected as the instrument.
-4. **Issue 12 is reported and deliberately left open.** Closure routes through
+3. **Issue 12 is reported and deliberately left open.** Closure routes through
    the cross-repo C11a final batch. The whole v5 notification path is latent —
    the shipped `leased-consumer-control-session-contract.json` is `.v2` with no
    `notification_channel`, so production takes the v4 branch and none of it runs.
@@ -65,6 +59,11 @@ Read the counts rather than trusting them here; each line names the command.
 - ~~The documentation-only CI skip has never fired live.~~ **Settled.** It fired
   on run `31286608349`, the first pushed range that carried no code: `scope`
   succeeded and both `check-native` and `check` were skipped. Nothing to track.
+- ~~Issue 6 blocks Gateway compatibility retirement.~~ **Settled — closed.** The
+  ledger and command it read from were retired upstream on 2026-07-30, and this
+  repository answered its desired capability with a different, recorded design:
+  a vendored `packages/ceal-protocol` plus `protocol-vendor-pin.json`, not an
+  installed packed artifact. The close comment carries the evidence.
 - ~~[debt.md](debt.md) was carried unconfirmed across sessions.~~ **Settled.**
   Every item was re-confirmed against the tree; none was deletable and four were
   restated because the surface had moved. The file says so and says the next
