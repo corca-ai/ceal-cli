@@ -7,70 +7,43 @@ first item in `## Next Session`.
 
 ## Continuation Capability
 
-Consume the next signed Gateway Protocol handoff without confusing a local
-Gateway checkout, a remote tag, and a published release; then cut the worker
-release only from one coherent pinned input slice.
+Finish the `ceal-v0.76.0` worker release from the already verified and committed
+Gateway Protocol handoff without weakening its proof boundary.
 
 ## Current State
 
-- The current branch contains unpushed worker-side user improvements through
-  truthful route effects and recovery, strict argv refusal, local-store cleanup
-  safety, current-session observer attribution, bounded receipt recording,
-  retired-session logout, race-safe guide registration, honest partial audit
-  lookup, and serialized receipt-drop accounting. The latest slice and proof
-  boundary live in
-  [2026-08-09-cli-user-fresh-sweep-2.md](../charness-artifacts/impl/2026-08-09-cli-user-fresh-sweep-2.md).
-- Gate builds, package-local test/coverage hooks, and release fixtures now share
-  the `dist` owner documented in [gates.md](gates.md). The current-slice contract
-  and proof commands live in
-  [2026-08-09-gate-build-reuse.md](../charness-artifacts/impl/2026-08-09-gate-build-reuse.md).
-- The v5 worker release remains ordered behind the exact signed handoff named in
-  [the Gateway request](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md).
-  A dirty or advanced `../ceal` worktree is not a release input.
+- The public signed Gateway handoff `gateway-protocol-handoff-v0.72.13` was
+  verified through the repo-owned bootstrap and consumed in commit `68be134`.
+  `gateway-protocol-handoff-lock.json` binds Gateway commit
+  `b644bdcc1883a12f30dec9f15a918eca3676b740`; the committed frozen Protocol tree
+  passes `node scripts/verify-protocol-vendor-pin.mjs`.
+- The CLI user-quality and startup work is committed locally. It includes static
+  route startup, secret-free `--timing` JSONL on stderr, truthful recovery and
+  effects, atomic local-store locking, identity-bound receipt history, and the
+  concurrency/error-reporting fixes recorded under `charness-artifacts/impl/`.
+- The manifests and lockfile are prepared for `0.76.0`, but the release proof,
+  main push, dispatch dry run, tag, public workflow, installed update, and final
+  handoff refresh have not yet completed. Do not describe this candidate as
+  released.
 
 ## Next Session
 
-1. Read the remote tag and published-release state with
-   `git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-v0.72.13*'`
-   and the four assets under
-   `https://ceal.borca.ai/releases/gateway-protocol-handoff/gateway-protocol-handoff-v0.72.13/`.
-   Gateway creates no GitHub Release. If any asset is absent, stop.
-2. Before consuming any bytes, add and prove the repo-owned read-only bootstrap
-   required by [release-and-enrollment.md](release-and-enrollment.md). It must
-   verify sums, Sigstore identity, remote tag/commit, archive inventory, and the
-   candidate lock tuple without writing this repository. Until it exists, stop;
-   do not derive a lock or vendor bytes from `../ceal`.
-3. Use only that verified candidate to commit the frozen protocol tree, both pin
-   files, private control-session contract, generated source, and workflow
-   literals as one handoff-input slice. Falsify the pin before accepting it.
-4. Make the manifest/package-lock version bump as a separate release commit,
-   run `npm run check`, and confirm the free preconditions in
-   [operator-acceptance.md](operator-acceptance.md).
-5. At each push, tag, and publish boundary apply `AGENTS.md` `## Boundaries`
-   separately. After the approved main push, read its `check.yml`; only then
-   obtain both tag and release-publish authority before the tag push.
-6. Complete the worker release procedure through installed `ceal update`
-   readback. Do not describe that as a live provider readback without a real
-   Gateway session.
-
-## Discuss
-
-- A release tag is irreversible. Gateway writes remain a separate approval and
-  are not part of this continuation.
-- The fresh sweep leaves two explicit design slices rather than hiding them in a
-  point fix: a local session generation for late pre-logout receipt writers, and
-  route-specific lazy public runtimes for stateful-command startup.
-- Discovery-cache subject/instance scope remains a Gateway-owned semantic
-  question. A synthetic lock-successor swap and a non-conforming fake cosign are
-  not user failures without reachable reproductions.
+1. Run the full local gate and maintainer-local duplication and shell gates.
+2. Commit the version/release-record slice, then perform the required fresh-eye
+   release-claim review.
+3. Push `main`, match `origin/main`, and read the exact commit's `check.yml` run.
+4. Dispatch and read the `ceal-release.yml` dry run because the workflow changed.
+5. Create and push `ceal-v0.76.0`, watch the tag workflow, and verify the public
+   release inventory, checksums, and signatures.
+6. Confirm no legacy `ceal` process is running, then run `ceal update` and the
+   local installed readbacks. Leave macOS install and live Gateway/provider
+   readback explicitly unclaimed.
+7. Refresh this handoff and the release record to the evidence actually reached,
+   commit that documentation, and push it.
 
 ## References
 
 - [release procedure](release-and-enrollment.md) ·
   [release preconditions and proof ceiling](operator-acceptance.md) ·
-  [protocol pin rules](gates.md) · [standing goal](release-guard-reachability.md)
-
-Refresh kept: the signed-handoff dependency, missing trust bootstrap, and exact
-release sequence.
-Refresh non-claims: no Gateway handoff release, worker tag, installed update, or
-live provider behavior is claimed here; the commands above must re-read them.
+  [Protocol pin rules](gates.md) ·
+  [release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.76.0 (`ceal-v0.76.0`)
+
+This release makes the public CLI faster to enter, safer under concurrent local
+state changes, and substantially easier to diagnose without changing its
+machine-readable stdout contract.
+
+- `ceal --timing <command>` emits secret-free JSON Lines phase measurements on
+  stderr. The fixed client-side phases expose startup, local-state, Gateway
+  request, and rendering cost where applicable; they do not claim provider-side
+  latency or a live Gateway readback.
+- Static help, command discovery, version reporting, and malformed-route refusal
+  avoid loading the full public or private runtimes. Recovery points at the
+  nearest useful help or read-only session-status route.
+- Session, cache, receipt, and guide operations close stale-write and concurrent
+  replacement races; partial audit history and dropped receipt persistence are
+  reported rather than presented as complete success.
+- Generic no-session and renewal failures now distinguish local, network, and
+  onboarding recovery, including both operator-code enrollment and conditional
+  verified-mailbox adoption where either is valid.
+- The worker consumes the signed Gateway Protocol handoff v0.72.13 and its v5
+  private capability-control notification channel. Release manifests bind the
+  exact packed client tarball as well as the Protocol and private worker inputs.
+
 **The merge step now re-reads every private release input from the checkout, not
 just one of the three.** Composing a per-platform asset set verified the carrier
 contract, the control-session contract and the Gateway handoff against the
