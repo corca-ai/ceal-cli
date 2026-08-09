@@ -45,12 +45,12 @@ Read the counts rather than trusting them here; each line names the command.
 
 1. **Ask about pushing the issue 10 commit, then verify the closeout.** It is the
    only thing between a finished fix and a closed issue.
-2. **Issue 6 is the one with someone else's clock on it.** Gateway compatibility
-   retirement is blocked on this consumer's cutover, and the ledger lives in
-   `corca-ai/ceal`, not here. Read its status there before ranking it below 10.
-   A related gap surfaced during issue 12: the vendored protocol is `0.72.12`
-   while that issue names a packed `0.72.13` selected-v5 candidate this checkout
-   does not have, so its candidate proof could not run.
+2. **Issue 6 needs its author, not this lane.** Its premise is stale: the ledger
+   and the `repository-extraction:retirement:status` command it cites were
+   retired with the 2026-07-30 signed-artifact cutover, and
+   `docs/specs/gateway-operator-cli-ownership-cutover.spec.md` in `../ceal` says
+   they must not be restored or read as readiness. Retirement no longer turns on
+   this consumer. Rewriting or closing it is a GitHub write.
 3. **A structural gate for direct session writers is now carried debt.** Issue 10
    happened because a command wrote the session store without going through a
    transition contract, and nothing structural stops the next one.
@@ -65,8 +65,10 @@ Read the counts rather than trusting them here; each line names the command.
 - ~~The documentation-only CI skip has never fired live.~~ **Settled.** It fired
   on run `31286608349`, the first pushed range that carried no code: `scope`
   succeeded and both `check-native` and `check` were skipped. Nothing to track.
-- **[debt.md](debt.md) was carried unconfirmed across sessions.** Re-confirm an
-  item before starting it, or delete it.
+- ~~[debt.md](debt.md) was carried unconfirmed across sessions.~~ **Settled.**
+  Every item was re-confirmed against the tree; none was deletable and four were
+  restated because the surface had moved. The file says so and says the next
+  reader owes the same re-check.
 
 ## References
 
