@@ -29,6 +29,7 @@ test("public bootstrap derives one lock candidate from exact signed packet ident
 	context.after(() => rmSync(result.retained_download_directory, { recursive: true, force: true }));
 	assert.equal(result.proof_level, "public_signed_artifact");
 	assert.equal(result.writes_repository, false);
+	assert.equal(result.candidate_lock.schema_version, "ceal.worker_gateway_protocol_handoff_lock.v2");
 	assert.equal(result.candidate_lock.gateway.commit, fixture.producer.commit);
 	assert.equal(result.candidate_lock.gateway.protocol_tree, fixture.producer.protocol_tree);
 	assert.equal(result.candidate_lock.protocol.version, fixture.version);

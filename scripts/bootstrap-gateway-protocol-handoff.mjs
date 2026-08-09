@@ -77,7 +77,7 @@ export function bootstrapGatewayProtocolHandoff(options = {}, dependencies = {})
 			fail("gateway_handoff_identity_mismatch", "Signed Gateway handoff bytes disagree with the remote tag or requested Protocol version.");
 		}
 		const candidateLock = {
-			schema_version: "ceal.worker_gateway_protocol_handoff_lock.v1",
+			schema_version: "ceal.worker_gateway_protocol_handoff_lock.v2",
 			status: "locked",
 			gateway: {
 				repository: REPOSITORY,

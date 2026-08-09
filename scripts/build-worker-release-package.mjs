@@ -71,6 +71,7 @@ function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInput
 						output_dir: output.directory,
 						version,
 						artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
+						client: packed.client,
 						consumer_smoke: packed.consumerSmoke,
 						protocol: inputs.protocol,
 						non_claims: [
@@ -117,6 +118,13 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 	const consumerSmoke = smokeInstalledWorker({ consumer, dependencies });
 	return {
 		worker: { name: packedWorker.filename, bytes: packedWorker.bytes, sha256: packedWorker.sha256, path: packedWorker.path },
+		client: {
+			package: packedClient.package,
+			version: packedClient.version,
+			filename: packedClient.filename,
+			bytes: packedClient.bytes,
+			sha256: packedClient.sha256,
+		},
 		consumerSmoke,
 		consumer,
 	};
@@ -321,6 +329,7 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 			status: "local_candidate_not_published",
 			version,
 			artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
+			client: packed.client,
 			guide: { name: inputs.guide.asset, bytes: guide.length, sha256: sha256(guide) },
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,

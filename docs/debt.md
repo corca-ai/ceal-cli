@@ -47,10 +47,6 @@ Everything else not listed is owned by the comment at the site and by
   vendored 0.72.12 does not export and the owner's 0.72.13 does — so a v5
   release cannot be cut without re-vendoring, and the "Gateway strips to v4"
   reasoning above stops applying the moment this worker declares v5.
-- **The signed release manifest has no client package.**
-  `ceal-worker-release-manifest-<platform>.json` records only the protocol, so a
-  consumer is left with a source-owner claim. The fix puts the client in the
-  manifest schema, which is release-affecting.
 - **CI runs macOS but proves no install there.** `check.yml`'s `check-native` leg
   and the release lane's `darwin-arm64` build both set
   `require_platform_proofs: "0"`, and `test/platform-proof.mjs` grants a non-skip

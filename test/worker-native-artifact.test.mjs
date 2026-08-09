@@ -30,6 +30,9 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	});
 	assert.equal(result.native_smoke.command, "ceal");
 	assert.equal(result.native_smoke.operator_surface_absent, true);
+	assert.equal(result.client.package, "@corca-ai/ceal");
+	assert.equal(result.client.version, result.version);
+	assert.match(result.client.sha256, /^[a-f0-9]{64}$/u);
 	const files = readdirSync(output).sort();
 	assert.deepEqual(
 		files,
@@ -48,6 +51,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	);
 	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
 	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
+	assert.deepEqual(manifest.client, result.client);
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
 	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
 	assert.equal(manifest.native_smoke.operator_surface_absent, true);
@@ -119,6 +123,13 @@ test("darwin native build removes, injects, then ad-hoc signs in order", async (
 				writeFileSync(workerBin, "#!/usr/bin/env node\n");
 				return {
 					worker: { name: "ceal-worker-cli-fixture.tgz", bytes: 1, sha256: "0".repeat(64), path: path.join(stage, "fixture.tgz") },
+					client: {
+						package: "@corca-ai/ceal",
+						version: "0.75.0",
+						filename: "corca-ai-ceal-0.75.0.tgz",
+						bytes: 1,
+						sha256: "1".repeat(64),
+					},
 					consumerSmoke: { resolved: "packed", fixture: true },
 					consumer: { directory: consumerDirectory, workerBin },
 				};

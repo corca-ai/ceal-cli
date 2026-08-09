@@ -23,6 +23,9 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 		source_or_workspace_fallback_used: false,
 	});
 	assert.equal(result.artifact.path, undefined);
+	assert.equal(result.client.package, "@corca-ai/ceal");
+	assert.equal(result.client.version, result.version);
+	assert.match(result.client.sha256, /^[a-f0-9]{64}$/u);
 	const files = readdirSync(output).sort();
 	assert.deepEqual(
 		files,
@@ -41,6 +44,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 	);
 	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-release-package-manifest.json"), "utf8"));
 	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
+	assert.deepEqual(manifest.client, result.client);
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => name !== ".ceal-worker-release-package" && name !== "SHA256SUMS")) {

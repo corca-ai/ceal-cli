@@ -99,6 +99,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			fail("native_build_failed", "Worker release assets require a successful native artifact build.");
 		if (options.version !== undefined && options.version !== native.version)
 			fail("version_mismatch", "Worker release assets version does not match the built worker artifact.");
+		const client = requireClientProvenance(native.client, native.version, "client_provenance_invalid");
 		const binaryName = `ceal-${native.platform}`;
 		const binary = readStagedFile(path.join(nativeOut, binaryName), "native_output_incomplete");
 		if (sha256(binary) !== native.artifact.sha256) fail("native_output_incomplete", "Native worker artifact bytes drifted after its build.");
@@ -148,6 +149,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			platform: native.platform,
 			command: "ceal",
 			artifact: { name: binaryName, bytes: binary.length, sha256: native.artifact.sha256 },
+			client,
 			guide: { name: GUIDE_ASSET, bytes: guide.length, sha256: sha256(guide) },
 			installer: { name: INSTALLER_NAME, bytes: installer.length, sha256: sha256(installer) },
 			third_party_notices: { name: NOTICE_NAME, bytes: notices.length, sha256: sha256(notices) },
@@ -283,6 +285,14 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		carrierHandoffIdentity(manifestBytes, sourceCarrierHandoff);
 		controlSessionContractIdentity(manifestBytes, sourceControlSessionContract);
 	}
+	const expectedClientVersion = readPackageVersion(repoRoot, "packages/ceal-client");
+	const clientIdentities = new Set();
+	for (const [platform, entries] of platforms) {
+		const manifestBytes = entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes;
+		clientIdentities.add(clientProvenanceIdentity(manifestBytes, expectedClientVersion));
+	}
+	if (clientIdentities.size !== 1)
+		fail("merge_client_provenance_drift", "Merged worker release assets require byte-identical client package provenance across platforms.");
 	// The last point at which a protocol-producer disagreement is still cheap.
 	// The pin is asserted while each platform BUILDS, and after that nothing
 	// asked again: the signing job verifies digests, the file list, and each
@@ -331,6 +341,46 @@ function platformOfAsset(name) {
 	if (binary) return binary[1];
 	const manifest = /^ceal-worker-release-manifest-((?:linux|darwin)-(?:arm64|amd64))[.]json$/u.exec(name);
 	return manifest ? manifest[1] : null;
+}
+
+function clientProvenanceIdentity(bytes, expectedVersion) {
+	try {
+		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
+		return JSON.stringify(requireClientProvenance(manifest?.client, expectedVersion, "merge_client_provenance_invalid"));
+	} catch (error) {
+		if (error instanceof WorkerReleaseAssetsError) throw error;
+		fail("merge_client_provenance_invalid", "Merged worker release assets require valid client package provenance.");
+	}
+}
+
+function requireClientProvenance(value, expectedVersion, code) {
+	if (
+		value?.package !== "@corca-ai/ceal" ||
+		value.version !== expectedVersion ||
+		value.filename !== `corca-ai-ceal-${expectedVersion}.tgz` ||
+		!Number.isSafeInteger(value.bytes) ||
+		value.bytes <= 0 ||
+		typeof value.sha256 !== "string" ||
+		!/^[a-f0-9]{64}$/u.test(value.sha256)
+	)
+		fail(code, "Worker release assets require exact packed client package provenance.");
+	return {
+		package: value.package,
+		version: value.version,
+		filename: value.filename,
+		bytes: value.bytes,
+		sha256: value.sha256,
+	};
+}
+
+function readPackageVersion(repoRoot, relativeDirectory) {
+	try {
+		const manifest = JSON.parse(readFileSync(path.join(repoRoot, relativeDirectory, "package.json"), "utf8"));
+		if (typeof manifest.version !== "string") throw new Error("invalid_version");
+		return manifest.version;
+	} catch {
+		fail("merge_client_provenance_invalid", "Merged worker release assets require the owned client package manifest.");
+	}
 }
 
 function readInventory(directory) {

@@ -113,6 +113,13 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.version, "0.65.0");
 	assert.equal(manifest.platform, "linux-arm64");
 	assert.equal(manifest.command, "ceal");
+	assert.deepEqual(manifest.client, {
+		package: "@corca-ai/ceal",
+		version: "0.65.0",
+		filename: "corca-ai-ceal-0.65.0.tgz",
+		bytes: 1234,
+		sha256: "c".repeat(64),
+	});
 	assert.equal(manifest.private_leased_consumer_carrier.contract_json, CARRIER_CONTRACT_BYTES.toString("utf8"));
 	assert.equal(manifest.private_leased_consumer_carrier.contract_sha256, CARRIER_CONTRACT_SHA256);
 	assert.equal(manifest.private_leased_consumer_control_session.contract_json, CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
@@ -331,6 +338,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// cases because they are different mistakes: bytes bound to another Gateway
 	// commit, and a manifest that names a version with no producer at all.
 	const driftCases = [
+		["client", (manifest) => (manifest.client.sha256 = "d".repeat(64)), "merge_client_provenance_drift"],
 		["carrier", (manifest) => (manifest.private_leased_consumer_carrier.contract_json = "{}"), "merge_private_carrier_contract_drift"],
 		["handoff", (manifest) => (manifest.private_leased_consumer_handoff.sha256 = "0".repeat(64)), "merge_private_carrier_handoff_drift"],
 		[
@@ -670,6 +678,7 @@ function fakeNativeBuild(
 		controlSessionSha256 = CONTROL_SESSION_CONTRACT_SHA256,
 		carrierHandoff = CARRIER_HANDOFF,
 		protocolProducer = LOCKED_PROTOCOL_PRODUCER,
+		clientSha256 = "c".repeat(64),
 	} = {},
 ) {
 	return async ({ outputDirectory }) => {
@@ -683,6 +692,13 @@ function fakeNativeBuild(
 			version,
 			platform,
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
+			client: {
+				package: "@corca-ai/ceal",
+				version,
+				filename: `corca-ai-ceal-${version}.tgz`,
+				bytes: 1234,
+				sha256: clientSha256,
+			},
 			// Producer provenance, not just a version: the merge asserts it against
 			// the lock before the artifacts are handed to signing, and the real
 			// compose path fills it from the handoff source
@@ -703,6 +719,9 @@ function fixtureRepo(root) {
 	writeFileSync(path.join(repo, "install-ceal.sh"), "#!/usr/bin/env sh\nexit 0\n", { mode: 0o755 });
 	const contractDirectory = path.join(repo, "packages", "ceal-worker-cli");
 	mkdirSync(contractDirectory, { recursive: true });
+	const clientDirectory = path.join(repo, "packages", "ceal-client");
+	mkdirSync(clientDirectory, { recursive: true });
+	writeFileSync(path.join(clientDirectory, "package.json"), `${JSON.stringify({ name: "@corca-ai/ceal", version: "0.65.0" })}\n`);
 	writeFileSync(path.join(contractDirectory, "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
 	writeFileSync(path.join(contractDirectory, "leased-consumer-control-session-contract.json"), CONTROL_SESSION_CONTRACT_BYTES);
 	writeFileSync(

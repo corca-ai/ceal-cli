@@ -6,7 +6,8 @@ import path from "node:path";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
-const LOCK_SCHEMA = "ceal.worker_gateway_protocol_handoff_lock.v1";
+const LOCK_SCHEMA_V1 = "ceal.worker_gateway_protocol_handoff_lock.v1";
+const LOCK_SCHEMA_V2 = "ceal.worker_gateway_protocol_handoff_lock.v2";
 const HANDOFF_SCHEMA = "ceal.gateway_protocol_handoff.v1";
 const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";
 // The Gateway handoff used to carry the Protocol and this repository's own
@@ -116,7 +117,7 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 }
 
 function validateLock(value) {
-	if (!isRecord(value) || value.schema_version !== LOCK_SCHEMA || value.status !== "locked") {
+	if (!isRecord(value) || ![LOCK_SCHEMA_V1, LOCK_SCHEMA_V2].includes(value.schema_version) || value.status !== "locked") {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock is invalid or not yet locked.");
 	}
 	const gateway = value.gateway;
@@ -157,6 +158,7 @@ function validateLock(value) {
 		!isRecord(signature) ||
 		signature.certificate_identity !== `https://github.com/corca-ai/ceal/${gateway.workflow_path}@refs/tags/${gateway.tag}` ||
 		signature.oidc_issuer !== "https://token.actions.githubusercontent.com" ||
+		(value.schema_version === LOCK_SCHEMA_V2 && signature.workflow_sha !== gateway.commit) ||
 		signature.run_invocation_uri !== `https://github.com/corca-ai/ceal/actions/runs/${gateway.actions_run_id}/attempts/1`
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock does not record the reviewed Sigstore signing identity.");

@@ -158,6 +158,8 @@ test("the lock declares the Protocol binding and it must agree with the tag", (c
 test("the lock must record the Sigstore identity its own tag implies", (context) => {
 	const fixture = archiveFixture(context);
 	const lock = JSON.parse(readFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), "utf8"));
+	lock.schema_version = "ceal.worker_gateway_protocol_handoff_lock.v2";
+	lock.reviewed_signature.workflow_sha = lock.gateway.commit;
 	for (const mutate of [
 		(value) => delete value.reviewed_signature,
 		(value) => {
@@ -168,6 +170,12 @@ test("the lock must record the Sigstore identity its own tag implies", (context)
 		},
 		(value) => {
 			value.reviewed_signature.run_invocation_uri = "https://github.com/corca-ai/ceal/actions/runs/1/attempts/1";
+		},
+		(value) => {
+			delete value.reviewed_signature.workflow_sha;
+		},
+		(value) => {
+			value.reviewed_signature.workflow_sha = "f".repeat(40);
 		},
 	]) {
 		refusesMutatedLock(fixture, lock, mutate);
