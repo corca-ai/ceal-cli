@@ -34,7 +34,14 @@ test("private carrier derives its one POST from the embedded handoff and decodes
 		readChannel: async () => channel,
 		closeChannel: async () => {},
 		fetchFn: async (url, init) => {
-			calls.push({ url: String(url), method: init.method, headers: init.headers, body: init.body, redirect: init.redirect });
+			calls.push({
+				url: String(url),
+				method: init.method,
+				headers: init.headers,
+				body: init.body,
+				redirect: init.redirect,
+				aborts: init.signal instanceof AbortSignal,
+			});
 			return new globalThis.Response(JSON.stringify({ ok: false, error_code: "leased_consumer_call_unavailable" }), {
 				status: 503,
 				headers: { "content-type": "application/json" },
@@ -54,6 +61,7 @@ test("private carrier derives its one POST from the embedded handoff and decodes
 			headers: { Authorization: "Bearer private-service-credential", "Content-Type": "application/json" },
 			body: JSON.stringify(request),
 			redirect: "error",
+			aborts: true,
 		},
 	]);
 	assert.equal(LEASED_CONSUMER_CARRIER_ARGV, carrierContract.argv[0]);
@@ -78,7 +86,7 @@ test("v2 protected channel uses only its fixed Unix socket path and never falls 
 			throw new Error("v2 must not fetch");
 		},
 		requestUnixSocket: async (input) => {
-			calls.push(input);
+			calls.push({ ...input, signal: input.signal instanceof AbortSignal });
 			return {
 				status: 503,
 				contentType: "application/json",
@@ -94,6 +102,16 @@ test("v2 protected channel uses only its fixed Unix socket path and never falls 
 			method: "POST",
 			credential: "private-service-credential",
 			body: JSON.stringify(request),
+			deadlineMs: carrierContract.service_call.deadline_ms,
+			maximumResponseBytes: carrierContract.result.maximum_bytes,
+			errors: {
+				aborted: "socket_request_aborted",
+				deadlineExceeded: "socket_request_deadline_exceeded",
+				responseTooLarge: "response_too_large",
+				responseFailed: "socket_response_failed",
+				requestFailed: "socket_request_failed",
+			},
+			signal: true,
 		},
 	]);
 	assert.equal(result.error_code, "leased_consumer_call_unavailable");
@@ -147,6 +165,92 @@ test("v2 shipped transport performs the bounded fixed-route post over a Unix soc
 		contentType: "application/json",
 		body: JSON.stringify(request),
 	});
+});
+
+test("a service that accepts and never answers loses the call to the deadline instead of hanging the worker", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-stall-"));
+	const socketPath = join(root, "leased-consumer-call-v2.sock");
+	const sockets = [];
+	// Accepts the connection, reads the request, and never writes a response.
+	const server = createServer(() => {});
+	server.on("connection", (socket) => sockets.push(socket));
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(socketPath, resolve);
+	});
+	t.after(async () => {
+		for (const socket of sockets) socket.destroy();
+		await new Promise((resolve) => server.close(resolve));
+		await rm(root, { recursive: true, force: true });
+	});
+	const localChannel = encoder.encode(
+		JSON.stringify({
+			schema_version: "ceal.leased_consumer_service_channel.v2",
+			transport: "unix_socket",
+			socket_path: socketPath,
+			service_credential: "private-service-credential",
+		}),
+	);
+	// Only the service-call deadline is collapsed; the FD4 channel read keeps its own.
+	const serviceCallDeadlineMs = carrierContract.service_call.deadline_ms;
+	let firedServiceCallTimer = false;
+	const carrier = runLeasedConsumerCarrier(requestBytes, {
+		readChannel: async () => localChannel,
+		closeChannel: async () => {},
+		fetchFn: async () => {
+			throw new Error("v2 must not fetch");
+		},
+		setTimer: (callback, ms) => {
+			if (ms !== serviceCallDeadlineMs) return setTimeout(callback, ms);
+			return setTimeout(() => {
+				firedServiceCallTimer = true;
+				callback();
+			}, 0);
+		},
+		clearTimer: (timer) => clearTimeout(timer),
+	});
+	const stillHanging = Symbol("still_hanging");
+	const guard = new Promise((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
+	const result = await Promise.race([carrier, guard]);
+	assert.notEqual(result, stillHanging, "the outbound service call never settled — its deadline is not applied");
+	assert.equal(firedServiceCallTimer, true);
+	assert.deepEqual(result, {
+		schema_version: "ceal.leased_consumer_call_result.v1",
+		ok: false,
+		status: "error",
+		error_code: "service_call_failed",
+	});
+});
+
+test("an https service that never answers loses the call to the same deadline", async () => {
+	const serviceCallDeadlineMs = carrierContract.service_call.deadline_ms;
+	let observedSignal = null;
+	let firedServiceCallTimer = false;
+	const carrier = runLeasedConsumerCarrier(requestBytes, {
+		readChannel: async () => channel,
+		closeChannel: async () => {},
+		// Never resolves on its own; only the deadline's abort can end this call.
+		fetchFn: (_url, init) =>
+			new Promise((_resolve, reject) => {
+				observedSignal = init.signal;
+				init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+			}),
+		setTimer: (callback, ms) => {
+			if (ms !== serviceCallDeadlineMs) return setTimeout(callback, ms);
+			return setTimeout(() => {
+				firedServiceCallTimer = true;
+				callback();
+			}, 0);
+		},
+		clearTimer: (timer) => clearTimeout(timer),
+	});
+	const stillHanging = Symbol("still_hanging");
+	const guard = new Promise((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
+	const result = await Promise.race([carrier, guard]);
+	assert.notEqual(result, stillHanging, "the https service call never settled — its deadline is not applied");
+	assert.equal(firedServiceCallTimer, true);
+	assert.equal(observedSignal?.aborted, true, "expiry must abort the fetch, not only lose the race");
+	assert.equal(result.error_code, "service_call_failed");
 });
 
 test("bad request bytes and every protected-channel failure make zero HTTP requests", async () => {

@@ -45,6 +45,39 @@ A find that predates the previous sweep of the same scope is a **miss**, and
 misses are the number that matters. A find introduced since is a new defect, and
 those two answer different questions.
 
+## The first re-sweep, 2026-08-09
+
+Run as one workflow: the three scopes above with their scope statements verbatim,
+plus the enumeration below, four independent reviewers with distinct lenses and no
+shared framing, each finding then put to a skeptic prompted to refute it.
+
+| lens | reported | survived refutation | predates |
+| --- | --- | --- | --- |
+| release path | 0 | — | — |
+| reader-facing contracts | 0 | — | — |
+| state, time, concurrency | 1 | 1 | 1 |
+| invariant enumeration | 0 of 10 checked | — | — |
+
+**The one find is a miss, not a new defect.** `leased-consumer-carrier.ts`'s
+outbound service call had no deadline; `git diff ceal-v0.75.0 HEAD -- <that file>`
+was empty, so it predates the baseline and all three sweeps walked past it —
+including the one whose own subject was applying a deadline rule to the sibling
+site that lacked it. Its fix is in `## Unreleased`.
+
+**Do not read the three zeros as convergence yet.** Two of the four lenses
+declared large unreached areas in their own denominators, the release-path lens
+most of all, so its zero is over a smaller area than the sweep it is being
+compared to. A zero over an unstated area is the same defect as a count over an
+unstated area, which is what this document was written to stop. What the run does
+establish is one comparable data point on one scope, and a second re-sweep of the
+state/time/concurrency scope is the one that would give a rate.
+
+**The enumeration came back clean and that is the result, not a null.** Ten
+invariants were identified with the site that enforces each, and every sibling
+site checked held it. That is the first evidence that `## One Fact, One Home` is
+actually enforced where it has been applied, and it is why the day's one find sat
+in the module that had no shared home at all.
+
 ## The finite task the sweeps converged on
 
 `AGENTS.md` `## One Fact, One Home` states the law. Its second working rule names

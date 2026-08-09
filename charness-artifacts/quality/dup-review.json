@@ -2,6 +2,20 @@
   "entries": [
     {
       "surface": "code",
+      "id": "04c7c82dc0fc3ac7",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "The three-line `typeof value === \"string\" && REGEX.test(value)` predicate, at every site the ratchet lists for this family. A language idiom, not a shared fact: each site tests a different regex against a different domain (a JSON content type, a safe reference, an argv token, a digest). All but one predate this session; private-worker-transport.ts joined the family only because isJsonContentType moved into the shared home this session created, which removed a real duplicate pair. Re-list the members with `npm run check:duplication` rather than trusting a count written here. Same class as the already-classified boilerplate families."
+    },
+    {
+      "surface": "code",
+      "id": "171ac3aa02bc3e23",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Rotated from 63fc4ccbcf404ffc because the fresh-eye review restored the caller-owned error vocabulary, which re-keyed the family. private-worker-transport.ts postUnixSocket against leased-consumer-control-session.ts writeLeasedConsumerAgentFrame. Same settle-once-plus-abort-listener skeleton, opposite ordering, and the ordering is the load-bearing part: postUnixSocket destroys the socket and then settles, while writeLeasedConsumerAgentFrame settles BEFORE destroying precisely so the teardown cannot supply the rejection — the comment at its abortWrite records that a clean shutdown was being reported as exit 3 when it did not. A shared helper would have to take the ordering as a parameter, which is the whole difference, and would put the two behaviours one argument apart in the code that decides how a shutdown is classified."
+    },
+    {
+      "surface": "code",
       "id": "17e36891f4f87883",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -13,6 +27,13 @@
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "test/worker-release-installer.test.mjs against a two-line import span in scripts/build-worker-native-artifact.mjs. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import."
+    },
+    {
+      "surface": "code",
+      "id": "1f6d1d747a63732a",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "scripts/generate-leased-consumer-handoff-runtime.mjs readCarrierContract vs readControlSessionContract, re-keyed. Same family and same reasoning as the already-classified 17e36891f4f87883, which this session re-keyed by adding the service_call deadline key to the carrier contract validator. That note stands unchanged: the two embedded-contract surfaces are deliberately independent because giving them a shared checker re-creates the single point of drift the asymmetry finding was about, in the code that decides whether a tampered contract is parsed."
     },
     {
       "surface": "code",
@@ -30,17 +51,24 @@
     },
     {
       "surface": "code",
+      "id": "322b1b9b02a1ca23",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-client/src/http-transport.ts mergeChunks against packages/ceal-worker-cli/src/private-worker-transport.ts concatBytes. Both join already-bounded chunks, and they sit on opposite sides of a package boundary: ceal-worker-cli depends on @corca-ai/ceal, not the reverse, so folding them means exporting an internal buffer helper from the client SDK public surface. That trades a three-line idiom for a published API this repo would then owe compatibility to. The shared home this session created is deliberately worker-internal."
+    },
+    {
+      "surface": "code",
+      "id": "4d047b071bc45bee",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/device-adoption.ts: the `waitTimeout()` outcome against the `recovery_required` branch of `failureOutcome`. Both are `AdoptionOutcome` literals — code, message, nextAction — so the detector is matching the type's own shape, not shared logic. They are also deliberately separate surfaces: `failureOutcome` maps codes the GATEWAY returned, `waitTimeout` names a purely local ceiling this client imposed. Folding the local one into the Gateway table would make an operator reading `error.kind` unable to tell which side ended the adoption."
+    },
+    {
+      "surface": "code",
       "id": "4dafaa60cfc9ee07",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "scripts/generate-leased-consumer-handoff-runtime.mjs, overlapping window over the same two contract readers as 17e36891f4f87883 — the reported ranges share lines, because the detector anchored on the shared frozen return and grew the window across a function boundary in both directions. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
-    },
-    {
-      "surface": "code",
-      "id": "adfa8ccb9c834a89",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "scripts/build-worker-release-assets.mjs compose vs merge, and the native-artifact and release-package entries. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. Concretely the members share the two-line entry preamble, a mkdtemp stage in a try/finally, the result-envelope key order, and the terminal error funnel. Their substance is disjoint: compose cross-checks a built binary's embedded contracts against source and emits a per-platform manifest, merge reconciles N composed sets and re-asserts protocol provenance, native runs esbuild/postject, package wraps the consumer staging. Extracting the stage and envelope means passing a callback plus six to eight fields to rebuild four different result objects, which inverts control in the functions that decide what ships. The real duplication these files did carry was removed instead: publishOutput was byte-identical in all three and inspectOutput differed only in its subject noun, and both now live in scripts/lib/output-directory.mjs. Rotated from 54accb51f9a3a7cc: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
     },
     {
       "surface": "code",
@@ -51,6 +79,13 @@
     },
     {
       "surface": "code",
+      "id": "5ebf240efc8ec5ee",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/call-result-output.ts: `writeCallCompleted` against `writeCallIncomplete` and the two head helpers. What was genuinely shared has already been extracted this session, into `servedResultHead` and `servedResultProvenance` — and that extraction is the fix for a real defect, because the two writers had each spelled the head out and both were silently missing `cache_origin`, the Protocol's sole live-vs-replay discriminator. What the detector still sees is the emitCallResult call and the ok/status/receipt lines, which are exactly the fields that must differ between a verified completion and an unread audit. Folding those would parameterise the difference and leave nothing readable at either call site."
+    },
+    {
+      "surface": "code",
       "id": "5f5c29172ed06436",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -58,10 +93,10 @@
     },
     {
       "surface": "code",
-      "id": "f948de0e7162c83e",
+      "id": "6bf41592e993a677",
       "class": "intentional",
       "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/leased-consumer-control-session.ts: the Agent control loop against consumeNdjson. Rotated from 692b0f2069fefe07 because the control loop changed. The prior note recorded the accumulated-buffer cap as one of three observable differences and treated reshaping it as a cost; it was a defect. MAX_FRAME_BYTES is a per-frame ceiling and the loop measured it against `pending` right after appending a chunk, so a chunk at the stream's own highWaterMark arriving behind any partial tail killed the session with frame_too_large before the first legal frame was dispatched, leaving the Agent with neither answer nor oracle. The cap now measures each extracted frame and the residual separately, which is consumeNdjson's shape. Two differences remain and are why these stay separate: an oversized single line is frame_too_large here and invalid_frame there, and both names reach stderr verbatim on the SHIPPED v4 path; and only the control loop carries the dispatch, the abort recheck and the emit. Folding them now would rename an error on shipped v4 to save the split loop."
+      "note": "scripts/verify-gateway-protocol-consumer.mjs against scripts/build-worker-release-package.mjs, whole-file. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. These two implement opposite strategies: the verifier runs a real npm install --offline and then refuses unless package-lock.json resolves the packed tarball with link !== true, which is its entire point; the package builder deliberately never installs and hand-stages node_modules so the build stays hermetic and injectable. Their pack helpers, smoke checks and asserted surfaces all differ. The only identical code is a three-line sha256. Rotated from a7fc6c4d435eaf51: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
     },
     {
       "surface": "code",
@@ -72,10 +107,38 @@
     },
     {
       "surface": "code",
+      "id": "78da89e93dd20627",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Same two readers as 1f6d1d747a63732a at a wider span, re-keyed by the same edit. Classified for the reason recorded on 17e36891f4f87883."
+    },
+    {
+      "surface": "code",
+      "id": "79824a3f9251e5bf",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/agent-audit.ts: the lstat-or-mark-partial block in collectCodexSessions against the one in codexDayDirectories. Predates this session — neither member was touched by the change that surfaced it, and the family is in neither the gate baseline nor this file, so the ratchet had been failing on it. Classified rather than extracted on measured evidence, not preference: extracting the eight lines into a statOrPartial(target, walk) helper was tried and re-run through the gate, and it removed this two-member family while creating a FIVE-member one spanning both collectors and three spans of local-store-guards.ts — the two walkers differ mainly in that block, so removing it makes them converge. Trading a local pair for a cross-module family in the inventory path is the worse position, and the walk already reports `partial` correctly in both places."
+    },
+    {
+      "surface": "code",
       "id": "949fa47905c8f03b",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
       "note": "packages/ceal-worker-cli control-session seam helpers against the carrier's. The carrier and the control session are two independent embedded-contract surfaces, and their parallelism is load-bearing rather than accidental. leased-consumer-control-session.ts:17-26 records why: this module used to parse its embedded contract text without ever reading the digest beside it while leased-consumer-carrier.ts verified its own before parsing, and 'the asymmetry was the whole finding'. The fix was to make the second surface check independently, not to give both a shared checker. Extracting into a module both import re-creates exactly the single point of drift that finding was about, and it would do so in the code that decides whether a tampered contract is parsed. Removed everything in these two files that could go without that cost: resolveTimerSeams for the two deadline races, the closeReadable re-implemented six lines below its own definition, and the byte-identical exact() predicate in the handoff generator's two contract readers."
+    },
+    {
+      "surface": "code",
+      "id": "9c35ab8ee2005928",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/profile-store.ts createCealSessionStore against discovery-cache.ts createCealDiscoveryCacheStore. Surfaced when the session store's locked handle gained `save` for the identity-replacement guard (issue 10). The parallel is the store-factory shape: guard the home, join a path, return load/save/remove. What differs is the whole reason each exists — the session store requires owner-only modes, takes a cross-process state lock with its own busy code, and refuses an unsafe directory; the cache is advisory and degrades to a live probe on any anomaly, so it deliberately does not. This is the same argument recorded for the carrier/control-session pair in 17e36891f4f87883: giving two independent safety surfaces a shared factory re-creates the single point of drift, in the code that decides whether a credential file may be written."
+    },
+    {
+      "surface": "code",
+      "id": "9de4af2a4fb6eb41",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Rotated from d17e2d11ba24cd1b because the fresh-eye review restored the caller-owned error vocabulary, which re-keyed the family. The import block of ./private-worker-transport.js in leased-consumer-carrier.ts and leased-consumer-control-session.ts. This is the detector reporting the extraction it asked for: the two modules now import the same shared home, so their import statements match. Import statements are not extractable, and a1b5412a5f2feb47 records the one attempt on that class turning one family into three."
     },
     {
       "surface": "code",
@@ -93,10 +156,10 @@
     },
     {
       "surface": "code",
-      "id": "6bf41592e993a677",
+      "id": "adfa8ccb9c834a89",
       "class": "intentional",
       "reviewed_at": "2026-08-09",
-      "note": "scripts/verify-gateway-protocol-consumer.mjs against scripts/build-worker-release-package.mjs, whole-file. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. These two implement opposite strategies: the verifier runs a real npm install --offline and then refuses unless package-lock.json resolves the packed tarball with link !== true, which is its entire point; the package builder deliberately never installs and hand-stages node_modules so the build stays hermetic and injectable. Their pack helpers, smoke checks and asserted surfaces all differ. The only identical code is a three-line sha256. Rotated from a7fc6c4d435eaf51: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
+      "note": "scripts/build-worker-release-assets.mjs compose vs merge, and the native-artifact and release-package entries. Detector artifact of the file template every script in scripts/ follows: shebang, the node: import block, the one-line ROOT computation, an exported codedErrorClass, a local fail()/sha256()/readJson(), a parseArgs and the import.meta.url main guard. Below that scaffolding the members implement different things. Same class as the already-classified a1b5412a5f2feb47: import statements and boilerplate headers are not extractable, and the one attempt on that family turned one into three because every rewritten header carried the same extra import. Concretely the members share the two-line entry preamble, a mkdtemp stage in a try/finally, the result-envelope key order, and the terminal error funnel. Their substance is disjoint: compose cross-checks a built binary's embedded contracts against source and emits a per-platform manifest, merge reconciles N composed sets and re-asserts protocol provenance, native runs esbuild/postject, package wraps the consumer staging. Extracting the stage and envelope means passing a callback plus six to eight fields to rebuild four different result objects, which inverts control in the functions that decide what ships. The real duplication these files did carry was removed instead: publishOutput was byte-identical in all three and inspectOutput differed only in its subject noun, and both now live in scripts/lib/output-directory.mjs. Rotated from 54accb51f9a3a7cc: the members are unchanged in kind, and the fingerprint moved only because this session added lines to the same files (a toolchain-env import, a compiler-diagnosis helper, a consumer-prepare seam)."
     },
     {
       "surface": "code",
@@ -114,6 +177,13 @@
     },
     {
       "surface": "code",
+      "id": "caa050ba4ec0bcd0",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "packages/ceal-worker-cli/src/session-replacement.ts endedPreviousSessionAction against scripts/verify-gateway-protocol-consumer.mjs artifactSpecifier. Two unrelated one-line functions that share only the shape `function f(x) { return `...${x}`; }` — one composes an operator next_action for a failed session write, the other builds an npm file: specifier. They are in different packages, have no caller in common, and share no concept. There is nothing to extract that would not be a helper named after a template literal."
+    },
+    {
+      "surface": "code",
       "id": "df2e822ae4dc97ee",
       "class": "intentional",
       "reviewed_at": "2026-08-08",
@@ -128,38 +198,10 @@
     },
     {
       "surface": "code",
-      "id": "caa050ba4ec0bcd0",
+      "id": "f948de0e7162c83e",
       "class": "intentional",
       "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/session-replacement.ts endedPreviousSessionAction against scripts/verify-gateway-protocol-consumer.mjs artifactSpecifier. Two unrelated one-line functions that share only the shape `function f(x) { return `...${x}`; }` — one composes an operator next_action for a failed session write, the other builds an npm file: specifier. They are in different packages, have no caller in common, and share no concept. There is nothing to extract that would not be a helper named after a template literal."
-    },
-    {
-      "surface": "code",
-      "id": "9c35ab8ee2005928",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/profile-store.ts createCealSessionStore against discovery-cache.ts createCealDiscoveryCacheStore. Surfaced when the session store's locked handle gained `save` for the identity-replacement guard (issue 10). The parallel is the store-factory shape: guard the home, join a path, return load/save/remove. What differs is the whole reason each exists — the session store requires owner-only modes, takes a cross-process state lock with its own busy code, and refuses an unsafe directory; the cache is advisory and degrades to a live probe on any anomaly, so it deliberately does not. This is the same argument recorded for the carrier/control-session pair in 17e36891f4f87883: giving two independent safety surfaces a shared factory re-creates the single point of drift, in the code that decides whether a credential file may be written."
-    },
-    {
-      "surface": "code",
-      "id": "79824a3f9251e5bf",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/agent-audit.ts: the lstat-or-mark-partial block in collectCodexSessions against the one in codexDayDirectories. Predates this session — neither member was touched by the change that surfaced it, and the family is in neither the gate baseline nor this file, so the ratchet had been failing on it. Classified rather than extracted on measured evidence, not preference: extracting the eight lines into a statOrPartial(target, walk) helper was tried and re-run through the gate, and it removed this two-member family while creating a FIVE-member one spanning both collectors and three spans of local-store-guards.ts — the two walkers differ mainly in that block, so removing it makes them converge. Trading a local pair for a cross-module family in the inventory path is the worse position, and the walk already reports `partial` correctly in both places."
-    },
-    {
-      "surface": "code",
-      "id": "4d047b071bc45bee",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/device-adoption.ts: the `waitTimeout()` outcome against the `recovery_required` branch of `failureOutcome`. Both are `AdoptionOutcome` literals — code, message, nextAction — so the detector is matching the type's own shape, not shared logic. They are also deliberately separate surfaces: `failureOutcome` maps codes the GATEWAY returned, `waitTimeout` names a purely local ceiling this client imposed. Folding the local one into the Gateway table would make an operator reading `error.kind` unable to tell which side ended the adoption."
-    },
-    {
-      "surface": "code",
-      "id": "5ebf240efc8ec5ee",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "packages/ceal-worker-cli/src/call-result-output.ts: `writeCallCompleted` against `writeCallIncomplete` and the two head helpers. What was genuinely shared has already been extracted this session, into `servedResultHead` and `servedResultProvenance` — and that extraction is the fix for a real defect, because the two writers had each spelled the head out and both were silently missing `cache_origin`, the Protocol's sole live-vs-replay discriminator. What the detector still sees is the emitCallResult call and the ok/status/receipt lines, which are exactly the fields that must differ between a verified completion and an unread audit. Folding those would parameterise the difference and leave nothing readable at either call site."
+      "note": "packages/ceal-worker-cli/src/leased-consumer-control-session.ts: the Agent control loop against consumeNdjson. Rotated from 692b0f2069fefe07 because the control loop changed. The prior note recorded the accumulated-buffer cap as one of three observable differences and treated reshaping it as a cost; it was a defect. MAX_FRAME_BYTES is a per-frame ceiling and the loop measured it against `pending` right after appending a chunk, so a chunk at the stream's own highWaterMark arriving behind any partial tail killed the session with frame_too_large before the first legal frame was dispatched, leaving the Agent with neither answer nor oracle. The cap now measures each extracted frame and the residual separately, which is consumeNdjson's shape. Two differences remain and are why these stay separate: an oversized single line is frame_too_large here and invalid_frame there, and both names reach stderr verbatim on the SHIPPED v4 path; and only the control loop carries the dispatch, the abort recheck and the emit. Folding them now would rename an error on shipped v4 to save the split loop."
     }
   ],
   "fixable_ceiling": 0,

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+**The private leased-consumer carrier's outbound service call now has a
+deadline.** It read its service channel off FD 4 under a 2,000 ms bound and then
+called the service with no bound at all, on either transport. Against a peer that
+accepts the connection and never answers — a stalled proxy, a socket peer that
+accepts and hangs — the call never settled and the worker emitted no envelope and
+never exited. The FD 4 read's ceiling was doing no work here: it is a different
+concept, and it had already completed.
+
+- `service_call.deadline_ms` is now its own key in the private carrier contract,
+  beside the existing `service_channel.deadline_ms`. Two deadlines, two concepts,
+  two homes; the carrier contract moves to `.v2`.
+- Expiry aborts the request as well as losing the race, so the socket is torn
+  down and the deadline releases the process rather than only the promise.
+- The Unix-socket POST now sets its own request timeout, which is what the
+  control session's sibling POST had all along.
+
+**The two private worker modes now share one transport home.** The deadline race
+existed in four hand-copied spellings and the fixed-route Unix-socket POST in
+two, which is how one of them ended up with no deadline. `private-worker-transport.ts`
+owns the race, the bounded-read wrapper, the socket POST, and the stream helpers;
+each mode still owns its own deadline values, response caps, and error
+vocabulary. The race answers a `settled` discriminator rather than `null`, so a
+caller whose own result may be `null` cannot confuse "answered" with "cut short".
+
+The first cut of that extraction did rename four of the control session's
+rejections, which reach an operator's stderr verbatim, and nothing went red
+because the shipped POST had no coverage at all. The socket POST now takes its
+five error names from its caller, and a test drives the shipped path against a
+peer that hangs up and pins them.
+
 **`session enroll` and `session adopt` no longer hand this host's identity over
 in silence.** A home holds exactly one session, so running either against a
 configured host substitutes the subject, Profile and membership behind every

@@ -73,8 +73,8 @@ export function readCarrierContract(file) {
 	}
 	const errors = ["invalid_request", "leased_consumer_call_unavailable", "service_call_failed", "service_channel_unavailable"];
 	if (
-		!exact(value, ["schema_version", "argv", "stdin", "service_channel", "result", "non_claims"]) ||
-		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v1" ||
+		!exact(value, ["schema_version", "argv", "stdin", "service_channel", "service_call", "result", "non_claims"]) ||
+		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v2" ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		value.argv[0] !== "--internal-leased-consumer-carrier" ||
@@ -89,6 +89,10 @@ export function readCarrierContract(file) {
 		value.service_channel.schema_versions[1] !== "ceal.leased_consumer_service_channel.v2" ||
 		value.service_channel.maximum_bytes !== 8 * 1024 ||
 		value.service_channel.deadline_ms !== 2_000 ||
+		// The outbound service call is a different concept from the FD4 channel read
+		// and carries its own deadline; the carrier has no launcher-injected one.
+		!exact(value.service_call, ["deadline_ms"]) ||
+		value.service_call.deadline_ms !== 30_000 ||
 		!exact(value.result, ["schema_version", "maximum_bytes", "allowed_error_codes"]) ||
 		value.result.schema_version !== "ceal.leased_consumer_call_result.v1" ||
 		value.result.maximum_bytes !== 32 * 1024 ||

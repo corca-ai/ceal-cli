@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -881,3 +882,27 @@ function responseFor(operation) {
 function lease() {
 	return { ...leaseInput(), delivery_attempt: 1, expires_at: "2026-08-01T00:00:30.000Z" };
 }
+
+// The shipped Unix-socket POST had no coverage at all, and that gap let a
+// refactor rename four of its rejections. These names are not internal:
+// `runLeasedConsumerControlTransport` writes `error.message` to stderr verbatim,
+// so a rename here is a shipped-output change. Drives the real postUnixSocket —
+// no `requestUnixSocket` seam — against a peer that accepts and then hangs up.
+test("the shipped Unix-socket POST keeps the error names that reach stderr", async (t) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-control-shipped-post-"));
+	const socketPath = path.join(root, "control.sock");
+	const server = createNetServer((socket) => socket.destroy());
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(socketPath, resolve);
+	});
+	t.after(async () => {
+		await new Promise((resolve) => server.close(resolve));
+		rmSync(root, { recursive: true, force: true });
+	});
+	const carrier = await openLeasedConsumerControlSession({
+		readProtectedSession: async () => sessionFor(socketPath),
+		closeProtectedSession: async () => {},
+	});
+	await assert.rejects(() => carrier.dispatch(encoder.encode(JSON.stringify(frames[0]))), /^Error: (?:request_failed|response_failed)$/u);
+});

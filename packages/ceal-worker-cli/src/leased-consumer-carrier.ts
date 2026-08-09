@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
-import { request as httpRequest } from "node:http";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
 	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
@@ -10,6 +9,18 @@ import {
 	GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON,
 	GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256,
 } from "./generated/leased-consumer-handoff.js";
+import {
+	closeReadable,
+	concatBytes,
+	isJsonContentType,
+	onceAsync,
+	postUnixSocket,
+	raceDeadline,
+	readBeforeDeadline,
+	readBoundedStream,
+	type UnixSocketErrorNames,
+	type UnixSocketResponse,
+} from "./private-worker-transport.js";
 
 const CARRIER_CONTRACT = verifyEmbeddedCarrierContract();
 const CHANNEL_SCHEMAS = CARRIER_CONTRACT.serviceChannelSchemas;
@@ -18,6 +29,16 @@ const MAX_CHANNEL_BYTES = CARRIER_CONTRACT.maximumChannelBytes;
 const MAX_REQUEST_BYTES = CARRIER_CONTRACT.maximumRequestBytes;
 const MAX_RESPONSE_BYTES = CARRIER_CONTRACT.maximumResultBytes;
 const CHANNEL_DEADLINE_MS = CARRIER_CONTRACT.channelDeadlineMs;
+/** Bounds the outbound call, not the FD4 read. Two deadlines, two concepts, two contract keys. */
+const SERVICE_CALL_DEADLINE_MS = CARRIER_CONTRACT.serviceCallDeadlineMs;
+/** The carrier answers a result envelope rather than stderr, so these stay internal. */
+const SOCKET_ERROR_NAMES = Object.freeze({
+	aborted: "socket_request_aborted",
+	deadlineExceeded: "socket_request_deadline_exceeded",
+	responseTooLarge: "response_too_large",
+	responseFailed: "socket_response_failed",
+	requestFailed: "socket_request_failed",
+});
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 
 /** Internal-only argv token; derived from the signed release contract and absent from the public command registry. */
@@ -63,6 +84,10 @@ export interface LeasedConsumerCarrierRuntime {
 		readonly method: string;
 		readonly credential: string;
 		readonly body: string;
+		readonly deadlineMs: number;
+		readonly maximumResponseBytes: number;
+		readonly errors: UnixSocketErrorNames;
+		readonly signal: AbortSignal;
 	}) => Promise<UnixSocketResponse>;
 	/** Test seam only; the shipped command always verifies the generated handoff. */
 	readonly loadHandoff?: () => CarrierHandoff;
@@ -106,7 +131,7 @@ export async function runLeasedConsumerCarrier(
 			return localFailure("service_channel_unavailable");
 		}
 		try {
-			const responseBytes = await sendCarrierRequest(channel, request, handoff, runtime);
+			const responseBytes = await sendCarrierRequestBeforeDeadline(channel, request, handoff, runtime);
 			if (responseBytes === null) return localFailure("service_call_failed");
 			const decoded = parseStrictJson(responseBytes);
 			if (!sameJson(decoded, handoff.unavailableBody)) return localFailure("service_call_failed");
@@ -137,30 +162,32 @@ function localFailure(errorCode: LeasedConsumerCarrierResult["error_code"]): Lea
 async function readChannelBeforeDeadline(runtime: LeasedConsumerCarrierRuntime): Promise<Uint8Array | null> {
 	const readChannel = runtime.readChannel ?? (() => Promise.reject(new Error("missing_channel")));
 	const closeChannel = onceAsync(runtime.closeChannel ?? (async () => {}));
-	const now = runtime.monotonicNow ?? monotonicNow;
-	const setTimer = runtime.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
-	const clearTimer = runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
-	const started = now();
-	let timedOut = false;
-	let timer: unknown;
+	return readBeforeDeadline(runtime, CHANNEL_DEADLINE_MS, readChannel, closeChannel);
+}
+
+/**
+ * Bounds the one outbound service call. Without this the carrier waits forever on
+ * a peer that accepts the connection and never answers, and the worker never
+ * emits an envelope. Aborting on expiry also tears the socket down, so the
+ * deadline releases the process rather than only releasing this promise.
+ */
+async function sendCarrierRequestBeforeDeadline(
+	channel: ServiceChannel,
+	request: JsonRecord,
+	handoff: CarrierHandoff,
+	runtime: LeasedConsumerCarrierRuntime,
+): Promise<Uint8Array | null> {
+	const controller = new AbortController();
 	try {
-		const pending = readChannel();
-		pending.catch(() => undefined);
-		const timeout = new Promise<null>((resolve) => {
-			timer = setTimer(() => {
-				timedOut = true;
-				void closeChannel();
-				resolve(null);
-			}, CHANNEL_DEADLINE_MS);
-		});
-		const value = await Promise.race([pending, timeout]);
-		if (timedOut || now() - started > CHANNEL_DEADLINE_MS) return null;
-		return value;
-	} catch {
-		return null;
+		const outcome = await raceDeadline(
+			runtime,
+			SERVICE_CALL_DEADLINE_MS,
+			sendCarrierRequest(channel, request, handoff, runtime, controller.signal),
+			() => controller.abort(),
+		);
+		return outcome.settled ? outcome.value : null;
 	} finally {
-		if (timer !== undefined) clearTimer(timer);
-		await closeChannel();
+		controller.abort();
 	}
 }
 
@@ -176,28 +203,8 @@ function createFd4Channel(): { readonly read: () => Promise<Uint8Array>; readonl
 	const stream = createReadStream("/dev/null", { fd: 4, autoClose: true, highWaterMark: MAX_CHANNEL_BYTES });
 	return {
 		read: () => readBoundedStream(stream, MAX_CHANNEL_BYTES, () => stream.destroy()),
-		close: () => {
-			if (stream.destroyed) return Promise.resolve();
-			return new Promise((resolve) => {
-				stream.once("close", resolve);
-				stream.destroy();
-			});
-		},
+		close: () => closeReadable(stream),
 	};
-}
-
-async function readBoundedStream(stream: AsyncIterable<Uint8Array>, maximum: number, abort?: () => void): Promise<Uint8Array> {
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	for await (const chunk of stream) {
-		if (!(chunk instanceof Uint8Array) || chunk.byteLength > maximum - total) {
-			abort?.();
-			throw new Error("input_too_large");
-		}
-		total += chunk.byteLength;
-		chunks.push(chunk);
-	}
-	return concatBytes(chunks, total);
 }
 
 function parseCarrierRequest(bytes: Uint8Array, handoff: CarrierHandoff): JsonRecord {
@@ -235,6 +242,7 @@ async function sendCarrierRequest(
 	request: JsonRecord,
 	handoff: CarrierHandoff,
 	runtime: LeasedConsumerCarrierRuntime,
+	signal: AbortSignal,
 ): Promise<Uint8Array | null> {
 	const body = JSON.stringify(request);
 	if (channel.kind === "https") {
@@ -245,6 +253,7 @@ async function sendCarrierRequest(
 			headers: { Authorization: `Bearer ${channel.credential}`, "Content-Type": "application/json" },
 			body,
 			redirect: "error",
+			signal,
 		});
 		if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.headers.get("content-type"))) return null;
 		return readBoundedWebResponse(response, MAX_RESPONSE_BYTES);
@@ -255,6 +264,10 @@ async function sendCarrierRequest(
 		method: handoff.method,
 		credential: channel.credential,
 		body,
+		deadlineMs: SERVICE_CALL_DEADLINE_MS,
+		maximumResponseBytes: MAX_RESPONSE_BYTES,
+		errors: SOCKET_ERROR_NAMES,
+		signal,
 	});
 	if (response.status !== handoff.unavailableStatus || !isJsonContentType(response.contentType)) return null;
 	if (response.bytes.byteLength > MAX_RESPONSE_BYTES) return null;
@@ -372,8 +385,8 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 	const value = parseStrictJson(bytes);
 	if (
 		!plainRecord(value) ||
-		!sameKeys(value, ["argv", "non_claims", "result", "schema_version", "service_channel", "stdin"]) ||
-		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v1" ||
+		!sameKeys(value, ["argv", "non_claims", "result", "schema_version", "service_call", "service_channel", "stdin"]) ||
+		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v2" ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		typeof value.argv[0] !== "string" ||
@@ -390,6 +403,10 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 		value.service_channel.schema_versions[1] !== "ceal.leased_consumer_service_channel.v2" ||
 		!Number.isSafeInteger(value.service_channel.maximum_bytes) ||
 		!Number.isSafeInteger(value.service_channel.deadline_ms) ||
+		!plainRecord(value.service_call) ||
+		!sameKeys(value.service_call, ["deadline_ms"]) ||
+		!Number.isSafeInteger(value.service_call.deadline_ms) ||
+		(value.service_call.deadline_ms as number) < 1 ||
 		!plainRecord(value.result) ||
 		!sameKeys(value.result, ["allowed_error_codes", "maximum_bytes", "schema_version"]) ||
 		typeof value.result.schema_version !== "string" ||
@@ -412,6 +429,7 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 		serviceChannelSchemas: value.service_channel.schema_versions as readonly string[],
 		maximumChannelBytes: value.service_channel.maximum_bytes as number,
 		channelDeadlineMs: value.service_channel.deadline_ms as number,
+		serviceCallDeadlineMs: value.service_call.deadline_ms as number,
 		resultSchema: value.result.schema_version,
 		maximumResultBytes: value.result.maximum_bytes as number,
 	};
@@ -436,57 +454,6 @@ async function readBoundedWebResponse(response: globalThis.Response, maximum: nu
 	} finally {
 		reader.releaseLock();
 	}
-}
-
-function postUnixSocket(input: {
-	readonly socketPath: string;
-	readonly path: string;
-	readonly method: string;
-	readonly credential: string;
-	readonly body: string;
-}): Promise<UnixSocketResponse> {
-	const body = Buffer.from(input.body, "utf8");
-	return new Promise((resolve, reject) => {
-		let settled = false;
-		const finish = (callback: () => void) => {
-			if (settled) return;
-			settled = true;
-			callback();
-		};
-		const request = httpRequest(
-			{
-				socketPath: input.socketPath,
-				path: input.path,
-				method: input.method,
-				headers: { Authorization: `Bearer ${input.credential}`, "Content-Type": "application/json", "Content-Length": String(body.byteLength) },
-			},
-			(response) => {
-				const chunks: Buffer[] = [];
-				let total = 0;
-				response.on("data", (chunk: Buffer) => {
-					total += chunk.byteLength;
-					if (total > MAX_RESPONSE_BYTES) {
-						request.destroy();
-						finish(() => reject(new Error("response_too_large")));
-						return;
-					}
-					chunks.push(chunk);
-				});
-				response.once("error", () => finish(() => reject(new Error("socket_response_failed"))));
-				response.once("end", () =>
-					finish(() =>
-						resolve({
-							status: response.statusCode ?? 0,
-							contentType: response.headers["content-type"],
-							bytes: new Uint8Array(Buffer.concat(chunks)),
-						}),
-					),
-				);
-			},
-		);
-		request.once("error", () => finish(() => reject(new Error("socket_request_failed"))));
-		request.end(body);
-	});
 }
 
 function parseStrictJson(bytes: Uint8Array): unknown {
@@ -605,37 +572,11 @@ function canonicalJson(value: unknown): unknown {
 	);
 }
 
-function concatBytes(chunks: readonly Uint8Array[], total: number): Uint8Array {
-	const value = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		value.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return value;
-}
-
-function monotonicNow(): number {
-	return performance.now();
-}
-
 function hasControlCharacter(value: string): boolean {
 	return [...value].some((character) => {
 		const code = character.codePointAt(0) ?? 0;
 		return code <= 0x1f || code === 0x7f;
 	});
-}
-
-function onceAsync(action: () => Promise<void>): () => Promise<void> {
-	let pending: Promise<void> | undefined;
-	return () => {
-		pending ??= action().catch(() => undefined);
-		return pending;
-	};
-}
-
-function isJsonContentType(value: string | string[] | null | undefined): boolean {
-	return typeof value === "string" && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
 }
 
 type ServiceChannel =
@@ -649,12 +590,6 @@ type ServiceChannel =
 			readonly socketPath: string;
 			readonly credential: string;
 	  };
-
-interface UnixSocketResponse {
-	readonly status: number;
-	readonly contentType: string | string[] | undefined;
-	readonly bytes: Uint8Array;
-}
 
 interface CarrierHandoff {
 	readonly method: string;
@@ -671,6 +606,7 @@ interface CarrierContract {
 	readonly serviceChannelSchemas: readonly string[];
 	readonly maximumChannelBytes: number;
 	readonly channelDeadlineMs: number;
+	readonly serviceCallDeadlineMs: number;
 	readonly resultSchema: string;
 	readonly maximumResultBytes: number;
 }

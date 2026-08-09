@@ -1,5 +1,5 @@
 {
-  "schema_version": "ceal.worker_private_leased_consumer_carrier_contract.v1",
+  "schema_version": "ceal.worker_private_leased_consumer_carrier_contract.v2",
   "argv": ["--internal-leased-consumer-carrier"],
   "stdin": {
     "schema_version": "ceal.gateway_leased_consumer_call_request.v1",
@@ -13,6 +13,9 @@
     ],
     "maximum_bytes": 8192,
     "deadline_ms": 2000
+  },
+  "service_call": {
+    "deadline_ms": 30000
   },
   "result": {
     "schema_version": "ceal.leased_consumer_call_result.v1",

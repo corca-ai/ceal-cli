@@ -31,8 +31,15 @@ Read the counts rather than trusting them here; each line names the command.
   `docs/acceptance/` overstate guide registration and were left as written —
   [debt.md](debt.md) says so.
 - **The sweeps converged on one shape**, now stated once as `AGENTS.md`
-  `## One Fact, One Home`. Read it before item 2 — the enumeration is its second
-  working rule applied.
+  `## One Fact, One Home`. The 2026-08-09 re-sweep applied its second working
+  rule and found the enforcement holding at every sibling it enumerated; the one
+  defect it did find was in the module that had no shared home at all.
+- **The two private worker modes now share `private-worker-transport.ts`.** Each
+  still owns its deadlines, caps, and error vocabulary. Six duplicate families
+  the ratchet then raised are classified in
+  `charness-artifacts/quality/dup-review.json` with their reasoning; four are
+  artifacts of the extraction itself, and re-folding them was declined for
+  reasons each entry states.
 - **All three gates are green here**, the two maintainer-local ones included:
   `npm run check`, `npm run check:duplication`, `npm run lint:shell`. Time a gate
   yourself rather than trusting a figure — this host is 2-core and its wall clock
@@ -46,23 +53,26 @@ Read the counts rather than trusting them here; each line names the command.
 
 ## Next Session
 
-1. **Ask about pushing.** If approved, push and then verify with the `issue`
-   skill's `issue_tool.py verify-closeout --carrier direct-commit --commit-ref
-   <ref> --expect-state CLOSED`. If declined again, change nothing and go to 2 —
-   the fix is finished either way, and nothing below depends on the push.
-2. **Run the convergence measurement and the invariant enumeration as one run.**
-   [defect-sweep.md](defect-sweep.md) owns both and owns the shape: it is one
-   dynamic-size workflow, not two tasks. What it buys is the thing three sweeps
-   could not say — whether the defect stream is converging. Do not add a fourth
-   uncomparable count.
+1. **Ask about pushing.** Declined twice now, so nothing depends on it. If
+   approved, push and then verify with the `issue` skill's `issue_tool.py
+   verify-closeout --carrier direct-commit --commit-ref <ref> --expect-state
+   CLOSED`.
+2. **Re-sweep the state/time/concurrency scope, and only that one.**
+   [defect-sweep.md](defect-sweep.md) `## The first re-sweep` records why: it is
+   the one scope with a find, so a second pass over it is the one that yields a
+   rate rather than another zero over an unstated area. Same scope statement,
+   same denominator discipline.
+3. **Close the release-path lens's denominator gap before comparing its zero to
+   anything.** That lens left most of `scripts/` unread and said so; the zero is
+   real over what it covered and says nothing about what it did not.
 
 ## Discuss
 
-- **Do not read "defects keep appearing" as converging or diverging yet.** Most
-  were wrong the day they were written and several sat inside the enforcement
-  itself — `git log ceal-v0.75.0..` has each with its provenance — and the one
-  re-sweep in the record went the wrong way. Item 2 is what would settle it;
-  until it runs, say the sample cannot support either claim.
+- **The sample still cannot support "converging" or "diverging".** One re-sweep
+  has now run and produced one comparable data point on one scope, with a miss
+  rather than a new defect — [defect-sweep.md](defect-sweep.md) has the table and
+  the caveat on the two lenses that left area unread. Two of the four zeros are
+  partly reduced coverage, not evidence.
 - **Issue 12 stays open** and is not an action here: closure routes through the
   cross-repo C11a final batch. Its v5 notification path is latent — the shipped
   contract declares no `notification_channel` — and [debt.md](debt.md) records

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { createReadStream, fstatSync } from "node:fs";
-import { request as httpRequest } from "node:http";
 import * as CealProtocol from "@corca-ai/ceal-protocol";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
@@ -13,6 +12,17 @@ import {
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
 } from "./generated/leased-consumer-control-session-contract.js";
+import {
+	closeReadable,
+	isJsonContentType,
+	onceAsync,
+	postUnixSocket,
+	raceDeadline,
+	readBeforeDeadline,
+	readBoundedStream,
+	type UnixSocketErrorNames,
+	type UnixSocketResponse,
+} from "./private-worker-transport.js";
 
 /**
  * The generator emits the contract text and its digest together, and the native
@@ -65,7 +75,6 @@ const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
 const ROUTES = Object.freeze(CONTROL_SESSION_CONTRACT.gateway.routes);
 
 type ControlSession = Readonly<{ dispatch: (frame: Uint8Array, signal?: AbortSignal) => Promise<Uint8Array> }>;
-type UnixSocketResponse = Readonly<{ status: number; contentType: string | string[] | undefined; bytes: Uint8Array }>;
 type DecodedControlFrame = Readonly<{ operation: string }> & Record<string, unknown>;
 type NotificationDecoder = (value: unknown) => Record<string, unknown>;
 type FrameEmitter = (frame: Uint8Array, signal?: AbortSignal) => void | Promise<void>;
@@ -168,7 +177,17 @@ export interface LeasedConsumerControlSessionRuntime {
 	readonly closeProtectedSession?: () => Promise<void>;
 	/** Test seam only. The shipped carrier makes one fixed-route Unix-socket POST. */
 	readonly requestUnixSocket?: (
-		input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number; signal?: AbortSignal }>,
+		input: Readonly<{
+			socketPath: string;
+			path: string;
+			method: string;
+			body: string;
+			credential: string;
+			deadlineMs: number;
+			maximumResponseBytes: number;
+			errors: UnixSocketErrorNames;
+			signal?: AbortSignal;
+		}>,
 	) => Promise<UnixSocketResponse>;
 	/** Test seam only. The shipped carrier gives protected FD 4 two seconds. */
 	readonly monotonicNow?: () => number;
@@ -437,42 +456,12 @@ async function consumeNdjson(
 	if (pending.length !== 0) throw new Error("unterminated_frame");
 }
 
-function closeReadable(stream: NodeJS.ReadableStream & { destroyed?: boolean; destroy: () => void }): Promise<void> {
-	if (stream.destroyed) return Promise.resolve();
-	return new Promise<void>((resolve) => {
-		stream.once("close", resolve);
-		stream.destroy();
-	});
-}
-
 async function readProtectedSessionBeforeDeadline(
 	runtime: LeasedConsumerControlSessionRuntime,
 	read: () => Promise<Uint8Array>,
 	close: () => Promise<void>,
 ): Promise<Uint8Array | null> {
-	const { now, setTimer, clearTimer } = resolveTimerSeams(runtime);
-	const started = now();
-	let timedOut = false;
-	let timer: unknown;
-	try {
-		const pending = read();
-		pending.catch(() => undefined);
-		const timeout = new Promise<null>((resolve) => {
-			timer = setTimer(() => {
-				timedOut = true;
-				void close();
-				resolve(null);
-			}, PROTECTED_SESSION_DEADLINE_MS);
-		});
-		const value = await Promise.race([pending, timeout]);
-		if (timedOut || now() - started > PROTECTED_SESSION_DEADLINE_MS) return null;
-		return value;
-	} catch {
-		return null;
-	} finally {
-		if (timer !== undefined) clearTimer(timer);
-		await close();
-	}
+	return readBeforeDeadline(runtime, PROTECTED_SESSION_DEADLINE_MS, read, close);
 }
 
 async function dispatch(
@@ -494,9 +483,12 @@ async function dispatch(
 			(runtime.requestUnixSocket ?? postUnixSocket)({
 				socketPath,
 				path: route,
+				method: "POST",
 				body,
 				credential,
 				deadlineMs: operationDeadlineMs,
+				maximumResponseBytes: MAX_FRAME_BYTES,
+				errors: SHIPPED_SOCKET_ERROR_NAMES,
 				signal,
 			}),
 		signal,
@@ -526,6 +518,18 @@ function decodeControlResponse(value: unknown): DecodedControlFrame {
 	return decodeCealLeasedConsumerCapabilityControlResponse(value) as DecodedControlFrame;
 }
 
+/**
+ * `leased-consumer-control-session` writes `error.message` to stderr verbatim on
+ * the shipped path, so these five names are shipped output, not internals.
+ */
+const SHIPPED_SOCKET_ERROR_NAMES = Object.freeze({
+	aborted: "control_aborted",
+	deadlineExceeded: "request_deadline_exceeded",
+	responseTooLarge: "response_too_large",
+	responseFailed: "response_failed",
+	requestFailed: "request_failed",
+});
+
 async function requestControlBeforeDeadline(
 	runtime: LeasedConsumerControlSessionRuntime,
 	operationDeadlineMs: number,
@@ -533,33 +537,13 @@ async function requestControlBeforeDeadline(
 	signal?: AbortSignal,
 ): Promise<UnixSocketResponse> {
 	if (signal?.aborted) throw new Error("control_aborted");
-	const { now, setTimer, clearTimer } = resolveTimerSeams(runtime);
-	const started = now();
-	let timedOut = false;
-	let timer: unknown;
-	let abortListener: (() => void) | undefined;
-	try {
-		const pending = request();
-		pending.catch(() => undefined);
-		const timeout = new Promise<null>((resolve) => {
-			timer = setTimer(() => {
-				timedOut = true;
-				resolve(null);
-			}, operationDeadlineMs);
-		});
-		const aborted = new Promise<null>((resolve) => {
-			if (!signal) return;
-			abortListener = () => resolve(null);
-			signal.addEventListener("abort", abortListener, { once: true });
-		});
-		const result = await Promise.race([pending, timeout, aborted]);
-		if (signal?.aborted) throw new Error("control_aborted");
-		if (timedOut || now() - started > operationDeadlineMs || result === null) throw new Error("control_deadline_exceeded");
-		return result;
-	} finally {
-		if (timer !== undefined) clearTimer(timer);
-		if (abortListener) signal?.removeEventListener("abort", abortListener);
-	}
+	const outcome = await raceDeadline(runtime, operationDeadlineMs, request(), undefined, signal);
+	if (signal?.aborted) throw new Error("control_aborted");
+	// `outcome.value` is typed non-null, but a test seam may hand back anything;
+	// the pre-extraction code treated a null response as a lost deadline and the
+	// caller dereferences `.status` immediately.
+	if (!outcome.settled || outcome.value === null) throw new Error("control_deadline_exceeded");
+	return outcome.value;
 }
 
 function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close: () => Promise<void> }> {
@@ -568,85 +552,6 @@ function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close
 	return Object.freeze({
 		read: () => readBoundedStream(stream, MAX_SESSION_BYTES, () => stream.destroy()),
 		close: () => closeReadable(stream),
-	});
-}
-
-async function readBoundedStream(stream: AsyncIterable<Uint8Array>, maximum: number, abort: () => void): Promise<Uint8Array> {
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	for await (const chunk of stream) {
-		if (!(chunk instanceof Uint8Array) || chunk.byteLength > maximum - total) {
-			abort();
-			throw new Error("input_too_large");
-		}
-		total += chunk.byteLength;
-		chunks.push(chunk);
-	}
-	const value = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		value.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return value;
-}
-
-function postUnixSocket(
-	input: Readonly<{ socketPath: string; path: string; body: string; credential: string; deadlineMs: number; signal?: AbortSignal }>,
-): Promise<UnixSocketResponse> {
-	const body = Buffer.from(input.body, "utf8");
-	return new Promise((resolve, reject) => {
-		let settled = false;
-		const finish = (action: () => void) => {
-			if (!settled) {
-				settled = true;
-				input.signal?.removeEventListener("abort", abortRequest);
-				action();
-			}
-		};
-		const abortRequest = () => {
-			request.destroy();
-			finish(() => reject(new Error("control_aborted")));
-		};
-		const request = httpRequest(
-			{
-				socketPath: input.socketPath,
-				path: input.path,
-				method: "POST",
-				headers: { Authorization: `Bearer ${input.credential}`, "Content-Type": "application/json", "Content-Length": String(body.byteLength) },
-			},
-			(response) => {
-				const chunks: Buffer[] = [];
-				let total = 0;
-				response.on("data", (chunk: Buffer) => {
-					total += chunk.byteLength;
-					if (total > MAX_FRAME_BYTES) {
-						request.destroy();
-						finish(() => reject(new Error("response_too_large")));
-						return;
-					}
-					chunks.push(chunk);
-				});
-				response.once("error", () => finish(() => reject(new Error("response_failed"))));
-				response.once("end", () =>
-					finish(() =>
-						resolve({
-							status: response.statusCode ?? 0,
-							contentType: response.headers["content-type"],
-							bytes: new Uint8Array(Buffer.concat(chunks)),
-						}),
-					),
-				);
-			},
-		);
-		request.setTimeout(input.deadlineMs, () => {
-			request.destroy();
-			finish(() => reject(new Error("request_deadline_exceeded")));
-		});
-		request.once("error", () => finish(() => reject(new Error("request_failed"))));
-		if (input.signal?.aborted) return abortRequest();
-		input.signal?.addEventListener("abort", abortRequest, { once: true });
-		request.end(body);
 	});
 }
 
@@ -731,38 +636,6 @@ function assertNoDuplicateJsonKeys(text: string): void {
 	value();
 	space();
 	if (index !== text.length) throw new Error("invalid_json");
-}
-
-function onceAsync(action: () => Promise<void>): () => Promise<void> {
-	let pending: Promise<void> | undefined;
-	return () => {
-		pending ??= action().catch(() => undefined);
-		return pending;
-	};
-}
-
-/**
- * The three timer/clock seams, resolved once. Both deadline races in this module
- * defaulted them with the same three lines; the lines below them differ, because
- * each race owns its own deadline and its own mutable state.
- */
-function resolveTimerSeams(runtime: LeasedConsumerControlSessionRuntime): Readonly<{
-	now: () => number;
-	setTimer: (callback: () => void, milliseconds: number) => unknown;
-	clearTimer: (timer: unknown) => void;
-}> {
-	return Object.freeze({
-		now: runtime.monotonicNow ?? monotonicNow,
-		setTimer: runtime.setTimer ?? ((callback, milliseconds) => setTimeout(callback, milliseconds)),
-		clearTimer: runtime.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)),
-	});
-}
-
-function monotonicNow(): number {
-	return performance.now();
-}
-function isJsonContentType(value: string | string[] | undefined): boolean {
-	return typeof value === "string" && /^(?:application\/json)(?:\s*;|\s*$)/iu.test(value);
 }
 
 function assertEmbeddedControlSessionContract(
