@@ -11,26 +11,41 @@ expensive way to discover the answer.
 
 ## Release
 
-Bump the three manifests — `package.json`, `packages/ceal-client`, and
-`packages/ceal-worker-cli` including its exact `@corca-ai/ceal` pin — then
-`npm i` to regenerate `package-lock.json`. `npm run check` does not gate the
-lockfile, but the tagged workflow's `npm ci --ignore-scripts` does.
-
-Nothing else carries the version. Source reads it from its own manifest, and
-`repo-gates` fails a commit that retypes it or lets the manifests disagree.
-
 Before a worker release, consume a signed Gateway Protocol handoff as one
-committed input slice: verify the tag-bound archive; update
+committed input slice. The Gateway publishes no GitHub Release: the public
+producer surface is
+`https://ceal.borca.ai/releases/gateway-protocol-handoff/<tag>/`, containing
+exactly the versioned archive, its `.sig`, its `.pem`, and `SHA256SUMS`.
+Existence is not verification. Before changing this repository, a read-only
+bootstrap must download all four into a temporary directory, check the sums,
+verify the blob with Cosign against repository `corca-ai/ceal`, the exact tag,
+workflow `.github/workflows/gateway-protocol-handoff-release.yml`, and the
+GitHub Actions OIDC issuer, and bind the manifest's producer commit to the
+remote tag and certificate workflow SHA. It must derive the candidate lock
+tuple only from those verified bytes and certificate claims. If no repo-owned
+command performs that bootstrap, stop rather than reconstructing it from a
+Gateway checkout or hand-editing a lock from memory.
+
+With that candidate verified, update
 `gateway-protocol-handoff-lock.json`, `protocol-vendor-pin.json`, the frozen
 `packages/ceal-protocol` tree, the private control-session contract, generated
 source, and workflow handoff literals together. The vendor-pin check reads the
 committed frozen tree by design, so run it after committing that coherent slice;
 never weaken it to accept a transient worktree copy.
 
+Then bump the three manifests — `package.json`, `packages/ceal-client`, and
+`packages/ceal-worker-cli` including its exact `@corca-ai/ceal` pin — and
+regenerate `package-lock.json` with `node_modules` absent. Keep that release
+version change in its own commit after the handoff-input commit. Nothing else
+carries the version: source reads it from its own manifest, and `repo-gates`
+fails a commit that retypes it or lets the manifests disagree. `npm run check`
+does not gate the lockfile, but the tagged workflow's
+`npm ci --ignore-scripts` does.
+
 Then:
 
 ```
-npm ci → npm run check → commit → push main
+npm ci → npm run check → commit the version slice → push main
 → confirm origin/main is that commit and its check.yml run is green
 → dry-run the release lane → tag → watch
 → ceal update → readback
