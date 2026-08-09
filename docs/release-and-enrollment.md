@@ -51,6 +51,14 @@ npm ci → npm run check → commit the version slice → push main
 → ceal update → readback
 ```
 
+Before the first `ceal update` that crosses from a release using the legacy
+mkdir-then-owner-write lock to one using atomic candidate publication, confirm
+that no other legacy `ceal` command is still running on that host. A process
+already paused inside the legacy owner write cannot participate in the new
+generation handoff; the new lock prevents this ambiguity between current
+binaries but cannot retroactively change an open file descriptor held by an old
+one. Later current-to-current updates need no lock migration step.
+
 **The dry run is a step, not an option, whenever the release lane itself
 changed.** `gh workflow run ceal-release.yml --ref main` builds, composes and
 merges exactly what a tag would and then stops: `sign-and-publish` is the one

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, rmSync, type Stats, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, type Stats, writeFileSync } from "node:fs";
 import path from "node:path";
 
 // The mutual exclusion every local store under HOME uses to make a
@@ -25,10 +25,11 @@ import path from "node:path";
 //   - `onUnsafe` / `onBusy`: each store raises its own error type, so the lock
 //     never has to know which store called it.
 //
-// The lock is a directory: `mkdir` is atomic on every filesystem this CLI
-// targets, unlike an exclusive-create file over NFS. The owner record inside it
-// carries the holder's pid so a lock orphaned by a killed process is reclaimed
-// instead of blocking every later run until the wait expires.
+// The lock is a directory published by an atomic same-parent rename. Its owner
+// record is completed in a private candidate first, so no observer can see the
+// open-before-write gap of `writeFileSync(..., "wx")`. The record carries the
+// holder's pid so a lock orphaned by a killed process is reclaimed instead of
+// blocking every later run until the wait expires.
 
 const LOCK_OWNER = "owner.json";
 const LOCK_POLL_MS = 25;
@@ -80,44 +81,40 @@ async function acquireLock(options: LocalStoreLockOptions): Promise<() => void> 
 }
 
 function createLock(options: LocalStoreLockOptions): string | null {
+	// A visible empty directory can only be a pre-atomic-publish legacy holder
+	// between mkdir and opening owner.json. Replacing it with a fully initialized
+	// candidate is safe: a legacy writer that has not opened the file loses to
+	// our already-present owner record, while one that has opened it makes the
+	// directory non-empty before this check can authorize replacement.
+	if (!lockPathAbsentOrEmpty(options)) return null;
+
+	const nonce = randomBytes(16).toString("hex");
+	const candidate = `${options.lockPath}.candidate-${process.pid}-${nonce}`;
 	try {
-		mkdirSync(options.lockPath, { mode: 0o700 });
-	} catch (error) {
-		if (nodeErrorCode(error) === "EEXIST") return null;
+		mkdirSync(candidate, { mode: 0o700 });
+		writeFileSync(path.join(candidate, LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+	} catch {
+		// The candidate name includes a fresh nonce and is never shared, so this is
+		// the one cleanup in acquisition whose path identity is self-authenticating.
+		rmSync(candidate, { recursive: true, force: true });
 		options.onUnsafe();
 	}
-	const nonce = randomBytes(16).toString("hex");
 	try {
-		writeFileSync(path.join(options.lockPath, LOCK_OWNER), `${JSON.stringify({ pid: process.pid, nonce })}\n`, { flag: "wx", mode: 0o600 });
+		renameSync(candidate, options.lockPath);
 		return nonce;
 	} catch (error) {
-		// `EEXIST` here means the directory this process made is gone and a
-		// contender's is in its place: `mkdir` left ours empty, so an owner record
-		// can only be somebody else's claim. That happens when this process is
-		// descheduled past the initialization grace and the contender reclaims the
-		// owner-less directory as abandoned.
-		//
-		// Returning *before* the cleanup below is the fix. That cleanup used to run
-		// unconditionally, so the loser of this race deleted the winner's live lock
-		// and put two writers on one state file. Retrying is also the honest
-		// report: losing a race one contender had to lose is nobody's error, and
-		// `prepareDirectory` in `local-store-guards.ts` already learned that
-		// calling a lost `EEXIST` race `unsafe_store` names a security condition
-		// for an ordinary outcome. The deadline says `busy` instead.
-		if (nodeErrorCode(error) === "EEXIST") return null;
+		rmSync(candidate, { recursive: true, force: true });
+		if (nodeErrorCode(error) === "EEXIST" || nodeErrorCode(error) === "ENOTEMPTY") return null;
+		options.onUnsafe();
+	}
+}
 
-		// Any other failure means no owner record was ever created, so the
-		// directory is still the empty one `mkdir` made and removing it is just
-		// cleaning up after ourselves.
-		//
-		// Still open, and deliberately not guessed at: a contender can replace the
-		// directory in this same window *without* claiming it, and then this write
-		// lands in theirs and succeeds, leaving two processes believing they hold
-		// the lock. Distinguishing that needs a directory identity the filesystem
-		// does not offer — `rmdir` + `mkdir` on the same path reused the inode in
-		// 20 of 20 trials here, so an `ino` comparison reports "still mine" for a
-		// directory somebody else made. It is recorded rather than papered over.
-		rmSync(options.lockPath, { recursive: true, force: true });
+function lockPathAbsentOrEmpty(options: LocalStoreLockOptions): boolean {
+	const lock = readSafeLockDirectory(options);
+	if (!lock) return true;
+	try {
+		return readdirSync(options.lockPath).length === 0;
+	} catch {
 		options.onUnsafe();
 	}
 }
@@ -140,22 +137,69 @@ function releaseLock(lockPath: string, nonce: string): void {
 function removeStaleLock(options: LocalStoreLockOptions): boolean {
 	const owner = staleLockOwner(options);
 	if (owner === "initializing") return false;
-	if (owner === null || processMissing(owner.pid, options)) {
-		rmSync(options.lockPath, { recursive: true, force: true });
-		return true;
+	if (owner === "absent") return true;
+	if ("invalidGeneration" in owner || processMissing(owner.pid, options)) {
+		return quarantineStaleLock(options, owner);
 	}
 	return false;
 }
 
-function staleLockOwner(options: LocalStoreLockOptions): { pid: number; nonce: string } | "initializing" | null {
+type StaleLockGeneration = { pid: number; nonce: string } | { invalidGeneration: string };
+
+function quarantineStaleLock(options: LocalStoreLockOptions, owner: StaleLockGeneration): boolean {
+	// Tombstones are generation-specific and deliberately retained. Two waiters
+	// can both classify one old holder as stale, but only the first can move that
+	// generation to its fixed destination. A late waiter then collides with the
+	// non-empty tombstone instead of renaming the successor that now occupies the
+	// stable lock path.
+	const suffix = "nonce" in owner ? owner.nonce : `invalid-${owner.invalidGeneration}`;
+	const quarantine = `${options.lockPath}.reclaimed-${suffix}`;
+	try {
+		renameSync(options.lockPath, quarantine);
+		return true;
+	} catch (error) {
+		if (nodeErrorCode(error) === "ENOENT") return true;
+		if (nodeErrorCode(error) !== "EEXIST" && nodeErrorCode(error) !== "ENOTEMPTY") options.onUnsafe();
+		assertQuarantine(options, quarantine, owner);
+		return false;
+	}
+}
+
+function assertQuarantine(options: LocalStoreLockOptions, quarantine: string, owner: StaleLockGeneration): void {
+	let stat: Stats;
+	try {
+		stat = lstatSync(quarantine);
+	} catch {
+		options.onUnsafe();
+	}
+	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) options.onUnsafe();
+	if ("nonce" in owner) {
+		const quarantinedOwner = readLockOwner(quarantine);
+		if (!quarantinedOwner || quarantinedOwner.pid !== owner.pid || quarantinedOwner.nonce !== owner.nonce) options.onUnsafe();
+		return;
+	}
+	// Retaining the moved directory also retains its inode, so a later invalid
+	// generation cannot reuse this destination identity. That is the fact the old
+	// delete/recreate design could not obtain from an inode comparison.
+	if (lockGeneration(stat) !== owner.invalidGeneration) options.onUnsafe();
+	try {
+		if (readdirSync(quarantine).length === 0) options.onUnsafe();
+	} catch {
+		options.onUnsafe();
+	}
+}
+
+function staleLockOwner(
+	options: LocalStoreLockOptions,
+): { pid: number; nonce: string } | { invalidGeneration: string } | "initializing" | "absent" {
 	const lock = readSafeLockDirectory(options);
-	if (!lock) return null;
+	if (!lock) return "absent";
 	const ownerPath = path.join(options.lockPath, LOCK_OWNER);
 	let owner: Stats;
 	try {
 		owner = lstatSync(ownerPath);
 	} catch {
-		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
+		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	}
 	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) options.onUnsafe();
 	// An owner record with the right shape and the right mode but unreadable
@@ -167,8 +211,13 @@ function staleLockOwner(options: LocalStoreLockOptions): { pid: number; nonce: s
 	// failed as `unsafe_store` with nothing anywhere to clear it. The mode check
 	// above is the security one and still refuses.
 	const parsed = readLockOwner(options.lockPath);
-	if (!parsed) return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : null;
+	if (!parsed)
+		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	return parsed;
+}
+
+function lockGeneration(lock: Stats): string {
+	return `${lock.dev.toString(16)}-${lock.ino.toString(16)}`;
 }
 
 function readSafeLockDirectory(options: LocalStoreLockOptions): Stats | null {

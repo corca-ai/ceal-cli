@@ -57,10 +57,13 @@ Everything else not listed is owned by the comment at the site and by
   only on `linux`/`x64`, so every installed-binary and installer proof self-skips
   on macOS. Do not "fix" this by flipping the flag — requiring it across all of
   `linux-*` is what burned `ceal-v0.67.0`.
-- **The worker lock's unclaimed-directory replacement is unresolved.** The
-  destructive-cleanup half is fixed and pinned by a named test; what remains is
-  recorded at the site in `packages/ceal-worker-cli/src/local-store-lock.ts`,
-  which owns the detail and why an `ino` comparison cannot settle it.
+- **The first atomic-lock release still owes its one-time migration condition.**
+  `release-and-enrollment.md` owns that condition and why an already-running
+  legacy process cannot be brought into the new lock protocol. Remove this item
+  after the first legacy-to-atomic update is accepted. Candidate/tombstone
+  housekeeping remains separate: candidates are nonce-private, while retained
+  tombstones must not receive a generic age-based cleanup that would reuse a
+  late reclaimer's destination.
 - **The v5 shutdown hang is closed, and it was reachable on the real channel.**
   All three inherited channels now go through `openInheritedReadable` in
   `packages/ceal-worker-cli/src/private-worker-transport.ts`, which adopts the
