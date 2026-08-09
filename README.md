@@ -201,8 +201,10 @@ throwaway `HOME`. `--allow-effect <effect>` opts into a declared *local* write
 while keeping the isolation; nothing in the guard can reach real local state.
 
 The effect vocabulary names remote change as well as local: `remote_write` is a
-route that changes the Gateway or a provider — `call`, and every `session`
-route. `--allow-effect` refuses it, because the throwaway `HOME` is what makes
+route that may change the Gateway or a provider. It covers provider calls,
+state-changing session leaves, and read routes that may first rotate an expired
+Gateway session (`capabilities`, `receipt`, and `acceptance`). `--allow-effect`
+refuses it, because the throwaway `HOME` is what makes
 the hatch safe and it neutralizes local state only. It is what a route *may* do,
 not what one invocation does: `call` is `remote_write` even for a capability
 whose own effect is `read`.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -122,6 +122,28 @@ test("discovery cache save leaves a symlinked store untouched", async () => {
 	await withHome(async (home) => {
 		symlinkSync(path.join(home, "outside"), path.join(home, ".ceal"));
 		await assert.rejects(createCealDiscoveryCacheStore(home).save(entry()), hasCode("unsafe_store"));
+	});
+});
+
+test("discovery cache cleanup never follows a substituted store parent", async () => {
+	await withHome(async (home) => {
+		const outside = path.join(home, "outside");
+		mkdirSync(outside, { mode: 0o700 });
+		const externalCache = path.join(outside, "client-discovery-cache.json");
+		writeFileSync(externalCache, "external\n", { mode: 0o600 });
+		symlinkSync(outside, path.join(home, ".ceal"));
+		await assert.rejects(createCealDiscoveryCacheStore(home).remove(), CealDiscoveryCacheStoreError);
+		assert.equal(existsSync(externalCache), true);
+	});
+});
+
+test("discovery cache cleanup refuses a store parent whose permissions widened", async () => {
+	await withHome(async (home) => {
+		const store = createCealDiscoveryCacheStore(home);
+		await store.save(entry());
+		chmodSync(path.join(home, ".ceal"), 0o755);
+		await assert.rejects(store.remove(), CealDiscoveryCacheStoreError);
+		assert.equal(existsSync(path.join(home, ".ceal", "client-discovery-cache.json")), true);
 	});
 });
 

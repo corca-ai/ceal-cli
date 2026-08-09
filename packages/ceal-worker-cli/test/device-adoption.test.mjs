@@ -233,6 +233,18 @@ test("a store that cannot write reports failure instead of a session", async () 
 	assert.equal(world.result().session_written, false);
 });
 
+test("a failed forced adoption never inherits enrollment-code recovery", async () => {
+	const world = createWorld({
+		storedSession: storedSession({ subjectRef: "subject:someone-else", refreshToken: "ceal_refresh_outgoing" }),
+		saveFails: true,
+	});
+	assert.equal(await run(world, ["--force"]), 3);
+	const result = world.result();
+	assert.equal(result.error.kind, "session_save_failed");
+	assert.match(result.error.next_action, /adoption did not land/u);
+	assert.doesNotMatch(result.error.next_action, /enrollment|replacement code/u);
+});
+
 // Interruption policy: keys are held in this process and nowhere else, so a
 // second run cannot resume the first. This asserts the observable half of that
 // — a fresh run is a fresh transaction with fresh keys — because the absence of
@@ -279,6 +291,9 @@ test("adopting over a different identity is refused by name, keeps the stored se
 	assert.equal(result.session_written, false);
 	assert.deepEqual(result.changed_bindings, ["subject_ref", "instance_ref"]);
 	assert.match(result.error.next_action, /--force/u);
+	assert.match(result.error.message, /adopted one differs/u);
+	assert.match(result.error.next_action, /approve replacement/u);
+	assert.doesNotMatch(result.error.next_action, /replacement code/u);
 	assert.equal(world.saved.length, 0);
 	assert.equal(world.storedSession().subjectRef, "subject:someone-else", "the identity this host holds is the one it keeps");
 	// The refusal happens after the Gateway has issued a session, so the refusal

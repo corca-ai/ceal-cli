@@ -166,10 +166,15 @@ test("a directory is not a file and a file is not a directory", (context) => {
 test("removableFile accepts only a plain existing file", (context) => {
 	const root = scratch(context);
 	const { directory, file } = store(root);
-	assert.equal(removableFile(file), true);
-	assert.equal(removableFile(path.join(directory, "absent")), false);
-	assert.equal(removableFile(directory), false);
+	assert.equal(removableFile(directory, file), true);
+	assert.equal(removableFile(directory, path.join(directory, "absent")), false);
+	assert.equal(removableFile(directory, directory), false);
 	const link = path.join(directory, "link.json");
 	symlinkSync(file, link);
-	assert.equal(removableFile(link), false);
+	assert.equal(removableFile(directory, link), false);
+	const outside = path.join(root, "outside");
+	mkdirSync(outside, { mode: 0o700 });
+	const substituted = path.join(root, "substituted");
+	symlinkSync(outside, substituted);
+	assert.equal(removableFile(substituted, path.join(substituted, "missing")), false);
 });

@@ -88,10 +88,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "capabilities",
-		description: "Discover Gateway-issued capabilities and select bounded targets.",
+		description: "Discover Gateway-issued capabilities and select bounded targets; a stale session may be renewed.",
 		usage:
 			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
-		effect: "read_only",
+		// Discovery is read-only at the capability boundary, but resolving the
+		// stored client session may rotate its one-time refresh credential first.
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery: `${SESSION_SETUP_NEXT_ACTION} Then run 'ceal capabilities' and descend to a bounded target selection.`,
@@ -112,9 +114,9 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "receipt",
-		description: "Inspect safe Gateway evidence for one audited capability call outcome.",
+		description: "Inspect safe Gateway evidence for one audited call outcome; a stale session may be renewed.",
 		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
-		effect: "read_only",
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
 		recovery:
@@ -131,9 +133,9 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "acceptance",
-		description: "Emit installed-client acceptance evidence for this exact installed release.",
+		description: "Emit installed-client acceptance evidence; a stale Gateway session may be renewed.",
 		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
-		effect: "read_only",
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.worker_acceptance_result.v2",
 		recovery:

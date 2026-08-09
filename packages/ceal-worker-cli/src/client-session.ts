@@ -52,7 +52,7 @@ async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<
 	try {
 		session = runtime.loadSession ? await runtime.loadSession() : null;
 	} catch {
-		return writeEnrollmentUnavailable("session_load_failed", io);
+		return writeClientSessionUnavailable("session_load_failed", io);
 	}
 	const now = runtime.now?.() ?? Date.now();
 	return writeYaml(io.stdout, session ? configuredSessionSummary(session, now) : unconfiguredSessionSummary());
@@ -143,7 +143,7 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 		return writeEnrollmentUnavailable(
 			commit.code,
 			io,
-			commit.previousSessionEnded ? endedPreviousSessionAction(enrollmentRecoveryAction(commit.code)) : undefined,
+			commit.previousSessionEnded ? endedPreviousSessionAction("enroll", enrollmentRecoveryAction(commit.code)) : undefined,
 		);
 	}
 	return writeEnrollmentSuccess(parsed.gateway, stored, commit, io);
@@ -240,7 +240,7 @@ function writeEnrollmentConflict(changedBindings: readonly string[], issuedSessi
 		command: "ceal",
 		ok: false,
 		enrollment_kind: "preapproved_client_device",
-		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "'ceal session enroll --force'"),
+		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "enroll"),
 	});
 	return 3;
 }

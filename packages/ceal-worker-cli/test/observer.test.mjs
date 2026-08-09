@@ -817,6 +817,37 @@ test("observer binds its session and receipt projections to one session snapshot
 	assert.equal(state.receipts.entries[0].request_ref, "narnia:old:receipt");
 });
 
+test("observer refuses to attribute another session's discovery cache to the current session", async () => {
+	const current = sessionForCacheKey({
+		gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
+		profileRef: "profile:current",
+		membershipRef: "membership:current",
+		negotiatedProtocolVersion: "1.3.0",
+	});
+	const foreignKey = {
+		gatewayEndpoint: current.gatewayEndpoint,
+		profileRef: "profile:previous",
+		membershipRef: "membership:previous",
+		negotiatedProtocolVersion: "1.3.0",
+	};
+	const state = await buildObserverState({
+		loadSession: async () => current,
+		loadDiscoveryCache: async () => ({
+			key: foreignKey,
+			cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
+			discovery: { capabilities: [{ capability_id: "must.not.surface" }], targets: [] },
+		}),
+		now: () => Date.parse("2026-07-24T00:01:00.000Z"),
+	});
+	assert.equal(state.session.profile_ref, "profile:current");
+	assert.deepEqual(state.discovery_cache, { status: "not_current_session" });
+	assert.equal(JSON.stringify(state).includes("must.not.surface"), false);
+	assert.equal(
+		state.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"),
+		true,
+	);
+});
+
 // The observer and the store both answer "is this cache entry still fresh", and
 // an operator debugging a cache that never serves reads the observer's answer.
 // While the two were separate copies they disagreed: the store grew a
@@ -858,6 +889,7 @@ test("the observer and the discovery cache agree on freshness, including a backw
 	for (const scenario of cases) {
 		const entry = { key, cachedAt: scenario.cachedAt, discovery };
 		const state = await buildObserverState({
+			loadSession: async () => sessionForCacheKey(key),
 			loadDiscoveryCache: async () => entry,
 			discoveryCacheTtlMs: ttl,
 			now: () => now,
@@ -900,7 +932,11 @@ test("the observer falls back to the SAME default window as the cli", async () =
 	// Inside the shared default, outside the former 5-minute one.
 	const cachedAt = now - DEFAULT_DISCOVERY_CACHE_TTL_MS + 60_000;
 	const entry = { key, cachedAt, discovery };
-	const state = await buildObserverState({ loadDiscoveryCache: async () => entry, now: () => now });
+	const state = await buildObserverState({
+		loadSession: async () => sessionForCacheKey(key),
+		loadDiscoveryCache: async () => entry,
+		now: () => now,
+	});
 	assert.equal(
 		state.discovery_cache.within_ttl,
 		discoveryCacheEntryUsable(entry, key, now, DEFAULT_DISCOVERY_CACHE_TTL_MS),
@@ -908,6 +944,23 @@ test("the observer falls back to the SAME default window as the cli", async () =
 	);
 	assert.equal(state.discovery_cache.within_ttl, true);
 });
+
+function sessionForCacheKey(key) {
+	return {
+		gatewayEndpoint: key.gatewayEndpoint,
+		profileRef: key.profileRef,
+		membershipRef: key.membershipRef,
+		registrationRef: "registration:observer",
+		clientRef: "client:observer",
+		subjectRef: "subject:observer",
+		instanceRef: "instance:observer",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-07-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-08-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	};
+}
 
 function rawRequest(baseUrl, requestPath, headers) {
 	const port = Number(new URL(baseUrl).port);

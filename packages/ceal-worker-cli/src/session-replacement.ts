@@ -96,8 +96,8 @@ export async function commitEnrolledSession(
 			// being stored — the receipt spool carries no discriminator to tell them
 			// apart — so it clears, first session included.
 			if (current && !replacing) return { ok: true, replacement: "same_identity", previousSessionRevoked, derivedStateCleared: false };
-			await clearSessionDerivedState(runtime);
-			return { ok: true, replacement: replacing ? "replaced" : "first_session", previousSessionRevoked, derivedStateCleared: true };
+			const derivedStateCleared = await clearSessionDerivedState(runtime);
+			return { ok: true, replacement: replacing ? "replaced" : "first_session", previousSessionRevoked, derivedStateCleared };
 		});
 	} catch (error) {
 		return { ok: false, reason: "store_failure", code: sessionStoreFailureCode(error), previousSessionEnded: false };
@@ -119,8 +119,9 @@ export function sessionReplacementNextAction(commit: CealSessionCommit & { ok: t
 }
 
 /** What a failed write owes an operator whose previous session it already ended. */
-export function endedPreviousSessionAction(ordinary: string): string {
-	return `This host's previous session was revoked before the write failed, so it is gone and the enrollment did not land. ${ordinary}`;
+export function endedPreviousSessionAction(method: "enroll" | "adopt", ordinary: string): string {
+	const acquisition = method === "enroll" ? "enrollment" : "adoption";
+	return `This host's previous session was revoked before the write failed, so it is gone and the ${acquisition} did not land. ${ordinary}`;
 }
 
 function lowerFirst(value: string): string {
@@ -148,8 +149,11 @@ export function sessionReplacementFields(commit: CealSessionCommit & { ok: true 
 export function sessionIdentityConflictFields(
 	changedBindings: readonly string[],
 	issuedSessionRevoked: CealRevokeDisposition,
-	replaceCommand: string,
+	method: "enroll" | "adopt",
 ): Record<string, unknown> {
+	const acquired = method === "enroll" ? "enrolled" : "adopted";
+	const replaceCommand = `'ceal session ${method} --force'`;
+	const approval = method === "enroll" ? "ask for a replacement code" : "ask the organization administrator to approve replacement";
 	return {
 		status: "conflict",
 		changed_bindings: [...changedBindings],
@@ -159,11 +163,11 @@ export function sessionIdentityConflictFields(
 		proof_level: "host_decision",
 		error: {
 			kind: "session_identity_conflict",
-			message: `This host already holds a session for a different identity; the enrolled one differs in ${changedBindings.join(", ")}.`,
+			message: `This host already holds a session for a different identity; the ${acquired} one differs in ${changedBindings.join(", ")}.`,
 			next_action:
 				issuedSessionRevoked === "revoked"
-					? `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; the session this attempt created has been revoked.`
-					: `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ask for a replacement code and re-run with ${replaceCommand}; report to your operator that the session this attempt created could not be revoked (${issuedSessionRevoked}).`,
+					? `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ${approval} and re-run with ${replaceCommand}; the session this attempt created has been revoked.`
+					: `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ${approval} and re-run with ${replaceCommand}; report to your operator that the session this attempt created could not be revoked (${issuedSessionRevoked}).`,
 		},
 	};
 }
@@ -240,17 +244,20 @@ export async function revokeClientSession(session: CealStoredSession, runtime: C
 // stores are advisory, so neither removal may block an operation that already
 // revoked — a logout that half-failed must still report the revocation it did
 // perform.
-export async function clearSessionDerivedState(runtime: CealCommandRuntime): Promise<void> {
-	await clearAdvisoryStore(runtime.removeDiscoveryCache);
-	await clearAdvisoryStore(runtime.removeReceiptSpool);
+export async function clearSessionDerivedState(runtime: CealCommandRuntime): Promise<boolean> {
+	const discoveryCleared = await clearAdvisoryStore(runtime.removeDiscoveryCache);
+	const receiptsCleared = await clearAdvisoryStore(runtime.removeReceiptSpool);
+	return discoveryCleared && receiptsCleared;
 }
 
-async function clearAdvisoryStore(remove: (() => Promise<void>) | undefined): Promise<void> {
-	if (!remove) return;
+async function clearAdvisoryStore(remove: (() => Promise<void>) | undefined): Promise<boolean> {
+	if (!remove) return false;
 	try {
 		await remove();
+		return true;
 	} catch {
 		/* advisory local state: never block the operation that already revoked */
+		return false;
 	}
 }
 

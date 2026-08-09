@@ -69,7 +69,9 @@ test("session store fails closed on unsafe permissions and symlinks", async () =
 	await withHome(async (home) => {
 		const target = path.join(home, "outside");
 		symlinkSync(target, path.join(home, ".ceal"));
-		await assert.rejects(createCealSessionStore(home).save(SESSION), hasCode("unsafe_store"));
+		const store = createCealSessionStore(home);
+		await assert.rejects(store.load(), hasCode("unsafe_store"));
+		await assert.rejects(store.save(SESSION), hasCode("unsafe_store"));
 	});
 });
 

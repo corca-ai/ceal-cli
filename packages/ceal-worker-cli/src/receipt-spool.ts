@@ -1,7 +1,7 @@
 import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { assertDirectoryIfPresent, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 import { validSessionIdentityDiscriminator } from "./session-identity.js";
@@ -116,15 +116,7 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 			assertIdentity(identity);
 			const drops = readDrops(path.join(directory, DROPS_FILE), identity);
 			const state = readSpool(directory, file, identity, now(), drops);
-			if (state === FOREIGN_SPOOL)
-				return drops.count > 0
-					? {
-							entries: [],
-							bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS },
-							drops,
-							spoolPresent: false,
-						}
-					: null;
+			if (state === FOREIGN_SPOOL) return drops.count > 0 ? emptySpoolState(drops) : null;
 			// A present-but-unusable file is an anomaly the observer should show
 			// as unreadable, not an empty history; append still soft-misses.
 			if (state === null && existsSync(file)) throw new CealReceiptSpoolStoreError("unsafe_store");
@@ -132,13 +124,7 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 			// be the one that was lost, and returning null there would let the
 			// observer state the strongest possible false claim — that this client
 			// made no calls — on the strength of a file that failed to be written.
-			if (state === null && drops.count > 0)
-				return {
-					entries: [],
-					bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS },
-					drops,
-					spoolPresent: false,
-				};
+			if (state === null && drops.count > 0) return emptySpoolState(drops);
 			return state;
 		},
 		async append(identity, entry) {
@@ -152,6 +138,15 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 		async remove() {
 			return removeUnderLock(directory, file);
 		},
+	};
+}
+
+function emptySpoolState(drops: CealReceiptSpoolState["drops"]): CealReceiptSpoolState {
+	return {
+		entries: [],
+		bounds: { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS },
+		drops,
+		spoolPresent: false,
 	};
 }
 
@@ -213,7 +208,10 @@ export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown
 // call site records it through `recordDrop`, so `ceal observe` can say the
 // history it is rendering is incomplete instead of quietly under-reporting.
 const SPOOL_LOCK_DIRECTORY = "receipt-spool.lock";
-const SPOOL_LOCK_MAX_WAIT_MS = 5_000;
+// This store is advisory and its caller has already emitted the call result.
+// Keep ordinary concurrent writers serialized, but never hold process exit for
+// seconds behind a stopped process; a miss is recorded by the drop counter.
+const SPOOL_LOCK_MAX_WAIT_MS = 250;
 
 // The append takes the lock for its read-modify-write; the removal did not, so a
 // clear that raced an in-flight append lost to it — the append's rename recreated
@@ -239,10 +237,10 @@ async function underSpoolLock(directory: string, action: () => void): Promise<vo
 }
 
 async function removeUnderLock(directory: string, file: string): Promise<void> {
-	if (!existsSync(directory)) return;
+	if (!assertDirectoryIfPresent(directory, unsafeReceiptSpool, true)) return;
 	return underSpoolLock(directory, () => {
-		removeSpool(file);
-		removeSpool(path.join(directory, DROPS_FILE));
+		removeSpool(directory, file);
+		removeSpool(directory, path.join(directory, DROPS_FILE));
 	});
 }
 
@@ -398,10 +396,10 @@ function withinRetention(recordedAt: number, now: number): boolean {
 	return recordedAt > now - RECEIPT_SPOOL_RETENTION_MS && recordedAt <= now + FUTURE_SKEW_TOLERANCE_MS;
 }
 
-function removeSpool(file: string): void {
-	// removableFile refuses anything that is not a plain file we own, so a
-	// symlink or directory left in the store is never deleted by cleanup.
-	if (removableFile(file)) rmSync(file, { force: true });
+function removeSpool(directory: string, file: string): void {
+	// removableFile binds the file to the real owner-only parent as well as its
+	// own shape, so cleanup never follows a substituted `.ceal` directory.
+	if (removableFile(directory, file)) rmSync(file, { force: true });
 }
 
 function serializeSpool(identity: string, entries: readonly CealReceiptSpoolEntry[]): Record<string, unknown> {

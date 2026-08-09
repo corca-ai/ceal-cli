@@ -341,7 +341,7 @@ async function completeAdoption(
 		return writeAdoptionFailure(io, {
 			code: commit.code,
 			message: "The adopted session could not be written to this host's session store.",
-			nextAction: commit.previousSessionEnded ? endedPreviousSessionAction(retry) : retry,
+			nextAction: commit.previousSessionEnded ? endedPreviousSessionAction("adopt", retry) : retry,
 		});
 	}
 
@@ -493,7 +493,7 @@ function writeAdoptionConflict(io: CealCliIo, changedBindings: readonly string[]
 		ok: false,
 		enrollment_kind: "verified_email_first_device",
 		credential_context: CREDENTIAL_CONTEXT,
-		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "'ceal session adopt --force'"),
+		...sessionIdentityConflictFields(changedBindings, issuedSessionRevoked, "adopt"),
 	});
 	return 3;
 }

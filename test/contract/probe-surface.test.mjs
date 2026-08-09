@@ -63,6 +63,10 @@ test("a declared non-read-only route is refused as a probe", () => {
 		["ceal", "session", "logout"],
 		["ceal", "guide", "register", "codex"],
 		["ceal", "update"],
+		["ceal", "capabilities"],
+		["ceal", "capabilities", "targets", "--capability", "message.search"],
+		["ceal", "receipt", "show", "ceal:prior:call"],
+		["ceal", "acceptance", "emit"],
 	]) {
 		const result = probe(args);
 		assert.equal(result.status, 2, args.join(" "));
@@ -107,11 +111,11 @@ test("help and read-only routes run, always in a throwaway HOME", () => {
 	assert.equal(help.status, 0);
 	assert.match(help.stdout, /^Usage: ceal session logout$/mu);
 	assert.match(help.stderr, /throwaway HOME/u);
-	const readOnly = probe(["ceal", "capabilities"]);
+	const readOnly = probe(["ceal", "session", "status"]);
 	assert.match(readOnly.stderr, /effect: read_only.*throwaway HOME/u);
 	// An isolated HOME has no session, which is the proof it did not read the
 	// operator's own state.
-	assert.match(readOnly.stdout, /^status: unavailable$/mu);
+	assert.match(readOnly.stdout, /^status: unconfigured$/mu);
 });
 
 test("the child's own declared effect decides, not the parent's", () => {

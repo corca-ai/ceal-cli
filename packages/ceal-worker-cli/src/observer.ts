@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
 import {
 	AGENT_AUDIT_NON_CLAIMS,
 	type CealAgentAuditSession,
@@ -9,7 +10,12 @@ import {
 	type CealAgentSessionEventsLookup,
 } from "./agent-audit.js";
 import type { CealAgentGuideState } from "./agent-guide.js";
-import { type CealDiscoveryCacheEntry, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheFreshness } from "./discovery-cache.js";
+import {
+	type CealDiscoveryCacheEntry,
+	DEFAULT_DISCOVERY_CACHE_TTL_MS,
+	discoveryCacheFreshness,
+	discoveryCacheKeyMatches,
+} from "./discovery-cache.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
@@ -59,7 +65,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	const sessionSnapshot = await observeSession(runtime);
 	const receipts = await observeReceiptSpool(runtime, sessionSnapshot.stored);
 	const session = sessionSnapshot.observed;
-	const discoveryCache = await observeDiscoveryCache(runtime, now);
+	const discoveryCache = await observeDiscoveryCache(runtime, now, sessionSnapshot.stored);
 	const agentActivity = observeAgentAudit(runtime);
 	return {
 		schema_version: "ceal.observer_state.v1",
@@ -109,7 +115,7 @@ function buildLocalSuggestions(
 	// Only a genuinely missing catalog fires (masterplan: "a missing Ceal cache
 	// opportunity"). Routine TTL expiry self-heals on the next discovery and
 	// would keep this entry permanently on, eroding trust in the section.
-	if (session.status === "present" && cache.status === "absent") {
+	if (session.status === "present" && (cache.status === "absent" || cache.status === "not_current_session")) {
 		entries.push({
 			kind: "missing_cache_opportunity",
 			evidence: { session: session.status, discovery_cache: cache.status },
@@ -371,7 +377,11 @@ async function observeSession(
 	};
 }
 
-async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number): Promise<Record<string, unknown>> {
+async function observeDiscoveryCache(
+	runtime: CealObserverRuntime,
+	now: number,
+	session: CealStoredSession | null,
+): Promise<Record<string, unknown>> {
 	if (!runtime.loadDiscoveryCache) return { status: "unavailable" };
 	let entry: CealDiscoveryCacheEntry | null;
 	try {
@@ -380,6 +390,17 @@ async function observeDiscoveryCache(runtime: CealObserverRuntime, now: number):
 		return { status: "unreadable" };
 	}
 	if (!entry) return { status: "absent" };
+	if (
+		!session ||
+		!discoveryCacheKeyMatches(entry.key, {
+			gatewayEndpoint: session.gatewayEndpoint,
+			profileRef: session.profileRef,
+			membershipRef: session.membershipRef,
+			negotiatedProtocolVersion: CEAL_PROTOCOL_VERSION,
+		})
+	) {
+		return { status: "not_current_session" };
+	}
 	const ttl = runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS;
 	// Freshness is the store's judgement, not a second copy of it — see
 	// `discoveryCacheFreshness`.

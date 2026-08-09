@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { assertDirectory, assertFile, prepareDirectory } from "./local-store-guards.js";
+import { assertDirectory, assertDirectoryIfPresent, assertFile, prepareDirectory } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 
@@ -80,8 +80,8 @@ export function createCealSessionStore(home: string | undefined): {
 }
 
 function readSessionFile(directory: string, file: string): CealStoredSession | null {
+	if (!assertDirectoryIfPresent(directory, unsafeSessionStore, true)) return null;
 	if (!existsSync(file)) return null;
-	assertDirectory(directory, unsafeSessionStore, true);
 	assertFile(file, unsafeSessionStore, true);
 	let parsed: unknown;
 	try {

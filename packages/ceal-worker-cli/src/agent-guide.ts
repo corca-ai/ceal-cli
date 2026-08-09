@@ -185,7 +185,6 @@ export function createCealAgentGuideStore(
 			rejectedOverride,
 		});
 	}
-	if ([...resolved.values()].every((host) => !host.registrationPath)) return undefined;
 	let guidePath: string;
 	try {
 		const releaseDirectory = dirname(realpathSync(executablePath));

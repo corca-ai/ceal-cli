@@ -488,6 +488,31 @@ test("receipt spool refuses an unsafe entry and a symlinked store", async () => 
 	assert.throws(() => createCealReceiptSpoolStore(undefined), CealReceiptSpoolStoreError);
 });
 
+test("receipt spool cleanup never follows a substituted store parent", async () => {
+	await withHome(async (home) => {
+		const outside = path.join(home, "outside");
+		mkdirSync(outside, { mode: 0o700 });
+		const externalSpool = path.join(outside, "receipt-spool.json");
+		const externalDrops = path.join(outside, "receipt-spool-drops");
+		writeFileSync(externalSpool, "external\n", { mode: 0o600 });
+		writeFileSync(externalDrops, "external\n", { mode: 0o600 });
+		symlinkSync(outside, path.join(home, ".ceal"));
+		await assert.rejects(createCealReceiptSpoolStore(home, () => BASE_TIME).remove(), CealReceiptSpoolStoreError);
+		assert.equal(existsSync(externalSpool), true);
+		assert.equal(existsSync(externalDrops), true);
+	});
+});
+
+test("receipt spool cleanup refuses a store parent whose permissions widened", async () => {
+	await withHome(async (home) => {
+		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
+		await store.append(entry());
+		chmodSync(path.join(home, ".ceal"), 0o755);
+		await assert.rejects(store.remove(), CealReceiptSpoolStoreError);
+		assert.equal(existsSync(spoolFile(home)), true);
+	});
+});
+
 test("call-result projection keeps only allowlisted metadata and skips receipt-less envelopes", () => {
 	const completed = receiptSpoolEntryFromCallResult(
 		{

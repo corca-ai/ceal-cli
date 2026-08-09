@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 
 // The filesystem safety checks every local store under HOME performs before it
 // reads or writes: refuse a symlink, refuse the wrong file type, and hold the
@@ -100,6 +100,24 @@ export function assertDirectory(directory: string, unsafe: UnsafeStore, requireM
 	if (requireMode && modeOf(stat) !== DIRECTORY_MODE) unsafe();
 }
 
+/**
+ * Classify an optional store parent without following a dangling or live
+ * symlink. A genuinely absent directory is an empty store; any existing path
+ * must already satisfy the caller's directory contract.
+ */
+export function assertDirectoryIfPresent(directory: string, unsafe: UnsafeStore, requireMode = false): boolean {
+	let stat: ReturnType<typeof lstatSync>;
+	try {
+		stat = lstatSync(directory);
+	} catch (error) {
+		if (nodeErrorCode(error) === "ENOENT") return false;
+		unsafe();
+	}
+	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
+	if (requireMode && modeOf(stat) !== DIRECTORY_MODE) unsafe();
+	return true;
+}
+
 /** Refuses `file` unless it is a real file, and 0o600 if required. */
 export function assertFile(file: string, unsafe: UnsafeStore, requireMode = false): void {
 	const stat = lstatSync(file);
@@ -114,8 +132,6 @@ export function assertFile(file: string, unsafe: UnsafeStore, requireMode = fals
  * deleted, so a store cleaning up after itself can never remove a target it did
  * not create.
  */
-export function removableFile(file: string): boolean {
-	if (!existsSync(file)) return false;
-	const stat = lstatSync(file);
-	return !stat.isSymbolicLink() && stat.isFile();
+export function removableFile(directory: string, file: string): boolean {
+	return safeExistingFile(directory, file, false);
 }

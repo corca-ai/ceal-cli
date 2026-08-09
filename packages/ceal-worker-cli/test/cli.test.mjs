@@ -356,6 +356,7 @@ test("target selection help states its unfiltered-page bound", async () => {
 	assert.match(stdout, /--limit <1-64>/u);
 	assert.match(stdout, /target_catalog\.selection_required/u);
 	assert.match(stdout, /target_catalog\.next_cursor/u);
+	assert.match(stdout, /--detail/u);
 });
 
 // A help token anywhere in the tail is read-only help, never an operand: a
@@ -395,6 +396,11 @@ test("a malformed known route points at the nearest help that can correct it", a
 		{ args: ["session", "enroll"], nextAction: "Run 'ceal session enroll --help'." },
 		{ args: ["session", "logout", "unexpected"], nextAction: "Run 'ceal session logout --help'." },
 		{ args: ["session", "adopt"], nextAction: "Run 'ceal session adopt --help', then supply" },
+		{ args: ["guide", "bogus"], nextAction: "Run 'ceal guide --help'." },
+		{ args: ["guide", "status", "unexpected"], nextAction: "Run 'ceal guide status --help'." },
+		{ args: ["observe", "--bogus"], nextAction: "Run 'ceal observe --help'." },
+		{ args: ["call"], nextAction: "Run 'ceal call --help'" },
+		{ args: ["receipt"], nextAction: "Run 'ceal receipt show --help'" },
 	];
 	for (const { args, nextAction } of cases) {
 		const payload = await yamlRun(args, 2, {
@@ -403,6 +409,23 @@ test("a malformed known route points at the nearest help that can correct it", a
 		});
 		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
 		assert.ok(payload.error.next_action.startsWith(nextAction), `${args.join(" ")}: ${payload.error.next_action}`);
+	}
+});
+
+test("routes that may rotate the stored Gateway session declare a remote write", () => {
+	for (const name of ["capabilities", "receipt", "acceptance"]) {
+		assert.equal(CEAL_COMMANDS.find((command) => command.name === name).effect, "remote_write", name);
+	}
+	for (const [parent, route] of [
+		["capabilities", "targets"],
+		["receipt", "show"],
+		["acceptance", "emit"],
+	]) {
+		assert.equal(
+			CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === parent && subcommand.route.join(" ") === route).effect,
+			"remote_write",
+			`${parent} ${route}`,
+		);
 	}
 });
 
@@ -936,6 +959,40 @@ test("--force replaces a different identity, revoking it first and clearing the 
 	});
 });
 
+test("a replacement reports advisory cleanup failure without undoing its stored session", async () => {
+	await withEnrollmentGateway(async ({ endpoint }) => {
+		let stored = null;
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else" }),
+			saveSession: async (session) => {
+				stored = session;
+			},
+			removeDiscoveryCache: async () => {
+				throw new Error("unsafe cache store");
+			},
+			removeReceiptSpool: async () => {},
+		});
+		assert.equal(payload.status, "enrolled");
+		assert.equal(payload.local_derived_state_cleared, false);
+		assert.equal(stored.subjectRef, "subject:hwidong");
+	});
+});
+
+test("acceptance argument failures use the argument exit class", async () => {
+	for (const args of [
+		["acceptance", "bogus"],
+		["acceptance", "emit", "bogus"],
+		["acceptance", "emit", "--profile", "profile:a", "--profile", "profile:b"],
+	]) {
+		const payload = await yamlRun(args, 2, {
+			readInstalledReleaseFacts: () => assert.fail("invalid acceptance argv must stop before installed-release inspection"),
+		});
+		assert.equal(payload.error.kind, "invalid_argument");
+		assert.match(payload.error.next_action, /ceal acceptance emit --help/u);
+	}
+});
+
 test("a replacement whose displaced credential the Gateway will not honor still proceeds and says so", async () => {
 	await withEnrollmentGateway(
 		async ({ endpoint }) => {
@@ -1178,6 +1235,21 @@ test("bare and explicit local session status agree without presenting untested r
 	assert.equal(payload.renewal_configured, true);
 	assert.equal(payload.renewal_status, "not_checked");
 	assert.equal(Object.hasOwn(payload, "renewal_available"), false);
+});
+
+test("session status classifies an unreadable store as a local session failure", async () => {
+	for (const args of [["session"], ["session", "status"]]) {
+		const payload = await yamlRun(args, 3, {
+			loadSession: async () => {
+				throw new Error("unsafe session store");
+			},
+		});
+		assert.equal(payload.schema_version, "ceal.client_session.v1");
+		assert.equal(payload.error.kind, "session_load_failed");
+		assert.match(payload.error.message, /stored Gateway session/u);
+		assert.match(payload.error.next_action, /ceal session status/u);
+		assert.doesNotMatch(payload.error.next_action, /enroll|adopt|device-enrollment code/u);
+	}
 });
 
 test("generic no-session recovery presents both approved setup routes", async () => {
@@ -2967,6 +3039,20 @@ test("capabilities rejects stray operands in both explicit and target-selection 
 		const optionLikeValue = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", match], 3);
 		assert.equal(optionLikeValue.status, "unavailable");
 		assert.equal(optionLikeValue.ok, false);
+	}
+});
+
+test("capabilities rejects duplicate special flags before session or Gateway work", async () => {
+	for (const args of [
+		["capabilities", "--fresh", "--fresh"],
+		["capabilities", "--detail", "--detail"],
+		["capabilities", "targets", "--capability", "message.search", "--detail", "--detail"],
+	]) {
+		const payload = await yamlRun(args, 2, {
+			loadSession: () => assert.fail("duplicate flags must be refused before session access"),
+		});
+		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
+		assert.match(payload.error.next_action, /--help/u);
 	}
 });
 

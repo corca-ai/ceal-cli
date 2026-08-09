@@ -232,12 +232,13 @@ function writeAcceptanceGatewayFailure(error: unknown, io: CealCliIo): number {
 
 async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseNamedOptions(options, new Set(["--port"]), new Set());
-	if (parsed?.operands.length !== 0) return writeError("invalid_argument", "Invalid ceal observe options.", io);
+	if (parsed?.operands.length !== 0)
+		return writeError("invalid_argument", "Invalid ceal observe options.", io, "Run 'ceal observe --help'.");
 	const rawPort = parsed.values.get("--port");
 	let port = DEFAULT_OBSERVER_PORT;
 	if (rawPort !== undefined) {
 		if (!/^\d{1,5}$/u.test(rawPort) || (Number(rawPort) !== 0 && (Number(rawPort) < 1024 || Number(rawPort) > 65535))) {
-			return writeError("invalid_argument", "ceal observe --port must be 0 (ephemeral) or 1024-65535.", io);
+			return writeError("invalid_argument", "ceal observe --port must be 0 (ephemeral) or 1024-65535.", io, "Run 'ceal observe --help'.");
 		}
 		port = Number(rawPort);
 	}
@@ -418,9 +419,10 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 		// A bare `ceal guide` is the status route; anything else here is undeclared.
 		return options.length === 0
 			? runGuideAction("status", undefined, io, runtime)
-			: writeError("invalid_argument", "Invalid guide action.", io);
+			: writeError("invalid_argument", "Invalid guide action.", io, "Run 'ceal guide --help'.");
 	}
-	if (resolved.rest.length > 0) return writeError("invalid_argument", "Invalid guide action.", io);
+	if (resolved.rest.length > 0)
+		return writeError("invalid_argument", "Invalid guide action.", io, `Run 'ceal guide ${resolved.subcommand.route.join(" ")} --help'.`);
 	return resolved.handler(resolved.subcommand, io, runtime);
 }
 
@@ -429,7 +431,8 @@ function runGuideRegister(subcommand: CealSubcommandDefinition, io: CealCliIo, r
 	// rather than cast, so a route declared without its host row is refused here
 	// instead of silently registering the default host or crashing inside the store.
 	const requested = subcommand.route[1];
-	if (!isCealAgentGuideHost(requested)) return writeError("invalid_argument", "Unsupported guide agent host.", io);
+	if (!isCealAgentGuideHost(requested))
+		return writeError("invalid_argument", "Unsupported guide agent host.", io, "Run 'ceal guide --help'.");
 	return runGuideAction("register", requested, io, runtime);
 }
 
@@ -492,10 +495,14 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	// that the concise default omits. Both are stripped before the existing
 	// parsers, which do not know the flags.
 	const policy = capabilitiesRoutePolicy(options);
-	const wantsFresh = policy.acceptsFresh && options.includes("--fresh");
-	const wantsDetail = options.includes("--detail");
-	const effectiveOptions = options.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
-	const selection = parseTargetCatalogOptions(effectiveOptions);
+	const resolvedRoute = resolveSubcommandRoute("capabilities", options, CAPABILITIES_ROUTES);
+	const routeOptions = resolvedRoute?.rest ?? options;
+	const named = parseNamedOptions(routeOptions, policy.valueOptions, policy.flagOptions);
+	if (!named || named.operands.length > 0) return writeCapabilitiesArgumentError(options, policy, io);
+	const wantsFresh = policy.acceptsFresh && named.flags.has("--fresh");
+	const wantsDetail = named.flags.has("--detail");
+	const effectiveOptions = routeOptions.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
+	const selection = policy.parse(effectiveOptions);
 	if (selection === null) return writeCapabilitiesArgumentError(options, policy, io);
 	const resolved =
 		selection.kind === "targets"
@@ -653,11 +660,6 @@ function writeCapabilitiesArgumentError(options: readonly string[], policy: Capa
 	// Every option is declared, so the fault is a value, a duplicate, or an operand.
 	const message = policy.selectsTarget ? "Invalid capabilities target selection." : "Invalid capabilities options.";
 	return writeError("invalid_argument", message, io, nextAction);
-}
-
-function parseTargetCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
-	const resolved = resolveSubcommandRoute("capabilities", options, CAPABILITIES_ROUTES);
-	return resolved ? resolved.handler.parse(resolved.rest) : CAPABILITIES_CATALOG_POLICY.parse(options);
 }
 
 function parseCapabilityCatalogOptions(options: readonly string[]): ParsedTargetCatalogOptions {
@@ -1016,7 +1018,13 @@ function capabilityCatalogNextAction(
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseCallOptions(options);
-	if (!parsed.ok) return writeCallValidationFailure(io);
+	if (!parsed.ok)
+		return writeError(
+			"invalid_argument",
+			"Invalid ceal call arguments.",
+			io,
+			"Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.",
+		);
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
@@ -1064,7 +1072,13 @@ async function cachedCapabilityEffect(
 
 async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	const parsed = parseReceiptOptions(options);
-	if (!parsed) return writeReceiptError("validation_error", "Pass one receipt reference returned by a completed call.", io);
+	if (!parsed)
+		return writeError(
+			"invalid_argument",
+			"Invalid ceal receipt arguments.",
+			io,
+			"Run 'ceal receipt show --help' and pass one request reference returned by a call.",
+		);
 	const resolved = await resolveCallSession(runtime);
 	if (!resolved.ok)
 		return writeReceiptError(
@@ -1417,10 +1431,6 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 	return parsed;
 }
 
-function writeCallValidationFailure(io: CealCliIo): number {
-	return writeCallUnavailable("validation_error", io, null, null);
-}
-
 function writeCapabilitiesUnavailable(io: CealCliIo): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
@@ -1536,5 +1546,5 @@ function writeAcceptanceRefusal(kind: string, message: string, io: CealCliIo, ne
 			next_action: nextAction ?? "Install a signed release with the published installer, then run 'ceal acceptance emit' from that install.",
 		},
 	});
-	return 3;
+	return kind === "invalid_argument" ? 2 : 3;
 }

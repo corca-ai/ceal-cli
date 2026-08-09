@@ -137,15 +137,17 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "capabilities",
 		route: ["targets"],
-		description: "Select bounded targets for one discovered capability.",
+		description: "Select bounded targets for one capability; a stale Gateway session may be renewed.",
 		usage:
-			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
-		effect: "read_only",
+			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>] [--detail]",
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery:
 			"Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
 		notes: [
+			"The target query itself is read-only. Its remote_write declaration is",
+			"conservative because this route may renew the stored Gateway session first.",
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",
 			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
 			"authoritative: when it needs a narrower selection it answers",
@@ -161,14 +163,15 @@ export const CEAL_SUBCOMMANDS = [
 			"  --match <text-or-url>   Select current target labels, or an approved source URL.",
 			"  --cursor <opaque>       Continue one Gateway-issued selected target page.",
 			"  --limit <1-64>          Bound one selected target page (default: Gateway choice).",
+			"  --detail                Include full per-capability input contracts.",
 		],
 	},
 	{
 		parent: "receipt",
 		route: ["show"],
-		description: "Read the caller's safe Gateway audit receipt for one audited call outcome, including a rejected one.",
+		description: "Read safe Gateway audit evidence; a stale Gateway session may be renewed.",
 		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
-		effect: "read_only",
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
 		recovery:
@@ -177,18 +180,24 @@ export const CEAL_SUBCOMMANDS = [
 			"  <request-ref>           Request reference returned by a call, audited or rejected.",
 			"  --profile <profile-ref> Select the Profile that issued the receipt request.",
 		],
+		notes: [
+			"Receipt readback never invokes a provider. Its remote_write declaration is",
+			"conservative because this route may renew the stored Gateway session first.",
+		],
 	},
 	{
 		parent: "acceptance",
 		route: ["emit"],
-		description: "Emit installed-client acceptance evidence for this exact installed release.",
+		description: "Emit installed-client acceptance evidence; a stale Gateway session may be renewed.",
 		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
-		effect: "read_only",
+		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.worker_acceptance_result.v2",
 		recovery:
 			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; a build tree is refused because it is not an installed release.",
 		notes: [
+			"The evidence reads do not invoke a provider. The remote_write declaration",
+			"is conservative because this route may renew the Gateway session first.",
 			"Measures the running binary, so there is no --binary option to substitute.",
 			"Performs a live discovery. It never performs a provider call; --request-ref reads back a receipt 'ceal call' already produced.",
 			"Emits no filesystem paths, so the record describes an installation without locating one.",

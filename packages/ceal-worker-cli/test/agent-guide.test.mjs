@@ -353,8 +353,27 @@ test("the projection names the running host when the environment identifies it",
 	}
 });
 
-test("a store needs at least one resolvable agent host", () => {
-	assert.equal(createCealAgentGuideStore("/nonexistent/ceal", undefined, undefined, undefined), undefined);
+test("an installed guide without a resolvable host reports the missing configuration root", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-no-home-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	symlinkSync("releases/first", path.join(state, "current"));
+	try {
+		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), undefined, undefined, undefined);
+		assert.ok(store);
+		const status = store.inspect();
+		assert.equal(status.error?.kind, "registration_failed");
+		assert.match(status.error?.next_action, /Set HOME or CODEX_HOME/u);
+		assert.doesNotMatch(status.error?.next_action, /Reinstall/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a missing guide remains an install failure even when no host resolves", () => {
+	const store = createCealAgentGuideStore("/nonexistent/ceal", undefined, undefined, undefined);
+	assert.ok(store);
+	assert.equal(store.inspect().error?.kind, "guide_unavailable");
 });
 
 function createRelease(state, name) {

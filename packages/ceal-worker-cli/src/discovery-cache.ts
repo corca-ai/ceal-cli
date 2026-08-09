@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { assertDirectoryIfPresent, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
@@ -89,7 +89,7 @@ export function createCealDiscoveryCacheStore(home: string | undefined): CealDis
 			writeCacheEntry(directory, file, entry);
 		},
 		async remove() {
-			removeCacheEntry(file);
+			removeCacheEntry(directory, file);
 		},
 	};
 }
@@ -100,12 +100,15 @@ export function createCealDiscoveryCacheStore(home: string | undefined): CealDis
  */
 export function discoveryCacheEntryUsable(entry: CealDiscoveryCacheEntry, key: CealDiscoveryCacheKey, now: number, ttlMs: number): boolean {
 	return (
-		isValidCacheKey(entry.key) &&
-		isValidCacheKey(key) &&
+		discoveryCacheKeyMatches(entry.key, key) &&
 		isValidCachedDiscovery(entry.discovery, entry.key) &&
-		keysMatch(entry.key, key) &&
 		discoveryCacheFreshness(entry.cachedAt, now, ttlMs).withinTtl
 	);
+}
+
+/** Whether two cache keys name the same Gateway-issued session projection. */
+export function discoveryCacheKeyMatches(left: CealDiscoveryCacheKey, right: CealDiscoveryCacheKey): boolean {
+	return isValidCacheKey(left) && isValidCacheKey(right) && keysMatch(left, right);
 }
 
 /**
@@ -183,10 +186,11 @@ function writeCacheEntry(directory: string, file: string, entry: CealDiscoveryCa
 	});
 }
 
-function removeCacheEntry(file: string): void {
-	// removableFile refuses anything that is not a plain file we own, so a
-	// symlink or directory left in the store is never deleted by cleanup.
-	if (removableFile(file)) rmSync(file, { force: true });
+function removeCacheEntry(directory: string, file: string): void {
+	if (!assertDirectoryIfPresent(directory, unsafeDiscoveryCache, true)) return;
+	// removableFile binds the file to the real owner-only parent as well as its
+	// own shape, so cleanup never follows a substituted `.ceal` directory.
+	if (removableFile(directory, file)) rmSync(file, { force: true });
 }
 
 function serializeEntry(entry: CealDiscoveryCacheEntry): Record<string, unknown> {

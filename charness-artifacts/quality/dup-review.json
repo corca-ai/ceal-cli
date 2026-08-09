@@ -307,6 +307,83 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-09",
 			"note": "Two single call lines in test/worker-release-installer.test.mjs (:199, :240), both untouched by this session and differing in the argument under test — the literal \"stable\" against a real TAG, which is the distinction each case exists to make. Collapsing them into a table would hide which of the two a failure came from. Re-keyed by line offsets moving elsewhere in the run, not by an edit here."
+		},
+		{
+			"surface": "code",
+			"id": "04e6fe40984b7b6a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "agent-guide.ts host detection, host type narrowing, row lookup, resolved registration map construction, and host-state projection. The detector grouped five consumers of CEAL_AGENT_GUIDE_HOSTS, but each performs a different operation. The table is already their one shared home; wrapping the consumers together would merge detection, path resolution, and rendering concepts."
+		},
+		{
+			"surface": "code",
+			"id": "36609bc75c7ef88f",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "client-session.ts writeAlreadyLoggedOut versus writeLoggedOut. The shared YAML key order is the result schema; every matched value is deliberately opposite: status, server revocation, local removal, and proof level. A parameterized helper would hide the transition whose truth this output exists to expose. Same envelope rationale as 387c2bf200d349cb."
+		},
+		{
+			"surface": "code",
+			"id": "4dda6b7f63d1db51",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "command-surface.ts acceptance and observe option arrays. The detector matched two three-row help blocks, but they share no option, value grammar, effect, or recovery fact. Extracting the array shape would replace two readable command-owned declarations with a helper parameterized by all content."
+		},
+		{
+			"surface": "code",
+			"id": "5837a77fbd37d939",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of 9c35ab8ee2005928 after session-store read safety changed. profile-store and discovery-cache share the store-factory shape, while the credential store requires strict modes and a cross-process lock and the advisory cache soft-misses. A shared factory would put those opposing safety policies behind parameters."
+		},
+		{
+			"surface": "code",
+			"id": "6f9dd08cb4ca60af",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Overlapping detector window across the control-session contract verifier and Gateway handoff verifier in generate-leased-consumer-handoff-runtime.mjs. These are independent trust surfaces with different source records and error codes; sharing their validator would make one compromised derivation verify itself. Same independence rationale as 17e36891f4f87883."
+		},
+		{
+			"surface": "code",
+			"id": "8bcbe5c6892359f6",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "discovery-cache.ts public discoveryCacheKeyMatches validates two untyped cache keys before calling the private field comparator keysMatch. The detector spans the call and comparator body, but there is one comparison implementation, not two; merging validation into it would erase the typed internal boundary."
+		},
+		{
+			"surface": "code",
+			"id": "9d16d95a7e4e4c75",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Mixed filesystem-check detector family: the two agent-audit walkers retain their intentional independent partial-inventory behavior (the prior 79824a3f9251e5bf rationale), while local-store-guards separates soft-miss checks from typed refusals. Sharing the lstat frame would merge opposite anomaly dispositions and make one caller's safety policy decide another's."
+		},
+		{
+			"surface": "code",
+			"id": "aa2143aaa2c4a4fa",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Carrier and control-session generated-source verification in generate-leased-consumer-handoff-runtime.mjs. Their matching byte/argv/digest frames independently verify two embedded trust surfaces and deliberately throw surface-specific errors. Same asymmetry-prevention rationale as 17e36891f4f87883."
+		},
+		{
+			"surface": "code",
+			"id": "ad2b09cb74331a6c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key/growth of the typeof-string-and-regex-test idiom classified in 04c7c82dc0fc3ac7 and e61827115f7b47d1. The members validate different domains across worker and release-script boundaries. Regex grammars have their own owners and lint:duplicate-literal prevents identical second homes; the remaining predicate shape is language boilerplate."
+		},
+		{
+			"surface": "code",
+			"id": "cc80c267cd8f22e1",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "client-session enrollment denial versus command-surface argv error. They deliberately use different schemas, proof levels, exit classes, messages, and recovery owners; only the YAML envelope frame matches. Folding them would make an enrollment host decision one parameter away from a local usage refusal. Same envelope rationale as 387c2bf200d349cb."
+		},
+		{
+			"surface": "code",
+			"id": "e39ba37c46eae8df",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of the call-result family classified at 5ebf240efc8ec5ee. Gateway failure and unavailable-session/transport results differ in request issuance, receipt evidence, retry classification, and recovery. Their genuinely shared identity/head projections are already extracted; the remaining similarity is the result schema they both implement."
 		}
 	],
 	"fixable_ceiling": 0,

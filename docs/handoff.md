@@ -14,10 +14,10 @@ release only from one coherent pinned input slice.
 ## Current State
 
 - The current branch contains unpushed worker-side user improvements through
-  session-status discovery, static-command startup, session-bound receipt
-  history, atomic local-store lock publication, and complete generic onboarding
-  recovery. The last slice and its proof live in
-  [2026-08-09-session-onboarding-recovery.md](../charness-artifacts/impl/2026-08-09-session-onboarding-recovery.md).
+  truthful route effects and recovery, strict argv refusal, local-store cleanup
+  safety, current-session observer attribution, and bounded receipt recording.
+  The latest slice and proof boundary live in
+  [2026-08-09-cli-user-fresh-sweep.md](../charness-artifacts/impl/2026-08-09-cli-user-fresh-sweep.md).
 - Gate builds, package-local test/coverage hooks, and release fixtures now share
   the `dist` owner documented in [gates.md](gates.md). The current-slice contract
   and proof commands live in
@@ -55,6 +55,9 @@ release only from one coherent pinned input slice.
 
 - A release tag is irreversible. Gateway writes remain a separate approval and
   are not part of this continuation.
+- The fresh sweep leaves two explicit design slices rather than hiding them in a
+  point fix: a local session generation for late pre-logout receipt writers, and
+  route-specific lazy public runtimes for stateful-command startup.
 
 ## References
 

@@ -44,8 +44,12 @@ Read the ceiling back yourself, in a throwaway HOME that cannot touch real state
 ```
 npm run build
 npm run probe -- ceal commands
-npm run probe -- ceal capabilities   # expect status: unavailable, exit 3
+npm run probe -- ceal session status   # expect status: unconfigured, exit 0
 ```
+
+`capabilities`, `receipt`, and `acceptance` may rotate an expired Gateway
+session before performing their read, so their declared effect is
+`remote_write`; probe their help rather than bypassing the guard.
 
 **This is the ceiling.** With no session you can prove the CLI's shape, its
 declared effects, its local rendering, and its refusals. You cannot prove that
