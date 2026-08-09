@@ -65,8 +65,9 @@ Read the counts rather than trusting them here; each line names the command.
 
 ## Discuss
 
-- **The documentation-only CI skip has never fired live** — proven locally and
-  gated, but every pushed range so far carried code. Track it or drop it.
+- ~~The documentation-only CI skip has never fired live.~~ **Settled.** It fired
+  on run `31286608349`, the first pushed range that carried no code: `scope`
+  succeeded and both `check-native` and `check` were skipped. Nothing to track.
 - **[debt.md](debt.md) was carried unconfirmed across sessions.** Re-confirm an
   item before starting it, or delete it.
 
