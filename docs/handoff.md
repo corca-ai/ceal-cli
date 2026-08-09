@@ -19,56 +19,68 @@ This file holds only what changes the next action.
 
 Read the facts rather than trusting them here; each line names how.
 
-- **Everything is pushed and CI is green on it** — `git rev-list --count
-  origin/main..HEAD`, `gh run list --workflow=check.yml`. Issue 10 is closed —
-  `gh issue view 10 -R corca-ai/ceal-cli`. The current version carries no tag:
-  compare `git describe --tags --abbrev=0` with
+- **Two commits are unpushed and CI has not seen them** — `git rev-list --count
+  origin/main..HEAD`, `gh run list --workflow=check.yml`. The current version
+  carries no tag: compare `git describe --tags --abbrev=0` with
   `node -p 'require("./package.json").version'`.
-- **The Gateway lane needs a worker release that carries the v5 contract**, not
-  the v4 one on `main` today. Their C11a batch is blocked on it: the installed
-  `ceal-v0.75.0` ships protocol 0.72.12, the selected-v5 candidate is 0.72.13,
-  and their Agent selection record still reads `ceal-v0.73.0`,
-  `recorded_not_activated`. A plain release of `main` would not unblock them.
-- **Two debt items stop being deferred the moment that release is the target**,
-  and [debt.md](debt.md) now says so at both: the vendored protocol must move to
-  0.72.13 (the v5 gate in `leased-consumer-control-session.ts` requires
-  `decodeCealLeasedConsumerCapabilityNotification`, which 0.72.12 does not
-  export), and the v5 notification shutdown hang becomes live rather than latent.
-- **All three gates are green — and green says nothing about the class of defect
-  that keeps appearing.** `npm run check`, `npm run check:duplication`,
-  `npm run lint:shell`, the two maintainer-local ones included; time them
-  yourself. Every find in the 2026-08-09 range was invisible to all three, and
-  [defect-sweep.md](defect-sweep.md) `## What would end this` owns why.
+- **The defect class now has two gates, and they are the session's product.**
+  `npm run lint:store-lock` and `npm run lint:duplicate-literal` run in both
+  tiers. Both were falsified against `ceal-v0.75.0` before being armed, and
+  [gates.md](gates.md) owns what each can and cannot see.
+  [defect-sweep.md](defect-sweep.md) `## The two-scope re-sweep` owns the run that
+  produced them, including two claims this session got wrong and had to correct.
+- **The v5 release is blocked on the Gateway, not on this repository.** The
+  highest signed protocol handoff is `gateway-protocol-handoff-v0.72.12` —
+  `git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-*'` — while
+  the v5 gate needs 0.72.13. Re-vendoring without a matching lock fails
+  `proof_shipment_protocol_divergence`, which is fatal. The tracked request is
+  [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md).
+- **The v5 shutdown hang is reproduced and its recorded fix was wrong.** Bounding
+  `closeReadable` settles the await and the process still never exits; the
+  measured fix is `net.Socket({ fd })` rather than `fs.createReadStream({ fd })`.
+  [debt.md](debt.md) carries the reproduction, the two controls, and why it is
+  its own slice.
+- **All gates are green** — `npm run check`, `npm run check:duplication`,
+  `npm run lint:shell`. Time them yourself.
 
 ## Next Session
 
-1. **Do one of the two moves in [defect-sweep.md](defect-sweep.md)
-   `## What would end this` — not a fourth general sweep.** That section says
-   plainly that an empty pass is not the goal and not an event to plan around,
-   and `## Shape of the run` owns how to run whichever move you pick. The
-   structural lens has run once (`## The denominator-gap sweep` is the only table
-   listing it); `## The first re-sweep` nominates a different scope for the rate
-   question. Item 1 is a choice between them, not both.
-2. **Then scope the v5 release, whatever item 1 found.** The tag is not waiting
-   on a clean pass. Re-vendor the protocol and re-pin in one commit, bump the
-   control-session contract to `.v3`, and close the shutdown hang ahead of the
-   tag — [debt.md](debt.md) has all three with their `file:line`.
-3. **Ask the operator for approval before the tag; it is theirs to authorize,
-   not yours to infer from green checks.** Confirm the free preconditions first —
-   [operator-acceptance.md](operator-acceptance.md) `## Before Spending A Release
-   Tag` lists them and all are reads. A tag is not retryable.
+1. **Close the v5 shutdown hang**, in its own slice, using the measured fix in
+   [debt.md](debt.md) rather than the one the entry used to name. It is a
+   transport change: `net.Socket` is a duplex with different EOF and error
+   behaviour, and the FD-kind predicate in the suite is written against
+   `fs.ReadStream`. The reproduction in that entry is what the fix owes a red run
+   against first.
+2. **Ask the operator before doing anything with the protocol pin.** Item 1 above
+   does not need it. The re-vendor does, and it cannot be done here until the
+   Gateway publishes the handoff — check the request's re-checks before assuming
+   either way.
+3. **Then scope the rest of the v5 release**: the control-session contract bump
+   to `.v3`, and the release tag itself.
+4. **Ask the operator for approval before the tag.** Confirm the free
+   preconditions first — [operator-acceptance.md](operator-acceptance.md)
+   `## Before Spending A Release Tag` lists them and all are reads. A tag is not
+   retryable.
 
-*Standing, applies to anything item 1 or 2 fixes:* a fix owes a fresh-eye review
-and a falsified pin, both in [defect-sweep.md](defect-sweep.md)
-`## Shape of the run`. The review is the control, not a formality — it does not
-gate item 2.
+*Standing, applies to anything above:* a fix owes a fresh-eye review and a
+falsified pin, both in [defect-sweep.md](defect-sweep.md) `## Shape of the run`.
+This session is the strongest evidence yet that the review is the control and not
+a formality — it caught a false historical claim the fixer had shipped in a
+commit message and a doc, with the disproof already printed in the fixer's own
+terminal.
 
 ## Discuss
 
-- **The sample says "misses, not new defects", and still not "converging".**
-  [defect-sweep.md](defect-sweep.md) holds the two tables; every survivor
-  predates the tag and every one is the same shape. No scope has been swept twice
-  at equal depth, so nothing supports a claim about the rate.
+- **The sample still says "misses, not new defects", and still not
+  "converging".** [defect-sweep.md](defect-sweep.md) now holds three tables.
+  Every survivor across all of them predates the tag, including the two this
+  session found — one of which was reported as new and corrected. Two scopes have
+  now been swept more than once, and depth is still the confound: the denominators
+  are not the same file sets, so nothing yet supports a claim about the rate.
+- **Three named patterns still have no gate**, and
+  [defect-sweep.md](defect-sweep.md) `## The two-scope re-sweep` says which and
+  why each was left. The one with a recorded generator is *fix scoped to the
+  reported instance rather than the invariant's population*.
 - **The debt in [debt.md](debt.md) is open on purpose**; read the count and the
   "not before" notes there rather than here. Issue 12's closure routes through
   the same cross-repo C11a batch item 2 serves — `gh issue view 12 -R
