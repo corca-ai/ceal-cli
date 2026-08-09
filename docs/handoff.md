@@ -57,14 +57,17 @@ Read the facts rather than trusting them here; each line names how.
 
 ## Next Session
 
-1. **Bump the control-session contract to `.v3`.** Not started. It is the last
-   worker-side item of the v5 release that does not wait on the Gateway.
-2. **Do not touch the protocol pin until the Gateway tags.** The re-vendor cannot
-   be done here, and re-checking that is three commands —
-   [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
-   carries them. Ask the operator before anything that writes to that lane.
-3. **Then the release tag.**
-4. **Ask the operator for approval before the tag.** Confirm the free
+1. **There is no worker-side v5 work left that the Gateway is not holding.** All
+   three items funnel through one tag, and each is mechanically enforced rather
+   than merely believed — [requests/…-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
+   `## Three items, one blocker` lists them with the `file:line` that refuses
+   each. Do not start any of them; re-check the request's commands instead, and
+   ask the operator before anything that writes to that lane.
+2. **When the tag lands**, the order is: re-vendor and re-pin in one commit, then
+   the `.v3` contract, then the release tag. The contract needs no authoring —
+   the generator refuses it today only because the lock is behind, so moving the
+   lock is most of it.
+3. **Ask the operator for approval before the tag.** Confirm the free
    preconditions first — [operator-acceptance.md](operator-acceptance.md)
    `## Before Spending A Release Tag` lists them and all are reads. A tag is not
    retryable.

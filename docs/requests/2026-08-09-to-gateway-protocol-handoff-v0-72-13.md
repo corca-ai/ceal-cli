@@ -48,6 +48,28 @@ blocking release, packing, and the acceptance packet. Today the pin is `agreed`
 and those paths are open. A declared divergence is a quarantine rather than a
 clearance, so declaring it here buys nothing either.
 
+## Three items, one blocker
+
+Every remaining worker-side item of the v5 release is held by this one tag, and
+none of them is held by belief — each has a check that refuses it today:
+
+- **The re-vendor.** `scripts/verify-protocol-vendor-pin.mjs` fails
+  `proof_shipment_protocol_divergence` the moment the copy moves without the
+  lock, which `docs/gates.md` records as fatal.
+- **The `.v3` control-session contract.**
+  `scripts/generate-leased-consumer-handoff-runtime.mjs:164` requires
+  `lock.protocol.version` to be at least 0.72.13 before it will embed a `.v3`
+  contract, and `node -p 'require("./gateway-protocol-handoff-lock.json").protocol.version'`
+  answers 0.72.12. Editing the contract by hand exits 2 with
+  `handoff_generation_failed` and the embedded runtime constant stays at `.v2`.
+  Worth knowing before trying: because the generator refuses, the *test suite
+  still passes* over a hand-edited `.v3` contract — it is passing over the old
+  embedded constant, and reading that pass as license would be a mistake.
+- **The worker's own v5 acceptance.**
+  `packages/ceal-worker-cli/src/leased-consumer-control-session.ts:603-605`
+  requires three protocol decoders to be functions; the vendored 0.72.12 exports
+  none of them, against 120 total exports as the positive control.
+
 ## This is an order, not a deadlock
 
 The Gateway lane's C11a batch is recorded as waiting on a worker release, and
