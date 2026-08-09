@@ -252,11 +252,11 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 			.withSessionStateLock(async (store) => {
 				const session = await store.load();
 				if (!session) return writeAlreadyLoggedOut(io);
-				const revokeFailure = await revokeClientSession(session, runtime);
-				if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
+				const revocation = await revokeClientSession(session, runtime);
+				if ("failure" in revocation) return writeClientSessionUnavailable(revocation.failure, io);
 				await store.remove();
 				await clearSessionDerivedState(runtime);
-				return writeLoggedOut(io);
+				return writeLoggedOut(io, revocation.disposition);
 			})
 			.catch((error) => writeClientSessionUnavailable(sessionStoreFailureCode(error), io));
 	let session: CealStoredSession | null;
@@ -266,15 +266,15 @@ async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Pro
 		return writeEnrollmentUnavailable("session_load_failed", io);
 	}
 	if (!session) return writeAlreadyLoggedOut(io);
-	const revokeFailure = await revokeClientSession(session, runtime);
-	if (revokeFailure) return writeClientSessionUnavailable(revokeFailure, io);
+	const revocation = await revokeClientSession(session, runtime);
+	if ("failure" in revocation) return writeClientSessionUnavailable(revocation.failure, io);
 	try {
 		await runtime.removeSession();
 	} catch {
 		return writeClientSessionUnavailable("session_remove_failed", io);
 	}
 	await clearSessionDerivedState(runtime);
-	return writeLoggedOut(io);
+	return writeLoggedOut(io, revocation.disposition);
 }
 
 function writeAlreadyLoggedOut(io: CealCliIo): number {
@@ -291,13 +291,14 @@ function writeAlreadyLoggedOut(io: CealCliIo): number {
 	});
 }
 
-function writeLoggedOut(io: CealCliIo): number {
+function writeLoggedOut(io: CealCliIo, disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable">): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.session_logout.v1",
 		command: "ceal",
 		ok: true,
 		status: "logged_out",
-		server_session_revoked: true,
+		server_session_revoked: disposition === "revoked",
+		server_session_disposition: disposition,
 		local_session_removed: true,
 		raw_token_visible: false,
 		proof_level: "host_decision",

@@ -21,8 +21,8 @@ const SPOOL_FILE = "receipt-spool.json";
 // Drops are counted in their own file, not in the spool, because a drop is by
 // definition a moment when the spool could not be written. The first line binds
 // the file to a session-identity digest; one byte is appended per drop with
-// O_APPEND, which POSIX makes atomic below PIPE_BUF, so the counter needs no
-// lock of its own.
+// O_APPEND. The append itself is atomic, while the identity-header replacement
+// and cap decision are serialized by the counter's separate lock below.
 const DROPS_FILE = "receipt-spool-drops";
 // A pathological caller cannot grow the counter without bound; past this the
 // observer reports "at least" rather than an exact figure, which is the honest
@@ -133,7 +133,7 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 		},
 		async recordDrop(identity) {
 			if (!validSessionIdentityDiscriminator(identity)) return;
-			recordDrop(directory, path.join(directory, DROPS_FILE), identity);
+			await recordDrop(directory, path.join(directory, DROPS_FILE), identity);
 		},
 		async remove() {
 			return removeUnderLock(directory, file);
@@ -212,6 +212,14 @@ const SPOOL_LOCK_DIRECTORY = "receipt-spool.lock";
 // Keep ordinary concurrent writers serialized, but never hold process exit for
 // seconds behind a stopped process; a miss is recorded by the drop counter.
 const SPOOL_LOCK_MAX_WAIT_MS = 250;
+// Drop accounting cannot take the spool lock: its primary caller reaches this
+// path because that lock was busy. It still needs its own exclusion, because
+// the identity header is a first-write replace and the cap is a read-then-append
+// decision. A short-polling sibling lock keeps those two facts atomic without
+// serializing a completed call behind spool work.
+const DROPS_LOCK_DIRECTORY = "receipt-spool-drops.lock";
+const DROPS_LOCK_MAX_WAIT_MS = 1_000;
+const DROPS_LOCK_POLL_MS = 1;
 
 // The append takes the lock for its read-modify-write; the removal did not, so a
 // clear that raced an in-flight append lost to it — the append's rename recreated
@@ -275,52 +283,58 @@ function writeAppendedSpool(directory: string, file: string, identity: string, e
 	});
 }
 
-// @lockFree: this is the module's third writer and the only one outside
-// `underSpoolLock`, deliberately. It runs on the append's failure path
-// (`bin.ts`'s `append(entry).catch(() => recordDrop())`), and one of the reasons
-// an append fails is `spool_busy` — the lock itself. Taking that lock here would
-// stop the counter recording in the case it exists to record, which is worse
-// than the race it would close.
-//
-// So the two claims in this file are both true of different things: the counter
-// needs no lock against another *append*, for the O_APPEND reason at the top of
-// this file. It is not protected against a *clear*: a delayed old process can
-// recreate the file after logout or replacement. The identity header is the
-// structural boundary for that race. A current-identity reader refuses the old
-// bytes, and a later current-identity write replaces them rather than merging
-// two subjects' loss accounting.
-function recordDrop(directory: string, file: string, identity: string): void {
+// This deliberately uses a lock separate from `underSpoolLock`: a drop is most
+// often recorded because that lock was busy. It remains unprotected against a
+// clear; a delayed old process can recreate the file after logout or replacement.
+// The identity header is the structural boundary for that race, so a current
+// reader refuses old bytes and a later current write replaces them.
+async function recordDrop(directory: string, file: string, identity: string): Promise<void> {
 	try {
 		prepareDirectory(directory, unsafeReceiptSpool);
-		const existing = readDropFile(file);
-		if (!existing || existing.identity !== identity) {
-			writeCealLocalStoreFile({
-				directory,
-				file,
-				prefix: "receipt-spool-drops",
-				contents: `${DROPS_SCHEMA_VERSION} ${identity}\n.`,
-				unsafe: unsafeReceiptSpool,
-			});
-			return;
-		}
-		if (existing.count >= MAX_RECORDED_DROPS) return;
-		// O_NOFOLLOW rather than an existence check: `existsSync` follows symlinks
-		// and reports false for a dangling one, so a planted link would have been
-		// created and written through — the one write in this module that could
-		// leave the store, since the spool's own write goes to a random temp name
-		// with `wx` and renames. The kernel refuses the link instead.
-		const handle = openSync(file, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600);
-		try {
-			writeSync(handle, ".");
-			// Shape is checked before the write and mode is repaired right after,
-			// which is the spool's stated write-path contract: refusing a
-			// wrong-mode file here would silently stop counting forever instead.
-			fchmodSync(handle, 0o600);
-		} finally {
-			closeSync(handle);
-		}
+		await withLocalStoreLock(
+			{
+				lockPath: path.join(directory, DROPS_LOCK_DIRECTORY),
+				maxWaitMs: DROPS_LOCK_MAX_WAIT_MS,
+				pollMs: DROPS_LOCK_POLL_MS,
+				onUnsafe: unsafeReceiptSpool,
+				onBusy: () => {
+					throw new CealReceiptSpoolStoreError("spool_busy");
+				},
+			},
+			async () => writeDrop(directory, file, identity),
+		);
 	} catch {
 		/* The drop counter exists to describe a failure; it may not become one. */
+	}
+}
+
+function writeDrop(directory: string, file: string, identity: string): void {
+	const existing = readDropFile(file);
+	if (!existing || existing.identity !== identity) {
+		writeCealLocalStoreFile({
+			directory,
+			file,
+			prefix: "receipt-spool-drops",
+			contents: `${DROPS_SCHEMA_VERSION} ${identity}\n.`,
+			unsafe: unsafeReceiptSpool,
+		});
+		return;
+	}
+	if (existing.count >= MAX_RECORDED_DROPS) return;
+	// O_NOFOLLOW rather than an existence check: `existsSync` follows symlinks
+	// and reports false for a dangling one, so a planted link would have been
+	// created and written through — the one write in this module that could
+	// leave the store, since the spool's own write goes to a random temp name
+	// with `wx` and renames. The kernel refuses the link instead.
+	const handle = openSync(file, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0o600);
+	try {
+		writeSync(handle, ".");
+		// Shape is checked before the write and mode is repaired right after,
+		// which is the spool's stated write-path contract: refusing a
+		// wrong-mode file here would silently stop counting forever instead.
+		fchmodSync(handle, 0o600);
+	} finally {
+		closeSync(handle);
 	}
 }
 

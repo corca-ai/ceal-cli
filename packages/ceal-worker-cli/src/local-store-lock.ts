@@ -43,6 +43,8 @@ export interface LocalStoreLockOptions {
 	lockPath: string;
 	/** Bounded wait before a contending caller is told the lock is busy. */
 	maxWaitMs: number;
+	/** Optional tighter polling for a tiny critical section on a hot failure path. */
+	pollMs?: number;
 	/** Throws the calling store's own `unsafe_store` error. Must not return. */
 	onUnsafe: () => never;
 	/** Throws the calling store's own busy/contended error. Must not return. */
@@ -114,7 +116,10 @@ function lockPathAbsentOrEmpty(options: LocalStoreLockOptions): boolean {
 	if (!lock) return true;
 	try {
 		return readdirSync(options.lockPath).length === 0;
-	} catch {
+	} catch (error) {
+		// The holder can release between the lstat above and this read. That is the
+		// ordinary transition a waiter is looking for, not an unsafe lock shape.
+		if (nodeErrorCode(error) === "ENOENT") return true;
 		options.onUnsafe();
 	}
 }
@@ -122,7 +127,7 @@ function lockPathAbsentOrEmpty(options: LocalStoreLockOptions): boolean {
 async function waitForLock(options: LocalStoreLockOptions, deadline: number): Promise<void> {
 	if (removeStaleLock(options)) return;
 	if (Date.now() >= deadline) options.onBusy();
-	await sleep(LOCK_POLL_MS);
+	await sleep(options.pollMs ?? LOCK_POLL_MS);
 }
 
 function releaseLock(lockPath: string, nonce: string): void {

@@ -15,9 +15,11 @@ release only from one coherent pinned input slice.
 
 - The current branch contains unpushed worker-side user improvements through
   truthful route effects and recovery, strict argv refusal, local-store cleanup
-  safety, current-session observer attribution, and bounded receipt recording.
-  The latest slice and proof boundary live in
-  [2026-08-09-cli-user-fresh-sweep.md](../charness-artifacts/impl/2026-08-09-cli-user-fresh-sweep.md).
+  safety, current-session observer attribution, bounded receipt recording,
+  retired-session logout, race-safe guide registration, honest partial audit
+  lookup, and serialized receipt-drop accounting. The latest slice and proof
+  boundary live in
+  [2026-08-09-cli-user-fresh-sweep-2.md](../charness-artifacts/impl/2026-08-09-cli-user-fresh-sweep-2.md).
 - Gate builds, package-local test/coverage hooks, and release fixtures now share
   the `dist` owner documented in [gates.md](gates.md). The current-slice contract
   and proof commands live in
@@ -58,6 +60,9 @@ release only from one coherent pinned input slice.
 - The fresh sweep leaves two explicit design slices rather than hiding them in a
   point fix: a local session generation for late pre-logout receipt writers, and
   route-specific lazy public runtimes for stateful-command startup.
+- Discovery-cache subject/instance scope remains a Gateway-owned semantic
+  question. A synthetic lock-successor swap and a non-conforming fake cosign are
+  not user failures without reachable reproductions.
 
 ## References
 

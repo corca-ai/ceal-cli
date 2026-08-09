@@ -153,23 +153,12 @@ test("separate ceal processes each keep their receipt when they append at once",
 		const priors = Array.from({ length: 150 }, (_, index) => `narnia:call:prior:${index}`);
 		for (const ref of priors) await store.append(entry({ recordedAt: Date.now(), requestRef: ref }));
 		const refs = Array.from({ length: 6 }, (_, index) => `narnia:call:concurrent:${index}`);
-		// A shared absolute start instant, spun to rather than slept to, lines the
-		// writers up far more tightly than spawn order alone would.
-		const startAt = Date.now() + START_BARRIER_MS;
-		const results = await Promise.all(refs.map((ref) => appendInChildProcess(home, ref, startAt)));
-		for (const result of results) assert.equal(result.code, 0, result.stderr);
-		// Without this, the test degrades silently instead of failing: on a host
-		// slow enough that a child reaches the barrier after it has already
-		// passed, the appends serialize naturally, an unlocked build keeps every
-		// receipt, and the regression proof passes while proving nothing. Each
-		// child reports the margin it still had when it arrived, so a run that
-		// never achieved overlap fails as that, rather than as green.
-		const margins = results.map((result) => Number(result.stdout.trim()));
-		assert.deepEqual(
-			margins.filter((margin) => !(margin >= 0)),
-			[],
-			`writers did not overlap; margins to the shared barrier were ${margins.join(", ")}ms`,
+		// Every child declares readiness before one shared file releases them, so
+		// host load cannot turn the concurrency proof into a startup-speed test.
+		const results = await runAtProcessGate(home, "append", refs, (ref, readyFile, goFile) =>
+			appendInChildProcess(home, ref, readyFile, goFile),
 		);
+		for (const result of results) assert.equal(result.code, 0, result.stderr);
 		// The count is exact because 150 priors plus 6 concurrent stays under the
 		// entry cap: a lock that kept the six by clobbering the priors would pass
 		// a membership-only assertion.
@@ -182,21 +171,13 @@ test("separate ceal processes each keep their receipt when they append at once",
 	});
 });
 
-// Long enough that six `node` cold starts finish before the barrier on a loaded
-// host, short enough not to dominate the suite. The margin assertion above is
-// what catches a host where it was not long enough after all.
-const START_BARRIER_MS = 750;
-
-function appendInChildProcess(home, requestRef, startAt) {
+function appendInChildProcess(home, requestRef, readyFile, goFile) {
 	const source = `
+		const { existsSync, writeFileSync } = await import("node:fs");
 		const { createCealReceiptSpoolStore } = await import(${JSON.stringify(new URL("../dist/receipt-spool.js", import.meta.url).href)});
-		const startAt = Number(process.env.SPOOL_START_AT);
 		const store = createCealReceiptSpoolStore(process.env.HOME);
-		// Measured before the wait: this is how much slack this child still had,
-		// and a negative value means it arrived after the gun already went off.
-		const margin = startAt - Date.now();
-		await new Promise((resolve) => setTimeout(resolve, Math.max(0, margin - 20)));
-		while (Date.now() < startAt) {}
+		writeFileSync(process.env.SPOOL_READY_FILE, "");
+		while (!existsSync(process.env.SPOOL_GO_FILE)) await new Promise((resolve) => setTimeout(resolve, 1));
 		await store.append(${JSON.stringify("a".repeat(64))}, {
 			recordedAt: Date.now(),
 			requestRef: process.env.SPOOL_REQUEST_REF,
@@ -204,10 +185,9 @@ function appendInChildProcess(home, requestRef, startAt) {
 			evidence: "readback_verified",
 			auditRefs: [],
 		});
-		process.stdout.write(String(margin));
 	`;
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
-		env: { ...process.env, HOME: home, SPOOL_REQUEST_REF: requestRef, SPOOL_START_AT: String(startAt) },
+		env: { ...process.env, HOME: home, SPOOL_REQUEST_REF: requestRef, SPOOL_READY_FILE: readyFile, SPOOL_GO_FILE: goFile },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	let stdout = "";
@@ -222,6 +202,54 @@ function appendInChildProcess(home, requestRef, startAt) {
 		child.once("error", reject);
 		child.once("close", (code) => resolve({ code, stdout, stderr }));
 	});
+}
+
+function recordDropInChildProcess(home, readyFile, goFile) {
+	const source = `
+		const { existsSync, writeFileSync } = await import("node:fs");
+		const { createCealReceiptSpoolStore } = await import(${JSON.stringify(new URL("../dist/receipt-spool.js", import.meta.url).href)});
+		const store = createCealReceiptSpoolStore(process.env.HOME);
+		writeFileSync(process.env.SPOOL_READY_FILE, "");
+		while (!existsSync(process.env.SPOOL_GO_FILE)) await new Promise((resolve) => setTimeout(resolve, 1));
+		await store.recordDrop(${JSON.stringify(TEST_IDENTITY)});
+	`;
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+		env: { ...process.env, HOME: home, SPOOL_READY_FILE: readyFile, SPOOL_GO_FILE: goFile },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.on("data", (chunk) => {
+		stdout += String(chunk);
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += String(chunk);
+	});
+	return new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", (code) => resolve({ code, stdout, stderr }));
+	});
+}
+
+async function recordConcurrentDrops(home, writers) {
+	return runAtProcessGate(home, "drop", Array.from({ length: writers }), (_value, readyFile, goFile) =>
+		recordDropInChildProcess(home, readyFile, goFile),
+	);
+}
+
+async function runAtProcessGate(home, label, values, launch) {
+	const gate = path.join(home, `${label}-gate-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+	mkdirSync(gate);
+	const goFile = path.join(gate, "go");
+	const readyFiles = values.map((_value, index) => path.join(gate, `ready-${index}`));
+	const pending = values.map((value, index) => launch(value, readyFiles[index], goFile));
+	const deadline = Date.now() + 10_000;
+	while (!readyFiles.every(existsSync)) {
+		assert.ok(Date.now() < deadline, `${label} writers did not reach the shared gate`);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	writeFileSync(goFile, "");
+	return Promise.all(pending);
 }
 
 test("a lost receipt is counted so the observer can say the history is incomplete", async () => {
@@ -242,6 +270,27 @@ test("a lost receipt is counted so the observer can say the history is incomplet
 		// carry a warning about entries it no longer claims to have had.
 		await store.remove();
 		assert.equal(existsSync(dropsFile(home)), false);
+	});
+});
+
+test("concurrent first drops are retained and the counter never races past its cap", async () => {
+	await withHome(async (home) => {
+		const writers = 30;
+		const results = await recordConcurrentDrops(home, writers);
+		for (const result of results) assert.equal(result.code, 0, result.stderr);
+		assert.equal(
+			(await createCealReceiptSpoolStore(home).load()).drops.count,
+			writers,
+			`drop bytes: ${readFileSync(dropsFile(home), "utf8").length}; errors: ${results.map((result) => result.stderr).join(" | ")}`,
+		);
+	});
+	await withHome(async (home) => {
+		mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
+		writeFileSync(dropsFile(home), `ceal.receipt_spool_drops.v2 ${TEST_IDENTITY}\n${".".repeat(4090)}`, { mode: 0o600 });
+		const results = await recordConcurrentDrops(home, 30);
+		for (const result of results) assert.equal(result.code, 0, result.stderr);
+		assert.deepEqual((await createCealReceiptSpoolStore(home).load()).drops, { count: 4096, atLeast: true });
+		assert.equal(readFileSync(dropsFile(home), "utf8").split("\n")[1].length, 4096);
 	});
 });
 

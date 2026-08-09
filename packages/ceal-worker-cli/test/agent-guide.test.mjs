@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {
+import fs, {
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -11,6 +11,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -49,6 +50,41 @@ test("Codex guide registration follows the role current pointer across releases"
 		assert.equal(store.inspect().hosts.find((host) => host.agent === "codex").registered, true);
 		assert.match(readFile(path.join(registration, "SKILL.md")), /release: second/u);
 	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a concurrent registration that created the requested link is reported as success", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-race-")));
+	const state = path.join(root, "install", ".ceal-cli", "worker");
+	const release = createRelease(state, "first");
+	const codexHome = path.join(root, "codex");
+	symlinkSync("releases/first", path.join(state, "current"));
+	const registration = path.join(codexHome, "skills", "ceal-guide");
+	const originalSymlinkSync = fs.symlinkSync;
+	try {
+		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, codexHome, undefined);
+		assert.ok(store);
+		let injected = false;
+		fs.symlinkSync = (...args) => {
+			if (!injected && args[1] === registration) {
+				injected = true;
+				originalSymlinkSync(...args);
+				const error = new Error("simulated concurrent EEXIST");
+				error.code = "EEXIST";
+				throw error;
+			}
+			return originalSymlinkSync(...args);
+		};
+		syncBuiltinESMExports();
+		const result = store.register("codex");
+		assert.equal(injected, true);
+		assert.equal(result.status, "available");
+		assert.equal(result.hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(realpathSync(registration), realpathSync(path.join(state, "current", "guide")));
+	} finally {
+		fs.symlinkSync = originalSymlinkSync;
+		syncBuiltinESMExports();
 		rmSync(root, { recursive: true, force: true });
 	}
 });

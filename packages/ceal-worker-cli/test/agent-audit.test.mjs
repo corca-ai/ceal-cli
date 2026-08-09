@@ -188,6 +188,11 @@ test("agent audit marks a truncated walk as a partial inventory, never complete"
 		// A partial walk that found nothing proves nothing about inactivity.
 		assert.equal(claude.health, "unknown");
 		assert.equal(claude.sessionCount, undefined);
+		assert.equal(
+			inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555").status,
+			"unreadable",
+			"a bounded miss cannot claim the requested session is absent",
+		);
 	});
 });
 

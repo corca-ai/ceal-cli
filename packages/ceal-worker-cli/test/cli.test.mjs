@@ -1434,6 +1434,29 @@ test("logout retains local session when Gateway revocation transport is unavaila
 	);
 });
 
+test("logout removes local state when the Gateway says the refresh credential is already retired", async () => {
+	for (const retiredCode of ["refresh_revoked", "refresh_invalid", "refresh_expired", "refresh_replayed"]) {
+		await withEnrollmentGateway(
+			async ({ endpoint, refreshToken }) => {
+				let removed = false;
+				const payload = await yamlRun(["session", "logout"], 0, {
+					loadSession: async () => storedSession(endpoint, { refreshToken }),
+					removeSession: async () => {
+						removed = true;
+					},
+					removeDiscoveryCache: async () => {},
+					removeReceiptSpool: async () => {},
+				});
+				assert.equal(payload.status, "logged_out", retiredCode);
+				assert.equal(payload.server_session_revoked, false, retiredCode);
+				assert.equal(payload.server_session_disposition, "already_unusable", retiredCode);
+				assert.equal(removed, true, retiredCode);
+			},
+			{ revokeDeniedCode: retiredCode },
+		);
+	}
+});
+
 test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
@@ -1479,6 +1502,7 @@ test("session logout revokes the server session before removing every session-de
 		});
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
+		assert.equal(payload.server_session_disposition, "revoked");
 		assert.equal(payload.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
 		assert.deepEqual(revoked, [oldRefreshToken]);
 		assert.deepEqual(cleared.sort(), ["discovery_cache", "receipt_spool", "session"]);
@@ -1496,6 +1520,7 @@ test("session logout revokes the server session before removing every session-de
 		});
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
+		assert.equal(payload.server_session_disposition, "revoked");
 	});
 });
 

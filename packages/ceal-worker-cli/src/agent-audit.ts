@@ -119,6 +119,28 @@ export interface CealAgentSessionEventsLookup {
 // is rejected before any filesystem access.
 const SESSION_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
+type TranscriptCollection =
+	| { status: "absent" }
+	| { status: "unreadable" }
+	| { status: "collected"; sessions: CollectedSession[]; partial: boolean };
+
+function collectTranscriptSessions(
+	directory: string,
+	collect: (directory: string) => { sessions: CollectedSession[]; partial: boolean },
+): TranscriptCollection {
+	try {
+		lstatSync(directory);
+	} catch (error) {
+		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
+		return { status: code === "ENOENT" ? "absent" : "unreadable" };
+	}
+	try {
+		return { status: "collected", ...collect(directory) };
+	} catch {
+		return { status: "unreadable" };
+	}
+}
+
 /**
  * On-demand bounded event scan for one inventoried session, so the Workbench
  * can drill into any listed session, not only the newest auto-scanned ones.
@@ -139,21 +161,11 @@ export function inspectAgentSessionEvents(
 		runtime === "claude"
 			? { directory: path.join(root, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
 			: { directory: path.join(root, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
-	try {
-		lstatSync(adapter.directory);
-	} catch (error) {
-		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-		return code === "ENOENT" ? { status: "not_found" } : { status: "unreadable" };
-	}
-	let collected: { sessions: CollectedSession[]; partial: boolean };
-	try {
-		collected = adapter.collect(adapter.directory);
-	} catch {
-		return { status: "unreadable" };
-	}
+	const collected = collectTranscriptSessions(adapter.directory, adapter.collect);
+	if (collected.status !== "collected") return { status: collected.status === "absent" ? "not_found" : "unreadable" };
 	const wanted = sessionRef.toLowerCase();
 	const matches = collected.sessions.filter((session) => session.sessionRef === wanted);
-	if (matches.length === 0) return { status: "not_found" };
+	if (matches.length === 0) return { status: collected.partial ? "unreadable" : "not_found" };
 	// A duplicated ref across shards resolves to the newest transcript.
 	matches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 	const { transcriptPath, ...session } = matches[0];
@@ -219,18 +231,9 @@ function observeTranscriptAdapter(
 	if (!sessionsDirectory) return base;
 	// Only a confirmed absence is `inactive`; a permission or lookup failure
 	// stays `unknown` so a read failure can never fabricate an empty inventory.
-	try {
-		lstatSync(sessionsDirectory);
-	} catch (error) {
-		const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-		return code === "ENOENT" ? { ...base, health: "inactive", sessionCount: 0, sessions: [] } : base;
-	}
-	let collected: { sessions: CollectedSession[]; partial: boolean };
-	try {
-		collected = collect(sessionsDirectory);
-	} catch {
-		return base;
-	}
+	const collected = collectTranscriptSessions(sessionsDirectory, collect);
+	if (collected.status === "absent") return { ...base, health: "inactive", sessionCount: 0, sessions: [] };
+	if (collected.status === "unreadable") return base;
 	const { sessions, partial } = collected;
 	const partialFields = partial ? { inventory: "partial" as const, note: `${HEALTH_BASIS}; inventory truncated or partly unreadable` } : {};
 	// A partial walk that found nothing proves nothing about inactivity.

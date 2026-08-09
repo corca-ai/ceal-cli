@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -45,6 +46,34 @@ test("the lock serializes, then releases so the next caller can take it", async 
 		// A second acquisition proves the release was real rather than the first
 		// call simply never having created the directory.
 		await withLocalStoreLock(options(directory), async () => {});
+	});
+});
+
+test("a holder released between lock inspection and directory read is an available lock", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		mkdirSync(lockPath, { mode: 0o700 });
+		const originalReaddirSync = fs.readdirSync;
+		let released = false;
+		try {
+			fs.readdirSync = (...args) => {
+				if (!released && args[0] === lockPath) {
+					released = true;
+					rmSync(lockPath, { recursive: true, force: true });
+				}
+				return originalReaddirSync(...args);
+			};
+			syncBuiltinESMExports();
+			let entered = false;
+			await withLocalStoreLock(options(directory), async () => {
+				entered = true;
+			});
+			assert.equal(released, true);
+			assert.equal(entered, true);
+		} finally {
+			fs.readdirSync = originalReaddirSync;
+			syncBuiltinESMExports();
+		}
 	});
 });
 

@@ -227,10 +227,14 @@ const RETIRED_REFRESH_CODES: ReadonlySet<string> = new Set(["refresh_revoked", "
  * could not reach the Gateway keeps local state so the operator can retry, and
  * reports the reason rather than a revocation it did not perform.
  */
-export async function revokeClientSession(session: CealStoredSession, runtime: CealCommandRuntime): Promise<string | null> {
+export type CealLogoutRevocation = { disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable"> } | { failure: string };
+
+export async function revokeClientSession(session: CealStoredSession, runtime: CealCommandRuntime): Promise<CealLogoutRevocation> {
 	const outcome = await requestRevocation(session, runtime);
-	if ("revoked" in outcome) return null;
-	return "denied" in outcome ? (outcome.denied === "refresh_revoked" ? null : outcome.denied) : outcome.transport;
+	if ("revoked" in outcome) return { disposition: "revoked" };
+	if ("denied" in outcome)
+		return RETIRED_REFRESH_CODES.has(outcome.denied) ? { disposition: "already_unusable" } : { failure: outcome.denied };
+	return { failure: outcome.transport };
 }
 
 // Logout leaves no session-derived local state behind, and the receipt spool is

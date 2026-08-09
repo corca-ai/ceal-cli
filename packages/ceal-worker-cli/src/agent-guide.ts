@@ -330,6 +330,12 @@ function registerGuide(
 		symlinkSync(guidePath, registrationPath, "dir");
 		return inspectRegistration(guidePath, agent, resolved);
 	} catch {
+		// Another process can publish the same registration after the existence
+		// check and before symlinkSync. The requested final state is success even
+		// when this process lost that race; a different occupant is still the same
+		// deliberate conflict the pre-check reports.
+		if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved);
+		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) return conflictState(guidePath, agent, resolved);
 		const inspected = inspectRegistration(guidePath, agent, resolved);
 		// Distinguish "the skills directory itself is unusable" from "something
 		// occupies the registration path". Found on a real host whose
