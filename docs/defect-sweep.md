@@ -119,6 +119,42 @@ was about, produced while fixing it — which is the argument for the review bei
 mandatory rather than discretionary. Both reviews in this session found a real
 defect the gate could not see.
 
+## What would end this, and what would not
+
+Four passes ran on 2026-08-09 — two sweeps and the two fresh-eye reviews the
+sweeps' own fixes owed. **All four found something.** The fourth found defects in
+the third's fixes, some of them the third fixer's own; the counts are in
+`## The denominator-gap sweep` above rather than restated here. All of it was
+invisible to `npm run check`, and each fix's falsified pin is that evidence —
+read the `fix:` commit bodies in `git log ceal-v0.75.0..`.
+
+So **"sweep until a pass comes back empty" is not a terminating condition** and
+should not be treated as one. Planning a release around it means planning around
+an event this record gives no reason to expect. **Either** of two things would
+change the situation, and neither is another general sweep:
+
+1. **Measure the rate.** Sweep one scope twice at equal depth, with the same
+   scope statement, and compare. Every pass so far has read a different area or
+   a different depth, so "we keep finding things" is still a statement about
+   coverage rather than about the tree. Until that runs, no pass — however
+   clean — licenses "converging".
+2. **Move the class into a gate.** The class is one sentence: *an invariant
+   enforced at one site and not at its sibling.* Every survivor of both sweeps
+   was an instance. A check that could see even part of it is worth more than
+   another pass, because it keeps working after the session ends and a sweep does
+   not. As examples only, not a checklist: sibling call sites of a guarded call,
+   two writers of one store, two spellings of one bound. Any instrument that
+   mechanically binds two homes counts. `check:duplication` already does this for
+   one half of `## One Fact, One Home`; for the other half the search that finds
+   `check:duplication` in `package.json` and `.githooks/pre-push` finds nothing.
+
+And a standing consequence for whoever fixes: **the mandated fresh-eye review is
+the control, not a formality.** The one measurement here of a fixer working
+inside this class says the fixer reproduces it. Both reviews in the 2026-08-09
+range found a real defect the gate could not see; one of them found the fixer's
+own. Skipping it because the change "is only a refactor" is exactly the case
+that produced the defect.
+
 ## The finite task the sweeps converged on
 
 `AGENTS.md` `## One Fact, One Home` states the law. Its second working rule names
@@ -142,6 +178,9 @@ There is no `src/` at the repo root; the sources live under `packages/*/src`.
 Each hit names a rule. For each, ask which other call site needs it.
 
 ## Shape of the run
+
+No skill encodes this; the operator composes the fan-out. What is fixed is the
+shape below.
 
 Run the re-sweep and the enumeration as **one** dynamic-size workflow, not as two
 tasks and not as a single agent: the scopes above are independent, and their

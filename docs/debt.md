@@ -30,6 +30,12 @@ Everything else not listed is owned by the comment at the site and by
   before the next release that keeps a stale pin. Re-syncing is the standing
   answer; it was declined here because `../ceal` had uncommitted work in flight
   and vendoring a half-finished tree is worse than vendoring an old one.
+  **That deferral expires with the v5 release.** The v5 gate in
+  `leased-consumer-control-session.ts` requires
+  `decodeCealLeasedConsumerCapabilityNotification` to be a function, which the
+  vendored 0.72.12 does not export and the owner's 0.72.13 does — so a v5
+  release cannot be cut without re-vendoring, and the "Gateway strips to v4"
+  reasoning above stops applying the moment this worker declares v5.
 - **The signed release manifest has no client package.**
   `ceal-worker-release-manifest-<platform>.json` records only the protocol, so a
   consumer is left with a source-owner claim. The fix puts the client in the
@@ -56,7 +62,10 @@ Everything else not listed is owned by the comment at the site and by
   child holding a socketpair end on the contract's fd, a parked `for await`, and
   a `destroy()`. The suite cannot express it: every fixture models the channel as
   a generator whose close is a graceful EOF, which differs in kind from
-  `destroy()`. Fix alongside the rest of the v5 path, not before.
+  `destroy()`.
+  **This is no longer "not before".** The Gateway lane needs a worker release
+  that actually carries the v5 contract, so the v5 path is the next release's
+  content rather than a later one's. Fix it in that slice, ahead of the tag.
 - **Two published acceptance records overstate guide registration, and one leaks
   identity refs.** `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were
   emitted while `registered_host_count` counted resolved host directories rather
