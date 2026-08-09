@@ -78,11 +78,11 @@ function sessionFor(socketPath) {
 }
 
 const frames = [
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "acquire", input: {} },
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "projection", input: leaseInput() },
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v4", operation: "recheck", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "acquire", input: {} },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "projection", input: leaseInput() },
+	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "recheck", input: leaseInput() },
 	{
-		schema_version: "ceal.leased_consumer_capability_control_request.v4",
+		schema_version: "ceal.leased_consumer_capability_control_request.v5",
 		operation: "call",
 		input: {
 			...leaseInput(),
@@ -94,13 +94,13 @@ const frames = [
 		},
 	},
 	{
-		schema_version: "ceal.leased_consumer_capability_control_request.v4",
+		schema_version: "ceal.leased_consumer_capability_control_request.v5",
 		operation: "complete",
 		input: { ...leaseInput(), disposition: "completed", agent_run_ref: "run:fixture" },
 	},
 ];
 
-test("private control session carries exactly the five canonical v4 capability operations over Gateway-issued UDS routes", async () => {
+test("private control session carries exactly the five canonical v5 capability operations over Gateway-issued UDS routes", async () => {
 	const calls = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
@@ -254,7 +254,7 @@ test("FD5 notification forwarding does not consume or wait for the pending seria
 	assert.equal(await running, true);
 	assert.deepEqual(
 		output.map((frame) => frame.schema_version),
-		["ceal.leased_consumer_capability_notification.v5", "ceal.leased_consumer_capability_control_response.v4"],
+		["ceal.leased_consumer_capability_notification.v5", "ceal.leased_consumer_capability_control_response.v5"],
 	);
 });
 
@@ -620,7 +620,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 	const output = [];
 	async function* malformed() {
 		yield encoder.encode(
-			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_capability_control_request.v4","operation":"acquire","input":{}}\n',
+			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_capability_control_request.v5","operation":"acquire","input":{}}\n',
 		);
 	}
 	assert.equal(await runControlSessionForTest(malformed(), carrier, (frame) => output.push(frame)), false);
@@ -909,7 +909,7 @@ function notificationFixture() {
 	};
 }
 function responseFor(operation) {
-	const base = { schema_version: "ceal.leased_consumer_capability_control_response.v4", operation };
+	const base = { schema_version: "ceal.leased_consumer_capability_control_response.v5", operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
 		return {

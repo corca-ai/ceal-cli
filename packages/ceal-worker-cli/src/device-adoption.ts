@@ -29,7 +29,7 @@ import {
 	type CealRevokeDisposition,
 	commitEnrolledSession,
 	endedPreviousSessionAction,
-	issuedSessionDispositionAction,
+	sessionCommitRecoveryAction,
 	sessionIdentityConflictFields,
 	sessionReplacementFields,
 	sessionReplacementNextAction,
@@ -343,9 +343,12 @@ async function completeAdoption(
 		}
 		// Nothing is claimed as adopted here. The session existed only in memory
 		// and is dropped with this process.
-		const nextAction = commit.previousSessionEnded
-			? endedPreviousSessionAction("adopt", adoptionCommitRecoveryAction(commit.code, commit.issuedSessionRevoked))
-			: adoptionCommitRecoveryAction(commit.code, commit.issuedSessionRevoked);
+		const commitRecovery = sessionCommitRecoveryAction(
+			commit.code,
+			commit.issuedSessionRevoked,
+			"Then run 'ceal session adopt' again to start a fresh adoption transaction.",
+		);
+		const nextAction = commit.previousSessionEnded ? endedPreviousSessionAction("adopt", commitRecovery) : commitRecovery;
 		return writeAdoptionFailure(
 			io,
 			{
@@ -495,14 +498,6 @@ function writeAdoptionFailure(io: CealCliIo, outcome: AdoptionOutcome, exitCode 
 		error: { kind: outcome.code, message: outcome.message, next_action: outcome.nextAction },
 	});
 	return exitCode;
-}
-
-function adoptionCommitRecoveryAction(reason: string, issuedSessionRevoked: CealRevokeDisposition): string {
-	const local =
-		reason === "refresh_busy"
-			? "Wait briefly for the other local Ceal process to finish."
-			: "Check the local Ceal state directory and its permissions.";
-	return `${issuedSessionDispositionAction(issuedSessionRevoked)} ${local} Then run 'ceal session adopt' again to start a fresh adoption transaction.`;
 }
 
 // Distinct from every outcome above: the Gateway did its part, and this host

@@ -1332,7 +1332,7 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 	// file now belongs to a worker suite or to nothing.
 	assert.equal(scripts["test:legacy-compatibility"], undefined, "the legacy compatibility suite must not come back");
 
-	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS].sort();
+	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS].filter((file) => file.startsWith("test/")).sort();
 	const actual = [
 		...readdirSync(path.join(ROOT, "test", "contract"))
 			.filter((name) => name.endsWith(".test.mjs"))

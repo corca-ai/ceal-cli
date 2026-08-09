@@ -1,5 +1,166 @@
 {
-	"entries": [
+  "entries": [
+    {
+      "surface": "code",
+      "id": "1d37623e5019a67e",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "composeWorkerReleaseAssets and mergeWorkerReleaseAssetSets are independent producer and reconciler boundaries in one release module. Their shared staging/error-envelope shape is already factored through output-directory helpers; combining the remaining bodies would put build and merge trust decisions behind callbacks."
+    },
+    {
+      "surface": "code",
+      "id": "1e9f0b30d6eae2f6",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Re-key of the already reviewed Codex inventory lstat-or-mark-partial family. Extraction was previously falsified because it replaced this local pair with a wider cross-module family; both walkers must independently consume and mark their shared budget."
+    },
+    {
+      "surface": "code",
+      "id": "32a0d0bcede949f0",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "ES module import-header overlap between a production bootstrap and a release test fixture. Import declarations are not an extractable implementation fact."
+    },
+    {
+      "surface": "code",
+      "id": "349d44928d03b33c",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Two test fixtures write placeholder signature and certificate sidecars. The repeated two-line data setup belongs to independent bootstrap and installer proofs; a shared fixture would couple contract and release tiers."
+    },
+    {
+      "surface": "code",
+      "id": "351b6fb800672617",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Two bootstrap cases declare similar dependency seams but deliberately differ in download observation and mutation. Factoring their few common fixture lines would hide which dependency each refusal controls."
+    },
+    {
+      "surface": "code",
+      "id": "3c7e99843e566e72",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Detector clustering across an HTTP error switch, session recovery branches, and an observer sentinel. The members share control-flow tokens but represent unrelated domains and no repeated fact."
+    },
+    {
+      "surface": "code",
+      "id": "401c404aa5ef00fd",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Broad detector overlap between release-asset composition and native-artifact construction. They share the repo's release-script frame but own different artifact schemas and trust boundaries; common output publication is already extracted."
+    },
+    {
+      "surface": "code",
+      "id": "44711d148bf378c8",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Broad token clustering combines two bounded audit walkers with unrelated local-store guard functions. The previously tested walker extraction increased cross-module duplication, and the filesystem members enforce distinct optional/present path contracts."
+    },
+    {
+      "surface": "code",
+      "id": "4e437a213994e8b8",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Whole-file detector artifact over the Protocol consumer verifier and worker package builder. One proves a real offline install while the other deliberately stages a hermetic package; sharing their orchestration would erase that proof distinction."
+    },
+    {
+      "surface": "code",
+      "id": "621f35cd113d9341",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Standalone-script CLI tails share the ordinary runCli return and import.meta main guard. This is executable-module boilerplate, not shared release policy."
+    },
+    {
+      "surface": "code",
+      "id": "65ddc5cd82a22b7c",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "removeOwnedFile independently opens its parent descriptor and the anchored child descriptor. Their matching ENOENT classification is required at two different race boundaries; merging them would parameterize the flags and resource semantics inside the security primitive."
+    },
+    {
+      "surface": "code",
+      "id": "66c8ea48562daff1",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Subset detector artifact between a transport error switch and Gateway-issued-session disposition text. The codes and recovery lifecycles are unrelated."
+    },
+    {
+      "surface": "code",
+      "id": "6e9d7666e7bbc8c4",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "withCealTiming and withCealTimingSync intentionally mirror outcome recording across Promise and immediate execution. A shared wrapper would either make synchronous timing asynchronous or finish before a Promise settles, which would corrupt the measurement."
+    },
+    {
+      "surface": "code",
+      "id": "7dcdd70e2daa5f84",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Three release boundaries validate regular non-symlink inputs while preserving their own typed error class and operator message. A generic callback-based checker would move each boundary's classification one argument away to save a short guard."
+    },
+    {
+      "surface": "code",
+      "id": "81ed10bf66f9701b",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Native, composed-asset, and package builders call the shared output-directory guard with their own marker and subject. The detector is reporting the shared-home invocation, not a second implementation."
+    },
+    {
+      "surface": "code",
+      "id": "9d81ae8c9d6354e8",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Import and root-resolution headers in two standalone release scripts. This is the same non-extractable executable-module boilerplate class already reviewed for other scripts."
+    },
+    {
+      "surface": "code",
+      "id": "ba2176416cd336c6",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Three-line local sha256 helpers across standalone scripts and fixtures. Each file must remain independently runnable, and extracting this primitive would add a shared import to many unrelated proof boundaries without removing a drifting policy."
+    },
+    {
+      "surface": "code",
+      "id": "dc8aef3bc2f65421",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Re-key of the already reviewed hook-installer idempotence test. The second install and check are the property under test; hiding them in a helper would remove the visible before/after assertion rather than remove duplicate production logic."
+    },
+    {
+      "surface": "code",
+      "id": "e076bb930a4d6684",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Native executable and packed-package materializers share a staging skeleton but publish different schemas, modes, assets, and smoke evidence. The safe output publication tail is already in one shared helper; the remainder is the artifact distinction."
+    },
+    {
+      "surface": "code",
+      "id": "e6cef3ff6d37c423",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Native and package release tests stage parallel but intentionally separate real-artifact fixtures. Combining them would couple two release proofs whose different builders and manifests are exactly what the tests compare."
+    },
+    {
+      "surface": "code",
+      "id": "eaac296845719b64",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "A ternary choosing a local repair message clustered with a ternary choosing unknown-outcome caution. The matching syntax carries unrelated decisions and no shared vocabulary."
+    },
+    {
+      "surface": "code",
+      "id": "f9a0289403048d7c",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Tag and SHA-256 validators share the small validate-string-or-fail idiom but own different grammars, error classes, and messages in separate public bootstrap and release-input boundaries."
+    },
+    {
+      "surface": "code",
+      "id": "fee08553988df21f",
+      "class": "intentional",
+      "reviewed_at": "2026-08-09",
+      "note": "Re-key of the reviewed session-store versus discovery-cache factory family. The session store fails closed around credential modes and locking; the cache is advisory and degrades to a live probe, so a shared factory would merge two deliberately different safety contracts."
+    },
 		{
 			"surface": "code",
 			"id": "04c7c82dc0fc3ac7",

@@ -695,7 +695,7 @@ function ascending(a: string, b: string): number {
 }
 
 function descending(a: string, b: string): number {
-	return a < b ? 1 : a > b ? -1 : 0;
+	return -ascending(a, b);
 }
 
 // Resolves YYYY/MM/DD leaf directories in descending date order, consuming

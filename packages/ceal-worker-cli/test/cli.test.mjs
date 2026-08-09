@@ -1572,6 +1572,22 @@ test("every logout precondition failure stays in the logout result contract", as
 	assert.equal(unsafe.error.kind, "unsafe_store");
 	assert.equal(unsafe.server_session_revoked, false);
 	assert.equal(unsafe.local_session_removed, false);
+
+	const lockedLoadFailure = await yamlRun(["session", "logout"], 3, {
+		loadSession: async () => assert.fail("the locked store owns loading"),
+		removeSession: async () => assert.fail("an unreadable session is not removed"),
+		withSessionStateLock: async (action) =>
+			action({
+				load: async () => {
+					throw new Error("unclassified local read failure");
+				},
+				save: async () => assert.fail("logout does not save"),
+				replace: async () => assert.fail("logout does not replace"),
+				remove: async () => assert.fail("an unreadable session is not removed"),
+			}),
+	});
+	assert.equal(lockedLoadFailure.error.kind, "session_load_failed");
+	assert.doesNotMatch(lockedLoadFailure.error.next_action, /Gateway URL|network/u);
 });
 
 test("logout removes local state when the Gateway says the refresh credential is already retired", async () => {

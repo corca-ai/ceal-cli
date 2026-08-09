@@ -1160,26 +1160,29 @@ async function requestReceiptReadback(
 ) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	let readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
-		client.request({
-			request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
-			operation: "readback",
-			profile_ref: profileRef,
-			body: { request_id: requestRef },
-		}),
-	);
+	let readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
 	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
+	readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
+	return { readback, session };
+}
+
+function requestGatewayReadback(
+	client: ReturnType<typeof createCealClient>,
+	profileRef: string,
+	requestRef: string,
+	requestIdFallback: string,
+	runtime: CealCommandRuntime,
+) {
+	return withCealTiming(runtime.timing, "gateway_readback", () =>
 		client.request({
-			request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
+			request_id: `${runtime.nextRequestId?.() ?? requestIdFallback}:readback`,
 			operation: "readback",
 			profile_ref: profileRef,
 			body: { request_id: requestRef },
 		}),
 	);
-	return { readback, session };
 }
 
 function projectReceiptEvent(event: CealGatewayAuditEvent): Record<string, unknown> {
@@ -1300,14 +1303,7 @@ async function executeCall(
 	try {
 		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);
 		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId, record);
-		const readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
-			client.request({
-				request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
-				operation: "readback",
-				profile_ref: profileRef,
-				body: { request_id: requestId },
-			}),
-		);
+		const readback = await requestGatewayReadback(client, profileRef, requestId, "ceal:readback", runtime);
 		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed, record);
 		completed = { value: call.value, events: readback.value.events, session };
 	} catch (error) {

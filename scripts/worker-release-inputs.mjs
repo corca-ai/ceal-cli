@@ -71,21 +71,8 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	// a release package is packing, not the development-only protocol proof the
 	// decision carves out.
 	assertShippableProtocolVendorPinFor(repoRoot);
-	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
-	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
-	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
-	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
-	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
-	if (
-		new Set([
-			path.dirname(protocolTarball),
-			path.dirname(protocolProvenance),
-			path.dirname(controlConformance),
-			path.dirname(handoffManifest),
-		]).size !== 1
-	) {
-		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
-	}
+	const { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 } =
+		requireGatewayHandoffPacketPaths(options);
 	const packet = validateGatewayHandoffPacketFiles({
 		controlConformance,
 		handoffManifest,
@@ -123,14 +110,8 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
  * grammar while keeping authentication separate from package consumption.
  */
 export function validateGatewayHandoffPacketFiles(options = {}) {
-	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
-	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
-	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
-	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
-	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
-	if (new Set([protocolTarball, protocolProvenance, controlConformance, handoffManifest].map(path.dirname)).size !== 1) {
-		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
-	}
+	const { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 } =
+		requireGatewayHandoffPacketPaths(options);
 	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
 	const control = readJson(controlConformance, "invalid_control_conformance");
 	const handoff = readJson(handoffManifest, "invalid_handoff_manifest");
@@ -151,6 +132,18 @@ export function validateGatewayHandoffPacketFiles(options = {}) {
 		protocol: packet.protocol,
 		control_conformance: packet.control_conformance,
 	};
+}
+
+function requireGatewayHandoffPacketPaths(options) {
+	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
+	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
+	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
+	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
+	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
+	if (new Set([protocolTarball, protocolProvenance, controlConformance, handoffManifest].map(path.dirname)).size !== 1) {
+		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
+	}
+	return { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 };
 }
 
 export function resolveWorkerReleaseInputsFromLockedGatewayArchive(options = {}, dependencies = {}) {

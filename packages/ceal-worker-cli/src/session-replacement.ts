@@ -140,12 +140,24 @@ export function endedPreviousSessionAction(method: "enroll" | "adopt", ordinary:
 }
 
 /** Explain the fate of a Gateway-issued session that the host could not keep. */
-export function issuedSessionDispositionAction(disposition: CealRevokeDisposition): string {
+function issuedSessionDispositionAction(disposition: CealRevokeDisposition): string {
 	if (disposition === "revoked") return "The incoming session was revoked.";
 	if (disposition === "already_unusable") return "The incoming session was already unusable at the Gateway.";
 	if (disposition === "unavailable")
 		return "The incoming session could not be revoked and may remain usable at the Gateway until it expires; report it to your organization operator.";
 	return "The incoming session has no applicable revocation disposition.";
+}
+
+/** The local repair shared by enrollment and adoption commit failures. */
+export function localSessionStoreRecoveryAction(reason: string): string {
+	return reason === "refresh_busy"
+		? "Wait briefly for the other local Ceal process to finish."
+		: "Check the local Ceal state directory and its permissions.";
+}
+
+/** Recovery after a Gateway-issued session could not be committed locally. */
+export function sessionCommitRecoveryAction(reason: string, disposition: CealRevokeDisposition, retryAction: string): string {
+	return `${issuedSessionDispositionAction(disposition)} ${localSessionStoreRecoveryAction(reason)} ${retryAction}`;
 }
 
 function lowerFirst(value: string): string {
@@ -301,6 +313,6 @@ export function clientSessionTransportFailure(error: unknown, operation: "renewa
 }
 
 /** The store's own reason when it has one; anything else is a failed write. */
-export function sessionStoreFailureCode(error: unknown): string {
-	return error instanceof CealSessionStoreError ? error.code : "session_save_failed";
+export function sessionStoreFailureCode(error: unknown, fallback = "session_save_failed"): string {
+	return error instanceof CealSessionStoreError ? error.code : fallback;
 }
