@@ -23,42 +23,39 @@ Read the counts rather than trusting them here; each line names the command.
   it — `node -p 'require("./package.json").version'`, `git describe --tags
   --abbrev=0`. `repo-gates` fails a commit whose manifests disagree, so one read
   answers for all three.
-- The working tree is clean, `npm run check` is green, and `origin/main` is green
-  on CI — `gh run list --workflow=check.yml`. That baseline had been broken for a
-  while and is not to be assumed; read it.
-- **Both slice 3 changes have executed on real runners without spending a tag.**
-  A dispatch dry run of `ceal-release.yml` reached all three build legs and
-  `assemble`, with `sign-and-publish` skipped. On the `linux-arm64` leg the gate
-  is skipped as designed and `Prove the packed Gateway consumer on the ungated
-  leg` ran. `gh run list --workflow=ceal-release.yml` has it.
-
-- **`ceal-v0.75.0` is released and read back on this host.** `ceal update` took
-  it from 0.73.0, the installed artifact digest matches the published
-  `SHA256SUMS`, and the acceptance packet reports digests agreeing across bytes,
-  manifest and `SHA256SUMS` with the protocol producer agreeing with the lock.
-  A live discovery reached `instance:ceal-prod` and was accepted. Re-emit with
-  `node scripts/worker-acceptance-packet.mjs --binary "$(command -v ceal)"` —
-  through `npm run accept:worker` the guard refuses, correctly, because npm puts
-  the workspace symlink on PATH ahead of the install.
-- **Proof level reached: installed release plus live host decision.** Provider
-  execution is not claimed: no bounded capability call was requested, and `call`
-  is now `remote_write`.
+- `npm run check` is green on this host and `origin/main` was green on CI before
+  the commit below — `gh run list --workflow=check.yml`. That baseline had been
+  broken for a while and is not to be assumed; read it.
+- **Issue 10 is fixed and committed, and the commit is unpushed.** It carries the
+  `Closes #10` keyword, so pushing closes the issue. Nothing has been pushed and
+  the issue is still open; that approval was never asked for. Verify after any
+  push with `issue_tool.py verify-closeout ... --carrier direct-commit
+  --commit-ref <ref> --expect-state CLOSED`.
+- **That fix is unreleased.** `CHANGELOG.md` carries it under `## Unreleased`,
+  which the release step should fold into the version section it cuts. Proof
+  level reached is local suite plus repo gate — no installed release, and no live
+  `session enroll`/`adopt` against a real Gateway, which both declare
+  `remote_write`.
+- **`ceal-v0.75.0` is released and read back on this host.** Re-emit the
+  acceptance packet with `node scripts/worker-acceptance-packet.mjs --binary
+  "$(command -v ceal)"` — through `npm run accept:worker` the guard refuses,
+  correctly, because npm puts the workspace symlink on PATH ahead of the install.
 
 ## Next Session
 
-1. **Issue 10 is the direct successor to what just shipped.** This release made
-   `session enroll`/`adopt`/`logout` declare `remote_write` because they consume
-   a one-time Gateway approval or revoke a live session. Issue 10 says those same
-   routes still overwrite a live session with no refusal, no `--force`, no
-   Gateway revoke and no spool cleanup — so the declaration is now truthful and
-   the behaviour still is not.
+1. **Ask about pushing the issue 10 commit, then verify the closeout.** It is the
+   only thing between a finished fix and a closed issue.
 2. **Issue 6 is the one with someone else's clock on it.** Gateway compatibility
    retirement is blocked on this consumer's cutover, and the ledger lives in
    `corca-ai/ceal`, not here. Read its status there before ranking it below 10.
    A related gap surfaced during issue 12: the vendored protocol is `0.72.12`
    while that issue names a packed `0.72.13` selected-v5 candidate this checkout
    does not have, so its candidate proof could not run.
-3. **Issue 12 is reported and deliberately left open.** Closure routes through
+3. **A structural gate for direct session writers is now carried debt.** Issue 10
+   happened because a command wrote the session store without going through a
+   transition contract, and nothing structural stops the next one.
+   [debt.md](debt.md) says why a regex sweep was rejected as the instrument.
+4. **Issue 12 is reported and deliberately left open.** Closure routes through
    the cross-repo C11a final batch. The whole v5 notification path is latent —
    the shipped `leased-consumer-control-session-contract.json` is `.v2` with no
    `notification_channel`, so production takes the v4 branch and none of it runs.
