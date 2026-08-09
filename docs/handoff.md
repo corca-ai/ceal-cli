@@ -3,71 +3,37 @@
 ## Workflow Trigger
 
 If this file is mentioned with no other task, start at the first item of
-`## Next Session`. `AGENTS.md` `## Boundaries` owns which acts need approval
-first — push, tag, GitHub write, Gateway write, release publish, and any live
-provider readback. This file does not keep a second, shorter list.
+`## Next Session
 
-## Continuation Capability
-
-After reading this you should not need to re-derive anything: how to sweep and
-what would end it live in [defect-sweep.md](defect-sweep.md), every gate's
-reasoning in [gates.md](gates.md), the carried debt in [debt.md](debt.md), the
-release procedure in [release-and-enrollment.md](release-and-enrollment.md).
-This file holds only what changes the next action.
-
-## Current State
-
-Read the facts rather than trusting them here; each line names how.
-
-- **Two commits are unpushed and CI has not seen them** — `git rev-list --count
-  origin/main..HEAD`, `gh run list --workflow=check.yml`. The current version
-  carries no tag: compare `git describe --tags --abbrev=0` with
-  `node -p 'require("./package.json").version'`.
-- **The defect class now has two gates, and they are the session's product.**
-  `npm run lint:store-lock` and `npm run lint:duplicate-literal` run in both
-  tiers. Both were falsified against `ceal-v0.75.0` before being armed, and
-  [gates.md](gates.md) owns what each can and cannot see.
-  [defect-sweep.md](defect-sweep.md) `## The two-scope re-sweep` owns the run that
-  produced them, including two claims this session got wrong and had to correct.
-- **The v5 release is blocked on the Gateway, not on this repository.** The
-  highest signed protocol handoff is `gateway-protocol-handoff-v0.72.12` —
-  `git -C ../ceal ls-remote --tags origin 'gateway-protocol-handoff-*'` — while
-  the v5 gate needs 0.72.13. Re-vendoring without a matching lock fails
-  `proof_shipment_protocol_divergence`, which is fatal. The tracked request is
-  [requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md).
-- **The v5 shutdown hang is closed, and its recorded fix had been wrong.**
-  Bounding `closeReadable` settles the await and leaves the process alive; the
-  fix is `openInheritedReadable` adopting the descriptor with `net.Socket`. The
-  test's control arm hangs on purpose so the fixed arm cannot pass vacuously, and
-  reverting the fix turns it red. It is pinned on the descriptor Gateway actually
-  supplies, and the hang reproduces there — an earlier reading that it did not
-  came from the harness, not the tree. [debt.md](debt.md) keeps both wrong
-  readings, because the second one survived a commit.
-- **The Gateway blocker is an order, not a deadlock, and the unrun step is
-  theirs.** Their handoff workflow triggers on its own tag and names no worker
-  input — `rg -n 'ceal-cli|vendor/|worker'` over
-  `.github/workflows/gateway-protocol-handoff-release.yml` in `../ceal` finds
-  nothing while `rg -c 'ceal-protocol'` finds two. Their 0.72.13 is committed
-  locally and **not pushed to their own origin**:
-  `git -C ../ceal show origin/main:packages/ceal-protocol/package.json` still says
-  0.72.12. So "waiting on a worker release" is true of their last step and hides
-  their first one.
-- **All gates are green** — `npm run check`, `npm run check:duplication`,
-  `npm run lint:shell`. Time them yourself.
-
-## Next Session
-
-1. **There is no worker-side v5 work left that the Gateway is not holding.** All
+1. **Make the gate stop paying for work it throws away.** Measured on 2026-08-09
+   and scheduled here rather than carried in [debt.md](debt.md), which owns the
+   detail and the corrected reason it was declined before. Two moves, in order:
+   route `precoverage`/`pretest` through the `dist` freshness owner the repo
+   already has (`ensurePackageBuilt` in `test/repo-build.mjs`) so a gate run
+   compiles each package once, then pass `--incremental` with a gitignored build
+   info file through `npm --prefix <pkg> run build --` so an unchanged tree stops
+   recompiling. Neither needs the frozen package edited.
+   It touches `prepack`, so it is release-affecting — which is why it goes now,
+   ahead of a release, rather than after one. The proof is a `dist` digest that
+   does not change and a re-measured iteration tier;
+   `charness-artifacts/quality/2026-08-09-quality-review.md` holds the before
+   figures and the commands that produced them.
+2. **Declare a runtime budget** for the two tiers in `.agents/quality-adapter.yaml`
+   while the numbers are fresh. `render_runtime_summary.py` reports
+   `runtime_visibility_missing_budgets` today, and the absence is not academic: a
+   contended reading of the iteration tier went unchallenged in this session's own
+   notes until it was re-measured. Set it from the measurement, not from a target.
+3. **There is no worker-side v5 work left that the Gateway is not holding.** All
    three items funnel through one tag, and each is mechanically enforced rather
    than merely believed — [requests/…-v0-72-13.md](requests/2026-08-09-to-gateway-protocol-handoff-v0-72-13.md)
    `## Three items, one blocker` lists them with the `file:line` that refuses
    each. Do not start any of them; re-check the request's commands instead, and
-   ask the operator before anything that writes to that lane.
-2. **When the tag lands**, the order is: re-vendor and re-pin in one commit, then
+   ask the operator before anything that writes to that lane. The operator is
+   delivering that request by hand.
+4. **When the tag lands**, the order is: re-vendor and re-pin in one commit, then
    the `.v3` contract, then the release tag. The contract needs no authoring —
-   the generator refuses it today only because the lock is behind, so moving the
-   lock is most of it.
-3. **Ask the operator for approval before the tag.** Confirm the free
+   the generator refuses it today only because the lock is behind.
+5. **Ask the operator for approval before the tag.** Confirm the free
    preconditions first — [operator-acceptance.md](operator-acceptance.md)
    `## Before Spending A Release Tag` lists them and all are reads. A tag is not
    retryable.
