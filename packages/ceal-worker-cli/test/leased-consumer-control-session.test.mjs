@@ -482,6 +482,17 @@ test("the abort settles before teardown, so destroy's own error cannot become th
 // Both arms run. The control arm builds the stream the old way and must hang;
 // without it, the fixed arm's pass would be indistinguishable from a harness
 // that could never fail.
+//
+// The control arm pays its whole budget by construction — it hangs, so it always
+// costs the timeout — which makes that number a standing gate cost rather than a
+// safety margin to round up. It is sized from the fixed arm's measured work
+// instead: the child parks for 100ms, `closeReadable` answers in single-digit
+// milliseconds, and the fixed arm finishes well inside half a second. A read
+// that has parked never un-parks, so anything past the fixed arm's own cost
+// distinguishes the two, and a longer wait buys nothing but gate time. The first
+// version spent five seconds here, 89% of this file.
+const SHUTDOWN_ARM_TIMEOUT_MS = 1_500;
+
 test("a parked read on an inherited socketpair does not keep the worker alive", () => {
 	const transport = `file://${path.join(DIST, "private-worker-transport.js")}`;
 	const run = (open) =>
@@ -503,7 +514,7 @@ test("a parked read on an inherited socketpair does not keep the worker alive", 
 			],
 			// No `process.exit` in the child on purpose: whether Node's loop drains
 			// is the whole question, and an explicit exit would answer it falsely.
-			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", "pipe"], encoding: "utf8", timeout: 5_000 },
+			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", "pipe"], encoding: "utf8", timeout: SHUTDOWN_ARM_TIMEOUT_MS },
 		);
 
 	const fixed = run("m.openInheritedReadable(fd)");
