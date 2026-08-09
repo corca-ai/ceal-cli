@@ -2,6 +2,7 @@ import { CealPersonalClientSessionError, createCealPersonalClientSessionClient }
 import type { CealCommandRuntime } from "./cli-runtime.js";
 import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
 import { changedSessionIdentityBindings } from "./session-identity.js";
+import { withCealTiming } from "./timing.js";
 
 // One home holds exactly one session (`profile-store.ts`, `~/.ceal/client-session.json`),
 // so `session enroll` and `session adopt` are not only first-configuration
@@ -51,6 +52,8 @@ export type CealSessionCommit =
 			code: string;
 			/** A replacement that already revoked the displaced session before failing to write. */
 			previousSessionEnded: boolean;
+			/** The Gateway-issued session this failed commit must not leave live and unnamed. */
+			issuedSessionRevoked: CealRevokeDisposition;
 	  };
 
 interface CealSessionCommitStore {
@@ -85,11 +88,17 @@ export async function commitEnrolledSession(
 			try {
 				await store.save(incoming);
 			} catch (error) {
-				// The displaced session is already retired. Keeping the one that was
-				// to replace it would strand a live session this host never stored
-				// and can no longer name — the same orphan the refusal path avoids.
-				if (current) await revoke(incoming, runtime);
-				return { ok: false, reason: "store_failure", code: sessionStoreFailureCode(error), previousSessionEnded: current !== null };
+				// The incoming session is already issued even when this was a first
+				// session. It must not remain live and unnamed just because there was
+				// no displaced local credential to clean up.
+				const issuedSessionRevoked = await revoke(incoming, runtime);
+				return {
+					ok: false,
+					reason: "store_failure",
+					code: sessionStoreFailureCode(error),
+					previousSessionEnded: previousSessionRevoked === "revoked" || previousSessionRevoked === "already_unusable",
+					issuedSessionRevoked,
+				};
 			}
 			// A renewal keeps the audit history of the identity it renews. Every
 			// other write may inherit state from an identity that is not the one
@@ -100,7 +109,13 @@ export async function commitEnrolledSession(
 			return { ok: true, replacement: replacing ? "replaced" : "first_session", previousSessionRevoked, derivedStateCleared };
 		});
 	} catch (error) {
-		return { ok: false, reason: "store_failure", code: sessionStoreFailureCode(error), previousSessionEnded: false };
+		return {
+			ok: false,
+			reason: "store_failure",
+			code: sessionStoreFailureCode(error),
+			previousSessionEnded: false,
+			issuedSessionRevoked: await revoke(incoming, runtime),
+		};
 	}
 }
 
@@ -122,6 +137,15 @@ export function sessionReplacementNextAction(commit: CealSessionCommit & { ok: t
 export function endedPreviousSessionAction(method: "enroll" | "adopt", ordinary: string): string {
 	const acquisition = method === "enroll" ? "enrollment" : "adoption";
 	return `This host's previous session was revoked before the write failed, so it is gone and the ${acquisition} did not land. ${ordinary}`;
+}
+
+/** Explain the fate of a Gateway-issued session that the host could not keep. */
+export function issuedSessionDispositionAction(disposition: CealRevokeDisposition): string {
+	if (disposition === "revoked") return "The incoming session was revoked.";
+	if (disposition === "already_unusable") return "The incoming session was already unusable at the Gateway.";
+	if (disposition === "unavailable")
+		return "The incoming session could not be revoked and may remain usable at the Gateway until it expires; report it to your organization operator.";
+	return "The incoming session has no applicable revocation disposition.";
 }
 
 function lowerFirst(value: string): string {
@@ -154,6 +178,7 @@ export function sessionIdentityConflictFields(
 	const acquired = method === "enroll" ? "enrolled" : "adopted";
 	const replaceCommand = `'ceal session ${method} --force'`;
 	const approval = method === "enroll" ? "ask for a replacement code" : "ask the organization administrator to approve replacement";
+	const incomingDisposition = issuedSessionDispositionAction(issuedSessionRevoked);
 	return {
 		status: "conflict",
 		changed_bindings: [...changedBindings],
@@ -164,10 +189,7 @@ export function sessionIdentityConflictFields(
 		error: {
 			kind: "session_identity_conflict",
 			message: `This host already holds a session for a different identity; the ${acquired} one differs in ${changedBindings.join(", ")}.`,
-			next_action:
-				issuedSessionRevoked === "revoked"
-					? `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ${approval} and re-run with ${replaceCommand}; the session this attempt created has been revoked.`
-					: `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ${approval} and re-run with ${replaceCommand}; report to your operator that the session this attempt created could not be revoked (${issuedSessionRevoked}).`,
+			next_action: `Run 'ceal session status' to read the identity this host keeps. To replace it deliberately, ${approval} and re-run with ${replaceCommand}. ${incomingDisposition}`,
 		},
 	};
 }
@@ -197,7 +219,9 @@ async function requestRevocation(
 ): Promise<{ revoked: true } | { denied: string } | { transport: string }> {
 	const create = runtime.createClientSessionClient ?? createCealPersonalClientSessionClient;
 	try {
-		const response = await create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken);
+		const response = await withCealTiming(runtime.timing, "session_revoke", () =>
+			create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken),
+		);
 		return response.ok ? { revoked: true } : { denied: response.error.code };
 	} catch (error) {
 		return { transport: clientSessionTransportFailure(error, "revocation") };

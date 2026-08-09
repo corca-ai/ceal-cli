@@ -5,6 +5,7 @@ import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
+import type { CealTimingRecorder } from "./timing.js";
 
 export interface CealCliIo {
 	stdout: { write(chunk: string): unknown };
@@ -37,6 +38,8 @@ export interface CealStableUpdateOptions {
 }
 
 export interface CealCommandRuntime {
+	/** Present only for an explicit `ceal --timing ...` invocation. */
+	timing?: CealTimingRecorder;
 	readSecret?: () => Promise<string>;
 	promptEnrollmentCode?: () => Promise<string>;
 	isInteractiveTerminal?: () => boolean;

@@ -1,7 +1,7 @@
-import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { assertDirectoryIfPresent, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { assertDirectoryIfPresent, prepareDirectory, removeOwnedFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 import { validSessionIdentityDiscriminator } from "./session-identity.js";
@@ -411,9 +411,7 @@ function withinRetention(recordedAt: number, now: number): boolean {
 }
 
 function removeSpool(directory: string, file: string): void {
-	// removableFile binds the file to the real owner-only parent as well as its
-	// own shape, so cleanup never follows a substituted `.ceal` directory.
-	if (removableFile(directory, file)) rmSync(file, { force: true });
+	removeOwnedFile(directory, file, unsafeReceiptSpool);
 }
 
 function serializeSpool(identity: string, entries: readonly CealReceiptSpoolEntry[]): Record<string, unknown> {

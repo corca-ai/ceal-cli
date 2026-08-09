@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { assertDirectoryIfPresent, prepareDirectory, removableFile, safeExistingFile } from "./local-store-guards.js";
+import { prepareDirectory, removeOwnedFile, safeExistingFile } from "./local-store-guards.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
@@ -187,10 +187,7 @@ function writeCacheEntry(directory: string, file: string, entry: CealDiscoveryCa
 }
 
 function removeCacheEntry(directory: string, file: string): void {
-	if (!assertDirectoryIfPresent(directory, unsafeDiscoveryCache, true)) return;
-	// removableFile binds the file to the real owner-only parent as well as its
-	// own shape, so cleanup never follows a substituted `.ceal` directory.
-	if (removableFile(directory, file)) rmSync(file, { force: true });
+	removeOwnedFile(directory, file, unsafeDiscoveryCache);
 }
 
 function serializeEntry(entry: CealDiscoveryCacheEntry): Record<string, unknown> {

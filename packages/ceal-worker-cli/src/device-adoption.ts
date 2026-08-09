@@ -29,10 +29,12 @@ import {
 	type CealRevokeDisposition,
 	commitEnrolledSession,
 	endedPreviousSessionAction,
+	issuedSessionDispositionAction,
 	sessionIdentityConflictFields,
 	sessionReplacementFields,
 	sessionReplacementNextAction,
 } from "./session-replacement.js";
+import { withCealTiming } from "./timing.js";
 
 // `ceal session adopt`: the employee-facing verified-email device flow.
 //
@@ -135,24 +137,26 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 	const client = (runtime.createDeviceAdoptionClient ?? createCealDeviceAdoptionClient)({ endpoint: parsed.gateway });
 	let started: CealDeviceEnrollmentStartResult;
 	try {
-		started = await client.start({
-			schema_version: CEAL_DEVICE_ENROLLMENT_START_SCHEMA,
-			email: parsed.email,
-			proof_suite: CEAL_DEVICE_ENROLLMENT_PROOF_SUITE,
-			proof_public_key: proofPublicKey,
-			recipient_suite: CEAL_DEVICE_ENROLLMENT_RECIPIENT_SUITE,
-			recipient_public_key: recipientPublicKey,
-			client: {
-				name: "ceal",
-				version: packageJson.version,
-				protocol_version: CEAL_PROTOCOL_VERSION,
-				// Ordered capability negotiation: a Gateway that does not know the
-				// second marker still has the original sealed-delivery path, while a
-				// Gateway enforcing the later-device limit can keep this command in a
-				// bounded approval wait instead of forcing the employee to restart.
-				features: [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE],
-			},
-		} as Parameters<typeof client.start>[0]);
+		started = await withCealTiming(runtime.timing, "session_adoption_start", () =>
+			client.start({
+				schema_version: CEAL_DEVICE_ENROLLMENT_START_SCHEMA,
+				email: parsed.email,
+				proof_suite: CEAL_DEVICE_ENROLLMENT_PROOF_SUITE,
+				proof_public_key: proofPublicKey,
+				recipient_suite: CEAL_DEVICE_ENROLLMENT_RECIPIENT_SUITE,
+				recipient_public_key: recipientPublicKey,
+				client: {
+					name: "ceal",
+					version: packageJson.version,
+					protocol_version: CEAL_PROTOCOL_VERSION,
+					// Ordered capability negotiation: a Gateway that does not know the
+					// second marker still has the original sealed-delivery path, while a
+					// Gateway enforcing the later-device limit can keep this command in a
+					// bounded approval wait instead of forcing the employee to restart.
+					features: [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE],
+				},
+			} as Parameters<typeof client.start>[0]),
+		);
 	} catch (error) {
 		return writeAdoptionFailure(io, transportOutcome(error, "start"));
 	}
@@ -189,12 +193,14 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 	while (true) {
 		let response: Awaited<ReturnType<typeof client.poll>>;
 		try {
-			response = await client.poll({
-				schema_version: "ceal.device_enrollment_poll.v1",
-				registration_ref: started.registration_ref,
-				nonce_ref: started.challenge.nonce_ref,
-				signature,
-			} as Parameters<typeof client.poll>[0]);
+			response = await withCealTiming(runtime.timing, "session_adoption_poll", () =>
+				client.poll({
+					schema_version: "ceal.device_enrollment_poll.v1",
+					registration_ref: started.registration_ref,
+					nonce_ref: started.challenge.nonce_ref,
+					signature,
+				} as Parameters<typeof client.poll>[0]),
+			);
 		} catch (error) {
 			// By this point the employee has already verified a mailbox in a browser
 			// and may have waited out an operator approval, and the device keys exist
@@ -337,12 +343,19 @@ async function completeAdoption(
 		}
 		// Nothing is claimed as adopted here. The session existed only in memory
 		// and is dropped with this process.
-		const retry = "Check the permissions on the Ceal state directory, then run 'ceal session adopt' again.";
-		return writeAdoptionFailure(io, {
-			code: commit.code,
-			message: "The adopted session could not be written to this host's session store.",
-			nextAction: commit.previousSessionEnded ? endedPreviousSessionAction("adopt", retry) : retry,
-		});
+		const nextAction = commit.previousSessionEnded
+			? endedPreviousSessionAction("adopt", adoptionCommitRecoveryAction(commit.code, commit.issuedSessionRevoked))
+			: adoptionCommitRecoveryAction(commit.code, commit.issuedSessionRevoked);
+		return writeAdoptionFailure(
+			io,
+			{
+				code: commit.code,
+				message: "The adopted session could not be written to this host's session store.",
+				nextAction,
+			},
+			3,
+			commit.issuedSessionRevoked,
+		);
 	}
 
 	return writeYaml(io.stdout, {
@@ -468,7 +481,7 @@ function transportOutcome(error: unknown, phase: "start" | "poll"): AdoptionOutc
 // written, so a caller cannot mistake any of them for a partial success. They
 // stay distinguishable by `error.kind` because their recoveries differ: an
 // expiry is retried, a binding mismatch is reported.
-function writeAdoptionFailure(io: CealCliIo, outcome: AdoptionOutcome, exitCode = 3): number {
+function writeAdoptionFailure(io: CealCliIo, outcome: AdoptionOutcome, exitCode = 3, issuedSessionRevoked?: CealRevokeDisposition): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.session_adoption.v1",
 		command: "ceal",
@@ -477,10 +490,19 @@ function writeAdoptionFailure(io: CealCliIo, outcome: AdoptionOutcome, exitCode 
 		enrollment_kind: "verified_email_first_device",
 		credential_context: CREDENTIAL_CONTEXT,
 		session_written: false,
+		...(issuedSessionRevoked === undefined ? {} : { issued_session_revoked: issuedSessionRevoked }),
 		raw_token_visible: false,
 		error: { kind: outcome.code, message: outcome.message, next_action: outcome.nextAction },
 	});
 	return exitCode;
+}
+
+function adoptionCommitRecoveryAction(reason: string, issuedSessionRevoked: CealRevokeDisposition): string {
+	const local =
+		reason === "refresh_busy"
+			? "Wait briefly for the other local Ceal process to finish."
+			: "Check the local Ceal state directory and its permissions.";
+	return `${issuedSessionDispositionAction(issuedSessionRevoked)} ${local} Then run 'ceal session adopt' again to start a fresh adoption transaction.`;
 }
 
 // Distinct from every outcome above: the Gateway did its part, and this host

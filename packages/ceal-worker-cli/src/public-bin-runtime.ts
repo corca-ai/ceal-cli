@@ -8,8 +8,10 @@ import { createCealSessionStore } from "./profile-store.js";
 import { createCealReceiptSpoolStore } from "./receipt-spool.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { createCealStableUpdateRunner } from "./stable-update.js";
+import { type CealTimingRecorder, finishCealTiming, startCealTiming, withCealTiming, withCealTimingSync } from "./timing.js";
 
-export async function runPublicCli(args: readonly string[]): Promise<number> {
+export async function runPublicCli(args: readonly string[], timing?: CealTimingRecorder): Promise<number> {
+	const prepareTiming = startCealTiming(timing, "runtime_prepare");
 	let sessionStore: ReturnType<typeof createCealSessionStore> | undefined;
 	try {
 		sessionStore = createCealSessionStore(process.env.HOME);
@@ -40,6 +42,7 @@ export async function runPublicCli(args: readonly string[]): Promise<number> {
 		detectCealAgentGuideHost(process.env),
 	);
 	const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
+	finishCealTiming(prepareTiming, "ok");
 
 	return await runCealCommand(
 		args,
@@ -48,20 +51,25 @@ export async function runPublicCli(args: readonly string[]): Promise<number> {
 			stderr: process.stderr,
 		},
 		{
+			timing,
 			readSecret: readStdinSecret,
 			promptEnrollmentCode: () => readHiddenTerminalEnrollmentCode(process.stdin, process.stderr),
 			isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
 			isOutputTerminal: () => Boolean(process.stderr.isTTY),
 			isInputTerminal: () => Boolean(process.stdin.isTTY),
-			loadSession: sessionStore ? () => sessionStore.load() : undefined,
-			saveSession: sessionStore ? (session) => sessionStore.save(session) : undefined,
-			removeSession: sessionStore ? () => sessionStore.remove() : undefined,
-			withSessionStateLock: sessionStore ? (action) => sessionStore.withStateLock(action) : undefined,
-			loadDiscoveryCache: discoveryCache ? () => discoveryCache.load() : undefined,
+			loadSession: sessionStore ? () => withCealTiming(timing, "session_load", () => sessionStore.load()) : undefined,
+			saveSession: sessionStore
+				? (session) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.save(session, onAcquired))
+				: undefined,
+			removeSession: sessionStore ? () => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.remove(onAcquired)) : undefined,
+			withSessionStateLock: sessionStore
+				? (action) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.withStateLock(action, onAcquired))
+				: undefined,
+			loadDiscoveryCache: discoveryCache ? () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()) : undefined,
 			saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
 			removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
-			inspectAgentGuide: agentGuide ? (agent) => agentGuide.inspect(agent) : undefined,
-			registerAgentGuide: agentGuide ? (agent) => agentGuide.register(agent) : undefined,
+			inspectAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_inspect", () => agentGuide.inspect(agent)) : undefined,
+			registerAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_register", () => agentGuide.register(agent)) : undefined,
 			// The append takes the spool's cross-process lock, so it is genuinely
 			// async and is not awaited here: a spool write must not delay the call's
 			// own result, which is already on stdout before this runs.
@@ -77,7 +85,9 @@ export async function runPublicCli(args: readonly string[]): Promise<number> {
 			// incomplete history rather than a quietly short one.
 			recordReceiptSpool: receiptSpool
 				? (identity, entry) => {
-						void receiptSpool.append(identity, entry).catch(() => receiptSpool.recordDrop(identity));
+						void withCealTiming(timing, "receipt_spool_append", () => receiptSpool.append(identity, entry)).catch(() =>
+							receiptSpool.recordDrop(identity),
+						);
 					}
 				: undefined,
 			recordReceiptSpoolDrop: receiptSpool
@@ -88,19 +98,39 @@ export async function runPublicCli(args: readonly string[]): Promise<number> {
 			loadReceiptSpool:
 				receiptSpool && sessionStore
 					? async (session) => {
-							return session ? receiptSpool.load(sessionIdentityDiscriminator(session)) : null;
+							return session ? withCealTiming(timing, "receipt_spool_load", () => receiptSpool.load(sessionIdentityDiscriminator(session))) : null;
 						}
 					: undefined,
 			removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
-			inspectAgentAudit: () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now()),
+			inspectAgentAudit: () =>
+				withCealTimingSync(timing, "observer_transcript_scan", () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now())),
 			inspectAgentSession: (runtimeName, sessionRef) =>
-				inspectAgentSessionEvents(process.env.HOME, agentHostOverrides, runtimeName, sessionRef),
+				withCealTimingSync(timing, "observer_session_scan", () =>
+					inspectAgentSessionEvents(process.env.HOME, agentHostOverrides, runtimeName, sessionRef),
+				),
 			runStableUpdate,
 			executablePath: process.execPath,
 			discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
 			nextRequestId: () => `ceal:${randomUUID()}`,
 		},
 	);
+}
+
+async function withSessionStoreLockTiming<T>(
+	timing: CealTimingRecorder | undefined,
+	action: (onAcquired: () => void) => Promise<T>,
+): Promise<T> {
+	const span = startCealTiming(timing, "local_store_lock_wait");
+	let acquired = false;
+	try {
+		return await action(() => {
+			acquired = true;
+			finishCealTiming(span, "ok");
+		});
+	} catch (error) {
+		if (!acquired) finishCealTiming(span, "error");
+		throw error;
+	}
 }
 
 function parseCacheTtlOverride(value: string | undefined): number | undefined {

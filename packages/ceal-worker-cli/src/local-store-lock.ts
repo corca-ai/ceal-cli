@@ -1,5 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, type Stats, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	constants,
+	fstatSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	type Stats,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 // The mutual exclusion every local store under HOME uses to make a
@@ -49,6 +62,8 @@ export interface LocalStoreLockOptions {
 	onUnsafe: () => never;
 	/** Throws the calling store's own busy/contended error. Must not return. */
 	onBusy: () => never;
+	/** Observation-only callback after this generation owns the lock. */
+	onAcquired?: (waitedMs: number) => void;
 }
 
 /**
@@ -58,7 +73,13 @@ export interface LocalStoreLockOptions {
  * not create it, because the two stores hold different mode contracts on it.
  */
 export async function withLocalStoreLock<T>(options: LocalStoreLockOptions, action: () => Promise<T>): Promise<T> {
+	const startedAt = Date.now();
 	const release = await acquireLock(options);
+	try {
+		options.onAcquired?.(Math.max(0, Date.now() - startedAt));
+	} catch {
+		/* diagnostics may never change whether the protected operation runs */
+	}
 	try {
 		return await action();
 	} finally {
@@ -71,14 +92,49 @@ export async function withLocalStoreLock<T>(options: LocalStoreLockOptions, acti
 }
 
 async function acquireLock(options: LocalStoreLockOptions): Promise<() => void> {
-	const deadline = Date.now() + options.maxWaitMs;
-	while (true) {
-		const nonce = createLock(options);
-		if (nonce)
-			return () => {
-				releaseLock(options.lockPath, nonce);
-			};
-		await waitForLock(options, deadline);
+	const anchored = anchorLockParent(options);
+	try {
+		const deadline = Date.now() + options.maxWaitMs;
+		while (true) {
+			const nonce = createLock(anchored.options);
+			if (nonce)
+				return () => {
+					try {
+						releaseLock(anchored.options.lockPath, nonce);
+					} finally {
+						closeSync(anchored.parentHandle);
+					}
+				};
+			await waitForLock(anchored.options, deadline);
+		}
+	} catch (error) {
+		closeSync(anchored.parentHandle);
+		throw error;
+	}
+}
+
+function anchorLockParent(options: LocalStoreLockOptions): { options: LocalStoreLockOptions; parentHandle: number } {
+	const parent = path.dirname(options.lockPath);
+	const name = path.basename(options.lockPath);
+	if (parent === options.lockPath || name === "." || name === "..") options.onUnsafe();
+	let parentHandle: number;
+	try {
+		parentHandle = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+	} catch {
+		options.onUnsafe();
+	}
+	try {
+		const stat = fstatSync(parentHandle);
+		if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o700) options.onUnsafe();
+		const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : process.platform === "darwin" ? "/dev/fd" : undefined;
+		if (!descriptorRoot) options.onUnsafe();
+		return {
+			options: { ...options, lockPath: path.join(descriptorRoot, String(parentHandle), name) },
+			parentHandle,
+		};
+	} catch (error) {
+		closeSync(parentHandle);
+		throw error;
 	}
 }
 

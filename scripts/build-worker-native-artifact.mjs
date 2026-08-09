@@ -287,7 +287,7 @@ function smokeArtifact({ artifactPath, version }) {
 		if (
 			identity?.command !== "ceal" ||
 			identity?.version !== version ||
-			!help.includes("Usage: ceal <command> [options]") ||
+			!/^Usage: ceal (?:\[[^\]\n]+\] )*<command> \[options\]$/mu.test(help) ||
 			REQUIRED_COMMANDS.some((name) => !names.includes(name)) ||
 			names.includes("cealctl")
 		) {

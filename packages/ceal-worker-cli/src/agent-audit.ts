@@ -1,5 +1,6 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, type Stats } from "node:fs";
+import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, openSync, readSync, type Stats } from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-guide.js";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
@@ -23,6 +24,9 @@ import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-g
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Bound the directory walk so a pathological root cannot stall the observer.
 const MAX_ENTRIES_EXAMINED = 2000;
+// The entry cap cannot bound one large directory before its names are read.
+// A monotonic deadline closes that gap without depending on wall-clock changes.
+const MAX_WALK_DURATION_MS = 100;
 const RENDERED_SESSIONS = 10;
 // Exactly the UUID grammar Claude Code uses for transcript filenames, so a
 // human-meaningful filename can never surface as a rendered session_ref.
@@ -123,6 +127,74 @@ type TranscriptCollection =
 	| { status: "absent" }
 	| { status: "unreadable" }
 	| { status: "collected"; sessions: CollectedSession[]; partial: boolean };
+
+interface WalkBudget {
+	examined: number;
+	partial: boolean;
+	deadline: number;
+}
+
+function createWalkBudget(): WalkBudget {
+	return { examined: 0, partial: false, deadline: performance.now() + MAX_WALK_DURATION_MS };
+}
+
+function walkBudgetReached(walk: WalkBudget): boolean {
+	if (walk.examined >= MAX_ENTRIES_EXAMINED || performance.now() >= walk.deadline) {
+		walk.partial = true;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Reads directory names without materializing an unbounded `readdir` result.
+ * Claude retains the ascending names returned by its previous `readdir` walk;
+ * Codex retains only the newest names so its truncated walk remains newest-first.
+ * The shared budget limits the names retained for processing, while the
+ * monotonic deadline limits how long a directory with more names can be
+ * inspected to find those retained entries.
+ */
+function readBoundedDirectoryNames(directoryPath: string, walk: WalkBudget, order: "ascending" | "descending"): string[] {
+	const remaining = Math.max(0, MAX_ENTRIES_EXAMINED - walk.examined);
+	if (remaining === 0) {
+		walk.partial = true;
+		return [];
+	}
+	if (walkBudgetReached(walk)) return [];
+	const names: string[] = [];
+	const compare = order === "ascending" ? ascending : order === "descending" ? descending : null;
+	const directory: Dir = opendirSync(directoryPath);
+	try {
+		while (true) {
+			if (walkBudgetReached(walk)) break;
+			const entry = directory.readSync();
+			if (entry === null) break;
+			if (names.length < remaining) {
+				names.push(entry.name);
+				if (compare && names.length === remaining) names.sort(compare);
+				continue;
+			}
+			// An omitted entry is a real truncation even when the retained names
+			// have not yet consumed the caller's shared processing budget.
+			walk.partial = true;
+			if (compare) {
+				const last = names.at(-1);
+				if (last !== undefined && compare(entry.name, last) < 0) {
+					names[names.length - 1] = entry.name;
+					names.sort(compare);
+				}
+			}
+		}
+	} finally {
+		try {
+			directory.closeSync();
+		} catch {
+			/* The directory may already have closed after a read failure. */
+		}
+	}
+	if (compare) names.sort(compare);
+	return names;
+}
 
 function collectTranscriptSessions(
 	directory: string,
@@ -531,57 +603,47 @@ const CODEX_LINE_ADAPTER: TranscriptLineAdapter = {
 // inventory is never presented as complete.
 function collectClaudeSessions(projects: string): { sessions: CollectedSession[]; partial: boolean } {
 	const sessions: CollectedSession[] = [];
-	let examined = 0;
-	let partial = false;
+	const walk = createWalkBudget();
 	const root = lstatSync(projects);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
-	for (const project of readdirSync(projects)) {
-		if (examined >= MAX_ENTRIES_EXAMINED) {
-			partial = true;
-			break;
-		}
-		examined += 1;
+	for (const project of readBoundedDirectoryNames(projects, walk, "ascending")) {
+		if (walkBudgetReached(walk)) break;
+		walk.examined += 1;
 		const projectDirectory = path.join(projects, project);
 		let projectStat: Stats;
 		try {
 			projectStat = lstatSync(projectDirectory);
 		} catch {
-			partial = true;
+			walk.partial = true;
 			continue;
 		}
 		if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) continue;
-		let files: string[];
 		try {
-			files = readdirSync(projectDirectory);
+			for (const file of readBoundedDirectoryNames(projectDirectory, walk, "ascending")) {
+				if (walkBudgetReached(walk)) break;
+				walk.examined += 1;
+				if (!SESSION_FILE.test(file)) continue;
+				const transcript = path.join(projectDirectory, file);
+				let stat: Stats;
+				try {
+					stat = lstatSync(transcript);
+				} catch {
+					walk.partial = true;
+					continue;
+				}
+				if (stat.isSymbolicLink() || !stat.isFile()) continue;
+				sessions.push({
+					sessionRef: file.slice(0, -".jsonl".length),
+					lastActivityAt: stat.mtimeMs,
+					transcriptBytes: stat.size,
+					transcriptPath: transcript,
+				});
+			}
 		} catch {
-			partial = true;
-			continue;
-		}
-		for (const file of files) {
-			if (examined >= MAX_ENTRIES_EXAMINED) {
-				partial = true;
-				break;
-			}
-			examined += 1;
-			if (!SESSION_FILE.test(file)) continue;
-			const transcript = path.join(projectDirectory, file);
-			let stat: Stats;
-			try {
-				stat = lstatSync(transcript);
-			} catch {
-				partial = true;
-				continue;
-			}
-			if (stat.isSymbolicLink() || !stat.isFile()) continue;
-			sessions.push({
-				sessionRef: file.slice(0, -".jsonl".length),
-				lastActivityAt: stat.mtimeMs,
-				transcriptBytes: stat.size,
-				transcriptPath: transcript,
-			});
+			walk.partial = true;
 		}
 	}
-	return { sessions, partial };
+	return { sessions, partial: walk.partial };
 }
 
 // Codex stores one JSONL rollout per session under
@@ -593,94 +655,74 @@ function collectClaudeSessions(projects: string): { sessions: CollectedSession[]
 // complete walk — any truncation is always declared as `inventory: partial`.
 function collectCodexSessions(sessionsRoot: string): { sessions: CollectedSession[]; partial: boolean } {
 	const sessions: CollectedSession[] = [];
-	const walk = { examined: 0, partial: false };
+	const walk = createWalkBudget();
 	const root = lstatSync(sessionsRoot);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const dayDirectory of codexDayDirectories(sessionsRoot, walk)) {
-		if (walk.examined >= MAX_ENTRIES_EXAMINED) {
-			walk.partial = true;
-			break;
-		}
-		let files: string[];
 		try {
-			files = readdirSync(dayDirectory);
+			for (const file of readBoundedDirectoryNames(dayDirectory, walk, "descending")) {
+				if (walkBudgetReached(walk)) break;
+				walk.examined += 1;
+				const rollout = CODEX_ROLLOUT_FILE.exec(file);
+				if (!rollout) continue;
+				const rolloutPath = path.join(dayDirectory, file);
+				let stat: Stats;
+				try {
+					stat = lstatSync(rolloutPath);
+				} catch {
+					walk.partial = true;
+					continue;
+				}
+				if (stat.isSymbolicLink() || !stat.isFile()) continue;
+				sessions.push({
+					sessionRef: rollout[1].toLowerCase(),
+					lastActivityAt: stat.mtimeMs,
+					transcriptBytes: stat.size,
+					transcriptPath: rolloutPath,
+				});
+			}
 		} catch {
 			walk.partial = true;
-			continue;
-		}
-		// Descending name order puts newer rollout stamps first, so a budget
-		// truncation inside one day still keeps its newest sessions.
-		files.sort(descending);
-		for (const file of files) {
-			if (walk.examined >= MAX_ENTRIES_EXAMINED) {
-				walk.partial = true;
-				break;
-			}
-			walk.examined += 1;
-			const rollout = CODEX_ROLLOUT_FILE.exec(file);
-			if (!rollout) continue;
-			const rolloutPath = path.join(dayDirectory, file);
-			let stat: Stats;
-			try {
-				stat = lstatSync(rolloutPath);
-			} catch {
-				walk.partial = true;
-				continue;
-			}
-			if (stat.isSymbolicLink() || !stat.isFile()) continue;
-			sessions.push({
-				sessionRef: rollout[1].toLowerCase(),
-				lastActivityAt: stat.mtimeMs,
-				transcriptBytes: stat.size,
-				transcriptPath: rolloutPath,
-			});
 		}
 	}
 	return { sessions, partial: walk.partial };
 }
 
-// Locale-independent descending name order; zero-padded date shards and
-// rollout stamps therefore sort newest-first.
+// Locale-independent name orders; zero-padded date shards and rollout stamps
+// therefore sort deterministically without relying on filesystem enumeration.
+function ascending(a: string, b: string): number {
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function descending(a: string, b: string): number {
 	return a < b ? 1 : a > b ? -1 : 0;
 }
 
 // Resolves YYYY/MM/DD leaf directories in descending date order, consuming
 // the shared walk budget and refusing symlinked shards at every level.
-function codexDayDirectories(sessionsRoot: string, walk: { examined: number; partial: boolean }): string[] {
+function codexDayDirectories(sessionsRoot: string, walk: WalkBudget): string[] {
 	let levels = [sessionsRoot];
 	for (const segment of CODEX_DATE_SEGMENT) {
 		const next: string[] = [];
 		for (const parent of levels) {
-			if (walk.examined >= MAX_ENTRIES_EXAMINED) {
-				walk.partial = true;
-				break;
-			}
-			let entries: string[];
 			try {
-				entries = readdirSync(parent);
+				for (const entry of readBoundedDirectoryNames(parent, walk, "descending")) {
+					if (walkBudgetReached(walk)) break;
+					walk.examined += 1;
+					if (!segment.test(entry)) continue;
+					const child = path.join(parent, entry);
+					let stat: Stats;
+					try {
+						stat = lstatSync(child);
+					} catch {
+						walk.partial = true;
+						continue;
+					}
+					if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+					next.push(child);
+				}
 			} catch {
 				walk.partial = true;
-				continue;
-			}
-			entries.sort(descending);
-			for (const entry of entries) {
-				if (walk.examined >= MAX_ENTRIES_EXAMINED) {
-					walk.partial = true;
-					break;
-				}
-				walk.examined += 1;
-				if (!segment.test(entry)) continue;
-				const child = path.join(parent, entry);
-				let stat: Stats;
-				try {
-					stat = lstatSync(child);
-				} catch {
-					walk.partial = true;
-					continue;
-				}
-				if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-				next.push(child);
 			}
 		}
 		levels = next;

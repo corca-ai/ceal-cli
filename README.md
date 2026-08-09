@@ -80,6 +80,15 @@ discovery. Every non-help result, including parser failures, is exactly one
 compact YAML document. The public commands reject `--json` and `--format json`;
 typed callers use `@corca-ai/ceal`, whose HTTP wire remains JSON.
 
+Prefix a public command with `--timing` when diagnosing latency, for example
+`ceal --timing capabilities --fresh`. The result remains the same single YAML
+document on stdout; stderr receives `ceal.timing.v1` JSON Lines for fixed client
+phases such as bootstrap, runtime import, session load/lock/refresh, Gateway
+handshake/call/readback, observer scan, receipt-spool tail, and update stages.
+Events contain only sequence, stage, monotonic elapsed time, and a fixed outcome
+— never endpoints, identity references, request references, payloads, tokens, or
+free-form errors. Ordinary invocations emit no timing events.
+
 Capability discovery and invocation are provider-neutral contracts. `ceal
 capabilities` exposes the active Profile's current capability contracts,
 readiness, recovery, and a bounded target-catalog summary; it intentionally

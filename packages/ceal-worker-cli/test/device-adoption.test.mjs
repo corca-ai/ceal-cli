@@ -11,6 +11,7 @@ import {
 import { adoptSession } from "../dist/device-adoption.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
+import { CealSessionStoreError } from "../dist/profile-store.js";
 
 // The Gateway in these tests is a real sealer, not a stub that returns a
 // fixture: it opens the start request the command actually sent, seals a real
@@ -229,8 +230,34 @@ test("a malformed invocation is refused before any key or request exists", async
 test("a store that cannot write reports failure instead of a session", async () => {
 	const world = createWorld({ saveFails: true });
 	assert.equal(await run(world), 3);
-	assert.equal(world.result().error.kind, "session_save_failed");
-	assert.equal(world.result().session_written, false);
+	const result = world.result();
+	assert.equal(result.error.kind, "session_save_failed");
+	assert.equal(result.session_written, false);
+	assert.equal(result.issued_session_revoked, "revoked");
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A"],
+	);
+	assert.doesNotMatch(result.error.next_action, /enrollment|replacement code/u);
+	assert.match(result.error.next_action, /fresh adoption transaction/u);
+});
+
+test("an adoption lock failure revokes the issued session and keeps recovery local", async () => {
+	const world = createWorld();
+	world.runtime.withSessionStateLock = async () => {
+		throw new CealSessionStoreError("refresh_busy");
+	};
+	assert.equal(await run(world), 3);
+	const result = world.result();
+	assert.equal(result.error.kind, "refresh_busy");
+	assert.equal(result.issued_session_revoked, "revoked");
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A"],
+	);
+	assert.doesNotMatch(result.error.next_action, /enrollment|replacement code/u);
+	assert.doesNotMatch(result.error.next_action, /Gateway URL/u);
+	assert.match(result.error.next_action, /fresh adoption transaction/u);
 });
 
 test("a failed forced adoption never inherits enrollment-code recovery", async () => {
@@ -241,6 +268,11 @@ test("a failed forced adoption never inherits enrollment-code recovery", async (
 	assert.equal(await run(world, ["--force"]), 3);
 	const result = world.result();
 	assert.equal(result.error.kind, "session_save_failed");
+	assert.equal(result.issued_session_revoked, "revoked");
+	assert.deepEqual(
+		world.revoked.map((call) => call.refreshToken),
+		["ceal_refresh_outgoing", "ceal_refresh_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A"],
+	);
 	assert.match(result.error.next_action, /adoption did not land/u);
 	assert.doesNotMatch(result.error.next_action, /enrollment|replacement code/u);
 });

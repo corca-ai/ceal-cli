@@ -34,6 +34,8 @@ import {
 	splitSubcommandRoute,
 	subcommandRouteKey,
 } from "../dist/index.js";
+import { CealSessionStoreError } from "../dist/profile-store.js";
+import { CEAL_TIMING_STAGES, createCealTimingRecorder } from "../dist/timing.js";
 
 // The version the worker introduces itself to the Gateway with is derived from
 // the manifest, so asserting a literal here would reintroduce the hand-bumped
@@ -121,7 +123,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 	for (const args of [[], ["help"], ["-h"], ["--help"]]) {
 		const result = await run(args);
 		assert.equal(result.code, 0);
-		assert.match(result.stdout, /^Usage: ceal <command> \[options\]/u);
+		assert.match(result.stdout, /^Usage: ceal \[--timing\] <command> \[options\]/u);
 		assert.match(result.stdout, /Named options follow required positionals, are order-independent, and may be supplied once\./u);
 		assert.equal(result.stderr, "");
 		for (const command of CEAL_COMMANDS) assert.match(result.stdout, new RegExp(`^  ${command.name}\\s`, "mu"));
@@ -595,6 +597,41 @@ test("update reports bounded stable progress only to an interactive stderr surfa
 	});
 	assert.equal(nonInteractive.stderr, "");
 	assert.equal(parseAllDocuments(nonInteractive.stdout, { uniqueKeys: true })[0].toJS().status, "unchanged");
+
+	let timingOutput = "";
+	const timed = await run(["update"], {
+		isOutputTerminal: () => true,
+		timing: createCealTimingRecorder({ write: (chunk) => (timingOutput += chunk) }),
+		runStableUpdate: async ({ onProgress } = {}) => {
+			for (const stage of ["check", "download_install", "verify", "installed_readback"]) onProgress?.(stage);
+			return { status: "updated" };
+		},
+	});
+	assert.equal(timed.code, 0);
+	assert.equal(timed.stderr, "", "timing mode keeps TTY stderr machine-parseable instead of mixing human progress");
+	assert.ok(timingEvents(timingOutput).every((event) => event.stage.startsWith("update_")));
+
+	let committed = false;
+	const hostileDiagnostic = await run(["update"], {
+		timing: {
+			start(stage) {
+				if (stage === "update_verify") throw new Error("diagnostic stderr failed");
+				return { finish() {} };
+			},
+			completed() {},
+		},
+		runStableUpdate: async ({ onProgress } = {}) => {
+			onProgress?.("check");
+			onProgress?.("download_install");
+			committed = true;
+			onProgress?.("verify");
+			onProgress?.("installed_readback");
+			return { status: "updated" };
+		},
+	});
+	assert.equal(committed, true);
+	assert.equal(hostileDiagnostic.code, 0, "an observation callback cannot reclassify a committed update as failed");
+	assert.equal(parseAllDocuments(hostileDiagnostic.stdout, { uniqueKeys: true })[0].toJS().status, "updated");
 });
 
 test("guide status and per-host registration expose one update-safe local skill path", async () => {
@@ -848,6 +885,59 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 	});
 });
 
+test("a first enrollment save failure revokes the issued session and asks for a fresh code", async () => {
+	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => null,
+			saveSession: async () => {
+				throw new Error("read-only store");
+			},
+		});
+		assert.equal(payload.error.kind, "session_save_failed");
+		assert.equal(payload.issued_session_revoked, "revoked");
+		assert.deepEqual(revoked, [refreshToken]);
+		assert.doesNotMatch(payload.error.next_action, /Gateway URL/u);
+		assert.match(payload.error.next_action, /fresh replacement device-enrollment code/u);
+	});
+});
+
+test("an enrollment lock failure revokes the issued session without blaming the Gateway URL", async () => {
+	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => null,
+			saveSession: async () => assert.fail("the lock failure must happen before save"),
+			withSessionStateLock: async () => {
+				throw new CealSessionStoreError("refresh_busy");
+			},
+		});
+		assert.equal(payload.error.kind, "refresh_busy");
+		assert.equal(payload.issued_session_revoked, "revoked");
+		assert.deepEqual(revoked, [refreshToken]);
+		assert.doesNotMatch(payload.error.next_action, /Gateway URL/u);
+		assert.match(payload.error.next_action, /fresh replacement device-enrollment code/u);
+	});
+});
+
+test("a replacement enrollment save failure reports both session dispositions", async () => {
+	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
+		const outgoing = `ceal_refresh_${"O".repeat(43)}`;
+		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 3, {
+			readSecret: async () => "E".repeat(48),
+			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
+			saveSession: async () => {
+				throw new Error("read-only store");
+			},
+		});
+		assert.equal(payload.error.kind, "session_save_failed");
+		assert.equal(payload.issued_session_revoked, "revoked");
+		assert.deepEqual(revoked, [outgoing, refreshToken]);
+		assert.match(payload.error.next_action, /previous session was revoked/u);
+		assert.match(payload.error.next_action, /fresh replacement device-enrollment code/u);
+	});
+});
+
 // One home holds one session (`~/.ceal/client-session.json`), so an enrollment
 // run against a configured host is a substitution of the identity behind every
 // later `ceal call`. These fix that the substitution is refused by name, that the
@@ -915,7 +1005,7 @@ test("enrolling a different identity is refused by name, keeps the stored sessio
 	});
 });
 
-test("a refusal whose own session could not be revoked says so rather than reporting a clean refusal", async () => {
+test("an identity refusal distinguishes an already unusable incoming session from one that may remain live", async () => {
 	await withEnrollmentGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
@@ -926,10 +1016,38 @@ test("a refusal whose own session could not be revoked says so rather than repor
 			});
 			assert.equal(payload.error.kind, "session_identity_conflict");
 			assert.equal(payload.issued_session_revoked, "already_unusable");
-			assert.match(payload.error.next_action, /could not be revoked/u);
+			assert.match(payload.error.next_action, /already unusable at the Gateway/u);
 		},
 		{ revokeDeniedCode: "refresh_invalid" },
 	);
+	await withEnrollmentGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
+				readSecret: async () => "E".repeat(48),
+				loadSession: async () =>
+					storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: `ceal_refresh_${"O".repeat(43)}` }),
+				saveSession: async () => assert.fail("a refused enrollment must not write"),
+			});
+			assert.equal(payload.issued_session_revoked, "unavailable");
+			assert.match(payload.error.next_action, /may remain usable at the Gateway until it expires/u);
+			assert.match(payload.error.next_action, /report it to your organization operator/u);
+		},
+		{ revokeDeniedCode: "access_denied" },
+	);
+});
+
+test("enrollment preflight keeps an unspent code and reports only the local store recovery", async () => {
+	const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", "https://ceal.example.test"], 3, {
+		loadSession: async () => {
+			throw new CealSessionStoreError("refresh_busy");
+		},
+		saveSession: async () => assert.fail("preflight stops before save"),
+		readSecret: async () => assert.fail("preflight stops before reading the one-time code"),
+	});
+	assert.equal(payload.error.kind, "refresh_busy");
+	assert.match(payload.error.next_action, /has not been read or sent/u);
+	assert.match(payload.error.next_action, /same approved code/u);
+	assert.doesNotMatch(payload.error.next_action, /Gateway URL|replacement device-enrollment code/u);
 });
 
 test("--force replaces a different identity, revoking it first and clearing the local state it produced", async () => {
@@ -1425,6 +1543,10 @@ test("logout retains local session when Gateway revocation transport is unavaila
 					removed = true;
 				},
 			});
+			assert.equal(payload.schema_version, "ceal.session_logout.v1");
+			assert.equal(payload.server_session_revoked, false);
+			assert.equal(payload.local_session_removed, false);
+			assert.equal(payload.local_derived_state_cleared, false);
 			assert.equal(payload.error.kind, "session_revocation_unavailable");
 			assert.equal(payload.error.retryable, true);
 			assert.match(payload.error.next_action, /Keep the local session/u);
@@ -1432,6 +1554,24 @@ test("logout retains local session when Gateway revocation transport is unavaila
 		},
 		{ invalidRevokeResponse: true },
 	);
+});
+
+test("every logout precondition failure stays in the logout result contract", async () => {
+	const unavailable = await yamlRun(["session", "logout"], 3);
+	assert.equal(unavailable.schema_version, "ceal.session_logout.v1");
+	assert.equal(unavailable.error.kind, "session_runtime_unavailable");
+	assert.doesNotMatch(unavailable.error.next_action, /Gateway URL|device-enrollment code/u);
+
+	const unsafe = await yamlRun(["session", "logout"], 3, {
+		loadSession: async () => {
+			throw new CealSessionStoreError("unsafe_store");
+		},
+		removeSession: async () => assert.fail("an unreadable session is not removed"),
+	});
+	assert.equal(unsafe.schema_version, "ceal.session_logout.v1");
+	assert.equal(unsafe.error.kind, "unsafe_store");
+	assert.equal(unsafe.server_session_revoked, false);
+	assert.equal(unsafe.local_session_removed, false);
 });
 
 test("logout removes local state when the Gateway says the refresh credential is already retired", async () => {
@@ -1503,6 +1643,7 @@ test("session logout revokes the server session before removing every session-de
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
 		assert.equal(payload.server_session_disposition, "revoked");
+		assert.equal(payload.local_derived_state_cleared, true);
 		assert.equal(payload.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
 		assert.deepEqual(revoked, [oldRefreshToken]);
 		assert.deepEqual(cleared.sort(), ["discovery_cache", "receipt_spool", "session"]);
@@ -1521,6 +1662,46 @@ test("session logout revokes the server session before removing every session-de
 		assert.equal(payload.status, "logged_out");
 		assert.equal(payload.server_session_revoked, true);
 		assert.equal(payload.server_session_disposition, "revoked");
+		assert.equal(payload.local_derived_state_cleared, false);
+		assert.match(payload.next_action, /cached local state could not be cleared/u);
+		assert.match(payload.next_action, /ceal session logout/u);
+	});
+});
+
+test("logout preserves completed Gateway revocation when locked local session removal fails", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, revoked }) => {
+		const session = storedSession(endpoint, { refreshToken: oldRefreshToken });
+		let cleanupAttempted = false;
+		const payload = await yamlRun(["session", "logout"], 3, {
+			loadSession: async () => session,
+			removeSession: async () => assert.fail("the locked store owns removal"),
+			withSessionStateLock: async (action) =>
+				action({
+					load: async () => session,
+					save: async () => assert.fail("logout does not save"),
+					replace: async () => assert.fail("logout does not replace"),
+					remove: async () => {
+						throw new CealSessionStoreError("unsafe_store");
+					},
+				}),
+			removeDiscoveryCache: async () => {
+				cleanupAttempted = true;
+			},
+			removeReceiptSpool: async () => {
+				cleanupAttempted = true;
+			},
+		});
+		assert.equal(payload.schema_version, "ceal.session_logout.v1");
+		assert.equal(payload.status, "local_cleanup_failed");
+		assert.equal(payload.server_session_revoked, true);
+		assert.equal(payload.server_session_disposition, "revoked");
+		assert.equal(payload.local_session_removed, false);
+		assert.equal(payload.local_derived_state_cleared, false);
+		assert.equal(payload.error.kind, "unsafe_store");
+		assert.match(payload.error.next_action, /already revoked or unusable/u);
+		assert.doesNotMatch(payload.error.next_action, /network|reachability/u);
+		assert.deepEqual(revoked, [oldRefreshToken]);
+		assert.equal(cleanupAttempted, false, "derived cleanup waits until the credential store can be removed safely");
 	});
 });
 
@@ -3337,6 +3518,23 @@ test("Gateway option and transport failures are redacted YAML", async () => {
 	}
 });
 
+test("every stored-session --profile consumer enforces the public Profile reference grammar before work", async () => {
+	const cases = [
+		["capabilities", "--profile", "bogus"],
+		["capabilities", "targets", "--capability", "message.search", "--profile", "bogus"],
+		["call", "message.search", "--target", "target:team-inbox", "--profile", "bogus", "query=launch"],
+		["receipt", "show", "request:test", "--profile", "bogus"],
+		["acceptance", "emit", "--profile", "bogus"],
+	];
+	for (const args of cases) {
+		const payload = await yamlRun(args, 2, {
+			loadSession: () => assert.fail(`${args.join(" ")} must reject before local session work`),
+			readInstalledReleaseFacts: () => assert.fail(`${args.join(" ")} must reject before release inspection`),
+		});
+		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
+	}
+});
+
 test("JSON modes and unsafe commands fail as redacted YAML", async () => {
 	for (const args of [
 		["version", "--json"],
@@ -4297,6 +4495,119 @@ test("a receipt the packaged bin could not spool is counted rather than lost sil
 		}
 	});
 });
+
+test("--timing preserves one-result stdout and emits only fixed secret-free phase events", async () => {
+	const ordinary = await runBin(["--help"], "");
+	assert.equal(ordinary.code, 0);
+	assert.equal(ordinary.stderr, "");
+	const staticTimed = await runBin(["--timing", "--help"], "");
+	assert.equal(staticTimed.code, 0);
+	assert.equal(staticTimed.stdout, ordinary.stdout, "the opt-in diagnostic may not alter the command result");
+	const staticEvents = timingEvents(staticTimed.stderr);
+	assert.deepEqual(new Set(staticEvents.map((event) => event.stage)), new Set(["cli_bootstrap"]));
+	const guideTimed = await runBin(["--timing", "guide", "status"], "");
+	assert.equal(guideTimed.code, 3);
+	const guideStages = new Set(timingEvents(guideTimed.stderr).map((event) => event.stage));
+	assert.ok(guideStages.has("runtime_prepare"));
+	assert.ok(guideStages.has("guide_inspect"));
+
+	await withGateway(async ({ endpoint }) => {
+		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-timing-"));
+		try {
+			mkdirSync(path.join(home, ".ceal"), { recursive: true, mode: 0o700 });
+			writeFileSync(
+				path.join(home, ".ceal", "client-session.json"),
+				`${JSON.stringify(serializeStoredSession(storedSession(endpoint)), null, 2)}\n`,
+				{ mode: 0o600 },
+			);
+			const result = await runBin(["--timing", "capabilities", "--fresh"], "", { HOME: home });
+			assert.equal(result.code, 0, result.stderr);
+			assert.equal(parseAllDocuments(result.stdout, { uniqueKeys: true }).length, 1);
+			const events = timingEvents(result.stderr);
+			const stages = new Set(events.map((event) => event.stage));
+			for (const stage of ["cli_bootstrap", "runtime_import", "session_load", "gateway_handshake", "gateway_discovery"]) {
+				assert.ok(stages.has(stage), `missing ${stage}: ${result.stderr}`);
+			}
+			for (const event of events) {
+				assert.ok(CEAL_TIMING_STAGES.includes(event.stage));
+				assert.deepEqual(
+					Object.keys(event).sort(),
+					event.event === "start"
+						? ["event", "schema_version", "sequence", "stage"]
+						: ["elapsed_ms", "event", "outcome", "schema_version", "sequence", "stage"],
+				);
+			}
+			assert.doesNotMatch(result.stderr, /profile:|membership:|subject:|instance:|ceal_(?:personal|refresh)_|https?:\/\//u);
+
+			const call = await runBin(["--timing", "call", "message.search", "--target", "target:team-inbox", "query=launch"], "", { HOME: home });
+			assert.equal(call.code, 0, call.stderr);
+			const callStages = new Set(timingEvents(call.stderr).map((event) => event.stage));
+			for (const stage of ["session_load", "gateway_call", "gateway_readback", "receipt_spool_append"]) {
+				assert.ok(callStages.has(stage), `missing ${stage}: ${call.stderr}`);
+			}
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
+test("--timing separates local lock, refresh, and revoke phases", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
+		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-timing-session-"));
+		try {
+			mkdirSync(path.join(home, ".ceal"), { recursive: true, mode: 0o700 });
+			writeFileSync(
+				path.join(home, ".ceal", "client-session.json"),
+				`${JSON.stringify(
+					serializeStoredSession(
+						storedSession(endpoint, {
+							expiresAt: "2020-01-01T00:00:00.000Z",
+							refreshToken: oldRefreshToken,
+							refreshTokenAbsoluteExpiresAt: "2099-01-01T00:00:00.000Z",
+						}),
+					),
+					null,
+					2,
+				)}\n`,
+				{ mode: 0o600 },
+			);
+			const refreshed = await runBin(["--timing", "capabilities", "--fresh"], "", { HOME: home });
+			assert.equal(refreshed.code, 0, refreshed.stderr);
+			const refreshedStages = new Set(timingEvents(refreshed.stderr).map((event) => event.stage));
+			assert.ok(refreshedStages.has("local_store_lock_wait"));
+			assert.ok(refreshedStages.has("session_refresh"));
+
+			const loggedOut = await runBin(["--timing", "session", "logout"], "", { HOME: home });
+			assert.equal(loggedOut.code, 0, loggedOut.stderr);
+			const logoutStages = new Set(timingEvents(loggedOut.stderr).map((event) => event.stage));
+			assert.ok(logoutStages.has("local_store_lock_wait"));
+			assert.ok(logoutStages.has("session_revoke"));
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
+function timingEvents(stderr) {
+	const events = stderr
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+	assert.ok(events.length >= 2, "a timed command emits at least one start/finish pair");
+	for (const event of events) {
+		assert.equal(event.schema_version, "ceal.timing.v1");
+		assert.ok(event.event === "start" || event.event === "finish");
+		assert.ok(Number.isSafeInteger(event.sequence) && event.sequence > 0);
+		if (event.event === "finish") {
+			assert.ok(event.outcome === "ok" || event.outcome === "error");
+			assert.ok(typeof event.elapsed_ms === "number" && event.elapsed_ms >= 0);
+		}
+	}
+	const started = events.filter((event) => event.event === "start").map((event) => event.sequence);
+	const finished = events.filter((event) => event.event === "finish").map((event) => event.sequence);
+	assert.deepEqual(finished, started, "every completed timed phase has one matching start");
+	return events;
+}
 
 test("the packaged bin keeps static help ahead of the full runtime and contains an unexpected runtime failure", async () => {
 	// bin.js's rejection handler is the one surface no input reaches: every

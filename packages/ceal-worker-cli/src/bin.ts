@@ -23,10 +23,28 @@ async function dispatch(args: readonly string[]): Promise<number> {
 		const privateResult = await runPrivateCli(args[0]);
 		if (privateResult !== undefined) return privateResult;
 	}
-	const staticResult = await runCealStaticCommand(args, { stdout: process.stdout, stderr: process.stderr });
+	// The diagnostic flag is deliberately prefix-only. Stripping arbitrary
+	// `--timing` operands from inside a command would make malformed route input
+	// look valid, and applying it to a private entrypoint would turn a public
+	// diagnostic option into a private bootstrap path.
+	const timingRequested = args[0] === "--timing";
+	const publicArgs = timingRequested ? args.slice(1) : args;
+	const timing = timingRequested ? (await import("./timing.js")).createCealTimingRecorder(process.stderr) : undefined;
+	// `performance.now()` is monotonic from Node process start, so this includes
+	// module/bootstrap work that happened before option parsing without exposing a
+	// wall-clock timestamp or inventing a second process-start clock.
+	timing?.completed("cli_bootstrap", process.uptime() * 1_000);
+	const staticResult = await runCealStaticCommand(publicArgs, { stdout: process.stdout, stderr: process.stderr });
 	if (staticResult !== undefined) return staticResult;
-	const { runPublicCli } = await import("./public-bin-runtime.js");
-	return await runPublicCli(args);
+	const importSpan = timing?.start("runtime_import");
+	try {
+		const { runPublicCli } = await import("./public-bin-runtime.js");
+		importSpan?.finish("ok");
+		return await runPublicCli(publicArgs, timing);
+	} catch (error) {
+		importSpan?.finish("error");
+		throw error;
+	}
 }
 
 function privateEntrypointCandidate(args: readonly string[]): args is readonly [string] {

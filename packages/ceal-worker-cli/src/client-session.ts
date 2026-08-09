@@ -5,7 +5,7 @@ import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./co
 import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
-import type { CealStoredSession } from "./profile-store.js";
+import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
 import {
 	type CealRevokeDisposition,
 	type CealSessionCommit,
@@ -13,6 +13,7 @@ import {
 	clientSessionTransportFailure,
 	commitEnrolledSession,
 	endedPreviousSessionAction,
+	issuedSessionDispositionAction,
 	revokeClientSession,
 	sessionIdentityConflictFields,
 	sessionReplacementFields,
@@ -20,6 +21,7 @@ import {
 	sessionStoreFailureCode,
 } from "./session-replacement.js";
 import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
+import { withCealTiming } from "./timing.js";
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 
@@ -123,14 +125,17 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 	// the Gateway has consumed it costs the operator a replacement code.
 	try {
 		await runtime.loadSession();
-	} catch {
-		return writeEnrollmentUnavailable("session_load_failed", io);
+	} catch (error) {
+		const reason = error instanceof CealSessionStoreError ? error.code : "session_load_failed";
+		return writeEnrollmentUnavailable(reason, io, enrollmentPreflightRecoveryAction(reason));
 	}
 	const code = await readEnrollmentCode(parsed.input, runtime);
 	if (!code.ok) return writeEnrollmentUnavailable(code.error, io);
 	let stored: CealStoredSession;
 	try {
-		const response = await createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code.value);
+		const response = await withCealTiming(runtime.timing, "session_enrollment_exchange", () =>
+			createCealEnrollmentClient({ endpoint: parsed.gateway }).exchange(code.value),
+		);
 		if (!response.ok) return writeEnrollmentRejected(response.error.code, io);
 		stored = toStoredSession(parsed.gateway, response);
 	} catch (error) {
@@ -140,11 +145,10 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 	const commit = await commitEnrolledSession(stored, runtime, parsed.force);
 	if (!commit.ok) {
 		if (commit.reason === "identity_conflict") return writeEnrollmentConflict(commit.changedBindings, commit.issuedSessionRevoked, io);
-		return writeEnrollmentUnavailable(
-			commit.code,
-			io,
-			commit.previousSessionEnded ? endedPreviousSessionAction("enroll", enrollmentRecoveryAction(commit.code)) : undefined,
-		);
+		const nextAction = commit.previousSessionEnded
+			? endedPreviousSessionAction("enroll", enrollmentCommitRecoveryAction(commit.code, commit.issuedSessionRevoked))
+			: enrollmentCommitRecoveryAction(commit.code, commit.issuedSessionRevoked);
+		return writeEnrollmentUnavailable(commit.code, io, nextAction, commit.issuedSessionRevoked);
 	}
 	return writeEnrollmentSuccess(parsed.gateway, stored, commit, io);
 }
@@ -246,38 +250,40 @@ function writeEnrollmentConflict(changedBindings: readonly string[], issuedSessi
 }
 
 async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	if (!runtime.loadSession || !runtime.removeSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	if (!runtime.loadSession || !runtime.removeSession) return writeLogoutUnavailable(io, "session_runtime_unavailable");
 	if (runtime.withSessionStateLock)
 		return runtime
 			.withSessionStateLock(async (store) => {
 				const session = await store.load();
-				if (!session) return writeAlreadyLoggedOut(io);
+				if (!session) return writeAlreadyLoggedOut(io, await clearLogoutDerivedState(runtime));
 				const revocation = await revokeClientSession(session, runtime);
-				if ("failure" in revocation) return writeClientSessionUnavailable(revocation.failure, io);
-				await store.remove();
-				await clearSessionDerivedState(runtime);
-				return writeLoggedOut(io, revocation.disposition);
+				if ("failure" in revocation) return writeLogoutUnavailable(io, revocation.failure);
+				try {
+					await store.remove();
+				} catch (error) {
+					return writeLogoutLocalFailure(io, revocation.disposition, sessionRemoveFailureCode(error));
+				}
+				return writeLoggedOut(io, revocation.disposition, await clearSessionDerivedState(runtime));
 			})
-			.catch((error) => writeClientSessionUnavailable(sessionStoreFailureCode(error), io));
+			.catch((error) => writeLogoutUnavailable(io, sessionStoreFailureCode(error)));
 	let session: CealStoredSession | null;
 	try {
 		session = await runtime.loadSession();
-	} catch {
-		return writeEnrollmentUnavailable("session_load_failed", io);
+	} catch (error) {
+		return writeLogoutUnavailable(io, error instanceof CealSessionStoreError ? error.code : "session_load_failed");
 	}
-	if (!session) return writeAlreadyLoggedOut(io);
+	if (!session) return writeAlreadyLoggedOut(io, await clearLogoutDerivedState(runtime));
 	const revocation = await revokeClientSession(session, runtime);
-	if ("failure" in revocation) return writeClientSessionUnavailable(revocation.failure, io);
+	if ("failure" in revocation) return writeLogoutUnavailable(io, revocation.failure);
 	try {
 		await runtime.removeSession();
-	} catch {
-		return writeClientSessionUnavailable("session_remove_failed", io);
+	} catch (error) {
+		return writeLogoutLocalFailure(io, revocation.disposition, sessionRemoveFailureCode(error));
 	}
-	await clearSessionDerivedState(runtime);
-	return writeLoggedOut(io, revocation.disposition);
+	return writeLoggedOut(io, revocation.disposition, await clearSessionDerivedState(runtime));
 }
 
-function writeAlreadyLoggedOut(io: CealCliIo): number {
+function writeAlreadyLoggedOut(io: CealCliIo, derivedStateCleared: boolean): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.session_logout.v1",
 		command: "ceal",
@@ -285,13 +291,18 @@ function writeAlreadyLoggedOut(io: CealCliIo): number {
 		status: "already_logged_out",
 		server_session_revoked: false,
 		local_session_removed: false,
+		local_derived_state_cleared: derivedStateCleared,
 		raw_token_visible: false,
 		proof_level: "local_state",
-		next_action: SESSION_SETUP_NEXT_ACTION,
+		next_action: logoutNextAction(derivedStateCleared),
 	});
 }
 
-function writeLoggedOut(io: CealCliIo, disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable">): number {
+function writeLoggedOut(
+	io: CealCliIo,
+	disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable">,
+	derivedStateCleared: boolean,
+): number {
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.session_logout.v1",
 		command: "ceal",
@@ -300,10 +311,93 @@ function writeLoggedOut(io: CealCliIo, disposition: Extract<CealRevokeDispositio
 		server_session_revoked: disposition === "revoked",
 		server_session_disposition: disposition,
 		local_session_removed: true,
+		local_derived_state_cleared: derivedStateCleared,
 		raw_token_visible: false,
 		proof_level: "host_decision",
-		next_action: SESSION_SETUP_NEXT_ACTION,
+		next_action: logoutNextAction(derivedStateCleared),
 	});
+}
+
+function writeLogoutLocalFailure(
+	io: CealCliIo,
+	disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable">,
+	reason: string,
+): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_logout.v1",
+		command: "ceal",
+		ok: false,
+		status: "local_cleanup_failed",
+		server_session_revoked: disposition === "revoked",
+		server_session_disposition: disposition,
+		local_session_removed: false,
+		local_derived_state_cleared: false,
+		raw_token_visible: false,
+		proof_level: "host_decision",
+		error: {
+			kind: reason,
+			message: "The Gateway session ended, but this host could not remove its local session state.",
+			next_action:
+				"The Gateway session is already revoked or unusable. Correct the Ceal state directory and its permissions, then run 'ceal session logout' again to finish local cleanup.",
+		},
+	});
+	return 3;
+}
+
+function writeLogoutUnavailable(io: CealCliIo, reason: string): number {
+	const localOrTransportFailure = new Set([
+		"home_unavailable",
+		"invalid_store",
+		"refresh_busy",
+		"session_load_failed",
+		"session_revocation_unavailable",
+		"session_runtime_unavailable",
+		"unsafe_store",
+	]);
+	const failure = localOrTransportFailure.has(reason)
+		? classifyClientSessionFailure(reason)
+		: {
+				kind: SAFE_REASON_TOKEN.test(reason) ? reason : "session_revocation_rejected",
+				retryable: false,
+				message: "The Gateway did not accept revocation of the stored session.",
+				nextAction:
+					"Keep the local session so the outcome remains inspectable. Run 'ceal session status', then ask the organization operator to resolve the revocation refusal.",
+			};
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_logout.v1",
+		command: "ceal",
+		ok: false,
+		status: "unavailable",
+		server_session_revoked: false,
+		local_session_removed: false,
+		local_derived_state_cleared: false,
+		raw_token_visible: false,
+		proof_level: "surface",
+		error: {
+			kind: failure.kind,
+			retryable: failure.retryable,
+			message: failure.message,
+			next_action: failure.nextAction,
+		},
+	});
+	return 3;
+}
+
+function logoutNextAction(derivedStateCleared: boolean): string {
+	return derivedStateCleared
+		? SESSION_SETUP_NEXT_ACTION
+		: `The Gateway session is no longer usable and the local session is absent, but cached local state could not be cleared. Correct the Ceal state directory and its permissions, then run 'ceal session logout' again. After cleanup succeeds, ${SESSION_SETUP_NEXT_ACTION}`;
+}
+
+function sessionRemoveFailureCode(error: unknown): string {
+	return error instanceof CealSessionStoreError ? error.code : "session_remove_failed";
+}
+
+async function clearLogoutDerivedState(runtime: CealCommandRuntime): Promise<boolean> {
+	// An embedding with neither advisory store has nothing to clear. Once it
+	// supplies either store, the shared cleanup requires both so a partial runtime
+	// cannot report the other session-derived state as removed.
+	return runtime.removeDiscoveryCache || runtime.removeReceiptSpool ? clearSessionDerivedState(runtime) : true;
 }
 
 export class CealClientSessionError extends Error {
@@ -326,7 +420,9 @@ export async function ensureCurrentSession(
 				if (!current) throw new CealClientSessionError("reenrollment_required");
 				assertSessionIdentity(current, session);
 				const refreshForced = force && current.refreshToken === session.refreshToken;
-				return renewSession(current, now, refreshForced, async (rotated) => store.replace(current.refreshToken, rotated));
+				return withCealTiming(runtime.timing, "session_refresh", () =>
+					renewSession(current, now, refreshForced, async (rotated) => store.replace(current.refreshToken, rotated)),
+				);
 			});
 		} catch (error) {
 			if (error instanceof CealClientSessionError) throw error;
@@ -334,7 +430,7 @@ export async function ensureCurrentSession(
 		}
 	}
 	if (!runtime.saveSession) throw new CealClientSessionError("reenrollment_required");
-	return renewSession(session, now, force, runtime.saveSession);
+	return withCealTiming(runtime.timing, "session_refresh", () => renewSession(session, now, force, runtime.saveSession!));
 }
 
 async function renewSession(
@@ -587,13 +683,19 @@ function writeEnrollmentRejected(code: string, io: CealCliIo): number {
 	return 3;
 }
 
-function writeEnrollmentUnavailable(reason: string, io: CealCliIo, nextAction?: string): number {
+function writeEnrollmentUnavailable(
+	reason: string,
+	io: CealCliIo,
+	nextAction?: string,
+	issuedSessionRevoked?: CealRevokeDisposition,
+): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.session_enrollment.v1",
 		command: "ceal",
 		ok: false,
 		status: "unavailable",
 		proof_level: "surface",
+		...(issuedSessionRevoked === undefined ? {} : { issued_session_revoked: issuedSessionRevoked }),
 		error: {
 			kind: reason,
 			message: "The device enrollment could not be completed.",
@@ -601,6 +703,22 @@ function writeEnrollmentUnavailable(reason: string, io: CealCliIo, nextAction?: 
 		},
 	});
 	return 3;
+}
+
+function enrollmentCommitRecoveryAction(reason: string, issuedSessionRevoked: CealRevokeDisposition): string {
+	const local =
+		reason === "refresh_busy"
+			? "Wait briefly for the other local Ceal process to finish."
+			: "Check the local Ceal state directory and its permissions.";
+	return `${issuedSessionDispositionAction(issuedSessionRevoked)} ${local} Then ask the organization administrator for a fresh replacement device-enrollment code and retry.`;
+}
+
+function enrollmentPreflightRecoveryAction(reason: string): string {
+	const local =
+		reason === "refresh_busy"
+			? "Wait briefly for the other local Ceal process to finish."
+			: "Check the local Ceal state directory and its permissions.";
+	return `${local} The enrollment code has not been read or sent, so retry this command with the same approved code after the local issue is fixed.`;
 }
 
 function enrollmentRecoveryAction(reason: string): string {

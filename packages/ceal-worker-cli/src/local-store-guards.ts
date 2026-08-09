@@ -1,4 +1,5 @@
-import { chmodSync, lstatSync, mkdirSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, unlinkSync } from "node:fs";
+import path from "node:path";
 
 // The filesystem safety checks every local store under HOME performs before it
 // reads or writes: refuse a symlink, refuse the wrong file type, and hold the
@@ -93,7 +94,10 @@ function nodeErrorCode(error: unknown): string | undefined {
 	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
-/** Refuses `directory` unless it is a real directory, and 0o700 if required. */
+/**
+ * Refuses `directory` unless it is a real directory, and 0o700 if required.
+ * @testOnly The helper is used internally; the export exists for shape tests.
+ */
 export function assertDirectory(directory: string, unsafe: UnsafeStore, requireMode = false): void {
 	const stat = lstatSync(directory);
 	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
@@ -126,12 +130,65 @@ export function assertFile(file: string, unsafe: UnsafeStore, requireMode = fals
 }
 
 /**
- * Whether a path may be removed: it must exist and be a plain file we own.
+ * Remove one owned file through an already-open directory descriptor. An absent
+ * parent or file is a successful no-op, while every existing path must be a real
+ * owner-only directory holding one unlinked plain file. Unexpected state is
+ * raised through the caller's store-specific refusal rather than being
+ * flattened into absence.
  *
- * Anything unexpected — a symlink, a directory — is left untouched rather than
- * deleted, so a store cleaning up after itself can never remove a target it did
- * not create.
+ * Anything unexpected — a symlink, a directory, or a widened parent — is left
+ * untouched rather than deleted. The descriptor anchor is load-bearing: a
+ * concurrent rename plus symlink substitution of `.ceal` cannot redirect the
+ * final unlink to a same-named file elsewhere.
+ *
+ * @param beforeUnlink test-only race seam, after both descriptors are open.
  */
-export function removableFile(directory: string, file: string): boolean {
-	return safeExistingFile(directory, file, false);
+export function removeOwnedFile(directory: string, file: string, unsafe: UnsafeStore, beforeUnlink?: () => void): boolean {
+	if (path.dirname(file) !== directory || path.basename(file) === "." || path.basename(file) === "..") unsafe();
+	let directoryHandle: number;
+	try {
+		directoryHandle = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+	} catch (error) {
+		if (nodeErrorCode(error) === "ENOENT") return false;
+		unsafe();
+	}
+	try {
+		const directoryStat = fstatSync(directoryHandle);
+		if (!directoryStat.isDirectory() || modeOf(directoryStat) !== DIRECTORY_MODE) unsafe();
+		const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : process.platform === "darwin" ? "/dev/fd" : undefined;
+		if (!descriptorRoot) unsafe();
+		const anchoredFile = path.join(descriptorRoot, String(directoryHandle), path.basename(file));
+		let fileHandle: number;
+		try {
+			fileHandle = openSync(anchoredFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+		} catch (error) {
+			if (nodeErrorCode(error) === "ENOENT") return false;
+			unsafe();
+		}
+		try {
+			const opened = fstatSync(fileHandle);
+			// A second hard link would let a store unlink a name it never created.
+			if (!opened.isFile() || opened.nlink !== 1) unsafe();
+			beforeUnlink?.();
+			let named: ReturnType<typeof lstatSync>;
+			try {
+				named = lstatSync(anchoredFile);
+			} catch (error) {
+				if (nodeErrorCode(error) === "ENOENT") return false;
+				unsafe();
+			}
+			if (named.isSymbolicLink() || !named.isFile() || named.dev !== opened.dev || named.ino !== opened.ino) unsafe();
+			try {
+				unlinkSync(anchoredFile);
+			} catch (error) {
+				if (nodeErrorCode(error) === "ENOENT") return false;
+				unsafe();
+			}
+			return true;
+		} finally {
+			closeSync(fileHandle);
+		}
+	} finally {
+		closeSync(directoryHandle);
+	}
 }

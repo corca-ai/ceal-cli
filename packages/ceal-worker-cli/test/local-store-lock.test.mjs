@@ -57,9 +57,9 @@ test("a holder released between lock inspection and directory read is an availab
 		let released = false;
 		try {
 			fs.readdirSync = (...args) => {
-				if (!released && args[0] === lockPath) {
+				if (!released && path.basename(args[0]) === path.basename(lockPath)) {
 					released = true;
-					rmSync(lockPath, { recursive: true, force: true });
+					rmSync(args[0], { recursive: true, force: true });
 				}
 				return originalReaddirSync(...args);
 			};
@@ -87,6 +87,26 @@ test("a rejecting action still releases the lock", async () => {
 		);
 		assert.equal(existsSync(options(directory).lockPath), false);
 		await withLocalStoreLock(options(directory), async () => {});
+	});
+});
+
+test("release stays anchored when the visible parent is swapped", async () => {
+	await withStore(async (root) => {
+		const directory = path.join(root, "store");
+		const moved = path.join(root, "moved-store");
+		const victim = path.join(root, "victim");
+		mkdirSync(directory, { mode: 0o700 });
+		mkdirSync(victim, { mode: 0o700 });
+		const victimLock = path.join(victim, "test.lock");
+		writeOwnedLock(victimLock, process.pid);
+
+		await withLocalStoreLock(options(directory), async () => {
+			fs.renameSync(directory, moved);
+			fs.symlinkSync(victim, directory, "dir");
+		});
+
+		assert.equal(existsSync(victimLock), true, "release must not follow the replacement parent to an outside lock");
+		assert.equal(existsSync(path.join(moved, "test.lock")), false, "release must remove its own anchored lock generation");
 	});
 });
 

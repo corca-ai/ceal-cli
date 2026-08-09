@@ -6,10 +6,11 @@ import { CEAL_SUBCOMMANDS, type CealSubcommandDefinition, splitSubcommandRoute, 
 const COMMAND_BY_NAME = new Map(CEAL_COMMANDS.map((command) => [command.name, command]));
 
 const TOP_LEVEL_HELP = [
-	"Usage: ceal <command> [options]",
+	"Usage: ceal [--timing] <command> [options]",
 	"",
 	"Worker-facing Ceal client. Organization authority and credentials remain with the Gateway.",
 	"Named options follow required positionals, are order-independent, and may be supplied once.",
+	"Prefix a public command with --timing to emit secret-free phase timing as JSON Lines on stderr.",
 	"",
 	"Commands:",
 	...CEAL_COMMANDS.map((command) => `  ${command.name.padEnd(14)} ${command.description}`),
@@ -126,6 +127,7 @@ function commandHelp(command: CealCommandDefinition): string {
 			: ["Subcommands:", ...subcommandRows(subcommands), `Run: ceal ${command.name} <subcommand> --help for that leaf's own contract.`, ""]),
 		"Options:",
 		...options,
+		"  --timing    Global diagnostic option; place immediately after 'ceal' and before the command.",
 		"  -h, --help  Show this help without performing work.",
 	].join("\n");
 }
@@ -150,6 +152,7 @@ function subcommandHelp(subcommand: CealSubcommandDefinition): string {
 		"",
 		"Options:",
 		...(subcommand.options ?? []),
+		"  --timing    Global diagnostic option; place immediately after 'ceal' and before the command.",
 		"  -h, --help  Show this help without performing work.",
 	].join("\n");
 }

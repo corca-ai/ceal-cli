@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
-import { assertDirectory, assertDirectoryIfPresent, assertFile, prepareDirectory } from "./local-store-guards.js";
+import { assertDirectoryIfPresent, assertFile, prepareDirectory, removeOwnedFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 
@@ -45,9 +45,9 @@ export interface CealLockedSessionStore {
 
 export function createCealSessionStore(home: string | undefined): {
 	load(): Promise<CealStoredSession | null>;
-	save(session: CealStoredSession): Promise<void>;
-	remove(): Promise<void>;
-	withStateLock<T>(action: (store: CealLockedSessionStore) => Promise<T>): Promise<T>;
+	save(session: CealStoredSession, onLockAcquired?: (waitedMs: number) => void): Promise<void>;
+	remove(onLockAcquired?: (waitedMs: number) => void): Promise<void>;
+	withStateLock<T>(action: (store: CealLockedSessionStore) => Promise<T>, onLockAcquired?: (waitedMs: number) => void): Promise<T>;
 } {
 	if (!home || !path.isAbsolute(home)) throw new CealSessionStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
@@ -56,24 +56,35 @@ export function createCealSessionStore(home: string | undefined): {
 		async load() {
 			return readSessionFile(directory, file);
 		},
-		async save(session) {
-			return withStateLock(directory, async () => {
-				writeSessionFile(directory, file, session);
-			});
+		async save(session, onLockAcquired) {
+			return withStateLock(
+				directory,
+				async () => {
+					writeSessionFile(directory, file, session);
+				},
+				onLockAcquired,
+			);
 		},
-		async remove() {
-			return withStateLock(directory, async () => {
-				removeSessionFile(directory, file);
-			});
+		async remove(onLockAcquired) {
+			return withStateLock(
+				directory,
+				async () => {
+					removeSessionFile(directory, file);
+				},
+				onLockAcquired,
+			);
 		},
-		async withStateLock(action) {
-			return withStateLock(directory, async () =>
-				action({
-					load: async () => readSessionFile(directory, file),
-					save: async (session) => writeSessionFile(directory, file, session),
-					replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
-					remove: async () => removeSessionFile(directory, file),
-				}),
+		async withStateLock(action, onLockAcquired) {
+			return withStateLock(
+				directory,
+				async () =>
+					action({
+						load: async () => readSessionFile(directory, file),
+						save: async (session) => writeSessionFile(directory, file, session),
+						replace: async (expectedRefreshToken, session) => replaceSessionFile(directory, file, expectedRefreshToken, session),
+						remove: async () => removeSessionFile(directory, file),
+					}),
+				onLockAcquired,
 			);
 		},
 	};
@@ -112,13 +123,10 @@ function replaceSessionFile(directory: string, file: string, expectedRefreshToke
 }
 
 function removeSessionFile(directory: string, file: string): void {
-	if (!existsSync(file)) return;
-	assertDirectory(directory, unsafeSessionStore, true);
-	assertFile(file, unsafeSessionStore, true);
-	rmSync(file);
+	removeOwnedFile(directory, file, unsafeSessionStore);
 }
 
-async function withStateLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
+async function withStateLock<T>(directory: string, action: () => Promise<T>, onAcquired?: (waitedMs: number) => void): Promise<T> {
 	prepareDirectory(directory, unsafeSessionStore, true);
 	// The refresh this guards is a Gateway roundtrip, so a contending process
 	// waits far longer than a local-file writer would before calling it busy.
@@ -130,6 +138,7 @@ async function withStateLock<T>(directory: string, action: () => Promise<T>): Pr
 			onBusy: () => {
 				throw new CealSessionStoreError("refresh_busy");
 			},
+			onAcquired,
 		},
 		action,
 	);

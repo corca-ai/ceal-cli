@@ -86,6 +86,22 @@ test("agent audit inventories Codex rollouts newest-first without reading conten
 	});
 });
 
+test("codex bounded inventory keeps the newest rollout after a large streamed directory", () => {
+	withHome((home) => {
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		for (let index = 0; index < 2000; index += 1) writeFileSync(path.join(day, `noise-${String(index).padStart(4, "0")}.txt`), "");
+		writeSession(day, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, "x\n");
+
+		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		assert.equal(codex.inventory, "partial");
+		assert.deepEqual(
+			codex.sessions.map((session) => session.sessionRef),
+			["019f9174-fec1-78d2-b4be-91402cdc66d4"],
+		);
+	});
+});
+
 test("codex adapter reports inactive, unknown, and recency-safe partial honestly", () => {
 	withHome((home) => {
 		// ~/.codex exists but sessions/ does not: a confirmed absence.

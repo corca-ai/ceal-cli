@@ -44,9 +44,10 @@ import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
-import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
+import { type CealTimingSpan, type CealTimingStage, finishCealTiming, startCealTiming, withCealTiming } from "./timing.js";
 import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION } from "./worker-identity.js";
 
 // Re-exported beside the route declarations because the probe guard resolves a
@@ -123,6 +124,8 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
 	const requestRef = parsed.values.get("--request-ref");
 	const profileOption = parsed.values.get("--profile");
+	if (profileOption !== undefined && !isSafeProfileRef(profileOption))
+		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
 
 	const reading = (runtime.readInstalledReleaseFacts ?? readInstalledReleaseFacts)(process.execPath);
 	if (!reading.ok) return writeAcceptanceRefusal(reading.code, reading.message, io);
@@ -144,12 +147,14 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 	try {
 		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime);
 		if (!handshake.ok) return writeAcceptanceGatewayFailure(handshake.error, io);
-		const discovery = await client.request({
-			request_id: `${access.value.requestId}:discover`,
-			operation: "discover",
-			profile_ref: access.value.profileRef,
-			body: {},
-		});
+		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
+			client.request({
+				request_id: `${access.value.requestId}:discover`,
+				operation: "discover",
+				profile_ref: access.value.profileRef,
+				body: {},
+			}),
+		);
 		if (!discovery.ok) return writeAcceptanceGatewayFailure(discovery.error, io);
 
 		// Read back a receipt only when one is named. This command never calls a
@@ -319,10 +324,22 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<nu
 				next_action: "Install a signed stable worker release, then run 'ceal update' from that installed command.",
 			},
 		});
+	let activeTiming: CealTimingSpan | undefined;
 	try {
-		const onProgress = runtime.isOutputTerminal?.() ? (stage: CealStableUpdateProgressStage) => writeUpdateProgress(io, stage) : undefined;
-		return writeUpdate(io, await runtime.runStableUpdate({ onProgress }));
+		const interactive = runtime.isOutputTerminal?.() === true;
+		const onProgress =
+			interactive || runtime.timing
+				? (stage: CealStableUpdateProgressStage) => {
+						finishCealTiming(activeTiming, "ok");
+						activeTiming = startCealTiming(runtime.timing, UPDATE_TIMING_STAGE[stage]);
+						if (interactive && !runtime.timing) writeUpdateProgress(io, stage);
+					}
+				: undefined;
+		const result = await runtime.runStableUpdate({ onProgress });
+		finishCealTiming(activeTiming, result.status === "unavailable" ? "error" : "ok");
+		return writeUpdate(io, result);
 	} catch {
+		finishCealTiming(activeTiming, "error");
 		return writeUpdate(io, {
 			status: "unavailable",
 			error: {
@@ -333,6 +350,13 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<nu
 		});
 	}
 }
+
+const UPDATE_TIMING_STAGE: Record<CealStableUpdateProgressStage, CealTimingStage> = {
+	check: "update_check",
+	download_install: "update_download_install",
+	verify: "update_verify",
+	installed_readback: "update_installed_readback",
+};
 
 function writeUpdateProgress(io: CealCliIo, stage: CealStableUpdateProgressStage): void {
 	const message: Record<CealStableUpdateProgressStage, string> = {
@@ -518,12 +542,14 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		if (selection.kind === "catalog") {
 			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, wantsDetail, io, runtime);
 		}
-		const discovery = await client.request({
-			request_id: `${resolved.value.requestId}:discover`,
-			operation: "discover",
-			profile_ref: resolved.value.profileRef,
-			body: selection.body,
-		});
+		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
+			client.request({
+				request_id: `${resolved.value.requestId}:discover`,
+				operation: "discover",
+				profile_ref: resolved.value.profileRef,
+				body: selection.body,
+			}),
+		);
 		if (!discovery.ok) return writeGatewayFailure(discovery, io);
 		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
@@ -568,12 +594,14 @@ async function serveCapabilityCatalog(
 			);
 		}
 	}
-	const discovery = await client.request({
-		request_id: `${access.requestId}:discover`,
-		operation: "discover",
-		profile_ref: access.profileRef,
-		body: {},
-	});
+	const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
+		client.request({
+			request_id: `${access.requestId}:discover`,
+			operation: "discover",
+			profile_ref: access.profileRef,
+			body: {},
+		}),
+	);
 	if (!discovery.ok) return writeGatewayFailure(discovery, io);
 	// Cache writes are advisory: a failure just means the next call probes live.
 	if (runtime.saveDiscoveryCache) {
@@ -814,23 +842,29 @@ async function resolveExplicitGatewayAccess(
 	}
 }
 
-function requestHandshake(client: ReturnType<typeof createCealClient>, access: Pick<GatewayAccess, "profileRef" | "requestId">) {
-	return client.request({
-		request_id: `${access.requestId}:handshake`,
-		operation: "handshake",
-		profile_ref: access.profileRef,
-		body: { client: { name: "ceal", version: CEAL_PACKAGE_VERSION } },
-	});
+function requestHandshake(
+	client: ReturnType<typeof createCealClient>,
+	access: Pick<GatewayAccess, "profileRef" | "requestId">,
+	runtime: CealCommandRuntime,
+) {
+	return withCealTiming(runtime.timing, "gateway_handshake", () =>
+		client.request({
+			request_id: `${access.requestId}:handshake`,
+			operation: "handshake",
+			profile_ref: access.profileRef,
+			body: { client: { name: "ceal", version: CEAL_PACKAGE_VERSION } },
+		}),
+	);
 }
 
 async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime) {
 	let client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
-	let handshake = await requestHandshake(client, access);
+	let handshake = await requestHandshake(client, access, runtime);
 	const storedSession = access.storedSession;
 	if (!shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
 	const session = await ensureCurrentSession(storedSession, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: session.accessToken }));
-	handshake = await requestHandshake(client, access);
+	handshake = await requestHandshake(client, access, runtime);
 	return { client, handshake };
 }
 
@@ -1126,21 +1160,25 @@ async function requestReceiptReadback(
 ) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	let readback = await client.request({
-		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
-		operation: "readback",
-		profile_ref: profileRef,
-		body: { request_id: requestRef },
-	});
+	let readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
+		client.request({
+			request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
+			operation: "readback",
+			profile_ref: profileRef,
+			body: { request_id: requestRef },
+		}),
+	);
 	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	readback = await client.request({
-		request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
-		operation: "readback",
-		profile_ref: profileRef,
-		body: { request_id: requestRef },
-	});
+	readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
+		client.request({
+			request_id: `${runtime.nextRequestId?.() ?? "ceal:receipt"}:readback`,
+			operation: "readback",
+			profile_ref: profileRef,
+			body: { request_id: requestRef },
+		}),
+	);
 	return { readback, session };
 }
 
@@ -1262,12 +1300,14 @@ async function executeCall(
 	try {
 		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);
 		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId, record);
-		const readback = await client.request({
-			request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
-			operation: "readback",
-			profile_ref: profileRef,
-			body: { request_id: requestId },
-		});
+		const readback = await withCealTiming(runtime.timing, "gateway_readback", () =>
+			client.request({
+				request_id: `${runtime.nextRequestId?.() ?? "ceal:readback"}:readback`,
+				operation: "readback",
+				profile_ref: profileRef,
+				body: { request_id: requestId },
+			}),
+		);
 		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed, record);
 		completed = { value: call.value, events: readback.value.events, session };
 	} catch (error) {
@@ -1306,18 +1346,21 @@ function requestCapability(
 	profileRef: string,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
+	runtime: CealCommandRuntime,
 ) {
-	return client.request({
-		request_id: requestId,
-		operation: "call",
-		profile_ref: profileRef,
-		body: {
-			capability_id: parsed.capabilityId,
-			target_ref: parsed.targetRef,
-			arguments: parsed.arguments,
-			purpose: parsed.purpose,
-		},
-	});
+	return withCealTiming(runtime.timing, "gateway_call", () =>
+		client.request({
+			request_id: requestId,
+			operation: "call",
+			profile_ref: profileRef,
+			body: {
+				capability_id: parsed.capabilityId,
+				target_ref: parsed.targetRef,
+				arguments: parsed.arguments,
+				purpose: parsed.purpose,
+			},
+		}),
+	);
 }
 
 async function requestCapabilityCall(
@@ -1329,7 +1372,7 @@ async function requestCapabilityCall(
 ) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	let call = await requestCapability(client, profileRef, parsed, requestId);
+	let call = await requestCapability(client, profileRef, parsed, requestId, runtime);
 	if (!shouldRetryAuthentication(call, session)) return { call, client, session };
 	try {
 		session = await ensureCurrentSession(session, runtime, true);
@@ -1337,7 +1380,7 @@ async function requestCapabilityCall(
 		throw new CealKnownPreProviderCallError(error);
 	}
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
-	call = await requestCapability(client, profileRef, parsed, requestId);
+	call = await requestCapability(client, profileRef, parsed, requestId, runtime);
 	return { call, client, session };
 }
 
@@ -1414,7 +1457,7 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 }
 
 function isSafeProfileRef(value: string | undefined): value is string {
-	return typeof value === "string" && CEAL_SAFE_REF.test(value);
+	return typeof value === "string" && CEAL_SAFE_PROFILE_REF.test(value);
 }
 
 function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {

@@ -43,6 +43,7 @@ test("receipt spool appends owner-only and reads entries back", async () => {
 	await withHome(async (home) => {
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		assert.equal(await store.load(), null);
+		await store.remove();
 		await store.append(entry());
 		const state = await store.load();
 		assert.deepEqual(state.entries, [entry()]);

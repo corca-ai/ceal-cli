@@ -35,6 +35,7 @@ test("discovery cache writes owner-only and reads the entry back", async () => {
 	await withHome(async (home) => {
 		const store = createCealDiscoveryCacheStore(home);
 		assert.equal(await store.load(), null);
+		await store.remove();
 		await store.save(entry());
 		assert.deepEqual(await store.load(), entry());
 		const file = path.join(home, ".ceal", "client-discovery-cache.json");

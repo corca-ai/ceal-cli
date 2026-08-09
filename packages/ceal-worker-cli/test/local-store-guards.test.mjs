@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertDirectory, assertFile, prepareDirectory, removableFile, safeExistingFile } from "../dist/local-store-guards.js";
+import { assertDirectory, assertFile, prepareDirectory, removeOwnedFile, safeExistingFile } from "../dist/local-store-guards.js";
 
 class Refused extends Error {}
 function unsafe() {
@@ -163,18 +163,47 @@ test("a directory is not a file and a file is not a directory", (context) => {
 });
 
 // Cleanup must never delete something the store did not create.
-test("removableFile accepts only a plain existing file", (context) => {
+test("removeOwnedFile distinguishes absence from unsafe state and unlinks only through its opened parent", (context) => {
 	const root = scratch(context);
 	const { directory, file } = store(root);
-	assert.equal(removableFile(directory, file), true);
-	assert.equal(removableFile(directory, path.join(directory, "absent")), false);
-	assert.equal(removableFile(directory, directory), false);
+	assert.equal(removeOwnedFile(directory, file, unsafe), true);
+	assert.equal(existsSync(file), false);
+	assert.equal(removeOwnedFile(directory, path.join(directory, "absent"), unsafe), false);
+	assert.equal(removeOwnedFile(path.join(root, "absent"), path.join(root, "absent", "entry.json"), unsafe), false);
+	assert.throws(() => removeOwnedFile(directory, directory, unsafe), Refused);
+	writeFileSync(file, "{}", { mode: 0o600 });
 	const link = path.join(directory, "link.json");
 	symlinkSync(file, link);
-	assert.equal(removableFile(directory, link), false);
+	assert.throws(() => removeOwnedFile(directory, link, unsafe), Refused);
+	const hardLink = path.join(directory, "hard-link.json");
+	linkSync(file, hardLink);
+	assert.throws(() => removeOwnedFile(directory, file, unsafe), Refused);
+	rmSync(hardLink);
 	const outside = path.join(root, "outside");
 	mkdirSync(outside, { mode: 0o700 });
 	const substituted = path.join(root, "substituted");
 	symlinkSync(outside, substituted);
-	assert.equal(removableFile(substituted, path.join(substituted, "missing")), false);
+	assert.throws(() => removeOwnedFile(substituted, path.join(substituted, "missing"), unsafe), Refused);
+	chmodSync(directory, 0o755);
+	assert.throws(() => removeOwnedFile(directory, file, unsafe), Refused);
+});
+
+test("removeOwnedFile keeps deletion anchored when the visible parent is swapped", (context) => {
+	const root = scratch(context);
+	const { directory, file } = store(root);
+	const openedParent = path.join(root, "opened-parent");
+	const victimDirectory = path.join(root, "victim");
+	const victim = path.join(victimDirectory, path.basename(file));
+	mkdirSync(victimDirectory, { mode: 0o700 });
+	writeFileSync(victim, "do not delete", { mode: 0o600 });
+
+	assert.equal(
+		removeOwnedFile(directory, file, unsafe, () => {
+			renameSync(directory, openedParent);
+			symlinkSync(victimDirectory, directory);
+		}),
+		true,
+	);
+	assert.equal(existsSync(victim), true, "the replacement parent's same-named file is outside the opened directory");
+	assert.equal(existsSync(path.join(openedParent, path.basename(file))), false, "the originally opened store file is the one removed");
 });
