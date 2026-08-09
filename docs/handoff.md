@@ -26,15 +26,23 @@ Read the counts rather than trusting them here; each line names the command.
 - `npm run check` is green on this host and `origin/main` was green on CI before
   the commit below — `gh run list --workflow=check.yml`. That baseline had been
   broken for a while and is not to be assumed; read it.
-- **Issue 10 is fixed and committed, and the commit is unpushed.** It carries the
-  `Closes #10` keyword, so pushing closes the issue. Nothing has been pushed and
-  the issue is still open; that approval was never asked for. Verify after any
-  push with `issue_tool.py verify-closeout ... --carrier direct-commit
-  --commit-ref <ref> --expect-state CLOSED`.
-- **That fix is unreleased.** `CHANGELOG.md` carries it under `## Unreleased`,
-  which the release step should fold into the version section it cuts. Proof
-  level reached is local suite plus repo gate — no installed release, and no live
-  `session enroll`/`adopt` against a real Gateway, which both declare
+- **Nothing is pushed.** The commits below are local only, and the first carries
+  `Closes #10`, so pushing closes that issue. Approval for the push was asked for
+  and declined once. Verify after any push with `issue_tool.py verify-closeout
+  ... --carrier direct-commit --commit-ref <ref> --expect-state CLOSED`.
+- **Issue 10 is fixed**, and a scouting pass then closed six release-path defects
+  it did not cause — an installer literal that would have locked existing clients
+  out of the next protocol bump, an acceptance document answering no `ok`, a
+  frame-ceiling measured on the wrong buffer, and three gates or steps that
+  passed without proving what they named. `CHANGELOG.md` `## Unreleased` has all
+  of it, and the release step should fold that section into the version it cuts.
+- **All three gates are green on this host**, including the two maintainer-local
+  ones: `npm run check`, `npm run check:duplication`, `npm run lint:shell`. The
+  ratchet had been failing before this session and its stale control-loop entry
+  is rotated and corrected. `origin/main` was green on CI before these commits —
+  `gh run list --workflow=check.yml`; that baseline is not to be assumed.
+- **Proof level reached is local suite plus repo gate.** No installed release,
+  and no live `session enroll`/`adopt` against a real Gateway; both declare
   `remote_write`.
 - **`ceal-v0.75.0` is released and read back on this host.** Re-emit the
   acceptance packet with `node scripts/worker-acceptance-packet.mjs --binary
@@ -56,18 +64,9 @@ Read the counts rather than trusting them here; each line names the command.
 
 ## Discuss
 
-- ~~The documentation-only CI skip has never fired live.~~ **Settled.** It fired
-  on run `31286608349`, the first pushed range that carried no code: `scope`
-  succeeded and both `check-native` and `check` were skipped. Nothing to track.
-- ~~Issue 6 blocks Gateway compatibility retirement.~~ **Settled — closed.** The
-  ledger and command it read from were retired upstream on 2026-07-30, and this
-  repository answered its desired capability with a different, recorded design:
-  a vendored `packages/ceal-protocol` plus `protocol-vendor-pin.json`, not an
-  installed packed artifact. The close comment carries the evidence.
-- ~~[debt.md](debt.md) was carried unconfirmed across sessions.~~ **Settled.**
-  Every item was re-confirmed against the tree; none was deletable and four were
-  restated because the surface had moved. The file says so and says the next
-  reader owes the same re-check.
+- Nothing open. Three items settled this session and were removed rather than
+  struck through: the documentation-only CI skip fired live, issue 6 closed, and
+  [debt.md](debt.md) is re-confirmed against the tree. `git log` holds the detail.
 
 ## References
 

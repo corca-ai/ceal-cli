@@ -33,6 +33,27 @@ local audit state it produced. The operator saw `status: enrolled`.
 
 Closes #10.
 
+**Six release-path defects closed, found by scouting rather than by a failure.**
+Two would have produced a wrong claim in a released artifact, and two were gates
+that passed without proving what they named.
+
+- `install-ceal.sh` checked `protocol_version` as a literal. Because `ceal
+  update` runs the *installed* generation's installer, that literal would have
+  locked every existing client out of the first release that bumps the protocol,
+  while the release lane stayed green. It checks the shape now.
+- `ceal acceptance emit`'s success document carried no `ok`, though its own
+  refusal writer and the shipped guide both promise one — so the artifact an
+  outsider produces to prove a release read as falsy.
+- The Agent control-session reader applied the per-frame byte ceiling to the
+  accumulated buffer, killing a session over two legal frames that arrived in one
+  read, before either was answered.
+- `.githooks/pre-push`'s tag-push branch was proven by a regex that the
+  iteration-gate line satisfied on its own; deleting the branch left it green.
+- `npm-package-stage.yml` read a failed `npm stage publish` through `tee` with no
+  `pipefail`, reporting both packages staged on a green run.
+- `install-git-hooks.mjs --check` called a clone installed on the config key
+  alone, though git silently skips a hook it cannot execute.
+
 ## 0.75.0 (`ceal-v0.75.0`)
 
 **The `effect` field now names a change that does not happen on this machine.**
