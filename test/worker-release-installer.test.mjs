@@ -42,6 +42,7 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 		const result = run({ install, release, tools, log, version: TAG });
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Installed ceal ceal-v0[.]65[.]0/u);
+		assert.match(result.stdout, /The install directory is not on PATH in this shell[.] Run:\n {2}export PATH=/u);
 		assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		assert.equal(readlinkSync(path.join(install, "cealctl")), ".ceal-cli/current/cealctl-linux-arm64");
 		assert.equal(existsSync(path.join(install, ".ceal-cli", "operator")), false);
@@ -54,6 +55,47 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 		assert.equal(cosign.match(/verify-blob/gu)?.length, 6);
 		assert.match(cosign, /ceal-release[.]yml@refs\/tags\/ceal-v0[.]65[.]0/u);
 	});
+});
+
+test("worker installer omits PATH guidance when the exact install directory is already reachable", () => {
+	withFixture(({ install, release, tools, log }) => {
+		const result = run({ install, release, tools, log, version: TAG, restrictedPath: `${install}:${tools}:${process.env.PATH}` });
+		assert.equal(result.status, 0, result.stderr);
+		assert.doesNotMatch(result.stdout, /install directory is not on PATH/u);
+	});
+});
+
+test("worker installer renders a copyable PATH command for a shell-active install directory", () => {
+	withFixture(({ install, release, tools, log }) => {
+		const shellActiveInstall = path.join(path.dirname(install), "worker's local bin");
+		const result = run({ install: shellActiveInstall, release, tools, log, version: TAG });
+		assert.equal(result.status, 0, result.stderr);
+		const command = result.stdout
+			.split("\n")
+			.find((line) => line.startsWith("  export PATH="))
+			?.trim();
+		assert.equal(command, `export PATH='${shellActiveInstall.replaceAll("'", "'\\''")}':"$PATH"`);
+		const applied = spawnSync("/bin/sh", ["-c", `${command}; [ "\${PATH%%:*}" = "$EXPECTED_INSTALL_DIR" ]`], {
+			encoding: "utf8",
+			env: { ...process.env, EXPECTED_INSTALL_DIR: shellActiveInstall },
+		});
+		assert.equal(applied.status, 0, applied.stderr);
+	});
+});
+
+test("worker installer rejects install directories that cannot be stable PATH entries before external work", () => {
+	for (const [install, message] of [
+		["relative/worker-bin", /CEAL_INSTALL_DIR must be an absolute path/u],
+		["/tmp/worker:bin", /CEAL_INSTALL_DIR must not contain ':'/u],
+	]) {
+		const result = spawnSync("/bin/sh", [INSTALLER], {
+			encoding: "utf8",
+			env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: TAG, PATH: "/usr/bin:/bin" },
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, message);
+		assert.equal(result.stdout, "");
+	}
 });
 
 test("worker stable resolver follows the worker static-origin stable pointer", () => {

@@ -249,7 +249,13 @@ curl -fsSL https://ceal.borca.ai/releases/worker/stable/install-ceal.sh \
 The installer needs only `curl`, `awk`, and the usual POSIX text tools, all of
 which a stock Linux or macOS host already has; it bootstraps a pinned `cosign`
 when one is absent. There is no Python, Node, or package-manager prerequisite,
-and `ceal` itself is a standalone binary.
+and `ceal` itself is a standalone binary. If the selected install directory is
+not already on the current shell's `PATH`, a successful install prints a safely
+quoted command that adds that exact directory for the current shell. The
+installer does not modify shell startup files; persist the printed command in
+the startup file appropriate for the user's shell when desired. A custom
+`CEAL_INSTALL_DIR` must be absolute and cannot contain `:`, so the printed
+directory remains one stable POSIX `PATH` entry.
 
 Worker distribution is the worker-owned static-origin prefix
 `https://ceal.borca.ai/releases/worker/` — never the Gateway-owned

@@ -33,6 +33,22 @@ TARGET_NEEDS_LINK_UPDATE=0
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is required"; }
 
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+print_path_guidance() {
+  case ":${PATH:-}:" in
+    *":$INSTALL_DIR:"*) return ;;
+  esac
+  printf 'The install directory is not on PATH in this shell. Run:\n  export PATH='
+  shell_quote "$INSTALL_DIR"
+  printf ':"$PATH"\n'
+  printf 'To keep it for future shells, add that command to your shell startup file.\n'
+}
+
 # Every download is bounded, and the reason is not politeness about slow links.
 # `curl` with no deadline waits indefinitely on an origin that completes the
 # connection and then goes silent — a black hole, a hung proxy, a load balancer
@@ -343,6 +359,8 @@ cleanup() {
 
 [ -n "$VERSION" ] || fail "CEAL_VERSION is required; set stable or an explicit tag such as ceal-v0.65.0."
 [ "$VERSION" = stable ] || is_tag "$VERSION" || fail "CEAL_VERSION must be stable or an explicit tag such as ceal-v0.65.0."
+case "$INSTALL_DIR" in /*) ;; *) fail "CEAL_INSTALL_DIR must be an absolute path" ;; esac
+case "$INSTALL_DIR" in *:*) fail "CEAL_INSTALL_DIR must not contain ':' because PATH uses it as a separator" ;; esac
 PLATFORM="$(detect_platform)"
 need mktemp; TMP_DIR="$(mktemp -d)"; trap cleanup EXIT HUP INT TERM
 probe_mv_t
@@ -385,4 +403,5 @@ replace_link "releases/$GENERATION_ID" "$CURRENT_LINK"; CURRENT_SWITCHED=1
 if [ "$TARGET_NEEDS_LINK_UPDATE" = 1 ]; then TARGET_MUTATED=1; rm -f "$COMMAND_TARGET"; ln -s "$COMMAND_LINK_TARGET" "$COMMAND_TARGET"; fi
 verify_version_output "$COMMAND_TARGET"; COMMITTED=1
 printf 'Installed ceal %s (%s) as worker at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"
+print_path_guidance
 printf 'Signed guide staged at %s; register it through the selected agent runtime (it is not auto-loaded).\n' "$GENERATION_DIR/guide/SKILL.md"
