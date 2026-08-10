@@ -130,7 +130,9 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 	const reading = (runtime.readInstalledReleaseFacts ?? readInstalledReleaseFacts)(process.execPath);
 	if (!reading.ok) return writeAcceptanceRefusal(reading.code, reading.message, io);
 
-	const access = await resolveStoredGatewayAccessResult(runtime, profileOption);
+	// Acceptance is evidence, not an action: do not spend the stored one-time
+	// refresh credential while loading the session or negotiating live readback.
+	const access = await resolveStoredGatewayAccessResult(runtime, profileOption, false);
 	if (!access.ok) {
 		const sessionFailure = access.origin === "client_session" ? classifyClientSessionFailure(access.reason) : undefined;
 		const unconfigured = access.origin === "unconfigured";
@@ -145,7 +147,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 
 	const startedAt = Date.now();
 	try {
-		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime);
+		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime, false);
 		if (!handshake.ok) return writeAcceptanceGatewayFailure(handshake.error, io);
 		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
 			client.request({
@@ -167,6 +169,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				access.value.profileRef,
 				requestRef,
 				runtime,
+				false,
 			);
 			if (!readback.readback.ok) return writeAcceptanceGatewayFailure(readback.readback.error, io);
 			// Through the same projection `ceal receipt show` renders, not around it.
@@ -232,7 +235,12 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 // the evidence run stopped.
 function writeAcceptanceGatewayFailure(error: unknown, io: CealCliIo): number {
 	const failure = classifyGatewayFailure(error);
-	return writeAcceptanceRefusal(failure.code, failure.message, io, failure.nextAction);
+	return writeAcceptanceRefusal(
+		failure.code,
+		failure.message,
+		io,
+		failure.code === "authentication_failed" ? explicitSessionRefreshNextAction("ceal acceptance emit") : failure.nextAction,
+	);
 }
 
 async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -1115,7 +1123,9 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 			io,
 			"Run 'ceal receipt show --help' and pass one request reference returned by a call.",
 		);
-	const resolved = await resolveCallSession(runtime);
+	// Receipt readback is observational. Keep the stored access token unchanged;
+	// the explicit `session refresh` route owns any credential rotation.
+	const resolved = await resolveCallSession(runtime, false);
 	if (!resolved.ok)
 		return writeReceiptError(
 			resolved.reason,
@@ -1126,13 +1136,21 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 		);
 	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {
-		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime);
+		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime, false);
 		// The Gateway's own failure vocabulary decides the answer: an unknown or
 		// not-yet-audited reference is `audit_event_not_found`, which is a real
 		// answer about this reference, not a broken receipt route.
 		if (!readback.ok) {
 			const failure = classifyGatewayFailure(readback.error);
-			return writeReceiptError(failure.code, failure.message, io, undefined, failure.nextAction, resolved.session, profileRef);
+			return writeReceiptError(
+				failure.code,
+				failure.message,
+				io,
+				undefined,
+				failure.code === "authentication_failed" ? explicitSessionRefreshNextAction("ceal receipt show") : failure.nextAction,
+				resolved.session,
+				profileRef,
+			);
 		}
 		return writeYaml(io.stdout, {
 			schema_version: "ceal.receipt.v1",
@@ -1159,11 +1177,12 @@ async function requestReceiptReadback(
 	profileRef: string,
 	requestRef: string,
 	runtime: CealCommandRuntime,
+	refreshStaleSession = true,
 ) {
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
-	if (!shouldRetryAuthentication(readback, session)) return { readback, session };
+	if (!refreshStaleSession || !shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
@@ -1327,11 +1346,11 @@ async function executeCall(
 
 type CallSessionResolution = { ok: true; session: CealStoredSession } | { ok: false; reason: string };
 
-async function resolveCallSession(runtime: CealCommandRuntime): Promise<CallSessionResolution> {
+async function resolveCallSession(runtime: CealCommandRuntime, refreshStaleSession = true): Promise<CallSessionResolution> {
 	if (!runtime.loadSession) return { ok: false, reason: "session_unavailable" };
 	try {
 		const loaded = await runtime.loadSession();
-		const session = loaded ? await ensureCurrentSession(loaded, runtime) : null;
+		const session = loaded ? (refreshStaleSession ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
 		return session ? { ok: true, session } : { ok: false, reason: "session_unavailable" };
 	} catch (error) {
 		const reason = error instanceof CealClientSessionError ? error.code : "session_load_failed";
@@ -1522,8 +1541,12 @@ function writeCapabilitiesGatewayFailure(response: { error: unknown }, access: G
 	return writeGatewayFailure(
 		response,
 		io,
-		failure.code === "authentication_failed" && access.storedSession ? `Run 'ceal session refresh', then retry '${route}'.` : undefined,
+		failure.code === "authentication_failed" && access.storedSession ? explicitSessionRefreshNextAction(route) : undefined,
 	);
+}
+
+function explicitSessionRefreshNextAction(route: string): string {
+	return `Run 'ceal session refresh', then retry '${route}'.`;
 }
 
 function writeGatewayFailure(response: { error: unknown }, io: CealCliIo, nextAction?: string): number {

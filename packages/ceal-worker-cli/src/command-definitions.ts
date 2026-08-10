@@ -114,13 +114,15 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "receipt",
-		description: "Inspect safe Gateway evidence for one audited call outcome; a stale session may be renewed.",
+		description: "Inspect safe Gateway evidence for one audited call outcome with the stored access token.",
 		usage: "ceal receipt show <request-ref> [--profile <profile-ref>]",
-		effect: "remote_write",
+		// Receipt readback never refreshes the stored session. An expired or rejected
+		// access token is reported, and `ceal session refresh` owns the rotation.
+		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.receipt.v1",
 		recovery:
-			"Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
+			"Use the 'receipt.request_ref' a call returned; if the stored access token is rejected, run 'ceal session refresh' and retry. A reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
 	},
 	{
 		name: "observe",
@@ -133,12 +135,14 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "acceptance",
-		description: "Emit installed-client acceptance evidence; a stale Gateway session may be renewed.",
+		description: "Emit installed-client acceptance evidence with the stored access token.",
 		usage: "ceal acceptance emit [--request-ref <ref>] [--profile <profile-ref>]",
-		effect: "remote_write",
+		// Acceptance evidence reads the installed release, live discovery, and an
+		// optional prior receipt. It never rotates the stored session.
+		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.worker_acceptance_result.v2",
 		recovery:
-			"Run 'ceal capabilities --fresh' to confirm the session, then re-run; an installed release is required and a build tree is refused.",
+			"If the stored access token is rejected, run 'ceal session refresh', then re-run; an installed release is required and a build tree is refused.",
 	},
 ];

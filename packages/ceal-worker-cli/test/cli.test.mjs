@@ -414,9 +414,9 @@ test("a malformed known route points at the nearest help that can correct it", a
 	}
 });
 
-test("observational routes declare their actual session-rotation effect", () => {
+test("observational routes declare a read-only effect and keep session rotation explicit", () => {
 	for (const name of ["receipt", "acceptance"]) {
-		assert.equal(CEAL_COMMANDS.find((command) => command.name === name).effect, "remote_write", name);
+		assert.equal(CEAL_COMMANDS.find((command) => command.name === name).effect, "read_only", name);
 	}
 	assert.equal(CEAL_COMMANDS.find((command) => command.name === "capabilities").effect, "read_only");
 	for (const [parent, route] of [
@@ -425,7 +425,7 @@ test("observational routes declare their actual session-rotation effect", () => 
 	]) {
 		assert.equal(
 			CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === parent && subcommand.route.join(" ") === route).effect,
-			"remote_write",
+			"read_only",
 			`${parent} ${route}`,
 		);
 	}
@@ -1341,6 +1341,37 @@ test("capabilities authentication failure names the explicit session refresh act
 	}
 });
 
+test("receipt and acceptance observation never retry auth or rotate a stale stored session", async () => {
+	for (const [name, args, operation, extra] of [
+		["receipt", ["receipt", "show", "narnia:call:1:call"], "readback", {}],
+		["acceptance", ["acceptance", "emit"], "handshake", { readInstalledReleaseFacts: installedReleaseReading }],
+	]) {
+		await withRenewingGateway(
+			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+				const payload = await yamlRun(args, 3, {
+					...extra,
+					loadSession: async () =>
+						storedSession(endpoint, {
+							expiresAt: "2020-01-01T00:00:00.000Z",
+							refreshToken: oldRefreshToken,
+						}),
+					saveSession: async () => assert.fail(`${name} must not rotate a stored session`),
+					now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+				});
+				assert.equal(payload.error.kind, "authentication_failed", name);
+				assert.match(payload.error.next_action, /ceal session refresh/u, name);
+				assert.equal(refreshCalls(), 0, name);
+				assert.deepEqual(
+					requests.map((item) => item.body.operation),
+					[operation],
+					name,
+				);
+			},
+			{ rejectFirstGateway: true },
+		);
+	}
+});
+
 test("session refresh fails closed for malformed absolute refresh expiry before a refresh request", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls }) => {
 		const payload = await yamlRun(["session", "refresh"], 3, {
@@ -1490,17 +1521,15 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 			assert.match(call.error.next_action, /ceal session adopt --help/u);
 			assert.equal(Object.hasOwn(call, "receipt"), false);
 
-			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, runtime);
-			assert.equal(receipt.error.kind, "session_renewal_unavailable");
-			assert.equal(receipt.error.retryable, false);
-			assert.match(receipt.error.next_action, /Do not retry the same command/u);
-			assert.match(receipt.error.next_action, /ceal session adopt --help/u);
+			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 0, runtime);
+			assert.equal(receipt.status, "verified");
+			assert.equal(refreshCalls(), 1, "receipt readback must not replay the quarantined refresh credential");
 		},
 		{ invalidRefreshResponse: true },
 	);
 });
 
-test("a refresh never reaches the Gateway when its pre-send quarantine cannot persist", async () => {
+test("an observational acceptance read does not require a durable refresh quarantine", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 		const runtime = {
 			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
@@ -1516,16 +1545,12 @@ test("a refresh never reaches the Gateway when its pre-send quarantine cannot pe
 		assert.doesNotMatch(payload.error.next_action, /network reachability/u);
 		assert.doesNotMatch(payload.error.next_action, /device-enrollment code/u);
 
-		const acceptance = await yamlRun(["acceptance", "emit"], 3, {
+		const acceptance = await yamlRun(["acceptance", "emit"], 0, {
 			...runtime,
 			readInstalledReleaseFacts: installedReleaseReading,
 		});
 		assert.equal(acceptance.schema_version, "ceal.worker_acceptance_result.v2");
-		assert.equal(acceptance.error.kind, "session_save_failed");
-		assert.match(acceptance.error.message, /stored Gateway session could not be used safely/u);
-		assert.match(acceptance.error.next_action, /ceal session status/u);
-		assert.doesNotMatch(acceptance.error.next_action, /network reachability/u);
-		assert.doesNotMatch(acceptance.error.next_action, /device-enrollment code/u);
+		assert.equal(acceptance.status, "emitted");
 		assert.equal(refreshCalls(), 0);
 	});
 });
