@@ -93,6 +93,63 @@ test("a non-JSON body, a wrong content type, and an off-Protocol shape are all i
 	}
 });
 
+test("start preserves only the Gateway's exact typed availability failures", async () => {
+	for (const [status, errorCode] of [
+		[404, "adoption_not_available"],
+		[503, "gateway_unavailable"],
+		[429, "rate_limited"],
+	]) {
+		await withServer(
+			(req, res) => {
+				req.resume();
+				json(res, { ok: false, error_code: errorCode }, status);
+			},
+			async (endpoint) =>
+				assert.rejects(
+					() => createCealDeviceAdoptionClient({ endpoint }).start(startRequest()),
+					(error) => error instanceof CealDeviceAdoptionClientError && error.code === errorCode,
+				),
+		);
+	}
+	await withServer(
+		(req, res) => {
+			req.resume();
+			json(res, { ok: false, error_code: "adoption_not_available" }, 503);
+		},
+		async (endpoint) =>
+			assert.rejects(
+				() => createCealDeviceAdoptionClient({ endpoint }).start(startRequest()),
+				(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_response",
+			),
+	);
+});
+
+test("poll rejects start-only typed failures as invalid responses", async () => {
+	for (const [status, errorCode] of [
+		[404, "adoption_not_available"],
+		[503, "gateway_unavailable"],
+		[429, "rate_limited"],
+	]) {
+		await withServer(
+			(req, res) => {
+				req.resume();
+				json(res, { ok: false, error_code: errorCode }, status);
+			},
+			async (endpoint) =>
+				assert.rejects(
+					() =>
+						createCealDeviceAdoptionClient({ endpoint }).poll({
+							schema_version: POLL_SCHEMA,
+							registration_ref: "registration:1",
+							nonce_ref: "nonce:1",
+							signature: SIGNATURE,
+						}),
+					(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_response",
+				),
+		);
+	}
+});
+
 test("a Gateway that never answers is bounded by the configured timeout", async () => {
 	await withServer(
 		(req) => {
@@ -193,8 +250,8 @@ function startResult() {
 	};
 }
 
-function json(res, body) {
-	res.writeHead(200, { "content-type": "application/json" });
+function json(res, body, status = 200) {
+	res.writeHead(status, { "content-type": "application/json" });
 	res.end(JSON.stringify(body));
 }
 

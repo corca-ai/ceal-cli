@@ -23,9 +23,9 @@ import {
 // transport that interprets `pending` or `failed` is one that can decide to
 // retry something the operator never approved.
 //
-// The routes are non-enumerating by design: `start` answers the same pending
-// shape whether or not the mailbox or invitation exists, so nothing here may
-// turn a response into a claim about which accounts are real.
+// The internal-product start route reports unavailable invitations explicitly.
+// This transport preserves only its exact typed failure grammar; it never
+// infers identity state from an arbitrary provider response.
 
 export interface CealDeviceAdoptionClient {
 	start(request: CealDeviceEnrollmentStartRequest): Promise<CealDeviceEnrollmentStartResult>;
@@ -40,7 +40,16 @@ export interface CreateCealDeviceAdoptionClientOptions {
 
 export class CealDeviceAdoptionClientError extends Error {
 	override readonly name = "CealDeviceAdoptionClientError";
-	constructor(readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response") {
+	constructor(
+		readonly code:
+			| "invalid_configuration"
+			| "request_timeout"
+			| "request_failed"
+			| "invalid_response"
+			| "adoption_not_available"
+			| "gateway_unavailable"
+			| "rate_limited",
+	) {
 		super(`Ceal device adoption ${code.replaceAll("_", " ")}.`);
 	}
 }
@@ -62,12 +71,12 @@ export function createCealDeviceAdoptionClient(options: CreateCealDeviceAdoption
 			} catch {
 				throw new CealDeviceAdoptionClientError("invalid_configuration");
 			}
-			return decode(await exchange(startEndpoint, body, fetchFn, timeoutMs), decodeCealDeviceEnrollmentStartResult);
+			return decode(await exchange(startEndpoint, body, fetchFn, timeoutMs, true), decodeCealDeviceEnrollmentStartResult);
 		},
 		async poll(request) {
 			if (!isPollRequest(request)) throw new CealDeviceAdoptionClientError("invalid_configuration");
 			const body = { ...request, schema_version: CEAL_DEVICE_ENROLLMENT_POLL_SCHEMA };
-			return decode(await exchange(pollEndpoint, body, fetchFn, timeoutMs), decodeCealDeviceEnrollmentPollResponse);
+			return decode(await exchange(pollEndpoint, body, fetchFn, timeoutMs, false), decodeCealDeviceEnrollmentPollResponse);
 		},
 	};
 }
@@ -89,7 +98,13 @@ function decode<T>(parsed: unknown, decoder: (value: unknown) => T): T {
 	}
 }
 
-async function exchange(endpoint: URL, body: unknown, fetchFn: typeof globalThis.fetch, timeoutMs: number): Promise<unknown> {
+async function exchange(
+	endpoint: URL,
+	body: unknown,
+	fetchFn: typeof globalThis.fetch,
+	timeoutMs: number,
+	allowStartFailure: boolean,
+): Promise<unknown> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
@@ -105,11 +120,15 @@ async function exchange(endpoint: URL, body: unknown, fetchFn: typeof globalThis
 		});
 		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
 		if (!declaresJsonContentType(response)) invalidResponse();
+		let parsed: unknown;
 		try {
-			return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+			parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 		} catch {
 			return invalidResponse();
 		}
+		if (!response.ok)
+			throw allowStartFailure ? gatewayFailure(response.status, parsed) : new CealDeviceAdoptionClientError("invalid_response");
+		return parsed;
 	} catch (error) {
 		if (error instanceof CealDeviceAdoptionClientError) throw error;
 		if (controller.signal.aborted) throw new CealDeviceAdoptionClientError("request_timeout");
@@ -117,6 +136,17 @@ async function exchange(endpoint: URL, body: unknown, fetchFn: typeof globalThis
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+function gatewayFailure(status: number, value: unknown): CealDeviceAdoptionClientError {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return new CealDeviceAdoptionClientError("invalid_response");
+	const record = value as Record<string, unknown>;
+	if (Object.keys(record).sort().join(",") !== "error_code,ok" || record.ok !== false)
+		return new CealDeviceAdoptionClientError("invalid_response");
+	if (status === 404 && record.error_code === "adoption_not_available") return new CealDeviceAdoptionClientError("adoption_not_available");
+	if (status === 503 && record.error_code === "gateway_unavailable") return new CealDeviceAdoptionClientError("gateway_unavailable");
+	if (status === 429 && record.error_code === "rate_limited") return new CealDeviceAdoptionClientError("rate_limited");
+	return new CealDeviceAdoptionClientError("invalid_response");
 }
 
 // Same endpoint rules the enrollment client applies: no credentials in the URL,

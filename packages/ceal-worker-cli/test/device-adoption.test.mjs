@@ -181,6 +181,24 @@ test("a malformed poll response stays terminal, because retrying returns the sam
 	assert.equal(world.saved.length, 0);
 });
 
+test("typed start availability failures stay distinct and never write a session", async () => {
+	for (const kind of ["adoption_not_available", "gateway_unavailable", "rate_limited"]) {
+		const world = createWorld({ startFailureCode: kind });
+		assert.equal(await run(world), 3);
+		assert.equal(world.result().error.kind, kind);
+		assert.equal(world.saved.length, 0);
+	}
+});
+
+test("start-only failure codes received during poll remain malformed and never write a session", async () => {
+	for (const code of ["adoption_not_available", "gateway_unavailable", "rate_limited"]) {
+		const world = createWorld({ transientPollFailures: 1, transientPollCode: code });
+		assert.equal(await run(world), 3);
+		assert.equal(world.result().error.kind, "malformed_response");
+		assert.equal(world.saved.length, 0);
+	}
+});
+
 // Each of these is a distinguishable, fail-closed outcome. The assertion that
 // matters in every one is the same: no session was written.
 test("every tampered delivery fails closed with its own error kind", async () => {
@@ -489,6 +507,7 @@ function createGateway(options) {
 			state.calledRoutes.start = true;
 			state.startCount += 1;
 			state.start = request;
+			if (options.startFailureCode) throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError(options.startFailureCode);
 			if (options.malformedStart) throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError("invalid_response");
 			const result = {
 				schema_version: "ceal.device_enrollment_start_result.v1",

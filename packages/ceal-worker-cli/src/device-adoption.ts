@@ -452,6 +452,34 @@ function failureOutcome(code: "unsupported_feature" | "recovery_required" | "exp
 
 function transportOutcome(error: unknown, phase: "start" | "poll"): AdoptionOutcome {
 	const code = error instanceof CealDeviceAdoptionClientError ? error.code : "request_failed";
+	if (phase === "poll" && ["adoption_not_available", "gateway_unavailable", "rate_limited"].includes(code)) {
+		return {
+			code: "malformed_response",
+			message: "The Gateway's poll response used a start-only failure contract.",
+			nextAction: "Ask your operator to inspect the Gateway route before starting a new adoption.",
+		};
+	}
+	if (phase === "start" && code === "adoption_not_available") {
+		return {
+			code,
+			message: "No active Ceal invitation is available for this email address.",
+			nextAction: "Ask your operator to invite this email address, then run 'ceal session adopt' again.",
+		};
+	}
+	if (phase === "start" && code === "gateway_unavailable") {
+		return {
+			code,
+			message: "The Gateway cannot start email adoption right now.",
+			nextAction: "Ask your operator to check the email-adoption service, then retry.",
+		};
+	}
+	if (phase === "start" && code === "rate_limited") {
+		return {
+			code,
+			message: "The Gateway is temporarily limiting adoption attempts.",
+			nextAction: "Wait before running 'ceal session adopt' again.",
+		};
+	}
 	if (code === "invalid_response") {
 		return {
 			code: "malformed_response",
