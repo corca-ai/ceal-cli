@@ -46,7 +46,7 @@ import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
-import { type CealSessionRenewalMode, requireCealSessionRenewalMode } from "./session-renewal.js";
+import { type CealSessionRenewalMode, requireCealCallRenewalMode, requireCealSessionRenewalMode } from "./session-renewal.js";
 import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 import { type CealTimingSpan, type CealTimingStage, finishCealTiming, startCealTiming, withCealTiming } from "./timing.js";
 import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION } from "./worker-identity.js";
@@ -1333,7 +1333,7 @@ async function executeCall(
 	const record = callResultRecorder(runtime, initialSession);
 	let completed: { value: CealGatewayCallValue; events: unknown; session: CealStoredSession } | null = null;
 	try {
-		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime);
+		const { call, client, session } = await requestCapabilityCall(initialSession, profileRef, parsed, requestId, runtime, "renew");
 		if (!call.ok) return writeCallGatewayFailure(call, io, session, parsed, requestId, record);
 		const readback = await requestGatewayReadback(client, profileRef, requestId, "ceal:readback", runtime);
 		if (!readback.ok) return writeCallIncomplete(call.value, requestId, "audit_readback_rejected", io, session, parsed, record);
@@ -1397,7 +1397,9 @@ async function requestCapabilityCall(
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
 	runtime: CealCommandRuntime,
+	sessionRenewalMode: CealSessionRenewalMode,
 ) {
+	requireCealCallRenewalMode(sessionRenewalMode);
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let call = await requestCapability(client, profileRef, parsed, requestId, runtime);

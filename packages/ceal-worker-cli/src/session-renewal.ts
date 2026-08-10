@@ -7,3 +7,8 @@ export function requireCealSessionRenewalMode(mode: CealSessionRenewalMode | und
 	if (mode === "observe" || mode === "renew") return mode;
 	throw new TypeError("An explicit session renewal mode (observe or renew) is required.");
 }
+
+export function requireCealCallRenewalMode(mode: CealSessionRenewalMode | undefined): "renew" {
+	if (mode === "renew") return mode;
+	throw new TypeError("Capability calls require the explicit renew session mode.");
+}
