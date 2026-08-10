@@ -2,17 +2,14 @@
 
 ## Workflow Trigger
 
-Continue the bounded Worker-owned notification shutdown lane. Read the local
-contract and closeout before doing release work; do not reimplement the repair.
-The operator approved the immutable Worker tag/release publish on 2026-08-10.
-Use the repo release procedure and its full tag gate; approval does not weaken
-any candidate, tag, public, install, or later Gateway proof.
+Consume the released Worker-owned notification shutdown repair. The source fix,
+immutable Worker release, public signature readback, and installed update are
+complete; do not reimplement or republish the repair.
 
 ## Continuation Capability
 
-Carry the locally proved Worker lifecycle repair into one signed successor to
-`ceal-v0.76.0`, then provide the exact public identity for Gateway coherent v5
-selection. Preserve early-FD5 and unrelated-error failure while doing so.
+Use signed `ceal-v0.76.1` as the exact Worker identity for Gateway coherent v5
+selection. Preserve early-FD5 and unrelated-error failure in any follow-up.
 
 ## Current State
 
@@ -25,22 +22,24 @@ selection. Preserve early-FD5 and unrelated-error failure while doing so.
 - The final local `check:unit` job is green. Gateway transport-only and active-
   runner durable compositions both reach Worker exit zero against the repaired
   local build; the active result records one abort and cancelled completion.
-- The immutable public release remains `ceal-v0.76.0`. No successor tag,
-  release publish, installed update, Gateway selection/apply, or live proof has
-  happened.
-- The prepared patch candidate targets `0.76.1` / `ceal-v0.76.1`; its
-  changelog, release critique, and pre-publication record are local truth
-  surfaces until the exact version commit passes the remaining gates.
+- Annotated tag `ceal-v0.76.1` resolves to
+  `2edf126e1c7bf65900d40b449dce9ea4481c6ce7`; release run `31346152389`
+  completed every build, assembly, signing, publication, and stable-pointer
+  step.
+- Fresh public readback verified all nine checksum-listed assets plus the
+  separately signed `SHA256SUMS` against the exact Cosign identity. The public
+  `SHA256SUMS` digest is
+  `7f5e20c27b539af490fee6f2fe18746853506ac075e8e6d91b462336fe582b4a`.
+- Installed `ceal` is `0.76.1`; Linux ARM64 binary digest is
+  `5c893c8ab10575eab9da378c85d2ba300d2eb469bd6ed57d5207aae9569cfe04`.
+- Gateway selection/apply and live provider/latency proof have not happened.
 
 ## Next Session
 
-1. Confirm the exact local commit and clean tree; do not redo the repair.
-2. Complete and commit the coherent 0.76.1 version/changelog/release-record
-   slice with Protocol 0.72.13 unchanged.
-3. Follow [release procedure](release-and-enrollment.md): full gate, dry run,
-   immutable tag, release watch, installed update, and readback.
-4. Hand the signed release tuple to the Gateway goal for coherent v5 selection,
-   `ceal-dev` apply, and configured-channel latency proof.
+1. Read the release record and use the exact signed 0.76.1 tuple; do not redo
+   release work.
+2. Hand the tuple to the Gateway goal for coherent v5 selection, `ceal-dev`
+   apply, and configured-channel latency proof.
 
 ## Discuss
 
@@ -49,10 +48,9 @@ selection. Preserve early-FD5 and unrelated-error failure while doing so.
 - The response-latency proof belongs after signed selection and apply. It may
   overlap only disjoint local work and must not overlap another instance
   restart.
-- Refresh kept: exact local proof state, immutable-release approval boundary,
-  and the next Gateway handoff.
-- Refresh non-claims: no successor release, selection/apply, provider/Slack,
-  latency, concurrent-close, or C11a completion proof.
+- Refresh kept: exact public/install proof state and the next Gateway handoff.
+- Refresh non-claims: no Gateway selection/apply, provider/Slack, latency,
+  concurrent-close, or C11a completion proof.
 
 ## References
 
@@ -60,3 +58,4 @@ selection. Preserve early-FD5 and unrelated-error failure while doing so.
 - [implementation closeout](../charness-artifacts/impl/2026-08-10-worker-owned-notification-shutdown.md)
 - [code critique](../charness-artifacts/critique/2026-08-10-worker-owned-notification-shutdown-code-critique.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)
+- [v0.76.1 release record](../charness-artifacts/release/2026-08-10-ceal-v0-76-1.md)
