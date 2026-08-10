@@ -211,12 +211,20 @@ while keeping the isolation; nothing in the guard can reach real local state.
 
 The effect vocabulary names remote change as well as local: `remote_write` is a
 route that may change the Gateway or a provider. It covers provider calls,
-state-changing session leaves, and read routes that may first rotate an expired
-Gateway session (`capabilities`, `receipt`, and `acceptance`). `--allow-effect`
-refuses it, because the throwaway `HOME` is what makes
-the hatch safe and it neutralizes local state only. It is what a route *may* do,
-not what one invocation does: `call` is `remote_write` even for a capability
-whose own effect is `read`.
+explicit session refresh/revocation, and other state-changing session actions.
+`capabilities`, target discovery, `receipt`, and `acceptance` are observational:
+they use the stored bearer as-is and never rotate an expired or rejected
+credential. Their recovery tells the operator to run `ceal session refresh`.
+`--allow-effect` refuses `remote_write`, because the throwaway `HOME` is what
+makes the hatch safe and it neutralizes local state only. It is what a route
+*may* do, not what one invocation does: `call` is `remote_write` even for a
+capability whose own effect is `read`, and may renew the session before that
+already-write-capable operation.
+
+A stored session belongs to one adopted host. Do not copy its one-time refresh
+credential to another machine: replay detection intentionally revokes the
+session family. Adopt each host separately so credential rotation and recovery
+remain independently attributable.
 
 The composite extraction verifier still packs all four historical packages,
 installs them into an isolated consumer, and scans the archives for private

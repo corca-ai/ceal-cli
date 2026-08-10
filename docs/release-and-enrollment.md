@@ -127,6 +127,11 @@ the changed bindings listed, and only `--force` replaces one — revoking the
 displaced session and clearing the local state it produced. Re-enrolling the
 same identity, which is what an unrenewable session needs, takes no flag.
 
+A session also belongs to one adopted host. Never copy its stored access or
+one-time refresh credential to another machine: replay detection deliberately
+revokes that session family. Run adoption or enrollment independently on each
+host so renewal, revocation, and audit stay host-attributable.
+
 On the Gateway host (`ssh oc`), use the owner copy at
 `~/ceal/packages/ceal-operator-cli`. The installed `cealctl 0.65.3` there is the
 other lineage and has no `enrollments` route.

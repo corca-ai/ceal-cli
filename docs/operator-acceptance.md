@@ -47,9 +47,11 @@ npm run probe -- ceal commands
 npm run probe -- ceal session status   # expect status: unconfigured, exit 0
 ```
 
-`capabilities`, `receipt`, and `acceptance` may rotate an expired Gateway
-session before performing their read, so their declared effect is
-`remote_write`; probe their help rather than bypassing the guard.
+`capabilities`, target discovery, `receipt`, and `acceptance` are declared
+`read_only` and must not rotate an expired or rejected Gateway session. Probe
+them through the guard; if the stored bearer is no longer usable, run the
+separately declared `remote_write` route `ceal session refresh`. `ceal call`
+remains `remote_write` and may renew before its already-write-capable operation.
 
 **This is the ceiling.** With no session you can prove the CLI's shape, its
 declared effects, its local rendering, and its refusals. You cannot prove that
