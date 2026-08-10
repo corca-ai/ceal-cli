@@ -131,6 +131,16 @@ class ControlAbortedError extends Error {
 	}
 }
 
+function isOwnedNotificationShutdownError(error: unknown): boolean {
+	if (error instanceof ControlAbortedError) return true;
+	// Destroying the production inherited `net.Socket` while its async iterator
+	// is pending rejects that iterator with Node's typed premature-close error.
+	// Accept the code only after the transport has entered its own normal-
+	// shutdown path: the same error from FD5 ending first remains unowned and
+	// therefore fails the pair.
+	return error instanceof Error && "code" in error && error.code === "ERR_STREAM_PREMATURE_CLOSE";
+}
+
 /**
  * v4 writes one response per request and retains its established non-blocking
  * behavior. v5 can emit unsolicited notifications, so its selected transport
@@ -328,7 +338,7 @@ async function runLeasedConsumerNotificationStream(
 		// reported as a successful worker exit. Clean requires both that the
 		// worker's own normal-shutdown path ran and that the cancellation it
 		// raised is the error in hand.
-		if (isOwnedShutdown() && error instanceof ControlAbortedError) return true;
+		if (isOwnedShutdown() && isOwnedNotificationShutdownError(error)) return true;
 		process.stderr.write(`ceal-worker notification-session failed: ${error instanceof Error ? error.message : "unknown"}\n`);
 		return false;
 	}

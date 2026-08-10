@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -392,6 +393,88 @@ test("Agent shutdown cleanly aborts a notification write stalled on stdout backp
 	);
 	assert.equal(await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("stdout_not_cancelled"), 100))]), true);
 	assert.equal(destroyed, 1);
+});
+
+test("the real inherited notification socket distinguishes owned shutdown from FD5-first EOF", async () => {
+	const entry = `file://${path.join(DIST, "leased-consumer-control-session.js")}`;
+	const runArm = async (fd5EndsFirst) => {
+		const child = spawn(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import(${JSON.stringify(entry)}).then(async (m) => {
+					let releaseAgent;
+					const agentReleased = new Promise((resolve) => { releaseAgent = resolve; });
+					async function* agentInput() {
+						if (${JSON.stringify(fd5EndsFirst)}) await agentReleased;
+					}
+					const clean = await m.runLeasedConsumerControlTransport(
+						agentInput(),
+						{ dispatch: async () => { throw new Error("unexpected_dispatch"); } },
+						() => { throw new Error("unexpected_emit"); },
+						m.openLeasedConsumerNotificationChannel(),
+						async () => releaseAgent(),
+					);
+					process.stdout.write(JSON.stringify({ clean }));
+				});`,
+			],
+			{ stdio: ["ignore", "pipe", "pipe", "ignore", "ignore", "pipe"] },
+		);
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+		child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+		if (fd5EndsFirst) child.stdio[5].end();
+		const timeout = setTimeout(() => child.kill("SIGKILL"), SHUTDOWN_ARM_TIMEOUT_MS);
+		const [code, signal] = await once(child, "close");
+		clearTimeout(timeout);
+		return { code, signal, stdout, stderr };
+	};
+
+	const owned = await runArm(false);
+	assert.equal(owned.signal, null, `owned shutdown was killed: ${owned.stderr}`);
+	assert.equal(owned.code, 0, owned.stderr);
+	assert.deepEqual(JSON.parse(owned.stdout), { clean: true });
+	assert.equal(owned.stderr, "");
+
+	const early = await runArm(true);
+	assert.equal(early.signal, null, `FD5-first arm was killed: ${early.stderr}`);
+	assert.equal(early.code, 0, early.stderr);
+	assert.deepEqual(JSON.parse(early.stdout), { clean: false });
+});
+
+test("owned shutdown does not accept the premature-close message with another error code", async () => {
+	let releaseNotification;
+	const notificationReleased = new Promise((resolve) => {
+		releaseNotification = resolve;
+	});
+	async function* agentInput() {}
+	const notificationInput = {
+		[Symbol.asyncIterator]() {
+			return this;
+		},
+		async next() {
+			await notificationReleased;
+			// Human text is not the classifier. Broadening the production helper to
+			// accept every Error turns this test RED with `true !== false`; the exact
+			// Node error code is the guard this oracle falsifies.
+			const error = new Error("Premature close");
+			error.code = "ERR_UNRELATED_STREAM_FAILURE";
+			throw error;
+		},
+	};
+	assert.equal(
+		await runLeasedConsumerControlTransport(
+			agentInput(),
+			{ dispatch: async () => assert.fail("no Agent frame expected") },
+			() => assert.fail("no notification frame expected"),
+			{ stream: notificationInput, close: async () => releaseNotification() },
+			async () => {},
+			{ decodeNotification: (value) => value },
+		),
+		false,
+	);
 });
 
 test("the shipped Agent writer destroys a backpressured stdout stream and rejects exactly once on abort", async () => {
