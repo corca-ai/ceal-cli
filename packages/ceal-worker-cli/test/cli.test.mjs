@@ -414,12 +414,12 @@ test("a malformed known route points at the nearest help that can correct it", a
 	}
 });
 
-test("routes that may rotate the stored Gateway session declare a remote write", () => {
-	for (const name of ["capabilities", "receipt", "acceptance"]) {
+test("observational routes declare their actual session-rotation effect", () => {
+	for (const name of ["receipt", "acceptance"]) {
 		assert.equal(CEAL_COMMANDS.find((command) => command.name === name).effect, "remote_write", name);
 	}
+	assert.equal(CEAL_COMMANDS.find((command) => command.name === "capabilities").effect, "read_only");
 	for (const [parent, route] of [
-		["capabilities", "targets"],
 		["receipt", "show"],
 		["acceptance", "emit"],
 	]) {
@@ -429,6 +429,14 @@ test("routes that may rotate the stored Gateway session declare a remote write",
 			`${parent} ${route}`,
 		);
 	}
+	assert.equal(
+		CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "capabilities" && subcommand.route.join(" ") === "targets").effect,
+		"read_only",
+	);
+	assert.equal(
+		CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "refresh").effect,
+		"remote_write",
+	);
 });
 
 test("session recovery strings point at the probe-safe status leaf", () => {
@@ -1262,10 +1270,10 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 	}
 });
 
-test("capabilities renews an expiring stored session once and persists the rotation", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken, requests }) => {
+test("session refresh explicitly rotates an expiring stored session once and persists the rotation", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken }) => {
 		let saved = null;
-		const payload = await yamlRun(["capabilities"], 0, {
+		const payload = await yamlRun(["session", "refresh"], 0, {
 			loadSession: async () =>
 				storedSession(endpoint, {
 					accessToken: `ceal_personal_${"O".repeat(43)}`,
@@ -1275,23 +1283,67 @@ test("capabilities renews an expiring stored session once and persists the rotat
 			saveSession: async (session) => {
 				saved = session;
 			},
-			nextRequestId: () => "narnia:renewed:001",
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		});
-		assert.equal(payload.status, "available");
+		assert.equal(payload.schema_version, "ceal.session_refresh.v1");
+		assert.equal(payload.status, "refreshed");
 		assert.equal(saved.accessToken, newAccessToken);
 		assert.equal(saved.refreshToken, newRefreshToken);
-		assert.deepEqual(
-			requests.map((item) => item.authorization),
-			[`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
-		);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(oldRefreshToken, "u"));
 	});
 });
 
-test("capabilities fails closed for malformed absolute refresh expiry before a refresh request", async () => {
+test("capabilities and target selection never rotate a stored session", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+		const runtime = {
+			loadSession: async () =>
+				storedSession(endpoint, {
+					expiresAt: "2020-01-01T00:00:00.000Z",
+					refreshToken: oldRefreshToken,
+				}),
+			saveSession: async () => assert.fail("read-only discovery must not rotate the stored session"),
+			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+		};
+		for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
+			const payload = await yamlRun(args, 0, runtime);
+			assert.equal(payload.status, "available", args.join(" "));
+		}
+		assert.equal(refreshCalls(), 0);
+		assert.deepEqual(
+			requests.map((item) => item.authorization),
+			[
+				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
+				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
+				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
+				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
+			],
+		);
+	});
+});
+
+test("capabilities authentication failure names the explicit session refresh action", async () => {
+	for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
+		await withRenewingGateway(
+			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+				const payload = await yamlRun(args, 3, {
+					loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+				});
+				assert.equal(payload.error.kind, "authentication_failed");
+				assert.match(payload.error.next_action, /ceal session refresh/u);
+				assert.equal(refreshCalls(), 0);
+				assert.deepEqual(
+					requests.map((item) => item.authorization),
+					[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`],
+				);
+			},
+			{ rejectFirstGateway: true },
+		);
+	}
+});
+
+test("session refresh fails closed for malformed absolute refresh expiry before a refresh request", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls }) => {
-		const payload = await yamlRun(["capabilities"], 3, {
+		const payload = await yamlRun(["session", "refresh"], 3, {
 			loadSession: async () =>
 				storedSession(endpoint, {
 					expiresAt: "2020-01-01T00:00:00.000Z",
@@ -1300,6 +1352,7 @@ test("capabilities fails closed for malformed absolute refresh expiry before a r
 			saveSession: async () => {},
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		});
+		assert.equal(payload.schema_version, "ceal.session_refresh.v1");
 		assert.equal(payload.status, "unavailable");
 		assert.equal(payload.error.kind, "refresh_expired");
 		assert.equal(refreshCalls(), 0);
@@ -1312,10 +1365,10 @@ test("capabilities fails closed for malformed absolute refresh expiry before a r
 // for the refresh token, where the local refusal was worse — `refresh_expired`
 // classifies NOT_RENEWABLE and sends the operator to spend a replacement
 // enrollment code for a session the Gateway would have renewed.
-test("a host clock past the refresh token's absolute expiry still lets the Gateway answer", async () => {
+test("an explicit session refresh still lets the Gateway answer past a host clock expiry", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls, newAccessToken, oldRefreshToken }) => {
 		let saved = null;
-		const payload = await yamlRun(["capabilities"], 0, {
+		const payload = await yamlRun(["session", "refresh"], 0, {
 			loadSession: async () =>
 				storedSession(endpoint, {
 					expiresAt: "2020-01-01T00:00:00.000Z",
@@ -1329,7 +1382,7 @@ test("a host clock past the refresh token's absolute expiry still lets the Gatew
 			nextRequestId: () => "narnia:skewed:001",
 			now: () => Date.parse("2099-01-01T00:00:00.000Z"),
 		});
-		assert.equal(payload.status, "available");
+		assert.equal(payload.status, "refreshed");
 		assert.equal(refreshCalls(), 1, "the Gateway must be asked rather than pre-empted by this machine's clock");
 		assert.equal(saved.accessToken, newAccessToken);
 	});
@@ -1384,6 +1437,7 @@ test("generic no-session recovery presents both approved setup routes", async ()
 		loadSession: async () => null,
 		removeSession: async () => assert.fail("an absent session must not be removed"),
 	});
+	const refresh = await yamlRun(["session", "refresh"], 3, { loadSession: async () => null });
 	const capabilities = await yamlRun(["capabilities"], 3, { loadSession: async () => null });
 	const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
 		loadSession: async () => null,
@@ -1395,6 +1449,7 @@ test("generic no-session recovery presents both approved setup routes", async ()
 	});
 	assert.equal(status.next_action, recovery);
 	assert.equal(logout.next_action, recovery);
+	assert.equal(refresh.error.next_action, recovery);
 	assert.equal(capabilities.error.next_action, recovery);
 	assert.equal(call.error.next_action, recovery);
 	assert.equal(receipt.error.next_action, recovery);
@@ -1412,18 +1467,18 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 					current = session;
 				},
 			};
-			const capabilities = await yamlRun(["capabilities", "--fresh"], 3, runtime);
-			assert.equal(capabilities.schema_version, "ceal.client_session.v1");
-			assert.equal(capabilities.error.kind, "session_renewal_unavailable");
-			assert.equal(capabilities.error.retryable, false);
-			assert.match(capabilities.error.message, /may already have been consumed/u);
-			assert.match(capabilities.error.next_action, /Do not retry the same command/u);
-			assert.match(capabilities.error.next_action, /ceal session enroll --help/u);
-			assert.match(capabilities.error.next_action, /ceal session adopt --help/u);
+			const refresh = await yamlRun(["session", "refresh"], 3, runtime);
+			assert.equal(refresh.schema_version, "ceal.session_refresh.v1");
+			assert.equal(refresh.error.kind, "session_renewal_unavailable");
+			assert.equal(refresh.error.retryable, false);
+			assert.match(refresh.error.message, /may already have been consumed/u);
+			assert.match(refresh.error.next_action, /Do not retry the same command/u);
+			assert.match(refresh.error.next_action, /ceal session enroll --help/u);
+			assert.match(refresh.error.next_action, /ceal session adopt --help/u);
 			assert.equal(current.renewalBlockedReason, "outcome_unknown");
 			assert.equal(refreshCalls(), 1);
 
-			const blockedRetry = await yamlRun(["capabilities", "--fresh"], 3, runtime);
+			const blockedRetry = await yamlRun(["session", "refresh"], 3, runtime);
 			assert.equal(blockedRetry.error.kind, "session_renewal_unavailable");
 			assert.equal(blockedRetry.error.retryable, false);
 			assert.equal(refreshCalls(), 1, "the quarantined v1 credential must never reach the Gateway again");
@@ -1453,8 +1508,8 @@ test("a refresh never reaches the Gateway when its pre-send quarantine cannot pe
 				throw new Error("disk unavailable");
 			},
 		};
-		const payload = await yamlRun(["capabilities", "--fresh"], 3, runtime);
-		assert.equal(payload.schema_version, "ceal.client_session.v1");
+		const payload = await yamlRun(["session", "refresh"], 3, runtime);
+		assert.equal(payload.schema_version, "ceal.session_refresh.v1");
 		assert.equal(payload.error.kind, "session_save_failed");
 		assert.match(payload.error.message, /stored Gateway session could not be used safely/u);
 		assert.match(payload.error.next_action, /ceal session status/u);
@@ -1479,22 +1534,24 @@ test("typed Gateway refresh denial requires reenrollment instead of retry", asyn
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
-			const payload = await yamlRun(["capabilities"], 3, {
+			const payload = await yamlRun(["session", "refresh"], 3, {
 				loadSession: async () => current,
 				saveSession: async (session) => {
 					current = session;
 				},
 			});
+			assert.equal(payload.schema_version, "ceal.session_refresh.v1");
 			assert.equal(payload.error.kind, "refresh_invalid");
 			assert.equal(payload.error.retryable, false);
 			assert.match(payload.error.next_action, /ceal session enroll --help/u);
 			assert.match(payload.error.next_action, /ceal session adopt --help/u);
 			assert.equal(current.renewalBlockedReason, "refresh_invalid");
 			assert.equal(refreshCalls(), 1);
-			const blockedRetry = await yamlRun(["capabilities"], 3, {
+			const blockedRetry = await yamlRun(["session", "refresh"], 3, {
 				loadSession: async () => current,
 				saveSession: async () => assert.fail("blocked refresh must not save"),
 			});
+			assert.equal(blockedRetry.schema_version, "ceal.session_refresh.v1");
 			assert.equal(blockedRetry.error.kind, "refresh_invalid");
 			assert.equal(refreshCalls(), 1);
 		},
@@ -1514,7 +1571,7 @@ test("separate installed invocations durably quarantine an ambiguous refresh bef
 					`${JSON.stringify(serializeStoredSession(storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken })), null, 2)}\n`,
 					{ mode: 0o600 },
 				);
-				const first = await runBin(["capabilities", "--fresh"], "", { HOME: home });
+				const first = await runBin(["session", "refresh"], "", { HOME: home });
 				assert.equal(first.code, 3, first.stdout);
 				assert.match(first.stdout, /Do not retry the same command/u);
 				const persisted = JSON.parse(readFileSync(sessionPath, "utf8"));
@@ -1522,7 +1579,7 @@ test("separate installed invocations durably quarantine an ambiguous refresh bef
 				assert.equal(persisted.renewal_blocked_reason, "outcome_unknown");
 				assert.equal(refreshCalls(), 1);
 
-				const second = await runBin(["capabilities", "--fresh"], "", { HOME: home });
+				const second = await runBin(["session", "refresh"], "", { HOME: home });
 				assert.equal(second.code, 3, second.stdout);
 				assert.equal(refreshCalls(), 1, "the second process must not replay the quarantined token");
 			} finally {
@@ -1613,23 +1670,20 @@ test("logout removes local state when the Gateway says the refresh credential is
 	}
 });
 
-test("capabilities retries one authentication rejection by rotating a still-current session", async () => {
+test("capabilities does not retry an authentication rejection or rotate a still-current session", async () => {
 	await withRenewingGateway(
-		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
-			let saved = null;
-			const payload = await yamlRun(["capabilities"], 0, {
+		async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+			const payload = await yamlRun(["capabilities"], 3, {
 				loadSession: async () =>
 					storedSession(endpoint, { refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z" }),
-				saveSession: async (session) => {
-					saved = session;
-				},
 				nextRequestId: () => "narnia:retry:001",
 			});
-			assert.equal(payload.status, "available");
-			assert.equal(saved.accessToken, newAccessToken);
+			assert.equal(payload.error.kind, "authentication_failed");
+			assert.match(payload.error.next_action, /ceal session refresh/u);
+			assert.equal(refreshCalls(), 0);
 			assert.deepEqual(
 				requests.map((item) => item.authorization),
-				[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
+				[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`],
 			);
 		},
 		{ rejectFirstGateway: true },
@@ -3202,11 +3256,14 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 			)}\n`,
 			{ mode: 0o600 },
 		);
-		const [first, second] = await Promise.all([runBin(["capabilities"], "", { HOME: home }), runBin(["capabilities"], "", { HOME: home })]);
+		const [first, second] = await Promise.all([
+			runBin(["session", "refresh"], "", { HOME: home }),
+			runBin(["session", "refresh"], "", { HOME: home }),
+		]);
 		assert.equal(first.code, 0, first.stderr);
 		assert.equal(second.code, 0, second.stderr);
-		assert.equal(parseYaml(first.stdout).status, "available");
-		assert.equal(parseYaml(second.stdout).status, "available");
+		assert.equal(parseYaml(first.stdout).status, "refreshed");
+		assert.equal(parseYaml(second.stdout).status, "refreshed");
 		assert.deepEqual(refreshRequests, [firstRefresh]);
 		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
 	} finally {
@@ -4587,7 +4644,7 @@ test("--timing separates local lock, refresh, and revoke phases", async () => {
 				)}\n`,
 				{ mode: 0o600 },
 			);
-			const refreshed = await runBin(["--timing", "capabilities", "--fresh"], "", { HOME: home });
+			const refreshed = await runBin(["--timing", "session", "refresh"], "", { HOME: home });
 			assert.equal(refreshed.code, 0, refreshed.stderr);
 			const refreshedStages = new Set(timingEvents(refreshed.stderr).map((event) => event.stage));
 			assert.ok(refreshedStages.has("local_store_lock_wait"));

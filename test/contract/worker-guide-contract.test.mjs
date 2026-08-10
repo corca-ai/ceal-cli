@@ -61,7 +61,7 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 			/Gateway-issued capabilities/u.test(candidate.description) && candidate.help.includes("Result schema: ceal.capabilities.v1"),
 	);
 	assert.ok(selected, "no semantic capabilities leaf found for a cold-start worker intent");
-	for (const field of ["Usage:", "Effect: remote_write", "Evidence:", "Result schema:", "Recovery/readback:"]) {
+	for (const field of ["Usage:", "Effect: read_only", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 		assert.match(selected.help, new RegExp(field, "u"));
 	}
 	const result = runBinary([selected.name], { allowFailure: true });

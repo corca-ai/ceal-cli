@@ -68,6 +68,21 @@ export const CEAL_SUBCOMMANDS = [
 	},
 	{
 		parent: "session",
+		route: ["refresh"],
+		description: "Explicitly rotate the stored Gateway session's one-time refresh credential.",
+		usage: "ceal session refresh",
+		effect: "remote_write",
+		evidence: "surface_or_host_decision",
+		result_schema: "ceal.session_refresh.v1",
+		recovery: `${SESSION_SETUP_NEXT_ACTION} If a session is configured, retry 'ceal session refresh' after correcting the reported local state.`,
+		notes: [
+			"This is the only worker readback-adjacent action that explicitly rotates",
+			"the stored one-time refresh credential. Discovery routes never refresh it",
+			"implicitly; after a stale access token, run this action deliberately.",
+		],
+	},
+	{
+		parent: "session",
 		route: ["enroll"],
 		description: "Exchange a pre-approved one-time device-enrollment code for a local session.",
 		usage: "ceal session enroll --gateway <https-url> [--code-stdin] [--force]",
@@ -137,17 +152,17 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "capabilities",
 		route: ["targets"],
-		description: "Select bounded targets for one capability; a stale Gateway session may be renewed.",
+		description: "Select bounded targets for one capability with the stored access token.",
 		usage:
 			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>] [--detail]",
-		effect: "remote_write",
+		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery:
 			"Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
 		notes: [
-			"The target query itself is read-only. Its remote_write declaration is",
-			"conservative because this route may renew the stored Gateway session first.",
+			"The target query and its session handling are read-only. A stale access",
+			"token is reported; run 'ceal session refresh' to rotate it explicitly.",
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",
 			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
 			"authoritative: when it needs a narrower selection it answers",

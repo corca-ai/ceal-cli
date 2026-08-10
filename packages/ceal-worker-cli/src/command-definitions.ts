@@ -66,12 +66,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "session",
-		description: "Enroll an approved client device and inspect its renewable Gateway session.",
+		description: "Enroll an approved client device, inspect it, and explicitly refresh its Gateway session.",
 		usage:
-			"ceal session [status | enroll --gateway <https-url> [--code-stdin] [--force] | adopt --gateway <https-url> --email <address> [--force] | logout]",
-		// The widest of its children. Enrolling and adopting consume a one-time
-		// approval at the Gateway and logging out revokes a live session there;
-		// none of the three is undone by deleting a local file.
+			"ceal session [status | refresh | enroll --gateway <https-url> [--code-stdin] [--force] | adopt --gateway <https-url> --email <address> [--force] | logout]",
+		// The widest of its children. Enrolling, adopting, and refreshing consume
+		// Gateway-issued one-time credentials, while logging out revokes a live
+		// session there; none of these remote actions is undone by deleting a local file.
 		effect: "remote_write",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.client_session.v1",
@@ -88,12 +88,12 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "capabilities",
-		description: "Discover Gateway-issued capabilities and select bounded targets; a stale session may be renewed.",
+		description: "Discover Gateway-issued capabilities and select bounded targets with the stored access token.",
 		usage:
 			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>]",
-		// Discovery is read-only at the capability boundary, but resolving the
-		// stored client session may rotate its one-time refresh credential first.
-		effect: "remote_write",
+		// Discovery is read-only at the capability boundary. A stale stored access
+		// token is reported and the separate `session refresh` action owns rotation.
+		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery: `${SESSION_SETUP_NEXT_ACTION} Then run 'ceal capabilities' and descend to a bounded target selection.`,

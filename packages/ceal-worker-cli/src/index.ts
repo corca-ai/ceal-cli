@@ -534,8 +534,9 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			: await resolveGatewayAccess(effectiveOptions, io, runtime);
 	if (!resolved.ok) return resolved.exitCode;
 	try {
-		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime);
-		if (!handshake.ok) return writeGatewayFailure(handshake, io);
+		const route = selection.kind === "targets" ? "ceal capabilities targets" : "ceal capabilities";
+		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime, false);
+		if (!handshake.ok) return writeCapabilitiesGatewayFailure(handshake, resolved.value, route, io);
 		// The catalog case is the cacheable one: its live handshake stays the auth
 		// gate while the expensive discovery probe is served from the client cache
 		// when warm. The targets case is a live paged query and is never cached.
@@ -550,7 +551,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 				body: selection.body,
 			}),
 		);
-		if (!discovery.ok) return writeGatewayFailure(discovery, io);
+		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io);
 		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
@@ -602,7 +603,7 @@ async function serveCapabilityCatalog(
 			body: {},
 		}),
 	);
-	if (!discovery.ok) return writeGatewayFailure(discovery, io);
+	if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, access, "ceal capabilities", io);
 	// Cache writes are advisory: a failure just means the next call probes live.
 	if (runtime.saveDiscoveryCache) {
 		await runtime
@@ -790,7 +791,7 @@ async function resolveStoredGatewayAccess(
 	runtime: CealCommandRuntime,
 	selectedProfile?: string,
 ): Promise<GatewayAccessResolution> {
-	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile);
+	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, false);
 	if (resolution.ok) return resolution;
 	const exitCode =
 		resolution.origin === "unconfigured"
@@ -804,11 +805,12 @@ async function resolveStoredGatewayAccess(
 async function resolveStoredGatewayAccessResult(
 	runtime: CealCommandRuntime,
 	selectedProfile?: string,
+	refreshStaleSession = true,
 ): Promise<StoredGatewayAccessResolution> {
 	if (!runtime.loadSession) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 	try {
 		const loaded = await runtime.loadSession();
-		const session = loaded ? await ensureCurrentSession(loaded, runtime) : null;
+		const session = loaded ? (refreshStaleSession ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
 		if (!session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 		return {
 			ok: true,
@@ -857,11 +859,11 @@ function requestHandshake(
 	);
 }
 
-async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime) {
+async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime, refreshStaleSession = true) {
 	let client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
 	let handshake = await requestHandshake(client, access, runtime);
 	const storedSession = access.storedSession;
-	if (!shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
+	if (!refreshStaleSession || !shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
 	const session = await ensureCurrentSession(storedSession, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: session.accessToken }));
 	handshake = await requestHandshake(client, access, runtime);
@@ -1515,7 +1517,16 @@ function invalidGatewayOptions(): ParsedGatewayOptions {
 	return { ok: false, message: "Invalid capabilities Gateway options." };
 }
 
-function writeGatewayFailure(response: { error: unknown }, io: CealCliIo): number {
+function writeCapabilitiesGatewayFailure(response: { error: unknown }, access: GatewayAccess, route: string, io: CealCliIo): number {
+	const failure = classifyGatewayFailure(response.error);
+	return writeGatewayFailure(
+		response,
+		io,
+		failure.code === "authentication_failed" && access.storedSession ? `Run 'ceal session refresh', then retry '${route}'.` : undefined,
+	);
+}
+
+function writeGatewayFailure(response: { error: unknown }, io: CealCliIo, nextAction?: string): number {
 	const failure = classifyGatewayFailure(response.error);
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
@@ -1533,7 +1544,7 @@ function writeGatewayFailure(response: { error: unknown }, io: CealCliIo): numbe
 		// failures as no error at all — a 36-call sweep lost 16 calls and reported
 		// none of them (ceal-cli#2). `code` is gone rather than carried alongside:
 		// one key, no reader left guessing which one a given surface speaks.
-		error: { kind: failure.code, message: failure.message, next_action: failure.nextAction },
+		error: { kind: failure.code, message: failure.message, next_action: nextAction ?? failure.nextAction },
 		non_claims: ["No provider action or production audit custody was reached."],
 	});
 	return 3;

@@ -61,10 +61,9 @@ function registrationPaths(stdout) {
 test("a declared non-read-only route is refused as a probe", () => {
 	for (const args of [
 		["ceal", "session", "logout"],
+		["ceal", "session", "refresh"],
 		["ceal", "guide", "register", "codex"],
 		["ceal", "update"],
-		["ceal", "capabilities"],
-		["ceal", "capabilities", "targets", "--capability", "message.search"],
 		["ceal", "receipt", "show", "ceal:prior:call"],
 		["ceal", "acceptance", "emit"],
 	]) {

@@ -34,6 +34,8 @@ export const SESSION_ROUTES: CealSubcommandHandlers<"session", SessionRouteHandl
 	enroll: (rest, io, runtime) => enrollSession(rest, io, runtime),
 	logout: (rest, io, runtime) =>
 		rest.length === 0 ? runSessionLogout(io, runtime) : writeSessionInvalidArgument("logout", "Invalid session logout options.", io),
+	refresh: (rest, io, runtime) =>
+		rest.length === 0 ? runSessionRefresh(io, runtime) : writeSessionInvalidArgument("refresh", "Invalid session refresh options.", io),
 	status: (rest, io, runtime) =>
 		rest.length === 0 ? showSession(io, runtime) : writeSessionInvalidArgument("status", "Invalid session status options.", io),
 };
@@ -115,6 +117,66 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 		proof_level: "local_state",
 		next_action: SESSION_SETUP_NEXT_ACTION,
 	};
+}
+
+async function runSessionRefresh(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+	if (!runtime.loadSession) return writeSessionRefreshUnavailable(io, "session_runtime_unavailable");
+	let session: CealStoredSession | null;
+	try {
+		session = await runtime.loadSession();
+	} catch (error) {
+		return writeSessionRefreshUnavailable(io, error instanceof CealSessionStoreError ? error.code : "session_load_failed");
+	}
+	if (!session) return writeSessionRefreshUnavailable(io, "session_unavailable");
+	try {
+		const refreshed = await ensureCurrentSession(session, runtime, true);
+		return writeSessionRefreshed(io, refreshed);
+	} catch (error) {
+		return writeSessionRefreshUnavailable(io, error instanceof CealClientSessionError ? error.code : "session_refresh_failed");
+	}
+}
+
+function writeSessionRefreshed(io: CealCliIo, session: CealStoredSession): number {
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_refresh.v1",
+		command: "ceal",
+		ok: true,
+		status: "refreshed",
+		gateway_endpoint: session.gatewayEndpoint,
+		profile_ref: session.profileRef,
+		expires_at: session.expiresAt,
+		raw_token_visible: false,
+		proof_level: "host_decision",
+		next_action: "Run 'ceal capabilities' to verify live Gateway access.",
+	});
+	return 0;
+}
+
+function writeSessionRefreshUnavailable(io: CealCliIo, reason: string): number {
+	const failure =
+		reason === "session_unavailable"
+			? {
+					kind: "session_unavailable",
+					retryable: false,
+					message: "No Gateway-issued client session is configured for this client.",
+					nextAction: SESSION_SETUP_NEXT_ACTION,
+				}
+			: classifyClientSessionFailure(reason);
+	writeYaml(io.stdout, {
+		schema_version: "ceal.session_refresh.v1",
+		command: "ceal",
+		ok: false,
+		status: "unavailable",
+		raw_token_visible: false,
+		proof_level: "surface",
+		error: {
+			kind: failure.kind,
+			retryable: failure.retryable,
+			message: failure.message,
+			next_action: failure.nextAction,
+		},
+	});
+	return 3;
 }
 
 async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
@@ -659,7 +721,11 @@ function parseEnrollmentOptions(
 	return { ok: true, gateway, input: parsed.flags.has("--code-stdin") ? "stdin" : "interactive", force: parsed.flags.has("--force") };
 }
 
-function writeSessionInvalidArgument(route: "status" | "enroll" | "logout" | undefined, message: string, io: CealCliIo): number {
+function writeSessionInvalidArgument(
+	route: "status" | "enroll" | "logout" | "refresh" | undefined,
+	message: string,
+	io: CealCliIo,
+): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.error.v1",
 		command: "ceal",
