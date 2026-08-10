@@ -46,6 +46,7 @@ import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
 import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
+import { type CealSessionRenewalMode, requireCealSessionRenewalMode } from "./session-renewal.js";
 import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 import { type CealTimingSpan, type CealTimingStage, finishCealTiming, startCealTiming, withCealTiming } from "./timing.js";
 import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION } from "./worker-identity.js";
@@ -132,7 +133,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 
 	// Acceptance is evidence, not an action: do not spend the stored one-time
 	// refresh credential while loading the session or negotiating live readback.
-	const access = await resolveStoredGatewayAccessResult(runtime, profileOption, false);
+	const access = await resolveStoredGatewayAccessResult(runtime, profileOption, "observe");
 	if (!access.ok) {
 		const sessionFailure = access.origin === "client_session" ? classifyClientSessionFailure(access.reason) : undefined;
 		const unconfigured = access.origin === "unconfigured";
@@ -147,7 +148,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 
 	const startedAt = Date.now();
 	try {
-		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime, false);
+		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime, "observe");
 		if (!handshake.ok) return writeAcceptanceGatewayFailure(handshake.error, io);
 		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
 			client.request({
@@ -169,7 +170,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				access.value.profileRef,
 				requestRef,
 				runtime,
-				false,
+				"observe",
 			);
 			if (!readback.readback.ok) return writeAcceptanceGatewayFailure(readback.readback.error, io);
 			// Through the same projection `ceal receipt show` renders, not around it.
@@ -543,7 +544,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	if (!resolved.ok) return resolved.exitCode;
 	try {
 		const route = selection.kind === "targets" ? "ceal capabilities targets" : "ceal capabilities";
-		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime, false);
+		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime, "observe");
 		if (!handshake.ok) return writeCapabilitiesGatewayFailure(handshake, resolved.value, route, io);
 		// The catalog case is the cacheable one: its live handshake stays the auth
 		// gate while the expensive discovery probe is served from the client cache
@@ -799,7 +800,7 @@ async function resolveStoredGatewayAccess(
 	runtime: CealCommandRuntime,
 	selectedProfile?: string,
 ): Promise<GatewayAccessResolution> {
-	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, false);
+	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, "observe");
 	if (resolution.ok) return resolution;
 	const exitCode =
 		resolution.origin === "unconfigured"
@@ -812,13 +813,13 @@ async function resolveStoredGatewayAccess(
 
 async function resolveStoredGatewayAccessResult(
 	runtime: CealCommandRuntime,
-	selectedProfile?: string,
-	refreshStaleSession = true,
+	selectedProfile: string | undefined,
+	sessionRenewalMode: CealSessionRenewalMode,
 ): Promise<StoredGatewayAccessResolution> {
+	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	if (!runtime.loadSession) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 	try {
-		const loaded = await runtime.loadSession();
-		const session = loaded ? (refreshStaleSession ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
+		const session = await loadStoredSessionForRenewalMode(runtime, mode);
 		if (!session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 		return {
 			ok: true,
@@ -835,6 +836,14 @@ async function resolveStoredGatewayAccessResult(
 			? { ok: false, origin: "client_session", reason: error.code }
 			: { ok: false, origin: "gateway_access", reason: "session_load_failed" };
 	}
+}
+
+async function loadStoredSessionForRenewalMode(
+	runtime: CealCommandRuntime,
+	mode: CealSessionRenewalMode,
+): Promise<CealStoredSession | null> {
+	const loaded = await runtime.loadSession?.();
+	return loaded ? (mode === "renew" ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
 }
 
 async function resolveExplicitGatewayAccess(
@@ -867,11 +876,12 @@ function requestHandshake(
 	);
 }
 
-async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime, refreshStaleSession = true) {
+async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime, sessionRenewalMode: CealSessionRenewalMode) {
+	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	let client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
 	let handshake = await requestHandshake(client, access, runtime);
 	const storedSession = access.storedSession;
-	if (!refreshStaleSession || !shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
+	if (mode !== "renew" || !shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
 	const session = await ensureCurrentSession(storedSession, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: session.accessToken }));
 	handshake = await requestHandshake(client, access, runtime);
@@ -1069,7 +1079,7 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 			io,
 			"Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.",
 		);
-	const resolved = await resolveCallSession(runtime);
+	const resolved = await resolveCallSession(runtime, "renew");
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
 	// Read the capability's declared effect from the client's own discovery
@@ -1125,7 +1135,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 		);
 	// Receipt readback is observational. Keep the stored access token unchanged;
 	// the explicit `session refresh` route owns any credential rotation.
-	const resolved = await resolveCallSession(runtime, false);
+	const resolved = await resolveCallSession(runtime, "observe");
 	if (!resolved.ok)
 		return writeReceiptError(
 			resolved.reason,
@@ -1136,7 +1146,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 		);
 	const profileRef = parsed.profileRef ?? resolved.session.profileRef;
 	try {
-		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime, false);
+		const { readback } = await requestReceiptReadback(resolved.session, profileRef, parsed.requestRef, runtime, "observe");
 		// The Gateway's own failure vocabulary decides the answer: an unknown or
 		// not-yet-audited reference is `audit_event_not_found`, which is a real
 		// answer about this reference, not a broken receipt route.
@@ -1177,12 +1187,13 @@ async function requestReceiptReadback(
 	profileRef: string,
 	requestRef: string,
 	runtime: CealCommandRuntime,
-	refreshStaleSession = true,
+	sessionRenewalMode: CealSessionRenewalMode,
 ) {
+	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	let session = initialSession;
 	let client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	let readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
-	if (!refreshStaleSession || !shouldRetryAuthentication(readback, session)) return { readback, session };
+	if (mode !== "renew" || !shouldRetryAuthentication(readback, session)) return { readback, session };
 	session = await ensureCurrentSession(session, runtime, true);
 	client = createCealClient(createCealHttpTransport({ endpoint: session.gatewayEndpoint, accessToken: session.accessToken }));
 	readback = await requestGatewayReadback(client, profileRef, requestRef, "ceal:receipt", runtime);
@@ -1346,11 +1357,11 @@ async function executeCall(
 
 type CallSessionResolution = { ok: true; session: CealStoredSession } | { ok: false; reason: string };
 
-async function resolveCallSession(runtime: CealCommandRuntime, refreshStaleSession = true): Promise<CallSessionResolution> {
+async function resolveCallSession(runtime: CealCommandRuntime, sessionRenewalMode: CealSessionRenewalMode): Promise<CallSessionResolution> {
+	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	if (!runtime.loadSession) return { ok: false, reason: "session_unavailable" };
 	try {
-		const loaded = await runtime.loadSession();
-		const session = loaded ? (refreshStaleSession ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
+		const session = await loadStoredSessionForRenewalMode(runtime, mode);
 		return session ? { ok: true, session } : { ok: false, reason: "session_unavailable" };
 	} catch (error) {
 		const reason = error instanceof CealClientSessionError ? error.code : "session_load_failed";

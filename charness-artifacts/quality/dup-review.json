@@ -552,6 +552,13 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-09",
 			"note": "Re-key of the call-result family classified at 5ebf240efc8ec5ee. Gateway failure and unavailable-session/transport results differ in request issuance, receipt evidence, retry classification, and recovery. Their genuinely shared identity/head projections are already extracted; the remaining similarity is the result schema they both implement."
+		},
+		{
+			"surface": "code",
+			"id": "7c383fb5a7575f89",
+			"class": "intentional",
+			"reviewed_at": "2026-08-10",
+			"note": "Pre-existing client-session result projections for session refresh failure and logout failure. They share the safe YAML error frame, but own different schemas, state dispositions, recovery semantics, and command boundaries; merging them would hide which lifecycle result is being reported."
 		}
 	],
 	"fixable_ceiling": 0,
