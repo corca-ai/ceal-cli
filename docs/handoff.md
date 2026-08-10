@@ -4,8 +4,9 @@
 
 Continue the bounded Worker-owned notification shutdown lane. Read the local
 contract and closeout before doing release work; do not reimplement the repair.
-An immutable Worker tag/release publish still requires separate operator
-approval. When approved, use the repo release procedure and its full tag gate.
+The operator approved the immutable Worker tag/release publish on 2026-08-10.
+Use the repo release procedure and its full tag gate; approval does not weaken
+any candidate, tag, public, install, or later Gateway proof.
 
 ## Continuation Capability
 
@@ -27,11 +28,15 @@ selection. Preserve early-FD5 and unrelated-error failure while doing so.
 - The immutable public release remains `ceal-v0.76.0`. No successor tag,
   release publish, installed update, Gateway selection/apply, or live proof has
   happened.
+- The prepared patch candidate targets `0.76.1` / `ceal-v0.76.1`; its
+  changelog, release critique, and pre-publication record are local truth
+  surfaces until the exact version commit passes the remaining gates.
 
 ## Next Session
 
 1. Confirm the exact local commit and clean tree; do not redo the repair.
-2. Obtain explicit approval for the Worker tag and release publish.
+2. Complete and commit the coherent 0.76.1 version/changelog/release-record
+   slice with Protocol 0.72.13 unchanged.
 3. Follow [release procedure](release-and-enrollment.md): full gate, dry run,
    immutable tag, release watch, installed update, and readback.
 4. Hand the signed release tuple to the Gateway goal for coherent v5 selection,

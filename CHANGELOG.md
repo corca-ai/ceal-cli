@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.76.1 (`ceal-v0.76.1`)
+
+This patch repairs the private v5 notification session's normal shutdown. Once
+Agent EOF has latched ownership of shutdown, Node's exact
+`ERR_STREAM_PREMATURE_CLOSE` result is classified as clean instead of making an
+otherwise successful active-runner cancellation exit non-zero. FD5-first EOF,
+malformed notifications, and unrelated stream errors still fail closed.
+
+The public CLI and Protocol remain unchanged. Gateway selection, instance
+apply, live Slack/provider behavior, latency, and concurrent notification plus
+channel-loss idempotency are post-release proofs rather than claims of this tag.
+
 ## 0.76.0 (`ceal-v0.76.0`)
 
 This release makes the public CLI faster to enter, safer under concurrent local
