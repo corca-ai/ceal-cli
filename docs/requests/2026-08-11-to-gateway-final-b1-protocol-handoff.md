@@ -24,6 +24,15 @@ The last signed handoff remains `gateway-protocol-handoff-v0.72.13`. Therefore
 `protocol-vendor-pin.json` declares a proof/shipment divergence and every
 release, native pack, and installed-acceptance path remains quarantined.
 
+## Local correction received
+
+Protocol `0.72.17` from Gateway commit
+`cd3f5f4b8fe1757ca97c12512f9f5066db989840`, Protocol tree
+`857545f9b5fc3eb76f84679f76080ca081902103`, is the corrected local response to
+the decoder and owner-matrix request. The packet itself declares
+`proof_level=local_state` and no signature or publication, so this request stays
+open only for the canonical signed final handoff.
+
 ## What unblocks convergence
 
 Correct the named-authority-reference boundary and add the complete converted-

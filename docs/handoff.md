@@ -69,11 +69,12 @@ recommended order and caller identity owned by the Gateway.
   stops checkout worker smokes from emitting discarded scripts-coverage data.
   Worker coverage and focused contract proofs pass; this remains local source
   proof.
-- Gateway Protocol `0.72.16` corrected both B1 defects reproduced in `0.72.14`,
-  but installed-consumer review found undeclared `grant_ref`, `policy_ref`,
-  `scope_ref`, and `role_ref` arguments reaching the delegated UDS seam. Its
-  exact local packet remains vendored only under proof/shipment quarantine.
-  The signed handoff, release inputs, and installed worker still bind `0.72.13`.
+- Gateway Protocol `0.72.17` at commit `cd3f5f4b8fe1757ca97c12512f9f5066db989840`
+  is the corrected local B1 packet: it refuses the named authority refs found in
+  `0.72.16` and carries the complete converted-response-site owner matrix. Its
+  exact source remains vendored under proof/shipment quarantine because the
+  packet is local and unsigned. The signed handoff, release inputs, and
+  installed worker still bind `0.72.13`.
 
 ## Next Session
 
@@ -82,10 +83,8 @@ recommended order and caller identity owned by the Gateway.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
    approved Worker release together with the client-boundary and session-writer
    quality fixes; a green checkout is not installed proof. Ask before releasing.
-3. Keep the ceal-cli B1 transport and proof implementation, but do not accept
-   local `0.72.16`. Wait for the Gateway owner to refuse named authority refs
-   while retaining ordinary opaque handles, and to cover every converted
-   response-object site. A signed final handoff is still required before re-pin
+3. Keep the ceal-cli B1 transport and corrected local `0.72.17` packed proof
+   under quarantine. A signed final handoff is still required before lock/pin
    convergence and release. The generic transport adds
    `x-ceal-decode-generation: additive-v1` only to the generic Gateway HTTP
    transport. The enrollment, adoption, and personal-session routes are separate

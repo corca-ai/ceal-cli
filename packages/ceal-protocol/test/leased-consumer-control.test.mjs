@@ -221,6 +221,13 @@ test("capability control v4 carries generic read and write results through exact
 		{ grant_revision: 99 },
 		{ policy_version: 99 },
 		{ credential_version: 99 },
+		// Reported by the ceal-cli consumer against 0.72.16: a reference TO
+		// authority is still authority, and these four reached the worker's
+		// delegated socket seam because the noun was not at the end of the key.
+		{ grant_ref: "grant:private" },
+		{ policy_ref: "policy:private" },
+		{ scope_ref: "scope:private" },
+		{ role_ref: "role:admin" },
 	]) {
 		const call = {
 			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,

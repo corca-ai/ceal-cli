@@ -12,13 +12,12 @@ also rejects an undeclared capability even when its arguments and result obey
 the provider-neutral relay boundary, ending the session on ordinary version
 skew.
 
-Gateway Protocol `0.72.16` at commit
-`ce5db611c12546dabb91d33328169493c8c3b2af` corrects the two boundary defects
-the release critique reproduced in `0.72.14`, but consumer review found that
-undeclared arguments still admit named authority refs such as `grant_ref` and
-`policy_ref`. The packet remains useful for quarantined implementation, not B1
-acceptance. A corrected replacement is required before packed proof can pass;
-the last signed handoff remains `0.72.13`.
+Gateway Protocol `0.72.17` at commit
+`cd3f5f4b8fe1757ca97c12512f9f5066db989840` corrects the boundary defects
+reproduced in `0.72.14` and the named-authority-reference escape reproduced in
+`0.72.16`. Its local packet is corrected B1 development input and includes the
+complete converted-response-site matrix, but it is unsigned; the last signed
+handoff remains `0.72.13`.
 
 ## Capability Contract
 
@@ -35,8 +34,8 @@ table.
 - Consume the corrected tarball/provenance as a Gateway-issued artifact;
   never edit frozen Protocol source by hand.
 - Evaluated packet identity: Protocol tree
-  `379ea7bccb43ed78df1d12afed9f5f52b0f1072d`, tarball SHA-256
-  `3c0445cb4308aae07062be9a40a959e919140ce616c5fc038e1c7d9d4bb76dbc`.
+  `857545f9b5fc3eb76f84679f76080ca081902103`, tarball SHA-256
+  `f56201e86124099b245a2073b78e0c7114fd01200cb09e47ccc1c75e2b380b70`.
 - Use the tarball for packed-artifact proof. Re-vendor source/test/conformance
   only from the exact Gateway commit whose Protocol tree equals the packet's
   declared `protocol_tree`, then update dependencies and
@@ -44,8 +43,10 @@ table.
 - Declare the proof/shipment divergence with an owner and tracked request. This
   is quarantine: only `npm run check:protocol-dev` may be claimed while the
   shipped handoff lock still names `0.72.13`.
-- Do not call `0.72.16` corrected B1 proof. The installed-consumer arm must
-  refuse named authority refs before the replacement packet can pass.
+- Call `0.72.17` corrected B1 development proof only after the installed
+  consumer refuses named authority refs and the owner suite exercises the
+  complete response-site matrix. Do not call it signed, shipped, released,
+  installed-worker, or live proof.
 - Delete `temp.md` after the local packet is consumed; the durable request and
   this contract replace the handshake note.
 

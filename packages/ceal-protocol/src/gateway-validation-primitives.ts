@@ -269,7 +269,13 @@ export function retainDeclaredResponseKeys(record: Record<string, unknown>, know
 // authority because a version number follows it. Declared keys never reach
 // here — `grant_revision` IS declared on the call response and is retained
 // above — so this only widens the refusal for keys nobody agreed to.
-const AUTHORITY_METADATA_SUFFIX = "(?:_(?:revisions?|versions?|generations?|ids?))*$";
+// `refs?` belongs in the STATE suffix, not only in the handle rule: a reference
+// TO authority is still authority. `grant_ref`, `policy_ref`, `scope_ref`, and
+// `role_ref` reached the worker's delegated socket seam as undeclared arguments
+// until the ceal-cli consumer reproduced it against 0.72.16. The noun is what
+// decides — `message_ref` and `thread_ref` name a Gateway-minted handle and stay
+// relayable, because `message` and `thread` are not authority nouns.
+const AUTHORITY_METADATA_SUFFIX = "(?:_(?:refs?|revisions?|versions?|generations?|ids?))*$";
 // Authority STATE: a value that decides what someone may do. This half applies
 // in BOTH directions, because neither peer may invent it.
 const UNDECLARED_AUTHORITY_STATE_KEY =

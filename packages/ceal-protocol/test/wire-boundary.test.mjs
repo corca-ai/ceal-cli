@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
@@ -1160,4 +1161,101 @@ test("safe-JSON node budgets derive from their enforced byte caps", () => {
 	assert.equal(safeJsonNodeBudgetForBytes(SAFE_JSON_MIN_BYTES_PER_NODE), 1);
 	assert.throws(() => safeJsonNodeBudgetForBytes(0), RangeError);
 	assert.throws(() => safeJsonNodeBudgetForBytes(3.5), RangeError);
+});
+
+// #700 acceptance proof requested by the ceal-cli consumer: the additive
+// response contract must hold at EVERY `retainDeclaredResponseKeys` site, not
+// only at the representative envelope/error/recovery ones the suite already
+// covered. Each site gets the same two assertions, because together they ARE
+// the contract: a benign undeclared key is removed, an authority-shaped one is
+// refused. The count guard below fails when a new site is added to the source
+// without a row here, so "every site" stays true rather than true-on-the-day.
+const RETAIN_SITE_BENIGN_KEY = "gateway_hint";
+const RETAIN_SITE_AUTHORITY_KEYS = ["policy_ref", "grant_revision", "scope_ref"];
+
+function retainSiteMatrix() {
+	const callRequest = envelope("call", { capability_id: "message.search", target_ref: "target:workspace", arguments: { query: "quarterly plan" }, purpose: "Search" });
+	const discoverRequest = envelope("discover", { capability_id: "message.search", match: "Team", limit: 1 });
+	const plainDiscoverRequest = envelope("discover", {});
+	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
+	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
+	const writeRequestRef = "gateway-write-request:123e4567-e89b-12d3-a456-426614174000";
+	const receiptRequest = envelope("readback", { write_request_ref: writeRequestRef });
+	const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
+	const failureRequest = envelope("call", { capability_id: "message.search", target_ref: "target:workspace", arguments: { query: "q" }, purpose: "Search" });
+	const failureResponse = responseEnvelope(failureRequest, {
+		ok: false,
+		error: { code: "connector_unavailable", message: "The connector is unavailable.", next_action: "Retry shortly.", recovery: { kind: "retry", retry_after_ms: 1000 } },
+	});
+	return [
+		{ id: "success envelope", request: callRequest, response: callResponse(callRequest), path: [] },
+		{ id: "handshake value", request: handshakeRequest, response: handshakeResponse(handshakeRequest), path: ["value"] },
+		{ id: "discovery value", request: plainDiscoverRequest, response: discoveryResponse(plainDiscoverRequest), path: ["value"] },
+		{ id: "discovery capability", request: plainDiscoverRequest, response: discoveryResponse(plainDiscoverRequest), path: ["value", "capabilities", 0] },
+		{ id: "discovery target", request: discoverRequest, response: discoveryResponse(discoverRequest), path: ["value", "targets", 0] },
+		{ id: "call value", request: callRequest, response: callResponse(callRequest), path: ["value"] },
+		{ id: "call redaction", request: callRequest, response: callResponse(callRequest), path: ["value", "redaction"] },
+		{ id: "readback value", request: readbackRequest, response: readbackResponse(readbackRequest, callRequest.request_id), path: ["value"] },
+		{ id: "readback event", request: readbackRequest, response: readbackResponse(readbackRequest, callRequest.request_id), path: ["value", "events", 0] },
+		{
+			id: "write receipt",
+			request: receiptRequest,
+			response: responseEnvelope(receiptRequest, {
+				ok: true,
+				value: {
+					schema_version: "ceal.gateway_write_receipt_readback.v1",
+					receipt: {
+						schema_version: "ceal.gateway_write_request_receipt.v1",
+						write_request_sha256: sha256(writeRequestRef),
+						source_kind: "authenticated_registered_client",
+						source_evidence_sha256: sha256("client-binding"),
+						idempotency_claim_sha256: sha256("idempotency"),
+						normalized_mutation_sha256: sha256("mutation"),
+						provider_state: "verified",
+						provider_readback: "verified",
+					},
+				},
+			}),
+			path: ["value", "receipt"],
+		},
+		{ id: "failure envelope", request: failureRequest, response: failureResponse, path: [] },
+		{ id: "failure error", request: failureRequest, response: failureResponse, path: ["error"] },
+		{ id: "failure recovery", request: failureRequest, response: failureResponse, path: ["error", "recovery"] },
+	];
+}
+
+function atPath(value, path) {
+	return path.reduce((node, step) => node[step], value);
+}
+
+test("every retainDeclaredResponseKeys site strips a benign additive key and refuses an authority-shaped one", () => {
+	const sites = retainSiteMatrix();
+	for (const site of sites) {
+		const additive = structuredClone(site.response);
+		atPath(additive, site.path)[RETAIN_SITE_BENIGN_KEY] = "additive guidance";
+		const decoded = decodeCealClientResponse(additive, site.request);
+		assert.equal(Object.hasOwn(atPath(decoded, site.path), RETAIN_SITE_BENIGN_KEY), false, `${site.id}: benign additive key must be removed`);
+		// The unmutated response still decodes, so a site row cannot pass by being
+		// invalid for an unrelated reason.
+		assert.ok(decodeCealClientResponse(structuredClone(site.response), site.request), site.id);
+		for (const authorityKey of RETAIN_SITE_AUTHORITY_KEYS) {
+			const promoted = structuredClone(site.response);
+			atPath(promoted, site.path)[authorityKey] = "authority:test";
+			assert.throws(
+				() => decodeCealClientResponse(promoted, site.request),
+				hasCode("invalid_client_response"),
+				`${site.id}: undeclared ${authorityKey} must be refused, not stripped`,
+			);
+		}
+	}
+});
+
+test("the retain-site matrix covers every site declared in the protocol source", () => {
+	const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+	const declaredSites = [...source.matchAll(/retainDeclaredResponseKeys\(/gu)].length;
+	assert.equal(
+		retainSiteMatrix().length,
+		declaredSites,
+		"a retainDeclaredResponseKeys site was added or removed without updating retainSiteMatrix; every site needs its own additive/authority proof",
+	);
 });
