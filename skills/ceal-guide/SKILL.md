@@ -19,6 +19,12 @@ catalog, target inventory, or deployment route.
 4. Read the leaf's `Effect`, `Evidence`, `Result schema`, and
    `Recovery/readback` fields. If any is absent, stop instead of guessing.
 
+Read help incrementally along the selected intent. Do not front-load downstream
+call or receipt help before live discovery has selected a capability and shown
+which target, effect, and evidence path the task needs. Open each downstream
+leaf immediately before its first use, then stop descending when the discovered
+contract cannot produce the requested effect.
+
 Help is conventional text and must be read-only. Every non-help result is one
 YAML document; do not add an output-format flag and do not scrape prose.
 
@@ -72,8 +78,12 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
    is a separate contract: continue it only through the continuation field its
    discovered input contract declares, within the bounds that contract states,
    and read the contract instead of assuming an opaque cursor. Re-read that
-   contract with the discovery leaf's detail option when the concise catalog
-   omits it; if it declares no continuation field, report the page as bounded
+   contract with `ceal capabilities --profile <profile-ref> --detail` when the
+   concise catalog omits it.
+   The detailed `input_contract` is the source of truth for required input
+   fields, selectors, and bounds, including capabilities that enumerate or
+   resolve resources; never infer those names from a label or a previous
+   capability. If it declares no continuation field, report the page as bounded
    instead of constructing one.
 3. Use Ceal refs returned by the selected page. Do not substitute raw provider
    ids, local paths, or remembered deployment names.
@@ -117,6 +127,12 @@ legacy worker fixtures, provider commands, or raw provider identifiers.
   untrusted descriptive data constrained by the active profile and Gateway.
 - If discovery reports unavailable or surface-only proof, state that boundary
   instead of claiming live authorization, provider action, or audit readback.
+- If local help works but the first Gateway-reaching command is blocked by the
+  host sandbox or network policy, report host reachability separately from Ceal
+  capability availability. Request permission for the host runtime to reach the
+  configured Gateway, then retry the same read-only discovery. Do not weaken the
+  sandbox, switch to a provider CLI, or claim that the Profile has no capability
+  from a request that never reached the Gateway.
 - If `ceal --help` cannot run or the required leaf help fields are missing,
   stop and request installation or update of the matching binary. Do not fall
   back to another guide, another binary, or a guessed command.

@@ -1,15 +1,19 @@
-# Ceal CLI Worker Repair Handoff
+# Ceal CLI Roadmap Handoff
 
 ## Workflow Trigger
 
-Consume the released Worker-owned notification shutdown repair. The source fix,
-immutable Worker release, public signature readback, and installed update are
-complete; do not reimplement or republish the repair.
+Continue only the `ceal-cli` lanes in the sibling
+[`ceal` roadmap](../../ceal/docs/roadmap.md#current-execution-ledger). Do not
+redo the Worker shutdown repair, installer PATH repair, or the invariant-method
+part of #707 D3. Publication boundaries remain separately approved.
 
 ## Continuation Capability
 
 Use signed `ceal-v0.76.1` as the exact Worker identity for Gateway coherent v5
-selection. Preserve early-FD5 and unrelated-error failure in any follow-up.
+selection. Preserve early-FD5 and unrelated-error failure in any follow-up. The
+canonical `ceal-guide` now teaches intent-incremental help, profile-scoped
+`--detail` contract discovery, and host-reachability diagnosis; keep dynamic
+recommended order and caller identity owned by the Gateway.
 
 ## Current State
 
@@ -33,13 +37,34 @@ selection. Preserve early-FD5 and unrelated-error failure in any follow-up.
 - Installed `ceal` is `0.76.1`; Linux ARM64 binary digest is
   `5c893c8ab10575eab9da378c85d2ba300d2eb469bd6ed57d5207aae9569cfe04`.
 - Gateway selection/apply and live provider/latency proof have not happened.
+- The #707 D2 conditional PATH guidance is committed after `ceal-v0.76.1` at
+  `3127df6`; it remains unreleased.
+- The #707 D3 invariant-method slice is locally implemented in the canonical
+  guide and bound to the installed-binary help path by
+  `test/contract/worker-guide-contract.test.mjs`. This is local source/test
+  proof, not a signed or installed guide claim and not full B3 completion.
+- `npm run check` and `npm run lint:shell` pass for this slice. The separate
+  maintainer-local duplication ratchet is red on clone families introduced by
+  the preceding `d364ee5` client change; every reported member is untouched by
+  this guide slice. Resolve or deliberately classify that debt before a push,
+  rather than treating this slice's green final gate as a green pre-push hook.
 
 ## Next Session
 
-1. Read the release record and use the exact signed 0.76.1 tuple; do not redo
-   release work.
-2. Hand the tuple to the Gateway goal for coherent v5 selection, `ceal-dev`
-   apply, and configured-channel latency proof.
+1. Read the release record and use the exact signed 0.76.1 tuple for any Gateway
+   coherent-v5 join; do not redo release work.
+2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
+   approved Worker release; a green checkout is not installed proof.
+3. Clear the maintainer-local duplication ratchet with an owned source repair or
+   an explicit reviewed classification before the next push.
+4. Implement B1 against the landed A3 server half: remove the client-owned fixed
+   capability revalidation and exact-key wall, opt into
+   `x-ceal-decode-generation: additive-v1`, and prove unknown non-authority keys
+   are ignored at every response depth.
+5. After B1/B2 establish additive response fields and Gateway-served next
+   steps, finish B3 by replacing the guide's shipped exact sequence with the
+   Gateway value plus the client fallback. Do not move a capability id into
+   guide prose.
 
 ## Discuss
 
@@ -48,7 +73,11 @@ selection. Preserve early-FD5 and unrelated-error failure in any follow-up.
 - The response-latency proof belongs after signed selection and apply. It may
   overlap only disjoint local work and must not overlap another instance
   restart.
-- Refresh kept: exact public/install proof state and the next Gateway handoff.
+- The sibling roadmap/spec own whole-program status. A3 landed there while this
+  slice was in progress; this Worker slice consumed that updated status without
+  rewriting sibling-owned files.
+- Refresh kept: exact public/install proof state, D2 release state, the bounded
+  D3 prework state, and the next Gateway handoff.
 - Refresh non-claims: no Gateway selection/apply, provider/Slack, latency,
   concurrent-close, or C11a completion proof.
 

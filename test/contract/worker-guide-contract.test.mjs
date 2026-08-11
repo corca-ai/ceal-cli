@@ -52,6 +52,10 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 test("a cold-start worker intent selects capabilities and preserves proof limits", () => {
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
 	assert.match(guide, /command registry is navigation only|Command discovery is navigation only/u);
+	assert.match(guide, /Read help incrementally along the selected intent/u);
+	assert.match(guide, /Do not front-load downstream\s+call or receipt help before live discovery/u);
+	assert.match(guide, /Open each downstream\s+leaf immediately before its first use/u);
+	assert.match(guide, /stop descending when the discovered\s+contract cannot produce the requested effect/u);
 	const candidates = parseRoutes(runBinary(["--help"]).stdout).map((route) => ({
 		...route,
 		help: runBinary([route.name, "--help"]).stdout,
@@ -74,6 +78,21 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 	assert.equal(value.proof_level, "surface");
 	assert.equal(value.live_gateway_checked, false);
 	assert.ok(value.non_claims.some((claim) => /No live Gateway discovery/u.test(claim)));
+});
+
+test("the worker guide teaches detailed contracts and diagnosis of a blocked first Gateway call", () => {
+	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
+	assert.match(guide, /`ceal capabilities --profile <profile-ref> --detail`/u);
+	assert.match(guide, /source of truth for required input\s+fields, selectors, and bounds/u);
+	assert.match(guide, /capabilities that enumerate or\s+resolve resources/u);
+	assert.match(guide, /host sandbox or network policy/u);
+	assert.match(guide, /report host reachability separately from Ceal\s+capability availability/u);
+	assert.match(guide, /retry the same read-only discovery/u);
+	assert.match(guide, /Do not weaken the\s+sandbox, switch to a provider CLI/u);
+	assert.match(guide, /claim that the Profile has no capability\s+from a request that never reached the Gateway/u);
+
+	const capabilityHelp = runBinary(["capabilities", "--help"]).stdout;
+	assert.match(capabilityHelp, /^ {2}--detail\s+Include each capability's full input_contract/mu);
 });
 
 test("every worker route advertised for descent renders four-field leaf help", () => {
