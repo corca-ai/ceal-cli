@@ -12,10 +12,11 @@ also rejects an undeclared capability even when its arguments and result obey
 the provider-neutral relay boundary, ending the session on ordinary version
 skew.
 
-Gateway Protocol `0.72.17` at commit
+The unsigned local packet declares Gateway Protocol `0.72.17` at commit
 `cd3f5f4b8fe1757ca97c12512f9f5066db989840` corrects the boundary defects
 reproduced in `0.72.14` and the named-authority-reference escape reproduced in
-`0.72.16`. Its local packet is corrected B1 development input and includes the
+`0.72.16`. The sibling checkout contains that commit and exact Protocol tree.
+This is corrected B1 development input and includes the
 complete converted-response-site matrix, but it is unsigned; the last signed
 handoff remains `0.72.13`.
 
@@ -40,9 +41,10 @@ table.
   only from the exact Gateway commit whose Protocol tree equals the packet's
   declared `protocol_tree`, then update dependencies and
   `protocol-vendor-pin.json` together.
-- Declare the proof/shipment divergence with an owner and tracked request. This
-  is quarantine: only `npm run check:protocol-dev` may be claimed while the
-  shipped handoff lock still names `0.72.13`.
+- Declare the proof/shipment divergence with an owner and tracked request. Only
+  development-scoped evidence may be claimed while the shipped handoff lock
+  still names `0.72.13`; `npm run check:protocol-dev` is the aggregate
+  development gate and the focused packed verifier is local integration proof.
 - Call `0.72.17` corrected B1 development proof only after the installed
   consumer refuses named authority refs and the owner suite exercises the
   complete response-site matrix. Do not call it signed, shipped, released,

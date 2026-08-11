@@ -69,12 +69,14 @@ recommended order and caller identity owned by the Gateway.
   stops checkout worker smokes from emitting discarded scripts-coverage data.
   Worker coverage and focused contract proofs pass; this remains local source
   proof.
-- Gateway Protocol `0.72.17` at commit `cd3f5f4b8fe1757ca97c12512f9f5066db989840`
-  is the corrected local B1 packet: it refuses the named authority refs found in
+- The unsigned local packet declares Gateway Protocol `0.72.17` at commit
+  `cd3f5f4b8fe1757ca97c12512f9f5066db989840`; the sibling checkout contains that
+  commit and exact subtree. It refuses the named authority refs found in
   `0.72.16` and carries the complete converted-response-site owner matrix. Its
   exact source remains vendored under proof/shipment quarantine because the
-  packet is local and unsigned. The signed handoff, release inputs, and
-  installed worker still bind `0.72.13`.
+  packet is local and unsigned. Package dependencies now bind `0.72.17`, while
+  the signed handoff lock, release workflow archive literals, and installed
+  worker still bind `0.72.13`.
 
 ## Next Session
 

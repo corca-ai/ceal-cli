@@ -13,9 +13,9 @@ decoder and reach the worker's delegated Unix-socket seam. Named authority
 references must be refused while ordinary opaque handle references remain
 relayable.
 
-The final packet also needs table-driven proof for every
-`retainDeclaredResponseKeys` response-object site. The current owner suite
-proves representative envelope, error, and recovery locations but not the
+The `0.72.16` packet also lacked table-driven proof for every
+`retainDeclaredResponseKeys` response-object site. Its owner suite proved
+representative envelope, error, and recovery locations but not the
 discovery capability/target, call/redaction, readback event/receipt, and
 failure-envelope siblings. This is an acceptance-proof requirement, not a
 request to loosen any authority object or closed enum.
@@ -26,18 +26,18 @@ release, native pack, and installed-acceptance path remains quarantined.
 
 ## Local correction received
 
-Protocol `0.72.17` from Gateway commit
+The unsigned local packet declares Protocol `0.72.17` from Gateway commit
 `cd3f5f4b8fe1757ca97c12512f9f5066db989840`, Protocol tree
-`857545f9b5fc3eb76f84679f76080ca081902103`, is the corrected local response to
+`857545f9b5fc3eb76f84679f76080ca081902103`; the sibling checkout contains that
+commit and exact subtree. This is the corrected local response to
 the decoder and owner-matrix request. The packet itself declares
 `proof_level=local_state` and no signature or publication, so this request stays
 open only for the canonical signed final handoff.
 
 ## What unblocks convergence
 
-Correct the named-authority-reference boundary and add the complete converted-
-site matrix, then publish one canonical signed Gateway protocol handoff whose
-archive and provenance bind the final Gateway commit and exact Protocol tree.
+Publish one canonical signed Gateway protocol handoff whose archive and
+provenance bind the received `0.72.17` commit and exact Protocol tree.
 The consumer will bootstrap that public artifact, verify its tag, certificate,
 member set, checksums, provenance, and conformance, rerun the installed B1
 proof, then replace this divergence with one coherent frozen-tree, lock, pin,
@@ -52,7 +52,7 @@ against the local packet but cannot clear or publish the divergence.
 
 - This request does not authorize a Gateway push, tag, publication, selection,
   apply, or provider call.
-- Local Protocol tests are development proof only. The packed-consumer B1
-  acceptance proof intentionally refuses `0.72.16` on the authority-ref case.
-- The exact final handoff version and identity are intentionally not predicted
-  before the remaining Gateway Protocol subtree work finishes.
+- Local Protocol tests and packed-consumer integration are development proof
+  only; neither substitutes for the requested signed handoff.
+- The signed handoff must bind the received `0.72.17` identity exactly; a later
+  source change requires a new local consumer review before publication.
