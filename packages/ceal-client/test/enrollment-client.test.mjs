@@ -69,6 +69,23 @@ test("enrollment client rejects plaintext remote, malformed codes, and unsafe re
 	await assert.rejects(client.exchange("A".repeat(43)), (error) => error.code === "invalid_response");
 });
 
+test("enrollment client preserves a typed Protocol failure carried by non-2xx", async () => {
+	const failure = {
+		schema_version: "ceal.enrollment_result.v1",
+		ok: false,
+		error: {
+			code: "enrollment_expired",
+			message: "The enrollment code expired.",
+			next_action: "Request a new enrollment code.",
+		},
+	};
+	const client = createCealEnrollmentClient({
+		endpoint: ENDPOINT,
+		fetchFn: async () => globalThis.Response.json(failure, { status: 410 }),
+	});
+	assert.deepEqual(await client.exchange(VALID_CODE), failure);
+});
+
 function listen(server) {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);

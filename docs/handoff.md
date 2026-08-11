@@ -43,11 +43,11 @@ recommended order and caller identity owned by the Gateway.
   guide and bound to the installed-binary help path by
   `test/contract/worker-guide-contract.test.mjs`. This is local source/test
   proof, not a signed or installed guide claim and not full B3 completion.
-- `npm run check` and `npm run lint:shell` pass for this slice. The separate
-  maintainer-local duplication ratchet is red on clone families introduced by
-  the preceding `d364ee5` client change; every reported member is untouched by
-  this guide slice. Resolve or deliberately classify that debt before a push,
-  rather than treating this slice's green final gate as a green pre-push hook.
+- The maintainer-local duplication ratchet is green again. The three public
+  session-lifecycle clients now derive endpoint safety and bounded JSON exchange
+  from package-private owners; their distinct public error contracts and route
+  declarations are explicitly reviewed rather than hidden behind a generic
+  callback surface. `npm run check:duplication` reproduces the verdict.
 
 ## Next Session
 
@@ -55,12 +55,16 @@ recommended order and caller identity owned by the Gateway.
    coherent-v5 join; do not redo release work.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
    approved Worker release; a green checkout is not installed proof.
-3. Clear the maintainer-local duplication ratchet with an owned source repair or
-   an explicit reviewed classification before the next push.
-4. Implement B1 against the landed A3 server half: remove the client-owned fixed
-   capability revalidation and exact-key wall, opt into
-   `x-ceal-decode-generation: additive-v1`, and prove unknown non-authority keys
-   are ignored at every response depth.
+3. Do not start the B1 client declaration from this repository alone. Wait for
+   a signed Gateway protocol handoff that owns the additive response decoder and
+   delegated relay exports, consume and re-pin that artifact, then add
+   `x-ceal-decode-generation: additive-v1` only to the generic Gateway HTTP
+   transport. The enrollment, adoption, and personal-session routes are separate
+   authority protocols and must not send it.
+4. Prove unknown non-authority keys are removed at every response depth and
+   future safe capability frames reach the delegated UDS seam only after that
+   canonical artifact is installed; preserve strict authority objects, enum
+   values, notification bindings, and request envelopes.
 5. After B1/B2 establish additive response fields and Gateway-served next
    steps, finish B3 by replacing the guide's shipped exact sequence with the
    Gateway value plus the client fallback. Do not move a capability id into

@@ -559,6 +559,27 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-10",
 			"note": "Pre-existing client-session result projections for session refresh failure and logout failure. They share the safe YAML error frame, but own different schemas, state dispositions, recovery semantics, and command boundaries; merging them would hide which lifecycle result is being reported."
+		},
+		{
+			"surface": "code",
+			"id": "1477ca3326da76f5",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "The public options and named error contracts for device adoption, enrollment, and personal-session clients. They deliberately preserve three caller-facing error vocabularies; a shared base would couple those public concepts while saving only interface scaffolding. Their actual shared HTTP policy is extracted in request-bounds.ts and session-http-client.ts."
+		},
+		{
+			"surface": "code",
+			"id": "5d43644e0a853e2a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Two clients each declare two route names through the already-shared resolver. The route-to-operation mapping belongs visibly at each caller; extracting a two-row map would add indirection without removing a second policy implementation."
+		},
+		{
+			"surface": "code",
+			"id": "aaf2df28f051a85e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Detector clustering across three distinct public client error constructors and unrelated worker store error classes. A generic coded-error base would parameterize each class name, message, and domain code — the whole behavior — to remove language boilerplate, not a duplicated fact."
 		}
 	],
 	"fixable_ceiling": 0,

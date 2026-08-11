@@ -129,6 +129,28 @@ test("a session response this client cannot trust is invalid_response on both ro
 	}
 });
 
+test("session client preserves typed Protocol failures carried by non-2xx", async () => {
+	for (const [route, schemaVersion] of [
+		["refresh", "ceal.client_refresh_result.v1"],
+		["revoke", "ceal.client_revoke_result.v1"],
+	]) {
+		const failure = {
+			schema_version: schemaVersion,
+			ok: false,
+			error: {
+				code: "refresh_expired",
+				message: "The personal-client session expired.",
+				next_action: "Enroll the client again.",
+			},
+		};
+		const client = createCealPersonalClientSessionClient({
+			endpoint: SESSION_ENDPOINT,
+			fetchFn: async () => globalThis.Response.json(failure, { status: 401 }),
+		});
+		assert.deepEqual(await client[route](REFRESH), failure, route);
+	}
+});
+
 test("an undeclared oversized session body is refused mid-stream and cancelled", async () => {
 	const oversized = oversizedStreamFetch();
 	const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: oversized.fetchFn });

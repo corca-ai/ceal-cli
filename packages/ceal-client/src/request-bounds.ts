@@ -56,6 +56,31 @@ export function declaresJsonContentType(response: Response): boolean {
 	return response.headers.get("content-type")?.toLowerCase().startsWith("application/json") === true;
 }
 
+/**
+ * Resolves the shared public-HTTP authority boundary. Credentials, query state,
+ * fragments, remote plaintext, and non-HTTP schemes are invalid for every
+ * transport in this package; callers retain their own typed refusal.
+ */
+export function resolveSafeHttpEndpoint(value: string | URL, refuse: () => never): URL {
+	let endpoint: URL;
+	try {
+		endpoint = new URL(value);
+	} catch {
+		return refuse();
+	}
+	const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+	if (
+		endpoint.username ||
+		endpoint.password ||
+		endpoint.search ||
+		endpoint.hash ||
+		(endpoint.protocol === "http:" && host !== "127.0.0.1" && host !== "::1") ||
+		(endpoint.protocol !== "http:" && endpoint.protocol !== "https:")
+	)
+		refuse();
+	return endpoint;
+}
+
 /** Joins already-bounded chunks into the one buffer their reader promised. */
 function mergeChunks(chunks: readonly Uint8Array[], total: number): Uint8Array {
 	const result = new Uint8Array(total);

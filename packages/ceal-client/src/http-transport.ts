@@ -4,7 +4,7 @@ import {
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
 } from "@corca-ai/ceal-protocol";
-import { CEAL_MAX_CONFIGURED_TIMEOUT_MS, readBoundedResponseBody } from "./request-bounds.js";
+import { CEAL_MAX_CONFIGURED_TIMEOUT_MS, readBoundedResponseBody, resolveSafeHttpEndpoint } from "./request-bounds.js";
 
 export type CealHttpTransportErrorCode =
 	| "invalid_configuration"
@@ -63,7 +63,9 @@ const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_CONFIGURED_RESPONSE_BYTES = 1024 * 1024;
 
 export function createCealHttpTransport(options: CreateCealHttpTransportOptions): CealClientTransport {
-	const endpoint = validateEndpoint(options.endpoint);
+	const endpoint = resolveSafeHttpEndpoint(options.endpoint, () => {
+		throw new CealHttpTransportError("invalid_configuration");
+	});
 	const accessToken = validateAccessToken(options.accessToken);
 	const fetchFn = options.fetchFn ?? globalThis.fetch;
 	if (typeof fetchFn !== "function") throw new CealHttpTransportError("invalid_configuration");
@@ -159,24 +161,6 @@ function decodeResponse<R extends CealGatewayRequest>(
 	} catch {
 		throw new CealHttpTransportError("invalid_response", status);
 	}
-}
-
-function validateEndpoint(value: string | URL): URL {
-	let endpoint: URL;
-	try {
-		endpoint = new URL(value);
-	} catch {
-		throw new CealHttpTransportError("invalid_configuration");
-	}
-	if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new CealHttpTransportError("invalid_configuration");
-	if (endpoint.protocol === "http:" && !isLoopbackHost(endpoint.hostname)) throw new CealHttpTransportError("invalid_configuration");
-	if (endpoint.protocol !== "https:" && endpoint.protocol !== "http:") throw new CealHttpTransportError("invalid_configuration");
-	return endpoint;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-	const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-	return normalized === "127.0.0.1" || normalized === "::1";
 }
 
 function validateAccessToken(value: string): string {

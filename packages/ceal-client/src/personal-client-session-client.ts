@@ -6,13 +6,8 @@ import {
 	decodeCealClientRefreshResponse,
 	decodeCealClientRevokeResponse,
 } from "@corca-ai/ceal-protocol";
-import {
-	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
-	CEAL_SESSION_CLIENT_TIMEOUT_MS,
-	declaresJsonContentType,
-	readBoundedResponseBody,
-	resolveRequestBounds,
-} from "./request-bounds.js";
+import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
+import { exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealPersonalClientSessionClient {
@@ -38,14 +33,15 @@ const REFRESH_TOKEN = /^ceal_refresh_[A-Za-z0-9_-]{43}$/u;
 export function createCealPersonalClientSessionClient(
 	options: CreateCealPersonalClientSessionClientOptions,
 ): CealPersonalClientSessionClient {
-	const endpoint = safeEndpoint(options.endpoint);
+	const refreshEndpoint = resolveSessionEndpoint(options.endpoint, "refresh", () => fail("invalid_configuration"));
+	const revokeEndpoint = resolveSessionEndpoint(options.endpoint, "revoke", () => fail("invalid_configuration"));
 	const { fetchFn, timeoutMs } = resolveRequestBounds(options, CEAL_SESSION_CLIENT_TIMEOUT_MS, () => {
 		throw new CealPersonalClientSessionError("invalid_configuration");
 	});
 	return {
 		refresh: (refreshToken) =>
 			requestSession({
-				endpoint: childEndpoint(endpoint, "refresh"),
+				endpoint: refreshEndpoint,
 				fetchFn,
 				timeoutMs,
 				refreshToken,
@@ -58,7 +54,7 @@ export function createCealPersonalClientSessionClient(
 			}),
 		revoke: (refreshToken) =>
 			requestSession({
-				endpoint: childEndpoint(endpoint, "revoke"),
+				endpoint: revokeEndpoint,
 				fetchFn,
 				timeoutMs,
 				refreshToken,
@@ -77,65 +73,21 @@ async function requestSession<T>(input: {
 	decode: (value: unknown) => T;
 }): Promise<T> {
 	if (!REFRESH_TOKEN.test(input.refreshToken)) throw new CealPersonalClientSessionError("invalid_configuration");
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+	const response = await exchangeSessionJson({
+		endpoint: input.endpoint,
+		fetchFn: input.fetchFn,
+		timeoutMs: input.timeoutMs,
+		body: input.body,
+		createError: (failure) => new CealPersonalClientSessionError(failure),
+		isClientError: (error) => error instanceof CealPersonalClientSessionError,
+	});
 	try {
-		const response = await input.fetchFn(input.endpoint, {
-			method: "POST",
-			headers: { accept: "application/json", "content-type": "application/json" },
-			body: JSON.stringify(input.body),
-			redirect: "error",
-			signal: controller.signal,
-		});
-		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
-		if (!declaresJsonContentType(response)) invalidResponse();
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-		} catch {
-			invalidResponse();
-		}
-		try {
-			return input.decode(parsed);
-		} catch {
-			invalidResponse();
-		}
-	} catch (error) {
-		if (error instanceof CealPersonalClientSessionError) throw error;
-		if (controller.signal.aborted) throw new CealPersonalClientSessionError("request_timeout");
-		throw new CealPersonalClientSessionError("request_failed");
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-function safeEndpoint(value: string | URL): URL {
-	let endpoint: URL;
-	try {
-		endpoint = new URL(value);
+		return input.decode(response.value);
 	} catch {
-		throw new CealPersonalClientSessionError("invalid_configuration");
+		return fail("invalid_response");
 	}
-	const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-	if (
-		endpoint.username ||
-		endpoint.password ||
-		endpoint.search ||
-		endpoint.hash ||
-		(endpoint.protocol === "http:" && host !== "127.0.0.1" && host !== "::1") ||
-		(endpoint.protocol !== "http:" && endpoint.protocol !== "https:")
-	) {
-		throw new CealPersonalClientSessionError("invalid_configuration");
-	}
-	return endpoint;
 }
 
-function childEndpoint(endpoint: URL, action: "refresh" | "revoke"): URL {
-	const result = new URL(endpoint);
-	result.pathname = `${result.pathname.replace(/\/$/u, "")}/${action}`;
-	return result;
-}
-
-function invalidResponse(): never {
-	throw new CealPersonalClientSessionError("invalid_response");
+function fail(code: "invalid_configuration" | "invalid_response"): never {
+	throw new CealPersonalClientSessionError(code);
 }

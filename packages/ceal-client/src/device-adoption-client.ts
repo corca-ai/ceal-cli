@@ -9,13 +9,8 @@ import {
 	decodeCealDeviceEnrollmentStartRequest,
 	decodeCealDeviceEnrollmentStartResult,
 } from "@corca-ai/ceal-protocol";
-import {
-	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
-	CEAL_SESSION_CLIENT_TIMEOUT_MS,
-	declaresJsonContentType,
-	readBoundedResponseBody,
-	resolveRequestBounds,
-} from "./request-bounds.js";
+import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
+import { exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 
 // Transport for the two verified-email first-device adoption routes. It carries
 // typed requests and hands back Gateway-decoded responses; every decision about
@@ -55,8 +50,8 @@ export class CealDeviceAdoptionClientError extends Error {
 }
 
 export function createCealDeviceAdoptionClient(options: CreateCealDeviceAdoptionClientOptions): CealDeviceAdoptionClient {
-	const startEndpoint = routeEndpoint(options.endpoint, "adopt/start");
-	const pollEndpoint = routeEndpoint(options.endpoint, "adopt/poll");
+	const startEndpoint = resolveSessionEndpoint(options.endpoint, "adopt/start", () => fail("invalid_configuration"));
+	const pollEndpoint = resolveSessionEndpoint(options.endpoint, "adopt/poll", () => fail("invalid_configuration"));
 	const { fetchFn, timeoutMs } = resolveRequestBounds(options, CEAL_SESSION_CLIENT_TIMEOUT_MS, () => {
 		throw new CealDeviceAdoptionClientError("invalid_configuration");
 	});
@@ -94,7 +89,7 @@ function decode<T>(parsed: unknown, decoder: (value: unknown) => T): T {
 	try {
 		return decoder(parsed);
 	} catch {
-		throw new CealDeviceAdoptionClientError("invalid_response");
+		return fail("invalid_response");
 	}
 }
 
@@ -105,37 +100,17 @@ async function exchange(
 	timeoutMs: number,
 	allowStartFailure: boolean,
 ): Promise<unknown> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		const response = await fetchFn(endpoint, {
-			method: "POST",
-			headers: { accept: "application/json", "content-type": "application/json" },
-			body: JSON.stringify(body),
-			// A redirect on an adoption route would move a request carrying an
-			// email address or a proof signature to an origin the caller never
-			// pinned, so it is an error rather than something to follow.
-			redirect: "error",
-			signal: controller.signal,
-		});
-		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
-		if (!declaresJsonContentType(response)) invalidResponse();
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-		} catch {
-			return invalidResponse();
-		}
-		if (!response.ok)
-			throw allowStartFailure ? gatewayFailure(response.status, parsed) : new CealDeviceAdoptionClientError("invalid_response");
-		return parsed;
-	} catch (error) {
-		if (error instanceof CealDeviceAdoptionClientError) throw error;
-		if (controller.signal.aborted) throw new CealDeviceAdoptionClientError("request_timeout");
-		throw new CealDeviceAdoptionClientError("request_failed");
-	} finally {
-		clearTimeout(timer);
-	}
+	const response = await exchangeSessionJson({
+		endpoint,
+		fetchFn,
+		timeoutMs,
+		body,
+		createError: (failure) => new CealDeviceAdoptionClientError(failure),
+		isClientError: (error) => error instanceof CealDeviceAdoptionClientError,
+	});
+	if (!response.ok)
+		throw allowStartFailure ? gatewayFailure(response.status, response.value) : new CealDeviceAdoptionClientError("invalid_response");
+	return response.value;
 }
 
 function gatewayFailure(status: number, value: unknown): CealDeviceAdoptionClientError {
@@ -149,30 +124,6 @@ function gatewayFailure(status: number, value: unknown): CealDeviceAdoptionClien
 	return new CealDeviceAdoptionClientError("invalid_response");
 }
 
-// Same endpoint rules the enrollment client applies: no credentials in the URL,
-// no query or fragment, and plaintext HTTP only against loopback, which is what
-// keeps a test server usable without opening a downgrade for a real Gateway.
-function routeEndpoint(value: string | URL, route: string): URL {
-	let endpoint: URL;
-	try {
-		endpoint = new URL(value);
-	} catch {
-		throw new CealDeviceAdoptionClientError("invalid_configuration");
-	}
-	if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
-		throw new CealDeviceAdoptionClientError("invalid_configuration");
-	}
-	const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-	if (endpoint.protocol === "http:" && host !== "127.0.0.1" && host !== "::1") {
-		throw new CealDeviceAdoptionClientError("invalid_configuration");
-	}
-	if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
-		throw new CealDeviceAdoptionClientError("invalid_configuration");
-	}
-	endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, "")}/${route}`;
-	return endpoint;
-}
-
-function invalidResponse(): never {
-	throw new CealDeviceAdoptionClientError("invalid_response");
+function fail(code: "invalid_configuration" | "invalid_response"): never {
+	throw new CealDeviceAdoptionClientError(code);
 }
