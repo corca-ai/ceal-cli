@@ -60,6 +60,12 @@ recommended order and caller identity owned by the Gateway.
   transition owners. Class/prototype/accessor embedding compatibility and the
   physical boundary are covered by worker tests; this is local source/runtime
   proof and remains unreleased.
+- The standing worker-guide contract now follows rendered help in-process and
+  keeps only named checkout-binary smokes for root help, explicit deep help, and
+  cold capability failure. The same slice replaced a scheduler-sensitive delay
+  in the cross-process refresh proof with the second process's observed lock-wait
+  event. This changes test execution shape only and is not signed or
+  installed-worker proof.
 - B1 release critique rejected the local unsigned Protocol `0.72.14` packet as
   a consumer input. Executed probes showed undeclared authority revision/version
   keys being stripped and undeclared capability arguments admitting
@@ -114,6 +120,8 @@ recommended order and caller identity owned by the Gateway.
 - [client-boundary closeout](../charness-artifacts/impl/2026-08-11-client-boundary-quality-sweep.md)
 - [session-writer quality review](../charness-artifacts/quality/2026-08-11-session-writer-ownership.md)
 - [session-writer closeout](../charness-artifacts/impl/2026-08-11-session-writer-ownership.md)
+- [worker-guide spawn economics](../charness-artifacts/quality/2026-08-11-spawn-economics.md)
+- [worker-guide spawn closeout](../charness-artifacts/impl/2026-08-11-worker-guide-spawn-economics.md)
 - [B1 release critique](../charness-artifacts/critique/2026-08-11-b1-v0-76-2-release-critique.md)
 - [B1 corrected handoff request](requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)

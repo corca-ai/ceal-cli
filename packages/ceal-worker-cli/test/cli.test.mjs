@@ -3318,6 +3318,14 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
 	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
 	const refreshRequests = [];
+	let firstRefreshObserved;
+	const firstRefreshStarted = new Promise((resolve) => {
+		firstRefreshObserved = resolve;
+	});
+	let releaseFirstRefresh;
+	const firstRefreshRelease = new Promise((resolve) => {
+		releaseFirstRefresh = resolve;
+	});
 	let currentRefresh = firstRefresh;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
@@ -3329,7 +3337,10 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 				return response.end(
 					JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }),
 				);
-			if (refreshRequests.length === 1) await delay(100);
+			if (refreshRequests.length === 1) {
+				firstRefreshObserved();
+				await firstRefreshRelease;
+			}
 			currentRefresh = secondRefresh;
 			response.writeHead(200, { "content-type": "application/json" });
 			return response.end(JSON.stringify(rotatedClientSession(currentRefresh)));
@@ -3362,10 +3373,18 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 			)}\n`,
 			{ mode: 0o600 },
 		);
-		const [first, second] = await Promise.all([
-			runBin(["session", "refresh"], "", { HOME: home }),
-			runBin(["session", "refresh"], "", { HOME: home }),
-		]);
+		const firstRun = runBin(["session", "refresh"], "", { HOME: home });
+		await waitForTestSignal(firstRefreshStarted, "the first ceal process did not reach the Gateway refresh route");
+		let secondReachedLock;
+		const secondLockWaitStarted = new Promise((resolve) => {
+			secondReachedLock = resolve;
+		});
+		const secondRun = runBin(["--timing", "session", "refresh"], "", { HOME: home }, (output) => {
+			if (output.includes('"stage":"local_store_lock_wait"')) secondReachedLock();
+		});
+		await waitForTestSignal(secondLockWaitStarted, "the second ceal process did not reach the session lock");
+		releaseFirstRefresh();
+		const [first, second] = await Promise.all([firstRun, secondRun]);
 		assert.equal(first.code, 0, first.stderr);
 		assert.equal(second.code, 0, second.stderr);
 		assert.equal(parseYaml(first.stdout).status, "refreshed");
@@ -3373,6 +3392,7 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		assert.deepEqual(refreshRequests, [firstRefresh]);
 		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
 	} finally {
+		releaseFirstRefresh();
 		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -4015,7 +4035,7 @@ async function withGateway(callback, responseFactory = null) {
 	}
 }
 
-async function runBin(args, stdin, env = {}) {
+async function runBin(args, stdin, env = {}, onStderr = () => {}) {
 	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 	// Never let the real binary touch the developer's actual home: the CLI
 	// persists session/discovery state under $HOME/.ceal, so an un-overridden
@@ -4034,6 +4054,7 @@ async function runBin(args, stdin, env = {}) {
 	});
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk;
+		onStderr(stderr);
 	});
 	child.stdin.end(stdin);
 	try {
@@ -4289,8 +4310,18 @@ function rotatedClientSession(refreshToken) {
 	};
 }
 
-function delay(milliseconds) {
-	return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
+async function waitForTestSignal(signal, message) {
+	let timer;
+	try {
+		await Promise.race([
+			signal,
+			new Promise((_, reject) => {
+				timer = globalThis.setTimeout(() => reject(new Error(message)), 10_000);
+			}),
+		]);
+	} finally {
+		globalThis.clearTimeout(timer);
+	}
 }
 
 function parseYaml(stdout) {

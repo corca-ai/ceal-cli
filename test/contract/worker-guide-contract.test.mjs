@@ -7,11 +7,17 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
+import { runCealCommand } from "../../packages/ceal-worker-cli/dist/index.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
 const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-worker-guide-contract-home-"));
 const WORKER = { skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-cli" };
+const REAL_BINARY_SMOKES = {
+	root_help: { args: ["--help"], expectedStatus: 0 },
+	deep_explicit_help: { args: ["help", "capabilities", "targets"], expectedStatus: 0 },
+	cold_capabilities: { args: ["capabilities"], expectedStatus: 3 },
+};
 
 test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
@@ -21,13 +27,15 @@ test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 // `release-contract.json` is a forbidden worker release input, and the digest it
 // records is the frozen legacy lane's own drift check — asserted for both guides
 // in `guide-contract.test.mjs`, alongside the lane that consumes it.
-test("the worker guide teaches help-driven discovery without command snapshots", () => {
+test("the worker guide teaches help-driven discovery without command snapshots", async () => {
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
 	assert.match(guide, /^name: ceal-guide$/mu);
 	assert.match(guide, /\bceal --help\b/u);
 	assert.match(guide, /ceal <command> --help/u);
 	assert.doesNotMatch(guide, /--json|--format json/u);
-	const routes = parseRoutes(runBinary(["--help"]).stdout);
+	const rootHelp = await runCommand(["--help"]);
+	assert.equal(runBinarySmoke("root_help").stdout, rootHelp.stdout, "the packaged entrypoint must render the command surface unchanged");
+	const routes = parseRoutes(rootHelp.stdout);
 	assert.ok(routes.length > 0, "ceal --help advertised no route; the help parser is not matching");
 	for (const route of routes) {
 		if (!["capabilities", "call", "receipt"].includes(route.name))
@@ -49,17 +57,20 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 	assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
 });
 
-test("a cold-start worker intent selects capabilities and preserves proof limits", () => {
+test("a cold-start worker intent selects capabilities and preserves proof limits", async () => {
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
 	assert.match(guide, /command registry is navigation only|Command discovery is navigation only/u);
 	assert.match(guide, /Read help incrementally along the selected intent/u);
 	assert.match(guide, /Do not front-load downstream\s+call or receipt help before live discovery/u);
 	assert.match(guide, /Open each downstream\s+leaf immediately before its first use/u);
 	assert.match(guide, /stop descending when the discovered\s+contract cannot produce the requested effect/u);
-	const candidates = parseRoutes(runBinary(["--help"]).stdout).map((route) => ({
-		...route,
-		help: runBinary([route.name, "--help"]).stdout,
-	}));
+	const rootHelp = await runCommand(["--help"]);
+	const candidates = await Promise.all(
+		parseRoutes(rootHelp.stdout).map(async (route) => ({
+			...route,
+			help: (await runCommand([route.name, "--help"])).stdout,
+		})),
+	);
 	const selected = candidates.find(
 		(candidate) =>
 			/Gateway-issued capabilities/u.test(candidate.description) && candidate.help.includes("Result schema: ceal.capabilities.v1"),
@@ -68,7 +79,7 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 	for (const field of ["Usage:", "Effect: read_only", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 		assert.match(selected.help, new RegExp(field, "u"));
 	}
-	const result = runBinary([selected.name], { allowFailure: true });
+	const result = runBinarySmoke("cold_capabilities");
 	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
 	assert.deepEqual(documents[0].errors, []);
@@ -80,7 +91,7 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 	assert.ok(value.non_claims.some((claim) => /No live Gateway discovery/u.test(claim)));
 });
 
-test("the worker guide teaches detailed contracts and diagnosis of a blocked first Gateway call", () => {
+test("the worker guide teaches detailed contracts and diagnosis of a blocked first Gateway call", async () => {
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
 	assert.match(guide, /`ceal capabilities --profile <profile-ref> --detail`/u);
 	assert.match(guide, /source of truth for required input\s+fields, selectors, and bounds/u);
@@ -91,23 +102,27 @@ test("the worker guide teaches detailed contracts and diagnosis of a blocked fir
 	assert.match(guide, /Do not weaken the\s+sandbox, switch to a provider CLI/u);
 	assert.match(guide, /claim that the Profile has no capability\s+from a request that never reached the Gateway/u);
 
-	const capabilityHelp = runBinary(["capabilities", "--help"]).stdout;
+	const capabilityHelp = (await runCommand(["capabilities", "--help"])).stdout;
 	assert.match(capabilityHelp, /^ {2}--detail\s+Include each capability's full input_contract/mu);
 });
 
-test("every worker route advertised for descent renders four-field leaf help", () => {
+test("every worker route advertised for descent renders four-field leaf help", async () => {
 	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
 	assert.match(guide, /`Subcommands:`/u);
 	let advertised = 0;
-	for (const route of parseRoutes(runBinary(["--help"]).stdout)) {
-		for (const child of parseSubcommands(runBinary([route.name, "--help"]).stdout)) {
+	const advertisedRoutes = new Set();
+	const rootHelp = await runCommand(["--help"]);
+	for (const route of parseRoutes(rootHelp.stdout)) {
+		const parentHelp = await runCommand([route.name, "--help"]);
+		for (const child of parseSubcommands(parentHelp.stdout)) {
 			advertised += 1;
 			const childRoute = [route.name, ...child.split(" ")];
+			advertisedRoutes.add(childRoute.join(" "));
 			for (const args of [
 				[...childRoute, "--help"],
 				["help", ...childRoute],
 			]) {
-				const help = runBinary(args).stdout;
+				const help = (await runCommand(args)).stdout;
 				for (const field of ["Usage:", "Effect:", "Evidence:", "Result schema:", "Recovery/readback:"]) {
 					assert.match(help, new RegExp(`^${field} \\S`, "mu"), `ceal ${args.join(" ")} is missing ${field}`);
 				}
@@ -116,6 +131,13 @@ test("every worker route advertised for descent renders four-field leaf help", (
 		}
 	}
 	assert.ok(advertised > 0, "ceal advertises no subcommand route to descend into");
+	assert.ok(advertisedRoutes.has("capabilities targets"), "the real-binary deep-help smoke must remain an advertised route");
+	const explicitHelpArgs = REAL_BINARY_SMOKES.deep_explicit_help.args;
+	assert.equal(
+		runBinarySmoke("deep_explicit_help").stdout,
+		(await runCommand(explicitHelpArgs)).stdout,
+		"the packaged entrypoint must preserve explicit help routing for a deepest advertised leaf",
+	);
 });
 
 test("the worker guide refuses a missing matching binary without a guessed fallback", () => {
@@ -125,22 +147,29 @@ test("the worker guide refuses a missing matching binary without a guessed fallb
 	assert.doesNotMatch(guide, /\bcealctl\s+(?!--help\b)[a-z][a-z-]*/u, "ceal-guide must not show a runnable cealctl fallback");
 });
 
-const SPAWNS = new Map();
-
-function runBinary(args, { allowFailure = false } = {}) {
+function runBinarySmoke(name) {
+	const smoke = REAL_BINARY_SMOKES[name];
+	assert.ok(smoke, `unknown real-binary smoke: ${name}`);
 	const bin = path.join(BINARY_ROOT, "packages", WORKER.packageDir, "dist", "bin.js");
-	const key = JSON.stringify([bin, args]);
-	const cached = SPAWNS.get(key);
-	const result =
-		cached ??
-		spawnSync(process.execPath, [bin, ...args], {
-			encoding: "utf8",
-			env: { ...process.env, HOME: ISOLATED_HOME },
-		});
-	SPAWNS.set(key, result);
-	if (!allowFailure) assert.equal(result.status, 0, result.stderr);
+	const result = spawnSync(process.execPath, [bin, ...smoke.args], {
+		encoding: "utf8",
+		env: { ...process.env, HOME: ISOLATED_HOME },
+	});
+	assert.equal(result.status, smoke.expectedStatus, result.stderr || result.stdout);
 	assert.equal(result.stderr, "");
 	return result;
+}
+
+async function runCommand(args) {
+	let stdout = "";
+	let stderr = "";
+	const code = await runCealCommand(args, {
+		stdout: { write: (chunk) => (stdout += String(chunk)) },
+		stderr: { write: (chunk) => (stderr += String(chunk)) },
+	});
+	assert.equal(code, 0, stderr || stdout);
+	assert.equal(stderr, "");
+	return { code, stdout, stderr };
 }
 
 function parseSubcommands(help) {
