@@ -2,7 +2,18 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -57,14 +68,20 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 		return result;
 	} catch (error) {
 		if (error instanceof GatewayProtocolConsumerError) {
-			error.workspace ??= workspace;
+			if (keepWorkspace) error.workspace ??= workspace;
 			throw error;
 		}
 		throw new GatewayProtocolConsumerError(
 			"consumer_verification_failed",
 			"Gateway protocol packed-consumer verification failed.",
-			workspace,
+			keepWorkspace ? workspace : undefined,
 		);
+	} finally {
+		// A full packed consumer contains nested npm installs and compiled package
+		// trees. Keeping every successful or expected-negative gate workspace turns
+		// a standing release proof into an unbounded disk leak. The existing explicit
+		// debug flag is the only path that retains one.
+		if (!keepWorkspace) rmSync(workspace, { recursive: true, force: true });
 	}
 }
 

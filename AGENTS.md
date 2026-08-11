@@ -191,10 +191,11 @@ such note ratified a real defect for a day.
   approvals gate are in
   [docs/release-and-enrollment.md](docs/release-and-enrollment.md).
 - Separate a **surface probe** from a **live readback**. `npm run probe -- ceal
-  <command> [route/options]` is the only sanctioned way to poke an installed
+  <command> [route/options]` is the only sanctioned way to poke the checkout-built
   surface: it resolves the route through the same declaration help renders from,
   refuses any route whose declared effect is not `read_only`, and runs in a
-  throwaway `HOME`. A live readback (`ceal capabilities --fresh`, `ceal call`,
+  throwaway `HOME`. It is not installed-release proof. A live readback
+  (`ceal capabilities --fresh`, `ceal call`,
   `ceal receipt show`) needs the operator's real session by definition — read the
   declared effect before typing the route, and never batch a state change into a
   list of checks. [docs/gates.md](docs/gates.md) says why the guard is shaped

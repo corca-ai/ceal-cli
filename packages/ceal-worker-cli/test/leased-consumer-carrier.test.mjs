@@ -9,6 +9,7 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { LEASED_CONSUMER_CARRIER_ARGV, readLeasedConsumerRequest, runLeasedConsumerCarrier } from "../dist/leased-consumer-carrier.js";
+import { postUnixSocket } from "../dist/private-worker-transport.js";
 
 const handoff = JSON.parse(
 	readFileSync(
@@ -220,6 +221,49 @@ test("a service that accepts and never answers loses the call to the deadline in
 		status: "error",
 		error_code: "service_call_failed",
 	});
+});
+
+test("the Unix-socket deadline is absolute even while a peer trickles response bytes", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-trickle-"));
+	const socketPath = join(root, "leased-consumer-call-v2.sock");
+	const sockets = [];
+	const intervals = [];
+	const server = createServer((_incoming, response) => {
+		response.writeHead(200, { "content-type": "application/json" });
+		response.write(" ");
+		const interval = setInterval(() => response.write(" "), 20);
+		intervals.push(interval);
+	});
+	server.on("connection", (socket) => sockets.push(socket));
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(socketPath, resolve);
+	});
+	t.after(async () => {
+		for (const interval of intervals) clearInterval(interval);
+		for (const socket of sockets) socket.destroy();
+		await new Promise((resolve) => server.close(resolve));
+		await rm(root, { recursive: true, force: true });
+	});
+	await assert.rejects(
+		postUnixSocket({
+			socketPath,
+			path: "/api/ceal/agent/v1/call",
+			method: "POST",
+			credential: "private-service-credential",
+			body: JSON.stringify(request),
+			deadlineMs: 100,
+			maximumResponseBytes: 1024,
+			errors: {
+				aborted: "aborted",
+				deadlineExceeded: "absolute_deadline_exceeded",
+				responseTooLarge: "too_large",
+				responseFailed: "response_failed",
+				requestFailed: "request_failed",
+			},
+		}),
+		/absolute_deadline_exceeded/u,
+	);
 });
 
 test("an https service that never answers loses the call to the same deadline", async () => {

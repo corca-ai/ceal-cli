@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import { GatewayProtocolConsumerError, verifyGatewayProtocolConsumer } from "../scripts/verify-gateway-protocol-consumer.mjs";
 import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixture.mjs";
@@ -7,6 +8,7 @@ import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixtur
 test("the known-bad development packet cannot satisfy the installed B1 authority boundary", (context) => {
 	const fixture = makeGatewayProtocolFixture();
 	context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+	const before = consumerWorkspaces();
 	assert.throws(
 		() =>
 			verifyGatewayProtocolConsumer({
@@ -16,6 +18,7 @@ test("the known-bad development packet cannot satisfy the installed B1 authority
 			}),
 		(error) => error instanceof GatewayProtocolConsumerError && error.code === "b1_authority_boundary_failed",
 	);
+	assert.deepEqual(consumerWorkspaces(), before, "an expected negative packed proof must not retain its installed workspace");
 });
 
 test("consumer rejects a protocol artifact whose bytes are not bound by Gateway provenance", (context) => {
@@ -29,3 +32,9 @@ test("consumer rejects a protocol artifact whose bytes are not bound by Gateway 
 		(error) => error instanceof GatewayProtocolConsumerError && error.code === "invalid_protocol_provenance",
 	);
 });
+
+function consumerWorkspaces() {
+	return readdirSync(tmpdir())
+		.filter((name) => name.startsWith("ceal-gateway-protocol-consumer-"))
+		.sort();
+}

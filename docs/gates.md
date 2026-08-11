@@ -634,11 +634,13 @@ the second homes are additionally bound by assertion in
 the binding cannot be vacuous the way a fixture compared against its own
 producer was.
 
-## Probing An Installed Surface
+## Probing A Checkout-Built Surface
 
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way
-to poke an installed binary. It refuses any route whose declared effect is not
-`read_only`, and it runs under a throwaway `HOME`.
+to poke this checkout's built binary. It resolves both the declarations and the
+executable from `packages/*/dist`, refuses any route whose declared effect is
+not `read_only`, and runs under a throwaway `HOME`. It is source/runtime proof,
+not proof of the separately installed signed worker.
 
 **The guard is only ever as right as the field it reads.** It was exactly as
 wrong as the declaration for as long as `call` said `read_only`: the vocabulary

@@ -17,15 +17,12 @@ recommended order and caller identity owned by the Gateway.
 
 ## Current State
 
-- The operator explicitly unfroze ceal-cli for this active-runner shutdown
-  repair. The source, real child-FD5 oracle, mutation oracle, spec, and critique
-  are locally complete.
-- The pre-fix real-socket arm returned `clean:false`. The repaired arm returns
-  `clean:true` with empty stderr, while FD5-first EOF and same-message/wrong-code
-  errors remain false.
-- The final local `check:unit` job is green. Gateway transport-only and active-
-  runner durable compositions both reach Worker exit zero against the repaired
-  local build; the active result records one abort and cancelled completion.
+- The ordinary `check:unit` path is currently not green: B1's declared
+  proof/shipment divergence deliberately stops its ship-facing vendor-pin
+  contract. `npm run check:protocol-dev` and the focused consumer/worker proofs
+  are the honest development path until a corrected signed handoff converges
+  the lock and frozen tree. Earlier shutdown evidence lives in its linked
+  implementation closeout rather than in this continuation pointer.
 - Annotated tag `ceal-v0.76.1` resolves to
   `2edf126e1c7bf65900d40b449dce9ea4481c6ce7`; release run `31346152389`
   completed every build, assembly, signing, publication, and stable-pointer
@@ -66,6 +63,12 @@ recommended order and caller identity owned by the Gateway.
   in the cross-process refresh proof with the second process's observed lock-wait
   event. This changes test execution shape only and is not signed or
   installed-worker proof.
+- A follow-up quality pass made bare `guide` and `session` probe routing derive
+  from their declared default leaves, bounds Unix-socket requests by wall time,
+  removes packed-consumer workspaces unless debug retention is explicit, and
+  stops checkout worker smokes from emitting discarded scripts-coverage data.
+  Worker coverage and focused contract proofs pass; this remains local source
+  proof.
 - Gateway Protocol `0.72.16` corrected both B1 defects reproduced in `0.72.14`,
   but installed-consumer review found undeclared `grant_ref`, `policy_ref`,
   `scope_ref`, and `role_ref` arguments reaching the delegated UDS seam. Its
@@ -95,6 +98,10 @@ recommended order and caller identity owned by the Gateway.
    steps, finish B3 by replacing the guide's shipped exact sequence with the
    Gateway value plus the client fallback. Do not move a capability id into
    guide prose.
+6. Continue the quality pass by making acceptance packets require the managed
+   installer layout and bound installed-binary children, then make repo-build
+   stale-lock reclamation generation-specific. Both have direct local
+   counterexamples; do not turn either into a duplicated path or lock rule.
 
 ## Discuss
 
@@ -122,6 +129,7 @@ recommended order and caller identity owned by the Gateway.
 - [session-writer closeout](../charness-artifacts/impl/2026-08-11-session-writer-ownership.md)
 - [worker-guide spawn economics](../charness-artifacts/quality/2026-08-11-spawn-economics.md)
 - [worker-guide spawn closeout](../charness-artifacts/impl/2026-08-11-worker-guide-spawn-economics.md)
+- [probe and deadline quality review](../charness-artifacts/quality/2026-08-11-probe-and-deadline-integrity.md)
 - [B1 release critique](../charness-artifacts/critique/2026-08-11-b1-v0-76-2-release-critique.md)
 - [B1 quarantined consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [B1 corrected handoff request](requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md)

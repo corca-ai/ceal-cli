@@ -46,8 +46,7 @@ export async function runSession(options: readonly string[], io: CealCliIo, runt
 	// resolved from the declared subcommand table, so help, acceptance, and
 	// dispatch cannot diverge.
 	const resolved = resolveSubcommandRoute("session", options, SESSION_ROUTES);
-	if (!resolved)
-		return options.length === 0 ? showSession(io, runtime) : writeSessionInvalidArgument(undefined, "Invalid session action.", io);
+	if (!resolved) return writeSessionInvalidArgument(undefined, "Invalid session action.", io);
 	return resolved.handler(resolved.rest, io, runtime);
 }
 

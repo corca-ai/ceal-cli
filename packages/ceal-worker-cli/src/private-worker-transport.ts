@@ -255,9 +255,11 @@ export function postUnixSocket(
 	const body = Buffer.from(input.body, "utf8");
 	return new Promise((resolve, reject) => {
 		let settled = false;
+		let deadline: ReturnType<typeof setTimeout> | undefined;
 		const finish = (action: () => void) => {
 			if (settled) return;
 			settled = true;
+			if (deadline) clearTimeout(deadline);
 			input.signal?.removeEventListener("abort", abortRequest);
 			action();
 		};
@@ -300,10 +302,14 @@ export function postUnixSocket(
 				);
 			},
 		);
-		request.setTimeout(input.deadlineMs, () => {
+		// ClientRequest.setTimeout is an inactivity timer: a peer can keep it alive
+		// forever by trickling one byte before each interval. The contract is a wall
+		// deadline, so own one timer whose clock network activity cannot reset.
+		deadline = setTimeout(() => {
 			request.destroy();
 			finish(() => reject(new Error(input.errors.deadlineExceeded)));
-		});
+		}, input.deadlineMs);
+		deadline.unref();
 		request.once("error", () => finish(() => reject(new Error(input.errors.requestFailed))));
 		if (input.signal?.aborted) return abortRequest();
 		input.signal?.addEventListener("abort", abortRequest, { once: true });

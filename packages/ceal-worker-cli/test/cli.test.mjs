@@ -221,6 +221,8 @@ test("route acceptance is derived from the declaration", async () => {
 test("dispatch selects the handler the route itself declares", () => {
 	for (const parent of new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
+		const defaults = declared.filter((subcommand) => subcommand.default === true);
+		assert.ok(defaults.length <= 1, `${parent} declares more than one default route`);
 		// A total table whose handlers are distinguishable only by which route they
 		// were registered under: a fallthrough would return a sibling's key.
 		const handlers = Object.fromEntries(declared.map((subcommand) => [subcommandRouteKey(subcommand), () => subcommandRouteKey(subcommand)]));
@@ -234,7 +236,11 @@ test("dispatch selects the handler the route itself declares", () => {
 		}
 		// An undeclared route reaches no handler rather than the nearest one.
 		assert.equal(resolveSubcommandRoute(parent, ["bogus-route"], handlers), undefined);
-		assert.equal(resolveSubcommandRoute(parent, [], handlers), undefined);
+		const bare = resolveSubcommandRoute(parent, [], handlers);
+		if (defaults[0]) {
+			assert.equal(bare?.handler(), subcommandRouteKey(defaults[0]), `${parent} did not reach its declared default route`);
+			assert.deepEqual(bare?.rest, []);
+		} else assert.equal(bare, undefined);
 	}
 	// A declared route whose handler is missing fails closed as undeclared instead
 	// of throwing, so the worst case is an argument refusal rather than a crash.

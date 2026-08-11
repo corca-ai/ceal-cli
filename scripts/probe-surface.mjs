@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Probe guard for the installed CLI surfaces.
+// Probe guard for the checkout-built CLI surfaces.
 //
 // An ad hoc probe ("does this route render its help / what does it answer now?")
 // is a read-only question, but nothing stopped it from being typed against a
@@ -18,8 +18,8 @@
 //
 // `--allow-effect <effect>` is the deliberate escape hatch: it still runs in the
 // throwaway HOME, so it can prove a local-write route's shape without touching
-// the operator's session. No flag ever grants the real HOME; use the installed
-// binary directly, on purpose, for that.
+// the operator's session. No flag ever grants the real HOME; an installed live
+// readback is a separate deliberate operation.
 //
 // `remote_write` is the one effect the hatch refuses. A throwaway HOME is what
 // makes the hatch safe, and it neutralizes LOCAL state only: it cannot take back
@@ -42,7 +42,7 @@ const BINARIES = {
 	ceal: {
 		packageDir: "ceal-worker-cli",
 		commands: "CEAL_COMMANDS",
-		subcommands: "CEAL_SUBCOMMANDS",
+		splitSubcommandRoute: "splitSubcommandRoute",
 		// The agent-host table declares which environment variables can redirect a
 		// host's state root, and this guard is the caller that must neutralize all
 		// of them. It used to name two of them by hand, which is the copy the
@@ -87,26 +87,15 @@ if (!Array.isArray(agentHostVariables) || agentHostVariables.length === 0) {
 	fail(`${dist} declares no ${target.agentHosts} to neutralize`);
 }
 const commands = module[target.commands];
-const subcommands = module[target.subcommands];
+const splitSubcommandRoute = module[target.splitSubcommandRoute];
+if (typeof splitSubcommandRoute !== "function") fail(`${dist} declares no ${target.splitSubcommandRoute} route resolver`);
 const definition = commands.find((entry) => entry.name === command);
 if (!definition) fail(`${binary} has no command '${command}'`);
 
-// The declaration decides which route this is, exactly as the dispatcher does.
-const leading = [];
-for (const token of tail) {
-	if (token.startsWith("-")) break;
-	leading.push(token);
-}
-let route = definition;
-for (let length = leading.length; length > 0; length -= 1) {
-	const match = subcommands.find(
-		(entry) => entry.parent === command && entry.route.length === length && entry.route.every((token, index) => token === leading[index]),
-	);
-	if (match) {
-		route = match;
-		break;
-	}
-}
+// Use the same resolver as dispatch. This includes a parent's declared default
+// leaf: bare `guide` and `session` are their read-only status routes, not the
+// wider parent effect that summarizes every child in the family.
+const route = splitSubcommandRoute(command, tail).subcommand ?? definition;
 
 const name = route.route ? `${command} ${route.route.join(" ")}` : command;
 const isHelp = tail.some((token) => token === "--help" || token === "-h");

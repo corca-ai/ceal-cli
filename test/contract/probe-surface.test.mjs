@@ -137,6 +137,19 @@ test("the child's own declared effect decides, not the parent's", () => {
 	assert.match(sessionStatus.stderr, /effect: read_only.*throwaway HOME/u);
 	assert.match(sessionStatus.stdout, /^schema_version: ceal\.client_session\.v1$/mu);
 	assert.match(sessionStatus.stdout, /^status: unconfigured$/mu);
+
+	// Bare aliases are not a second dispatch-only fact: both parents declare
+	// status as their default leaf, so the sanctioned probe reaches the same
+	// read-only route the binary does.
+	for (const [args, schema] of [
+		[["ceal", "guide"], "ceal.guide.v1"],
+		[["ceal", "session"], "ceal.client_session.v1"],
+	]) {
+		const bare = probe(args);
+		assert.notEqual(bare.status, 2, bare.stderr);
+		assert.match(bare.stderr, /effect: read_only.*throwaway HOME/u);
+		assert.match(bare.stdout, new RegExp(`^schema_version: ${schema.replaceAll(".", "\\.")}$`, "mu"));
+	}
 });
 
 test("the escape hatch is explicit and still isolated", () => {

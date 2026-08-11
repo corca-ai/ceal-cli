@@ -153,7 +153,11 @@ function runBinarySmoke(name) {
 	const bin = path.join(BINARY_ROOT, "packages", WORKER.packageDir, "dist", "bin.js");
 	const result = spawnSync(process.execPath, [bin, ...smoke.args], {
 		encoding: "utf8",
-		env: { ...process.env, HOME: ISOLATED_HOME },
+		// `coverage:scripts` measures scripts/**. These retained process smokes run
+		// only the worker package binary, so inherited collection writes large V8
+		// profiles that c8 discards during remap. Keep the real process boundary and
+		// stop producing evidence the owning coverage target cannot consume.
+		env: { ...process.env, HOME: ISOLATED_HOME, NODE_V8_COVERAGE: "" },
 	});
 	assert.equal(result.status, smoke.expectedStatus, result.stderr || result.stdout);
 	assert.equal(result.stderr, "");

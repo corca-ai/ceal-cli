@@ -455,12 +455,7 @@ export function dispatchedRouteKeys(): Readonly<Record<string, readonly string[]
 
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): number {
 	const resolved = resolveSubcommandRoute("guide", options, GUIDE_ROUTES);
-	if (!resolved) {
-		// A bare `ceal guide` is the status route; anything else here is undeclared.
-		return options.length === 0
-			? runGuideAction("status", undefined, io, runtime)
-			: writeError("invalid_argument", "Invalid guide action.", io, "Run 'ceal guide --help'.");
-	}
+	if (!resolved) return writeError("invalid_argument", "Invalid guide action.", io, "Run 'ceal guide --help'.");
 	if (resolved.rest.length > 0)
 		return writeError("invalid_argument", "Invalid guide action.", io, `Run 'ceal guide ${resolved.subcommand.route.join(" ")} --help'.`);
 	return resolved.handler(resolved.subcommand, io, runtime);

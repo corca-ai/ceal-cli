@@ -17,28 +17,6 @@ Everything else not listed is owned by the comment at the site and by
   only on `linux`/`x64`, so every installed-binary and installer proof self-skips
   on macOS. Do not "fix" this by flipping the flag — requiring it across all of
   `linux-*` is what burned `ceal-v0.67.0`.
-- **The v5 shutdown hang is closed, and it was reachable on the real channel.**
-  All three inherited channels now go through `openInheritedReadable` in
-  `packages/ceal-worker-cli/src/private-worker-transport.ts`, which adopts the
-  descriptor with `net.Socket` so libuv reads it non-blocking on the event loop.
-  `closeReadable` is bounded as well, and that bound is defence in depth rather
-  than the fix — it was measured making the shutdown await settle while the
-  process still never exited, which is the shape that would have shipped as done.
-  `packages/ceal-worker-cli/test/leased-consumer-control-session.test.mjs` pins it
-  on the descriptor Gateway actually supplies: `stdio: "pipe"` hands the child a
-  Unix socketpair end on Linux, the same fact the FD-kind test above it pins. The
-  control arm builds the stream the old way and hangs on purpose, so the fixed
-  arm's pass cannot be vacuous; reverting `openInheritedReadable` turns the test
-  red, and that was run.
-  **This entry twice recorded a wrong reason and both are worth keeping.** It
-  first named `closeReadable` as the fix, which the reproduction disproved. It
-  then said the hang did not reproduce through inherited descriptors and that the
-  socketpair case was untested and maybe not worth settling — the fresh-eye review
-  re-ran it and got the opposite, three times. The `EAGAIN` that reading was built
-  on came from the harness reusing one descriptor across both arms: `net.Socket`
-  sets `O_NONBLOCK` on the shared open file description, so the arm that ran
-  second inherited a non-blocking descriptor. Nothing about the tree; everything
-  about the measurement.
 - **Two published acceptance records overstate guide registration, and one leaks
   identity refs.** `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were
   emitted while `registered_host_count` counted resolved host directories rather

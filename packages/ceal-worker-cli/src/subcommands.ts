@@ -10,6 +10,8 @@ export type CealCommandName = CealCommandDefinition["name"];
 export interface CealSubcommandDefinition {
 	parent: CealCommandName;
 	route: readonly string[];
+	/** This leaf owns a bare parent invocation when no argv follows it. */
+	default?: true;
 	description: string;
 	usage: string;
 	effect: CealCommandDefinition["effect"];
@@ -29,6 +31,7 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "guide",
 		route: ["status"],
+		default: true,
 		description: "Inspect the signed guide and its registration in every supported agent host.",
 		usage: "ceal guide status",
 		effect: "read_only",
@@ -59,6 +62,7 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "session",
 		route: ["status"],
+		default: true,
 		description: "Inspect this host's locally stored Gateway session without contacting the Gateway.",
 		usage: "ceal session status",
 		effect: "read_only",
@@ -232,6 +236,10 @@ function findSubcommand(parent: CealCommandName, route: readonly string[]): Ceal
 	);
 }
 
+function defaultSubcommand(parent: CealCommandName): CealSubcommandDefinition | undefined {
+	return subcommandsOf(parent).find((subcommand) => subcommand.default === true);
+}
+
 /**
  * Splits a command tail into the declared subcommand route its leading
  * positionals name and the options that follow it. Every runner resolves its
@@ -243,6 +251,7 @@ export function splitSubcommandRoute(
 	parent: CealCommandName,
 	options: readonly string[],
 ): { subcommand?: CealSubcommandDefinition; rest: readonly string[] } {
+	if (options.length === 0) return { subcommand: defaultSubcommand(parent), rest: options };
 	const leading: string[] = [];
 	for (const option of options) {
 		if (option.startsWith("-")) break;

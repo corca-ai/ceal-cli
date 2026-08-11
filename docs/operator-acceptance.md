@@ -110,8 +110,9 @@ node scripts/verify-protocol-vendor-pin.mjs   # exit 0 only when shippable
 A non-zero exit with `proof_shipment_protocol_divergence` names the vendored
 copy's Gateway commit and the one the lock binds, and it blocks the release,
 packing, and acceptance-packet paths independently of whether any test ran. While
-it is failing, `npm run check:protocol-dev` still exercises the protocol and
-client suites — its output is stamped `proof_level: development_only` and must
+it is failing, `npm run check:protocol-dev` still verifies the development
+vendor identity and exercises the client suite — its output is stamped
+`proof_level: development_only` and must
 not be cited as release or installed-worker evidence. `docs/gates.md` says what
 the check does and does not cover.
 
