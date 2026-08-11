@@ -87,7 +87,7 @@ Ambient: B1 proof/shipment divergence remains; no signed/installed proof is clai
   skills/ceal-guide --skill-path skills/ceal-capability-audit --summary` reports
   zero heuristic findings and still requires prose review.
 - artifact: `skills/ceal-guide/` prose review finds its trigger narrowly worker-facing; core
-  owns selection and sequencing; each directly listed reference deepens one
+  owns selection and incremental navigation; each directly listed reference deepens one
   selected concept; conditional idempotency and no-auto-open private-source
   safety remain explicit. The audit trigger is exhaustive-only and requires the
   installed guide package rather than a checkout-relative substitute.

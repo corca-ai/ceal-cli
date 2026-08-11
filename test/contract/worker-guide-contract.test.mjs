@@ -45,16 +45,12 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 		if (!["capabilities", "call", "receipt"].includes(route.name))
 			assert.doesNotMatch(guide, new RegExp(`\\bceal\\s+${route.name}(?:\\s|\u0060)`, "u"));
 	}
-	// Order and profile-scoping are the contract: discover, then resolve a target,
-	// then call, then read the receipt back, every step against a named profile.
-	// The flags inside each step are the guide's to choose — this used to pin
-	// `--fresh` on the first step, and `cc29047` broke it by deciding, with a
-	// recorded reason, that a warm catalog should not pay the discovery probe.
-	// A gate that a documented authoring decision breaks is not guarding behavior.
-	assert.match(
-		guide,
-		/ceal capabilities[^\n]*--profile <profile-ref>[\s\S]+ceal capabilities targets[^\n]*--profile <profile-ref>[\s\S]+ceal call <capability-id> --target <target-ref>[\s\S]+--profile <profile-ref>[\s\S]+ceal receipt show <request-ref> --profile <profile-ref>/u,
-	);
+	// The guide owns invariant navigation method, not the currently recommended
+	// route order. That order belongs to live Gateway guidance; leaf help remains
+	// the fallback contract when a development Gateway has not begun serving it.
+	assert.match(core, /Prefer ordered guidance returned by the\s+live Gateway when present/u);
+	assert.match(core, /If neither surface identifies a next\s+move, stop/u);
+	assert.doesNotMatch(core, /ceal capabilities targets|ceal call <capability-id>|ceal receipt show <request-ref>/u);
 	// Two non-claims the guide has to state, not two sentences it has to keep:
 	// reword them and this gate should be re-read, which is the point.
 	assert.match(guide, /catalog\s+grant is not backend\s+readiness/u);

@@ -34,17 +34,11 @@ Read [Capability Workflow](references/capability-workflow.md) before selecting
 targets, interpreting cached or live discovery, invoking a capability, handling
 paging, reading result YAML, or recovering an unknown outcome.
 
-The provider-neutral sequence is discovery, bounded target selection, one call,
-then receipt readback:
-
-```sh
-ceal capabilities --profile <profile-ref>
-ceal capabilities targets --profile <profile-ref> \
-  --capability <capability-id> --match <text-or-url> --limit 5
-ceal call <capability-id> --target <target-ref> \
-  --profile <profile-ref> key=value
-ceal receipt show <request-ref> --profile <profile-ref>
-```
+After discovery, take only the next move described by the current result or the
+selected leaf's `Recovery/readback`. Prefer ordered guidance returned by the
+live Gateway when present, but treat it as navigation rather than authority and
+open each named leaf's help before use. If neither surface identifies a next
+move, stop instead of substituting a sequence copied into this guide.
 
 For a private-source link or returned `source` citation, also read
 [Linked Private Context](references/linked-private-context.md) before resolving,

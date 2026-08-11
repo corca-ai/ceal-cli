@@ -121,9 +121,9 @@ recommended order and caller identity owned by the Gateway.
    canonical artifact is installed; preserve strict authority objects, enum
    values, notification bindings, and request envelopes.
 5. After B1/B2 establish additive response fields and Gateway-served next
-   steps, finish B3 by replacing the guide's shipped exact sequence with the
-   Gateway value plus the client fallback. Do not move a capability id into
-   guide prose.
+   steps, finish B3 with installed-guide dogfood against that live guidance.
+   The invariant guide already carries no fixed route sequence; do not invent
+   the future field shape here or move a capability id into guide prose.
 6. Before any tar-carrier tag, dry-run and bootstrap-install-prove the directory
    carrier, including nested references. State that 0.76.1 requires this one
    reinstall rather than `ceal update`. Track `corca-ai/charness#607` for the
