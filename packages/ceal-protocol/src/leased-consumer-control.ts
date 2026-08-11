@@ -1,11 +1,21 @@
 /**
- * Canonical private control-session records for a Gateway-owned leased
- * consumer. These records never carry a personal session, provider credential
- * or locator, endpoint selector, or Agent-supplied service authority. Selected
- * v5 may disclose one bounded requester account identity beside an opaque
- * subject ref; that context is neither a locator nor authority.
+ * Lane: leased Agent control carrier. This is neither the Worker-facing
+ * `ceal capabilities`/`ceal call` protocol nor the legacy instance runtime.
+ * Owner: docs/specs/gateway-leased-consumer-control.spec.md.
+ *
+ * These canonical private records never carry a personal session, provider
+ * credential or locator, endpoint selector, or Agent-supplied service
+ * authority. Selected v5 may disclose one bounded requester account identity
+ * beside an opaque subject ref; that context is neither a locator nor
+ * authority.
  */
-import { requireJsonByteSize } from "./gateway-validation-primitives.js";
+import { isAuthorityStateKey, requireJsonByteSize } from "./gateway-validation-primitives.js";
+import { validCealLeasedConsumerMessageAuthor, type CealLeasedConsumerMessageAuthor } from "./leased-consumer-message-author.js";
+export type { CealLeasedConsumerMessageAuthor } from "./leased-consumer-message-author.js";
+import { CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerSurveyDispatchArguments, decodeCealLeasedConsumerSurveyDispatchData } from "./leased-consumer-survey-dispatch.js";
+import { opaqueArtifactRef, opaqueMessageRef, opaqueResultRef, opaqueTargetRef, opaqueThreadRef, safeReplyReceiptRef } from "./leased-consumer-opaque-refs.js";
+import { CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerPeopleSearchArguments, validCealLeasedConsumerReadItemDetail, validCealLeasedConsumerSubjectRef, type CealLeasedConsumerResourceReadItem } from "./leased-consumer-directory-reads.js";
+export { CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_DATA_SCHEMA } from "./leased-consumer-survey-dispatch.js";
 import {
 	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_LABEL_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_TOKEN_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_MAX_CONTROLS, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, validCealLeasedConsumerCompletedPhaseHistory, type CealLeasedConsumerMessagePresentation,
 } from "./leased-consumer-presentation.js";
@@ -39,7 +49,7 @@ export const CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA = "ceal.gatewa
 export const CEAL_LEASED_CONSUMER_MESSAGE_ENUMERATE_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_enumerate_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_resource_resolve_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_arguments.v1" as const;
-export const CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_resource_read_data.v1" as const;
+export const CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_resource_read_data.v2" as const;
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_data.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_reaction_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA = "ceal.gateway_leased_agent_message_reaction_data.v1" as const;
@@ -54,7 +64,7 @@ export const CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_DATA_SCHEMA = "ceal.gateway_lea
 export const CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_file_upload_arguments.v1" as const;
 /** Raw bytes per staging chunk; base64 expansion stays inside the 32KiB frame. */
 export const CEAL_LEASED_CONSUMER_ARTIFACT_CHUNK_MAX_BYTES = 12 * 1024;
-export const CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_message_read_data.v1" as const;
+export const CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_message_read_data.v2" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA = "ceal.gateway_leased_agent_message_write_data.v1" as const;
 /** Upper bound of ordered continuation message handles one write may return. */
 export const CEAL_LEASED_CONSUMER_WRITE_MESSAGE_HANDLE_LIMIT = 16;
@@ -227,6 +237,7 @@ export type CealLeasedConsumerCapabilityArguments =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA; usergroup: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA; subject_ref: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA; subject_ref: string }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA; query?: string; limit?: number }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA; root_ref: string; workflow_name: string | null; skill_name?: string; routing: "normal" | "skill"; mode: "human_replies" }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA; upload_ref: string; chunk_index: number; chunk_count: number; sha256: string; bytes_base64: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA; artifact_ref: string; title?: string; reply_to?: string };
@@ -314,13 +325,14 @@ export interface CealLeasedConsumerCapabilityResult {
 
 /**
  * Result content is a selected capability projection, never a provider
- * response.  Text is content; identities remain exclusively in `handles`.
+ * response. Message authors are Profile-keyed opaque descriptors; actionable
+ * resource identities remain exclusively in `handles`.
  */
 export type CealLeasedConsumerCapabilityData =
-	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA; items: readonly { text: string }[] }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA; items: readonly { text: string; author?: CealLeasedConsumerMessageAuthor }[] }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed"; text?: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed" }
-	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA; items: readonly { kind: "conversation" | "identity" | "usergroup" | "message"; display_name: string; handle_index: number; text?: string }[] }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA; truncated?: boolean; items: readonly CealLeasedConsumerResourceReadItem[] }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA; terminal: "acknowledged" | "idempotency_replayed" }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed" }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_REPLY_INTAKE_DATA_SCHEMA; terminal: "registered" | "idempotency_replayed" }
@@ -361,8 +373,8 @@ const TERMINAL_STATUSES = new Set<CealLeasedConsumerControlTerminalResult["statu
 // The v4 capability ABI sets are exported so Gateway tables (handle resolver,
 // context issuer, result projectors) and conformance vectors can prove
 // set-equality against this single source instead of re-declaring literals.
-export const CEAL_LEASED_CONSUMER_V4_READ_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "message.enumerate", "resource.resolve", "directory.usergroups.list", "directory.usergroups.members.list", "identity.profile_image.get", "conversation.direct.resolve"] as const);
-export const CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS = Object.freeze(["message.create", "message.update", "message.delete", "presentation.activity.set", "message.reaction.add", "workflow.reply_intake.register", "artifact.stage", "file.upload"] as const);
+export const CEAL_LEASED_CONSUMER_V4_READ_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "message.enumerate", "resource.resolve", "directory.usergroups.list", "directory.usergroups.members.list", "directory.people.search", "identity.profile_image.get", "conversation.direct.resolve"] as const);
+export const CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS = Object.freeze(["message.create", "message.update", "message.delete", "presentation.activity.set", "message.reaction.add", "workflow.reply_intake.register", "workflow.survey_dispatch.send", "artifact.stage", "file.upload"] as const);
 // Delete and update intentionally have no ingress bootstrap context. The
 // ingress message is normally user-authored, and the continuation store is
 // deny-default for updateability: a mutation handle exists only after a
@@ -373,7 +385,7 @@ export const CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS = Object.freeze(["mess
 // ack-reaction on the trigger message is a cutover-blocking behavior, a
 // reaction never mutates content (deny-default updateability is untouched),
 // and the reaction-bound handle still resolves only for that one message.
-export const CEAL_LEASED_CONSUMER_V4_INGRESS_CONTEXT_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "message.create", "message.enumerate", "resource.resolve", "message.reaction.add"] as const);
+export const CEAL_LEASED_CONSUMER_V4_INGRESS_CONTEXT_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "message.create", "message.enumerate", "resource.resolve", "message.reaction.add", "workflow.survey_dispatch.send"] as const);
 const V4_READ_CAPABILITIES = new Set<string>(CEAL_LEASED_CONSUMER_V4_READ_CAPABILITY_IDS);
 const V4_WRITE_CAPABILITIES = new Set<string>(CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS);
 const V4_INGRESS_CONTEXT_CAPABILITIES = new Set<string>(CEAL_LEASED_CONSUMER_V4_INGRESS_CONTEXT_CAPABILITY_IDS);
@@ -395,9 +407,11 @@ const V4_CAPABILITY_GRAMMAR: ReadonlyArray<readonly [string, string, (value: unk
 	["message.reaction.add", CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA, decodeMessageReactionArguments],
 	["directory.usergroups.list", CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA, decodeUsergroupsListArguments],
 	["directory.usergroups.members.list", CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA, decodeUsergroupMembersArguments],
+	["directory.people.search", CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerPeopleSearchArguments],
 	["identity.profile_image.get", CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA)],
 	["conversation.direct.resolve", CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA)],
 	["workflow.reply_intake.register", CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA, decodeReplyIntakeArguments],
+	["workflow.survey_dispatch.send", CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerSurveyDispatchArguments],
 	["artifact.stage", CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA, decodeArtifactStageArguments],
 	["file.upload", CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA, decodeFileUploadArguments],
 ];
@@ -405,6 +419,9 @@ const V4_CAPABILITY_ARGUMENT_DECODERS = new Map<string, (value: unknown) => void
 /** Derived from the grammar table so tests can prove the internal maps never
  * drift from the exported read/write ABI sets (S1 critique F3). */
 export const CEAL_LEASED_CONSUMER_V4_DECLARED_CAPABILITY_IDS = Object.freeze([...V4_CAPABILITY_ARGUMENT_DECODERS.keys()]);
+/** Ingress contexts admitted per frame; independent of how many capabilities are declared. */
+export const CEAL_LEASED_CONSUMER_INGRESS_CONTEXT_LIMIT = 32; /** Framing shape for any relayed capability id, declared or not. */
+function safeCapabilityId(value: unknown): value is string { return typeof value === "string" && /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31}){1,4}$/u.test(value); }
 /** Capability id -> argument schema_version, derived from the same grammar
  * table as the wire decoders. Consumers (Agent adapter, test harnesses,
  * generated fixtures) must source their argument-schema maps from this export
@@ -554,10 +571,15 @@ function validCapabilityCallLease(value: Record<string, unknown>): boolean {
 	return value.schema_version === "ceal.gateway_leased_consumer_call_request.v1" && safeRef(value.event_ref) && safeRef(value.lease_ref) && positive(value.lease_fence);
 }
 function validCapabilityCallSelection(value: Record<string, unknown>): boolean {
-	return knownV4Capability(value.capability_id) && opaqueTargetRef(value.target_ref) && safeText(value.purpose, 512);
+	return safeCapabilityId(value.capability_id) && opaqueTargetRef(value.target_ref) && safeText(value.purpose, 512);
 }
 function validCapabilityCallIdempotency(value: Record<string, unknown>): boolean {
 	if (value.idempotency_key !== undefined && !safeText(value.idempotency_key, 512)) return false;
+	// Write semantics belong to the Gateway, which both issues and authorizes the
+	// call. For a capability this relay knows, the declared write set is kept as
+	// defence in depth; for one it does not, the relay does not guess -- guessing
+	// would either reject a new read or invent a requirement the authority never
+	// stated. #700: the relay must not revalidate a contract it does not own.
 	return !V4_WRITE_CAPABILITIES.has(value.capability_id as string) || safeText(value.idempotency_key, 512);
 }
 function decodeCompleteInput(value: Record<string, unknown>): void {
@@ -594,9 +616,8 @@ function decodeCapabilityProjectionResult(value: Record<string, unknown>): void 
 function decodeProjectionRequester(value: unknown): void {
 	const record = requireRecord(value);
 	requireExactKeys(record, ["display_name", "provider_identity", "subject_ref"], ["display_name", "provider_identity"]);
-	if (!safeRef(record.subject_ref) || !(record.subject_ref as string).startsWith("subject:")) invalid();
 	// Slack-shaped requester identifiers must never ride the subject ref.
-	if (/^subject:(?:[UW][A-Z0-9]{4,})$/u.test(record.subject_ref as string)) invalid();
+	if (!validCealLeasedConsumerSubjectRef(record.subject_ref)) invalid();
 	if (record.display_name !== undefined && (!safeText(record.display_name, 512) || (record.display_name as string).length === 0)) invalid();
 	if (record.provider_identity !== undefined) decodeProviderIdentity(record.provider_identity);
 }
@@ -613,7 +634,10 @@ function decodeProjectionAttachments(value: unknown): void {
 	if (record.count === 0 ? record.set_ref !== null : !safeRef(record.set_ref)) invalid();
 }
 function decodeCapabilityContexts(value: unknown): void {
-	if (!Array.isArray(value) || value.length < 1 || value.length > V4_CAPABILITY_ARGUMENT_DECODERS.size) invalid();
+	// Bounded by its own constant, not by the size of the declared table: tying
+	// the ingress-context limit to the capability count made adding a capability
+	// silently widen an unrelated bound.
+	if (!Array.isArray(value) || value.length < 1 || value.length > CEAL_LEASED_CONSUMER_INGRESS_CONTEXT_LIMIT) invalid();
 	const capabilityIds = new Set<string>();
 	for (const context of value) {
 		const capabilityId = decodeCapabilityContext(context);
@@ -662,15 +686,44 @@ function decodeCapabilityResult(value: unknown): void {
 	requireJsonByteSize(value, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES, invalid);
 	const record = requireRecord(value);
 	requireExactKeys(record, ["capability_id", "data", "effect", "handles", "result_ref", "schema_version"]);
-	if (record.schema_version !== CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA || !knownV4Capability(record.capability_id)
+	if (record.schema_version !== CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA || !safeCapabilityId(record.capability_id)
 		|| !["read", "write"].includes(record.effect as string) || !opaqueResultRef(record.result_ref)
-		|| !Array.isArray(record.handles) || record.handles.length > 32 || !record.handles.every(capabilityHandle)
-		|| !capabilityResultMatches(record.capability_id, record.effect, record.handles, record.data)) invalid();
+		|| !Array.isArray(record.handles) || record.handles.length > 32 || !record.handles.every(capabilityHandle)) invalid();
+	// A declared capability keeps its exact result rule; an undeclared one keeps
+	// every generic guard above plus credential/locator-free result JSON, and the
+	// Gateway owns the shape. `safeResultJson` is what `requireExactKeys` on the
+	// envelope never covered anyway: it is the check that matters for a relay.
+	if (knownV4Capability(record.capability_id)) {
+		if (!capabilityResultMatches(record.capability_id, record.effect, record.handles, record.data)) invalid();
+	} else if (!safeResultJson(record.data)) invalid();
 }
+/**
+ * Per-capability argument grammar for the capabilities this relay declares, and
+ * generic safety for the ones it does not (#700).
+ *
+ * The worker is a relay: it reads an Agent frame, forwards it over a Unix
+ * socket, and returns the answer. It neither executes nor authorizes the
+ * capability, so a fixed 17-entry table gating that relay meant a Gateway could
+ * not add a capability without a worker release — and the failure was not a
+ * skew message but a dead session, because a decode throw ends the frame loop.
+ *
+ * An undeclared capability now passes the safety this relay DOES own: bounded,
+ * credential-free, locator-free JSON. What it no longer does is claim to know
+ * the shape.
+ *
+ * That claim was prose only until the ceal-cli consumer reproduced it against
+ * the built 0.72.14 decoder: `safeJson` bars credential-shaped keys but admits
+ * `locator`, `provider_locator`, `permissions`, `grant_revision`, and
+ * `policy_version`, and it accepts a non-plain prototype. The undeclared
+ * ARGUMENT boundary and the undeclared RESULT boundary are the same question in
+ * two directions, so they now share one predicate rather than drifting again.
+ * The declared per-capability decoders are unchanged and keep their own exact
+ * grammar, including the locators a declared capability legitimately names.
+ */
 function decodeCapabilityArguments(capabilityId: unknown, value: unknown): void {
 	const decode = V4_CAPABILITY_ARGUMENT_DECODERS.get(capabilityId as string);
-	if (!decode) invalid();
-	decode(value);
+	if (decode) { decode(value); return; }
+	if (!safeCapabilityId(capabilityId) || !safeUndeclaredArgumentJson(value)) invalid();
 }
 function decodeMessageSearchArguments(value: unknown): void {
 	const record = requireRecord(value);
@@ -816,6 +869,7 @@ const V4_CAPABILITY_RESULT_RULES = new Map<string, CapabilityResultRule>([
 	["resource.resolve", RESOURCE_READ_RESULT_RULE],
 	["directory.usergroups.list", RESOURCE_READ_RESULT_RULE],
 	["directory.usergroups.members.list", RESOURCE_READ_RESULT_RULE],
+	["directory.people.search", RESOURCE_READ_RESULT_RULE],
 	["identity.profile_image.get", RESOURCE_READ_RESULT_RULE],
 	["conversation.direct.resolve", RESOURCE_READ_RESULT_RULE],
 	["message.create", MESSAGE_WRITE_RESULT_RULE],
@@ -824,6 +878,7 @@ const V4_CAPABILITY_RESULT_RULES = new Map<string, CapabilityResultRule>([
 	["presentation.activity.set", (effect, handles, data) => effect === "write" && handles.length === 0 && decodePresentationActivityData(data)],
 	["message.reaction.add", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeMessageReactionData(data)],
 	["workflow.reply_intake.register", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeReplyIntakeData(data)],
+	["workflow.survey_dispatch.send", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeCealLeasedConsumerSurveyDispatchData(data)],
 	// A chunk ack carries no handle; the final chunk carries exactly the one
 	// digest-verified artifact handle.
 	["artifact.stage", (effect, handles, data) => effect === "write" && artifactStageHandles(handles, data) && decodeArtifactStageData(data)],
@@ -855,8 +910,8 @@ function decodeMessageReadData(value: unknown): boolean {
 }
 function messageReadItem(value: unknown): boolean {
 	if (!plainRecord(value)) return false;
-	requireExactKeys(value, ["text"]);
-	return safeReplyText(value.text);
+	requireExactKeys(value, ["author", "text"], ["author"]);
+	return safeReplyText(value.text) && (value.author === undefined || validCealLeasedConsumerMessageAuthor(value.author));
 }
 function decodeMessageWriteData(value: unknown): boolean {
 	if (!plainRecord(value)) return false;
@@ -870,19 +925,26 @@ function decodeMessageWriteData(value: unknown): boolean {
  */
 function decodeResourceReadData(value: unknown, handles: readonly unknown[]): boolean {
 	if (!plainRecord(value)) return false;
-	requireExactKeys(value, ["items", "schema_version"]);
-	if (value.schema_version !== CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA || !Array.isArray(value.items) || value.items.length > 64) return false;
+	// `truncated` is optional and generic: a bounded read states that its page
+	// ended early instead of letting the consumer read a short list as the
+	// whole set. Absent means the projection carried everything it found.
+	requireExactKeys(value, ["items", "schema_version", "truncated"], ["truncated"]);
+	if (value.schema_version !== CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA || !Array.isArray(value.items) || value.items.length > 64 || (value.truncated !== undefined && typeof value.truncated !== "boolean")) return false;
 	return value.items.every((item) => resourceReadItem(item, handles.length));
 }
 function resourceReadItem(value: unknown, handleCount: number): boolean {
 	if (!plainRecord(value)) return false;
 	// handle_index is optional (S5): display-only items (e.g. usergroups) mint
 	// no handle; when present it must point inside the typed handles array.
-	requireExactKeys(value, ["display_name", "handle_index", "kind", "text"], ["handle_index", "text"]);
+	// subject_ref is optional and identity-only: a directory read projects the
+	// addressable Gateway-native subject so an ordinary skill can reach
+	// `conversation.direct.resolve` without a provider locator. It is a
+	// descriptive ref, never authority by itself.
+	requireExactKeys(value, ["actor_kind", "author", "display_name", "handle_index", "kind", "subject_ref", "text"], ["actor_kind", "author", "handle_index", "subject_ref", "text"]);
 	return ["conversation", "identity", "usergroup", "message"].includes(value.kind as string)
 		&& typeof value.display_name === "string" && value.display_name.length >= 1 && safeText(value.display_name, 512)
 		&& validOptionalHandleIndex(value.handle_index, handleCount)
-		&& (value.text === undefined || safeReplyText(value.text));
+		&& validCealLeasedConsumerReadItemDetail(value, safeReplyText, validCealLeasedConsumerMessageAuthor);
 }
 function validOptionalHandleIndex(value: unknown, handleCount: number): boolean {
 	if (value === undefined) return true;
@@ -903,21 +965,9 @@ function decodeReplyIntakeData(value: unknown): boolean {
 	requireExactKeys(value, ["schema_version", "terminal"]);
 	return value.schema_version === CEAL_LEASED_CONSUMER_REPLY_INTAKE_DATA_SCHEMA && ["registered", "idempotency_replayed"].includes(value.terminal as string);
 }
-function decodeMessageReactionData(value: unknown): boolean {
-	if (!plainRecord(value)) return false;
-	requireExactKeys(value, ["schema_version", "terminal"]);
-	return value.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA && ["readback_confirmed", "idempotency_replayed"].includes(value.terminal as string);
-}
-function decodePresentationActivityData(value: unknown): boolean {
-	if (!plainRecord(value)) return false;
-	requireExactKeys(value, ["schema_version", "terminal"]);
-	return value.schema_version === CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA && ["acknowledged", "idempotency_replayed"].includes(value.terminal as string);
-}
-function decodeMessageDeleteData(value: unknown): boolean {
-	if (!plainRecord(value)) return false;
-	requireExactKeys(value, ["schema_version", "terminal"]);
-	return value.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA && ["readback_confirmed", "idempotency_replayed"].includes(value.terminal as string);
-}
+function decodeMessageReactionData(value: unknown): boolean { if (!plainRecord(value)) return false; requireExactKeys(value, ["schema_version", "terminal"]); return value.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA && ["readback_confirmed", "idempotency_replayed"].includes(value.terminal as string); }
+function decodePresentationActivityData(value: unknown): boolean { if (!plainRecord(value)) return false; requireExactKeys(value, ["schema_version", "terminal"]); return value.schema_version === CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA && ["acknowledged", "idempotency_replayed"].includes(value.terminal as string); }
+function decodeMessageDeleteData(value: unknown): boolean { if (!plainRecord(value)) return false; requireExactKeys(value, ["schema_version", "terminal"]); return value.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA && ["readback_confirmed", "idempotency_replayed"].includes(value.terminal as string); }
 function capabilityHandle(value: unknown): boolean {
 	if (!plainRecord(value)) return false;
 	requireExactKeys(value, ["kind", "ref"]);
@@ -953,21 +1003,40 @@ function projectionContext(value: unknown): boolean { if (!record(value)) return
 function socketPath(value: unknown): boolean { return isSafeUnixSocketPath(value) && !value.endsWith("/admin-gateway.sock"); }
 function credential(value: unknown): boolean { return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= 4096 && /^[\x21-\x7e]+$/u.test(value); }
 function safeRef(value: unknown): value is string { return typeof value === "string" && SAFE_REF.test(value); }
-function safeReplyReceiptRef(value: unknown): value is string { return typeof value === "string" && /^reply-receipt:[a-f0-9]{64}$/u.test(value); }
 function positive(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 1; }
 function timestamp(value: unknown): boolean { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 /** Reply text is a visible message body, so line breaks are intentional. */
 function safeReplyText(value: unknown): value is string { return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= 16_384 && ![...value].some((character) => character.codePointAt(0)! < 32 && character !== "\t" && character !== "\n" && character !== "\r" || character.codePointAt(0) === 127); }
 function safeText(value: unknown, maximum: number): value is string { return typeof value === "string" && Buffer.byteLength(value, "utf8") <= maximum && ![...value].some((character) => character.codePointAt(0)! < 32 || character.codePointAt(0) === 127); }
 function safeJson(value: unknown, depth = 0): boolean { if (depth > 16) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 8 * 1024); if (Array.isArray(value)) return value.length <= 128 && value.every((entry) => safeJson(entry, depth + 1)); if (!record(value) || Object.keys(value).length > 128) return false; return Object.entries(value).every(([key, entry]) => safeText(key, 128) && !/(?:token|secret|password|authorization|credential|provenance|runner|consumer|requester|source_kind)/iu.test(key) && safeJson(entry, depth + 1)); }
-function safeResultJson(value: unknown, depth = 0): boolean { if (depth > 8) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 4 * 1024); if (Array.isArray(value)) return value.length <= 64 && value.every((entry) => safeResultJson(entry, depth + 1)); if (!plainRecord(value) || Object.keys(value).length > 64) return false; return Object.entries(value).every(([key, entry]) => safeResultKey(key) && safeResultJson(entry, depth + 1)); }
+/**
+ * One traversal owner for both undeclared relay boundaries, with the key policy
+ * as the only difference between them.
+ *
+ * Undeclared ARGUMENTS additionally refuse authority STATE keys
+ * (`grant_revision`, `policy_version`, `credential_version`), because an
+ * argument is the direction a consumer could push authority INTO. They do NOT
+ * refuse the bare `*_ref` handle idiom — see `isAuthorityStateKey` for why
+ * refusing it would re-create #700's dead session for the next capability that
+ * takes a Gateway-minted handle.
+ *
+ * Undeclared RESULTS keep the result key policy unchanged, deliberately: `data`
+ * is capability-owned, and a test pins that asymmetry so a later "unify these"
+ * cleanup fails loudly instead of refusing working responses.
+ *
+ * The argument path also inherits the RESULT bounds — depth 8, 64 entries,
+ * 4 KiB strings, plain prototypes — rather than the looser ones `safeJson`
+ * applied. That is a deliberate tightening with one known edge: a declared
+ * message body may reach 16 KiB through `safeReplyText`, so an undeclared
+ * messaging-shaped capability is capped lower than its declared sibling. The
+ * declared capability is the one that needs the room; an undeclared relay does
+ * not get to assume it.
+ */
+function safeRelayJson(value: unknown, isSafeKey: (key: string) => boolean, depth = 0): boolean { if (depth > 8) return false; if (value === null || typeof value === "boolean") return true; if (typeof value === "number") return Number.isFinite(value); if (typeof value === "string") return safeText(value, 4 * 1024); if (Array.isArray(value)) return value.length <= 64 && value.every((entry) => safeRelayJson(entry, isSafeKey, depth + 1)); if (!plainRecord(value) || Object.keys(value).length > 64) return false; return Object.entries(value).every(([key, entry]) => isSafeKey(key) && safeRelayJson(entry, isSafeKey, depth + 1)); }
+function safeResultJson(value: unknown): boolean { return safeRelayJson(value, safeResultKey); }
+function safeUndeclaredArgumentJson(value: unknown): boolean { return safeRelayJson(value, (key) => safeResultKey(key) && !isAuthorityStateKey(key)); }
 function safeResultKey(value: string): boolean { return safeText(value, 128) && !/(?:token|secret|password|authorization|credential|provenance|runner|consumer|requester|source_kind|attachment|binary|body|header|url|uri|link|path|locator|acl|permission|__proto__|constructor|prototype)/iu.test(value); }
 function knownV4Capability(value: unknown): value is string { return typeof value === "string" && (V4_READ_CAPABILITIES.has(value) || V4_WRITE_CAPABILITIES.has(value)); }
-function opaqueResultRef(value: unknown): value is string { return typeof value === "string" && /^result:[a-f0-9]{64}$/u.test(value); }
-function opaqueTargetRef(value: unknown): value is string { return typeof value === "string" && /^target:[a-f0-9]{64}$/u.test(value); }
-function opaqueMessageRef(value: unknown): value is string { return typeof value === "string" && /^message:[a-f0-9]{64}$/u.test(value); }
-function opaqueThreadRef(value: unknown): value is string { return typeof value === "string" && /^thread:[a-f0-9]{64}$/u.test(value); }
-function opaqueArtifactRef(value: unknown): value is string { return typeof value === "string" && /^artifact:[a-f0-9]{64}$/u.test(value); }
 function requireRecord(value: unknown): Record<string, unknown> { if (!record(value)) invalid(); return value; }
 function requireExactKeys(value: Record<string, unknown>, expected: readonly string[], optional: readonly string[] = []): void { const keys = Object.keys(value).sort(); const allowed = [...expected].sort(); const required = allowed.filter((key) => !optional.includes(key)); if (keys.length < required.length || keys.length > allowed.length || !keys.every((key) => allowed.includes(key)) || !required.every((key) => Object.hasOwn(value, key))) invalid(); }
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean { const keys = Object.keys(value).sort(); return keys.length === expected.length && keys.every((key, index) => key === expected[index]); }

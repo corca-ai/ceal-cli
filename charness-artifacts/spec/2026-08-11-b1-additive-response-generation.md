@@ -12,12 +12,11 @@ also rejects an undeclared capability even when its arguments and result obey
 the provider-neutral relay boundary, ending the session on ordinary version
 skew.
 
-Gateway commit `22e151053747ae1db8d5ea3ebe969a7c7756521a` proposed the repair in
-Protocol `0.72.14`. Its local packet is development evidence only, and release
-critique reproduced two boundary defects in it: authority nouns followed by
-revision/version metadata are stripped rather than refused, and undeclared
-capability arguments admit locator/permission/authority-shaped keys. Do not
-vendor this packet. A corrected replacement is required before implementation.
+Gateway Protocol `0.72.16` at commit
+`ce5db611c12546dabb91d33328169493c8c3b2af` corrects the two boundary defects
+the release critique reproduced in `0.72.14`. Its local packet is development
+evidence only; the last signed handoff remains `0.72.13`, so consuming it opens
+implementation while keeping every release path quarantined.
 
 ## Capability Contract
 
@@ -33,6 +32,9 @@ table.
 
 - Consume the corrected tarball/provenance as a Gateway-issued artifact;
   never edit frozen Protocol source by hand.
+- Corrected packet identity: Protocol tree
+  `379ea7bccb43ed78df1d12afed9f5f52b0f1072d`, tarball SHA-256
+  `3c0445cb4308aae07062be9a40a959e919140ce616c5fc038e1c7d9d4bb76dbc`.
 - Use the tarball for packed-artifact proof. Re-vendor source/test/conformance
   only from the exact Gateway commit whose Protocol tree equals the packet's
   declared `protocol_tree`, then update dependencies and

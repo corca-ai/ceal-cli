@@ -218,6 +218,84 @@ export function requireExactKeys(record: Record<string, unknown>, allowedKeys: s
 	for (const key of allowed) if (!optional.has(key) && !Object.hasOwn(record, key)) invalidRequestOrResponse();
 }
 
+/**
+ * Response-direction key handling for NON-AUTHORITY objects (#700 server half).
+ *
+ * Requires the declared contract exactly as `requireExactKeys` does, and then
+ * REMOVES every other key instead of failing the response. Removal rather than
+ * tolerance is the point: an ignored unknown key would still be sitting on the
+ * object a consumer later reads, so the decoder would be vouching for a field
+ * it never validated. After this runs, what the caller holds is exactly the
+ * contract it decoded against.
+ *
+ * Use it only where an older peer that never sees the added key reaches the
+ * same decision. Request envelopes, authority-bearing objects, notification
+ * bindings, and every closed enum keep `requireExactKeys` and their own value
+ * checks — a new enum MEMBER is still a breaking change, and nothing here
+ * changes that.
+ */
+export function retainDeclaredResponseKeys(record: Record<string, unknown>, knownKeys: string[], optionalKeys: string[] = []): void {
+	const known = new Set(knownKeys);
+	const optional = new Set(optionalKeys);
+	for (const key of known) if (!optional.has(key) && !Object.hasOwn(record, key)) invalidRequestOrResponse();
+	for (const key of Object.keys(record)) {
+		if (known.has(key)) continue;
+		if (isAuthorityShapedKey(key)) invalidRequestOrResponse();
+		delete record[key];
+	}
+}
+
+/**
+ * The enforced half of "additive means guidance, never authority".
+ *
+ * An undeclared key that NAMES an identity, decision, grant, policy, scope, or
+ * credential is refused rather than stripped. Stripping would be safe for the
+ * client — it never reaches a consumer either way — but it would let a Gateway
+ * quietly start emitting authority-shaped state that no peer ever agreed to,
+ * and the divergence would surface only when someone decided to read it. A
+ * refusal makes that a release event, which is exactly what authority should
+ * still cost.
+ *
+ * Scoped to this function on purpose: `FORBIDDEN_AUTHORITY_KEY` is reused for
+ * the names it already owns, and the wider suffix rule applies only to keys
+ * nobody declared. Every legitimate `*_ref` in this protocol is a declared key
+ * and is retained by the check above before this runs.
+ */
+// The trailing metadata group is the half a `$` anchor alone missed, reported by
+// the ceal-cli consumer against the built 0.72.14 decoder: `grant_revision`,
+// `policy_version`, `scope_revision`, and `credential_version` are authority
+// state carrying its own generation counter, and every one of them was being
+// stripped as ordinary guidance. An authority noun does not stop naming
+// authority because a version number follows it. Declared keys never reach
+// here — `grant_revision` IS declared on the call response and is retained
+// above — so this only widens the refusal for keys nobody agreed to.
+const AUTHORITY_METADATA_SUFFIX = "(?:_(?:revisions?|versions?|generations?|ids?))*$";
+// Authority STATE: a value that decides what someone may do. This half applies
+// in BOTH directions, because neither peer may invent it.
+const UNDECLARED_AUTHORITY_STATE_KEY =
+	new RegExp(`(?:^|_)(?:decisions?|authority|grants?|policy|policies|scopes?|tokens?|credentials?|secrets?|permissions?|roles?)${AUTHORITY_METADATA_SUFFIX}`, "iu");
+// A bare `*_ref` is this protocol's HANDLE idiom, not authority state, and it is
+// the dominant argument shape: ten of the declared capabilities take
+// `message_ref`, `thread_ref`, `subject_ref`, `root_ref`, `upload_ref`, or
+// `artifact_ref` inside `arguments`. It is authority-shaped on a RESPONSE, where
+// an undeclared one would be a Gateway inventing state no peer agreed to, but
+// refusing it on an undeclared REQUEST would refuse the next capability that
+// takes a Gateway-minted handle — and a decode throw ends the frame loop, which
+// is the dead session #700 exists to prevent. Named authority refs
+// (`actor_ref`, `owner_ref`, `runner_ref`, `registration_ref`) stay refused in
+// both directions through FORBIDDEN_AUTHORITY_KEY.
+const UNDECLARED_HANDLE_REF_KEY = new RegExp(`(?:^|_)refs?${AUTHORITY_METADATA_SUFFIX}`, "iu");
+
+/** Refused in both directions: no peer may invent authority state. */
+export function isAuthorityStateKey(key: string): boolean {
+	return FORBIDDEN_AUTHORITY_KEY.test(key) || UNDECLARED_AUTHORITY_STATE_KEY.test(key);
+}
+
+/** The response-side rule: authority state, plus the bare handle idiom. */
+export function isAuthorityShapedKey(key: string): boolean {
+	return isAuthorityStateKey(key) || UNDECLARED_HANDLE_REF_KEY.test(key);
+}
+
 export function requireRecord(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) invalidRequestOrResponse();
 	const prototype = Object.getPrototypeOf(value);

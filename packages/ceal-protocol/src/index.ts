@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS } from "./gateway-response-types.js";
+import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
-import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
 import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
 export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
@@ -21,7 +20,7 @@ import {
 	requirePrefixedRef,
 	requireRecord,
 	requireSafeRef,
-	requireSafeText,
+	requireSafeText, retainDeclaredResponseKeys,
 	SAFE_CODE, safeJsonNodeBudgetForBytes,
 } from "./gateway-validation-primitives.js";
 export { CealProtocolValidationError, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.js";
@@ -50,7 +49,7 @@ export type {
 	CealEnrollmentResult,
 } from "./enrollment.js";
 export * from "./device-enrollment.js";
-export * from "./leased-consumer-notification-control.js";
+export * from "./leased-consumer-disposition-control.js";
 export { PORTABLE_UNIX_SOCKET_PATH_MAX_BYTES, isSafeUnixSocketPath } from "./unix-socket-path-safety.js";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
@@ -109,6 +108,7 @@ export type {
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
 export { CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+export * from "./gateway-additive-response-fields.js";
 export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.js";
 export type {
 	CealProtocolNegotiation,
@@ -264,7 +264,7 @@ function requireTargetSelector(value: unknown): void {
 }
 
 function validateSuccessResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>, responseValueMaxNodes = safeJsonNodeBudgetForBytes(MAX_RESPONSE_VALUE_BYTES)): void {
-	requireExactKeys(response, ["ok", "proof_ref_or_unavailable", "protocol_version", "request_id", "value"], ["proof_ref_or_unavailable"]);
+	retainDeclaredResponseKeys(response, ["ok", "proof_ref_or_unavailable", "protocol_version", "request_id", "value"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
 	assertSafeJsonValue(response.value, {
 		forbidAuthorityKeys: false,
@@ -306,7 +306,7 @@ function validateHostProofReference(response: Record<string, unknown>): void {
 
 function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGatewayHandshakeRequest>): void {
 	const handshake = requireRecord(value);
-	requireExactKeys(handshake, [
+	retainDeclaredResponseKeys(handshake, [
 		"client_ref", "eligible_profiles", "host_decision", "instance_ref", "membership_ref",
 		"negotiated_protocol_version", "non_claims", "profile_ref", "proof_level",
 		"registration_ref", "schema_version", "subject_ref", "supported_gateway_protocol_range",
@@ -339,7 +339,7 @@ function validateEligibleProfiles(value: unknown): void {
 
 function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGatewayDiscoverRequest>): void {
 	const discovery = requireRecord(value);
-	requireExactKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "target_catalog", "targets"]);
+	retainDeclaredResponseKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "target_catalog", "targets"]);
 	if (discovery.schema_version !== "ceal.gateway_discovery.v2"
 		|| discovery.profile_ref !== expectedRequest.profile_ref
 		|| discovery.host_decision !== "accepted"
@@ -364,7 +364,7 @@ function validateTargetCatalog(
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	const capability = requireRecord(value);
-	requireExactKeys(capability, ["announcement_policy", "capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["announcement_policy", "write_contract"]);
+	retainDeclaredResponseKeys(capability, ["announcement_policy", "capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["announcement_policy", "write_contract"]);
 	requireSafeRef(capability.capability_id);
 	if (seen.has(String(capability.capability_id))
 		|| !["read", "write"].includes(String(capability.effect))
@@ -535,7 +535,7 @@ function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<str
 
 function validateDiscoveryTarget(value: unknown, seen: Set<string>, availableCapabilities: ReadonlySet<string>): void {
 	const target = requireRecord(value);
-	requireExactKeys(target, ["access", "capability_access", "capability_ids", "label", "target_ref"]);
+	retainDeclaredResponseKeys(target, ["access", "capability_access", "capability_ids", "label", "target_ref"]);
 	requirePrefixedRef(target.target_ref, "target:");
 	if (seen.has(target.target_ref)) invalidResponse();
 	seen.add(target.target_ref);
@@ -556,7 +556,7 @@ function validateTargetCapabilityIds(target: Record<string, unknown>, availableC
 
 function validateCallValue(value: unknown, expectedRequest: Readonly<CealGatewayCallRequest>): void {
 	const call = requireRecord(value);
-	requireExactKeys(call, ["cache_origin", "capability_id", "data", "grant_ref", "grant_revision", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"], ["cache_origin"]);
+	retainDeclaredResponseKeys(call, ["cache_origin", "capability_id", "data", "grant_ref", "grant_revision", "host_decision", "non_claims", "proof_level", "redaction", "schema_version", "target_ref"], ["cache_origin"]);
 	if (call.schema_version !== "ceal.gateway_call_result.v1"
 		|| call.capability_id !== expectedRequest.body.capability_id
 		|| call.target_ref !== expectedRequest.body.target_ref
@@ -609,7 +609,7 @@ function validateRateLimitPolicy(value: unknown): void {
 
 function validateCallRedaction(value: unknown): void {
 	const redaction = requireRecord(value);
-	requireExactKeys(redaction, ["omitted_classes", "state"]);
+	retainDeclaredResponseKeys(redaction, ["omitted_classes", "state"]);
 	if (redaction.state !== "applied"
 		|| !Array.isArray(redaction.omitted_classes)
 		|| redaction.omitted_classes.length === 0
@@ -619,7 +619,7 @@ function validateCallRedaction(value: unknown): void {
 
 function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<CealGatewayAuditReadbackRequest>): void {
 	const readback = requireRecord(value);
-	requireExactKeys(readback, ["events", "request_id", "schema_version"]);
+	retainDeclaredResponseKeys(readback, ["events", "request_id", "schema_version"]);
 	const targetRequestId = readback.request_id;
 	if (readback.schema_version !== "ceal.gateway_audit_readback.v1" || targetRequestId !== expectedRequest.body.request_id) invalidResponse();
 	if (!Array.isArray(readback.events) || readback.events.length === 0 || readback.events.length > 128) invalidResponse();
@@ -628,7 +628,7 @@ function validateAuditReadbackValue(value: unknown, expectedRequest: Readonly<Ce
 
 function validateAuditEvent(value: unknown, expectedRequest: Readonly<CealGatewayAuditReadbackRequest>, targetRequestId: string): void {
 	const event = requireRecord(value);
-	requireExactKeys(event, [
+	retainDeclaredResponseKeys(event, [
 		"auth_decision",
 		"call",
 		"client_ref",
@@ -680,7 +680,7 @@ function validateWriteReceiptReadbackValue(value: unknown, expectedRequest: Read
 	requireExactKeys(projection, ["receipt", "schema_version"]);
 	if (projection.schema_version !== "ceal.gateway_write_receipt_readback.v1") invalidResponse();
 	const receipt = requireRecord(projection.receipt);
-	requireExactKeys(receipt, [
+	retainDeclaredResponseKeys(receipt, [
 		"admission_context_sha256", "idempotency_claim_sha256", "normalized_mutation_sha256", "provider_readback", "provider_result_sha256",
 		"provider_state", "purpose_sha256", "schema_version", "source_evidence_sha256", "source_kind", "write_request_sha256",
 	], ["admission_context_sha256", "provider_result_sha256", "purpose_sha256"]);
@@ -823,10 +823,10 @@ function validateFailureResponse(response: Record<string, unknown>, expectedRequ
 		validatePolicyDenial(response, error, expectedRequest);
 		return;
 	}
-	requireExactKeys(response, ["error", "ok", "proof_ref_or_unavailable", "protocol_version", "request_id"], ["proof_ref_or_unavailable"]);
+	retainDeclaredResponseKeys(response, ["error", "ok", "proof_ref_or_unavailable", "protocol_version", "request_id"], ["proof_ref_or_unavailable"]);
 	validateResponseIdentity(response, expectedRequest.request_id);
 	if ("proof_ref_or_unavailable" in response) validateProofReference(response.proof_ref_or_unavailable);
-	requireExactKeys(error, ["code", "message", "next_action", "recovery"], ["next_action", "recovery"]);
+	retainDeclaredResponseKeys(error, ["code", "message", "next_action", "recovery"], ["next_action", "recovery"]);
 	if (typeof error.code !== "string" || !SAFE_CODE.test(error.code)) invalidResponse();
 	requireSafeText(error.message, 512);
 	if ("next_action" in error) requireSafeText(error.next_action, 512);
@@ -837,7 +837,7 @@ const MAX_RECOVERY_RETRY_AFTER_MS = 60 * 60 * 1000;
 
 function validateFailureRecovery(value: unknown): void {
 	const recovery = requireRecord(value);
-	requireExactKeys(recovery, ["kind", "retry_after_ms"], ["retry_after_ms"]);
+	retainDeclaredResponseKeys(recovery, ["kind", "retry_after_ms"], ["retry_after_ms"]);
 	if (!(CEAL_GATEWAY_RECOVERY_KINDS as readonly unknown[]).includes(recovery.kind)) invalidResponse();
 	if ("retry_after_ms" in recovery) {
 		const wait = recovery.retry_after_ms;

@@ -37,7 +37,7 @@
 		"coverage": "c8 node --test test/*.test.mjs"
 	},
 	"dependencies": {
-		"@corca-ai/ceal-protocol": "0.72.13"
+		"@corca-ai/ceal-protocol": "0.72.16"
 	},
 	"devDependencies": {
 		"@types/node": "24.6.0",

@@ -24,6 +24,8 @@ import {
 	CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA,
+	CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA,
 	decodeCealLeasedConsumerControlRequest,
 	decodeCealLeasedConsumerControlResponse,
@@ -157,7 +159,7 @@ test("capability control v4 carries generic read and write results through exact
 		},
 	};
 	for (const result of [
-		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"c".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded" }] } },
+		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"c".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.update", effect: "write", result_ref: `result:${"d".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"e".repeat(64)}` }, { kind: "message", ref: `message:${"f".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA, terminal: "readback_confirmed", text: "updated" } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.delete", effect: "write", result_ref: `result:${"f".repeat(64)}`, handles: [], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA, terminal: "readback_confirmed" } },
 	]) {
@@ -165,6 +167,133 @@ test("capability control v4 carries generic read and write results through exact
 		assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call).operation, "call");
 		assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response).operation, "call");
 	}
+	// #700: the relay forwards a capability the Gateway declares and this table
+	// does not. It executes and authorizes nothing, so gating the relay on a
+	// fixed table made every new Gateway capability a worker release -- and the
+	// failure was a dead session, not a skew message, because a decode throw ends
+	// the frame loop.
+	const undeclaredCall = {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+		operation: "call",
+		input: {
+			schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
+			capability_id: "calendar.event.list", target_ref: `target:${"a".repeat(64)}`,
+			purpose: "list events", arguments: { schema_version: "ceal.calendar_event_list_input.v1", window: "week" },
+		},
+	};
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(undeclaredCall).operation, "call");
+	const undeclaredResult = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "calendar.event.list", effect: "read",
+		result_ref: `result:${"a".repeat(64)}`, handles: [], data: { people: [{ display_name: "Alice" }], truncated: false },
+	} } };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(undeclaredResult).operation, "call");
+
+	// What the relay DOES own still holds for an undeclared capability: the id
+	// shape, and result JSON free of credential and locator material.
+	for (const unsafe of [
+		{ capability_id: "Message.Search", data: { ok: true } },
+		{ capability_id: "message", data: { ok: true } },
+		{ capability_id: "calendar.event.list", data: { credential: "leaked" } },
+		{ capability_id: "calendar.event.list", data: { source_url: "https://unsafe.example" } },
+		{ capability_id: "calendar.event.list", data: { locator: "C0123456789" } },
+	]) {
+		const response = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: unsafe.capability_id, effect: "read",
+			result_ref: `result:${"a".repeat(64)}`, handles: [], data: unsafe.data,
+		} } };
+		assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response), TypeError, unsafe.capability_id);
+	}
+
+	// Reproduced by the ceal-cli consumer against the built 0.72.14 decoder: the
+	// undeclared ARGUMENT path used a weaker predicate than the undeclared result
+	// path, so it admitted exactly the material the result path refuses, plus
+	// authority state carrying its own generation counter. The doc comment on
+	// decodeCapabilityArguments already claimed "locator-free"; only the code
+	// disagreed.
+	// The first three are refused by the RESULT key policy the argument path now
+	// shares; the last three isolate the authority-state rule, which is the half
+	// that did not exist before. Kept in one loop, distinguished in this comment,
+	// so the count is not read as six proofs of one rule.
+	for (const unsafeArguments of [
+		{ locator: "C0123456789" },
+		{ provider_locator: "/private/path" },
+		{ permissions: ["admin"] },
+		{ grant_revision: 99 },
+		{ policy_version: 99 },
+		{ credential_version: 99 },
+	]) {
+		const call = {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+			operation: "call",
+			input: {
+				schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
+				capability_id: "calendar.event.list", target_ref: `target:${"a".repeat(64)}`,
+				purpose: "list events", arguments: unsafeArguments,
+			},
+		};
+		assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(call), TypeError, JSON.stringify(unsafeArguments));
+	}
+
+	// Two positive controls, because the boundary had to NARROW without closing.
+	// The second one is the one that matters: a bare `*_ref` is this protocol's
+	// HANDLE idiom, not authority state, and ten declared capabilities already
+	// take one inside `arguments`. Refusing it here would refuse the next
+	// capability that takes a Gateway-minted handle, and a decode throw ends the
+	// frame loop -- the dead session #700 exists to prevent.
+	for (const safeArguments of [
+		{ schema_version: "ceal.calendar_event_list_input.v1", window: "week", limit: 10 },
+		{ schema_version: "ceal.calendar_event_get_input.v1", event_ref: `event:${"a".repeat(64)}`, message_ref: `message:${"a".repeat(64)}` },
+	]) {
+		const call = {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+			operation: "call",
+			input: {
+				schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
+				capability_id: "calendar.event.list", target_ref: `target:${"a".repeat(64)}`,
+				purpose: "list events", arguments: safeArguments,
+			},
+		};
+		assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call).operation, "call", JSON.stringify(safeArguments));
+	}
+
+	// A named authority ref stays refused in BOTH directions, so narrowing the
+	// handle idiom did not open `actor_ref`/`owner_ref`/`runner_ref`.
+	const namedAuthorityRefArguments = {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+		operation: "call",
+		input: {
+			schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
+			capability_id: "calendar.event.list", target_ref: `target:${"a".repeat(64)}`,
+			purpose: "list events", arguments: { actor_ref: "actor:root" },
+		},
+	};
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(namedAuthorityRefArguments), TypeError);
+
+	// Invariant pin for the deliberate ASYMMETRY: the undeclared RESULT policy is
+	// NOT widened with the authority rule, because `data` is capability-owned. A
+	// later "unify these two predicates" cleanup must fail here rather than start
+	// refusing working responses.
+	const undeclaredResultWithRefAndRevision = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "calendar.event.list", effect: "read",
+		result_ref: `result:${"a".repeat(64)}`, handles: [], data: { item_ref: "item:one", grant_revision: 1 },
+	} } };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(undeclaredResultWithRefAndRevision).operation, "call");
+
+	// A DECLARED capability keeps its exact result rule, so relaying an unknown
+	// one did not loosen the known ones.
+	const wrongShapeForDeclared = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read",
+		result_ref: `result:${"a".repeat(64)}`, handles: [], data: { people: [], truncated: false },
+	} } };
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(wrongShapeForDeclared), TypeError);
+
+	const unsafeAuthorResult = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [],
+		data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: "author:U0123456789", actor_kind: "human" } }] },
+	} } };
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
+	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice (U0123456789)", actor_kind: "human" };
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 		operation: "call",
@@ -498,7 +627,7 @@ test("capability control v4 declares enumerate/resolve/presentation with display
 	const response = (result) => ({ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result } });
 	const resolveResult = (items, handles) => ({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "resource.resolve", effect: "read", result_ref: `result:${"a".repeat(64)}`,
-		handles, data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v1", items },
+		handles, data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items },
 	});
 	const handles = [{ kind: "target", ref: `target:${"c".repeat(64)}` }, { kind: "thread", ref: `thread:${"d".repeat(64)}` }];
 	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response(resolveResult([{ kind: "conversation", display_name: "Release Room", handle_index: 0 }], handles))).operation, "call");
@@ -526,4 +655,87 @@ test("the internal v4 decoder and result-rule tables equal the exported ABI sets
 			result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: id, effect, result_ref: `result:${"a".repeat(64)}`, handles: [], data: { schema_version: "ceal.unknown_data.v1" } } },
 		}), TypeError, id);
 	}
+});
+
+test("survey dispatch capability accepts only opaque authority arguments and consistent zero-handle results", () => {
+	const request = {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+		operation: "call",
+		input: {
+			schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
+			capability_id: "workflow.survey_dispatch.send", target_ref: `target:${"d".repeat(64)}`,
+			purpose: "send approved survey", idempotency_key: "survey-dispatch:one",
+			arguments: { schema_version: CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA, run_id: "survey-run:one", dispatch_fingerprint: "a".repeat(64) },
+		},
+	};
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request).operation, "call");
+	for (const mutate of [
+		(value) => { value.arguments.recipient_id = "U0123456789"; },
+		(value) => { value.arguments.run_id = "unsafe run"; },
+		(value) => { value.arguments.dispatch_fingerprint = "A".repeat(64); },
+		(value) => { delete value.idempotency_key; },
+	]) {
+		const bad = structuredClone(request); mutate(bad.input);
+		assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(bad), TypeError);
+	}
+
+	const response = (data, handles = []) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call",
+		result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "workflow.survey_dispatch.send", effect: "write", result_ref: `result:${"e".repeat(64)}`, handles, data } },
+	});
+	const completed = { schema_version: CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_DATA_SCHEMA, terminal: "completed", sent_count: 2, replayed_count: 1, failed_count: 1, uncertain_count: 0 };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response(completed)).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response({ ...completed, terminal: "ack_uncertain", uncertain_count: 1 })).operation, "call");
+	for (const [data, handles] of [
+		[{ ...completed, provider_message_id: "171234.0001" }, []],
+		[{ ...completed, terminal: "ack_uncertain" }, []],
+		[{ ...completed, uncertain_count: 1 }, []],
+		[{ ...completed, sent_count: -1 }, []],
+		[{ ...completed, sent_count: "1" }, []],
+		[{ ...completed, sent_count: 1.5 }, []],
+		[{ ...completed, sent_count: Number.NaN }, []],
+		[{ ...completed, failed_count: Number.MAX_SAFE_INTEGER + 1 }, []],
+		[completed, [{ kind: "message", ref: `message:${"f".repeat(64)}` }]],
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(data, handles)), TypeError);
+});
+
+test("the people directory carries an addressable subject ref without ever carrying a provider identity", async () => {
+	const { CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA } = await import("../dist/index.js");
+	const call = (arguments_) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
+		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id: "directory.people.search", target_ref: `target:${"e".repeat(64)}`, purpose: "declared", arguments: arguments_ },
+	});
+	const schema_version = CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA;
+	// Listing the whole active Profile is the ordinary first call, so both
+	// arguments are optional.
+	for (const good of [{ schema_version }, { schema_version, query: "ali" }, { schema_version, limit: 50 }, { schema_version, query: "ali", limit: 1 }]) {
+		assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call(good)).operation, "call");
+	}
+	for (const bad of [{ schema_version, query: " " }, { schema_version, query: "a".repeat(129) }, { schema_version, limit: 0 }, { schema_version, limit: 51 }, { schema_version, limit: 1.5 }, { schema_version, subject_ref: "subject:alice" }]) {
+		assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(call(bad)), TypeError);
+	}
+
+	const response = (items, truncated) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call",
+		result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "directory.people.search", effect: "read", result_ref: `result:${"a".repeat(64)}`,
+			handles: [], data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items, ...(truncated === undefined ? {} : { truncated }) },
+		} },
+	});
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "identity", display_name: "Alice", subject_ref: "subject:alice", actor_kind: "human", text: "Engineer · Platform" }], true)).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "identity", display_name: "Alice" }])).operation, "call");
+	for (const [items, truncated] of [
+		// A Slack-shaped id must never ride the subject ref, the subject ref is
+		// identity-only, and truncation is a boolean fact or absent.
+		[[{ kind: "identity", display_name: "Alice", subject_ref: "subject:U0AAAAAAAAA" }], false],
+		[[{ kind: "identity", display_name: "Alice", subject_ref: "U0AAAAAAAAA" }], false],
+		[[{ kind: "identity", display_name: "Alice", subject_ref: "alice" }], false],
+		[[{ kind: "usergroup", display_name: "Platform", subject_ref: "subject:alice" }], false],
+		[[{ kind: "identity", display_name: "Alice", subject_ref: "subject:B0AAAAAAAAA" }], false],
+		// actor_kind is identity-only and closed to its four declared values.
+		[[{ kind: "message", display_name: "Alice", actor_kind: "human" }], false],
+		[[{ kind: "identity", display_name: "Alice", actor_kind: "colleague" }], false],
+		[[{ kind: "identity", display_name: "Alice", subject_ref: "subject:alice", provider_user_id: "U0AAAAAAAAA" }], false],
+		[[{ kind: "identity", display_name: "Alice" }], "yes"],
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(items, truncated)), TypeError);
 });

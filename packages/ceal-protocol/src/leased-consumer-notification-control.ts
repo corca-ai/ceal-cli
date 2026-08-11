@@ -24,6 +24,7 @@ import {
 } from "./leased-consumer-notification.js";
 
 export * from "./leased-consumer-control.js";
+export * from "./leased-consumer-directory-reads.js";
 export * from "./leased-consumer-agent-control.js";
 export * from "./leased-consumer-presentation.js";
 export * from "./leased-consumer-notification.js";

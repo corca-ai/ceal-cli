@@ -362,13 +362,21 @@ test("client response decoder accepts exact operation-correlated Gateway results
 		{ kind: "retry", retry_after_ms: -1 },
 		{ kind: "retry", retry_after_ms: 24 * 60 * 60 * 1000 },
 		{ kind: "retry", retry_after_ms: 5.5 },
-		{ kind: "retry", note: "extra keys are rejected" },
 		"retry",
 	]) {
 		const invalidRecovery = structuredClone(failure);
 		invalidRecovery.error.recovery = recovery;
 		assert.throws(() => decodeCealClientResponse(invalidRecovery, handshakeRequest), hasCode("invalid_client_response"));
 	}
+
+	// #700: an additive non-authority key on a response object is removed, not
+	// rejected. Removed rather than tolerated, so a consumer cannot read a field
+	// this decoder never validated. The closed `kind` vocabulary above is
+	// unaffected -- a new enum MEMBER is still breaking.
+	const additiveRecovery = structuredClone(failure);
+	additiveRecovery.error.recovery = { kind: "retry", retry_after_ms: 1000, note: "additive guidance" };
+	const decodedRecovery = decodeCealClientResponse(additiveRecovery, handshakeRequest);
+	assert.deepEqual(decodedRecovery.error.recovery, { kind: "retry", retry_after_ms: 1000 });
 
 	const readbackRequest = envelope("readback", { request_id: callRequest.request_id });
 	const readback = readbackResponse(readbackRequest, callRequest.request_id);
@@ -730,7 +738,6 @@ test("call decoder rejects envelope mismatch and unsafe material while leaving c
 	const cases = [
 		{ ...exact, request_id: "request:other" },
 		{ ...exact, protocol_version: "2.0.0" },
-		{ ...exact, extra: true },
 		{ ...exact, proof_ref_or_unavailable: { state: "unavailable", reason: "pending", owner_surface: "Gateway audit" } },
 	];
 
@@ -762,9 +769,31 @@ test("call decoder rejects envelope mismatch and unsafe material while leaving c
 	authorityPromotion.value.policy_ref = "policy:test";
 	cases.push(authorityPromotion);
 
+	// Reproduced by the ceal-cli consumer against the built 0.72.14 decoder: the
+	// authority-shaped suffix matcher anchored at `$`, so an authority noun
+	// carrying its own generation counter fell through and was STRIPPED as
+	// ordinary guidance. A grant does not stop naming authority because a
+	// revision number follows it.
+	// Placed on the ENVELOPE, which declares only ok/proof/protocol/request/value:
+	// `grant_revision` is a DECLARED key of the call response value and is
+	// retained there by contract, so asserting it inside `value` would have
+	// tested the wrong surface.
+	for (const versionedAuthorityKey of ["grant_revision", "policy_version", "scope_revision", "credential_version", "role_id", "permissions_generation"]) {
+		const versionedAuthority = structuredClone(exact);
+		versionedAuthority[versionedAuthorityKey] = 99;
+		cases.push(versionedAuthority);
+	}
+
 	for (const [index, value] of cases.entries()) {
 		assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"), `case ${index}`);
 	}
+
+	// #700 on the success envelope: a benign additive top-level key is removed,
+	// while `policy_ref` above proves an authority-shaped one is still refused.
+	// The two together are the whole boundary -- guidance is additive, authority
+	// is a release event.
+	const additiveEnvelope = { ...exact, gateway_hint: "additive guidance" };
+	assert.equal(Object.hasOwn(decodeCealClientResponse(additiveEnvelope, callRequest), "gateway_hint"), false);
 
 	const malformedInputRequest = structuredClone(callRequest);
 	malformedInputRequest.body.arguments.extra = true;
@@ -823,8 +852,13 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	const exact = callResponse(callRequest);
 	for (const value of [
 		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "bad-code", message: "No." } },
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "Leak." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", policy_decision: "Leak." } },
 	]) assert.throws(() => decodeCealClientResponse(value, callRequest), hasCode("invalid_client_response"));
+
+	// The benign sibling of that authority-shaped key is removed instead, so the
+	// undeclared field cannot reach a consumer either way.
+	const additiveError = { ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "guidance" } };
+	assert.deepEqual(decodeCealClientResponse(additiveError, callRequest).error, { code: "denied", message: "No.", next_action: "Retry." });
 
 	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
 	const handshake = handshakeResponse(handshakeRequest);

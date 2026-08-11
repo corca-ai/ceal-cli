@@ -19,7 +19,7 @@ const EXPECTED_CASE_COUNTS: Readonly<Record<GovernedRunnerConformanceKind, numbe
 	dispatch: 3,
 	egress: 3,
 	wake: 6,
-	capability_result: 3,
+	capability_result: 4,
 };
 const PROOF_LEVEL_KEYS = new Set(["proof_level", "highest_proof_level_reached", "requirement", "reached"]);
 const FORBIDDEN_VALUE_KEY = /^(?:secret|password|token|raw_provider_payload|private_path)$/iu;
