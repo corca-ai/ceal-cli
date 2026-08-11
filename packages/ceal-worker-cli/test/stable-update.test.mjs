@@ -1,11 +1,22 @@
 /* global process */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readlinkSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { sha256 } from "../dist/sha256.js";
 import { createCealStableUpdateRunner } from "../dist/stable-update.js";
 
 test("stable updater only launches a current managed worker generation and reads back its replacement", async (context) => {
@@ -14,14 +25,15 @@ test("stable updater only launches a current managed worker generation and reads
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
 	const releases = path.join(worker, "releases");
-	const first = path.join(releases, "0.65.0-linux-amd64-test");
-	const second = path.join(releases, "0.65.1-linux-amd64-test");
-	mkdirSync(first, { recursive: true });
-	writeWorkerBinary(path.join(first, "ceal-linux-amd64"), "0.65.0");
-	writeFileSync(path.join(first, "install.sh"), updateScript(second));
-	chmodSync(path.join(first, "install.sh"), 0o755);
-	writeInventory(first);
-	symlinkSync("releases/0.65.0-linux-amd64-test", path.join(worker, "current"));
+	const stagedFirst = path.join(releases, ".first");
+	const second = nextGenerationPath(worker, "0.65.1", "linux-amd64");
+	mkdirSync(stagedFirst, { recursive: true });
+	writeWorkerBinary(path.join(stagedFirst, "ceal-linux-amd64"), "0.65.0");
+	writeFileSync(path.join(stagedFirst, "install.sh"), updateScript(second));
+	chmodSync(path.join(stagedFirst, "install.sh"), 0o755);
+	writeInventory(stagedFirst);
+	const first = finalizeGeneration(stagedFirst, "0.65.0", "linux-amd64");
+	symlinkSync(path.join("releases", path.basename(first)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 
@@ -33,7 +45,7 @@ test("stable updater only launches a current managed worker generation and reads
 	assert.equal(result.previous_version, "0.65.0");
 	assert.equal(result.installed_version, "0.65.1");
 	assert.equal(result.platform, "linux-amd64");
-	assert.equal(result.artifact_sha256, digest(readFileSync(path.join(second, "ceal-linux-amd64"))));
+	assert.equal(result.artifact_sha256, sha256(readFileSync(path.join(second, "ceal-linux-amd64"))));
 	assert.equal(typeof result.elapsed_ms, "number");
 	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 	assert.deepEqual(stages, ["check", "download_install", "verify", "installed_readback"]);
@@ -44,14 +56,15 @@ test("stable updater recognizes a managed darwin worker generation", async (cont
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
-	const first = path.join(worker, "releases", "0.65.1-darwin-arm64-worker");
-	const second = path.join(worker, "releases", "0.65.2-darwin-arm64-worker");
-	mkdirSync(first, { recursive: true });
-	writeWorkerBinary(path.join(first, "ceal-darwin-arm64"), "0.65.1");
-	writeFileSync(path.join(first, "install-ceal.sh"), updateScript(second, "0.65.2", "ceal-darwin-arm64"));
-	chmodSync(path.join(first, "install-ceal.sh"), 0o755);
-	writeInventory(first, "install-ceal.sh");
-	symlinkSync("releases/0.65.1-darwin-arm64-worker", path.join(worker, "current"));
+	const stagedFirst = path.join(worker, "releases", ".first");
+	const second = nextGenerationPath(worker, "0.65.2", "darwin-arm64");
+	mkdirSync(stagedFirst, { recursive: true });
+	writeWorkerBinary(path.join(stagedFirst, "ceal-darwin-arm64"), "0.65.1");
+	writeFileSync(path.join(stagedFirst, "install-ceal.sh"), updateScript(second, "0.65.2", "ceal-darwin-arm64"));
+	chmodSync(path.join(stagedFirst, "install-ceal.sh"), 0o755);
+	writeInventory(stagedFirst, "install-ceal.sh");
+	const first = finalizeGeneration(stagedFirst, "0.65.1", "darwin-arm64");
+	symlinkSync(path.join("releases", path.basename(first)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-darwin-arm64", path.join(install, "ceal"));
 	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
@@ -79,13 +92,14 @@ test("stable updater rejects a verified installer result that would downgrade th
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
 	const releases = path.join(worker, "releases");
-	const first = path.join(releases, "0.65.1-linux-amd64-test");
-	mkdirSync(first, { recursive: true });
-	writeWorkerBinary(path.join(first, "ceal-linux-amd64"), "0.65.1");
-	writeFileSync(path.join(first, "install.sh"), downgradeScript());
-	chmodSync(path.join(first, "install.sh"), 0o755);
-	writeInventory(first);
-	symlinkSync("releases/0.65.1-linux-amd64-test", path.join(worker, "current"));
+	const stagedFirst = path.join(releases, ".first");
+	mkdirSync(stagedFirst, { recursive: true });
+	writeWorkerBinary(path.join(stagedFirst, "ceal-linux-amd64"), "0.65.1");
+	writeFileSync(path.join(stagedFirst, "install.sh"), downgradeScript());
+	chmodSync(path.join(stagedFirst, "install.sh"), 0o755);
+	writeInventory(stagedFirst);
+	const first = finalizeGeneration(stagedFirst, "0.65.1", "linux-amd64");
+	symlinkSync(path.join("releases", path.basename(first)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 	const stages = [];
@@ -102,14 +116,15 @@ test("stable updater runs only the checksum-bound migrated worker installer", as
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
-	const first = path.join(worker, "releases", "0.65.1-linux-amd64-worker");
-	const second = path.join(worker, "releases", "0.65.2-linux-amd64-worker");
-	mkdirSync(first, { recursive: true });
-	writeWorkerBinary(path.join(first, "ceal-linux-amd64"), "0.65.1");
-	writeFileSync(path.join(first, "install-ceal.sh"), updateScript(second, "0.65.2"));
-	chmodSync(path.join(first, "install-ceal.sh"), 0o755);
-	writeInventory(first, "install-ceal.sh");
-	symlinkSync("releases/0.65.1-linux-amd64-worker", path.join(worker, "current"));
+	const stagedFirst = path.join(worker, "releases", ".first");
+	const second = nextGenerationPath(worker, "0.65.2", "linux-amd64");
+	mkdirSync(stagedFirst, { recursive: true });
+	writeWorkerBinary(path.join(stagedFirst, "ceal-linux-amd64"), "0.65.1");
+	writeFileSync(path.join(stagedFirst, "install-ceal.sh"), updateScript(second, "0.65.2"));
+	chmodSync(path.join(stagedFirst, "install-ceal.sh"), 0o755);
+	writeInventory(stagedFirst, "install-ceal.sh");
+	const first = finalizeGeneration(stagedFirst, "0.65.1", "linux-amd64");
+	symlinkSync(path.join("releases", path.basename(first)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })();
@@ -283,18 +298,19 @@ function scratch(context, label) {
 function installedGeneration(root, installerBody, workerBody = null) {
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
-	const generation = path.join(worker, "releases", "0.65.0-linux-amd64-test");
-	mkdirSync(generation, { recursive: true });
-	const binary = path.join(generation, "ceal-linux-amd64");
+	const stagedGeneration = path.join(worker, "releases", ".first");
+	mkdirSync(stagedGeneration, { recursive: true });
+	const binary = path.join(stagedGeneration, "ceal-linux-amd64");
 	if (workerBody === null) writeWorkerBinary(binary, "0.65.0");
 	else {
 		writeFileSync(binary, `#!/usr/bin/env sh\n${workerBody}`);
 		chmodSync(binary, 0o755);
 	}
-	writeFileSync(path.join(generation, "install.sh"), `#!/usr/bin/env sh\n${installerBody}`);
-	chmodSync(path.join(generation, "install.sh"), 0o755);
-	writeInventory(generation);
-	symlinkSync("releases/0.65.0-linux-amd64-test", path.join(worker, "current"));
+	writeFileSync(path.join(stagedGeneration, "install.sh"), `#!/usr/bin/env sh\n${installerBody}`);
+	chmodSync(path.join(stagedGeneration, "install.sh"), 0o755);
+	writeInventory(stagedGeneration);
+	const generation = finalizeGeneration(stagedGeneration, "0.65.0", "linux-amd64");
+	symlinkSync(path.join("releases", path.basename(generation)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 	return path.join(install, "ceal");
@@ -320,7 +336,7 @@ cat > '${path.join(nextGeneration, "install.sh")}' <<'EOF'
 exit 0
 EOF
 chmod 755 '${path.join(nextGeneration, "install.sh")}'
-printf '${digest("#!/usr/bin/env sh\nexit 0\n")}  install.sh\\n' > '${path.join(nextGeneration, "SHA256SUMS")}'
+printf '${sha256("#!/usr/bin/env sh\nexit 0\n")}  install.sh\\n' > '${path.join(nextGeneration, "SHA256SUMS")}'
 rm -f "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
 ln -s 'releases/${path.basename(nextGeneration)}' "$CEAL_INSTALL_DIR/.ceal-cli/worker/current"
 printf 'installer prose must not escape\\n'
@@ -351,9 +367,18 @@ exit 2
 
 function writeInventory(generation, installerName = "install.sh") {
 	const installer = readFileSync(path.join(generation, installerName));
-	writeFileSync(path.join(generation, "SHA256SUMS"), `${digest(installer)}  ${installerName}\n`);
+	writeFileSync(path.join(generation, "SHA256SUMS"), `${sha256(installer)}  ${installerName}\n`);
 }
 
-function digest(bytes) {
-	return createHash("sha256").update(bytes).digest("hex");
+function finalizeGeneration(stagedGeneration, version, platform) {
+	const inventory = readFileSync(path.join(stagedGeneration, "SHA256SUMS"));
+	const generation = path.join(path.dirname(stagedGeneration), `${version}-${platform}-${sha256(inventory)}`);
+	renameSync(stagedGeneration, generation);
+	return generation;
+}
+
+function nextGenerationPath(worker, version, platform) {
+	const installer = "#!/usr/bin/env sh\nexit 0\n";
+	const inventory = `${sha256(installer)}  install.sh\n`;
+	return path.join(worker, "releases", `${version}-${platform}-${sha256(inventory)}`);
 }

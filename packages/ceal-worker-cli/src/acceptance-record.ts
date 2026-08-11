@@ -15,9 +15,10 @@
 // that performs a real provider action as a side effect is how an "evidence
 // run" becomes an unlogged write; the bounded call stays `ceal call`, and this
 // command reads back the receipt of one that already happened.
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
+import { sha256 } from "./sha256.js";
 
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
@@ -46,7 +47,18 @@ export type CealInstalledReleaseReading = { ok: true; facts: CealInstalledReleas
  * would still read as evidence to whoever receives it.
  */
 export function readInstalledReleaseFacts(binaryPath: string): CealInstalledReleaseReading {
-	const directory = path.dirname(binaryPath);
+	let installed: InstalledWorkerRelease;
+	try {
+		installed = resolveInstalledWorkerRelease(binaryPath);
+	} catch {
+		return {
+			ok: false,
+			code: "managed_install_required",
+			message: "The running binary is not the current generation of a verified managed worker installation.",
+		};
+	}
+	const binary = installed.commandPath;
+	const directory = installed.generationDirectory;
 	let entries: readonly string[];
 	try {
 		entries = readdirSync(directory);
@@ -75,9 +87,9 @@ export function readInstalledReleaseFacts(binaryPath: string): CealInstalledRele
 	}
 	let observed: string;
 	try {
-		observed = createHash("sha256").update(readFileSync(binaryPath)).digest("hex");
+		observed = sha256(readFileSync(binary));
 	} catch {
-		return { ok: false, code: "artifact_unreadable", message: `Cannot read the running binary at ${binaryPath}.` };
+		return { ok: false, code: "artifact_unreadable", message: `Cannot read the running binary at ${binary}.` };
 	}
 	const artifact = manifest.artifact as { sha256?: unknown } | undefined;
 	if (observed !== artifact?.sha256) {
@@ -89,9 +101,9 @@ export function readInstalledReleaseFacts(binaryPath: string): CealInstalledRele
 	}
 	const sumsPath = path.join(directory, SUMS_NAME);
 	if (!existsSync(sumsPath)) return { ok: false, code: "checksums_missing", message: `No ${SUMS_NAME} beside the running binary.` };
-	const declared = readChecksum(sumsPath, path.basename(binaryPath));
+	const declared = readChecksum(sumsPath, path.basename(binary));
 	if (declared === undefined) {
-		return { ok: false, code: "checksums_entry_missing", message: `${SUMS_NAME} has no line for ${path.basename(binaryPath)}.` };
+		return { ok: false, code: "checksums_entry_missing", message: `${SUMS_NAME} has no line for ${path.basename(binary)}.` };
 	}
 	if (declared !== observed) {
 		return {
@@ -129,10 +141,11 @@ function readChecksum(file: string, name: string): string | undefined {
  * Two emitters answer this schema — this module for the installed binary, and
  * `scripts/worker-acceptance-packet.mjs` from a checkout — and they cannot share
  * an implementation: one holds decoded Gateway events, the other only the
- * installed binary's rendered stdout, and making the script import this package
- * would give a script that deliberately needs no build a build dependency. So
- * the field lists live here and `test/contract/worker-acceptance-packet.test.mjs`
- * binds the script's output to them. Until this existed the two emitters
+ * installed binary's rendered stdout. The checkout script now imports package
+ * build output for shared install and child-process policy; this field list
+ * remains here because the installed emitter owns the schema.
+ * `test/contract/worker-acceptance-packet.test.mjs` binds the script's output to
+ * it. Until this existed the two emitters
  * declared one schema version while carrying different field sets.
  *
  * @testOnly The values are used by `projectBoundedCall` below; the export exists

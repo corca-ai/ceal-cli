@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -85,23 +85,43 @@ function acquire() {
 	mkdirSync(path.dirname(LOCK), { recursive: true });
 	const deadline = Date.now() + WAIT_TIMEOUT_MS;
 	for (;;) {
-		const nonce = randomBytes(16).toString("hex");
-		try {
-			// `mkdir` is the atomic test-and-set: it either creates the directory or
-			// fails with EEXIST, with no window between the two for a second process.
-			mkdirSync(LOCK);
-			writeFileSync(path.join(LOCK, "owner"), `${process.pid} ${nonce}\n`);
-			return nonce;
-		} catch (error) {
-			if (error.code !== "EEXIST") throw error;
-			if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
-			// Liveness, not elapsed time, decides whether a lock is abandoned. A wall
-			// clock cannot tell a slow compile on a loaded runner from a dead holder,
-			// and breaking a live holder recreates the double-writer state this lock
-			// exists to prevent. `local-store-lock.ts` reaches the same conclusion.
-			reclaimIfHolderIsGone();
-			sleep(25);
+		const nonce = publishCandidate();
+		if (nonce) return nonce;
+		if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
+		// Liveness, not elapsed time, decides whether a lock is abandoned. A wall
+		// clock cannot tell a slow compile on a loaded runner from a dead holder,
+		// and breaking a live holder recreates the double-writer state this lock
+		// exists to prevent. `local-store-lock.ts` reaches the same conclusion.
+		reclaimIfHolderIsGone();
+		sleep(25);
+	}
+}
+
+function publishCandidate() {
+	const nonce = randomBytes(16).toString("hex");
+	const candidate = `${LOCK}.candidate-${process.pid}-${nonce}`;
+	try {
+		mkdirSync(candidate);
+		writeFileSync(path.join(candidate, "owner"), `${process.pid} ${nonce}\n`, { flag: "wx" });
+	} catch (error) {
+		rmSync(candidate, { recursive: true, force: true });
+		throw error;
+	}
+	try {
+		// POSIX rename may replace an existing empty directory. Refuse that
+		// cross-version legacy state here so the grace/reclaim path decides it.
+		// A legacy holder can still appear between this check and rename; current
+		// candidates are non-empty, so same-version contenders remain atomic.
+		if (existsSync(LOCK)) {
+			rmSync(candidate, { recursive: true, force: true });
+			return null;
 		}
+		renameSync(candidate, LOCK);
+		return nonce;
+	} catch (error) {
+		rmSync(candidate, { recursive: true, force: true });
+		if (error.code === "EEXIST" || error.code === "ENOTEMPTY") return null;
+		throw error;
 	}
 }
 
@@ -114,41 +134,68 @@ function release(nonce) {
 }
 
 function reclaimIfHolderIsGone() {
+	let generation;
+	try {
+		generation = statSync(LOCK);
+	} catch {
+		return;
+	}
 	const owner = readOwner();
 	if (owner) {
 		if (!processIsGone(owner.pid)) return;
-		reclaim(`dead pid ${owner.pid}`);
+		quarantineGeneration(generation, owner.nonce, `dead pid ${owner.pid}`);
 		return;
 	}
-	// No readable owner record: either the holder is between its `mkdir` and its
-	// `writeFileSync` right now, or it died in that window. Age is what separates
-	// the two, and reading the directory's own mtime rather than a per-waiter timer
-	// is deliberate — every waiter then agrees about which lock is the stale one,
-	// so two of them cannot each reclaim and delete the other's replacement.
-	let age;
+	// New holders publish a completed private candidate atomically. An empty
+	// visible directory can only be a legacy holder that died before its owner
+	// write; rmdir is deliberate because it cannot remove a non-empty successor.
+	if (Date.now() - generation.mtimeMs < OWNER_WRITE_GRACE_MS) return;
+	let entries;
 	try {
-		age = Date.now() - statSync(LOCK).mtimeMs;
+		entries = readdirSync(LOCK);
 	} catch {
 		return;
 	}
-	if (age < OWNER_WRITE_GRACE_MS) return;
-	reclaim("a holder that died before recording itself");
+	if (entries.length === 0) {
+		try {
+			rmdirSync(LOCK);
+			process.emitWarning(`reclaiming the workspace dist lock from a legacy owner-less holder: ${LOCK}`);
+		} catch (error) {
+			if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY" && error.code !== "EEXIST") throw error;
+		}
+		return;
+	}
+	quarantineGeneration(generation, `invalid-${generation.dev.toString(16)}-${generation.ino.toString(16)}`, "an invalid owner generation");
 }
 
-function reclaim(reason) {
-	process.emitWarning(`reclaiming the workspace dist lock from ${reason}: ${LOCK}`);
-	rmSync(LOCK, { recursive: true, force: true });
+function quarantineGeneration(generation, suffix, reason) {
+	const tombstone = `${LOCK}.reclaimed-${suffix}`;
+	try {
+		renameSync(LOCK, tombstone);
+		process.emitWarning(`reclaiming the workspace dist lock from ${reason}: ${LOCK}`);
+		return;
+	} catch (error) {
+		if (error.code === "ENOENT") return;
+		if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error;
+	}
+	const retained = statSync(tombstone);
+	if (retained.dev !== generation.dev || retained.ino !== generation.ino) {
+		throw new Error(`workspace dist lock tombstone identity mismatch at ${tombstone}`);
+	}
 }
 
-function readOwner() {
+function readOwner(lockPath = LOCK) {
 	let raw;
 	try {
-		raw = readFileSync(path.join(LOCK, "owner"), "utf8");
+		raw = readFileSync(path.join(lockPath, "owner"), "utf8");
 	} catch {
 		return null;
 	}
-	const [pid, nonce] = raw.trim().split(" ");
-	return Number.isInteger(Number(pid)) && nonce ? { pid: Number(pid), nonce } : null;
+	const parts = raw.trim().split(" ");
+	if (parts.length !== 2) return null;
+	const [pid, nonce] = parts;
+	const parsedPid = Number(pid);
+	return Number.isSafeInteger(parsedPid) && parsedPid > 0 && /^[a-f0-9]{32}$/u.test(nonce ?? "") ? { pid: parsedPid, nonce } : null;
 }
 
 function processIsGone(pid) {

@@ -5067,5 +5067,5 @@ test("a build tree is refused as an installed release rather than described as o
 	// is exactly the substitution this command must not narrate.
 	const reading = readInstalledReleaseFacts(fileURLToPath(new URL("../dist/bin.js", import.meta.url)));
 	assert.equal(reading.ok, false);
-	assert.equal(reading.code, "release_manifest_missing");
+	assert.equal(reading.code, "managed_install_required");
 });

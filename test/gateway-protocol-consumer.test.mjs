@@ -6,8 +6,7 @@ import { GatewayProtocolConsumerError, verifyGatewayProtocolConsumer } from "../
 import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixture.mjs";
 
 test("the corrected development packet satisfies the installed B1 boundary", (context) => {
-	const fixture = makeGatewayProtocolFixture();
-	context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+	const fixture = protocolFixture(context);
 	const before = consumerWorkspaces();
 	const result = verifyGatewayProtocolConsumer({
 		repoRoot: REPO_ROOT,
@@ -28,8 +27,7 @@ test("the corrected development packet satisfies the installed B1 boundary", (co
 });
 
 test("consumer rejects a protocol artifact whose bytes are not bound by Gateway provenance", (context) => {
-	const fixture = makeGatewayProtocolFixture();
-	context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+	const fixture = protocolFixture(context);
 	const provenance = JSON.parse(readFileSync(fixture.provenance, "utf8"));
 	provenance.artifact.sha256 = "0".repeat(64);
 	writeFileSync(fixture.provenance, `${JSON.stringify(provenance)}\n`);
@@ -38,6 +36,12 @@ test("consumer rejects a protocol artifact whose bytes are not bound by Gateway 
 		(error) => error instanceof GatewayProtocolConsumerError && error.code === "invalid_protocol_provenance",
 	);
 });
+
+function protocolFixture(context) {
+	const fixture = makeGatewayProtocolFixture();
+	context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+	return fixture;
+}
 
 function consumerWorkspaces() {
 	return readdirSync(tmpdir())

@@ -14,8 +14,13 @@ import {
 } from "../scripts/build-worker-native-artifact.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
-test("native worker artifact consumes a manifest-bound packed consumer and emits no operator material", async (context) => {
-	const fixture = packedProtocolFixture(context);
+let packedFixture;
+test.before((context) => {
+	packedFixture = packedProtocolFixture(context);
+});
+
+test("native worker artifact consumes a manifest-bound packed consumer and emits no operator material", async () => {
+	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-native");
 	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
@@ -103,8 +108,8 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 // The real postject macho-segment and codesign calls only run on a macOS
 // host; this fixture proves the darwin step order, platform propagation, and
 // artifact naming deterministically on the Linux lane.
-test("darwin native build removes, injects, then ad-hoc signs in order", async (context) => {
-	const fixture = packedProtocolFixture(context);
+test("darwin native build removes, injects, then ad-hoc signs in order", async () => {
+	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-native-darwin");
 	const steps = [];
 	const result = await buildWorkerNativeArtifactFromDevelopmentInputs(

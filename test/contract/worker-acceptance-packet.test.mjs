@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,11 +10,14 @@ import {
 	CEAL_ACCEPTANCE_RECEIPT_KEYS,
 	CEAL_ACCEPTANCE_SESSION_KEYS,
 	CEAL_ACCEPTANCE_TOP_LEVEL_KEYS,
+	readInstalledReleaseFacts,
 } from "../../packages/ceal-worker-cli/dist/acceptance-record.js";
+import { sha256 } from "../../packages/ceal-worker-cli/dist/sha256.js";
 import {
 	buildAcceptancePacket,
 	inspectInstalledRelease,
 	resolveInstalledBinary,
+	runInstalledCommand,
 	sanitizedAcceptanceRecord,
 	verifyProtocolProvenance,
 	WorkerAcceptanceError,
@@ -28,14 +30,28 @@ import { scratchDir } from "../scratch-dir.mjs";
 // running it against a real install, which no gate can fabricate.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_BYTES = "#!/bin/sh\nexit 0\n";
+const INSTALLER_BYTES = "#!/bin/sh\nexit 0\n";
 
-function stageInstall(root, { manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES } = {}) {
-	const directory = path.join(root, "install", "releases", "0.66.1-linux-amd64-deadbeef");
+function stageInstall(
+	root,
+	{ manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES, generationDigest, commandLink = true } = {},
+) {
+	const worker = path.join(root, "install", ".ceal-cli", "worker");
+	const actual = digest ?? sha256(binaryBytes);
+	const installerDigest = sha256(INSTALLER_BYTES);
+	const inventory = sums ?? `${actual}  ceal-linux-amd64\n${installerDigest}  install-ceal.sh\n`;
+	const generation = `0.66.1-linux-amd64-${generationDigest ?? sha256(inventory)}`;
+	const directory = path.join(worker, "releases", generation);
 	mkdirSync(directory, { recursive: true });
 	const binary = path.join(directory, "ceal-linux-amd64");
 	writeFileSync(binary, binaryBytes);
 	chmodSync(binary, 0o755);
-	const actual = digest ?? sha256(binaryBytes);
+	const installer = path.join(directory, "install-ceal.sh");
+	writeFileSync(installer, INSTALLER_BYTES);
+	chmodSync(installer, 0o755);
+	mkdirSync(worker, { recursive: true });
+	symlinkSync(path.join("releases", generation), path.join(worker, "current"));
+	if (commandLink) symlinkSync(path.join(".ceal-cli", "worker", "current", "ceal-linux-amd64"), path.join(root, "install", "ceal"));
 	const manifest = {
 		schema_version: "ceal.worker_release_manifest.v1",
 		artifact_state: "unsigned_build_candidate",
@@ -51,12 +67,8 @@ function stageInstall(root, { manifest: overrides = {}, sums, digest, binaryByte
 		...overrides,
 	};
 	writeFileSync(path.join(directory, "ceal-worker-release-manifest-linux-amd64.json"), JSON.stringify(manifest, null, 2));
-	writeFileSync(path.join(directory, "SHA256SUMS"), sums ?? `${actual}  ceal-linux-amd64\n`);
+	writeFileSync(path.join(directory, "SHA256SUMS"), inventory);
 	return { directory, binary, manifest };
-}
-
-function sha256(text) {
-	return createHash("sha256").update(text).digest("hex");
 }
 
 function code(expected) {
@@ -87,18 +99,50 @@ test("the installed bytes must agree with both the manifest and SHA256SUMS", (co
 	const inspected = inspectInstalledRelease(good.binary);
 	assert.equal(inspected.manifest.version, "0.66.1");
 	assert.equal(inspected.artifactSha256, sha256(BINARY_BYTES));
+	const installedReading = readInstalledReleaseFacts(good.binary);
+	assert.equal(installedReading.ok, true);
+	assert.equal(installedReading.facts.release_version, "0.66.1");
 
 	const drifted = stageInstall(path.join(root, "drift"), { manifest: { artifact: { name: "ceal-linux-amd64", sha256: "b".repeat(64) } } });
 	assert.throws(() => inspectInstalledRelease(drifted.binary), code("artifact_digest_mismatch"));
 
-	const wrongSums = stageInstall(path.join(root, "sums"), { sums: `${"e".repeat(64)}  ceal-linux-amd64\n` });
+	const wrongSums = stageInstall(path.join(root, "sums"), {
+		sums: `${"e".repeat(64)}  ceal-linux-amd64\n${sha256(INSTALLER_BYTES)}  install-ceal.sh\n`,
+	});
 	assert.throws(() => inspectInstalledRelease(wrongSums.binary), code("checksums_mismatch"));
 
-	const bare = path.join(root, "bare");
-	mkdirSync(bare, { recursive: true });
-	const lonely = path.join(bare, "ceal");
-	writeFileSync(lonely, BINARY_BYTES);
-	assert.throws(() => inspectInstalledRelease(lonely), code("release_manifest_missing"));
+	const missingManifest = stageInstall(path.join(root, "bare"));
+	unlinkSync(path.join(missingManifest.directory, "ceal-worker-release-manifest-linux-amd64.json"));
+	assert.throws(() => inspectInstalledRelease(missingManifest.binary), code("release_manifest_missing"));
+});
+
+test("self-consistent release sidecars outside the managed current generation are refused", (context) => {
+	const root = scratchDir(context, "ceal-acceptance-");
+	const staged = stageInstall(root);
+	const scratch = path.join(root, "freeform");
+	mkdirSync(scratch, { recursive: true });
+	const binary = path.join(scratch, "ceal-linux-amd64");
+	writeFileSync(binary, BINARY_BYTES);
+	chmodSync(binary, 0o755);
+	writeFileSync(path.join(scratch, "ceal-worker-release-manifest-linux-amd64.json"), JSON.stringify(staged.manifest));
+	writeFileSync(path.join(scratch, "SHA256SUMS"), `${sha256(BINARY_BYTES)}  ceal-linux-amd64\n`);
+	assert.throws(() => inspectInstalledRelease(binary), code("managed_install_required"));
+	assert.deepEqual(readInstalledReleaseFacts(binary), {
+		ok: false,
+		code: "managed_install_required",
+		message: "The running binary is not the current generation of a verified managed worker installation.",
+	});
+});
+
+test("managed-shaped scratch must match the installer generation identity and public command link", (context) => {
+	const root = scratchDir(context, "ceal-acceptance-");
+	const wrongGeneration = stageInstall(path.join(root, "wrong-generation"), { generationDigest: "0".repeat(64) });
+	assert.throws(() => inspectInstalledRelease(wrongGeneration.binary), code("managed_install_required"));
+	assert.equal(readInstalledReleaseFacts(wrongGeneration.binary).ok, false);
+
+	const missingLink = stageInstall(path.join(root, "missing-link"), { commandLink: false });
+	assert.throws(() => inspectInstalledRelease(missingLink.binary), code("managed_install_required"));
+	assert.equal(readInstalledReleaseFacts(missingLink.binary).ok, false);
 });
 
 // `@corca-ai/ceal-protocol@0.65.0` has been observed with three different byte
@@ -213,10 +257,10 @@ function stageWorkingInstall(root, options = {}) {
 // that refusal is only meaningful against the pin this repository actually
 // ships. The INSTALL still lives in a scratch directory, which is the
 // separation that matters: the packet describes an install, never the source.
-test("the packet describes the install it measured, and its non-claims follow what the run reached", (context) => {
+test("the packet describes the install it measured, and its non-claims follow what the run reached", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary, directory } = stageWorkingInstall(root);
-	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
+	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary });
 
 	assert.equal(packet.schema_version, "ceal.worker_acceptance_packet.v1");
 	assert.equal(packet.installed_client.binary_path, binary);
@@ -255,10 +299,10 @@ test("the packet describes the install it measured, and its non-claims follow wh
 	assert.ok(packet.non_claims.some((claim) => claim.includes("before signing")));
 });
 
-test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", (context) => {
+test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
-	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
 
 	assert.equal(packet.bounded_capability_call.capability, "message.search");
 	assert.equal(packet.bounded_capability_call.status, "completed");
@@ -276,22 +320,59 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 
 // A discovery that exits non-zero is not a failure of the command — it is a row
 // the packet must report as unreached and then say so, rather than omitting.
-test("an unreached Gateway session is recorded and named in the non-claims", (context) => {
+test("an unreached Gateway session is recorded and named in the non-claims", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root, { discoveryStatus: 3 });
-	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary });
+	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary });
 	assert.equal(packet.gateway_session.reached, false);
 	assert.equal(packet.gateway_session.exit_code, 3);
 	assert.ok(packet.non_claims.some((claim) => claim.startsWith("gateway_session_not_reached:")));
 });
 
-test("a binary that cannot answer 'version' is refused rather than described", (context) => {
+test("a binary that cannot answer 'version' is refused rather than described", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageInstall(root, {
 		binaryBytes: "#!/bin/sh\nexit 9\n",
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
 	});
-	assert.throws(() => buildAcceptancePacket({ repoRoot: ROOT, binary }), code("installed_binary_unusable"));
+	await assert.rejects(() => buildAcceptancePacket({ repoRoot: ROOT, binary }), code("installed_binary_unusable"));
+});
+
+test("installed command execution refuses a child that ignores TERM and a child that floods output", async (context) => {
+	const root = scratchDir(context, "ceal-acceptance-");
+	const hanging = path.join(root, "hanging");
+	writeFileSync(hanging, "#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 1; done\n");
+	chmodSync(hanging, 0o755);
+	await assert.rejects(
+		() =>
+			runInstalledCommand(hanging, ["version"], {
+				timeoutMs: 20,
+				terminationGraceMs: 20,
+				postKillReportMs: 20,
+				postExitDrainMs: 5,
+			}),
+		code("installed_binary_timeout"),
+	);
+
+	const flooding = path.join(root, "flooding");
+	writeFileSync(flooding, "#!/bin/sh\nwhile :; do printf '0123456789abcdef'; done\n");
+	chmodSync(flooding, 0o755);
+	await assert.rejects(
+		() => runInstalledCommand(flooding, ["version"], { maxCapturedOutputBytes: 64, postKillReportMs: 20 }),
+		code("installed_binary_output_too_large"),
+	);
+
+	const signaled = path.join(root, "signaled");
+	writeFileSync(signaled, "#!/bin/sh\nkill -KILL $$\n");
+	chmodSync(signaled, 0o755);
+	await assert.rejects(
+		() => runInstalledCommand(signaled, ["call", "message.search"], { postExitDrainMs: 5 }),
+		(error) => code("installed_binary_failed")(error) && /provider outcome may be unknown/u.test(error.message),
+	);
+	await assert.rejects(
+		() => runInstalledCommand(path.join(root, "missing"), ["version"], { postExitDrainMs: 5 }),
+		code("installed_binary_failed"),
+	);
 });
 
 // The CLI entry, run as the process it really is. `parseArgs` and `render` have
@@ -370,14 +451,14 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 
 // A call whose stdout carries no request_ref must leave the receipt null rather
 // than inventing one — the packet would otherwise claim a readback it never ran.
-test("a call with no request_ref leaves the receipt unclaimed", (context) => {
+test("a call with no request_ref leaves the receipt unclaimed", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageInstall(root, {
 		binaryBytes:
 			'#!/bin/sh\ncase "$1 $2" in\n  "version ") echo "version: 0.66.1" ;;\n  "call message.search") echo "status: refused" ;;\nesac\nexit 0\n',
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
 	});
-	const packet = buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
 	assert.equal(packet.bounded_capability_call.status, "refused");
 	assert.equal(packet.bounded_capability_call.request_ref, null);
 	assert.equal(packet.bounded_capability_call.receipt, null);

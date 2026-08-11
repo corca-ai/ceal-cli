@@ -16,9 +16,9 @@ import {
 	discoveryCacheFreshness,
 	discoveryCacheKeyMatches,
 } from "./discovery-cache.js";
+import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
-import { inspectInstalledWorkerRelease } from "./stable-update.js";
 
 // Local client observer: one loopback page over the state this client already
 // holds. Boundary (fixed): no admin surface, no provider credential, and no
@@ -430,7 +430,12 @@ async function observeDiscoveryCache(
 
 function observeInstall(runtime: CealObserverRuntime): Record<string, unknown> {
 	if (!runtime.executablePath) return { status: "unavailable" };
-	const installed = inspectInstalledWorkerRelease(runtime.executablePath);
+	let installed: InstalledWorkerRelease | null;
+	try {
+		installed = resolveInstalledWorkerRelease(runtime.executablePath);
+	} catch {
+		installed = null;
+	}
 	if (!installed) return { status: "unmanaged", note: "This command is not running from a managed installed worker release." };
 	const manifest = readGenerationManifest(installed.generationDirectory);
 	return {

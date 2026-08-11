@@ -449,7 +449,27 @@ function copySourcePackage(root, workspace, sourcePath) {
 }
 
 function assertNoProtocolFallbackSource(root) {
-	for (const relative of ["src", "package.json", "tsconfig.json", "tsconfig.build.json"]) {
+	const manifest = readJson(path.join(root, "package.json"), "invalid_package_manifest");
+	for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+		const dependencies = manifest[field];
+		if (dependencies === undefined) continue;
+		if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) {
+			throw new GatewayProtocolConsumerError("source_fallback", `Worker package ${field} must be an object.`);
+		}
+		for (const [name, value] of Object.entries(dependencies)) {
+			if (
+				typeof value !== "string" ||
+				value.startsWith("workspace:") ||
+				(name === PROTOCOL_NAME && /(?:^|\/)(?:packages\/ceal-protocol|(?:src|dist)(?:\/|$))/u.test(value))
+			) {
+				throw new GatewayProtocolConsumerError(
+					"source_fallback",
+					"Worker package dependencies contain a workspace or Protocol source fallback.",
+				);
+			}
+		}
+	}
+	for (const relative of ["src", "tsconfig.json", "tsconfig.build.json"]) {
 		const target = path.join(root, relative);
 		if (!existsSync(target)) continue;
 		for (const file of regularFiles(target)) {

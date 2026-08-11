@@ -69,6 +69,16 @@ recommended order and caller identity owned by the Gateway.
   stops checkout worker smokes from emitting discarded scripts-coverage data.
   Worker coverage and focused contract proofs pass; this remains local source
   proof.
+- The next quality pass made managed worker topology and bounded subprocess
+  settlement single package owners shared by update, observe, and both
+  acceptance emitters. Self-consistent scratch release bundles are refused,
+  acceptance children settle on deadline or output overflow, repo-build stale
+  reclamation preserves successor generations, and standalone package hooks
+  build their dependency closure. Worker coverage, focused contract proofs, and
+  clean-copy standalone package tests pass. The worker package/native release
+  tests structurally share immutable Protocol packet fixtures per module, but
+  their green release-path lifecycle and timing remain unproved while B1 is
+  quarantined. Signed install proof also remains absent.
 - The unsigned local packet declares Gateway Protocol `0.72.17` at commit
   `cd3f5f4b8fe1757ca97c12512f9f5066db989840`; the sibling checkout contains that
   commit and exact subtree. It refuses the named authority refs found in
@@ -99,10 +109,10 @@ recommended order and caller identity owned by the Gateway.
    steps, finish B3 by replacing the guide's shipped exact sequence with the
    Gateway value plus the client fallback. Do not move a capability id into
    guide prose.
-6. Continue the quality pass by making acceptance packets require the managed
-   installer layout and bound installed-binary children, then make repo-build
-   stale-lock reclamation generation-specific. Both have direct local
-   counterexamples; do not turn either into a duplicated path or lock rule.
+6. Continue the quality pass by inventorying the remaining release/probe child
+   process seams for missing explicit deadlines. Preserve real packaging and
+   installed-process smokes; do not replace delivery-boundary proof with an
+   in-process shortcut.
 
 ## Discuss
 
@@ -131,6 +141,7 @@ recommended order and caller identity owned by the Gateway.
 - [worker-guide spawn economics](../charness-artifacts/quality/2026-08-11-spawn-economics.md)
 - [worker-guide spawn closeout](../charness-artifacts/impl/2026-08-11-worker-guide-spawn-economics.md)
 - [probe and deadline quality review](../charness-artifacts/quality/2026-08-11-probe-and-deadline-integrity.md)
+- [acceptance and lock integrity review](../charness-artifacts/quality/2026-08-11-acceptance-lock-integrity.md)
 - [B1 release critique](../charness-artifacts/critique/2026-08-11-b1-v0-76-2-release-critique.md)
 - [B1 quarantined consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [B1 corrected handoff request](requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md)

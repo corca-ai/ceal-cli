@@ -27,10 +27,10 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"pretest": "node ../../test/repo-build.mjs packages/ceal-worker-cli",
+		"pretest": "node ../../test/repo-build.mjs packages/ceal-protocol packages/ceal-client packages/ceal-worker-cli",
 		"test": "node --test test/*.test.mjs",
 		"prepack": "npm run clean && npm run build",
-		"precoverage": "node ../../test/repo-build.mjs packages/ceal-worker-cli",
+		"precoverage": "node ../../test/repo-build.mjs packages/ceal-protocol packages/ceal-client packages/ceal-worker-cli",
 		"coverage": "c8 node --test test/*.test.mjs"
 	},
 	"dependencies": {

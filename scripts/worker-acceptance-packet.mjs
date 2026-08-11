@@ -13,20 +13,21 @@
 // asserting an installation nobody performed.
 //
 // Usage:
-//   node scripts/worker-acceptance-packet.mjs
-//   node scripts/worker-acceptance-packet.mjs --capability <id> --target <ref>
-//   node scripts/worker-acceptance-packet.mjs --binary /path/to/ceal --json
-//   node scripts/worker-acceptance-packet.mjs --sanitized   # external record
+//   npm run accept:worker --
+//   npm run accept:worker -- --capability <id> --target <ref>
+//   npm run accept:worker -- --binary /path/to/ceal --json
+//   npm run accept:worker -- --sanitized   # external record
 //
 // Without `--capability`/`--target` the live provider row is left as an
 // explicit non-claim. A bounded capability call is a real provider action and
 // is therefore opt-in per run, never a default of a verification command.
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
+import { resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
@@ -34,6 +35,11 @@ import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./veri
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";
+const ACCEPTANCE_COMMAND_TIMEOUT_MS = 60_000;
+const ACCEPTANCE_TERMINATION_GRACE_MS = 2_000;
+const ACCEPTANCE_POST_KILL_REPORT_MS = 500;
+const ACCEPTANCE_POST_EXIT_DRAIN_MS = 100;
+const ACCEPTANCE_MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
 export const WorkerAcceptanceError = codedErrorClass("WorkerAcceptanceError");
 
@@ -92,7 +98,14 @@ function which(command, env) {
  * a self-report.
  */
 export function inspectInstalledRelease(binaryPath) {
-	const directory = path.dirname(binaryPath);
+	let installed;
+	try {
+		installed = resolveInstalledWorkerRelease(binaryPath);
+	} catch {
+		fail("managed_install_required", `${binaryPath} is not the current generation of a verified managed worker installation.`);
+	}
+	const binary = installed.commandPath;
+	const directory = installed.generationDirectory;
 	const manifestName = readdirSync(directory).find((name) => name.startsWith(MANIFEST_PREFIX) && name.endsWith(".json"));
 	if (!manifestName)
 		fail("release_manifest_missing", `No ${MANIFEST_PREFIX}*.json beside ${binaryPath}; this is not an installed release layout.`);
@@ -100,13 +113,13 @@ export function inspectInstalledRelease(binaryPath) {
 	if (manifest.schema_version !== "ceal.worker_release_manifest.v1") {
 		fail("release_manifest_schema", `Unexpected manifest schema: ${manifest.schema_version}`);
 	}
-	const observed = sha256File(binaryPath);
+	const observed = sha256File(binary);
 	if (observed !== manifest.artifact?.sha256) {
 		fail("artifact_digest_mismatch", `Installed bytes ${observed} do not match the manifest's ${manifest.artifact?.sha256}.`);
 	}
 	const sums = readChecksums(path.join(directory, SUMS_NAME));
-	const declared = sums.get(path.basename(binaryPath));
-	if (!declared) fail("checksums_entry_missing", `${SUMS_NAME} has no line for ${path.basename(binaryPath)}.`);
+	const declared = sums.get(path.basename(binary));
+	if (!declared) fail("checksums_entry_missing", `${SUMS_NAME} has no line for ${path.basename(binary)}.`);
 	if (declared !== observed)
 		fail("checksums_mismatch", `${SUMS_NAME} declares ${declared} for the installed binary but its bytes are ${observed}.`);
 	return { directory, manifestName, manifest, artifactSha256: observed };
@@ -137,10 +150,37 @@ export function verifyProtocolProvenance(manifest, { repoRoot = REPO_ROOT } = {}
 	return verifyProtocolProvenanceAgainstLock(manifest, { repoRoot, fail });
 }
 
-function runBinary(binaryPath, args) {
+export async function runInstalledCommand(
+	binaryPath,
+	args,
+	{
+		timeoutMs = ACCEPTANCE_COMMAND_TIMEOUT_MS,
+		terminationGraceMs = ACCEPTANCE_TERMINATION_GRACE_MS,
+		postKillReportMs = ACCEPTANCE_POST_KILL_REPORT_MS,
+		postExitDrainMs = ACCEPTANCE_POST_EXIT_DRAIN_MS,
+		maxCapturedOutputBytes = ACCEPTANCE_MAX_CAPTURED_OUTPUT_BYTES,
+	} = {},
+) {
 	const started = Date.now();
-	const result = spawnSync(binaryPath, args, { encoding: "utf8" });
-	return { args, status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", elapsed_ms: Date.now() - started };
+	const result = await runBoundedProcess(binaryPath, args, {
+		cwd: path.dirname(binaryPath),
+		env: process.env,
+		timeoutMs,
+		terminationGraceMs,
+		postKillReportMs,
+		postExitDrainMs,
+		maxCapturedOutputBytes,
+	});
+	if (result.timedOut) {
+		const action = args[0] === "call" ? " The provider outcome may be unknown; do not repeat the call until its receipt is read back." : "";
+		fail("installed_binary_timeout", `'${binaryPath} ${args.join(" ")}' exceeded its deadline and was stopped.${action}`);
+	}
+	if (result.truncated) fail("installed_binary_output_too_large", `'${binaryPath} ${args.join(" ")}' exceeded the captured-output bound.`);
+	if (result.spawnError || result.signal !== null || result.code === null) {
+		const action = args[0] === "call" ? " The provider outcome may be unknown; do not repeat the call until its receipt is read back." : "";
+		fail("installed_binary_failed", `'${binaryPath} ${args.join(" ")}' did not exit normally.${action}`);
+	}
+	return { args, status: result.code, stdout: result.stdout, stderr: result.stderr, elapsed_ms: Date.now() - started };
 }
 
 // Deliberately not a YAML parser: the packet records a handful of scalar
@@ -151,7 +191,7 @@ function scalar(stdout, key) {
 	return match ? match[1].trim() : undefined;
 }
 
-export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability, target, env = process.env } = {}) {
+export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability, target, env = process.env, commandBounds } = {}) {
 	// Acceptance-candidate emission is one of the paths the Gateway owner made
 	// ship-blocking on a proof/ship divergence, and it must refuse on its own
 	// rather than on the strength of some test command having passed earlier. It
@@ -167,10 +207,10 @@ export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability
 	const release = inspectInstalledRelease(binaryPath);
 	const protocol = verifyProtocolProvenance(release.manifest, { repoRoot });
 
-	const version = runBinary(binaryPath, ["version"]);
+	const version = await runInstalledCommand(binaryPath, ["version"], commandBounds);
 	if (version.status !== 0) fail("installed_binary_unusable", `'${binaryPath} version' exited ${version.status}.`);
-	const guide = runBinary(binaryPath, ["guide", "status"]);
-	const discovery = runBinary(binaryPath, ["capabilities", "--fresh"]);
+	const guide = await runInstalledCommand(binaryPath, ["guide", "status"], commandBounds);
+	const discovery = await runInstalledCommand(binaryPath, ["capabilities", "--fresh"], commandBounds);
 
 	const packet = {
 		schema_version: "ceal.worker_acceptance_packet.v1",
@@ -212,11 +252,11 @@ export function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability
 	};
 
 	if (capability && target) {
-		const call = runBinary(binaryPath, ["call", capability, "--target", target]);
+		const call = await runInstalledCommand(binaryPath, ["call", capability, "--target", target], commandBounds);
 		const requestRef = scalar(call.stdout, "request_ref");
 		let receipt;
 		if (requestRef) {
-			const shown = runBinary(binaryPath, ["receipt", "show", requestRef]);
+			const shown = await runInstalledCommand(binaryPath, ["receipt", "show", requestRef], commandBounds);
 			// Field-for-field the installed emitter's receipt row, in the order
 			// CEAL_ACCEPTANCE_RECEIPT_KEYS declares. That list is the one home and
 			// the contract test binds this object to it; the two cannot share an
@@ -441,7 +481,7 @@ function render(packet) {
 if (import.meta.url === `file://${process.argv[1]}`) {
 	try {
 		const options = parseArgs(process.argv.slice(2));
-		const packet = buildAcceptancePacket(options);
+		const packet = await buildAcceptancePacket(options);
 		const emitted = options.sanitized ? sanitizedAcceptanceRecord(packet) : packet;
 		process.stdout.write(options.json ? `${JSON.stringify(emitted, null, 2)}\n` : `${render(packet)}\n`);
 	} catch (error) {

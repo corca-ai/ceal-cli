@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -72,35 +72,50 @@ test("a live holder is not reclaimed, however long it holds", async () => {
 	assert.doesNotMatch(waiter.stderr, /reclaiming/u, "a live holder was reclaimed");
 });
 
-test("a lock abandoned by a dead process is reclaimed rather than waited out forever", () => {
-	rmSync(LOCK, { recursive: true, force: true });
-	mkdirSync(LOCK, { recursive: true });
+test("a lock abandoned by a dead process is reclaimed rather than waited out forever", async (context) => {
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-dead-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
 	// A pid that cannot be running: the kernel would have to have wrapped past it,
 	// and `pid_max` is far below this on every supported host.
-	writeFileSync(path.join(LOCK, "owner"), "2147483646 deadbeef\n");
+	writeFileSync(path.join(lock, "owner"), `2147483646 ${"a".repeat(32)}\n`);
+	const isolated = await import(`${new URL(`file://${scratch.modulePath}`).href}?dead=${Date.now()}`);
 	assert.equal(
-		withDistLock(() => "reclaimed"),
+		isolated.withDistLock(() => "reclaimed"),
 		"reclaimed",
 	);
-	assert.equal(existsSync(LOCK), false);
+	assert.equal(existsSync(lock), false);
 });
 
-test("an owner-less lock is reclaimed after the owner-write grace, not waited out", () => {
+test("an owner-less lock is reclaimed after the owner-write grace, not waited out", async (context) => {
 	// A holder that died between its `mkdir` and its owner write names no pid, so
 	// the liveness check can never declare it dead. Before the grace existed this
 	// case hung for the full wait timeout — found by a falsification run that left
 	// exactly this lock behind, not by review.
-	rmSync(LOCK, { recursive: true, force: true });
-	mkdirSync(LOCK, { recursive: true });
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-ownerless-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
 	const stale = new Date(Date.now() - 60_000);
-	utimesSync(LOCK, stale, stale);
+	utimesSync(lock, stale, stale);
+	const isolated = await import(`${new URL(`file://${scratch.modulePath}`).href}?ownerless=${Date.now()}`);
 	const started = Date.now();
 	assert.equal(
-		withDistLock(() => "reclaimed"),
+		isolated.withDistLock(() => "reclaimed"),
 		"reclaimed",
 	);
 	assert.ok(Date.now() - started < 5_000, "the owner-less lock was waited out instead of reclaimed");
-	rmSync(LOCK, { recursive: true, force: true });
+});
+
+test("a fresh owner-less legacy lock is not replaced before its grace expires", async (context) => {
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-fresh-ownerless-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
+	const generation = statSync(lock);
+	const isolated = await import(`${new URL(`file://${scratch.modulePath}`).href}?fresh=${Date.now()}`);
+	assert.throws(() => isolated.withDistLock(() => assert.fail("fresh legacy lock was replaced")), /timed out waiting/u);
+	const retained = statSync(lock);
+	assert.equal(retained.dev, generation.dev);
+	assert.equal(retained.ino, generation.ino);
 });
 
 test("a process cannot delete a lock it does not own", () => {
@@ -109,11 +124,71 @@ test("a process cannot delete a lock it does not own", () => {
 	withDistLock(() => {
 		// Simulate the successor case: our lock is reclaimed and a second process
 		// takes it while we are still inside. Our release must not remove theirs.
-		writeFileSync(path.join(LOCK, "owner"), "1 successor-nonce\n");
+		writeFileSync(path.join(LOCK, "owner"), `1 ${"b".repeat(32)}\n`);
 	});
 	observed = readFileSync(path.join(LOCK, "owner"), "utf8").trim();
-	assert.equal(observed, "1 successor-nonce", "the outgoing holder deleted its successor's lock");
+	assert.equal(observed, `1 ${"b".repeat(32)}`, "the outgoing holder deleted its successor's lock");
 	rmSync(LOCK, { recursive: true, force: true });
+});
+
+test("a late stale-lock reclaimer cannot move the successor generation", async (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-dist-lock-late-reclaimer-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const modulePath = injectedRepoBuild(
+		scratch,
+		"renameSync(LOCK, tombstone);",
+		[
+			"renameSync(LOCK, tombstone);",
+			"mkdirSync(LOCK);",
+			`writeFileSync(path.join(LOCK, "owner"), ${JSON.stringify(`${process.pid} ${"c".repeat(32)}\n`)});`,
+		].join("\n"),
+	);
+	const lock = path.join(scratch, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
+	writeFileSync(path.join(lock, "owner"), `2147483646 ${"a".repeat(32)}\n`);
+	const raced = await import(`${new URL(`file://${modulePath}`).href}?late=${Date.now()}`);
+	assert.throws(() => raced.withDistLock(() => undefined), /timed out waiting/u);
+	assert.equal(readFileSync(path.join(lock, "owner"), "utf8").trim(), `${process.pid} ${"c".repeat(32)}`);
+});
+
+test("a completed candidate that loses publication cannot replace the winner", async (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-dist-lock-publish-race-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const modulePath = injectedRepoBuild(
+		scratch,
+		"renameSync(candidate, LOCK);",
+		[
+			"mkdirSync(LOCK);",
+			`writeFileSync(path.join(LOCK, "owner"), ${JSON.stringify(`${process.pid} ${"d".repeat(32)}\n`)});`,
+			"renameSync(candidate, LOCK);",
+		].join("\n"),
+	);
+	const lock = path.join(scratch, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	const raced = await import(`${new URL(`file://${modulePath}`).href}?publish=${Date.now()}`);
+	assert.throws(() => raced.withDistLock(() => undefined), /timed out waiting/u);
+	assert.equal(readFileSync(path.join(lock, "owner"), "utf8").trim(), `${process.pid} ${"d".repeat(32)}`);
+	assert.deepEqual(
+		readdirSync(path.dirname(lock)).filter((name) => name.includes(".candidate-")),
+		[],
+		"the losing private candidate was not cleaned up",
+	);
+});
+
+test("a stale non-empty invalid owner generation is quarantined by identity", async (context) => {
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-invalid-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
+	writeFileSync(path.join(lock, "owner"), `${process.pid} ${"e".repeat(32)} extra-token\n`);
+	const stale = new Date(Date.now() - 60_000);
+	utimesSync(lock, stale, stale);
+	const generation = statSync(lock);
+	const isolated = await import(`${new URL(`file://${scratch.modulePath}`).href}?invalid=${Date.now()}`);
+	assert.equal(
+		isolated.withDistLock(() => "reclaimed"),
+		"reclaimed",
+	);
+	const suffix = `invalid-${generation.dev.toString(16)}-${generation.ino.toString(16)}`;
+	assert.equal(existsSync(`${lock}.reclaimed-${suffix}`), true);
 });
 
 test("the lock is released even when the guarded body throws", () => {
@@ -140,10 +215,13 @@ test("ensurePackageBuilt runs the build exactly once per package per process", (
 });
 
 test("standalone package tests enter the dist owner", () => {
-	for (const packageName of ["ceal-client", "ceal-worker-cli"]) {
+	for (const [packageName, closure] of [
+		["ceal-client", "packages/ceal-protocol packages/ceal-client"],
+		["ceal-worker-cli", "packages/ceal-protocol packages/ceal-client packages/ceal-worker-cli"],
+	]) {
 		const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", packageName, "package.json"), "utf8"));
-		assert.equal(manifest.scripts.precoverage, `node ../../test/repo-build.mjs packages/${packageName}`);
-		assert.equal(manifest.scripts.pretest, `node ../../test/repo-build.mjs packages/${packageName}`);
+		assert.equal(manifest.scripts.precoverage, `node ../../test/repo-build.mjs ${closure}`);
+		assert.equal(manifest.scripts.pretest, `node ../../test/repo-build.mjs ${closure}`);
 	}
 });
 
@@ -184,4 +262,24 @@ function runHolder(source) {
 		stdout += chunk;
 	});
 	return new Promise((resolve) => child.on("close", (code) => resolve({ code, stdout, stderr })));
+}
+
+function injectedRepoBuild(root, anchor, replacement) {
+	const directory = path.join(root, "test");
+	mkdirSync(directory, { recursive: true });
+	let source = readFileSync(HELPER, "utf8");
+	if (anchor) assert.ok(source.includes(anchor), `repo-build injection anchor missing: ${anchor}`);
+	const toolchainImport = new URL("../../scripts/lib/toolchain-env.mjs", import.meta.url).href;
+	source = source.replace('from "../scripts/lib/toolchain-env.mjs"', `from ${JSON.stringify(toolchainImport)}`);
+	source = source.replace("const WAIT_TIMEOUT_MS = 600_000;", "const WAIT_TIMEOUT_MS = 20;");
+	if (anchor) source = source.replace(anchor, replacement);
+	const modulePath = path.join(directory, "repo-build.mjs");
+	writeFileSync(modulePath, source);
+	return modulePath;
+}
+
+function isolatedRepoBuild(context, prefix) {
+	const root = mkdtempSync(path.join(tmpdir(), prefix));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	return { root, modulePath: injectedRepoBuild(root) };
 }

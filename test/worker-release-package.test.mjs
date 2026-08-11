@@ -12,8 +12,13 @@ import {
 } from "../scripts/build-worker-release-package.mjs";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.mjs";
 
-test("worker package build consumes a manifest-bound packed Protocol and emits no operator material", (context) => {
-	const fixture = packedProtocolFixture(context);
+let packedFixture;
+test.before((context) => {
+	packedFixture = packedProtocolFixture(context);
+});
+
+test("worker package build consumes a manifest-bound packed Protocol and emits no operator material", () => {
+	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-package");
 	const result = buildWorkerReleasePackageFromDevelopmentInputs({ repoRoot: ROOT, outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
@@ -62,8 +67,8 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 // The compile failure used to report one sentence for every way tsc can fail,
 // including the ways that are not about the source — an OOM kill read as "your
 // TypeScript does not compile", and the diagnosis cost a re-run of the tier.
-test("a failed worker compile carries the compiler's own output and its terminating signal", (context) => {
-	const fixture = packedProtocolFixture(context);
+test("a failed worker compile carries the compiler's own output and its terminating signal", () => {
+	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-package-compile-failure");
 	const killed = Object.assign(new Error("Command failed"), {
 		stdout: "src/index.ts(1,1): error TS2307: Cannot find module '@corca-ai/ceal-protocol'.",

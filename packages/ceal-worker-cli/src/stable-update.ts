@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
+import { runBoundedProcess } from "./bounded-process.js";
 import type { CealStableUpdateOptions, CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
+import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
+import { sha256 } from "./sha256.js";
 
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
@@ -75,7 +76,7 @@ export function createCealStableUpdateRunner(
 		options.onProgress?.("check");
 		let installed: InstalledWorkerRelease;
 		try {
-			installed = findInstalledWorkerRelease(executablePath);
+			installed = resolveInstalledWorkerRelease(executablePath);
 		} catch {
 			return unavailable(
 				"update_unavailable",
@@ -91,19 +92,21 @@ export function createCealStableUpdateRunner(
 				"Reinstall an explicitly approved signed worker release before retrying.",
 			);
 		options.onProgress?.("download_install");
-		const run = await runProcess(
-			"/bin/sh",
-			[installed.installerPath],
-			{
+		const run = await runBoundedProcess("/bin/sh", [installed.installerPath], {
+			cwd: installed.generationDirectory,
+			env: {
 				...environment,
 				CEAL_INSTALL_DIR: installed.installDirectory,
 				CEAL_INSTALL_ROLE: "worker",
 				CEAL_VERSION: "stable",
 				CEAL_MINIMUM_VERSION: previous.version,
 			},
-			installed.generationDirectory,
-			{ ...deadlines, timeoutMs: deadlines.installerMs },
-		);
+			timeoutMs: deadlines.installerMs,
+			terminationGraceMs: deadlines.terminationGraceMs,
+			postKillReportMs: deadlines.postKillReportMs,
+			postExitDrainMs: POST_EXIT_DRAIN_MS,
+			maxCapturedOutputBytes: MAX_CAPTURED_OUTPUT_BYTES,
+		});
 		// Named separately from a failed install because the operator action
 		// differs: a timeout says nothing about whether the release is sound, and
 		// the useful next move is to check the network path rather than to reinstall.
@@ -125,7 +128,7 @@ export function createCealStableUpdateRunner(
 		options.onProgress?.("verify");
 		let updated: InstalledWorkerRelease;
 		try {
-			updated = findInstalledWorkerRelease(join(installed.installDirectory, "ceal"));
+			updated = resolveInstalledWorkerRelease(join(installed.installDirectory, "ceal"));
 		} catch {
 			return unavailable(
 				"update_readback_failed",
@@ -153,92 +156,25 @@ export function createCealStableUpdateRunner(
 			previous_version: previous.version,
 			installed_version: current.version,
 			platform: current.platform,
-			artifact_sha256: digest(readFileSync(updated.commandPath)),
+			artifact_sha256: sha256(readFileSync(updated.commandPath)),
 			elapsed_ms,
 		};
 	};
-}
-
-export interface InstalledWorkerRelease {
-	commandPath: string;
-	installerPath: string;
-	generationDirectory: string;
-	installDirectory: string;
-}
-
-/** Observation-safe view of the managed install layout: null instead of throwing. */
-export function inspectInstalledWorkerRelease(executablePath: string): InstalledWorkerRelease | null {
-	try {
-		return findInstalledWorkerRelease(executablePath);
-	} catch {
-		return null;
-	}
-}
-
-function findInstalledWorkerRelease(executablePath: string): InstalledWorkerRelease {
-	const commandPath = realpathSync(executablePath);
-	const generationDirectory = dirname(commandPath);
-	const releasesDirectory = dirname(generationDirectory);
-	const workerDirectory = dirname(releasesDirectory);
-	const stateDirectory = dirname(workerDirectory);
-	const installDirectory = dirname(stateDirectory);
-	if (!isManagedWorkerGeneration({ commandPath, generationDirectory, releasesDirectory, workerDirectory, stateDirectory }))
-		throw new Error("unmanaged_release");
-	const inventoryPath = join(generationDirectory, "SHA256SUMS");
-	if (!lstatSync(inventoryPath).isFile()) throw new Error("unsafe_installer");
-	const installerPath = findVerifiedInstaller(generationDirectory, readFileSync(inventoryPath, "utf8"));
-	return { commandPath, installerPath, generationDirectory, installDirectory };
-}
-
-function findVerifiedInstaller(generationDirectory: string, inventory: string): string {
-	const candidates = ["install-ceal.sh", "install.sh"].flatMap((name) => {
-		const file = join(generationDirectory, name);
-		try {
-			const stat = lstatSync(file);
-			if (!stat.isFile() || stat.isSymbolicLink()) return [];
-			const expected = new RegExp(`^([a-f0-9]{64}) {2}${escapePattern(name)}$`, "mu").exec(inventory)?.[1];
-			return expected === digest(readFileSync(file)) ? [file] : [];
-		} catch {
-			return [];
-		}
-	});
-	if (candidates.length !== 1) throw new Error("installer_digest_mismatch");
-	return candidates[0]!;
-}
-
-function isManagedWorkerGeneration(
-	paths: Pick<InstalledWorkerRelease, "commandPath" | "generationDirectory"> & {
-		releasesDirectory: string;
-		workerDirectory: string;
-		stateDirectory: string;
-	},
-): boolean {
-	const commandName = basename(paths.commandPath);
-	return (
-		isWorkerBinary(commandName) &&
-		paths.commandPath === join(paths.generationDirectory, commandName) &&
-		basename(paths.stateDirectory) === ".ceal-cli" &&
-		basename(paths.workerDirectory) === "worker" &&
-		basename(paths.releasesDirectory) === "releases" &&
-		realpathSync(join(paths.workerDirectory, "current")) === paths.generationDirectory
-	);
-}
-
-function basename(value: string): string {
-	return value.slice(value.lastIndexOf("/") + 1);
-}
-function isWorkerBinary(value: string): boolean {
-	return /^ceal-(?:linux|darwin)-(?:arm64|amd64)$/u.test(value);
-}
-function escapePattern(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 async function readVersion(
 	commandPath: string,
 	deadlines: CealStableUpdateDeadlines,
 ): Promise<{ version: string; platform: CealWorkerPlatform } | null> {
-	const run = await runProcess(commandPath, ["version"], {}, dirname(commandPath), { ...deadlines, timeoutMs: deadlines.versionReadbackMs });
+	const run = await runBoundedProcess(commandPath, ["version"], {
+		cwd: dirname(commandPath),
+		env: {},
+		timeoutMs: deadlines.versionReadbackMs,
+		terminationGraceMs: deadlines.terminationGraceMs,
+		postKillReportMs: deadlines.postKillReportMs,
+		postExitDrainMs: POST_EXIT_DRAIN_MS,
+		maxCapturedOutputBytes: MAX_CAPTURED_OUTPUT_BYTES,
+	});
 	// A readback that had to be killed is not a version, and it reaches the same
 	// `update_readback_failed` envelope as a readback that answered nonsense.
 	if (run.timedOut || run.code !== 0 || run.truncated || run.stderr !== "") return null;
@@ -264,105 +200,6 @@ function parseWorkerVersion(
 	)
 		return null;
 	return { version: payload.version, platform: platform as CealWorkerPlatform };
-}
-
-async function runProcess(
-	command: string,
-	args: readonly string[],
-	env: NodeJS.ProcessEnv,
-	cwd: string,
-	bounds: { timeoutMs: number; terminationGraceMs: number; postKillReportMs: number },
-): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean; timedOut: boolean }> {
-	return new Promise((resolveResult) => {
-		// `detached` puts the child in its own process group so the whole tree can
-		// be signalled. Signalling only `/bin/sh` does nothing useful: a POSIX shell
-		// does not run a trap while blocked on a foreground child, so a SIGTERM
-		// arriving while it waits on `curl` is merely queued, and the SIGKILL five
-		// seconds later destroys the shell before its rollback ever runs — leaving a
-		// staged generation, a temp directory of downloaded assets, and an install
-		// lock that on macOS nothing clears. Killing the group takes `curl` down,
-		// the shell's wait returns, and the trap runs the way it was written to.
-		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
-		let stdout = "";
-		let stderr = "";
-		let truncated = false;
-		let timedOut = false;
-		let settled = false;
-		let exitCode: number | null = null;
-		const timers: NodeJS.Timeout[] = [];
-		const settle = (code: number | null) => {
-			if (settled) return;
-			settled = true;
-			for (const timer of timers) clearTimeout(timer);
-			// Deciding the answer is not the same as being able to return it. A
-			// process holding these pipes keeps the event loop alive, so `ceal update`
-			// would print nothing and sit there having already decided. This was missed
-			// the first time: the envelope arrived on time and the process still hung.
-			//
-			// Not covered by a test, deliberately recorded rather than implied: since
-			// the deadline signals the whole process group, every descendant that
-			// inherited these pipes dies with it, and only something that escaped the
-			// group — a `setsid` — could still hold them. Removing these three lines
-			// keeps the suite green. They stay as the cheap guard against the one
-			// failure mode this whole deadline exists to prevent.
-			child.stdout.destroy();
-			child.stderr.destroy();
-			child.unref();
-			resolveResult({ code, stdout, stderr, truncated, timedOut });
-		};
-		const after = (delay: number, action: () => void) => {
-			const timer = setTimeout(action, delay);
-			// The deadline must not be the reason the process stays alive: an update
-			// that finished has nothing left to wait for.
-			timer.unref();
-			timers.push(timer);
-		};
-		after(bounds.timeoutMs, () => {
-			timedOut = true;
-			signalGroup(child, "SIGTERM");
-			after(bounds.terminationGraceMs, () => {
-				signalGroup(child, "SIGKILL");
-				after(bounds.postKillReportMs, () => settle(null));
-			});
-		});
-		const capture = (stream: "stdout" | "stderr", chunk: Buffer) => {
-			if (truncated) return;
-			const next = (stream === "stdout" ? stdout : stderr) + chunk.toString("utf8");
-			if (Buffer.byteLength(next) > MAX_CAPTURED_OUTPUT_BYTES) {
-				truncated = true;
-				return;
-			}
-			if (stream === "stdout") stdout = next;
-			else stderr = next;
-		};
-		child.stdout.on("data", (chunk: Buffer) => capture("stdout", chunk));
-		child.stderr.on("data", (chunk: Buffer) => capture("stderr", chunk));
-		child.on("error", () => settle(null));
-		child.on("exit", (code) => {
-			exitCode = code;
-			after(POST_EXIT_DRAIN_MS, () => settle(exitCode));
-		});
-		child.on("close", (code) => settle(code));
-	});
-}
-
-// Signals the child's whole process group, falling back to the child alone if
-// the group is already gone. `kill` on a departed child is a no-op rather than a
-// throw, but the negated-pid form raises ESRCH once nothing in the group is left.
-function signalGroup(child: ReturnType<typeof spawn>, signal: "SIGTERM" | "SIGKILL"): void {
-	try {
-		if (child.pid !== undefined) process.kill(-child.pid, signal);
-	} catch {
-		try {
-			child.kill(signal);
-		} catch {
-			/* Already gone; the deadline has nothing left to stop. */
-		}
-	}
-}
-
-function digest(bytes: Buffer | string): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 
 function compareVersions(left: string, right: string): number {

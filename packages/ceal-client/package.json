@@ -30,10 +30,10 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"pretest": "node ../../test/repo-build.mjs packages/ceal-client",
+		"pretest": "node ../../test/repo-build.mjs packages/ceal-protocol packages/ceal-client",
 		"test": "node --test test/*.test.mjs",
 		"prepack": "npm run clean && npm run build",
-		"precoverage": "node ../../test/repo-build.mjs packages/ceal-client",
+		"precoverage": "node ../../test/repo-build.mjs packages/ceal-protocol packages/ceal-client",
 		"coverage": "c8 node --test test/*.test.mjs"
 	},
 	"dependencies": {

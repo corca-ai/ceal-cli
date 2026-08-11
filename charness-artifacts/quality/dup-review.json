@@ -601,6 +601,27 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-11",
 			"note": "Detector overlap between resolveGatewayAccess and parseCapabilityCatalogOptions after the former's runtime type changed. One selects explicit or stored Gateway access from profile and argv state; the other classifies capability catalog flags. Their similar conditional shape carries no shared fact, and a helper would be parameterized by unrelated semantics."
+		},
+		{
+			"surface": "code",
+			"id": "40e06511f93f62bc",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the local SHA-256 helper family classified at ba2176416cd336c6. This slice removed four new package/test-local copies and left one package-private worker owner in sha256.ts; the remaining members are independently runnable release scripts and fixtures whose three-line digest primitive carries no shared policy."
+		},
+		{
+			"surface": "code",
+			"id": "a8bc38ab98549fd7",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the whole-file detector artifact classified at 4e437a213994e8b8. The Protocol consumer verifier proves a packed isolated install while the worker package builder stages a hermetic release package; their shared executable-script frame is not a shared trust decision, and output/build primitives are already extracted."
+		},
+		{
+			"surface": "code",
+			"id": "f31ec081330a5919",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "ES module import-header overlap between two standalone release scripts, the same non-extractable executable-module boilerplate class classified at 9d81ae8c9d6354e8. Their production bodies own different package-consumer and release-asset contracts."
 		}
 	],
 	"fixable_ceiling": 0,

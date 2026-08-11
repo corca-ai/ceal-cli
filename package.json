@@ -33,6 +33,7 @@
 		"check:duplication": "node scripts/check-dup-ratchet.mjs",
 		"lint:shell": "node scripts/lint-shell.mjs",
 		"lint:unused": "knip",
+		"preaccept:worker": "npm run build:worker",
 		"accept:worker": "node scripts/worker-acceptance-packet.mjs",
 		"release:worker:inputs": "node scripts/worker-release-inputs.mjs",
 		"bootstrap:gateway-handoff": "node scripts/bootstrap-gateway-protocol-handoff.mjs",
