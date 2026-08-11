@@ -1,0 +1,66 @@
+version: 1
+repo: ceal-cli
+language: en
+output_dir: charness-artifacts/release
+preset_id: portable-defaults
+customized_from: portable-defaults
+package_id: ceal-cli
+packaging_manifest_path: package.json
+checked_in_plugin_root: skills/ceal-guide
+# This repository does not generate plugin manifests. Version synchronization is
+# owned by docs/release-and-enrollment.md and the three npm manifests plus the
+# clean-tree package-lock regeneration it requires; do not route publication
+# through the generic plugin publish helper.
+sync_command: npm run build
+quality_command: npm run check
+post_publish_install_refresh: ceal update
+post_publish_version_readback: ceal version
+post_publish_baton_path: docs/handoff.md
+update_instructions:
+  - Run `ceal update` from an existing managed installation.
+  - Run `ceal version` and verify the installed worker version after update.
+product_surfaces:
+  - installable_cli
+  - bundled_skill
+cli_skill_surface_probe_commands:
+  - npm run probe -- ceal commands
+cli_skill_surface_command_docs:
+  - docs/operator-acceptance.md
+cli_skill_surface_skill_paths:
+  - skills/ceal-guide/SKILL.md
+cli_skill_surface_change_globs:
+  - packages/ceal-client/**
+  - packages/ceal-worker-cli/**
+  - skills/ceal-guide/**
+  - install-ceal.sh
+fresh_checkout_probes:
+  - npm ci --ignore-scripts && npm run check
+unpublished_release_surfaces:
+  - claude_plugin
+  - codex_plugin
+  - claude_marketplace_version
+  - codex_marketplace_source_path
+real_host_required_surfaces: []
+real_host_required_path_globs:
+  - packages/ceal-client/**
+  - packages/ceal-worker-cli/**
+  - skills/ceal-guide/**
+  - install-ceal.sh
+real_host_checklist:
+  - Confirm no legacy worker process is still holding the pre-atomic session lock before the first update across that boundary.
+  - Run the repo-owned installed-worker acceptance/readback procedure from docs/operator-acceptance.md.
+requested_review_commands:
+  - npm run check:duplication
+  - npm run lint:shell
+requested_review_policy: advisory-only
+review_unavailable_patterns:
+  - review unavailable
+  - requested review unavailable
+  - review gate unavailable
+  - review skipped because
+  - executor_variants
+  - no executor_variants
+review_waiver_phrases:
+  - review waiver:
+  - explicit review waiver:
+  - requested review waiver:

@@ -60,6 +60,12 @@ recommended order and caller identity owned by the Gateway.
   transition owners. Class/prototype/accessor embedding compatibility and the
   physical boundary are covered by worker tests; this is local source/runtime
   proof and remains unreleased.
+- B1 release critique rejected the local unsigned Protocol `0.72.14` packet as
+  a consumer input. Executed probes showed undeclared authority revision/version
+  keys being stripped and undeclared capability arguments admitting
+  locator/permission/authority keys. The Gateway-owner correction request is
+  `docs/requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md`; no
+  frozen Protocol copy or pin moved.
 
 ## Next Session
 
@@ -68,9 +74,10 @@ recommended order and caller identity owned by the Gateway.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
    approved Worker release together with the client-boundary and session-writer
    quality fixes; a green checkout is not installed proof. Ask before releasing.
-3. Do not start the B1 client declaration from this repository alone. Wait for
-   a signed Gateway protocol handoff that owns the additive response decoder and
-   delegated relay exports, consume and re-pin that artifact, then add
+3. Do not consume the known-bad local `0.72.14` packet. Wait for the Gateway
+   owner to answer the tracked correction request, then use the corrected packet
+   to develop the additive response decoder and delegated relay proof. A signed
+   final handoff is still required before re-pin convergence and release. Add
    `x-ceal-decode-generation: additive-v1` only to the generic Gateway HTTP
    transport. The enrollment, adoption, and personal-session routes are separate
    authority protocols and must not send it.
@@ -107,5 +114,7 @@ recommended order and caller identity owned by the Gateway.
 - [client-boundary closeout](../charness-artifacts/impl/2026-08-11-client-boundary-quality-sweep.md)
 - [session-writer quality review](../charness-artifacts/quality/2026-08-11-session-writer-ownership.md)
 - [session-writer closeout](../charness-artifacts/impl/2026-08-11-session-writer-ownership.md)
+- [B1 release critique](../charness-artifacts/critique/2026-08-11-b1-v0-76-2-release-critique.md)
+- [B1 corrected handoff request](requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)
 - [v0.76.1 release record](../charness-artifacts/release/2026-08-10-ceal-v0-76-1.md)
