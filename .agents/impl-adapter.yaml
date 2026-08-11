@@ -5,7 +5,7 @@ output_dir: charness-artifacts/impl
 preset_id: portable-defaults
 customized_from: portable-defaults
 verification_tools:
-  - "npm run check"
+  - cmd:npm
 ui_verification_tools: []
 verification_install_proposals: []
 truth_surfaces:

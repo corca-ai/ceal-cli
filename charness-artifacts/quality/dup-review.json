@@ -23,6 +23,13 @@
     },
     {
       "surface": "code",
+      "id": "4afb27a3e3668b84",
+      "class": "intentional",
+      "reviewed_at": "2026-08-11",
+      "note": "ES module import-header overlap between the enrollment and personal-session public clients. Their shared HTTP exchange and status/body policy already live in session-http-client.ts; extracting import declarations would add an indirection without removing another implementation of a fact."
+    },
+    {
+      "surface": "code",
       "id": "349d44928d03b33c",
       "class": "intentional",
       "reviewed_at": "2026-08-09",

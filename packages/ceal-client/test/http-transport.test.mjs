@@ -315,6 +315,14 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "invalid_response",
+			fetchFn: async () =>
+				new globalThis.Response(JSON.stringify(handshakeResponse(request)), {
+					status: 200,
+					headers: { "content-type": "text/plain; application/json" },
+				}),
+		},
+		{
+			code: "invalid_response",
 			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.3.0", value: {} }),
 		},
 		{
@@ -351,6 +359,19 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 			return true;
 		});
 	}
+});
+
+test("HTTP transport retains structured JSON media types with parameters", async () => {
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () =>
+			new globalThis.Response(JSON.stringify(handshakeResponse(request)), {
+				status: 200,
+				headers: { "content-type": "application/problem+json; charset=utf-8" },
+			}),
+	});
+	assert.equal((await createCealClient(transport).request(request)).ok, true);
 });
 
 test("HTTP transport enforces the total request timeout even when injected fetch ignores abort", async () => {

@@ -10,7 +10,7 @@ import {
 	mustNotFetch,
 	oversizedStreamFetch,
 	responseFetch,
-	UNTRUSTED_RESPONSE_CASES,
+	untrustedResponseCases,
 } from "./client-response-test-support.mjs";
 
 const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
@@ -23,23 +23,7 @@ test("personal-client session client rotates and revokes only through derived Ga
 		requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
 		response.writeHead(200, { "content-type": "application/json" });
 		if (request.url?.endsWith("/refresh")) {
-			response.end(
-				JSON.stringify({
-					schema_version: "ceal.client_refresh_result.v1",
-					ok: true,
-					profile_ref: "profile:work",
-					membership_ref: "membership:narnia",
-					registration_ref: "registration:narnia",
-					client_ref: "client:narnia",
-					subject_ref: "subject:hwidong",
-					instance_ref: "instance:ceal-dev",
-					access_token: `ceal_personal_${"A".repeat(43)}`,
-					expires_at: "2026-07-13T06:15:00.000Z",
-					refresh_token: `ceal_refresh_${"N".repeat(43)}`,
-					refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
-					refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
-				}),
-			);
+			response.end(JSON.stringify(refreshResult()));
 		} else {
 			response.end(JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }));
 		}
@@ -118,7 +102,8 @@ test("a session response this client cannot trust is invalid_response on both ro
 	// Both routes share the request path, so both must refuse identically; a
 	// guard that only covered `refresh` would leave revocation trusting bytes.
 	for (const route of ["refresh", "revoke"]) {
-		for (const [options, why] of UNTRUSTED_RESPONSE_CASES) {
+		const validResponse = route === "refresh" ? refreshResult() : { schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true };
+		for (const [options, why] of untrustedResponseCases(validResponse)) {
 			const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: responseFetch(options) });
 			await assert.rejects(
 				() => client[route](REFRESH),
@@ -148,6 +133,23 @@ test("session client preserves typed Protocol failures carried by non-2xx", asyn
 			fetchFn: async () => globalThis.Response.json(failure, { status: 401 }),
 		});
 		assert.deepEqual(await client[route](REFRESH), failure, route);
+	}
+});
+
+test("session client refuses non-2xx responses whose bodies claim success", async () => {
+	for (const [route, success] of [
+		["refresh", refreshResult()],
+		["revoke", { schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }],
+	]) {
+		const client = createCealPersonalClientSessionClient({
+			endpoint: SESSION_ENDPOINT,
+			fetchFn: async () => globalThis.Response.json(success, { status: 500 }),
+		});
+		await assert.rejects(
+			() => client[route](REFRESH),
+			(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+			route,
+		);
 	}
 });
 
@@ -181,3 +183,21 @@ test("a session timeout and a transport failure are told apart", async () => {
 		(error) => error instanceof CealPersonalClientSessionError && error.code === "request_failed",
 	);
 });
+
+function refreshResult() {
+	return {
+		schema_version: "ceal.client_refresh_result.v1",
+		ok: true,
+		profile_ref: "profile:work",
+		membership_ref: "membership:narnia",
+		registration_ref: "registration:narnia",
+		client_ref: "client:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:ceal-dev",
+		access_token: `ceal_personal_${"A".repeat(43)}`,
+		expires_at: "2026-07-13T06:15:00.000Z",
+		refresh_token: `ceal_refresh_${"N".repeat(43)}`,
+		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
+	};
+}

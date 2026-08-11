@@ -4,7 +4,13 @@ import {
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
 } from "@corca-ai/ceal-protocol";
-import { CEAL_MAX_CONFIGURED_TIMEOUT_MS, readBoundedResponseBody, resolveSafeHttpEndpoint } from "./request-bounds.js";
+import {
+	acceptsJsonMediaType,
+	CEAL_MAX_CONFIGURED_TIMEOUT_MS,
+	raceRequestDeadline,
+	readBoundedResponseBody,
+	resolveSafeHttpEndpoint,
+} from "./request-bounds.js";
 
 export type CealHttpTransportErrorCode =
 	| "invalid_configuration"
@@ -114,9 +120,8 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 					redirect: "error",
 					signal: controller.signal,
 				});
-				pendingResponse.catch(() => undefined);
-				const response = await Promise.race([pendingResponse, timeout]);
-				const bytes = await Promise.race([readBoundedResponse(response, maxResponseBytes), timeout]);
+				const response = await raceRequestDeadline(pendingResponse, timeout);
+				const bytes = await raceRequestDeadline(readBoundedResponse(response, maxResponseBytes), timeout);
 				const decoded = decodeResponse<R>(bytes, response.headers.get("content-type"), wireRequest, response.status);
 				if (!response.ok && decoded.ok) throw new CealHttpTransportError("invalid_response", response.status);
 				return decoded;
@@ -150,7 +155,7 @@ function decodeResponse<R extends CealGatewayRequest>(
 	request: Readonly<R>,
 	status: number,
 ): CealGatewayResponseFor<R> {
-	if (!contentType || !/(?:^|\s|;)application\/(?:[a-z0-9.+-]+[+]json|json)(?:\s*;|\s*$)/iu.test(contentType)) {
+	if (!acceptsJsonMediaType(contentType, true)) {
 		throw new CealHttpTransportError("invalid_response", status);
 	}
 	let value: unknown;

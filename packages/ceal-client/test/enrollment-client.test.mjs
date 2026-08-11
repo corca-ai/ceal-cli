@@ -7,10 +7,12 @@ import { CealEnrollmentClientError, createCealEnrollmentClient } from "../dist/i
 import {
 	abortingFetch,
 	brokenFetch,
+	ignoringAbortFetch,
 	mustNotFetch,
+	nonTerminatingBodyFetch,
 	oversizedStreamFetch,
 	responseFetch,
-	UNTRUSTED_RESPONSE_CASES,
+	untrustedResponseCases,
 } from "./client-response-test-support.mjs";
 
 test("enrollment client exchanges one code over the derived loopback route", async () => {
@@ -20,23 +22,7 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		for await (const chunk of request) chunks.push(chunk);
 		requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
 		response.writeHead(200, { "content-type": "application/json" });
-		response.end(
-			JSON.stringify({
-				schema_version: "ceal.enrollment_result.v1",
-				ok: true,
-				profile_ref: "profile:narnia",
-				membership_ref: "membership:narnia",
-				registration_ref: "registration:narnia",
-				client_ref: "client:narnia",
-				subject_ref: "subject:hwidong",
-				instance_ref: "instance:corca",
-				access_token: `ceal_personal_${"B".repeat(43)}`,
-				expires_at: "2026-07-14T00:00:00.000Z",
-				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-				refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
-				refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
-			}),
-		);
+		response.end(JSON.stringify(enrollmentResult()));
 	});
 	await listen(server);
 	const address = server.address();
@@ -81,9 +67,24 @@ test("enrollment client preserves a typed Protocol failure carried by non-2xx", 
 	};
 	const client = createCealEnrollmentClient({
 		endpoint: ENDPOINT,
-		fetchFn: async () => globalThis.Response.json(failure, { status: 410 }),
+		fetchFn: async () =>
+			new globalThis.Response(JSON.stringify(failure), {
+				status: 410,
+				headers: { "content-type": "application/json; charset=utf-8" },
+			}),
 	});
 	assert.deepEqual(await client.exchange(VALID_CODE), failure);
+});
+
+test("enrollment client refuses a non-2xx response whose body claims success", async () => {
+	const client = createCealEnrollmentClient({
+		endpoint: ENDPOINT,
+		fetchFn: async () => globalThis.Response.json(enrollmentResult(), { status: 500 }),
+	});
+	await assert.rejects(
+		() => client.exchange(VALID_CODE),
+		(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_response",
+	);
 });
 
 function listen(server) {
@@ -154,7 +155,7 @@ test("a malformed enrollment code never reaches the network", async () => {
 });
 
 test("a response this client cannot trust is invalid_response, not a parsed guess", async () => {
-	for (const [options, why] of UNTRUSTED_RESPONSE_CASES) {
+	for (const [options, why] of untrustedResponseCases(enrollmentResult())) {
 		const client = createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: responseFetch(options) });
 		await assert.rejects(
 			() => client.exchange(VALID_CODE),
@@ -196,3 +197,35 @@ test("a timeout and a transport failure are told apart", async () => {
 		(error) => error instanceof CealEnrollmentClientError && error.code === "request_failed",
 	);
 });
+
+test("the lifecycle deadline wins when injected fetch or body ignores abort", async () => {
+	for (const [why, fetchFn] of [
+		["fetch", ignoringAbortFetch],
+		["response body", nonTerminatingBodyFetch],
+	]) {
+		const client = createCealEnrollmentClient({ endpoint: ENDPOINT, timeoutMs: 5, fetchFn });
+		await assert.rejects(
+			() => client.exchange(VALID_CODE),
+			(error) => error instanceof CealEnrollmentClientError && error.code === "request_timeout",
+			why,
+		);
+	}
+});
+
+function enrollmentResult() {
+	return {
+		schema_version: "ceal.enrollment_result.v1",
+		ok: true,
+		profile_ref: "profile:narnia",
+		membership_ref: "membership:narnia",
+		registration_ref: "registration:narnia",
+		client_ref: "client:narnia",
+		subject_ref: "subject:hwidong",
+		instance_ref: "instance:corca",
+		access_token: `ceal_personal_${"B".repeat(43)}`,
+		expires_at: "2026-07-14T00:00:00.000Z",
+		refresh_token: `ceal_refresh_${"R".repeat(43)}`,
+		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
+	};
+}

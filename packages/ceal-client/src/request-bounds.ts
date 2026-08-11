@@ -46,14 +46,27 @@ export function resolveRequestBounds(
 	return { fetchFn, timeoutMs };
 }
 
-/**
- * The content type the three session-lifecycle clients require, spelled once for
- * them. Not the whole package's: `http-transport.ts` keeps a deliberately more
- * permissive check that admits `application/…+json`, because the Gateway result
- * route may negotiate a suffixed type and a session exchange may not.
- */
+/** Races one HTTP step against its caller-owned deadline and contains a late rejection after the deadline wins. */
+export function raceRequestDeadline<T>(pending: Promise<T>, timeout: Promise<never>): Promise<T> {
+	pending.catch(() => undefined);
+	return Promise.race([pending, timeout]);
+}
+
+/** The package's one JSON media-type grammar; callers choose whether structured suffixes are in contract. */
+export function acceptsJsonMediaType(contentType: string | null, allowStructuredSuffix = false): boolean {
+	if (contentType === null) return false;
+	const parsed =
+		/^([!#$%&'*+\-.^_`|~0-9A-Za-z]+)\/([!#$%&'*+\-.^_`|~0-9A-Za-z]+)(?:[ \t]*;[ \t]*[!#$%&'*+\-.^_`|~0-9A-Za-z]+[ \t]*=[ \t]*(?:[!#$%&'*+\-.^_`|~0-9A-Za-z]+|"(?:[\t\u0020\u0021\u0023-\u005B\u005D-\u007E]|\\[\t\u0020-\u007E])*"))*[ \t]*$/u.exec(
+			contentType,
+		);
+	if (parsed === null || parsed[1]?.toLowerCase() !== "application") return false;
+	const subtype = parsed[2]?.toLowerCase() ?? "";
+	return subtype === "json" || (allowStructuredSuffix && subtype.length > "+json".length && subtype.endsWith("+json"));
+}
+
+/** The exact JSON content type required by the three session-lifecycle clients. */
 export function declaresJsonContentType(response: Response): boolean {
-	return response.headers.get("content-type")?.toLowerCase().startsWith("application/json") === true;
+	return acceptsJsonMediaType(response.headers.get("content-type"));
 }
 
 /**

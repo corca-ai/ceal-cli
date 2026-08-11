@@ -5,6 +5,7 @@ import {
 	type CealDeviceEnrollmentPollResponse,
 	type CealDeviceEnrollmentStartRequest,
 	type CealDeviceEnrollmentStartResult,
+	decodeCealDeviceEnrollmentPollRequest,
 	decodeCealDeviceEnrollmentPollResponse,
 	decodeCealDeviceEnrollmentStartRequest,
 	decodeCealDeviceEnrollmentStartResult,
@@ -69,20 +70,15 @@ export function createCealDeviceAdoptionClient(options: CreateCealDeviceAdoption
 			return decode(await exchange(startEndpoint, body, fetchFn, timeoutMs, true), decodeCealDeviceEnrollmentStartResult);
 		},
 		async poll(request) {
-			if (!isPollRequest(request)) throw new CealDeviceAdoptionClientError("invalid_configuration");
-			const body = { ...request, schema_version: CEAL_DEVICE_ENROLLMENT_POLL_SCHEMA };
+			let body: CealDeviceEnrollmentPollRequest;
+			try {
+				body = decodeCealDeviceEnrollmentPollRequest({ ...request, schema_version: CEAL_DEVICE_ENROLLMENT_POLL_SCHEMA });
+			} catch {
+				throw new CealDeviceAdoptionClientError("invalid_configuration");
+			}
 			return decode(await exchange(pollEndpoint, body, fetchFn, timeoutMs, false), decodeCealDeviceEnrollmentPollResponse);
 		},
 	};
-}
-
-function isPollRequest(request: CealDeviceEnrollmentPollRequest): boolean {
-	return (
-		typeof request?.registration_ref === "string" &&
-		typeof request?.nonce_ref === "string" &&
-		typeof request?.signature === "string" &&
-		request.signature.length > 0
-	);
 }
 
 function decode<T>(parsed: unknown, decoder: (value: unknown) => T): T {

@@ -7,7 +7,7 @@ import {
 	decodeCealClientRevokeResponse,
 } from "@corca-ai/ceal-protocol";
 import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
-import { exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
+import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealPersonalClientSessionClient {
@@ -64,7 +64,7 @@ export function createCealPersonalClientSessionClient(
 	};
 }
 
-async function requestSession<T>(input: {
+async function requestSession<T extends { readonly ok: boolean }>(input: {
 	endpoint: URL;
 	fetchFn: typeof globalThis.fetch;
 	timeoutMs: number;
@@ -81,11 +81,7 @@ async function requestSession<T>(input: {
 		createError: (failure) => new CealPersonalClientSessionError(failure),
 		isClientError: (error) => error instanceof CealPersonalClientSessionError,
 	});
-	try {
-		return input.decode(response.value);
-	} catch {
-		return fail("invalid_response");
-	}
+	return decodeSessionProtocolResponse(response, input.decode, () => fail("invalid_response"));
 }
 
 function fail(code: "invalid_configuration" | "invalid_response"): never {

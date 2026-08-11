@@ -1,6 +1,7 @@
 import {
 	CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES,
 	declaresJsonContentType,
+	raceRequestDeadline,
 	readBoundedResponseBody,
 	resolveSafeHttpEndpoint,
 } from "./request-bounds.js";
@@ -29,19 +30,27 @@ export interface SessionJsonResponse {
  */
 export async function exchangeSessionJson(options: SessionJsonExchangeOptions): Promise<SessionJsonResponse> {
 	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			reject(options.createError("request_timeout"));
+		}, options.timeoutMs);
+	});
 	const invalidResponse = (): never => {
 		throw options.createError("invalid_response");
 	};
 	try {
-		const response = await options.fetchFn(options.endpoint, {
+		const pendingResponse = options.fetchFn(options.endpoint, {
 			method: "POST",
 			headers: { accept: "application/json", "content-type": "application/json" },
 			body: JSON.stringify(options.body),
 			redirect: "error",
 			signal: controller.signal,
 		});
-		const bytes = await readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
+		const response = await raceRequestDeadline(pendingResponse, timeout);
+		const pendingBody = readBoundedResponseBody(response, CEAL_SESSION_CLIENT_MAX_RESPONSE_BYTES, "digits", invalidResponse);
+		const bytes = await raceRequestDeadline(pendingBody, timeout);
 		if (!declaresJsonContentType(response)) invalidResponse();
 		let value: unknown;
 		try {
@@ -55,8 +64,24 @@ export async function exchangeSessionJson(options: SessionJsonExchangeOptions): 
 		if (controller.signal.aborted) throw options.createError("request_timeout");
 		throw options.createError("request_failed");
 	} finally {
-		clearTimeout(timer);
+		if (timer !== undefined) clearTimeout(timer);
 	}
+}
+
+/** Decodes one lifecycle response while refusing a success body carried on a non-success HTTP status. */
+export function decodeSessionProtocolResponse<T extends { readonly ok: boolean }>(
+	response: SessionJsonResponse,
+	decoder: (value: unknown) => T,
+	invalidResponse: () => never,
+): T {
+	let decoded: T;
+	try {
+		decoded = decoder(response.value);
+	} catch {
+		return invalidResponse();
+	}
+	if (!response.ok && decoded.ok) return invalidResponse();
+	return decoded;
 }
 
 /**

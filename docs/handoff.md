@@ -48,13 +48,20 @@ recommended order and caller identity owned by the Gateway.
   from package-private owners; their distinct public error contracts and route
   declarations are explicitly reviewed rather than hidden behind a generic
   callback surface. `npm run check:duplication` reproduces the verdict.
+- A repository quality sweep repaired owned client-boundary defects without
+  touching the frozen Protocol package: lifecycle deadlines now bound caller
+  wait even when fetch/body work ignores abort, non-success status cannot carry
+  a decoded success, JSON media-type parsing has one complete owner, and
+  adoption poll uses the canonical request decoder before fetch. The full local gate and
+  read-only command probe are green; this is source proof, not a release claim.
 
 ## Next Session
 
 1. Read the release record and use the exact signed 0.76.1 tuple for any Gateway
    coherent-v5 join; do not redo release work.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
-   approved Worker release; a green checkout is not installed proof.
+   approved Worker release together with the client-boundary quality fixes; a
+   green checkout is not installed proof. Ask before releasing.
 3. Do not start the B1 client declaration from this repository alone. Wait for
    a signed Gateway protocol handoff that owns the additive response decoder and
    delegated relay exports, consume and re-pin that artifact, then add
@@ -90,5 +97,7 @@ recommended order and caller identity owned by the Gateway.
 - [repair contract](../charness-artifacts/spec/2026-08-10-worker-owned-notification-shutdown.md)
 - [implementation closeout](../charness-artifacts/impl/2026-08-10-worker-owned-notification-shutdown.md)
 - [code critique](../charness-artifacts/critique/2026-08-10-worker-owned-notification-shutdown-code-critique.md)
+- [client-boundary quality review](../charness-artifacts/quality/2026-08-11-codebase-quality-sweep.md)
+- [client-boundary closeout](../charness-artifacts/impl/2026-08-11-client-boundary-quality-sweep.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)
 - [v0.76.1 release record](../charness-artifacts/release/2026-08-10-ceal-v0-76-1.md)

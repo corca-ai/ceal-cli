@@ -33,7 +33,7 @@ public_spec_pointer_proof_markers:
   - "executable_proof: pointer"
   - "public_spec_proof: pointer"
 cli_skill_surface_probe_commands:
-  - npm run probe
+  - npm run probe -- ceal commands
 canonical_markdown_surfaces:
   - AGENTS.md
   - CLAUDE.md

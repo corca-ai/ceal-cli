@@ -44,6 +44,12 @@ test("start and poll reach their own routes and return decoded Protocol values",
 	);
 	assert.ok(seen.every((entry) => entry.method === "POST" && entry.contentType === "application/json"));
 	assert.equal(JSON.parse(seen[0].body).email, "employee@example.test");
+	assert.deepEqual(JSON.parse(seen[1].body), {
+		schema_version: "ceal.device_enrollment_poll.v1",
+		registration_ref: "registration:1",
+		nonce_ref: "nonce:1",
+		signature: SIGNATURE,
+	});
 });
 
 test("a redirect is refused rather than followed", async () => {
@@ -201,7 +207,10 @@ test("unusable endpoints and malformed requests never leave the process", async 
 	}
 	// A local request the Protocol would reject fails here rather than reaching
 	// the Gateway with an address attached to it.
-	const client = createCealDeviceAdoptionClient({ endpoint: "https://ceal.example.test/api/ceal/v1" });
+	const client = createCealDeviceAdoptionClient({
+		endpoint: "https://ceal.example.test/api/ceal/v1",
+		fetchFn: async () => assert.fail("an invalid request must not fetch"),
+	});
 	await assert.rejects(
 		() => client.start({ ...startRequest(), email: "not-an-address" }),
 		(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
@@ -210,6 +219,17 @@ test("unusable endpoints and malformed requests never leave the process", async 
 		() => client.poll({ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "" }),
 		(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
 	);
+	for (const request of [
+		{ schema_version: POLL_SCHEMA, registration_ref: "", nonce_ref: "nonce:1", signature: SIGNATURE },
+		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "", signature: SIGNATURE },
+		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "x" },
+		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: SIGNATURE, extra: "leak" },
+	]) {
+		await assert.rejects(
+			() => client.poll(request),
+			(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
+		);
+	}
 });
 
 const POLL_SCHEMA = "ceal.device_enrollment_poll_result.v1";
