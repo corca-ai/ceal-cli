@@ -32,7 +32,7 @@ test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 // in `guide-contract.test.mjs`, alongside the lane that consumes it.
 test("the worker guide teaches help-driven discovery without command snapshots", async () => {
 	const core = readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8");
-	const guide = `${core}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
+	const guide = `${core}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}\n${readFileSync(LINKED_PRIVATE_CONTEXT, "utf8")}`;
 	assert.match(guide, /^name: ceal-guide$/mu);
 	assert.match(guide, /\bceal --help\b/u);
 	assert.match(guide, /ceal <command> --help/u);
@@ -50,7 +50,7 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 	// the fallback contract when a development Gateway has not begun serving it.
 	assert.match(core, /Prefer ordered guidance returned by the\s+live Gateway when present/u);
 	assert.match(core, /If neither surface identifies a next\s+move, stop/u);
-	assert.doesNotMatch(core, /ceal capabilities targets|ceal call <capability-id>|ceal receipt show <request-ref>/u);
+	assert.doesNotMatch(guide, /ceal capabilities targets|ceal call <capability-id>|ceal receipt show <request-ref>/u);
 	// Two non-claims the guide has to state, not two sentences it has to keep:
 	// reword them and this gate should be re-read, which is the point.
 	assert.match(guide, /catalog\s+grant is not backend\s+readiness/u);
