@@ -14,9 +14,11 @@ skew.
 
 Gateway Protocol `0.72.16` at commit
 `ce5db611c12546dabb91d33328169493c8c3b2af` corrects the two boundary defects
-the release critique reproduced in `0.72.14`. Its local packet is development
-evidence only; the last signed handoff remains `0.72.13`, so consuming it opens
-implementation while keeping every release path quarantined.
+the release critique reproduced in `0.72.14`, but consumer review found that
+undeclared arguments still admit named authority refs such as `grant_ref` and
+`policy_ref`. The packet remains useful for quarantined implementation, not B1
+acceptance. A corrected replacement is required before packed proof can pass;
+the last signed handoff remains `0.72.13`.
 
 ## Capability Contract
 
@@ -28,11 +30,11 @@ fatal. A delegated control session relays an undeclared safe capability through
 the generic argument/result boundary instead of dying on a fixed capability
 table.
 
-## Corrected Development Input Slice
+## Quarantined Development Input Slice
 
 - Consume the corrected tarball/provenance as a Gateway-issued artifact;
   never edit frozen Protocol source by hand.
-- Corrected packet identity: Protocol tree
+- Evaluated packet identity: Protocol tree
   `379ea7bccb43ed78df1d12afed9f5f52b0f1072d`, tarball SHA-256
   `3c0445cb4308aae07062be9a40a959e919140ce616c5fc038e1c7d9d4bb76dbc`.
 - Use the tarball for packed-artifact proof. Re-vendor source/test/conformance
@@ -42,6 +44,8 @@ table.
 - Declare the proof/shipment divergence with an owner and tracked request. This
   is quarantine: only `npm run check:protocol-dev` may be claimed while the
   shipped handoff lock still names `0.72.13`.
+- Do not call `0.72.16` corrected B1 proof. The installed-consumer arm must
+  refuse named authority refs before the replacement packet can pass.
 - Delete `temp.md` after the local packet is consumed; the durable request and
   this contract replace the handshake note.
 
@@ -67,7 +71,8 @@ table.
 - A response carrying a new member of a closed enum is refused.
 - An undeclared safe delegated capability request/result crosses the canonical
   Protocol decoder; provider-shaped handles, credentials, locators,
-  permissions, and authority fields remain refused.
+  permissions, authority fields, and named authority refs remain refused while
+  ordinary opaque `*_ref` handles stay relayable.
 - One real worker control session processes an undeclared safe capability frame
   and a following known frame, proving version skew does not end the loop.
 - Header capture proves the generic transport sends exactly the generation

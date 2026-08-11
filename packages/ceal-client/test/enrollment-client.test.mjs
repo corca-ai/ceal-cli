@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
+import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
 import { CealEnrollmentClientError, createCealEnrollmentClient } from "../dist/index.js";
 import {
 	abortingFetch,
@@ -20,7 +21,11 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
-		requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+		requests.push({
+			url: request.url,
+			decodeGeneration: request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
+			body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+		});
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(enrollmentResult()));
 	});
@@ -33,6 +38,7 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		assert.equal(result.profile_ref, "profile:narnia");
 		assert.equal(requests[0].url, "/api/ceal/v1/enroll");
 		assert.equal(requests[0].body.code, "A".repeat(43));
+		assert.equal(requests[0].decodeGeneration, undefined);
 		// Drift guard: the hardcoded client-identification version must track
 		// the client package manifest.
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));

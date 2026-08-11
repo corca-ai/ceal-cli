@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
 import {
 	isInheritedNotificationChannelFd,
 	openLeasedConsumerControlSession,
@@ -148,6 +149,61 @@ test("private control session carries exactly the five canonical v5 capability o
 		["acquire", "projection", "recheck", "call", "complete"],
 	);
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
+});
+
+test("one control session relays an undeclared safe capability and then a declared frame", async () => {
+	const unknownFrame = {
+		schema_version: "ceal.leased_consumer_capability_control_request.v5",
+		operation: "call",
+		input: {
+			...leaseInput(),
+			schema_version: "ceal.gateway_leased_consumer_call_request.v1",
+			capability_id: "calendar.event.list",
+			target_ref: `target:${"a".repeat(64)}`,
+			purpose: "list bounded events",
+			arguments: {
+				schema_version: "ceal.calendar_event_list_input.v1",
+				window: "week",
+				event_ref: `event:${"e".repeat(64)}`,
+			},
+		},
+	};
+	const unknownResponse = {
+		schema_version: "ceal.leased_consumer_capability_control_response.v5",
+		operation: "call",
+		result: {
+			status: "result",
+			result: {
+				schema_version: "ceal.gateway_leased_agent_capability_result.v1",
+				capability_id: "calendar.event.list",
+				effect: "read",
+				result_ref: `result:${"a".repeat(64)}`,
+				handles: [],
+				data: { entries: [{ label: "Planning" }], truncated: false },
+			},
+		},
+	};
+	const calls = [];
+	const carrier = await openLeasedConsumerControlSession({
+		readProtectedSession: async () => session,
+		closeProtectedSession: async () => {},
+		requestUnixSocket: async (input) => {
+			const request = JSON.parse(input.body);
+			calls.push(request);
+			const response = request.input?.capability_id === "calendar.event.list" ? unknownResponse : responseFor(request.operation);
+			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(response)) };
+		},
+	});
+	const output = [];
+	async function* input() {
+		yield encoder.encode(`${JSON.stringify(unknownFrame)}\n${JSON.stringify(frames[0])}\n`);
+	}
+	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))), true);
+	assert.deepEqual(
+		calls.map((frame) => frame.operation),
+		["call", "acquire"],
+	);
+	assert.deepEqual(output, [unknownResponse, responseFor("acquire")]);
 });
 
 test("candidate notifications are protocol-decoded and forwarded as bounded canonical Agent frames", async () => {
@@ -1029,7 +1085,7 @@ function responseFor(operation) {
 					effect: "read",
 					result_ref: `result:${"a".repeat(64)}`,
 					handles: [{ kind: "message", ref: `message:${"b".repeat(64)}` }],
-					data: { schema_version: "ceal.gateway_leased_agent_message_read_data.v1", items: [{ text: "fixture" }] },
+					data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "fixture" }] },
 				},
 			},
 		};

@@ -1,4 +1,7 @@
 import {
+	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
+	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
+	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
 	type CealGatewayRequest,
 	type CealGatewayResponseFor,
 	decodeCealClientResponse,
@@ -44,19 +47,27 @@ export interface CealClientTransport {
 }
 
 /**
- * Negotiation header declaring that this client tolerates the optional
- * eligible-Profile catalog on the handshake. The Gateway emits the catalog only
- * when it reads exactly `accept` here, because the 1.3.0 handshake decoder is
- * exact-keys strict. The literal is the wire contract owned by the server; a
- * client cannot import it, so a golden-value test pins this constant to it.
+ * @deprecated The generic transport now declares the Protocol-owned additive
+ * decode generation. Kept as a compatibility export for callers that inspect
+ * the former per-field negotiation surface.
  */
-export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = "x-ceal-profiles";
+export const CEAL_GATEWAY_PROFILES_ACCEPT_HEADER = ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS.profiles.legacyAcceptHeader;
 
-/** Negotiates the optional safe connector-route failure audit projection. */
-export const CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER = "x-ceal-route-provenance";
+/** @deprecated Use the additive decode generation negotiated by the generic transport. */
+export const CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER = ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS.route_provenance.legacyAcceptHeader;
 
-/** Negotiates the optional bounded Gateway handling time on audit readback. */
-export const CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER = "x-ceal-audit-timing";
+/** @deprecated Use the additive decode generation negotiated by the generic transport. */
+export const CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER = ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS.audit_timing.legacyAcceptHeader;
+
+const CEAL_GATEWAY_RECOVERY_ACCEPT_HEADER = ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS.recovery.legacyAcceptHeader;
+const CEAL_GATEWAY_RATE_LIMIT_POLICY_ACCEPT_HEADER = ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS.rate_limit_policy.legacyAcceptHeader;
+
+const TRANSITIONAL_LEGACY_ACCEPT_HEADERS = Object.freeze({
+	[CEAL_GATEWAY_RECOVERY_ACCEPT_HEADER]: "accept",
+	[CEAL_GATEWAY_RATE_LIMIT_POLICY_ACCEPT_HEADER]: "accept",
+	[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER]: "accept",
+	[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER]: "accept",
+});
 
 // Capability calls can legitimately traverse a bounded provider page before
 // the Gateway serializes its minimized result. Ten seconds cut off a completed
@@ -101,16 +112,11 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 						accept: "application/json",
 						authorization: `Bearer ${accessToken}`,
 						"content-type": "application/json",
-						// This transport ships with the recovery-tolerant failure
-						// decoder, so it may declare acceptance of typed
-						// `error.recovery`; the Gateway never sends the field to a
-						// client that does not.
-						"x-ceal-recovery": "accept",
-						// The handshake decoder now tolerates the optional
-						// eligible-Profile catalog, so negotiate for it here; the
-						// Gateway omits the field for a client that does not.
-						[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER]: "accept",
-						[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER]: "accept",
+						[CEAL_GATEWAY_DECODE_GENERATION_HEADER]: CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
+						// Keep the former per-field opt-ins for rolling operation with
+						// Gateways that predate the decode-generation contract. Their
+						// literals derive from the Protocol registry above.
+						...TRANSITIONAL_LEGACY_ACCEPT_HEADERS,
 						// Audit event timing is an additive strict-decoder field. It only
 						// has meaning on readback, so keep the wire negotiation scoped to
 						// that operation rather than expanding every Gateway request.

@@ -3,6 +3,11 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
 import {
+	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
+	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
+	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
+} from "@corca-ai/ceal-protocol";
+import {
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
 	CEAL_GATEWAY_PROFILES_ACCEPT_HEADER,
@@ -89,12 +94,20 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 					);
 				}
 				if (body.operation === "call") return globalThis.Response.json(allowedCallResponse(body));
+				if (body.operation === "discover") return globalThis.Response.json(discoveryResponse(body));
 				return globalThis.Response.json(handshakeResponse(body));
 			},
 		}),
 	);
 	const response = await client.request(request);
 	assert.equal(response.ok, true);
+	const discovery = await client.request({
+		request_id: "request:discover:header-scope",
+		operation: "discover",
+		profile_ref: "profile:test",
+		body: {},
+	});
+	assert.equal(discovery.ok, true);
 	const call = await client.request({
 		request_id: "request:call:header-scope",
 		operation: "call",
@@ -115,14 +128,60 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 	});
 	assert.equal(readback.ok, false);
 	const handshakeHeaders = observedHeaders.get("handshake");
+	const discoveryHeaders = observedHeaders.get("discover");
 	const callHeaders = observedHeaders.get("call");
 	const readbackHeaders = observedHeaders.get("readback");
 	assert.equal(handshakeHeaders["x-ceal-recovery"], "accept");
+	for (const headers of [handshakeHeaders, discoveryHeaders, callHeaders, readbackHeaders]) {
+		assert.equal(headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER], CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION);
+	}
+	for (const field of ["recovery", "rate_limit_policy", "profiles", "route_provenance"]) {
+		assert.equal(handshakeHeaders[ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS[field].legacyAcceptHeader], "accept");
+	}
 	assert.equal(handshakeHeaders[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER], "accept");
 	assert.equal(handshakeHeaders[CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER], "accept");
 	assert.equal(handshakeHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], undefined);
 	assert.equal(callHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], undefined);
 	assert.equal(readbackHeaders[CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER], "accept");
+});
+
+test("HTTP transport removes additive keys but still refuses authority keys and closed-enum drift", async () => {
+	const benign = handshakeResponse(request);
+	benign.gateway_hint = "later envelope guidance";
+	benign.value.presentation_hint = "later handshake guidance";
+	const accepted = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(benign),
+	});
+	const decoded = await createCealClient(accepted).request(request);
+	assert.equal(Object.hasOwn(decoded, "gateway_hint"), false);
+	assert.equal(Object.hasOwn(decoded.value, "presentation_hint"), false);
+
+	const authority = { ...handshakeResponse(request), grant_revision: 9 };
+	const authorityTransport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(authority),
+	});
+	await assert.rejects(createCealClient(authorityTransport).request(request), hasTransportCode("invalid_response"));
+
+	const closedEnum = {
+		ok: false,
+		request_id: request.request_id,
+		protocol_version: "1.3.0",
+		error: {
+			code: "unavailable",
+			message: "Gateway is unavailable.",
+			recovery: { kind: "retry_with_new_member" },
+		},
+	};
+	const closedEnumTransport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(closedEnum, { status: 503 }),
+	});
+	await assert.rejects(createCealClient(closedEnumTransport).request(request), hasTransportCode("invalid_response"));
 });
 
 test("HTTP transport refuses redirects before the request body can reach another endpoint", async () => {

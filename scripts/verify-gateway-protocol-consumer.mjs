@@ -36,8 +36,11 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 			gateway_protocol: input.provenance,
 			worker_source: {
 				repository: "corca-ai/ceal-cli",
-				commit: git(root, ["rev-parse", "HEAD"]),
-				tree: git(root, ["rev-parse", "HEAD^{tree}"]),
+				baseline_commit: git(root, ["rev-parse", "HEAD"]),
+				baseline_tree: git(root, ["rev-parse", "HEAD^{tree}"]),
+				state: git(root, ["status", "--porcelain=v1"]) === "" ? "committed" : "working_tree",
+				non_claim:
+					"The baseline identity does not bind working-tree package bytes; the packed artifact digests below bind the exercised outputs.",
 			},
 			worker_release_inputs: {
 				...releaseInputs,
@@ -198,6 +201,31 @@ function installAndExerciseWorker({ workspace, input, client, worker }) {
 	assertContainedRegularPath(consumer, resolvedPath, "escaped_protocol_resolution");
 	if (!resolvedPath.includes(`${path.sep}node_modules${path.sep}`))
 		throw new GatewayProtocolConsumerError("source_fallback", "Worker resolved protocol outside installed node_modules.");
+	const b1Probe = path.join(consumer, "verify-b1-installed.mjs");
+	const b1ProbeSource = B1_INSTALLED_CONSUMER_PROBE.replace("__CEAL_CLIENT_VERSION_JSON__", JSON.stringify(client.version));
+	if (!B1_INSTALLED_CONSUMER_PROBE.includes("__CEAL_CLIENT_VERSION_JSON__") || b1ProbeSource.includes("__CEAL_CLIENT_VERSION_JSON__"))
+		throw new GatewayProtocolConsumerError("worker_smoke_failed", "Installed B1 behavior proof did not receive the packed client version.");
+	writeFileSync(b1Probe, b1ProbeSource);
+	let b1;
+	try {
+		b1 = JSON.parse(run(consumer, process.execPath, [b1Probe], "b1_installed_behavior").stdout);
+	} catch {
+		throw new GatewayProtocolConsumerError("worker_smoke_failed", "Installed B1 behavior proof did not return valid JSON.");
+	}
+	if (b1?.undeclared_authority_refs !== "refused")
+		throw new GatewayProtocolConsumerError(
+			"b1_authority_boundary_failed",
+			"Installed Protocol admitted a named authority ref in undeclared capability arguments.",
+		);
+	if (
+		b1?.decode_generation !== "additive-v1" ||
+		b1?.unknown_response_keys !== "removed" ||
+		b1?.authority_keys !== "refused" ||
+		b1?.closed_enums !== "refused" ||
+		b1?.undeclared_capability_sequence !== "relayed_then_known"
+	) {
+		throw new GatewayProtocolConsumerError("worker_smoke_failed", "Installed B1 behavior proof did not satisfy its contract.");
+	}
 	return {
 		protocol_tarball_sha256: input.sha256,
 		protocol_lock: protocol.lock,
@@ -205,8 +233,190 @@ function installAndExerciseWorker({ workspace, input, client, worker }) {
 		client_tarball_sha256: client.tarball.sha256,
 		worker_tarball_sha256: worker.tarball.sha256,
 		worker_commands_schema: "ceal.commands.v1",
+		b1,
 	};
 }
+
+const B1_INSTALLED_CONSUMER_PROBE = String.raw`import {
+	CealHttpTransportError,
+	createCealClient,
+	createCealHttpTransport,
+} from "@corca-ai/ceal";
+import {
+	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
+	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
+	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
+} from "@corca-ai/ceal-protocol";
+import {
+	openLeasedConsumerControlSession,
+	runLeasedConsumerControlTransport,
+} from "./node_modules/@corca-ai/ceal-worker-cli/dist/leased-consumer-control-session.js";
+
+const encoder = new TextEncoder();
+const request = {
+	request_id: "request:packed:b1",
+	operation: "handshake",
+	profile_ref: "profile:packed",
+	body: { client: { name: "packed-proof", version: __CEAL_CLIENT_VERSION_JSON__ } },
+};
+const handshake = () => ({
+	ok: true,
+	request_id: request.request_id,
+	protocol_version: "1.3.0",
+	proof_ref_or_unavailable: "proof:packed",
+	value: {
+		schema_version: "ceal.gateway_handshake.v1",
+		negotiated_protocol_version: "1.3.0",
+		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:packed",
+		registration_ref: "registration:packed",
+		client_ref: "client:packed",
+		subject_ref: "subject:packed",
+		instance_ref: "instance:packed",
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	},
+});
+const transportFor = (response, capture) => createCealHttpTransport({
+	endpoint: "https://gateway.example.test/client",
+	accessToken: "packed-proof-token",
+	fetchFn: async (_endpoint, init) => {
+		if (capture) capture(init.headers);
+		return Response.json(response, { status: response.ok ? 200 : 503 });
+	},
+});
+const refusesInvalidResponse = async (response) => {
+	try {
+		await createCealClient(transportFor(response)).request(request);
+		return false;
+	} catch (error) {
+		return error instanceof CealHttpTransportError && error.code === "invalid_response";
+	}
+};
+
+let headers;
+const benign = handshake();
+benign.gateway_hint = "later envelope guidance";
+benign.value.presentation_hint = "later handshake guidance";
+const decoded = await createCealClient(transportFor(benign, (value) => { headers = value; })).request(request);
+if (Object.hasOwn(decoded, "gateway_hint") || Object.hasOwn(decoded.value, "presentation_hint")) throw new Error("unknown_key_retained");
+if (headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER] !== CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION) throw new Error("generation_missing");
+for (const field of ["recovery", "rate_limit_policy", "profiles", "route_provenance"]) {
+	if (headers[ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS[field].legacyAcceptHeader] !== "accept") throw new Error("legacy_header_missing");
+}
+
+const authority = handshake();
+authority.grant_revision = 9;
+if (!(await refusesInvalidResponse(authority))) throw new Error("authority_key_accepted");
+const closedEnum = {
+	ok: false,
+	request_id: request.request_id,
+	protocol_version: "1.3.0",
+	error: { code: "unavailable", message: "Gateway is unavailable.", recovery: { kind: "retry_with_new_member" } },
+};
+if (!(await refusesInvalidResponse(closedEnum))) throw new Error("closed_enum_accepted");
+
+const leaseInput = { event_ref: "event:packed", lease_ref: "lease:packed", lease_fence: 1 };
+const unknownFrame = {
+	schema_version: "ceal.leased_consumer_capability_control_request.v5",
+	operation: "call",
+	input: {
+		...leaseInput,
+		schema_version: "ceal.gateway_leased_consumer_call_request.v1",
+		capability_id: "calendar.event.list",
+		target_ref: "target:" + "a".repeat(64),
+		purpose: "list bounded events",
+		arguments: { schema_version: "ceal.calendar_event_list_input.v1", window: "week", event_ref: "event:" + "e".repeat(64) },
+	},
+};
+const knownFrame = { schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "acquire", input: {} };
+const unknownResponse = {
+	schema_version: "ceal.leased_consumer_capability_control_response.v5",
+	operation: "call",
+	result: {
+		status: "result",
+		result: {
+			schema_version: "ceal.gateway_leased_agent_capability_result.v1",
+			capability_id: "calendar.event.list",
+			effect: "read",
+			result_ref: "result:" + "a".repeat(64),
+			handles: [],
+			data: { entries: [{ label: "Planning" }], truncated: false },
+		},
+	},
+};
+const knownResponse = {
+	schema_version: "ceal.leased_consumer_capability_control_response.v5",
+	operation: "acquire",
+	result: {
+		status: "leased",
+		lease: { ...leaseInput, delivery_attempt: 1, expires_at: "2026-08-11T09:00:00.000Z" },
+	},
+};
+const openSession = (requestUnixSocket) => openLeasedConsumerControlSession({
+	readProtectedSession: async () => encoder.encode(JSON.stringify({
+		schema_version: "ceal.leased_consumer_control_session.v1",
+		transport: "unix_socket",
+		socket_path: "/run/user/1001/ceal/leased-consumer-control-v1.sock",
+		service_credential: "private-service-credential",
+	})),
+	closeProtectedSession: async () => {},
+	requestUnixSocket,
+});
+const session = await openSession(async (input) => {
+		const frame = JSON.parse(input.body);
+		const response = frame.input?.capability_id === "calendar.event.list" ? unknownResponse : knownResponse;
+		return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(response)) };
+});
+async function* frames() {
+	yield encoder.encode(JSON.stringify(unknownFrame) + "\n" + JSON.stringify(knownFrame) + "\n");
+}
+const output = [];
+const clean = await runLeasedConsumerControlTransport(
+	frames(),
+	session,
+	(frame) => output.push(JSON.parse(new TextDecoder().decode(frame))),
+	undefined,
+	async () => {},
+);
+if (!clean || output.length !== 2 || output[0].result.result.capability_id !== "calendar.event.list" || output[1].operation !== "acquire") {
+	throw new Error("undeclared_sequence_failed");
+}
+
+let authorityRefsRefused = true;
+for (const authorityRef of ["grant_ref", "policy_ref", "scope_ref", "role_ref"]) {
+	let udsRequests = 0;
+	const unsafeSession = await openSession(async () => {
+		udsRequests += 1;
+		return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(unknownResponse)) };
+	});
+	const unsafeFrame = structuredClone(unknownFrame);
+	unsafeFrame.input.arguments = { [authorityRef]: authorityRef + ":admin" };
+	async function* unsafeFrames() {
+		yield encoder.encode(JSON.stringify(unsafeFrame) + "\n");
+	}
+	const unsafeOutput = [];
+	const unsafeClean = await runLeasedConsumerControlTransport(
+		unsafeFrames(),
+		unsafeSession,
+		(frame) => unsafeOutput.push(frame),
+		undefined,
+		async () => {},
+	);
+	if (unsafeClean || udsRequests !== 0 || unsafeOutput.length !== 0) authorityRefsRefused = false;
+}
+
+console.log(JSON.stringify({
+	decode_generation: headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
+	unknown_response_keys: "removed",
+	authority_keys: "refused",
+	closed_enums: "refused",
+	undeclared_authority_refs: authorityRefsRefused ? "refused" : "accepted",
+	undeclared_capability_sequence: "relayed_then_known",
+}));
+`;
 
 function copySourcePackage(root, workspace, sourcePath) {
 	const source = path.join(root, sourcePath);

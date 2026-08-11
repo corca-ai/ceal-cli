@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../dist/index.js";
 
 // Driven against a real loopback socket rather than an injected fetch, because
@@ -19,7 +20,13 @@ test("start and poll reach their own routes and return decoded Protocol values",
 	await withServer(
 		(req, res) => {
 			readBody(req).then((body) => {
-				seen.push({ url: req.url, method: req.method, contentType: req.headers["content-type"], body });
+				seen.push({
+					url: req.url,
+					method: req.method,
+					contentType: req.headers["content-type"],
+					decodeGeneration: req.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
+					body,
+				});
 				json(res, req.url.endsWith("/adopt/start") ? startResult() : { schema_version: POLL_SCHEMA, status: "pending", retry_after_ms: 1000 });
 			});
 		},
@@ -43,6 +50,7 @@ test("start and poll reach their own routes and return decoded Protocol values",
 		["/api/ceal/v1/adopt/start", "/api/ceal/v1/adopt/poll"],
 	);
 	assert.ok(seen.every((entry) => entry.method === "POST" && entry.contentType === "application/json"));
+	assert.ok(seen.every((entry) => entry.decodeGeneration === undefined));
 	assert.equal(JSON.parse(seen[0].body).email, "employee@example.test");
 	assert.deepEqual(JSON.parse(seen[1].body), {
 		schema_version: "ceal.device_enrollment_poll.v1",

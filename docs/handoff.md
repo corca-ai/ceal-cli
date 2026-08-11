@@ -66,11 +66,11 @@ recommended order and caller identity owned by the Gateway.
   in the cross-process refresh proof with the second process's observed lock-wait
   event. This changes test execution shape only and is not signed or
   installed-worker proof.
-- Gateway Protocol `0.72.16` corrected both B1 boundary defects reproduced in
-  `0.72.14`. B1 development consumes its exact local packet and quarantines the
-  resulting proof/shipment divergence; the signed handoff, release inputs, and
-  installed worker still bind `0.72.13` until the Gateway publishes one final
-  handoff after its remaining Protocol subtree work.
+- Gateway Protocol `0.72.16` corrected both B1 defects reproduced in `0.72.14`,
+  but installed-consumer review found undeclared `grant_ref`, `policy_ref`,
+  `scope_ref`, and `role_ref` arguments reaching the delegated UDS seam. Its
+  exact local packet remains vendored only under proof/shipment quarantine.
+  The signed handoff, release inputs, and installed worker still bind `0.72.13`.
 
 ## Next Session
 
@@ -79,8 +79,11 @@ recommended order and caller identity owned by the Gateway.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
    approved Worker release together with the client-boundary and session-writer
    quality fixes; a green checkout is not installed proof. Ask before releasing.
-3. Complete B1 against the corrected local `0.72.16` packet. A signed final
-   handoff is still required before re-pin convergence and release. Add
+3. Keep the ceal-cli B1 transport and proof implementation, but do not accept
+   local `0.72.16`. Wait for the Gateway owner to refuse named authority refs
+   while retaining ordinary opaque handles, and to cover every converted
+   response-object site. A signed final handoff is still required before re-pin
+   convergence and release. The generic transport adds
    `x-ceal-decode-generation: additive-v1` only to the generic Gateway HTTP
    transport. The enrollment, adoption, and personal-session routes are separate
    authority protocols and must not send it.
@@ -120,6 +123,7 @@ recommended order and caller identity owned by the Gateway.
 - [worker-guide spawn economics](../charness-artifacts/quality/2026-08-11-spawn-economics.md)
 - [worker-guide spawn closeout](../charness-artifacts/impl/2026-08-11-worker-guide-spawn-economics.md)
 - [B1 release critique](../charness-artifacts/critique/2026-08-11-b1-v0-76-2-release-critique.md)
+- [B1 quarantined consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [B1 corrected handoff request](requests/2026-08-11-to-gateway-b1-corrected-protocol-handoff.md)
 - [B1 final signed handoff request](requests/2026-08-11-to-gateway-final-b1-protocol-handoff.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)
