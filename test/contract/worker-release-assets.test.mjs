@@ -95,7 +95,7 @@ test("composed worker release assets match the installer's signed inventory cont
 			".ceal-worker-release-assets",
 			"SHA256SUMS",
 			"THIRD_PARTY_NOTICES.txt",
-			"ceal-guide-SKILL.md",
+			"ceal-guide.tar",
 			"ceal-linux-arm64",
 			"ceal-worker-release-manifest-linux-arm64.json",
 			"install-ceal.sh",
@@ -125,8 +125,10 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.equal(manifest.private_leased_consumer_control_session.contract_json, CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
 	assert.equal(manifest.private_leased_consumer_control_session.contract_sha256, CONTROL_SESSION_CONTRACT_SHA256);
 	assert.deepEqual(manifest.private_leased_consumer_handoff, CARRIER_HANDOFF);
-	assert.equal(manifest.guide.name, "ceal-guide-SKILL.md");
-	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide-SKILL.md"))));
+	assert.equal(manifest.guide.name, "ceal-guide.tar");
+	assert.equal(manifest.guide.format, "ustar");
+	assert.ok(manifest.guide.files.some((file) => file.path === "SKILL.md"));
+	assert.equal(manifest.guide.sha256, digest(readFileSync(path.join(output, "ceal-guide.tar"))));
 	assert.equal(manifest.installer.sha256, digest(readFileSync(path.join(output, "install-ceal.sh"))));
 	await assert.rejects(
 		() =>
@@ -429,9 +431,9 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 		rewriteInventoryDigest(input, path.basename(manifestPath));
 	}
 
-	writeFileSync(path.join(inputs[1], "ceal-guide-SKILL.md"), "drifted guide\n");
+	writeFileSync(path.join(inputs[1], "ceal-guide.tar"), "drifted guide\n");
 	const driftedSums = readFileSync(path.join(inputs[1], "SHA256SUMS"), "utf8").replace(
-		/^[a-f0-9]{64}(?= {2}ceal-guide-SKILL[.]md$)/mu,
+		/^[a-f0-9]{64}(?= {2}ceal-guide[.]tar$)/mu,
 		digest(Buffer.from("drifted guide\n")),
 	);
 	writeFileSync(path.join(inputs[1], "SHA256SUMS"), driftedSums);
@@ -588,7 +590,7 @@ test("published worker inventory parser accepts both historical and current rele
 			"THIRD_PARTY_NOTICES.txt",
 			"ceal-darwin-amd64",
 			"ceal-darwin-arm64",
-			"ceal-guide-SKILL.md",
+			"ceal-guide.tar",
 			"ceal-linux-amd64",
 			"ceal-linux-arm64",
 			"ceal-worker-release-manifest-darwin-amd64.json",
@@ -634,7 +636,7 @@ function bashArray(script, name) {
 function publishedInventory(platforms) {
 	const names = [
 		"THIRD_PARTY_NOTICES.txt",
-		"ceal-guide-SKILL.md",
+		"ceal-guide.tar",
 		"install-ceal.sh",
 		...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
 	];
@@ -691,13 +693,21 @@ function fakeNativeBuild(
 		mkdirSync(outputDirectory, { recursive: true });
 		const binary = Buffer.from(`native-${platform}\n`);
 		writeFileSync(path.join(outputDirectory, `ceal-${platform}`), binary, { mode: 0o755 });
-		writeFileSync(path.join(outputDirectory, "ceal-guide-SKILL.md"), "---\nname: ceal-guide\n");
+		const guide = Buffer.from("fixture guide archive\n");
+		writeFileSync(path.join(outputDirectory, "ceal-guide.tar"), guide);
 		writeFileSync(path.join(outputDirectory, "THIRD_PARTY_NOTICES.txt"), "notice\n");
 		return {
 			ok: true,
 			version,
 			platform,
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
+			guide: {
+				name: "ceal-guide.tar",
+				format: "ustar",
+				bytes: guide.length,
+				sha256: digest(guide),
+				files: [{ path: "SKILL.md", bytes: 1, sha256: digest("x"), mode: 0o644 }],
+			},
 			client: {
 				package: "@corca-ai/ceal",
 				version,

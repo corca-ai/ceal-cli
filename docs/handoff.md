@@ -17,12 +17,12 @@ recommended order and caller identity owned by the Gateway.
 
 ## Current State
 
-- The ordinary `check:unit` path is currently not green: B1's declared
-  proof/shipment divergence deliberately stops its ship-facing vendor-pin
-  contract. `npm run check:protocol-dev` and the focused consumer/worker proofs
-  are the honest development path until a corrected signed handoff converges
-  the lock and frozen tree. Earlier shutdown evidence lives in its linked
-  implementation closeout rather than in this continuation pointer.
+- `npm run check:unit` and `npm run check:protocol-dev` pass on the current
+  repaired tree. That development evidence does not clear B1's declared
+  proof/shipment divergence: ship-facing release, package, and acceptance paths
+  remain quarantined until a corrected signed handoff converges the lock and
+  frozen tree. Earlier shutdown evidence lives in its linked implementation
+  closeout rather than in this continuation pointer.
 - Annotated tag `ceal-v0.76.1` resolves to
   `2edf126e1c7bf65900d40b449dce9ea4481c6ce7`; release run `31346152389`
   completed every build, assembly, signing, publication, and stable-pointer
@@ -79,6 +79,21 @@ recommended order and caller identity owned by the Gateway.
   tests structurally share immutable Protocol packet fixtures per module, but
   their green release-path lifecycle and timing remain unproved while B1 is
   quarantined. Signed install proof also remains absent.
+- The current quality slice separates command effect from process lifecycle, so
+  the sanctioned probe refuses `until_interrupted` routes before spawning. It
+  also makes `ceal-guide` a progressively disclosed directory and changes the
+  release carrier to deterministic `ceal-guide.tar`; manifest/signature binding,
+  pre-extraction path/type validation, nested-reference installation, and both
+  skill ergonomics are covered locally. Release-package execution remains
+  quarantined by the existing Protocol proof/shipment divergence, so this is not
+  signed or installed-guide proof.
+- Fresh-eye review found that signed 0.76.1's installed updater understands only
+  the legacy guide filename. The operator accepted a direct directory-carrier
+  rollout instead of a bridge: in-place update from 0.76.1 is unsupported and
+  requires one stable-bootstrap reinstall, while later archive-capable
+  generations resume normal update behavior. The same review drove exact
+  existing-generation root/mode checks and bounded, operand-redacting
+  audit-helper subprocess handling.
 - The unsigned local packet declares Gateway Protocol `0.72.17` at commit
   `cd3f5f4b8fe1757ca97c12512f9f5066db989840`; the sibling checkout contains that
   commit and exact subtree. It refuses the named authority refs found in
@@ -109,10 +124,10 @@ recommended order and caller identity owned by the Gateway.
    steps, finish B3 by replacing the guide's shipped exact sequence with the
    Gateway value plus the client fallback. Do not move a capability id into
    guide prose.
-6. Continue the quality pass by inventorying the remaining release/probe child
-   process seams for missing explicit deadlines. Preserve real packaging and
-   installed-process smokes; do not replace delivery-boundary proof with an
-   in-process shortcut.
+6. Before any tar-carrier tag, dry-run and bootstrap-install-prove the directory
+   carrier, including nested references. State that 0.76.1 requires this one
+   reinstall rather than `ceal update`. Track `corca-ai/charness#607` for the
+   upstream settlement-inventory gap; do not file a duplicate.
 
 ## Discuss
 

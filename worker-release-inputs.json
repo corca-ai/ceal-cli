@@ -11,8 +11,9 @@
 		"source_path": "packages/ceal-client"
 	},
 	"guide": {
-		"source_path": "skills/ceal-guide/SKILL.md",
-		"asset": "ceal-guide-SKILL.md"
+		"source_path": "skills/ceal-guide",
+		"asset": "ceal-guide.tar",
+		"format": "ustar"
 	},
 	"required_gateway_protocol": {
 		"package": "@corca-ai/ceal-protocol",

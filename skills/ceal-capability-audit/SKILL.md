@@ -1,6 +1,6 @@
 ---
 name: ceal-capability-audit
-description: "Run an exhaustive, evidence-backed audit of the live Ceal capability surface: inventory every discovered capability, verify user-scoped read and explicitly authorized write paths, measure per-command latency and response size, and publish a transparent observation report. Use when a user asks what Ceal can do, wants provider integrations tested, wants failures and wasted work recorded, or asks for a GitHub issue/report from a Ceal capability audit."
+description: "Run an exhaustive, evidence-backed audit of the live Ceal capability surface: inventory every discovered capability, verify user-scoped read and explicitly authorized write paths, measure per-command latency and response size, and publish a transparent observation report. Use when a user explicitly wants exhaustive integration coverage, a cost/evidence ledger, failure and wasted-work accounting, or a GitHub report from a Ceal capability audit."
 ---
 
 # Ceal Capability Audit
@@ -27,8 +27,10 @@ for Notion, Google, Slack, or GitHub.
 
 ## Cold start
 
-1. Read `skills/ceal-guide/SKILL.md` completely. Re-read its leaf-help and
-   receipt rules whenever the effect, target, or write contract changes.
+1. Read the installed `ceal-guide` package completely, following every reference
+   it links for the selected scenario. If the host cannot resolve that package,
+   stop rather than substituting a checkout-relative copy. Re-read its leaf-help
+   and receipt rules whenever the effect, target, or write contract changes.
 2. Run `ceal --help`, then the selected command family help and every child leaf
    help named by that help. Stop if a required leaf omits `Effect`, `Evidence`,
    `Result schema`, or `Recovery/readback`.
@@ -45,20 +47,23 @@ for Notion, Google, Slack, or GitHub.
 ## Measurement
 
 Run every non-help Ceal command through the bundled measurement helper:
+resolve `SKILL_DIR` to this installed skill package's directory first.
 
 ```sh
-python3 skills/ceal-capability-audit/scripts/measure_ceal.py \
+python3 "$SKILL_DIR/scripts/measure_ceal.py" \
   --label <short-step-name> -- ceal <command> <args>
 ```
 
-The helper preserves the command's complete stdout byte-for-byte and emits one
-`CEAL_AUDIT_METRIC` JSON line on stderr. Record:
+The helper preserves bounded command output, enforces its declared wall-time
+and per-stream limits, and terminates the command process group when either is
+exceeded. Its `CEAL_AUDIT_METRIC` line never copies operands or file contents.
+Record:
 
 - `local_elapsed_ms`: wall-clock time around the whole CLI process;
 - `stdout_bytes` and `stderr_bytes`: exact captured byte counts;
 - `estimated_stdout_tokens`: `ceil(stdout_bytes / 4)`, explicitly a rough size
   estimate rather than tokenizer accounting;
-- command label, exit code, and the full Ceal YAML result separately.
+- command label, settlement, exit code, and the bounded Ceal YAML result separately.
 
 Do not invent historical timing or token counts. If an earlier run was not
 measured, record `measurement_gap` and do not silently rerun an irreversible
@@ -177,3 +182,7 @@ Use these literal terms in the ledger and report when applicable:
 `agent_choice`, `readback_verified`, `not_read_back`, `outcome_unknown`,
 `gateway_request_failed`, `connector_unavailable`, `rate_limited`,
 `capability_absent`, `target_unavailable`, `safety_skipped`, `measurement_gap`.
+
+## References
+
+- `references/report-template.md` — required durable audit report shape.

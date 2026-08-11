@@ -10,6 +10,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -21,6 +22,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
+import { createSkillDirectoryBundle } from "../scripts/lib/skill-directory-bundle.mjs";
 import { requireHostTools } from "./host-tools.mjs";
 import { platformProofTest } from "./platform-proof.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
@@ -49,6 +51,10 @@ test("worker-only installer migrates only ceal from a legacy dual release", () =
 		assert.equal(
 			readFileSync(path.join(install, ".ceal-cli", "worker", "current", "install-ceal.sh"), "utf8"),
 			readFileSync(INSTALLER, "utf8"),
+		);
+		assert.equal(
+			readFileSync(path.join(install, ".ceal-cli", "worker", "current", "guide", "references", "workflow.md"), "utf8"),
+			"# Workflow\n",
 		);
 		assert.equal(lstatSync(path.join(install, ".ceal-cli", "worker", "current")).isSymbolicLink(), true);
 		const cosign = readFileSync(log, "utf8");
@@ -248,7 +254,7 @@ test("worker installer resolves a reordered, extended, or pretty-printed pointer
 test("worker installer rejects a syntactically valid decoy manifest and a rejected signer", () => {
 	withFixture(({ install, release, tools, log }) => {
 		const manifest = path.join(release, "ceal-worker-release-manifest-linux-arm64.json");
-		writeFileSync(manifest, JSON.stringify({ note: "ceal.worker_release_manifest.v1 0.65.0 linux-arm64 ceal ceal-guide-SKILL.md" }) + "\n");
+		writeFileSync(manifest, JSON.stringify({ note: "ceal.worker_release_manifest.v1 0.65.0 linux-arm64 ceal ceal-guide.tar" }) + "\n");
 		rewriteChecksumsAndSidecars(release);
 		const malformed = run({ install, release, tools, log, version: TAG });
 		assert.notEqual(malformed.status, 0);
@@ -267,7 +273,7 @@ test("worker installer rejects a syntactically valid decoy manifest and a reject
 // Without these, that whole check can be deleted and the suite still passes.
 test("worker installer rejects a manifest that does not bind this release, platform, command, and guide", () => {
 	const cases = [
-		{ why: "guide digest is not the signed guide", overrides: { guide: { name: "ceal-guide-SKILL.md", bytes: 7, sha256: "f".repeat(64) } } },
+		{ why: "guide digest is not the signed guide", overrides: { guide: { name: "ceal-guide.tar", bytes: 7, sha256: "f".repeat(64) } } },
 		{ why: "guide is renamed", overrides: { guide: { name: "evil-SKILL.md", bytes: 7, sha256: "f".repeat(64) } } },
 		{ why: "guide block is absent", overrides: { guide: undefined } },
 		{ why: "command is another binary", overrides: { command: "cealctl" } },
@@ -302,6 +308,61 @@ test("worker installer rejects a manifest that does not bind this release, platf
 		assert.match(result.stderr, /signed worker platform manifest/u);
 		assert.equal(existsSync(path.join(install, "ceal")), false);
 	});
+});
+
+test("worker installer refuses a signed guide archive containing a symlink before extraction", () => {
+	withFixture(({ install, release, tools, log }) => {
+		const hostile = path.join(path.dirname(release), "hostile-guide");
+		mkdirSync(path.join(hostile, "references"), { recursive: true });
+		writeFileSync(path.join(hostile, "SKILL.md"), "---\nname: ceal-guide\n---\n");
+		symlinkSync("/tmp/ceal-guide-escape", path.join(hostile, "references", "escape"));
+		const archive = path.join(release, "ceal-guide.tar");
+		const packed = spawnSync("tar", ["-cf", archive, "-C", hostile, "SKILL.md", "references/escape"], { encoding: "utf8" });
+		assert.equal(packed.status, 0, packed.stderr);
+		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform);
+		rewriteChecksumsAndSidecars(release);
+		const result = run({ install, release, tools, log, version: TAG });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /link or special file/u);
+		assert.equal(existsSync(path.join(install, "ceal")), false);
+	});
+});
+
+test("worker installer refuses duplicate and traversing guide archive members", () => {
+	for (const [replacement, message] of [
+		["references/private.md", /duplicate paths/u],
+		["../escape", /unsafe or unsupported path/u],
+	]) {
+		withFixture(({ install, release, tools, log }) => {
+			const archive = path.join(release, "ceal-guide.tar");
+			rewriteTarMemberName(archive, "references/workflow.md", replacement);
+			for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform);
+			rewriteChecksumsAndSidecars(release);
+			const result = run({ install, release, tools, log, version: TAG });
+			assert.notEqual(result.status, 0);
+			assert.match(result.stderr, message);
+			assert.equal(existsSync(path.join(install, "ceal")), false);
+		});
+	}
+});
+
+test("worker installer refuses a damaged or widened existing generation", () => {
+	for (const mutate of [
+		(generation) => chmodSync(path.join(generation, "ceal-linux-arm64"), 0o644),
+		(generation) => writeFileSync(path.join(generation, "unexpected"), "not signed\n"),
+		(generation) => chmodSync(path.join(generation, "guide", "references", "workflow.md"), 0o755),
+	]) {
+		withFixture(({ install, release, tools, log }) => {
+			const installed = run({ install, release, tools, log, version: TAG });
+			assert.equal(installed.status, 0, installed.stderr);
+			const current = realpathSync(path.join(install, ".ceal-cli", "worker", "current"));
+			mutate(current);
+			const repeated = run({ install, release, tools, log, version: TAG });
+			assert.notEqual(repeated.status, 0);
+			assert.match(repeated.stderr, /Existing worker release generation/u);
+			assert.equal(realpathSync(path.join(install, ".ceal-cli", "worker", "current")), current);
+		});
+	}
 });
 
 test("worker installer rejects non-worker checksum inventory before changing ceal", () => {
@@ -476,7 +537,12 @@ function withFixture(callback) {
 		mkdirSync(tools);
 		writeWorkerBinary(path.join(release, "ceal-linux-arm64"));
 		writeWorkerBinary(path.join(release, "ceal-linux-amd64"));
-		writeFileSync(path.join(release, "ceal-guide-SKILL.md"), "---\nname: ceal-guide\n");
+		const guideSource = path.join(root, "guide-source");
+		mkdirSync(path.join(guideSource, "references"), { recursive: true });
+		writeFileSync(path.join(guideSource, "SKILL.md"), "---\nname: ceal-guide\n---\n");
+		writeFileSync(path.join(guideSource, "references", "workflow.md"), "# Workflow\n");
+		writeFileSync(path.join(guideSource, "references", "private.md"), "# Private\n");
+		writeFileSync(path.join(release, "ceal-guide.tar"), createSkillDirectoryBundle(guideSource).bytes);
 		writeFileSync(path.join(release, "THIRD_PARTY_NOTICES.txt"), "notice\n");
 		copyFileSync(INSTALLER, path.join(release, "install-ceal.sh"));
 		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform);
@@ -556,6 +622,7 @@ function restrictedTools(tools) {
 		"tr",
 		"cut",
 		"cmp",
+		"find",
 		"awk",
 		"chmod",
 		"mkdir",
@@ -565,6 +632,7 @@ function restrictedTools(tools) {
 		"mv",
 		"cp",
 		"readlink",
+		"tar",
 	]) {
 		const found = resolve(name);
 		assert.notEqual(found, "", `restricted tool ${name} must exist on the test host`);
@@ -601,7 +669,7 @@ function writeStablePointer(release, overrides = {}) {
 // reader that matches those keys at any depth binds the wrong value. A minimal
 // fixture cannot catch that.
 function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
-	const guide = readFileSync(path.join(release, "ceal-guide-SKILL.md"));
+	const guide = readFileSync(path.join(release, "ceal-guide.tar"));
 	const manifest = {
 		schema_version: "ceal.worker_release_manifest.v1",
 		artifact_state: "unsigned_build_candidate",
@@ -609,7 +677,7 @@ function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
 		platform,
 		command: "ceal",
 		artifact: { name: `ceal-${platform}`, bytes: 1024, sha256: digest("artifact") },
-		guide: { name: "ceal-guide-SKILL.md", bytes: guide.length, sha256: digest(guide) },
+		guide: { name: "ceal-guide.tar", format: "ustar", bytes: guide.length, sha256: digest(guide) },
 		installer: { name: "install-ceal.sh", bytes: 2048, sha256: digest("installer") },
 		protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: digest("protocol") },
 		native_smoke: { command: "ceal", version, help: true, operator_surface_absent: true },
@@ -621,7 +689,7 @@ function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
 function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {
 	const entries = [
 		"THIRD_PARTY_NOTICES.txt",
-		"ceal-guide-SKILL.md",
+		"ceal-guide.tar",
 		"install-ceal.sh",
 		...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
 	].sort();
@@ -641,6 +709,31 @@ function writeDarwinAssets(release) {
 
 function appendChecksum(release, name) {
 	writeFileSync(path.join(release, "SHA256SUMS"), `${digest(readFileSync(path.join(release, name)))}  ${name}\n`, { flag: "a" });
+}
+
+function rewriteTarMemberName(archive, from, to) {
+	const bytes = readFileSync(archive);
+	for (let offset = 0; offset + 512 <= bytes.length; ) {
+		const header = bytes.subarray(offset, offset + 512);
+		const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
+		if (name === from) {
+			header.fill(0, 0, 100);
+			header.write(to, 0, 100, "utf8");
+			header.fill(0x20, 148, 156);
+			const checksum = header
+				.reduce((sum, byte) => sum + byte, 0)
+				.toString(8)
+				.padStart(6, "0");
+			header.write(checksum, 148, 6, "ascii");
+			header[154] = 0;
+			header[155] = 0x20;
+			writeFileSync(archive, bytes);
+			return;
+		}
+		const size = Number.parseInt(header.subarray(124, 136).toString("ascii").replace(/\0.*$/u, "").trim() || "0", 8);
+		offset += 512 + Math.ceil(size / 512) * 512;
+	}
+	assert.fail(`tar member not found: ${from}`);
 }
 function rewriteSidecars(release) {
 	for (const name of [

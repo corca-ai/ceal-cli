@@ -118,6 +118,7 @@ function commandHelp(command: CealCommandDefinition): string {
 		"Named options follow required positionals, are order-independent, and may be supplied once.",
 		"",
 		`Effect: ${command.effect}`,
+		...(command.lifecycle ? [`Lifecycle: ${command.lifecycle}`] : []),
 		`Evidence: ${command.evidence}`,
 		`Result schema: ${command.result_schema}`,
 		`Recovery/readback: ${command.recovery}`,

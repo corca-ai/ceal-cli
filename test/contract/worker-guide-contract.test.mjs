@@ -13,6 +13,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
 const ISOLATED_HOME = mkdtempSync(path.join(tmpdir(), "ceal-worker-guide-contract-home-"));
 const WORKER = { skill: "ceal-guide", binary: "ceal", packageDir: "ceal-worker-cli" };
+const GUIDE_ROOT = path.join(ROOT, "skills", WORKER.skill);
+const CAPABILITY_WORKFLOW = path.join(GUIDE_ROOT, "references", "capability-workflow.md");
+const LINKED_PRIVATE_CONTEXT = path.join(GUIDE_ROOT, "references", "linked-private-context.md");
 const REAL_BINARY_SMOKES = {
 	root_help: { args: ["--help"], expectedStatus: 0 },
 	deep_explicit_help: { args: ["help", "capabilities", "targets"], expectedStatus: 0 },
@@ -28,7 +31,8 @@ test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 // records is the frozen legacy lane's own drift check — asserted for both guides
 // in `guide-contract.test.mjs`, alongside the lane that consumes it.
 test("the worker guide teaches help-driven discovery without command snapshots", async () => {
-	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
+	const core = readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8");
+	const guide = `${core}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
 	assert.match(guide, /^name: ceal-guide$/mu);
 	assert.match(guide, /\bceal --help\b/u);
 	assert.match(guide, /ceal <command> --help/u);
@@ -53,17 +57,21 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 	);
 	// Two non-claims the guide has to state, not two sentences it has to keep:
 	// reword them and this gate should be re-read, which is the point.
-	assert.match(guide, /catalog grant is not backend\s+readiness/u);
+	assert.match(guide, /catalog\s+grant is not backend\s+readiness/u);
 	assert.match(guide, /not interchangeable with\s+legacy worker fixtures/u);
+	assert.match(core, /\[Capability Workflow\]\(references\/capability-workflow[.]md\)/u);
+	assert.match(core, /\[Linked Private Context\]\(references\/linked-private-context[.]md\)/u);
+	assert.ok(existsSync(CAPABILITY_WORKFLOW));
+	assert.ok(existsSync(LINKED_PRIVATE_CONTEXT));
 });
 
 test("a cold-start worker intent selects capabilities and preserves proof limits", async () => {
-	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
+	const guide = `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
 	assert.match(guide, /command registry is navigation only|Command discovery is navigation only/u);
 	assert.match(guide, /Read help incrementally along the selected intent/u);
 	assert.match(guide, /Do not front-load downstream\s+call or receipt help before live discovery/u);
-	assert.match(guide, /Open each downstream\s+leaf immediately before its first use/u);
-	assert.match(guide, /stop descending when the discovered\s+contract cannot produce the requested effect/u);
+	assert.match(guide, /Open each downstream leaf\s+immediately before its first use/u);
+	assert.match(guide, /stop when the discovered contract cannot\s+produce the requested effect/u);
 	const rootHelp = await runCommand(["--help"]);
 	const candidates = await Promise.all(
 		parseRoutes(rootHelp.stdout).map(async (route) => ({
@@ -92,22 +100,26 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 });
 
 test("the worker guide teaches detailed contracts and diagnosis of a blocked first Gateway call", async () => {
-	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
+	const guide = `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
 	assert.match(guide, /`ceal capabilities --profile <profile-ref> --detail`/u);
-	assert.match(guide, /source of truth for required input\s+fields, selectors, and bounds/u);
+	assert.match(guide, /source of truth for required input\s+fields, selectors,\s+and bounds/u);
 	assert.match(guide, /capabilities that enumerate or\s+resolve resources/u);
 	assert.match(guide, /host sandbox or network policy/u);
 	assert.match(guide, /report host reachability separately from Ceal\s+capability availability/u);
 	assert.match(guide, /retry the same read-only discovery/u);
-	assert.match(guide, /Do not weaken the\s+sandbox, switch to a provider CLI/u);
-	assert.match(guide, /claim that the Profile has no capability\s+from a request that never reached the Gateway/u);
+	assert.match(guide, /Do not\s+weaken the sandbox, switch to a provider CLI/u);
+	assert.match(guide, /infer that the Profile has no\s+capability from a request that never reached the Gateway/u);
+	assert.match(guide, /only when the discovered write contract requires\s+one/u);
+	const privateContext = readFileSync(LINKED_PRIVATE_CONTEXT, "utf8");
+	assert.match(privateContext, /Do not open it automatically/u);
+	assert.match(privateContext, /do not widen access/u);
 
 	const capabilityHelp = (await runCommand(["capabilities", "--help"])).stdout;
 	assert.match(capabilityHelp, /^ {2}--detail\s+Include each capability's full input_contract/mu);
 });
 
 test("every worker route advertised for descent renders four-field leaf help", async () => {
-	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
+	const guide = readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8");
 	assert.match(guide, /`Subcommands:`/u);
 	let advertised = 0;
 	const advertisedRoutes = new Set();
@@ -141,9 +153,9 @@ test("every worker route advertised for descent renders four-field leaf help", a
 });
 
 test("the worker guide refuses a missing matching binary without a guessed fallback", () => {
-	const guide = readFileSync(path.join(ROOT, "skills", WORKER.skill, "SKILL.md"), "utf8");
-	assert.match(guide, /stop and request installation or update of the matching binary/u);
-	assert.match(guide, /Do not fall\s+back to another guide, another binary, or a guessed command/u);
+	const guide = readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8");
+	assert.match(guide, /stop and request\s+installation or update of the matching binary/u);
+	assert.match(guide, /Do not fall back to another\s+guide, binary, or guessed command/u);
 	assert.doesNotMatch(guide, /\bcealctl\s+(?!--help\b)[a-z][a-z-]*/u, "ceal-guide must not show a runnable cealctl fallback");
 });
 

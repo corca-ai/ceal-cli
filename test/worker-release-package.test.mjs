@@ -38,7 +38,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 			".ceal-worker-release-package",
 			"SHA256SUMS",
 			"THIRD_PARTY_NOTICES.txt",
-			"ceal-guide-SKILL.md",
+			"ceal-guide.tar",
 			"ceal-worker-release-package-manifest.json",
 			result.artifact.name,
 		].sort(),
@@ -51,6 +51,14 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
 	assert.deepEqual(manifest.client, result.client);
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
+	assert.equal(manifest.guide.format, "ustar");
+	assert.deepEqual(
+		execFileSync("tar", ["-tf", path.join(output, "ceal-guide.tar")], { encoding: "utf8" })
+			.trim()
+			.split("\n"),
+		manifest.guide.files.map((file) => file.path),
+	);
+	assert.ok(manifest.guide.files.some((file) => file.path === "references/linked-private-context.md"));
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => name !== ".ceal-worker-release-package" && name !== "SHA256SUMS")) {
 		assert.equal(

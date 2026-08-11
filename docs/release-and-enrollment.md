@@ -61,13 +61,28 @@ fails a commit that retypes it or lets the manifests disagree. `npm run check`
 does not gate the lockfile, but the tagged workflow's
 `npm ci --ignore-scripts` does.
 
+The guide release input is the complete `skills/ceal-guide/` directory. Builders
+encode it as deterministic `ceal-guide.tar`; the manifest, checksum inventory,
+and signatures bind that archive, and the installer validates member paths and
+types before extracting the whole directory. Never publish only `SKILL.md` or
+maintain a second hand-written member list.
+
+The first archive rollout deliberately does not support in-place `ceal update`
+from signed `ceal-v0.76.1`: that installed generation's updater accepts only
+`ceal-guide-SKILL.md` and fails before a tar-capable successor installer can run.
+The operator accepted this discontinuity instead of adding a bridge release,
+because clients that skip the bridge would retain the same failure. Install the
+first archive release through the published stable bootstrap command, then use
+`ceal update` normally between archive-capable generations. Release notes must
+state the manual reinstall requirement.
+
 Then:
 
 ```
 npm ci → npm run check → commit the version slice → push main
 → confirm origin/main is that commit and its check.yml run is green
 → dry-run the release lane → tag → watch
-→ ceal update → readback
+→ bootstrap install for the first archive release, otherwise ceal update → readback
 ```
 
 Before the first `ceal update` that crosses from a release using the legacy

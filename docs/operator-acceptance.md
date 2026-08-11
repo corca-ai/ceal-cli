@@ -127,8 +127,9 @@ spending anything:
 gh api repos/corca-ai/ceal-cli --jq '.permissions'
 ```
 
-Then follow `docs/release-and-enrollment.md`, whose final `ceal update` →
-readback step is what turns a published artifact into an accepted one.
+Then follow `docs/release-and-enrollment.md`, whose final bootstrap-or-update →
+readback step is what turns a published artifact into an accepted one. The first
+directory-carrier release requires bootstrap reinstall from `ceal-v0.76.1`.
 
 ### The npm lane is a separate, currently unconfigured lane
 

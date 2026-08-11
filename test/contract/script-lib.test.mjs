@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { codedErrorClass } from "../../scripts/lib/coded-error.mjs";
 import { parseScriptArgs } from "../../scripts/lib/parse-script-args.mjs";
+import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.mjs";
 
 function thrower() {
 	return (code, message) => {
@@ -103,4 +108,88 @@ test("declared extra fields are assigned and default to null", () => {
 	const WithWorkspace = codedErrorClass("WorkspaceError", ["workspace"]);
 	assert.equal(new WithWorkspace("command_failed", "boom", "/tmp/ws").workspace, "/tmp/ws");
 	assert.equal(new WithWorkspace("command_failed", "boom").workspace, null);
+});
+
+test("skill directory bundles are deterministic, complete, and refuse unsafe entries", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-skill-bundle-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const skill = path.join(root, "skill");
+	mkdirSync(path.join(skill, "references"), { recursive: true });
+	writeFileSync(path.join(skill, "SKILL.md"), "---\nname: fixture\n---\n");
+	writeFileSync(path.join(skill, "references", "workflow.md"), "# Workflow\n");
+	const first = createSkillDirectoryBundle(skill);
+	const second = createSkillDirectoryBundle(skill);
+	assert.deepEqual(first.bytes, second.bytes);
+	assert.deepEqual(
+		first.files.map((file) => file.path),
+		["SKILL.md", "references/workflow.md"],
+	);
+	const archive = path.join(root, "skill.tar");
+	writeFileSync(archive, first.bytes);
+	assert.equal(execFileSync("tar", ["-tf", archive], { encoding: "utf8" }), "SKILL.md\nreferences/workflow.md\n");
+	symlinkSync("SKILL.md", path.join(skill, "references", "alias.md"));
+	assert.throws(() => createSkillDirectoryBundle(skill), /refuses symlink/u);
+	writeFileSync(path.join(skill, "assets"), "not a directory\n");
+	assert.throws(() => createSkillDirectoryBundle(skill), /support root must be a directory/u);
+});
+
+test("capability audit measurement bounds settlement and does not echo operands", () => {
+	const helper = path.resolve("skills/ceal-capability-audit/scripts/measure_ceal.py");
+	const secret = "private-operand-value";
+	const timed = spawnSync(
+		"python3",
+		[helper, "--label", "timeout", "--timeout-seconds", "0.05", "--", "python3", "-c", "import time; time.sleep(5)", secret],
+		{ encoding: "utf8" },
+	);
+	assert.equal(timed.status, 124, timed.stderr);
+	assert.match(timed.stderr, /"settlement": "timeout"/u);
+	assert.doesNotMatch(timed.stderr, new RegExp(secret, "u"));
+	const flooded = spawnSync(
+		"python3",
+		[helper, "--label", "flood", "--max-output-bytes", "64", "--", "python3", "-c", "print('x' * 4096)"],
+		{ encoding: "utf8" },
+	);
+	assert.equal(flooded.status, 125, flooded.stderr);
+	assert.equal(Buffer.byteLength(flooded.stdout), 64);
+	assert.match(flooded.stderr, /"settlement": "output_limit"/u);
+	const inherited = spawnSync(
+		"python3",
+		[
+			helper,
+			"--label",
+			"descendant",
+			"--timeout-seconds",
+			"0.05",
+			"--",
+			"python3",
+			"-c",
+			"import subprocess; subprocess.Popen(['python3', '-c', 'import time; time.sleep(5)'])",
+		],
+		{ encoding: "utf8", timeout: 1000 },
+	);
+	assert.equal(inherited.status, 124, inherited.stderr);
+	assert.match(inherited.stderr, /"settlement": "timeout"/u);
+});
+
+test("capability audit file arguments are regular and bounded before reading", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-audit-file-arg-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const helper = path.resolve("skills/ceal-capability-audit/scripts/measure_ceal.py");
+	const oversized = path.join(root, "oversized.txt");
+	writeFileSync(oversized, "x".repeat(65));
+	const refused = spawnSync(
+		"python3",
+		[helper, "--label", "file", "--max-file-arg-bytes", "64", "--file-arg", `text=${oversized}`, "--", "true"],
+		{ encoding: "utf8" },
+	);
+	assert.equal(refused.status, 2);
+	assert.match(refused.stderr, /exceeds --max-file-arg-bytes/u);
+	const fifo = path.join(root, "fifo");
+	execFileSync("mkfifo", [fifo]);
+	const special = spawnSync("python3", [helper, "--label", "fifo", "--file-arg", `text=${fifo}`, "--", "true"], {
+		encoding: "utf8",
+		timeout: 1000,
+	});
+	assert.equal(special.status, 2, special.stderr);
+	assert.match(special.stderr, /regular file/u);
 });

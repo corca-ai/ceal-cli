@@ -639,8 +639,9 @@ producer was.
 `npm run probe -- <binary> <command> [route/options]` is the only sanctioned way
 to poke this checkout's built binary. It resolves both the declarations and the
 executable from `packages/*/dist`, refuses any route whose declared effect is
-not `read_only`, and runs under a throwaway `HOME`. It is source/runtime proof,
-not proof of the separately installed signed worker.
+not `read_only` or whose lifecycle is `until_interrupted`, and runs under a
+throwaway `HOME`. It is source/runtime proof, not proof of the separately
+installed signed worker.
 
 **The guard is only ever as right as the field it reads.** It was exactly as
 wrong as the declaration for as long as `call` said `read_only`: the vocabulary
@@ -651,6 +652,13 @@ it — the hatch's entire safety argument is the throwaway `HOME`, which cannot
 take back a revoked session, a consumed enrollment code, or a posted message.
 Adding a route without thinking about its effect does not fail any gate; it
 produces a guard that is confidently wrong, which is worse than an absent one.
+
+Effect and settlement are separate facts. `observe` is read-only but serves
+until interrupted, so admitting it through a synchronous probe wedges the probe
+without changing state. Its `lifecycle` lives beside `effect` in
+`CEAL_COMMANDS`, is rendered by help and command discovery, and is the probe's
+refusal input. Omission means the command settles on its own; only the exceptional
+long-running route needs another value.
 
 The one exception: a `--help`/`-h` token anywhere in the tail bypasses the effect
 check, because a help token makes the invocation read-only help regardless of

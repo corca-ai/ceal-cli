@@ -524,6 +524,7 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 		payload.commands.map((command) => command.name),
 		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe", "acceptance"],
 	);
+	assert.equal(payload.commands.find((command) => command.name === "observe").lifecycle, "until_interrupted");
 	// An agent that parses this document instead of prose help must see the same
 	// route depth the help surface advertises.
 	assert.deepEqual(
@@ -839,8 +840,8 @@ const OK_SWEEP_EXEMPT = ["version"];
 // false and fails here.
 test("the guide's account of the success predicate matches the exemptions the code takes", () => {
 	assert.deepEqual(OK_SWEEP_EXEMPT, ["version"], "a new exemption owes the shipped guide a rewrite; it promises exactly one document");
-	const guide = readFileSync(new URL("../../../skills/ceal-guide/SKILL.md", import.meta.url), "utf8");
-	assert.match(guide, /One installed document[\s\S]{0,240}answers no `ok`/u);
+	const guide = readFileSync(new URL("../../../skills/ceal-guide/references/capability-workflow.md", import.meta.url), "utf8");
+	assert.match(guide, /One\s+installed document[\s\S]{0,240}answers no `ok`/u);
 	// It must not name the command: the guide contract forbids command snapshots,
 	// so the property is what an agent can act on.
 	assert.doesNotMatch(guide, /\bceal\s+version\b/u);

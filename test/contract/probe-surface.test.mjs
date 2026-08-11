@@ -123,6 +123,18 @@ test("help and read-only routes run, always in a throwaway HOME", () => {
 	}
 });
 
+test("a read-only route that serves until interrupted is refused before spawning", () => {
+	const refused = probe(["ceal", "observe", "--port", "0"]);
+	assert.equal(refused.status, 2);
+	assert.equal(refused.stdout, "");
+	assert.match(refused.stderr, /declared lifecycle is until_interrupted/u);
+	assert.match(refused.stderr, /would not settle/u);
+
+	const help = probe(["ceal", "observe", "--help"]);
+	assert.equal(help.status, 0, help.stderr);
+	assert.match(help.stdout, /^Lifecycle: until_interrupted$/mu);
+});
+
 test("the child's own declared effect decides, not the parent's", () => {
 	// `guide` declares read_only_or_local_write; its `status` child is read_only,
 	// so the probe runs — resolving the route is what makes the guard precise

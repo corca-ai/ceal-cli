@@ -21,7 +21,7 @@ import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.m
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
 const INSTALLER_NAME = "install-ceal.sh";
-const GUIDE_ASSET = "ceal-guide-SKILL.md";
+const GUIDE_ASSET = "ceal-guide.tar";
 const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
 const PRIVATE_CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const PRIVATE_CONTROL_SESSION_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-control-session-contract.json";
@@ -104,6 +104,14 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		const binary = readStagedFile(path.join(nativeOut, binaryName), "native_output_incomplete");
 		if (sha256(binary) !== native.artifact.sha256) fail("native_output_incomplete", "Native worker artifact bytes drifted after its build.");
 		const guide = readStagedFile(path.join(nativeOut, GUIDE_ASSET), "native_output_incomplete");
+		if (
+			native.guide?.name !== GUIDE_ASSET ||
+			native.guide.format !== "ustar" ||
+			native.guide.sha256 !== sha256(guide) ||
+			!Array.isArray(native.guide.files) ||
+			!native.guide.files.some((file) => file?.path === "SKILL.md")
+		)
+			fail("native_output_incomplete", "Native worker guide bundle metadata is incomplete or drifted.");
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
 		let privateCarrierContract;
@@ -150,7 +158,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			command: "ceal",
 			artifact: { name: binaryName, bytes: binary.length, sha256: native.artifact.sha256 },
 			client,
-			guide: { name: GUIDE_ASSET, bytes: guide.length, sha256: sha256(guide) },
+			guide: { ...native.guide, bytes: guide.length, sha256: sha256(guide) },
 			installer: { name: INSTALLER_NAME, bytes: installer.length, sha256: sha256(installer) },
 			third_party_notices: { name: NOTICE_NAME, bytes: notices.length, sha256: sha256(notices) },
 			protocol: native.protocol,

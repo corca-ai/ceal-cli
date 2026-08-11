@@ -18,6 +18,7 @@ import {
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 import {
 	WorkerReleaseInputError,
 	withWorkerReleaseDevelopmentInputsAsync,
@@ -109,7 +110,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 					});
 					const version = resolveVersion(repoRoot, inputs);
 					const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-					materializeOutput({
+					const guide = materializeOutput({
 						output,
 						repoRoot,
 						inputs,
@@ -131,6 +132,7 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						platform,
 						artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
 						client: packed.client,
+						guide,
 						consumer_smoke: packed.consumerSmoke,
 						native_smoke: artifact.smoke,
 						protocol: inputs.protocol,
@@ -321,9 +323,9 @@ function materializeOutput({
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
 		copyFileSync(artifact.path, path.join(staging, artifact.name));
 		chmodSync(path.join(staging, artifact.name), 0o755);
-		const guide = readFileSync(path.join(repoRoot, inputs.guide.source_path));
+		const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
 		const notice = readFileSync(path.join(repoRoot, NOTICE_FILENAME));
-		writeFileSync(path.join(staging, inputs.guide.asset), guide, { mode: 0o644 });
+		writeFileSync(path.join(staging, inputs.guide.asset), guide.bytes, { mode: 0o644 });
 		writeFileSync(path.join(staging, NOTICE_FILENAME), notice, { mode: 0o644 });
 		const manifest = {
 			schema_version: "ceal.worker_native_artifact_manifest.v1",
@@ -332,7 +334,7 @@ function materializeOutput({
 			platform,
 			artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
 			client,
-			guide: { name: inputs.guide.asset, bytes: guide.length, sha256: sha256(guide) },
+			guide: { name: inputs.guide.asset, format: inputs.guide.format, bytes: guide.bytes.length, sha256: guide.sha256, files: guide.files },
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,
 			private_leased_consumer_carrier: privateCarrierContract,
@@ -347,7 +349,7 @@ function materializeOutput({
 		writeFileSync(path.join(staging, MANIFEST_FILENAME), manifestBytes, { mode: 0o644 });
 		const entries = [
 			{ name: artifact.name, sha256: artifact.sha256 },
-			{ name: inputs.guide.asset, sha256: sha256(guide) },
+			{ name: inputs.guide.asset, sha256: guide.sha256 },
 			{ name: NOTICE_FILENAME, sha256: sha256(notice) },
 			{ name: MANIFEST_FILENAME, sha256: sha256(manifestBytes) },
 		].sort((left, right) => left.name.localeCompare(right.name));
@@ -355,6 +357,7 @@ function materializeOutput({
 			mode: 0o644,
 		});
 		publishOutputDirectory(staging, output);
+		return manifest.guide;
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
 		throw error;

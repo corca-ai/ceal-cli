@@ -70,7 +70,8 @@ npm run release:worker:assets -- compose \
 ```
 
 The output directory is already installer-shaped for one platform: binary,
-platform manifest, guide, notices, `install-ceal.sh`, and `SHA256SUMS`.
+platform manifest, deterministic `ceal-guide.tar` containing the complete skill
+directory, notices, `install-ceal.sh`, and `SHA256SUMS`.
 
 ## 4. What this proves, and what it does not
 

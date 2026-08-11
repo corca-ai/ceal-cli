@@ -22,6 +22,8 @@ export interface CealCommandDefinition {
 	 * can act on.
 	 */
 	effect: "read_only" | "local_write" | "read_only_or_local_write" | "remote_write";
+	/** Omitted commands settle on their own; this command serves until stopped. */
+	lifecycle?: "until_interrupted";
 	evidence: "surface" | "surface_or_host_decision";
 	result_schema: string;
 	recovery: string;
@@ -129,6 +131,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		description: "Serve a loopback-only read-only page over this client's cached local state.",
 		usage: "ceal observe [--port <0|1024-65535>]",
 		effect: "read_only",
+		lifecycle: "until_interrupted",
 		evidence: "surface",
 		result_schema: "ceal.observe.v1",
 		recovery: "Open the printed 127.0.0.1 URL in a local browser; stop the observer with Ctrl-C.",

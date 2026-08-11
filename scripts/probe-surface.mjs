@@ -111,6 +111,12 @@ if (!isHelp && !allowed.has(route.effect)) {
 			"  throwaway HOME anyway, or run the installed binary directly and deliberately.";
 	fail(`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n${remedy}`);
 }
+if (!isHelp && route.lifecycle === "until_interrupted") {
+	fail(
+		`refusing '${binary} ${name}': declared lifecycle is until_interrupted, so a synchronous surface probe would not settle.\n` +
+			"  Inspect its help through this guard, or run the installed binary directly and stop it deliberately.",
+	);
+}
 
 const home = mkdtempSync(path.join(tmpdir(), "ceal-probe-home-"));
 try {

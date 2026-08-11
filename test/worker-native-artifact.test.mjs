@@ -45,7 +45,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 			".ceal-worker-native-artifact",
 			"SHA256SUMS",
 			"THIRD_PARTY_NOTICES.txt",
-			"ceal-guide-SKILL.md",
+			"ceal-guide.tar",
 			"ceal-worker-native-artifact-manifest.json",
 			result.artifact.name,
 		].sort(),
@@ -60,6 +60,14 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
 	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
 	assert.equal(manifest.native_smoke.operator_surface_absent, true);
+	assert.equal(manifest.guide.format, "ustar");
+	assert.deepEqual(
+		execFileSync("tar", ["-tf", path.join(output, "ceal-guide.tar")], { encoding: "utf8" })
+			.trim()
+			.split("\n"),
+		manifest.guide.files.map((file) => file.path),
+	);
+	assert.ok(manifest.guide.files.some((file) => file.path === "references/capability-workflow.md"));
 	const outputCommands = execFileSync(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
 	assert.match(outputCommands, /command: ceal\n/u);
 	assert.match(outputCommands, /name: update\n/u);
