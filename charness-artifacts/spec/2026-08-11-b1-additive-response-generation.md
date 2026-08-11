@@ -1,7 +1,15 @@
 # Implementation Contract: B1 Additive Response Generation
 
 Date: 2026-08-11
-Target release: `ceal-v0.76.2` (patch)
+Target release: deferred until the final signed Protocol cut is reviewed
+
+## Schedule Supersession
+
+The Gateway later moved the Protocol subtree beyond the evaluated `0.72.17`
+packet and scheduled one signed cut after C1. Keep `0.72.17` as the exact
+historical development input for the proofs below, not as the next shipment
+identity. No intermediate `0.72.18` packet or delta review is requested; the
+consumer will review the final signed artifact once at the cut.
 
 ## Problem
 
@@ -43,8 +51,9 @@ table.
   `protocol-vendor-pin.json` together.
 - Declare the proof/shipment divergence with an owner and tracked request. Only
   development-scoped evidence may be claimed while the shipped handoff lock
-  still names `0.72.13`; `npm run check:protocol-dev` is the aggregate
-  development gate and the focused packed verifier is local integration proof.
+  still names `0.72.13`; `npm run check:unit` is the aggregate development gate
+  and `npm run check:protocol-dev` is the narrower Protocol/client gate. The
+  focused packed verifier is local integration proof.
 - Call `0.72.17` corrected B1 development proof only after the installed
   consumer refuses named authority refs and the owner suite exercises the
   complete response-site matrix. Do not call it signed, shipped, released,
@@ -94,10 +103,10 @@ replace the development divergence with one coherent frozen-tree/lock/pin
 commit. The ordinary full gate, release package paths, and acceptance packet
 must then pass without `--development`.
 
-After convergence, bump all three worker manifests to `0.76.2` and regenerate
-`package-lock.json` with `node_modules` absent in a dedicated version commit.
-The patch level is justified because this release ships compatibility and
-behavior repairs without removing or changing a public invocation.
+After convergence, choose the Worker version with the operator, bump all three
+worker manifests, and regenerate `package-lock.json` with `node_modules` absent
+in a dedicated version commit. This contract does not preselect a version while
+the final Protocol contents and release bundle remain open.
 
 ## Publication Boundary
 

@@ -27,6 +27,7 @@ const MAX_ENTRIES_EXAMINED = 2000;
 // The entry cap cannot bound one large directory before its names are read.
 // A monotonic deadline closes that gap without depending on wall-clock changes.
 const MAX_WALK_DURATION_MS = 100;
+const DEFAULT_MONOTONIC_NOW = () => performance.now();
 const RENDERED_SESSIONS = 10;
 // Exactly the UUID grammar Claude Code uses for transcript filenames, so a
 // human-meaningful filename can never surface as a rendered session_ref.
@@ -132,14 +133,19 @@ interface WalkBudget {
 	examined: number;
 	partial: boolean;
 	deadline: number;
+	monotonicNow: () => number;
 }
 
-function createWalkBudget(): WalkBudget {
-	return { examined: 0, partial: false, deadline: performance.now() + MAX_WALK_DURATION_MS };
+interface AgentAuditRuntime {
+	monotonicNow?: () => number;
+}
+
+function createWalkBudget(monotonicNow: () => number): WalkBudget {
+	return { examined: 0, partial: false, deadline: monotonicNow() + MAX_WALK_DURATION_MS, monotonicNow };
 }
 
 function walkBudgetReached(walk: WalkBudget): boolean {
-	if (walk.examined >= MAX_ENTRIES_EXAMINED || performance.now() >= walk.deadline) {
+	if (walk.examined >= MAX_ENTRIES_EXAMINED || walk.monotonicNow() >= walk.deadline) {
 		walk.partial = true;
 		return true;
 	}
@@ -225,14 +231,23 @@ export function inspectAgentSessionEvents(
 	overrides: CealAgentHostOverrides,
 	runtime: string,
 	sessionRef: string,
+	dependencies: AgentAuditRuntime = {},
 ): CealAgentSessionEventsLookup | null {
 	if ((runtime !== "claude" && runtime !== "codex") || !SESSION_REF.test(sessionRef)) return null;
 	const { root } = resolveCealAgentHostRoot(runtime, home, overrides);
 	if (!root) return { status: "unreadable" };
 	const adapter =
 		runtime === "claude"
-			? { directory: path.join(root, "projects"), collect: collectClaudeSessions, lines: CLAUDE_LINE_ADAPTER }
-			: { directory: path.join(root, "sessions"), collect: collectCodexSessions, lines: CODEX_LINE_ADAPTER };
+			? {
+					directory: path.join(root, "projects"),
+					collect: (directory: string) => collectClaudeSessions(directory, dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW),
+					lines: CLAUDE_LINE_ADAPTER,
+				}
+			: {
+					directory: path.join(root, "sessions"),
+					collect: (directory: string) => collectCodexSessions(directory, dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW),
+					lines: CODEX_LINE_ADAPTER,
+				};
 	const collected = collectTranscriptSessions(adapter.directory, adapter.collect);
 	if (collected.status !== "collected") return { status: collected.status === "absent" ? "not_found" : "unreadable" };
 	const wanted = sessionRef.toLowerCase();
@@ -250,10 +265,32 @@ export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 	"Token figures are runtime-supplied transcript accounting surfaced as integers with explicit source and scan completeness; field semantics are runtime-defined, figures are not comparable across runtimes, and this is not a cost or billing claim. No latency figure is shown because neither runtime supplies one.",
 ]);
 
-export function inspectAgentAudit(home: string | undefined, overrides: CealAgentHostOverrides, now: number): CealAgentAuditState {
+export function inspectAgentAudit(
+	home: string | undefined,
+	overrides: CealAgentHostOverrides,
+	now: number,
+	dependencies: AgentAuditRuntime = {},
+): CealAgentAuditState {
+	const monotonicNow = dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW;
 	const adapters: CealAgentAuditAdapterState[] = [
-		observeHostAdapter("claude", "projects", collectClaudeSessions, CLAUDE_LINE_ADAPTER, home, overrides, now),
-		observeHostAdapter("codex", "sessions", collectCodexSessions, CODEX_LINE_ADAPTER, home, overrides, now),
+		observeHostAdapter(
+			"claude",
+			"projects",
+			(directory) => collectClaudeSessions(directory, monotonicNow),
+			CLAUDE_LINE_ADAPTER,
+			home,
+			overrides,
+			now,
+		),
+		observeHostAdapter(
+			"codex",
+			"sessions",
+			(directory) => collectCodexSessions(directory, monotonicNow),
+			CODEX_LINE_ADAPTER,
+			home,
+			overrides,
+			now,
+		),
 	];
 	return {
 		schemaVersion: "ceal.agent_activity.v1",
@@ -601,9 +638,9 @@ const CODEX_LINE_ADAPTER: TranscriptLineAdapter = {
 // walk consumes only file identity and stat metadata. `partial` reports an
 // exhausted walk budget or an unreadable/vanished subtree so a truncated
 // inventory is never presented as complete.
-function collectClaudeSessions(projects: string): { sessions: CollectedSession[]; partial: boolean } {
+function collectClaudeSessions(projects: string, monotonicNow: () => number): { sessions: CollectedSession[]; partial: boolean } {
 	const sessions: CollectedSession[] = [];
-	const walk = createWalkBudget();
+	const walk = createWalkBudget(monotonicNow);
 	const root = lstatSync(projects);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const project of readBoundedDirectoryNames(projects, walk, "ascending")) {
@@ -653,9 +690,9 @@ function collectClaudeSessions(projects: string): { sessions: CollectedSession[]
 // walked newest-named first so a truncated walk keeps the newest shards;
 // health derives from mtime, so its accuracy is guaranteed only for a
 // complete walk — any truncation is always declared as `inventory: partial`.
-function collectCodexSessions(sessionsRoot: string): { sessions: CollectedSession[]; partial: boolean } {
+function collectCodexSessions(sessionsRoot: string, monotonicNow: () => number): { sessions: CollectedSession[]; partial: boolean } {
 	const sessions: CollectedSession[] = [];
-	const walk = createWalkBudget();
+	const walk = createWalkBudget(monotonicNow);
 	const root = lstatSync(sessionsRoot);
 	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
 	for (const dayDirectory of codexDayDirectories(sessionsRoot, walk)) {

@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
 import { createSkillDirectoryBundle } from "../scripts/lib/skill-directory-bundle.mjs";
+import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
 import { requireHostTools } from "./host-tools.mjs";
 import { platformProofTest } from "./platform-proof.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
@@ -464,7 +465,10 @@ platformProofTest(
 			assert.equal(version.version, built.version);
 			assert.equal(version.protocol_version, "1.3.0");
 
-			writeWorkerSession(install);
+			writeClientSessionStoreFixture(install, {
+				gatewayEndpoint: "http://127.0.0.1:1/gateway/client",
+				label: "installer-fixture",
+			});
 			const unavailable = spawnSync(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
 				encoding: "utf8",
 				env: { ...process.env, HOME: install },
@@ -497,34 +501,6 @@ platformProofTest(
 		});
 	},
 );
-
-function writeWorkerSession(home) {
-	const directory = path.join(home, ".ceal");
-	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	writeFileSync(
-		path.join(directory, "client-session.json"),
-		`${JSON.stringify(
-			{
-				schema_version: "ceal.client_session_store.v1",
-				gateway_endpoint: "http://127.0.0.1:1/gateway/client",
-				profile_ref: "profile:installer-fixture",
-				membership_ref: "membership:installer-fixture",
-				registration_ref: "registration:installer-fixture",
-				client_ref: "client:installer-fixture",
-				subject_ref: "subject:installer-fixture",
-				instance_ref: "instance:installer-fixture",
-				access_token: `ceal_personal_${"P".repeat(43)}`,
-				expires_at: "2099-07-14T00:00:00.000Z",
-				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-			},
-			null,
-			2,
-		)}\n`,
-		{ mode: 0o600 },
-	);
-}
 
 function withFixture(callback) {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-installer-"));

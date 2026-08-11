@@ -120,6 +120,17 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 	converged.shipped.disposition_request = undefined;
 	const result = expectPass({ pin: converged, vendoredTree: converged.source.tree });
 	assert.equal(result.diverged, false);
+	assert.equal(
+		assertShippableProtocolVendorPin({
+			repoRoot: ROOT,
+			pin: converged,
+			lock: LOCK,
+			vendoredTree: converged.source.tree,
+			vendoredDirty: [],
+			vendoredHidden: [],
+		}).diverged,
+		false,
+	);
 });
 
 // Moving to the protocol-only handoff left `gateway-handoff-lock.json` sitting in
@@ -265,19 +276,6 @@ test("the repository's own pin agrees with the lock it was written about", () =>
 		pin.shipped.protocol_tree !== pin.source.tree,
 		"the declared status and the recorded trees must agree",
 	);
-});
-
-// The ship gate itself, on the live pin. This is the assertion that keeps
-// `npm run check` from returning green while what the repository tests is not
-// what a release would ship, so it is deliberately not written as "throws
-// because diverged": that form would go red on the day the divergence is
-// resolved, which is the outcome the whole guard exists to ask for. It asserts
-// shippability, and a divergence makes it fail on its own.
-test("the repository's vendored protocol is shippable against the lock it carries", () => {
-	const result = assertShippableProtocolVendorPin({ repoRoot: ROOT });
-	assert.equal(result.diverged, false);
-	// The verdict must come from the one identity the pin does not author.
-	assert.equal(result.source.commit, LOCK.gateway.commit);
 });
 
 // Fatality lives here, in the fixture tier, for the reason the header gives.

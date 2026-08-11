@@ -47,9 +47,13 @@ for Notion, Google, Slack, or GitHub.
 ## Measurement
 
 Run every non-help Ceal command through the bundled measurement helper:
-resolve `SKILL_DIR` to this installed skill package's directory first.
+resolve `SKILL_DIR` from the path of the installed `SKILL.md` you just opened.
+Do not assume the shell already exports it, and do not substitute a checkout
+copy. Assign and export it in the same shell invocation that runs the helper.
 
 ```sh
+SKILL_DIR='<absolute directory containing this installed SKILL.md>'
+export SKILL_DIR
 python3 "$SKILL_DIR/scripts/measure_ceal.py" \
   --label <short-step-name> -- ceal <command> <args>
 ```

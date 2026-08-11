@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +12,7 @@ import {
 	runCli,
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.mjs";
+import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 let packedFixture;
@@ -74,7 +75,10 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	assert.doesNotMatch(outputCommands, /cealctl/u);
 	const artifact = path.join(output, result.artifact.name);
 	const unknownHome = path.join(fixture.root, "unknown-home");
-	writeStoredSession(unknownHome, "http://127.0.0.1:1/gateway/client");
+	writeClientSessionStoreFixture(unknownHome, {
+		gatewayEndpoint: "http://127.0.0.1:1/gateway/client",
+		label: "native-fixture",
+	});
 	const unknown = await runArtifact(artifact, ["call", "message.post", "--target", "target:team-inbox", "text=retry-safe"], unknownHome);
 	assert.equal(unknown.code, 3);
 	assert.equal(unknown.stderr, "");
@@ -85,7 +89,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	assert.doesNotMatch(unknown.stdout, /ceal_personal_|ceal_refresh_/u);
 	await withFailureGateway(async (endpoint) => {
 		const failedHome = path.join(fixture.root, "failed-home");
-		writeStoredSession(failedHome, endpoint);
+		writeClientSessionStoreFixture(failedHome, { gatewayEndpoint: endpoint, label: "native-fixture" });
 		const failed = await runArtifact(artifact, ["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], failedHome);
 		assert.equal(failed.code, 3);
 		assert.equal(failed.stderr, "");
@@ -203,35 +207,6 @@ test("production native build accepts only the locked archive lane", async (cont
 
 function hasCode(code) {
 	return (error) => error instanceof WorkerNativeArtifactError && error.code === code;
-}
-
-function writeStoredSession(home, endpoint) {
-	const directory = path.join(home, ".ceal");
-	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	chmodSync(directory, 0o700);
-	writeFileSync(
-		path.join(directory, "client-session.json"),
-		`${JSON.stringify(
-			{
-				schema_version: "ceal.client_session_store.v1",
-				gateway_endpoint: endpoint,
-				profile_ref: "profile:native-fixture",
-				membership_ref: "membership:native-fixture",
-				registration_ref: "registration:native-fixture",
-				client_ref: "client:native-fixture",
-				subject_ref: "subject:native-fixture",
-				instance_ref: "instance:native-fixture",
-				access_token: `ceal_personal_${"P".repeat(43)}`,
-				expires_at: "2099-07-14T00:00:00.000Z",
-				refresh_token: `ceal_refresh_${"R".repeat(43)}`,
-				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-			},
-			null,
-			2,
-		)}\n`,
-		{ mode: 0o600 },
-	);
 }
 
 async function runArtifact(artifact, args, home) {

@@ -622,6 +622,153 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-11",
 			"note": "ES module import-header overlap between two standalone release scripts, the same non-extractable executable-module boilerplate class classified at 9d81ae8c9d6354e8. Their production bodies own different package-consumer and release-asset contracts."
+		},
+		{
+			"surface": "code",
+			"id": "0a3cb22612e9c90d",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the regular non-symlink input guards classified at 7dcdd70e2daa5f84. Each release boundary retains its own typed error and subject; a callback-based two-line helper would move rather than centralize the policy."
+		},
+		{
+			"surface": "code",
+			"id": "0e75db29ebe57564",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Two test fixtures create different required directory layouts. The matching mkdir/write setup is test scaffolding, while their release-probe and converged-Protocol responsibilities remain independent."
+		},
+		{
+			"surface": "code",
+			"id": "2c4224859ea718e0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the three-line local SHA-256 helper family classified at 40e06511f93f62bc and ba2176416cd336c6. The members are independently runnable scripts and fixtures; their digest idiom carries no second policy implementation."
+		},
+		{
+			"surface": "code",
+			"id": "416cfcf08f3ed0ae",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the broad release-composition/native-artifact detector family classified at 401c404aa5ef00fd. The two builders own different artifact schemas and trust boundaries; common output publication already has one home."
+		},
+		{
+			"surface": "code",
+			"id": "45145f7b9fa550ee",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Native and package release tests deliberately stage separate real-artifact fixtures, the proof distinction classified at e6cef3ff6d37c423. Sharing their builder-specific setup would couple the two release boundaries."
+		},
+		{
+			"surface": "code",
+			"id": "454f7c4c56066d18",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the package/native materializeOutput family classified at 6df6b80781ef0564 and e076bb930a4d6684. Their differing schemas, modes, copy semantics, and evidence are the artifact boundary; shared publication is already extracted."
+		},
+		{
+			"surface": "code",
+			"id": "4780b88c7f4655b5",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Detector overlap between a release test's import block and a production script header. Import declarations are executable-module boilerplate, not an implementation fact to extract."
+		},
+		{
+			"surface": "code",
+			"id": "51ea431f13e93529",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "The acceptance and release-input contract suites each import the shared converged-Protocol fixture and establish their own module fixture lifecycle. The shared repository-state fact is already centralized in converged-protocol-repo-fixture.mjs."
+		},
+		{
+			"surface": "code",
+			"id": "7da09f07c6684713",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Two installer refusal branches visibly assert the same no-install postcondition after distinct hostile archive cases. Hiding the assertion would reduce each security test's local proof without centralizing production behavior."
+		},
+		{
+			"surface": "code",
+			"id": "8d1891946db8a0b9",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Larger-window re-key of the package/native materialization family classified at 6df6b80781ef0564. The common staging tail is already shared; the remaining bodies define different shipped artifacts."
+		},
+		{
+			"surface": "code",
+			"id": "9111f25a708e0c00",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of compose-versus-merge in build-worker-release-assets.mjs classified at 1d37623e5019a67e. Producer and reconciler share a release frame but intentionally own different trust decisions."
+		},
+		{
+			"surface": "code",
+			"id": "9715e81ef7fdf02b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Two short installer-test assertions are local consequences of different refusal scenarios. This is the one-line assertion class already reviewed at 4925978468652c57, below a meaningful extraction boundary."
+		},
+		{
+			"surface": "code",
+			"id": "b27908ce727df1f7",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Two worker-guide contract tests traverse related help output but prove different semantics: advertised route completeness and parent-to-leaf guidance. A shared assertion would obscure which guide contract failed."
+		},
+		{
+			"surface": "code",
+			"id": "bdcc97715c0ed28c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Parallel native and package release assertions compare their own manifest-bound artifacts. The similar lines are independent proof rows, not a duplicated release decision."
+		},
+		{
+			"surface": "code",
+			"id": "cd074435a7e3daaa",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Import-header overlap between a release installer test and a contract test. Their executable-module setup is not a shared domain fact and has no useful extraction seam."
+		},
+		{
+			"surface": "code",
+			"id": "ceb7053338e69ddc",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Import-header overlap among independent Protocol handoff fixtures and bootstrap code, the same non-extractable module scaffolding class as 32a0d0bcede949f0 and 1f59a2daf80674cc."
+		},
+		{
+			"surface": "code",
+			"id": "d3d10b19e3927fba",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder artifact classified at 4e437a213994e8b8 and a8bc38ab98549fd7. One proves an isolated install; the other stages a hermetic package."
+		},
+		{
+			"surface": "code",
+			"id": "ed49982afe11137e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Native and package tests independently assert their real release outputs. The small common assertion frame belongs visibly at each proof boundary; the underlying builders and manifests differ."
+		},
+		{
+			"surface": "code",
+			"id": "f42d0e16917fc28f",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the synthetic contract handoff fixture versus real packed release fixture classified at 2d2c1bd4107cc298. Sharing them would either make contract tests pack artifacts or make release proof synthetic."
+		},
+		{
+			"surface": "code",
+			"id": "6f84a28422e012e6",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the independently bounded Claude and Codex transcript collectors reviewed at 011f1d4590e7f666 and 79824a3f9251e5bf after both received the shared monotonic-clock dependency. They traverse different directory grammars and retain different name orders; factoring the broad overlap would merge runtime-specific inventory policy, while the actual shared deadline now has one injected owner."
+		},
+		{
+			"surface": "code",
+			"id": "56e6161f8a085070",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder detector classified at d3d10b19e3927fba, a8bc38ab98549fd7, and 4e437a213994e8b8. The verifier now consumes the shared skill-directory bundler, but it still proves an isolated install while the builder stages a hermetic package."
 		}
 	],
 	"fixable_ceiling": 0,

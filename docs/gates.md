@@ -172,12 +172,23 @@ exists; it does not let anything ship. Plain existence was too weak a check for
 the request: every path in the tree satisfied it, so a one-character edit could
 keep a dead declaration alive by aiming it at `README.md`.
 
-Development motion survives that: `npm run check:protocol-dev` runs the client
-suite plus `verify-protocol-vendor-pin.mjs --development`, which reports the pin
-without the shippability assertion and stamps its own output
-`proof_level: development_only` with the non-claim spelled out. It is not release
-proof and not installed-worker proof, and no release, acceptance, or announcement
-path calls it.
+Development motion survives in two scopes. `npm run check:unit` remains the
+ordinary iteration gate: contract behavior that must reach past the ship guard
+runs against one shared scratch Git repository whose vendored tree, pin, and
+lock are genuinely converged. Separate guard-reachability tests prove the
+release-input chokepoint fails on a pin error before inspecting arguments and
+acceptance fails on an exact divergent fixture before resolving an installed
+binary. This keeps downstream contract branches observable without adding a
+production bypass or claiming that the live checkout is shippable.
+
+`npm run check:protocol-dev` is the narrower Protocol/client path. It runs the
+client suite plus `verify-protocol-vendor-pin.mjs --development`, which reports
+the live pin without the shippability assertion and stamps its own output
+`proof_level: development_only` with the non-claim spelled out. Neither
+development command is release or installed-worker proof, and no release,
+acceptance, or announcement path calls the development verifier. The full gate
+still reaches the release tier, whose live-checkout positives remain red until
+the pin and shipment lock converge.
 
 The refusal does not depend on which test command ran. `worker-release-inputs.mjs`
 asserts shippability inside `resolveWorkerReleaseDevelopmentInputs`, the single
@@ -198,10 +209,12 @@ that nothing then called. Reproduced on 2026-08-08.
 
 `worker-release-inputs.test.mjs` now falsifies it behaviourally. A scratch
 `repoRoot` reaches the guard and fails for a pin reason; with the call removed the
-same input walks past it and fails on the next argument check instead. Two
-distinguishable outcomes are all a falsification needs, and it does not need a
-genuinely diverged pin — the guard refusing at all is the claim. The divergence
-verdicts stay in `protocol-vendor-pin.test.mjs`, which owns them properly.
+same input walks past it and fails on the next argument check instead. The
+acceptance suite has the sibling proof: its deliberately divergent scratch pin
+must fail before an absent binary is resolved. Two distinguishable outcomes are
+all a falsification needs. The divergence verdicts stay in
+`protocol-vendor-pin.test.mjs`, which owns them properly, while the shared
+converged fixture owns the repeated contract setup.
 
 The source-shape gate in `repo-gates.test.mjs` stays, because it still catches the
 easy case in `worker-acceptance-packet.mjs`. Do not treat it as the guard's

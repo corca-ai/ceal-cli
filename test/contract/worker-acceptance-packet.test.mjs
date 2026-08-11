@@ -22,6 +22,7 @@ import {
 	verifyProtocolProvenance,
 	WorkerAcceptanceError,
 } from "../../scripts/worker-acceptance-packet.mjs";
+import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.mjs";
 import { scratchDir } from "../scratch-dir.mjs";
 
 // Contract tier and offline by design: every refusal below is a decision this
@@ -29,6 +30,24 @@ import { scratchDir } from "../scratch-dir.mjs";
 // command is that those refusals cannot be skipped. The live rows are proved by
 // running it against a real install, which no gate can fabricate.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const CONTRACT_REPO = createProtocolRepoFixture({ acceptanceCli: true });
+const DIVERGED_REPO = createProtocolRepoFixture({ diverged: true });
+test.after(() => {
+	CONTRACT_REPO.cleanup();
+	DIVERGED_REPO.cleanup();
+});
+
+function buildContractAcceptancePacket(options) {
+	return buildAcceptancePacket({ ...options, repoRoot: CONTRACT_REPO.root });
+}
+
+function buildMessageSearchAcceptancePacket(binary) {
+	return buildContractAcceptancePacket({
+		binary,
+		capability: "message.search",
+		target: `target:${"a".repeat(64)}`,
+	});
+}
 const BINARY_BYTES = "#!/bin/sh\nexit 0\n";
 const INSTALLER_BYTES = "#!/bin/sh\nexit 0\n";
 
@@ -236,8 +255,8 @@ exit 0
 // The real lock, read rather than restated: `buildAcceptancePacket` compares the
 // manifest's producer against the repo's own lock, so a hand-copied commit here
 // would be a fixture agreeing with itself.
-function lockedProducer() {
-	const gateway = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8")).gateway;
+function lockedProducer(repoRoot = CONTRACT_REPO.root) {
+	const gateway = JSON.parse(readFileSync(path.join(repoRoot, "gateway-protocol-handoff-lock.json"), "utf8")).gateway;
 	return { repository: gateway.repository, commit: gateway.commit, tree: gateway.tree };
 }
 
@@ -245,22 +264,23 @@ function lockedProducer() {
 // that answers, and a producer the repo's lock agrees with. `stageInstall` stays
 // the low-level fixture because the refusal tests above need to break exactly
 // one of those two properties at a time.
-function stageWorkingInstall(root, options = {}) {
+function stageWorkingInstall(root, options = {}, repoRoot = CONTRACT_REPO.root) {
 	return stageInstall(root, {
 		binaryBytes: stubBinary(options),
-		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
+		manifest: {
+			protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer(repoRoot) },
+		},
 	});
 }
 
-// `repoRoot` is the real checkout, not a scratch fixture, because the first
-// thing this command does is refuse on a proof/ship protocol divergence — and
-// that refusal is only meaningful against the pin this repository actually
-// ships. The INSTALL still lives in a scratch directory, which is the
-// separation that matters: the packet describes an install, never the source.
+// Packet semantics are contract behavior, not a claim that the live checkout
+// is release-ready. A real scratch Git checkout supplies a converged pin so the
+// production guard runs and the behavior after it remains reachable while the
+// live checkout is deliberately quarantined.
 test("the packet describes the install it measured, and its non-claims follow what the run reached", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary, directory } = stageWorkingInstall(root);
-	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary });
+	const packet = await buildContractAcceptancePacket({ binary });
 
 	assert.equal(packet.schema_version, "ceal.worker_acceptance_packet.v1");
 	assert.equal(packet.installed_client.binary_path, binary);
@@ -302,7 +322,7 @@ test("the packet describes the install it measured, and its non-claims follow wh
 test("a bounded call adds the provider row and its receipt readback, and drops that non-claim", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
-	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+	const packet = await buildMessageSearchAcceptancePacket(binary);
 
 	assert.equal(packet.bounded_capability_call.capability, "message.search");
 	assert.equal(packet.bounded_capability_call.status, "completed");
@@ -323,7 +343,7 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 test("an unreached Gateway session is recorded and named in the non-claims", async (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root, { discoveryStatus: 3 });
-	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary });
+	const packet = await buildContractAcceptancePacket({ binary });
 	assert.equal(packet.gateway_session.reached, false);
 	assert.equal(packet.gateway_session.exit_code, 3);
 	assert.ok(packet.non_claims.some((claim) => claim.startsWith("gateway_session_not_reached:")));
@@ -335,7 +355,14 @@ test("a binary that cannot answer 'version' is refused rather than described", a
 		binaryBytes: "#!/bin/sh\nexit 9\n",
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
 	});
-	await assert.rejects(() => buildAcceptancePacket({ repoRoot: ROOT, binary }), code("installed_binary_unusable"));
+	await assert.rejects(() => buildContractAcceptancePacket({ binary }), code("installed_binary_unusable"));
+});
+
+test("acceptance reaches the protocol ship guard before resolving an installed binary", async () => {
+	await assert.rejects(
+		() => buildAcceptancePacket({ repoRoot: DIVERGED_REPO.root, binary: path.join(DIVERGED_REPO.root, "absent") }),
+		code("proof_shipment_protocol_divergence"),
+	);
 });
 
 test("installed command execution refuses a child that ignores TERM and a child that floods output", async (context) => {
@@ -379,7 +406,7 @@ test("installed command execution refuses a child that ignores TERM and a child 
 // no other caller, and exporting them to reach in-process would prove a surface
 // no operator uses. The child inherits NODE_V8_COVERAGE, so this counts.
 function runCli(args, options = {}) {
-	return spawnSync(process.execPath, [path.join(ROOT, "scripts", "worker-acceptance-packet.mjs"), ...args], {
+	return spawnSync(process.execPath, [path.join(CONTRACT_REPO.root, "scripts", "worker-acceptance-packet.mjs"), ...args], {
 		encoding: "utf8",
 		...options,
 	});
@@ -458,7 +485,7 @@ test("a call with no request_ref leaves the receipt unclaimed", async (context) 
 			'#!/bin/sh\ncase "$1 $2" in\n  "version ") echo "version: 0.66.1" ;;\n  "call message.search") echo "status: refused" ;;\nesac\nexit 0\n',
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
 	});
-	const packet = await buildAcceptancePacket({ repoRoot: ROOT, binary, capability: "message.search", target: `target:${"a".repeat(64)}` });
+	const packet = await buildMessageSearchAcceptancePacket(binary);
 	assert.equal(packet.bounded_capability_call.status, "refused");
 	assert.equal(packet.bounded_capability_call.request_ref, null);
 	assert.equal(packet.bounded_capability_call.receipt, null);

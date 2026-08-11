@@ -3,9 +3,21 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { inspectAgentAudit, inspectAgentSessionEvents } from "../dist/agent-audit.js";
+import {
+	inspectAgentAudit as inspectAgentAuditWithRuntime,
+	inspectAgentSessionEvents as inspectAgentSessionEventsWithRuntime,
+} from "../dist/agent-audit.js";
 
 const NOW = Date.parse("2026-07-24T12:00:00.000Z");
+const FIXED_MONOTONIC_CLOCK = Object.freeze({ monotonicNow: () => 0 });
+
+function inspectAgentAudit(home, overrides, now) {
+	return inspectAgentAuditWithRuntime(home, overrides, now, FIXED_MONOTONIC_CLOCK);
+}
+
+function inspectAgentSessionEvents(home, overrides, runtime, sessionRef) {
+	return inspectAgentSessionEventsWithRuntime(home, overrides, runtime, sessionRef, FIXED_MONOTONIC_CLOCK);
+}
 
 test("agent audit inventories Claude sessions without reading transcript content", () => {
 	withHome((home) => {
@@ -83,6 +95,23 @@ test("agent audit inventories Codex rollouts newest-first without reading conten
 			["019f9174-fec1-78d2-b4be-91402cdc66d4", "019f0000-0000-7000-8000-000000000001"],
 		);
 		assert.equal(JSON.stringify(inspectAgentAudit(home, {}, NOW)).includes("rollout text"), false);
+	});
+});
+
+test("a walk that exhausts its monotonic deadline reports unknown instead of fabricating inactivity", () => {
+	withHome((home) => {
+		const july = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(july, { recursive: true });
+		writeSession(july, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, "x\n");
+		let reading = 0;
+		const codex = inspectAgentAuditWithRuntime(home, {}, NOW, {
+			monotonicNow: () => {
+				reading += 101;
+				return reading;
+			},
+		}).adapters.find((adapter) => adapter.runtime === "codex");
+		assert.equal(codex.health, "unknown");
+		assert.equal(codex.inventory, "partial");
 	});
 });
 

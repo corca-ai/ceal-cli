@@ -7,9 +7,16 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
+import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.mjs";
 import { scratchDir } from "../scratch-dir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const CONTRACT_REPO = createProtocolRepoFixture();
+test.after(() => CONTRACT_REPO.cleanup());
+
+function resolveContractInputs(options) {
+	return resolveWorkerReleaseDevelopmentInputs({ ...options, repoRoot: CONTRACT_REPO.root });
+}
 
 // The synthetic handoff below stands in for a real Gateway artifact, and the
 // resolver rejects it unless the worker packages declare the supplied protocol
@@ -23,7 +30,7 @@ const MARKER_CONTENTS = "ceal.gateway_protocol_handoff.v1\n";
 
 test("worker release inventory accepts one exact complete Gateway protocol handoff", (context) => {
 	const fixture = handoffFixture(context);
-	const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
+	const resolution = resolveContractInputs(fixture);
 	assert.equal(resolution.ok, true);
 	assert.equal(resolution.protocol.package, "@corca-ai/ceal-protocol");
 	assert.equal(resolution.protocol.producer.repository, "corca-ai/ceal");
@@ -45,27 +52,27 @@ test("worker release inventory accepts the v3 through v5 Gateway control conform
 	]) {
 		writeControlConformance(fixture, schemaVersion);
 		writeHandoffManifest(fixture);
-		const resolution = resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture });
+		const resolution = resolveContractInputs(fixture);
 		assert.equal(resolution.ok, true);
 	}
 
 	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v2");
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("invalid_control_conformance"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
 });
 
 test("worker release inventory rejects stale sidecars, an unbound control conformance, and source fallback", (context) => {
 	const fixture = handoffFixture(context);
 	const marker = path.join(fixture.root, MARKER_NAME);
 	writeFileSync(marker, "unexpected\n");
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_marker_mismatch"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_marker_mismatch"));
 	writeFileSync(marker, MARKER_CONTENTS);
 
 	// The control conformance is a Gateway-owned member this repository does not
 	// interpret. Not interpreting it is not the same as not binding it: bytes the
 	// signed manifest does not name have no business riding in the packet.
 	writeFileSync(fixture.controlConformance, `${JSON.stringify({ ...fixture.control, extra: true })}\n`);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_conformance_mismatch"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_conformance_mismatch"));
 	writeControlConformance(fixture);
 	writeHandoffManifest(fixture);
 
@@ -73,7 +80,7 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 	foreignControl.source.commit = "c".repeat(40);
 	writeFileSync(fixture.controlConformance, `${JSON.stringify(foreignControl)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("invalid_control_conformance"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
 	writeControlConformance(fixture);
 	writeHandoffManifest(fixture);
 
@@ -81,12 +88,12 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 	stale.artifact.sha256 = "0".repeat(64);
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(stale)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_provenance_mismatch"));
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	fixture.provenance.artifact.exports = ["."];
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("handoff_provenance_mismatch"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_provenance_mismatch"));
 	fixture.provenance.artifact.exports = [".", "./conformance"];
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
@@ -97,35 +104,23 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 	driftedSubtree.source.protocol_tree = "d".repeat(40);
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(driftedSubtree)}\n`);
 	writeHandoffManifest(fixture);
-	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture }), hasCode("invalid_protocol_provenance"));
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_protocol_provenance"));
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
 
 	assert.throws(
-		() =>
-			resolveWorkerReleaseDevelopmentInputs({
-				repoRoot: ROOT,
-				protocolTarball: path.relative(ROOT, fixture.protocolTarball),
-				...rest(fixture),
-			}),
+		() => resolveContractInputs({ protocolTarball: path.relative(CONTRACT_REPO.root, fixture.protocolTarball), ...rest(fixture) }),
 		hasCode("protocol_tarball"),
 	);
 	assert.throws(
-		() =>
-			resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, handoffManifest: path.join(ROOT, "worker-release-inputs.json") }),
+		() => resolveContractInputs({ ...fixture, handoffManifest: path.join(CONTRACT_REPO.root, "worker-release-inputs.json") }),
 		hasCode("handoff_layout_mismatch"),
 	);
-	assert.throws(
-		() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, expectedHandoffSha256: "0".repeat(64) }),
-		hasCode("handoff_trust_mismatch"),
-	);
+	assert.throws(() => resolveContractInputs({ ...fixture, expectedHandoffSha256: "0".repeat(64) }), hasCode("handoff_trust_mismatch"));
 	const scattered = path.join(fixture.root, "different", path.basename(fixture.controlConformance));
 	mkdirSync(path.dirname(scattered), { recursive: true });
 	writeFileSync(scattered, readFileSync(fixture.controlConformance));
-	assert.throws(
-		() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: ROOT, ...fixture, controlConformance: scattered }),
-		hasCode("handoff_layout_mismatch"),
-	);
+	assert.throws(() => resolveContractInputs({ ...fixture, controlConformance: scattered }), hasCode("handoff_layout_mismatch"));
 });
 
 // docs/gates.md pinned this call site by source shape, on the reasoning that a
@@ -238,10 +233,7 @@ function handoffFixture(context) {
 		files: { "dist/index.js": "export const protocol = '1.3.0';\n", "dist/conformance.js": "export const conformance = true;\n" },
 	});
 	const producer = {
-		repository: "corca-ai/ceal",
-		commit: "a".repeat(40),
-		tree: "b".repeat(40),
-		protocol_tree: "e".repeat(40),
+		...CONTRACT_REPO.gateway,
 		scoped_paths_clean: true,
 	};
 	writeFileSync(path.join(root, MARKER_NAME), MARKER_CONTENTS);

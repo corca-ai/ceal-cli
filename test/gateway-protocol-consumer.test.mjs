@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { createSkillDirectoryBundle } from "../scripts/lib/skill-directory-bundle.mjs";
 import { GatewayProtocolConsumerError, verifyGatewayProtocolConsumer } from "../scripts/verify-gateway-protocol-consumer.mjs";
 import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixture.mjs";
 
@@ -15,6 +17,7 @@ test("the corrected development packet satisfies the installed B1 boundary", (co
 	});
 	assert.equal(result.ok, true);
 	assert.equal(result.proof_level, "local_integration");
+	assert.equal(result.worker_release_inputs.guide_sha256, createSkillDirectoryBundle(path.join(REPO_ROOT, "skills", "ceal-guide")).sha256);
 	assert.deepEqual(result.consumer.b1, {
 		decode_generation: "additive-v1",
 		unknown_response_keys: "removed",

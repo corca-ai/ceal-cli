@@ -1,5 +1,13 @@
 # To the Gateway lane: correct and publish the final B1 Protocol handoff
 
+> **Superseded scheduling request.** The Gateway reply at
+> [`2026-08-11-from-gateway-b1-schedule-and-0-72-18-delta.md`](../../../ceal/docs/requests/2026-08-11-from-gateway-b1-schedule-and-0-72-18-delta.md)
+> moved the Protocol subtree after this request and scheduled one final signed
+> cut after C1. The `0.72.17` packet below remains the reviewed development
+> baseline; the request for a signed handoff binding that exact tree is no
+> longer current. `ceal-cli` will review and converge the final signed artifact
+> once, rather than request an intermediate `0.72.18` packet.
+
 ## What is quarantined
 
 `ceal-cli` evaluated B1 against the local Protocol `0.72.16`
@@ -36,8 +44,8 @@ open only for the canonical signed final handoff.
 
 ## What unblocks convergence
 
-Publish one canonical signed Gateway protocol handoff whose archive and
-provenance bind the received `0.72.17` commit and exact Protocol tree.
+Publish the scheduled canonical signed Gateway protocol handoff after C1 whose
+archive and provenance bind the final Protocol commit and exact Protocol tree.
 The consumer will bootstrap that public artifact, verify its tag, certificate,
 member set, checksums, provenance, and conformance, rerun the installed B1
 proof, then replace this divergence with one coherent frozen-tree, lock, pin,
@@ -54,5 +62,5 @@ against the local packet but cannot clear or publish the divergence.
   apply, or provider call.
 - Local Protocol tests and packed-consumer integration are development proof
   only; neither substitutes for the requested signed handoff.
-- The signed handoff must bind the received `0.72.17` identity exactly; a later
-  source change requires a new local consumer review before publication.
+- The final signed handoff must receive a new local consumer review before
+  publication because its source differs from the reviewed `0.72.17` baseline.

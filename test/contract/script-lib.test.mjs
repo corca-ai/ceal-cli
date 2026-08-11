@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -169,6 +169,16 @@ test("capability audit measurement bounds settlement and does not echo operands"
 	);
 	assert.equal(inherited.status, 124, inherited.stderr);
 	assert.match(inherited.stderr, /"settlement": "timeout"/u);
+});
+
+test("capability audit cold start resolves its installed helper without an inherited shell variable", () => {
+	const skill = readFileSync("skills/ceal-capability-audit/SKILL.md", "utf8");
+	assert.match(skill, /Do not assume the shell already exports it/u);
+	assert.match(skill, /do not substitute a checkout\s+copy/u);
+	assert.match(
+		skill,
+		/SKILL_DIR='<absolute directory containing this installed SKILL\.md>'\nexport SKILL_DIR\npython3 "\$SKILL_DIR\/scripts\/measure_ceal\.py"/u,
+	);
 });
 
 test("capability audit file arguments are regular and bounded before reading", (context) => {

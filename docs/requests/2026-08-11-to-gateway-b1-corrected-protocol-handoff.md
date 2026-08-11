@@ -1,5 +1,15 @@
 # To the Gateway lane: correct the B1 Protocol boundaries before handoff
 
+## Fulfillment
+
+The unsigned local `0.72.17` packet fulfilled this development-packet request
+and passed the bounded consumer proof. The later
+[`final B1 request`](./2026-08-11-to-gateway-final-b1-protocol-handoff.md)
+records the remaining shipment quarantine; the Gateway's post-C1 signed-cut
+schedule supersedes this document's release timing. The reproduced defects and
+their acceptance boundary below remain the historical reason for the
+correction, not an open request for another intermediate packet.
+
 ## What is blocked
 
 `ceal-cli` B1 implementation and `ceal-v0.76.2` release are blocked on a

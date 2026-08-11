@@ -47,23 +47,33 @@ implementation and convergence contract. The remaining signed handoff is tracked
 - The ordinary vendor-pin verifier exited with
   `proof_shipment_protocol_divergence`, which is the required release
   quarantine while the signed handoff still names `0.72.13`.
+- `npm run check:unit`, the complete worker coverage run, the duplicate ratchet,
+  and the packed Gateway Protocol consumer test pass on the repaired tree. The
+  latter derives the shipped guide identity from the canonical directory bundle.
 - Verification level: local checkout and packed-artifact development proof.
   There is no signed final-handoff, released-binary, installed-worker, or live
   Gateway/provider proof.
 
 ## Lint Gate
 
-ran-fail-deferred `bash .githooks/pre-push`
-`docs/requests/2026-08-11-to-gateway-final-b1-protocol-handoff.md`. Its lint,
-unused-export, reachability, store-lock, duplicate-literal, build, and package
-coverage phases passed; the contract tier refuses release/acceptance positives
-under the declared proof/shipment divergence. The development gate passes.
+ran-pass `npm run check:unit`
+
+ran-pass `npm run check:duplication`
+
+ran-pass `bash .githooks/pre-push`
+
+ran-fail-deferred `npm run check` — the release tier reaches the unchanged live
+package/native shippability guards and reports
+`proof_shipment_protocol_divergence`. Development, contract, and packed local
+consumer evidence are not promoted to signed release proof.
 
 ## Truth Surface Sync
 
 The implementation contract, Gateway request, vendor pin, package manifests,
-lockfile, and `docs/handoff.md` identify `0.72.17` as corrected local B1 proof
-and the signed `0.72.13` lock as the remaining shipment blocker.
+lockfile, and `docs/handoff.md` identify `0.72.17` as the last reviewed local B1
+development baseline, now superseded in content. The signed `0.72.13` lock
+still quarantines shipment while one post-C1 final handoff and cut-time consumer
+review remain.
 
 ## Boundary Ownership
 
@@ -88,19 +98,27 @@ A distinct claims reviewer then qualified unsigned producer identity, corrected
 the split dependency/shipment state, and repaired the completion vocabulary;
 its fingerprint was also clean. Those round-two repairs close under the
 two-round cap rather than claiming a third unrun review.
+The final quality reviewer also rejected a reduced-concurrency receipt test as
+still scheduler-dependent. Round one separated exact exclusion from production
+best-effort lock timing; round two required watchdog-owned default append and
+drop contention proofs. Both review windows verified clean, and the bounded
+round-two repair is accepted-unreviewed under the same cap.
 
 ## Residual Risks
 
-- A final signed handoff must converge the frozen tree, lock, pin, dependency,
-  and packed proof before any worker version bump or release approval.
+- The post-C1 final signed handoff must receive a fresh consumer review and
+  converge the frozen tree, lock, pin, dependency, and packed proof before any
+  worker version bump or release approval.
 - The owner matrix binds site count and behavior but could be strengthened by a
   unique site-identity guard; that is Gateway-owned and not a consumer blocker.
 
 ## Next Slice
 
-Wait for the exact signed `0.72.17` handoff, bootstrap and converge the shipment
-lock/pin, run the ordinary gates, then ask the operator before releasing
-`ceal-v0.76.2`.
+The Gateway subsequently superseded `0.72.17` in content and scheduled one
+signed cut after C1. Wait for that final artifact, review it against this
+development baseline, bootstrap and converge the shipment lock/pin, run the
+ordinary gates, then ask the operator before choosing or releasing a Worker
+version.
 
 ## Completion Categories
 

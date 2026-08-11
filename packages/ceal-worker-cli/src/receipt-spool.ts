@@ -107,7 +107,17 @@ export interface CealReceiptSpoolStore {
 	remove(): Promise<void>;
 }
 
-export function createCealReceiptSpoolStore(home: string | undefined, now: () => number = Date.now): CealReceiptSpoolStore {
+interface CealReceiptSpoolLockTiming {
+	spoolMaxWaitMs: number;
+	dropsMaxWaitMs: number;
+	dropsPollMs: number;
+}
+
+export function createCealReceiptSpoolStore(
+	home: string | undefined,
+	now: () => number = Date.now,
+	lockTiming: CealReceiptSpoolLockTiming = PRODUCTION_LOCK_TIMING,
+): CealReceiptSpoolStore {
 	if (!home || !path.isAbsolute(home)) throw new CealReceiptSpoolStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, SPOOL_FILE);
@@ -129,14 +139,14 @@ export function createCealReceiptSpoolStore(home: string | undefined, now: () =>
 		},
 		async append(identity, entry) {
 			assertIdentity(identity);
-			await appendEntry(directory, file, identity, entry, now());
+			await appendEntry(directory, file, identity, entry, now(), lockTiming);
 		},
 		async recordDrop(identity) {
 			if (!validSessionIdentityDiscriminator(identity)) return;
-			await recordDrop(directory, path.join(directory, DROPS_FILE), identity);
+			await recordDrop(directory, path.join(directory, DROPS_FILE), identity, lockTiming);
 		},
 		async remove() {
-			return removeUnderLock(directory, file);
+			return removeUnderLock(directory, file, lockTiming);
 		},
 	};
 }
@@ -220,6 +230,11 @@ const SPOOL_LOCK_MAX_WAIT_MS = 250;
 const DROPS_LOCK_DIRECTORY = "receipt-spool-drops.lock";
 const DROPS_LOCK_MAX_WAIT_MS = 1_000;
 const DROPS_LOCK_POLL_MS = 1;
+const PRODUCTION_LOCK_TIMING: CealReceiptSpoolLockTiming = {
+	spoolMaxWaitMs: SPOOL_LOCK_MAX_WAIT_MS,
+	dropsMaxWaitMs: DROPS_LOCK_MAX_WAIT_MS,
+	dropsPollMs: DROPS_LOCK_POLL_MS,
+};
 
 // The append takes the lock for its read-modify-write; the removal did not, so a
 // clear that raced an in-flight append lost to it — the append's rename recreated
@@ -230,11 +245,11 @@ const DROPS_LOCK_POLL_MS = 1;
 // One home for this store's exclusion, because the append had these terms and the
 // removal did not, and the removal is what a clear races. A second spelling is how
 // the two drift back apart.
-async function underSpoolLock(directory: string, action: () => void): Promise<void> {
+async function underSpoolLock(directory: string, lockTiming: CealReceiptSpoolLockTiming, action: () => void): Promise<void> {
 	return withLocalStoreLock(
 		{
 			lockPath: path.join(directory, SPOOL_LOCK_DIRECTORY),
-			maxWaitMs: SPOOL_LOCK_MAX_WAIT_MS,
+			maxWaitMs: lockTiming.spoolMaxWaitMs,
 			onUnsafe: unsafeReceiptSpool,
 			onBusy: () => {
 				throw new CealReceiptSpoolStoreError("spool_busy");
@@ -244,18 +259,25 @@ async function underSpoolLock(directory: string, action: () => void): Promise<vo
 	);
 }
 
-async function removeUnderLock(directory: string, file: string): Promise<void> {
+async function removeUnderLock(directory: string, file: string, lockTiming: CealReceiptSpoolLockTiming): Promise<void> {
 	if (!assertDirectoryIfPresent(directory, unsafeReceiptSpool, true)) return;
-	return underSpoolLock(directory, () => {
+	return underSpoolLock(directory, lockTiming, () => {
 		removeSpool(directory, file);
 		removeSpool(directory, path.join(directory, DROPS_FILE));
 	});
 }
 
-async function appendEntry(directory: string, file: string, identity: string, entry: CealReceiptSpoolEntry, now: number): Promise<void> {
+async function appendEntry(
+	directory: string,
+	file: string,
+	identity: string,
+	entry: CealReceiptSpoolEntry,
+	now: number,
+	lockTiming: CealReceiptSpoolLockTiming,
+): Promise<void> {
 	if (!isValidEntry(entry)) throw new CealReceiptSpoolStoreError("unsafe_store");
 	prepareDirectory(directory, unsafeReceiptSpool);
-	return underSpoolLock(directory, () => writeAppendedSpool(directory, file, identity, entry, now));
+	return underSpoolLock(directory, lockTiming, () => writeAppendedSpool(directory, file, identity, entry, now));
 }
 
 function writeAppendedSpool(directory: string, file: string, identity: string, entry: CealReceiptSpoolEntry, now: number): void {
@@ -288,14 +310,14 @@ function writeAppendedSpool(directory: string, file: string, identity: string, e
 // clear; a delayed old process can recreate the file after logout or replacement.
 // The identity header is the structural boundary for that race, so a current
 // reader refuses old bytes and a later current write replaces them.
-async function recordDrop(directory: string, file: string, identity: string): Promise<void> {
+async function recordDrop(directory: string, file: string, identity: string, lockTiming: CealReceiptSpoolLockTiming): Promise<void> {
 	try {
 		prepareDirectory(directory, unsafeReceiptSpool);
 		await withLocalStoreLock(
 			{
 				lockPath: path.join(directory, DROPS_LOCK_DIRECTORY),
-				maxWaitMs: DROPS_LOCK_MAX_WAIT_MS,
-				pollMs: DROPS_LOCK_POLL_MS,
+				maxWaitMs: lockTiming.dropsMaxWaitMs,
+				pollMs: lockTiming.dropsPollMs,
 				onUnsafe: unsafeReceiptSpool,
 				onBusy: () => {
 					throw new CealReceiptSpoolStoreError("spool_busy");

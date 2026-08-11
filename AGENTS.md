@@ -44,8 +44,10 @@ history or full rationale.
   or the full gate for a tag. Bypass visibly with `git push --no-verify`, never by editing the hook.
 - `protocol-vendor-pin.json` binds the frozen copy. Proof/shipment divergence is
   fatal and blocks release, packing, and acceptance even when declared under
-  `docs/requests/`; a declaration quarantines, never clears. While divergent,
-  only `npm run check:protocol-dev` is available and it is development-only proof.
+  `docs/requests/`; a declaration quarantines, never clears. `npm run check:unit`
+  remains the development iteration gate by using converged contract fixtures;
+  `npm run check:protocol-dev` is the narrower Protocol/client proof. Neither is
+  release proof, and the full gate and every ship-facing command remain blocked.
 - `test:unit` is coverage over owned client/worker source with `all: true` and
   fail-closed floors. Raise floors after measured improvement; never lower one
   to clear a gate. `npm run coverage:scripts` is the Linux-measured third target

@@ -19,6 +19,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROTOCOL_NAME = "@corca-ai/ceal-protocol";
@@ -55,7 +56,7 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 			},
 			worker_release_inputs: {
 				...releaseInputs,
-				guide_sha256: sha256(readRegularFile(path.join(root, releaseInputs.guide), "invalid_worker_release_inputs")),
+				guide_sha256: guideBundleSha256(path.join(root, releaseInputs.guide)),
 				installer_sha256: sha256(readRegularFile(path.join(root, releaseInputs.installer), "invalid_worker_release_inputs")),
 			},
 			consumer: installed,
@@ -82,6 +83,14 @@ export function verifyGatewayProtocolConsumer({ repoRoot = REPO_ROOT, protocolTa
 		// a standing release proof into an unbounded disk leak. The existing explicit
 		// debug flag is the only path that retains one.
 		if (!keepWorkspace) rmSync(workspace, { recursive: true, force: true });
+	}
+}
+
+function guideBundleSha256(directory) {
+	try {
+		return createSkillDirectoryBundle(directory).sha256;
+	} catch {
+		throw new GatewayProtocolConsumerError("invalid_worker_release_inputs", "Worker guide directory is not a valid release bundle input.");
 	}
 }
 
