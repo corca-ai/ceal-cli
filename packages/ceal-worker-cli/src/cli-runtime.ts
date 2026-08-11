@@ -5,6 +5,7 @@ import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
+import type { CealSessionCommit } from "./session-replacement.js";
 import type { CealTimingRecorder } from "./timing.js";
 
 export interface CealCliIo {
@@ -47,8 +48,11 @@ export interface CealCommandRuntime {
 	isOutputTerminal?: () => boolean;
 	isInputTerminal?: () => boolean;
 	loadSession?: () => Promise<CealStoredSession | null>;
+	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
 	saveSession?: (session: CealStoredSession) => Promise<void>;
+	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
 	removeSession?: () => Promise<void>;
+	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
 	withSessionStateLock?: <T>(action: (store: CealLockedSessionStore) => Promise<T>) => Promise<T>;
 	// Client-local discovery-catalog cache (advisory; failures degrade to a live
 	// probe). Present only when a home directory is available. See discovery-cache.ts.
@@ -114,3 +118,69 @@ export interface CealCommandRuntime {
 	 */
 	createClientSessionClient?: (options: { endpoint: string }) => CealPersonalClientSessionClient;
 }
+
+/**
+ * The only session mutations command code can name. Each operation is already
+ * bound to the external runtime at the composition root, so no callback can
+ * recover the raw store or turn a semantic transition into an arbitrary write.
+ */
+interface CealSessionCommandFacade {
+	commitEnrolled?: (incoming: CealStoredSession, force: boolean) => Promise<CealSessionCommit>;
+	ensureCurrent?: (session: CealStoredSession, force?: boolean) => Promise<CealStoredSession>;
+	logout?: (io: CealCliIo) => Promise<number>;
+}
+
+type CealRawSessionMutationKey = "saveSession" | "removeSession" | "withSessionStateLock";
+type AssertNever<T extends never> = T;
+
+/**
+ * The complete safe projection. Adding a runtime seam must classify it here or
+ * as a raw session mutation before the worker can compile.
+ */
+export const CEAL_COMMAND_CONTEXT_KEYS = [
+	"timing",
+	"readSecret",
+	"promptEnrollmentCode",
+	"isInteractiveTerminal",
+	"isOutputTerminal",
+	"isInputTerminal",
+	"loadSession",
+	"loadDiscoveryCache",
+	"saveDiscoveryCache",
+	"removeDiscoveryCache",
+	"removeReceiptSpool",
+	"inspectAgentGuide",
+	"registerAgentGuide",
+	"recordReceiptSpool",
+	"recordReceiptSpoolDrop",
+	"loadReceiptSpool",
+	"inspectAgentAudit",
+	"inspectAgentSession",
+	"runStableUpdate",
+	"readInstalledReleaseFacts",
+	"executablePath",
+	"onObserverListening",
+	"discoveryCacheTtlMs",
+	"nextRequestId",
+	"sleep",
+	"now",
+	"monotonicNow",
+	"createDeviceAdoptionClient",
+	"createClientSessionClient",
+] as const satisfies readonly Exclude<keyof CealCommandRuntime, CealRawSessionMutationKey>[];
+
+type CealProjectedCommandRuntimeKey = (typeof CEAL_COMMAND_CONTEXT_KEYS)[number];
+type CealCommandContextShape = Pick<CealCommandRuntime, CealProjectedCommandRuntimeKey> & {
+	session: CealSessionCommandFacade;
+};
+
+/** Package-internal projection passed below `runCealCommand`. */
+export type CealCommandContext = CealCommandContextShape &
+	// These fail compilation if a raw key enters or a safe runtime key is not classified.
+	Record<
+		AssertNever<
+			| Extract<keyof CealCommandContextShape, CealRawSessionMutationKey>
+			| Exclude<Exclude<keyof CealCommandRuntime, CealRawSessionMutationKey>, CealProjectedCommandRuntimeKey>
+		>,
+		never
+	>;

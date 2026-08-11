@@ -54,14 +54,20 @@ recommended order and caller identity owned by the Gateway.
   a decoded success, JSON media-type parsing has one complete owner, and
   adoption poll uses the canonical request decoder before fetch. The full local gate and
   read-only command probe are green; this is source proof, not a release claim.
+- Worker command dispatch now receives a physically narrowed internal context:
+  raw session save, remove, and locked-store callbacks stop at the composition
+  root, while fixed commit, renewal, and logout operations retain their existing
+  transition owners. Class/prototype/accessor embedding compatibility and the
+  physical boundary are covered by worker tests; this is local source/runtime
+  proof and remains unreleased.
 
 ## Next Session
 
 1. Read the release record and use the exact signed 0.76.1 tuple for any Gateway
    coherent-v5 join; do not redo release work.
 2. Keep D2 and the D3 invariant-method slice queued for the next explicitly
-   approved Worker release together with the client-boundary quality fixes; a
-   green checkout is not installed proof. Ask before releasing.
+   approved Worker release together with the client-boundary and session-writer
+   quality fixes; a green checkout is not installed proof. Ask before releasing.
 3. Do not start the B1 client declaration from this repository alone. Wait for
    a signed Gateway protocol handoff that owns the additive response decoder and
    delegated relay exports, consume and re-pin that artifact, then add
@@ -99,5 +105,7 @@ recommended order and caller identity owned by the Gateway.
 - [code critique](../charness-artifacts/critique/2026-08-10-worker-owned-notification-shutdown-code-critique.md)
 - [client-boundary quality review](../charness-artifacts/quality/2026-08-11-codebase-quality-sweep.md)
 - [client-boundary closeout](../charness-artifacts/impl/2026-08-11-client-boundary-quality-sweep.md)
+- [session-writer quality review](../charness-artifacts/quality/2026-08-11-session-writer-ownership.md)
+- [session-writer closeout](../charness-artifacts/impl/2026-08-11-session-writer-ownership.md)
 - [v0.76.0 release record](../charness-artifacts/release/2026-08-09-ceal-v0-76-0.md)
 - [v0.76.1 release record](../charness-artifacts/release/2026-08-10-ceal-v0-76-1.md)

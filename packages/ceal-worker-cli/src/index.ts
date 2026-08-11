@@ -22,7 +22,13 @@ import {
 	writeCallUnavailable,
 } from "./call-result-output.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
-import type { CealCliIo, CealCommandRuntime, CealStableUpdateProgressStage, CealStableUpdateResult } from "./cli-runtime.js";
+import type {
+	CealCliIo,
+	CealCommandContext,
+	CealCommandRuntime,
+	CealStableUpdateProgressStage,
+	CealStableUpdateResult,
+} from "./cli-runtime.js";
 import {
 	CealClientSessionError,
 	classifyClientSessionFailure,
@@ -32,6 +38,7 @@ import {
 	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
+import { createCealCommandContext } from "./command-context.js";
 import {
 	type CealCommandDefinition,
 	CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT,
@@ -84,14 +91,14 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	if (staticResult !== undefined) return staticResult;
 	const command = findCealCommand(args[0]);
 	if (!command) throw new Error("static command dispatch did not handle an unknown command");
-	return runKnownCommand(command.name, args.slice(1), io, runtime);
+	return runKnownCommand(command.name, args.slice(1), io, createCealCommandContext(runtime));
 }
 
 async function runKnownCommand(
 	command: CealCommandDefinition["name"],
 	options: readonly string[],
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): Promise<number> {
 	if (command === "update") return runUpdate(io, runtime);
 	if (command === "guide") return runGuide(options, io, runtime);
@@ -109,7 +116,7 @@ async function runKnownCommand(
 // the installed artifact itself. Run from a build tree there is no release
 // layout beside it, and the refusal below is the correct answer rather than a
 // weaker record.
-async function runAcceptance(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runAcceptance(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const resolvedRoute = resolveSubcommandRoute("acceptance", options, ACCEPTANCE_ROUTES);
 	// A bare `ceal acceptance` is the emit route, as a bare `ceal guide` is
 	// status: the parent has one job, and making a reader type its only child
@@ -119,7 +126,7 @@ async function runAcceptance(options: readonly string[], io: CealCliIo, runtime:
 	return resolvedRoute.handler(resolvedRoute.rest, io, runtime);
 }
 
-async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseNamedOptions(rest, new Set(["--request-ref", "--profile"]), new Set());
 	if (parsed?.operands.length !== 0)
 		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
@@ -244,7 +251,7 @@ function writeAcceptanceGatewayFailure(error: unknown, io: CealCliIo): number {
 	);
 }
 
-async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runObserve(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseNamedOptions(options, new Set(["--port"]), new Set());
 	if (parsed?.operands.length !== 0)
 		return writeError("invalid_argument", "Invalid ceal observe options.", io, "Run 'ceal observe --help'.");
@@ -323,7 +330,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 	return closed;
 }
 
-async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runUpdate(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	if (!runtime.runStableUpdate)
 		return writeUpdate(io, {
 			status: "unavailable",
@@ -396,7 +403,7 @@ function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
 	return result.status === "unavailable" ? 3 : 0;
 }
 
-type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandRuntime) => number;
+type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandContext) => number;
 
 // One handler per declared guide route. The `register` rows share a handler that
 // reads its host from its own declared route, so this dispatcher still never
@@ -408,7 +415,7 @@ type GuideRouteHandler = (subcommand: CealSubcommandDefinition, io: CealCliIo, r
 // compile-time exhaustiveness check covers it: adding a row to CEAL_SUBCOMMANDS
 // without a handler here is a `tsc` failure, which is what stops a shipped
 // binary from advertising a route it cannot serve.
-type AcceptanceRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => Promise<number>;
+type AcceptanceRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandContext) => Promise<number>;
 
 const ACCEPTANCE_ROUTES: CealSubcommandHandlers<"acceptance", AcceptanceRouteHandler> = {
 	emit: (rest, io, runtime) => emitAcceptanceRecord(rest, io, runtime),
@@ -446,7 +453,7 @@ export function dispatchedRouteKeys(): Readonly<Record<string, readonly string[]
 	};
 }
 
-function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
+function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): number {
 	const resolved = resolveSubcommandRoute("guide", options, GUIDE_ROUTES);
 	if (!resolved) {
 		// A bare `ceal guide` is the status route; anything else here is undeclared.
@@ -459,7 +466,7 @@ function runGuide(options: readonly string[], io: CealCliIo, runtime: CealComman
 	return resolved.handler(resolved.subcommand, io, runtime);
 }
 
-function runGuideRegister(subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandRuntime): number {
+function runGuideRegister(subcommand: CealSubcommandDefinition, io: CealCliIo, runtime: CealCommandContext): number {
 	// The route's second token is the agent host, validated against the host table
 	// rather than cast, so a route declared without its host row is refused here
 	// instead of silently registering the default host or crashing inside the store.
@@ -473,7 +480,7 @@ function runGuideAction(
 	action: "status" | "register",
 	agent: CealAgentGuideHost | undefined,
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): number {
 	const inspect = action === "register" ? runtime.registerAgentGuide : runtime.inspectAgentGuide;
 	if (!inspect) return writeAgentGuideUnavailable(io, action, agent);
@@ -522,7 +529,7 @@ function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register"
 	return 3;
 }
 
-async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runCapabilities(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	// `--fresh` (catalog only) forces a live discovery probe past any cache;
 	// `--detail` (either case) restores the full per-capability input contract
 	// that the concise default omits. Both are stripped before the existing
@@ -577,7 +584,7 @@ async function serveCapabilityCatalog(
 	wantsFresh: boolean,
 	wantsDetail: boolean,
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): Promise<number> {
 	// Key the cache on the live handshake's authoritative identity, not the
 	// requested profile: a warm entry can only serve a session the Gateway just
@@ -785,7 +792,7 @@ type StoredGatewayAccessResolution =
 async function resolveGatewayAccess(
 	options: readonly string[],
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): Promise<GatewayAccessResolution> {
 	const selectedProfile = storedProfileOption(options);
 	return selectedProfile
@@ -797,7 +804,7 @@ async function resolveGatewayAccess(
 
 async function resolveStoredGatewayAccess(
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	selectedProfile?: string,
 ): Promise<GatewayAccessResolution> {
 	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, "observe");
@@ -812,7 +819,7 @@ async function resolveStoredGatewayAccess(
 }
 
 async function resolveStoredGatewayAccessResult(
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	selectedProfile: string | undefined,
 	sessionRenewalMode: CealSessionRenewalMode,
 ): Promise<StoredGatewayAccessResolution> {
@@ -839,7 +846,7 @@ async function resolveStoredGatewayAccessResult(
 }
 
 async function loadStoredSessionForRenewalMode(
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	mode: CealSessionRenewalMode,
 ): Promise<CealStoredSession | null> {
 	const loaded = await runtime.loadSession?.();
@@ -849,7 +856,7 @@ async function loadStoredSessionForRenewalMode(
 async function resolveExplicitGatewayAccess(
 	options: readonly string[],
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): Promise<GatewayAccessResolution> {
 	const parsed = parseGatewayOptions(options);
 	if (!parsed.ok) return { ok: false, exitCode: writeError("invalid_argument", parsed.message, io) };
@@ -864,7 +871,7 @@ async function resolveExplicitGatewayAccess(
 function requestHandshake(
 	client: ReturnType<typeof createCealClient>,
 	access: Pick<GatewayAccess, "profileRef" | "requestId">,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ) {
 	return withCealTiming(runtime.timing, "gateway_handshake", () =>
 		client.request({
@@ -876,7 +883,7 @@ function requestHandshake(
 	);
 }
 
-async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandRuntime, sessionRenewalMode: CealSessionRenewalMode) {
+async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandContext, sessionRenewalMode: CealSessionRenewalMode) {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	let client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
 	let handshake = await requestHandshake(client, access, runtime);
@@ -945,7 +952,7 @@ function writeCapabilitiesAvailable(
 	detail: boolean,
 	io: CealCliIo,
 	provenance: CatalogProvenance,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): number {
 	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
 	return writeYaml(io.stdout, {
@@ -1038,7 +1045,7 @@ function profileSelectionHint(handshake: CealGatewayHandshakeValue): {
  * absent when the running host cannot be identified, so it never becomes noise
  * on a healthy install.
  */
-function unregisteredGuideAdvisory(runtime: CealCommandRuntime): Record<string, unknown> {
+function unregisteredGuideAdvisory(runtime: CealCommandContext): Record<string, unknown> {
 	try {
 		const state = runtime.inspectAgentGuide?.();
 		// Only when the guide is present and merely unregistered for the host that
@@ -1070,7 +1077,7 @@ function capabilityCatalogNextAction(
 	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
 }
 
-async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseCallOptions(options);
 	if (!parsed.ok)
 		return writeError(
@@ -1098,7 +1105,7 @@ async function runCall(options: readonly string[], io: CealCliIo, runtime: CealC
 
 async function cachedCapabilityEffect(
 	capabilityId: string,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	key: CealDiscoveryCacheKey,
 ): Promise<CealCapabilityEffect | undefined> {
 	try {
@@ -1124,7 +1131,7 @@ async function cachedCapabilityEffect(
 	}
 }
 
-async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runReceipt(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseReceiptOptions(options);
 	if (!parsed)
 		return writeError(
@@ -1186,7 +1193,7 @@ async function requestReceiptReadback(
 	initialSession: CealStoredSession,
 	profileRef: string,
 	requestRef: string,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	sessionRenewalMode: CealSessionRenewalMode,
 ) {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
@@ -1205,7 +1212,7 @@ function requestGatewayReadback(
 	profileRef: string,
 	requestRef: string,
 	requestIdFallback: string,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ) {
 	return withCealTiming(runtime.timing, "gateway_readback", () =>
 		client.request({
@@ -1301,7 +1308,7 @@ function writeReceiptError(
 // through the spool's allowlist and appends it. Every failure is swallowed so
 // a broken spool can never change a call's output or exit code, and a
 // receipt-less envelope (pre-issue failure) projects to nothing.
-function callResultRecorder(runtime: CealCommandRuntime, session: CealStoredSession): CealCallResultRecorder | undefined {
+function callResultRecorder(runtime: CealCommandContext, session: CealStoredSession): CealCallResultRecorder | undefined {
 	const record = runtime.recordReceiptSpool;
 	if (!record) return undefined;
 	const drop = runtime.recordReceiptSpoolDrop;
@@ -1327,7 +1334,7 @@ async function executeCall(
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	capabilityEffect?: CealCapabilityEffect,
 ): Promise<number> {
 	const record = callResultRecorder(runtime, initialSession);
@@ -1357,7 +1364,7 @@ async function executeCall(
 
 type CallSessionResolution = { ok: true; session: CealStoredSession } | { ok: false; reason: string };
 
-async function resolveCallSession(runtime: CealCommandRuntime, sessionRenewalMode: CealSessionRenewalMode): Promise<CallSessionResolution> {
+async function resolveCallSession(runtime: CealCommandContext, sessionRenewalMode: CealSessionRenewalMode): Promise<CallSessionResolution> {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	if (!runtime.loadSession) return { ok: false, reason: "session_unavailable" };
 	try {
@@ -1374,7 +1381,7 @@ function requestCapability(
 	profileRef: string,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ) {
 	return withCealTiming(runtime.timing, "gateway_call", () =>
 		client.request({
@@ -1396,7 +1403,7 @@ async function requestCapabilityCall(
 	profileRef: string,
 	parsed: Extract<ParsedCallOptions, { ok: true }>,
 	requestId: string,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	sessionRenewalMode: CealSessionRenewalMode,
 ) {
 	requireCealCallRenewalMode(sessionRenewalMode);

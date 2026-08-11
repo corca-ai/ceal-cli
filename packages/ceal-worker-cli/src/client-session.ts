@@ -1,6 +1,6 @@
 import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
-import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandContext, CealCommandRuntime } from "./cli-runtime.js";
 import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
@@ -11,7 +11,6 @@ import {
 	type CealSessionCommit,
 	clearSessionDerivedState,
 	clientSessionTransportFailure,
-	commitEnrolledSession,
 	endedPreviousSessionAction,
 	localSessionStoreRecoveryAction,
 	revokeClientSession,
@@ -40,9 +39,9 @@ export const SESSION_ROUTES: CealSubcommandHandlers<"session", SessionRouteHandl
 		rest.length === 0 ? showSession(io, runtime) : writeSessionInvalidArgument("status", "Invalid session status options.", io),
 };
 
-type SessionRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => Promise<number> | number;
+type SessionRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandContext) => Promise<number> | number;
 
-export async function runSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+export async function runSession(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	// Both the routes this runner accepts and the handler each one reaches are
 	// resolved from the declared subcommand table, so help, acceptance, and
 	// dispatch cannot diverge.
@@ -52,7 +51,7 @@ export async function runSession(options: readonly string[], io: CealCliIo, runt
 	return resolved.handler(resolved.rest, io, runtime);
 }
 
-async function showSession(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function showSession(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	let session: CealStoredSession | null;
 	try {
 		session = runtime.loadSession ? await runtime.loadSession() : null;
@@ -119,7 +118,7 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 	};
 }
 
-async function runSessionRefresh(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runSessionRefresh(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	if (!runtime.loadSession) return writeSessionRefreshUnavailable(io, "session_runtime_unavailable");
 	let session: CealStoredSession | null;
 	try {
@@ -179,10 +178,11 @@ function writeSessionRefreshUnavailable(io: CealCliIo, reason: string): number {
 	return 3;
 }
 
-async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeSessionInvalidArgument("enroll", "Invalid session enrollment options.", io);
-	if (!runtime.saveSession || !runtime.loadSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	const commitEnrolled = runtime.session.commitEnrolled;
+	if (!commitEnrolled || !runtime.loadSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
 	// Read the store before the code is read or spent. An enrollment code is
 	// one-time: discovering that this host's session file is unreadable *after*
 	// the Gateway has consumed it costs the operator a replacement code.
@@ -205,7 +205,7 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 		const reason = error instanceof CealEnrollmentClientError ? error.code : "session_save_failed";
 		return writeEnrollmentUnavailable(reason, io);
 	}
-	const commit = await commitEnrolledSession(stored, runtime, parsed.force);
+	const commit = await commitEnrolled(stored, parsed.force);
 	if (!commit.ok) {
 		if (commit.reason === "identity_conflict") return writeEnrollmentConflict(commit.changedBindings, commit.issuedSessionRevoked, io);
 		const commitRecovery = sessionCommitRecoveryAction(
@@ -221,7 +221,7 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 
 async function readEnrollmentCode(
 	input: "stdin" | "interactive",
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 ): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
 	if (input === "stdin" && runtime.isInputTerminal?.()) return { ok: false, error: "stdin_enrollment_requires_pipe" };
 	const reader = enrollmentCodeReader(input, runtime);
@@ -233,7 +233,7 @@ async function readEnrollmentCode(
 	}
 }
 
-function enrollmentCodeReader(input: "stdin" | "interactive", runtime: CealCommandRuntime): (() => Promise<string>) | undefined {
+function enrollmentCodeReader(input: "stdin" | "interactive", runtime: CealCommandContext): (() => Promise<string>) | undefined {
 	if (input === "stdin") return runtime.readSecret;
 	return runtime.isInteractiveTerminal?.() ? runtime.promptEnrollmentCode : undefined;
 }
@@ -315,7 +315,11 @@ function writeEnrollmentConflict(changedBindings: readonly string[], issuedSessi
 	return 3;
 }
 
-async function runSessionLogout(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+async function runSessionLogout(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
+	return runtime.session.logout ? runtime.session.logout(io) : writeLogoutUnavailable(io, "session_runtime_unavailable");
+}
+
+export async function runSessionLogoutWithRuntime(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
 	if (!runtime.loadSession || !runtime.removeSession) return writeLogoutUnavailable(io, "session_runtime_unavailable");
 	if (runtime.withSessionStateLock)
 		return runtime
@@ -477,6 +481,15 @@ export class CealClientSessionError extends Error {
 }
 
 export async function ensureCurrentSession(
+	session: CealStoredSession,
+	runtime: CealCommandContext,
+	force = false,
+): Promise<CealStoredSession> {
+	if (!runtime.session.ensureCurrent) throw new CealClientSessionError("reenrollment_required");
+	return runtime.session.ensureCurrent(session, force);
+}
+
+export async function ensureCurrentSessionWithRuntime(
 	session: CealStoredSession,
 	runtime: CealCommandRuntime,
 	force = false,

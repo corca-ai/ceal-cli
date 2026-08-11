@@ -8,9 +8,9 @@ import {
 	deviceEnrollmentHpkeInfo,
 	deviceEnrollmentProofPayload,
 } from "@corca-ai/ceal-protocol";
-import { adoptSession } from "../dist/device-adoption.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
+import { runCealCommand } from "../dist/index.js";
 import { CealSessionStoreError } from "../dist/profile-store.js";
 
 // The Gateway in these tests is a real sealer, not a stub that returns a
@@ -237,7 +237,7 @@ test("a malformed invocation is refused before any key or request exists", async
 		["--gateway", GATEWAY, "--email", EMAIL, "extra"],
 	]) {
 		const world = createWorld();
-		const code = await adoptSession(options, world.io, world.runtime);
+		const code = await runCealCommand(["session", "adopt", ...options], world.io, world.runtime);
 		assert.equal(code, 2, `${JSON.stringify(options)} must be an argument error`);
 		assert.equal(world.result().error.kind, "invalid_argument");
 		assert.equal(world.gateway.startCount, 0, "no transaction may be started for a malformed invocation");
@@ -401,7 +401,7 @@ function storedSession(overrides = {}) {
 }
 
 function run(world, extraOptions = []) {
-	return adoptSession(["--gateway", GATEWAY, "--email", EMAIL, ...extraOptions], world.io, world.runtime);
+	return runCealCommand(["session", "adopt", "--gateway", GATEWAY, "--email", EMAIL, ...extraOptions], world.io, world.runtime);
 }
 
 function fingerprint(publicKey) {

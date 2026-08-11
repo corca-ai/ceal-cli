@@ -24,6 +24,7 @@ import { parseAllDocuments } from "yaml";
 import { buildAcceptanceRecord, readInstalledReleaseFacts } from "../dist/acceptance-record.js";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
+import { createCealCommandContext } from "../dist/command-context.js";
 import {
 	CEAL_COMMANDS,
 	CEAL_SUBCOMMANDS,
@@ -872,6 +873,86 @@ test("every command answers one success predicate that agrees with its exit code
 		assert.doesNotMatch(body, /(?:^|,)\s*code\s*[:,]/u, `error objects speak 'kind' only: ${body.trim()}`);
 		assert.match(body, /(?:^|,)\s*kind\s*[:,]/u, `error object without kind: ${body.trim()}`);
 	}
+});
+
+test("command handlers receive semantic session operations without raw store mutation", async () => {
+	const externalRuntime = {
+		loadSession: async () => null,
+		saveSession: async () => assert.fail("status is read-only"),
+		removeSession: async () => assert.fail("status is read-only"),
+		withSessionStateLock: async () => assert.fail("status is read-only"),
+	};
+	const observedContext = createCealCommandContext(externalRuntime);
+	const payload = await yamlRun(["session", "status"], 0, externalRuntime);
+	assert.equal(payload.status, "unconfigured");
+	assert.equal(typeof observedContext.session.commitEnrolled, "function");
+	assert.equal(typeof observedContext.session.ensureCurrent, "function");
+	assert.equal(typeof observedContext.session.logout, "function");
+	assert.equal(Object.getPrototypeOf(observedContext), null, "the embedding prototype must not provide a mutation back door");
+	assert.equal(Object.isExtensible(observedContext), false, "raw keys cannot be defined after projection");
+	for (const rawKey of ["saveSession", "removeSession", "withSessionStateLock"]) {
+		assert.equal(Object.hasOwn(observedContext, rawKey), false, `${rawKey} must be physically absent below dispatch`);
+		assert.equal(rawKey in observedContext, false, `${rawKey} must be absent from the whole context chain`);
+		assert.equal(Reflect.defineProperty(observedContext, rawKey, { value: async () => {} }), false, `${rawKey} cannot be added later`);
+	}
+	assert.doesNotThrow(() => Reflect.ownKeys(observedContext), "reflection stays valid after the context is made non-extensible");
+});
+
+test("command context preserves class prototype and non-enumerable embedding seams", async () => {
+	const session = storedSession("https://ceal.example.test");
+	class Runtime {
+		async loadSession() {
+			assert.equal(this, runtime, "prototype methods keep the embedding receiver");
+			return session;
+		}
+	}
+	const runtime = new Runtime();
+	Object.defineProperty(runtime, "now", {
+		value() {
+			assert.equal(this, runtime, "non-enumerable methods keep the embedding receiver");
+			return Date.parse(session.expiresAt) - 1;
+		},
+	});
+	const payload = await yamlRun(["session", "status"], 0, runtime);
+	assert.equal(payload.status, "configured");
+	assert.equal(payload.access_status, "current");
+});
+
+test("command context preserves lazy accessors and tracks a changing function value", () => {
+	let reads = 0;
+	const runtime = {};
+	Object.defineProperty(runtime, "now", {
+		get() {
+			reads += 1;
+			return function () {
+				assert.equal(this, runtime);
+				return reads;
+			};
+		},
+	});
+	const context = createCealCommandContext(runtime);
+	assert.equal(Object.getOwnPropertyDescriptor(context, "now").get instanceof Function, true);
+	assert.equal(reads, 0, "descriptor inspection must not execute the embedding getter");
+	const first = context.now;
+	const second = context.now;
+	assert.notEqual(first, second, "a getter that changes its function is not pinned by the bind cache");
+	assert.equal(first(), 2);
+});
+
+test("unrelated commands do not inspect embedding session accessors", async () => {
+	let reads = 0;
+	const runtime = {};
+	for (const property of ["loadSession", "saveSession", "removeSession"]) {
+		Object.defineProperty(runtime, property, {
+			get() {
+				reads += 1;
+				throw new Error("unrelated session getter touched");
+			},
+		});
+	}
+	const payload = await yamlRun(["guide"], 3, runtime);
+	assert.equal(payload.status, "unavailable");
+	assert.equal(reads, 0);
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {

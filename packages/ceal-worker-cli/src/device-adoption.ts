@@ -19,7 +19,7 @@ import {
 	deviceEnrollmentPublicKeyFingerprint,
 } from "@corca-ai/ceal-protocol";
 import packageJson from "../package.json" with { type: "json" };
-import type { CealCliIo, CealCommandRuntime } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandContext } from "./cli-runtime.js";
 import { generateCealDeviceProofKeyPair, signCealDeviceProof } from "./device-proof.js";
 import { generateCealHpkeKeyPair, openCealHpkeMessage } from "./hpke.js";
 import { parseNamedOptions } from "./named-options.js";
@@ -27,7 +27,6 @@ import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import {
 	type CealRevokeDisposition,
-	commitEnrolledSession,
 	endedPreviousSessionAction,
 	sessionCommitRecoveryAction,
 	sessionIdentityConflictFields,
@@ -91,7 +90,7 @@ interface AdoptionOutcome {
 	nextAction: string;
 }
 
-export async function adoptSession(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
+export async function adoptSession(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseAdoptionOptions(options);
 	if (!parsed.ok) {
 		return writeAdoptionFailure(
@@ -105,7 +104,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			2,
 		);
 	}
-	if (!runtime.saveSession || !runtime.loadSession) {
+	if (!runtime.session.commitEnrolled || !runtime.loadSession) {
 		return writeAdoptionFailure(io, {
 			code: "session_runtime_unavailable",
 			message: "This host has no writable session store, so an adopted session could not be kept.",
@@ -252,7 +251,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 
 async function completeAdoption(
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	runtime: CealCommandContext,
 	delivery: {
 		gateway: string;
 		origin: string;
@@ -336,7 +335,7 @@ async function completeAdoption(
 	// A sealed delivery proves the Gateway meant this session for this device. It
 	// does not say this host is free to give the identity behind `ceal call` away,
 	// and that is a separate refusal with a separate remedy.
-	const commit = await commitEnrolledSession(stored, runtime, delivery.force);
+	const commit = await runtime.session.commitEnrolled!(stored, delivery.force);
 	if (!commit.ok) {
 		if (commit.reason === "identity_conflict") {
 			return writeAdoptionConflict(io, commit.changedBindings, commit.issuedSessionRevoked);
