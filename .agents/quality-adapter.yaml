@@ -105,6 +105,10 @@ dup_ratchet:
 gate_commands:
   - npm run check:unit
   - npm run check
+# Report-only quality packet. The standing gates remain network-independent;
+# dependency advisories are refreshed only when a quality review has network.
+security_commands:
+  - npm audit --omit=dev --audit-level=high
 # `.githooks/pre-push` writes this log on every push, so the runtime helpers read
 # what a real host measured instead of a figure typed into a doc. AGENTS.md makes
 # that a rule; this is where the rule gets a machine-readable home.

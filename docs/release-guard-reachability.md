@@ -131,24 +131,24 @@ reused**. That minute was measured on a development machine, not a
 
 ### B. Nothing re-asserts the pin before the artifact is signed — resolved
 
-The pin is asserted inside `withWorkerReleaseInputs*`
-(`scripts/worker-release-inputs.mjs:67`) while each platform builds. Afterwards
-nothing asks again: `sign-and-publish`'s inventory verification
-(`ceal-release.yml:263-277`) checks digests, the exact file list, and that each
-manifest carries the right `version` and `platform` — bytes and shape, never
+The pin was asserted inside `withWorkerReleaseInputs*`
+(`scripts/worker-release-inputs.mjs:67`) while each platform built. Afterwards
+nothing asked again: `sign-and-publish`'s inventory verification
+(`ceal-release.yml:263-277`) checked digests, the exact file list, and that each
+manifest carried the right `version` and `platform` — bytes and shape, never
 `protocol.producer`.
 
-**The comparison already exists and fails closed.** The manifest records the
+**The comparison already existed and failed closed.** The manifest recorded the
 protocol producer's `repository`, `commit` and `tree`, and
-`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.mjs:136`) compares
+`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.mjs:136`) compared
 them against the lock, failing `protocol_provenance_disagreement` at `:162`.
-`docs/acceptance/ceal-v0.67.1/linux-amd64.json` carries a real one. So this is
-wiring, not design — and the [debt.md](debt.md) hole is a different field, the
-missing **client** package, which that entry names while recording the protocol.
+`docs/acceptance/ceal-v0.67.1/linux-amd64.json` carries a real one. So this was
+wiring, not design. The then-open missing-client-package hole was separate; the
+current merge now validates exact client provenance beside the Protocol check.
 
-But the catch today is late rather than absent: the only production caller is
+But the catch then was late rather than absent: the only production caller was
 `buildAcceptancePacket` (`:205`), an operator command run against an *installed*
-release. The defect would surface after signing and publishing, and **a failed
+release. The defect would have surfaced after signing and publishing, and **a failed
 release tag cannot be reused**.
 
 It went into the `merge` the `assemble` job runs, rather than into a new step
@@ -177,10 +177,10 @@ release shipped with, not the lock on the branch the lane checks out, so the
 guard that fits B would fail a correct rollback. Settle "which lock" before
 anyone treats this as B's second half.
 
-The signed manifest's missing client identity, described in [debt.md](debt.md), is
-a real hole and is out of this goal: it is a manifest schema change that needs a
-release to prove, which makes it its own goal. Same for the README split and the
-runtime budgets, which need a sample window before a threshold is honest.
+The signed manifest's missing client identity was out of this goal because it
+required its own manifest-schema change. That later landed in the merge path;
+this historical scope boundary is not a current debt entry. The README split and
+runtime-budget work likewise moved on under their own owners.
 
 ## Slice 4 — the standing signal coverage cannot give
 

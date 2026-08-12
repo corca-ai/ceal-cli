@@ -2,6 +2,20 @@
   "entries": [
     {
       "surface": "code",
+      "id": "6eb36b7028824c4b",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the materialized-guide verification and boundary-specific filesystem traversal family reviewed at dfb806c62157194d. The new permissionMode owner changed the runtime member's tokens, not the ownership decision: signed-guide verification, guide-state parent admission, and generic release-source enumeration retain different inventories, mode policies, symlink treatment, and failure classes."
+    },
+    {
+      "surface": "code",
+      "id": "bfc4c34f2224075a",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the build-time skill collector versus runtime exact materialized-guide verifier reviewed at 94d117266d9477ea. The collector constructs a portable deterministic source bundle; the runtime verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. Sharing the traversal would merge opposite anomaly policies."
+    },
+    {
+      "surface": "code",
       "id": "a65fd5dcda4e5280",
       "class": "intentional",
       "reviewed_at": "2026-08-12",

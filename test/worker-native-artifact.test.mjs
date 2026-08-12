@@ -231,6 +231,45 @@ test("native artifact process proof kills a command tree that exceeds its deadli
 		assert.equal(processIsAlive(pid), false, `timed-out artifact pid ${pid} survived its watchdog`);
 });
 
+test("release process deadline starts only after its fixture-ready marker", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-native-process-marker-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const result = await runArtifact(
+		process.execPath,
+		[
+			"-e",
+			"setTimeout(() => process.stdout.write('ready\\n'), 150); setTimeout(() => process.stdout.write('late\\n'), 500); setTimeout(() => process.exit(0), 3_000)",
+		],
+		root,
+		{
+			timeoutMs: 50,
+			terminationGraceMs: 50,
+			postKillReportMs: 50,
+			postExitDrainMs: 10,
+			timeoutStartMarker: "ready\n",
+			timeoutStartDeadlineMs: 2_000,
+		},
+	);
+	assert.equal(result.timedOut, true);
+	assert.match(result.stdout, /ready/u);
+	assert.doesNotMatch(result.stdout, /late/u);
+});
+
+test("release process fixture-ready marker has its own missing-marker deadline", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-native-process-marker-missing-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const result = await runArtifact(process.execPath, ["-e", "setTimeout(() => {}, 250)"], root, {
+		timeoutMs: 2_000,
+		terminationGraceMs: 50,
+		postKillReportMs: 50,
+		postExitDrainMs: 10,
+		timeoutStartMarker: "ready\n",
+		timeoutStartDeadlineMs: 50,
+	});
+	assert.equal(result.timedOut, true);
+	assert.doesNotMatch(result.stdout, /ready/u);
+});
+
 function hasCode(code) {
 	return (error) => error instanceof WorkerNativeArtifactError && error.code === code;
 }

@@ -204,9 +204,9 @@ sleep 20
 	);
 
 	await createCealStableUpdateRunner(install, { PATH: process.env.PATH }, deadlines({ installerMs: 150, terminationGraceMs: 2_000 }))();
-	// The trap runs after our promise settles, so give the shell a moment to
-	// unwind before reading what it left behind.
-	await delay(500);
+	// The trap runs after our promise settles. Observe its actual postcondition
+	// instead of paying a fixed sleep on every coverage run.
+	await waitUntil(() => existsSync(marker) && !existsSync(lock));
 	assert.equal(existsSync(marker), true, "the installer was killed before its rollback trap could run");
 	assert.equal(existsSync(lock), false, "the install lock was leaked; the next update would refuse to start");
 });
@@ -226,9 +226,9 @@ test("an installer that ignores SIGTERM is killed rather than waited out", { tim
 
 	assert.equal(result.error.kind, "update_failed");
 	assert.ok(elapsed < 5_000, `the update took ${elapsed}ms; SIGTERM was ignored and nothing escalated`);
-	await delay(300);
 	const pid = Number(readFileSync(pidFile, "utf8").trim());
 	assert.ok(Number.isInteger(pid) && pid > 0, "the fixture must record the pid it is asserting about");
+	await waitUntil(() => !processAlive(pid));
 	assert.equal(processAlive(pid), false, `installer pid ${pid} survived a deadline it ignored SIGTERM for`);
 });
 
@@ -288,8 +288,12 @@ function deadlines(overrides) {
 	return { terminationGraceMs: 100, postKillReportMs: 50, ...overrides };
 }
 
-function delay(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+async function waitUntil(predicate, timeoutMs = 2_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() >= deadline) throw new Error("stable update fixture did not reach its postcondition before the test deadline");
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
 }
 
 function processAlive(pid) {

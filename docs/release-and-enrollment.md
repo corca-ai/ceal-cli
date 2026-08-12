@@ -78,6 +78,11 @@ cannot print the new guide advisory; after the update, run `ceal guide status`
 and the appropriate register command. New-to-new update YAML reports
 `registration_not_attempted` and the same next action.
 
+If that first register reports an earlier Ceal-managed link, follow its exact
+cleanup path, remove only that named link, and retry the same register command.
+Do not reinstall the binary: the preserved link is a registration conflict, not
+an update failure.
+
 Then:
 
 ```

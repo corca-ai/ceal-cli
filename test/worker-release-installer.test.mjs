@@ -30,6 +30,10 @@ import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install-ceal.sh");
 const TAG = "ceal-v0.65.0";
+// The release record owns this immutable historical executable identity. The
+// annotated tag is checked against it below, but never used as the `git show`
+// input: a moved unsigned tag must fail rather than select code in an OIDC job.
+const CEAL_0_76_1_COMMIT = "2edf126e1c7bf65900d40b449dce9ea4481c6ce7";
 // See restrictedTools below: the darwin simulation is assembled from a real
 // GNU sha256sum, so it can only be staged on a host that has one.
 const simulatedDarwinSkip = requireHostTools("sha256sum");
@@ -71,9 +75,16 @@ test("the exact 0.76.1 installer crosses to the embedded-directory release witho
 		}
 		rewriteChecksumsAndSidecars(release);
 		const oldInstaller = path.join(root, "install-ceal-0.76.1.sh");
-		writeFileSync(oldInstaller, execReleaseTestProcess("git", ["show", "ceal-v0.76.1:install-ceal.sh"], { encoding: "utf8", cwd: ROOT }), {
-			mode: 0o755,
-		});
+		assert.equal(
+			execReleaseTestProcess("git", ["rev-parse", "ceal-v0.76.1^{}"], { encoding: "utf8", cwd: ROOT }).trim(),
+			CEAL_0_76_1_COMMIT,
+			"the compatibility tag moved away from the released commit",
+		);
+		writeFileSync(
+			oldInstaller,
+			execReleaseTestProcess("git", ["show", `${CEAL_0_76_1_COMMIT}:install-ceal.sh`], { encoding: "utf8", cwd: ROOT }),
+			{ mode: 0o755 },
+		);
 		const registration = path.join(root, "codex", "skills", "ceal-guide");
 		mkdirSync(path.dirname(registration), { recursive: true });
 		symlinkSync(path.join(install, ".ceal-cli", "worker", "current", "guide"), registration, "dir");
@@ -204,6 +215,28 @@ test("release sync-process proof kills a TERM-ignoring command tree", (context) 
 	assert.equal(result.error?.code, "ETIMEDOUT");
 	for (const pid of readFileSync(pidFile, "utf8").split(" ").map(Number))
 		assert.equal(processIsAlive(pid), false, `timed-out release command pid ${pid} survived its watchdog`);
+});
+
+test("release test children cannot inherit CI credential surfaces", () => {
+	const result = runSyncReleaseProcess(
+		process.execPath,
+		[
+			"-e",
+			"process.stdout.write(JSON.stringify({ oidc: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, runtime: process.env.ACTIONS_RUNTIME_TOKEN, github: process.env.GITHUB_TOKEN }))",
+		],
+		{
+			encoding: "utf8",
+			env: {
+				...process.env,
+				ACTIONS_ID_TOKEN_REQUEST_TOKEN: "must-not-leak",
+				ACTIONS_ID_TOKEN_REQUEST_URL: "https://tokens.invalid",
+				ACTIONS_RUNTIME_TOKEN: "must-not-leak",
+				GITHUB_TOKEN: "must-not-leak",
+			},
+		},
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(JSON.parse(result.stdout), {});
 });
 
 test("worker stable resolver follows the worker static-origin stable pointer", () => {

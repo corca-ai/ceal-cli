@@ -2,11 +2,12 @@
 
 ## Workflow Trigger
 
-Continue only the `ceal-cli` lanes in the sibling
-[`ceal` roadmap](../../ceal/docs/roadmap.md#current-execution-ledger). Do not
-redo the Worker shutdown, conditional PATH, read-only discovery, or invariant
-guide-method repairs. Push, tag, release, publication, Gateway selection, and
-apply remain separately approved boundaries.
+Continue only the worker lane in the sibling
+[release execution plan](../../ceal/docs/next-release-execution-plan.md#corca-aiceal-cli--worker-lane).
+The older roadmap ledger is stale against the 2026-08-12 reframe. Do not redo
+the Worker shutdown, conditional PATH, read-only discovery, or invariant guide-method
+repairs. Push, tag, release, publication, Gateway selection, and apply remain
+separately approved boundaries.
 
 ## Current State
 
@@ -21,8 +22,9 @@ apply remain separately approved boundaries.
   negotiation version, not the npm Protocol package version.
 - Source after `0.76.1` contains the #707 D2 conditional PATH guidance and the
   bounded D3 invariant guide method. The guide is a progressive directory
-  carrier and names no fixed capability sequence; final B3 dogfood waits for
-  B2's Gateway-served next-step and caller-identity fields.
+  carrier and names no fixed capability sequence. Installed-guide dogfood is
+  still unproved, but the current cross-repo plan does not schedule it as a
+  separate worker slice.
 - `ceal capabilities`, target selection, receipt readback, and acceptance use
   observation mode and never rotate a stored session. Authentication failure
   points to the explicit `ceal session refresh` remote-write route. This is
@@ -44,11 +46,11 @@ apply remain separately approved boundaries.
   able to cross directly without reinstall; that old binary cannot emit the new
   guide advisory, so read it from the updated command afterwards.
 - The frozen Protocol copy and client/worker dependencies retain reviewed local
-  `0.72.17` as a quarantined B1 development baseline. The Gateway has since
-  moved the subtree and scheduled one final signed cut after C1; no intermediate
-  `0.72.18` consumer review is requested. The signed lock, release workflow, and
-  installed worker remain on `0.72.13`, so ship-facing builders and acceptance
-  stay correctly refused.
+  `0.72.17` as a quarantined B1 development baseline. The current cross-repo
+  execution plan starts with the Gateway's `0.72.19` bump, allows S1-S5 packet
+  changes before one signed cut, and asks this repo for one consumer review at
+  that cut. The signed lock, release workflow, and installed worker remain on
+  `0.72.13`, so ship-facing builders and acceptance stay correctly refused.
 - `npm run check:unit` is the aggregate development iteration gate. Contract
   behavior runs through a real converged scratch repository, while separate
   reachability tests prove the production ship guards refuse divergence before
@@ -67,8 +69,9 @@ apply remain separately approved boundaries.
 
 ## Next Action
 
-1. Wait for the post-C1 final signed Gateway Protocol handoff. Do not request or
-   re-pin an intermediate packet merely to restamp the quarantine.
+1. Wait for the one signed Gateway Protocol handoff cut after S0 and whichever
+   of S1-S5 land before that cut. Do not request or re-pin an intermediate packet
+   merely to restamp the quarantine.
 2. Review that exact artifact against the B1 response-depth, authority-key,
    closed-enum, notification-binding, request-envelope, and consecutive-frame
    proofs; converge frozen tree, dependency, lock, pin, generated contracts,
@@ -76,8 +79,9 @@ apply remain separately approved boundaries.
 3. Run the ordinary release gates and tag-resolved `0.76.1` installer crossing plus explicit
    guide-register proof. Ask before choosing a version, pushing, tagging,
    publishing, or installing the new release.
-4. After B2 serves ordered guidance and caller identity, finish B3 with
-   installed-guide dogfood. Do not invent those future fields in this repo.
+4. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
+   dogfood remains a proof opportunity after serving, not a separately scheduled
+   worker slice. Do not invent future fields in this repo.
 
 ## Non-Claims
 
@@ -95,4 +99,5 @@ apply remain separately approved boundaries.
 - [B1 consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [superseded B1 handoff request](requests/2026-08-11-to-gateway-final-b1-protocol-handoff.md)
 - [Gateway schedule and Protocol delta](../../ceal/docs/requests/2026-08-11-from-gateway-b1-schedule-and-0-72-18-delta.md)
+- [current cross-repo release execution plan](../../ceal/docs/next-release-execution-plan.md)
 - [release and enrollment procedure](release-and-enrollment.md)

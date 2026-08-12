@@ -81,6 +81,12 @@ function runnerSource() {
 	return read("scripts/coverage-scripts.mjs");
 }
 
+function workflowPaths() {
+	return readdirSync(path.join(ROOT, ".github/workflows"))
+		.filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+		.map((name) => path.join(".github/workflows", name));
+}
+
 // Both gates below have to find "the step that runs the final gate", and both used
 // to do it with exact equality after `trim()`. Wrapping the step in a multi-line
 // `run:` — to export one env var, say — then made one of them vacuous and the
@@ -91,19 +97,25 @@ function runsFinalGate(step) {
 }
 
 test("workflows that exercise release proofs retain historical tags", () => {
-	for (const workflowPath of [".github/workflows/check.yml", ".github/workflows/ceal-release.yml"]) {
+	let exercisingJobs = 0;
+	for (const workflowPath of workflowPaths()) {
 		const workflow = parse(read(workflowPath));
 		for (const [jobName, job] of Object.entries(workflow.jobs)) {
 			const steps = job.steps ?? [];
 			const exercisesReleaseProof = steps.some(
-				(step) => runsFinalGate(step) || /npm run test:release/u.test(step.run ?? "") || /build-worker-release-assets/u.test(step.run ?? ""),
+				(step) =>
+					runsFinalGate(step) ||
+					/npm run test:release/u.test(step.run ?? "") ||
+					/(?:^|\n)\s*node scripts\/build-worker-release-assets[.]mjs (?:compose|merge)\b/u.test(step.run ?? ""),
 			);
 			if (!exercisesReleaseProof) continue;
+			exercisingJobs += 1;
 			const checkout = steps.find((step) => (step.uses ?? "").startsWith("actions/checkout"));
 			assert.ok(checkout, `${workflowPath} ${jobName} must check out the source it proves`);
 			assert.equal(checkout.with?.["fetch-depth"], 0, `${workflowPath} ${jobName} must resolve historical installer tags`);
 		}
 	}
+	assert.ok(exercisingJobs > 0, "no workflow job exercised a release proof; the history gate became vacuous");
 });
 
 // A lint step that only some entry points run is a lint step maintainers learn
@@ -974,18 +986,22 @@ test("every release, packing, and acceptance path still asserts protocol shippab
 // them as ENOTCACHED. This gate ran green locally and red on CI for exactly
 // that reason; pin the ordering so the next lane cannot repeat it.
 test("every CI lane that runs the gate prewarms the offline consumer cache first", () => {
-	for (const file of [".github/workflows/check.yml", ".github/workflows/ceal-release.yml"]) {
-		const steps = Object.values(parse(read(file)).jobs).flatMap((job) => job.steps ?? []);
-		const runs = steps.map((step) => step.run ?? "");
-		// Asserted rather than skipped: exact equality plus `if (gate === -1) continue`
-		// silently made this whole test vacuous for a lane whose gate step moved to a
-		// multi-line `run:`, which is the failure it exists to prevent.
-		const gate = steps.findIndex(runsFinalGate);
-		assert.notEqual(gate, -1, `${file} no longer runs 'npm run check'; this gate cannot silently stop applying`);
-		const prewarm = runs.findIndex((run) => run.includes("prewarm-offline-consumer-cache.mjs"));
-		assert.notEqual(prewarm, -1, `${file} runs the gate without prewarming the offline cache`);
-		assert.ok(prewarm < gate, `${file} must prewarm the offline cache before running the gate`);
+	let gateJobs = 0;
+	for (const file of workflowPaths()) {
+		for (const [jobName, job] of Object.entries(parse(read(file)).jobs)) {
+			const steps = job.steps ?? [];
+			const gate = steps.findIndex(runsFinalGate);
+			if (gate === -1) continue;
+			gateJobs += 1;
+			const prewarm = steps.findIndex((step) => (step.run ?? "").includes("prewarm-offline-consumer-cache.mjs"));
+			assert.notEqual(prewarm, -1, `${file} ${jobName} runs the gate without prewarming the offline cache`);
+			const sameStepInOrder =
+				prewarm === gate &&
+				(steps[gate].run ?? "").indexOf("prewarm-offline-consumer-cache.mjs") < (steps[gate].run ?? "").indexOf("npm run check");
+			assert.ok(prewarm < gate || sameStepInOrder, `${file} ${jobName} must prewarm the offline cache before running the gate`);
+		}
 	}
+	assert.ok(gateJobs > 0, "no workflow job runs the final gate; the offline-cache prerequisite check became vacuous");
 });
 
 // A mutable action ref resolves to whatever the tag points at when the lane runs,

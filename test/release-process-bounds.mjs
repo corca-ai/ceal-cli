@@ -15,7 +15,7 @@ const DEFAULT_ASYNC_BOUNDS = Object.freeze({
 });
 
 export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = RELEASE_TEST_PROCESS_TIMEOUT_MS) {
-	const targetEnv = withoutCoverageCollector(options.env ?? process.env);
+	const targetEnv = releaseTestEnv(options.env ?? process.env);
 	const bounds = {
 		...DEFAULT_ASYNC_BOUNDS,
 		timeoutMs,
@@ -28,7 +28,7 @@ export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = R
 	};
 	const supervisor = spawnSync(process.execPath, [fileURLToPath(new URL("release-process-supervisor.mjs", import.meta.url))], {
 		encoding: "utf8",
-		env: withoutCoverageCollector(process.env),
+		env: releaseTestEnv(process.env),
 		input: JSON.stringify({ command, args, bounds }),
 		killSignal: "SIGKILL",
 		maxBuffer: DEFAULT_ASYNC_BOUNDS.maxCapturedOutputBytes * 3,
@@ -59,13 +59,19 @@ export function runAsyncReleaseProcess(command, args, options, bounds = {}) {
 		...DEFAULT_ASYNC_BOUNDS,
 		...bounds,
 		cwd: options.cwd,
-		env: withoutCoverageCollector(options.env ?? process.env),
+		env: releaseTestEnv(options.env ?? process.env),
 	});
 }
 
-function withoutCoverageCollector(env) {
+function releaseTestEnv(env) {
 	const clean = { ...env };
+	// These children prove untrusted historical installers and native artifacts.
+	// They need ordinary tool paths, never the parent CI job's credential surface.
 	delete clean.NODE_V8_COVERAGE;
+	delete clean.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+	delete clean.ACTIONS_ID_TOKEN_REQUEST_URL;
+	delete clean.ACTIONS_RUNTIME_TOKEN;
+	delete clean.GITHUB_TOKEN;
 	return clean;
 }
 

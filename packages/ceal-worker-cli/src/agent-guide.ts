@@ -14,6 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { permissionMode } from "./filesystem-mode.js";
 import { type CealGuideBundle, decodeCealGuideBundle } from "./guide-bundle.js";
 import { resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import { isSha256Digest, sha256 } from "./sha256.js";
@@ -403,8 +404,8 @@ function registerGuide(
 		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) {
 			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
 			// The signed 0.76.1 runtime registered the generation-local `current/guide`
-			// path. The embedded directory carrier replaces only that installer-owned
-			// link automatically; every other occupant remains a deliberate conflict.
+			// path. Preserve that link, like every other occupant: portable filesystems
+			// cannot replace it conditionally without deleting a concurrent foreign entry.
 			const managedPrevious =
 				(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
 				(embeddedStateRoot && registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot));
@@ -517,7 +518,7 @@ function ensureGuideOwnershipMarker(ownership: string, digest: string): void {
 		// marker is acceptable only when it is the exact Ceal-owned statement.
 	}
 	const stat = lstatSync(marker);
-	if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o7777) !== 0o600 || readFileSync(marker, "utf8") !== expected)
+	if (stat.isSymbolicLink() || !stat.isFile() || permissionMode(stat) !== 0o600 || readFileSync(marker, "utf8") !== expected)
 		throw new Error("unsafe_guide_state");
 }
 
@@ -538,7 +539,7 @@ function ensureRegularDirectory(path: string): void {
 
 function verifyMaterializedGuide(root: string, bundle: CealGuideBundle): void {
 	const rootStat = lstatSync(root);
-	if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || (rootStat.mode & 0o7777) !== 0o700) throw new Error("unsafe_guide_state");
+	if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || permissionMode(rootStat) !== 0o700) throw new Error("unsafe_guide_state");
 	const expected = new Map(bundle.files.map((file) => [file.path, file]));
 	const observed: string[] = [];
 	const visit = (directory: string, prefix: string): void => {
@@ -548,7 +549,7 @@ function verifyMaterializedGuide(root: string, bundle: CealGuideBundle): void {
 			const stat = lstatSync(absolute);
 			if (stat.isSymbolicLink()) throw new Error("unsafe_guide_state");
 			if (stat.isDirectory()) {
-				if ((stat.mode & 0o7777) !== 0o700) throw new Error("unsafe_guide_state");
+				if (permissionMode(stat) !== 0o700) throw new Error("unsafe_guide_state");
 				visit(absolute, relative);
 			} else if (stat.isFile()) observed.push(relative);
 			else throw new Error("unsafe_guide_state");
@@ -559,7 +560,7 @@ function verifyMaterializedGuide(root: string, bundle: CealGuideBundle): void {
 	for (const [path, file] of expected) {
 		const absolute = join(root, ...path.split("/"));
 		const stat = lstatSync(absolute);
-		if (sha256(readFileSync(absolute)) !== sha256(Buffer.from(file.bytes)) || (stat.mode & 0o7777) !== file.mode)
+		if (sha256(readFileSync(absolute)) !== sha256(Buffer.from(file.bytes)) || permissionMode(stat) !== file.mode)
 			throw new Error("guide_state_drift");
 	}
 }
@@ -579,7 +580,7 @@ function registrationPointsIntoEmbeddedState(registrationPath: string, stateRoot
 			!targetStat.isSymbolicLink() &&
 			markerStat.isFile() &&
 			!markerStat.isSymbolicLink() &&
-			(markerStat.mode & 0o7777) === 0o600 &&
+			permissionMode(markerStat) === 0o600 &&
 			readFileSync(marker, "utf8") === `ceal.worker_guide_materialization.v1 ${digest}\n`
 		);
 	} catch {
