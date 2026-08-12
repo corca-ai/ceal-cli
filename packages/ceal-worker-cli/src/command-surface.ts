@@ -178,9 +178,9 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 		];
 	if (name === "acceptance")
 		return [
-			"  --request-ref <ref>     'receipt.request_ref' from a completed 'ceal call'; embeds its verified receipt.",
+			"  --request-ref <ref>     'receipt.request_ref' from a completed 'ceal call'; embeds its Gateway-audit readback.",
 			"  --profile <profile-ref> Select one assigned Profile for this read without re-login.",
-			"                          Emits no host paths. Performs a live discovery; never performs a provider call.",
+			"                          This readback does not establish provider state and never performs a provider call.",
 		];
 	if (name === "observe")
 		return [

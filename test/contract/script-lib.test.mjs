@@ -179,6 +179,12 @@ test("capability audit cold start resolves its installed helper without an inher
 		skill,
 		/SKILL_DIR='<absolute directory containing this installed SKILL\.md>'\nexport SKILL_DIR\npython3 "\$SKILL_DIR\/scripts\/measure_ceal\.py"/u,
 	);
+	assert.match(
+		skill,
+		/legacy `receipt\.evidence: readback_verified` token alone means Gateway audit\s+readback, not provider-state verification/u,
+	);
+	assert.match(skill, /`audit_event_not_found` response is not permission to repeat the write/u);
+	assert.match(skill, /`gateway_audit_readback` and `provider_roundtrip` as separate observations/u);
 });
 
 test("capability audit file arguments are regular and bounded before reading", (context) => {

@@ -40,6 +40,16 @@ separately approved boundaries.
   guide still carries the reported wording until a successor is released and
   registered. Capability-specific selector semantics and query provenance
   remain Gateway/Protocol work and are not invented in this repository.
+- The Worker-owned part of `ceal-cli#14` is locally repaired without widening
+  frozen Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
+  audit readback from provider-state readback while retaining legacy tokens;
+  unknown writes retain their exact request reference, while the guide tells
+  agents to preserve their inputs and required idempotency key. They remain
+  non-retryable until the Gateway explicitly reports a terminal
+  provider-not-started outcome. The generated purpose and public command
+  description no longer claim pre-approval. Gateway-owned replay, purpose
+  provenance, terminal receipt, input-contract, and provider-evidence semantics
+  remain outside this local projection.
 - The current source also contains the client deadline/status/media-type and
   adoption-request boundary repairs, generic HTTP timeout classification,
   narrowed command session capabilities, explicit guide-register provenance,
@@ -99,7 +109,7 @@ separately approved boundaries.
    `ceal-cli-release` Environment protection/secret move named in operator acceptance.
 4. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
    dogfood remains a proof opportunity after serving, not a separately scheduled
-   worker slice. Do not invent future fields in this repo.
+   worker slice. Do not invent future Protocol or Gateway-owned fields in this repo.
 
 ## Non-Claims
 

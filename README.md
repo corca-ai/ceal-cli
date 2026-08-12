@@ -110,9 +110,10 @@ discovered vocabulary without requiring a new top-level CLI command or
 client-side provider grammar. The Gateway validates capability input, Profile
 scope, and connector execution; the client preserves a bounded generic wire
 envelope and rejects secret or authority material. Successful calls use a
-compact result envelope with primary data and verified readback identity. Rich
-audit evidence is read only on demand so agents do not infer completion from an
-exit code alone.
+compact result envelope with primary data and an exact Gateway-audit readback
+state. That state does not claim provider-state verification. Rich audit
+evidence is read only on demand so agents do not infer completion from an exit
+code alone.
 
 `ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
 read-only Workbench page and JSON endpoint over the client's cached local

@@ -112,6 +112,16 @@ test("the worker guide teaches detailed contracts and diagnosis of a blocked fir
 	assert.match(guide, /Do not\s+weaken the sandbox, switch to a provider CLI/u);
 	assert.match(guide, /infer that the Profile has no\s+capability from a request that never reached the Gateway/u);
 	assert.match(guide, /only when the discovered write contract requires\s+one/u);
+	assert.match(guide, /exact returned\s+`receipt\.request_ref`/u);
+	assert.match(guide, /original call inputs, and the original idempotency\s+key/u);
+	assert.match(guide, /`audit_event_not_found` as permission to\s+retry/u);
+	assert.doesNotMatch(guide, /preserve its replay identity/u);
+	assert.match(
+		guide,
+		/`receipt\.verification\.gateway_audit_readback`; `ceal receipt show` reports it\s+at `verification\.gateway_audit_readback`/u,
+	);
+	assert.match(guide, /`verified` proves a Gateway journal\s+event/u);
+	assert.match(guide, /does not prove provider state/u);
 	const privateContext = readFileSync(LINKED_PRIVATE_CONTEXT, "utf8");
 	assert.match(privateContext, /Do not open it automatically/u);
 	assert.match(privateContext, /do not widen access/u);

@@ -45,10 +45,18 @@ Use these rules after the core guide selects a capability-oriented task.
   installed document is frozen byte for byte and answers no `ok`; at exit 0 it
   answered. On failure read `error.kind`, then only fields actually present.
 - Read returned artifacts before answering. Claim a write only when discovery
-  declares `effect: write`, its contract was followed, and required authoritative
-  readback or audit evidence is present.
+  declares `effect: write`, its contract was followed, and the exact required
+  evidence is present. A call result reports this at
+  `receipt.verification.gateway_audit_readback`; `ceal receipt show` reports it
+  at `verification.gateway_audit_readback`. `verified` proves a Gateway journal
+  event was read; it does not prove provider state. Require a separately
+  declared provider-state readback before making that stronger claim.
 - Keep one stable idempotency key only when the discovered write contract requires
-  one. For an unverified or unknown outcome, preserve its replay identity and
-  inspect its receipt instead of inventing a retry or claiming delivery.
+  one. For an unverified or unknown outcome, preserve the exact returned
+  `receipt.request_ref`, the original call inputs, and the original idempotency
+  key when one was required. Inspect that receipt; do not create another request
+  or key, repeat the write, or treat `audit_event_not_found` as permission to
+  retry unless the Gateway explicitly reports a terminal provider-not-started
+  outcome.
 - On a structured error, follow its recovery or next action and rediscover help
   if installation or runtime drift may have changed the surface.

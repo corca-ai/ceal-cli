@@ -281,6 +281,8 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 			// implementation because this side has only rendered stdout to read.
 			receipt = {
 				readback_status: scalar(shown.stdout, "status"),
+				gateway_audit_readback: scalar(shown.stdout, "gateway_audit_readback"),
+				provider_state_readback: scalar(shown.stdout, "provider_state_readback"),
 				outcome: scalar(shown.stdout, "outcome"),
 				authorization: scalar(shown.stdout, "authorization"),
 				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => match[1]),
@@ -415,6 +417,8 @@ export function sanitizedAcceptanceRecord(packet) {
 					receipt: call.receipt
 						? {
 								readback_status: call.receipt.readback_status,
+								gateway_audit_readback: call.receipt.gateway_audit_readback,
+								provider_state_readback: call.receipt.provider_state_readback,
 								outcome: call.receipt.outcome,
 								authorization: call.receipt.authorization,
 								audit_refs: call.receipt.audit_refs,
@@ -485,7 +489,7 @@ function render(packet) {
 		lines.push(`            ${call.request_ref}`);
 		if (call.receipt) {
 			lines.push(
-				`receipt:    ${call.receipt.readback_status} ${call.receipt.authorization}/${call.receipt.outcome} ${call.receipt.audit_refs.join(", ")}`,
+				`receipt:    ${call.receipt.readback_status} audit=${call.receipt.gateway_audit_readback ?? "unreported"} provider=${call.receipt.provider_state_readback ?? "unreported"} ${call.receipt.authorization}/${call.receipt.outcome} ${call.receipt.audit_refs.join(", ")}`,
 			);
 		}
 	} else {

@@ -23,6 +23,42 @@ export type CealCallResultRecorder = (envelope: Record<string, unknown>) => void
 /** The failing capability's declared effect, when discovery is known locally. */
 export type CealCapabilityEffect = "read" | "write";
 
+export type CealGatewayAuditReadbackState = "verified" | "not_read_back" | "unavailable";
+
+/**
+ * Exact observation point for one Worker receipt.
+ *
+ * `receipt.evidence` predates the distinction and remains as a compatibility
+ * token. A Gateway journal read proves only that the Gateway event was read; it
+ * never upgrades the result to provider-state readback on its own.
+ */
+export function gatewayAuditVerification(gatewayAuditReadback: CealGatewayAuditReadbackState): {
+	verification: { gateway_audit_readback: CealGatewayAuditReadbackState; provider_state_readback: "not_established" };
+} {
+	return {
+		verification: {
+			gateway_audit_readback: gatewayAuditReadback,
+			provider_state_readback: "not_established",
+		},
+	};
+}
+
+type CealCallReceiptEvidence = "readback_verified" | "not_read_back" | "readback_unavailable" | "outcome_unknown";
+
+function callReceipt(
+	evidence: CealCallReceiptEvidence,
+	gatewayAuditReadback: CealGatewayAuditReadbackState,
+	requestRef: string,
+	auditRefs: readonly string[],
+): Record<string, unknown> {
+	return {
+		evidence,
+		...gatewayAuditVerification(gatewayAuditReadback),
+		request_ref: requestRef,
+		audit_refs: auditRefs,
+	};
+}
+
 // An unknown outcome only warrants replay caution for a capability that can
 // change provider state. Attaching "do not repeat a write" to a declared read
 // makes an agent apply write-grade discipline to an idempotent call, and makes
@@ -122,7 +158,7 @@ export function writeCallCompleted(
 			ok: true,
 			status: "completed",
 			...servedResultHead(value, session, parsed),
-			receipt: { evidence: "readback_verified", request_ref: requestId, audit_refs: eventRefs },
+			receipt: callReceipt("readback_verified", "verified", requestId, eventRefs),
 		},
 		record,
 	);
@@ -147,7 +183,7 @@ export function writeCallGatewayFailure(
 			capability: parsed.capabilityId,
 			target: parsed.targetRef,
 			...gatewayResultIdentity(session, parsed.profileRef),
-			receipt: { evidence: "not_read_back", request_ref: requestId, audit_refs: proofRefs },
+			receipt: callReceipt("not_read_back", "not_read_back", requestId, proofRefs),
 			error: {
 				kind: failure.denial ? "authorization_denied" : failure.code,
 				message: failure.message,
@@ -178,7 +214,7 @@ export function writeCallIncomplete(
 			ok: false,
 			status: "error",
 			...servedResultHead(value, session, parsed),
-			receipt: { evidence: "readback_unavailable", request_ref: requestId, audit_refs: [] },
+			receipt: callReceipt("readback_unavailable", "unavailable", requestId, []),
 			error: {
 				kind: reason,
 				message: "The Gateway returned a result but its audit event was not read back.",
@@ -214,7 +250,11 @@ export function writeCallUnavailable(
 			// reference has an unknown outcome: the Gateway may have completed and
 			// audited the call after the client stopped waiting. Preserve that safe
 			// correlation key so an agent can inspect it instead of repeating a write.
-			...(requestWasIssued ? { receipt: { evidence: "outcome_unknown", request_ref: requestId, audit_refs: [] } } : {}),
+			...(requestWasIssued
+				? {
+						receipt: callReceipt("outcome_unknown", "not_read_back", requestId, []),
+					}
+				: {}),
 			error: {
 				kind: reason,
 				...(sessionFailure
@@ -306,8 +346,18 @@ const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "c
 	audit_event_not_found: {
 		message: "The Gateway has no audited outcome for that request reference.",
 		nextAction:
-			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.",
+			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. Keep the write unresolved and do not repeat it unless the Gateway explicitly reports a terminal provider-not-started outcome.",
 		denial: false,
+	},
+	target_catalog_selection_invalid: {
+		message: "The Gateway could not safely use the requested target selection.",
+		nextAction: "Run fresh capability discovery, then make a new bounded target selection.",
+		denial: false,
+	},
+	target_catalog_capability_not_granted: {
+		message: "The selected Profile has no granted target for the requested capability.",
+		nextAction: "List the capabilities this Profile currently holds, then select a target for one of those capabilities.",
+		denial: true,
 	},
 	invalid_readback_request: {
 		message: "The request reference is not a readable Gateway request id.",

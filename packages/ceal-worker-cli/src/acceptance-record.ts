@@ -210,6 +210,8 @@ export const CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS = Object.freeze([
  */
 export const CEAL_ACCEPTANCE_RECEIPT_KEYS = Object.freeze([
 	"readback_status",
+	"gateway_audit_readback",
+	"provider_state_readback",
 	"outcome",
 	"authorization",
 	"audit_refs",

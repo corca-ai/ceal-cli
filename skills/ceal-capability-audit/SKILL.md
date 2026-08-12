@@ -117,13 +117,15 @@ Use the strongest honest proof level per action:
 - `surface`: help, discovery, or target catalog only;
 - `worker_queued`: shaped request reaches the capability bridge;
 - `host_decision`: Gateway accepts or rejects target, policy, and readiness;
-- `provider_roundtrip`: provider result or observable side effect is read back;
+- `gateway_audit_readback`: the exact Gateway journal event is read back;
+- `provider_roundtrip`: provider result or observable side effect is separately
+  read back;
 - `agent_choice`: a fresh agent/evaluator selects this skill from the natural
   language prompt. Do not claim this unless it was actually tested.
 
 Keep these states distinct in the ledger and report:
 
-- `readback_verified` / `provider_roundtrip`;
+- `gateway_audit_readback` and `provider_roundtrip` as separate observations;
 - `gateway_request_failed` or another structured `error.kind`;
 - `connector_unavailable`;
 - `rate_limited`;
@@ -133,11 +135,17 @@ Keep these states distinct in the ledger and report:
 - `target_unavailable`;
 - `safety_skipped`.
 
-If a write returns unknown, do not create a new idempotency key or claim success.
-Inspect the receipt after a short wait. If the Gateway confirms no audited outcome,
-retry the same intended effect with the same idempotency key only when the
-Gateway recovery contract permits it; otherwise leave it unresolved for the
-operator.
+The legacy `receipt.evidence: readback_verified` token alone means Gateway audit
+readback, not provider-state verification. Use the exact `verification` fields
+when present and never upgrade that token to `provider_roundtrip`.
+
+If a write returns unknown, preserve its exact `receipt.request_ref`, original
+call inputs, and required idempotency key; do not create another request or key
+or claim success. Inspect the receipt after a short wait. An
+`audit_event_not_found` response is not permission to repeat the write. Retry
+only when the Gateway explicitly reports a terminal provider-not-started state
+and its recovery contract permits the same intended effect; otherwise leave it
+unresolved for the operator.
 
 ## Report and GitHub publication
 
@@ -182,8 +190,8 @@ entry if the user wants exhaustive inventory accounting.
 
 Use these literal terms in the ledger and report when applicable:
 
-`surface`, `worker_queued`, `host_decision`, `provider_roundtrip`,
-`agent_choice`, `readback_verified`, `not_read_back`, `outcome_unknown`,
+`surface`, `worker_queued`, `host_decision`, `gateway_audit_readback`,
+`provider_roundtrip`, `agent_choice`, `not_read_back`, `outcome_unknown`,
 `gateway_request_failed`, `connector_unavailable`, `rate_limited`,
 `capability_absent`, `target_unavailable`, `safety_skipped`, `measurement_gap`.
 

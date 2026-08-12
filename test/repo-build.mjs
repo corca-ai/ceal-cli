@@ -87,12 +87,15 @@ function acquire() {
 	for (;;) {
 		const nonce = publishCandidate();
 		if (nonce) return nonce;
-		if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
 		// Liveness, not elapsed time, decides whether a lock is abandoned. A wall
 		// clock cannot tell a slow compile on a loaded runner from a dead holder,
 		// and breaking a live holder recreates the double-writer state this lock
 		// exists to prevent. `local-store-lock.ts` reaches the same conclusion.
 		reclaimIfHolderIsGone();
+		// Always perform one liveness check after a failed acquisition, even when
+		// filesystem scheduling consumed the wait deadline. The deadline bounds
+		// waiting for a live holder; it must not shadow a dead-holder reclamation.
+		if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
 		sleep(25);
 	}
 }

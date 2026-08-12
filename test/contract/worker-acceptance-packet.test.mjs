@@ -242,6 +242,8 @@ case "$1 $2" in
     echo "request_ref: request:fixture" ;;
   "receipt show")
     echo "status: readback_complete"
+    echo "gateway_audit_readback: verified"
+    echo "provider_state_readback: not_established"
     echo "outcome: succeeded"
     echo "authorization: granted"
     echo "gateway_elapsed_ms: 42"
@@ -332,6 +334,8 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 	// returned. Without it the packet would be quoting the call's own report of
 	// itself, which is the substitution this row exists to avoid.
 	assert.equal(packet.bounded_capability_call.receipt.readback_status, "readback_complete");
+	assert.equal(packet.bounded_capability_call.receipt.gateway_audit_readback, "verified");
+	assert.equal(packet.bounded_capability_call.receipt.provider_state_readback, "not_established");
 	assert.equal(packet.bounded_capability_call.receipt.authorization, "granted");
 	assert.equal(packet.bounded_capability_call.receipt.gateway_elapsed_ms, 42);
 	assert.deepEqual(packet.bounded_capability_call.receipt.audit_refs, ["audit:one", "audit:two"]);
@@ -458,7 +462,10 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 	assert.equal(called.status, 0, called.stderr);
 	assert.match(called.stdout, /^call: {7}message[.]search -> completed \(receipt\) in \d+ms$/mu);
 	assert.match(called.stdout, /^ {12}request:fixture$/mu);
-	assert.match(called.stdout, /^receipt: {4}readback_complete granted\/succeeded audit:one, audit:two$/mu);
+	assert.match(
+		called.stdout,
+		/^receipt: {4}readback_complete audit=verified provider=not_established granted\/succeeded audit:one, audit:two$/mu,
+	);
 
 	const json = runCli(["--binary", binary, "--json"]);
 	assert.equal(json.status, 0, json.stderr);
@@ -626,6 +633,8 @@ test("the checkout emitter answers the record schema with exactly its declared k
 		operator_home: "/home/someone",
 		receipt: {
 			readback_status: "verified",
+			gateway_audit_readback: "verified",
+			provider_state_readback: "not_established",
 			outcome: "succeeded",
 			authorization: "allowed",
 			audit_refs: ["gateway-audit:fixture"],
@@ -690,7 +699,15 @@ test("both emitters answer the record schema with the same key sets", async () =
 			elapsed_ms: null,
 			evidence: null,
 			request_ref: "ceal:x:call",
-			receipt: { readback_status: "verified", outcome: "succeeded", authorization: "allowed", audit_refs: [], gateway_elapsed_ms: null },
+			receipt: {
+				readback_status: "verified",
+				gateway_audit_readback: "verified",
+				provider_state_readback: "not_established",
+				outcome: "succeeded",
+				authorization: "allowed",
+				audit_refs: [],
+				gateway_elapsed_ms: null,
+			},
 		},
 	});
 	const packet = packetFixture();
@@ -704,6 +721,8 @@ test("both emitters answer the record schema with the same key sets", async () =
 		request_ref: "ceal:fixture:call",
 		receipt: {
 			readback_status: "verified",
+			gateway_audit_readback: "verified",
+			provider_state_readback: "not_established",
 			outcome: "succeeded",
 			authorization: "allowed",
 			audit_refs: [],

@@ -1,6 +1,27 @@
 {
-  "entries": [
-    {
+	"entries": [
+		{
+			"surface": "code",
+			"id": "c34d1f043057c129",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of command-surface acceptance versus observe option arrays reviewed at 4dda6b7f63d1db51. The acceptance wording changed to name Gateway-audit and provider-state proof limits; the branches still share no option, value grammar, lifecycle, or recovery fact. Extracting the three-row array shape would parameterize all content and erase readable command-owned help."
+		},
+		{
+			"surface": "code",
+			"id": "884165f097f91195",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the call-result writer family reviewed at 5ebf240efc8ec5ee after the shared callReceipt projection was extracted. servedResultHead, servedResultProvenance, gatewayAuditVerification, and callReceipt now own every shared fact. The remaining overlap is the emit envelope around verified completion, unread audit, and missing-audit branches; their ok, status, receipt evidence, audit state, and error semantics are exactly the policy that must remain visible at each caller rather than becoming parameters to a generic verdict writer."
+		},
+		{
+			"surface": "code",
+			"id": "4acc9d07ea33ad9e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "writeCallGatewayFailure renders a decoded Gateway refusal with typed denial/retry policy; writeCallUnavailable classifies pre-issue session failures and post-issue transport uncertainty, conditionally emits a receipt, and applies write-only replay caution. Their common result-schema/error-envelope shape is the public type they implement, while a shared writer would parameterize every meaningful branch. Receipt construction and Gateway identity are already centralized, so no duplicated fact remains."
+		},
+		{
       "surface": "code",
       "id": "6eb36b7028824c4b",
       "class": "intentional",

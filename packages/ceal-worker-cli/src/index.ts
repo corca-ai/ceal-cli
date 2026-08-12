@@ -14,6 +14,7 @@ import {
 	type CealCapabilityEffect,
 	type CealParsedCapabilityCall,
 	classifyGatewayFailure,
+	gatewayAuditVerification,
 	gatewayFailureCode,
 	gatewayResultIdentity,
 	writeCallCompleted,
@@ -195,6 +196,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 				request_ref: requestRef,
 				receipt: {
 					readback_status: "verified",
+					...gatewayAuditVerification("verified").verification,
 					outcome: projected.at(-1)?.outcome ?? null,
 					authorization: projected.at(-1)?.authorization ?? null,
 					audit_refs: projected.map((event) => event.ref),
@@ -1191,6 +1193,7 @@ async function runReceipt(options: readonly string[], io: CealCliIo, runtime: Ce
 			schema_version: "ceal.receipt.v1",
 			ok: true,
 			status: "verified",
+			...gatewayAuditVerification("verified"),
 			request_ref: parsed.requestRef,
 			...gatewayResultIdentity(resolved.session, profileRef),
 			events: readback.value.events.map(projectReceiptEvent),
@@ -1460,7 +1463,7 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 		targetRef,
 		arguments: arguments_,
 		...(profileRef ? { profileRef } : {}),
-		purpose: `Invoke approved capability '${capabilityId}' for the current task.`,
+		purpose: `Invoke capability '${capabilityId}' for the current task.`,
 	};
 }
 

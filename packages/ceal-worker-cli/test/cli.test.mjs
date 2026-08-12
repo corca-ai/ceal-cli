@@ -374,6 +374,14 @@ test("target selection help states its unfiltered-page bound", async () => {
 	assert.match(stdout, /--detail/u);
 });
 
+test("acceptance help names Gateway-audit readback without claiming provider state", async () => {
+	const { code, stdout } = await run(["acceptance", "emit", "--help"]);
+	assert.equal(code, 0);
+	assert.match(stdout, /embeds the Gateway-audit readback/u);
+	assert.match(stdout, /does not establish provider state/u);
+	assert.doesNotMatch(stdout, /verified receipt/u);
+});
+
 // A help token anywhere in the tail is read-only help, never an operand: a
 // guessed or partially typed route must land on a leaf that names the real
 // routes instead of reaching a runner or the top of the tree.
@@ -542,6 +550,9 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 			assert.match(subcommand[field], /\S/u, `${subcommand.route.join(" ")}.${field}`);
 		}
 	}
+	const call = payload.commands.find((command) => command.name === "call");
+	assert.equal(call.description, "Invoke a capability and read back its Gateway audit event.");
+	assert.doesNotMatch(call.description, /approved/iu);
 });
 
 test("update is option-free, stable-only, and keeps child execution behind one YAML result", async () => {
@@ -1927,6 +1938,10 @@ test("call invokes one granted capability and independently reads back its audit
 		assert.equal(payload.target, "target:team-inbox");
 		assert.equal(payload.data.results.length, 1);
 		assert.equal(payload.receipt.evidence, "readback_verified");
+		assert.deepEqual(payload.receipt.verification, {
+			gateway_audit_readback: "verified",
+			provider_state_readback: "not_established",
+		});
 		assert.equal(payload.receipt.request_ref, "narnia:call:1:call");
 		assert.equal("usage" in payload, false);
 		assert.equal("profile" in payload, false);
@@ -1936,6 +1951,8 @@ test("call invokes one granted capability and independently reads back its audit
 			["call", "readback"],
 		);
 		assert.equal(requests[0].body.body.arguments.query, "launch");
+		assert.equal(requests[0].body.body.purpose, "Invoke capability 'message.search' for the current task.");
+		assert.doesNotMatch(requests[0].body.body.purpose, /approved/iu);
 	});
 });
 
@@ -2013,6 +2030,10 @@ test("receipt keeps audit metadata out of normal results and retrieves a safe pr
 			schema_version: "ceal.receipt.v1",
 			ok: true,
 			status: "verified",
+			verification: {
+				gateway_audit_readback: "verified",
+				provider_state_readback: "not_established",
+			},
 			request_ref: "narnia:call:1:call",
 			gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
 			events: [
@@ -2046,6 +2067,10 @@ test("a policy-denied receipt retains the error code, non-claims, and negotiated
 				schema_version: "ceal.receipt.v1",
 				ok: true,
 				status: "verified",
+				verification: {
+					gateway_audit_readback: "verified",
+					provider_state_readback: "not_established",
+				},
 				request_ref: "narnia:denied:1:call",
 				gateway: { instance_ref: "instance:corca", profile_ref: "profile:narnia" },
 				events: [
@@ -2315,7 +2340,7 @@ test("an unknown outcome points at the Gateway's own answer and does not invent 
 		code: "audit_event_not_found",
 		message: "The Gateway has no audited outcome for that request reference.",
 		nextAction:
-			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait; a reference that never gains an audited outcome is one the Gateway never recorded, so the call did not reach provider execution.",
+			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. Keep the write unresolved and do not repeat it unless the Gateway explicitly reports a terminal provider-not-started outcome.",
 		denial: false,
 	});
 	const receiptLeaf = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "receipt");
@@ -2383,7 +2408,15 @@ test("compatibility result data passes through without a client-side message pro
 		// redaction statement travels beside it rather than being folded into it:
 		// dropped, a withheld class read as one the provider does not have.
 		redaction: { state: "applied", omitted_classes: ["credential_material"] },
-		receipt: { evidence: "readback_verified", request_ref: "request:get:001", audit_refs: ["gateway-audit:get:001"] },
+		receipt: {
+			evidence: "readback_verified",
+			verification: {
+				gateway_audit_readback: "verified",
+				provider_state_readback: "not_established",
+			},
+			request_ref: "request:get:001",
+			audit_refs: ["gateway-audit:get:001"],
+		},
 	});
 });
 
@@ -2453,6 +2486,10 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 	assert.equal(payload.error.kind, "request_failed");
 	assert.deepEqual(payload.receipt, {
 		evidence: "outcome_unknown",
+		verification: {
+			gateway_audit_readback: "not_read_back",
+			provider_state_readback: "not_established",
+		},
 		request_ref: "ceal:call:call",
 		audit_refs: [],
 	});
@@ -2510,6 +2547,80 @@ test("rate-limited calls explain a retryable recovery instead of operator restor
 		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
 		denial: false,
 	});
+});
+
+test("target-catalog failures keep their exact diagnosis instead of collapsing to one scope denial", () => {
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "target_catalog_selection_invalid",
+			message: "server-controlled",
+			recovery: { kind: "select_granted_scope" },
+		}),
+		{
+			code: "target_catalog_selection_invalid",
+			message: "The Gateway could not safely use the requested target selection.",
+			nextAction: "Run fresh capability discovery, then make a new bounded target selection.",
+			denial: false,
+		},
+	);
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "target_catalog_capability_not_granted",
+			message: "server-controlled",
+			recovery: { kind: "select_granted_scope" },
+		}),
+		{
+			code: "target_catalog_capability_not_granted",
+			message: "The selected Profile has no granted target for the requested capability.",
+			nextAction: "List the capabilities this Profile currently holds, then select a target for one of those capabilities.",
+			denial: true,
+		},
+	);
+});
+
+test("target-catalog failures keep their exact code through the capabilities targets route", async () => {
+	for (const expected of [
+		{
+			code: "target_catalog_selection_invalid",
+			status: "unavailable",
+			message: "The Gateway could not safely use the requested target selection.",
+		},
+		{
+			code: "target_catalog_capability_not_granted",
+			status: "denied",
+			message: "The selected Profile has no granted target for the requested capability.",
+		},
+	]) {
+		await withGateway(
+			async ({ endpoint, requests }) => {
+				const payload = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", "team"], 3, {
+					loadSession: async () => storedSession(endpoint),
+					nextRequestId: () => `narnia:${expected.code}`,
+				});
+				assert.equal(payload.error.kind, expected.code);
+				assert.equal(payload.error.message, expected.message);
+				assert.equal(payload.status, expected.status);
+				assert.equal(payload.live_gateway_checked, true);
+				assert.deepEqual(
+					requests.map((request) => request.body.operation),
+					["handshake", "discover"],
+				);
+			},
+			(request) =>
+				request.operation === "handshake"
+					? handshakeResponse(request)
+					: {
+							ok: false,
+							request_id: request.request_id,
+							protocol_version: "1.3.0",
+							error: {
+								code: expected.code,
+								message: "server-controlled",
+								recovery: { kind: "select_granted_scope" },
+							},
+						},
+		);
+	}
 });
 
 test("invalid capability arguments ask the caller to correct input instead of retrying the same request", () => {
@@ -2596,6 +2707,10 @@ test("an opaque resource denial classifies at the call surface and defers dispos
 			assert.equal(failed.error.kind, "resource_not_available");
 			assert.deepEqual(failed.receipt, {
 				evidence: "not_read_back",
+				verification: {
+					gateway_audit_readback: "not_read_back",
+					provider_state_readback: "not_established",
+				},
 				request_ref: "narnia:opaque:1:call",
 				audit_refs: [],
 			});
@@ -2625,6 +2740,10 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 			const failed = await yamlRun(["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], 3, runtime);
 			assert.deepEqual(failed.receipt, {
 				evidence: "not_read_back",
+				verification: {
+					gateway_audit_readback: "not_read_back",
+					provider_state_readback: "not_established",
+				},
 				request_ref: "narnia:failed:1:call",
 				audit_refs: [],
 			});
@@ -5158,7 +5277,15 @@ test("the record states what it did not do, including that it called no provider
 				elapsed_ms: null,
 				evidence: null,
 				request_ref: "ceal:x:call",
-				receipt: { readback_status: "verified", outcome: "succeeded", authorization: "allowed", audit_refs: [], gateway_elapsed_ms: null },
+				receipt: {
+					readback_status: "verified",
+					gateway_audit_readback: "verified",
+					provider_state_readback: "not_established",
+					outcome: "succeeded",
+					authorization: "allowed",
+					audit_refs: [],
+					gateway_elapsed_ms: null,
+				},
 			},
 		}),
 	);
@@ -5184,6 +5311,8 @@ test("a bounded-call field the builder was never told to emit does not travel", 
 				request_ref: "ceal:x:call",
 				receipt: {
 					readback_status: "verified",
+					gateway_audit_readback: "verified",
+					provider_state_readback: "not_established",
 					outcome: "succeeded",
 					authorization: "allowed",
 					audit_refs: ["gateway-audit:one"],

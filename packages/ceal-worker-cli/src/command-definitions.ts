@@ -102,7 +102,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "call",
-		description: "Invoke an approved capability and read back its Gateway audit event.",
+		description: "Invoke a capability and read back its Gateway audit event.",
 		usage: "ceal call <capability-id> --target <target-ref> [--profile <profile-ref>] [key=value ...]",
 		// The one route that executes a governed provider capability. Some
 		// capabilities only read, and the client does discover each capability's
