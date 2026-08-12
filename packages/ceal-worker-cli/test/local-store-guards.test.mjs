@@ -79,50 +79,94 @@ test("processes racing to create the same missing store all succeed", async (con
 	// lock is taken; for the session store it is a refused write.
 	const root = scratch(context);
 	const directory = path.join(root, "contended");
-	const startAt = Date.now() + 750;
 	const source = `
 		const { prepareDirectory } = await import(${JSON.stringify(new URL("../dist/local-store-guards.js", import.meta.url).href)});
-		const startAt = Number(process.env.GUARD_START_AT);
-		const margin = startAt - Date.now();
-		await new Promise((resolve) => setTimeout(resolve, Math.max(0, margin - 20)));
-		while (Date.now() < startAt) {}
+		process.stdout.write("ready\\n");
+		await new Promise((resolve) => process.stdin.once("data", resolve));
 		prepareDirectory(process.env.GUARD_DIRECTORY, () => {
 			throw new Error("refused as unsafe_store");
 		});
-		process.stdout.write(String(margin));
+		process.stdout.write("done\\n");
 	`;
-	const results = await Promise.all(
-		Array.from({ length: 6 }, () => runGuardChild(source, { GUARD_DIRECTORY: directory, GUARD_START_AT: String(startAt) })),
-	);
+	const children = Array.from({ length: 6 }, () => runGuardChild(source, { GUARD_DIRECTORY: directory }));
+	const results = await releaseGuardChildren(children);
 	for (const result of results) assert.equal(result.code, 0, result.stderr);
-	// Same guard as the spool's concurrency test: a host too slow to reach the
-	// barrier would serialize the racers and pass without racing anything.
-	const margins = results.map((result) => Number(result.stdout.trim()));
-	assert.deepEqual(
-		margins.filter((margin) => !(margin >= 0)),
-		[],
-		`creators did not overlap; margins to the shared barrier were ${margins.join(", ")}ms`,
-	);
+	for (const result of results) assert.equal(result.stdout, "ready\ndone\n");
 	assert.equal(statSync(directory).mode & 0o777, 0o700);
 });
+
+test("the guard-child barrier fails promptly and reaps every child when readiness fails", async () => {
+	for (const failingSource of ["setInterval(() => {}, 1000);", "process.exit(7);"]) {
+		const children = [
+			runGuardChild(failingSource, {}),
+			runGuardChild('process.stdout.write("ready\\n"); await new Promise((resolve) => process.stdin.once("data", resolve));', {}),
+		];
+		await assert.rejects(releaseGuardChildren(children, 50), /guard child/u);
+		for (const child of children) assert.equal(child.isAlive(), false);
+	}
+});
+
+async function releaseGuardChildren(children, readyTimeoutMs = 10_000) {
+	let timer;
+	try {
+		await Promise.race([
+			Promise.all(children.map((child) => child.ready)),
+			new Promise((_, reject) => {
+				timer = setTimeout(() => reject(new Error("guard child readiness deadline exceeded")), readyTimeoutMs);
+			}),
+		]);
+		for (const child of children) child.release();
+		return await Promise.all(children.map((child) => child.result));
+	} finally {
+		if (timer) clearTimeout(timer);
+		for (const child of children) child.terminate();
+		await Promise.allSettled(children.map((child) => child.result));
+	}
+}
 
 function runGuardChild(source, env) {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
 		env: { ...process.env, ...env },
-		stdio: ["ignore", "pipe", "pipe"],
+		stdio: ["pipe", "pipe", "pipe"],
 	});
 	let stdout = "";
 	let stderr = "";
+	let readySeen = false;
+	let resolveReady;
+	let rejectReady;
+	const ready = new Promise((resolve, reject) => {
+		resolveReady = resolve;
+		rejectReady = reject;
+	});
 	child.stdout.on("data", (chunk) => {
 		stdout += String(chunk);
+		if (!readySeen && stdout.includes("ready\n")) {
+			readySeen = true;
+			resolveReady();
+		}
 	});
 	child.stderr.on("data", (chunk) => {
 		stderr += String(chunk);
 	});
-	return new Promise((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", (code) => resolve({ code, stdout, stderr }));
+	const result = new Promise((resolve, reject) => {
+		child.once("error", (error) => {
+			if (!readySeen) rejectReady(error);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			if (!readySeen) rejectReady(new Error(`guard child exited ${code} before ready: ${stderr}`));
+			resolve({ code, stdout, stderr });
+		});
 	});
+	return {
+		ready,
+		release: () => child.stdin.end("go\n"),
+		result,
+		terminate: () => {
+			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+		},
+		isAlive: () => child.exitCode === null && child.signalCode === null,
+	};
 }
 
 // The strictness difference between the credential store and the cache/spool was

@@ -133,6 +133,7 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 				return decoded;
 			} catch (error) {
 				if (error instanceof CealHttpTransportError) throw error;
+				if (controller.signal.aborted) throw new CealHttpTransportError("request_timeout");
 				throw new CealHttpTransportError("request_failed");
 			} finally {
 				if (timeoutId !== undefined) clearTimeout(timeoutId);

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -13,6 +12,13 @@ import {
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.mjs";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
+import {
+	assertReleaseGuideArchive,
+	assertReleaseManifestProvenance,
+	execReleaseTestProcess,
+	processIsAlive,
+	runAsyncReleaseProcess,
+} from "./release-process-bounds.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 let packedFixture;
@@ -56,20 +62,11 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 		false,
 	);
 	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
-	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
-	assert.deepEqual(manifest.client, result.client);
-	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
+	assertReleaseManifestProvenance(manifest, result, fixture.provenance.artifact.sha256);
 	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
 	assert.equal(manifest.native_smoke.operator_surface_absent, true);
-	assert.equal(manifest.guide.format, "ustar");
-	assert.deepEqual(
-		execFileSync("tar", ["-tf", path.join(output, "ceal-guide.tar")], { encoding: "utf8" })
-			.trim()
-			.split("\n"),
-		manifest.guide.files.map((file) => file.path),
-	);
-	assert.ok(manifest.guide.files.some((file) => file.path === "references/capability-workflow.md"));
-	const outputCommands = execFileSync(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
+	assertReleaseGuideArchive(manifest, output, "references/capability-workflow.md");
+	const outputCommands = execReleaseTestProcess(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
 	assert.match(outputCommands, /command: ceal\n/u);
 	assert.match(outputCommands, /name: update\n/u);
 	assert.doesNotMatch(outputCommands, /cealctl/u);
@@ -205,27 +202,31 @@ test("production native build accepts only the locked archive lane", async (cont
 	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
 });
 
+test("native artifact process proof kills a command tree that exceeds its deadline", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-native-process-bound-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const pidFile = path.join(root, "pid");
+	const result = await runArtifact(
+		"/bin/sh",
+		[
+			"-c",
+			`${process.execPath} -e 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; trap '' TERM; wait`,
+		],
+		root,
+		{ timeoutMs: 50, terminationGraceMs: 50, postKillReportMs: 50, postExitDrainMs: 10 },
+	);
+	assert.equal(result.timedOut, true);
+	assert.equal(result.signal, "SIGKILL");
+	for (const pid of readFileSync(pidFile, "utf8").split(" ").map(Number))
+		assert.equal(processIsAlive(pid), false, `timed-out artifact pid ${pid} survived its watchdog`);
+});
+
 function hasCode(code) {
 	return (error) => error instanceof WorkerNativeArtifactError && error.code === code;
 }
 
-async function runArtifact(artifact, args, home) {
-	const child = spawn(artifact, args, { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
-	let stdout = "";
-	let stderr = "";
-	child.stdout.setEncoding("utf8");
-	child.stderr.setEncoding("utf8");
-	child.stdout.on("data", (chunk) => {
-		stdout += chunk;
-	});
-	child.stderr.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	const code = await new Promise((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", resolve);
-	});
-	return { code, stdout, stderr };
+async function runArtifact(artifact, args, home, bounds) {
+	return runAsyncReleaseProcess(artifact, args, { cwd: process.cwd(), env: { ...process.env, HOME: home } }, bounds);
 }
 
 async function withFailureGateway(callback) {

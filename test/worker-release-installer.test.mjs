@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	chmodSync,
@@ -26,6 +25,7 @@ import { createSkillDirectoryBundle } from "../scripts/lib/skill-directory-bundl
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
 import { requireHostTools } from "./host-tools.mjs";
 import { platformProofTest } from "./platform-proof.mjs";
+import { processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,7 +82,7 @@ test("worker installer renders a copyable PATH command for a shell-active instal
 			.find((line) => line.startsWith("  export PATH="))
 			?.trim();
 		assert.equal(command, `export PATH='${shellActiveInstall.replaceAll("'", "'\\''")}':"$PATH"`);
-		const applied = spawnSync("/bin/sh", ["-c", `${command}; [ "\${PATH%%:*}" = "$EXPECTED_INSTALL_DIR" ]`], {
+		const applied = runSyncReleaseProcess("/bin/sh", ["-c", `${command}; [ "\${PATH%%:*}" = "$EXPECTED_INSTALL_DIR" ]`], {
 			encoding: "utf8",
 			env: { ...process.env, EXPECTED_INSTALL_DIR: shellActiveInstall },
 		});
@@ -95,7 +95,7 @@ test("worker installer rejects install directories that cannot be stable PATH en
 		["relative/worker-bin", /CEAL_INSTALL_DIR must be an absolute path/u],
 		["/tmp/worker:bin", /CEAL_INSTALL_DIR must not contain ':'/u],
 	]) {
-		const result = spawnSync("/bin/sh", [INSTALLER], {
+		const result = runSyncReleaseProcess("/bin/sh", [INSTALLER], {
 			encoding: "utf8",
 			env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: TAG, PATH: "/usr/bin:/bin" },
 		});
@@ -103,6 +103,24 @@ test("worker installer rejects install directories that cannot be stable PATH en
 		assert.match(result.stderr, message);
 		assert.equal(result.stdout, "");
 	}
+});
+
+test("release sync-process proof kills a TERM-ignoring command tree", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-release-process-bound-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const pidFile = path.join(root, "pid");
+	const result = runSyncReleaseProcess(
+		"/bin/sh",
+		[
+			"-c",
+			`${process.execPath} -e 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; trap '' TERM; wait`,
+		],
+		{ encoding: "utf8" },
+		50,
+	);
+	assert.equal(result.error?.code, "ETIMEDOUT");
+	for (const pid of readFileSync(pidFile, "utf8").split(" ").map(Number))
+		assert.equal(processIsAlive(pid), false, `timed-out release command pid ${pid} survived its watchdog`);
 });
 
 test("worker stable resolver follows the worker static-origin stable pointer", () => {
@@ -158,34 +176,16 @@ test("worker stable update refuses a pointer older than the installed release", 
 });
 
 test("worker installer rejects a malformed or mismatched stable pointer", () => {
-	withFixture(({ install, release, tools, log }) => {
-		writeStablePointer(release, { tag: "v9.9.9" });
-		const result = run({ install, release, tools, log, version: "stable" });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /stable release pointer is not a valid/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
-	});
-	withFixture(({ install, release, tools, log }) => {
-		writeStablePointer(release, { sha256sums_sha256: "not-a-release-set-digest" });
-		const result = run({ install, release, tools, log, version: "stable" });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /stable release pointer is not a valid/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
-	});
-	withFixture(({ install, release, tools, log }) => {
-		writeFileSync(path.join(release, "ceal-worker-stable-release.json"), "");
-		const result = run({ install, release, tools, log, version: "stable" });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /stable release pointer is not a valid/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
-	});
-	withFixture(({ install, release, tools, log }) => {
-		writeStablePointer(release, { sha256sums_sha256: digest("tampered release set") });
-		const result = run({ install, release, tools, log, version: "stable" });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /does not match the downloaded signed SHA256SUMS/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
-	});
+	for (const [prepare, message] of [
+		[(release) => writeStablePointer(release, { tag: "v9.9.9" }), /stable release pointer is not a valid/u],
+		[(release) => writeStablePointer(release, { sha256sums_sha256: "not-a-release-set-digest" }), /stable release pointer is not a valid/u],
+		[(release) => writeFileSync(path.join(release, "ceal-worker-stable-release.json"), ""), /stable release pointer is not a valid/u],
+		[
+			(release) => writeStablePointer(release, { sha256sums_sha256: digest("tampered release set") }),
+			/does not match the downloaded signed SHA256SUMS/u,
+		],
+	])
+		assertStablePointerRefused(prepare, message);
 });
 
 // The pointer is read before any signature exists, so it is the one document an
@@ -203,30 +203,26 @@ test("worker installer rejects every pointer an origin could choose freely", () 
 		{ why: "tag carries a leading zero", pointer: () => ({ tag: "ceal-v01.2.3" }) },
 	];
 	for (const { why, pointer } of cases) {
-		withFixture(({ install, release, tools, log }) => {
-			const overrides = pointer(release);
-			const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSetOf(release), ...overrides };
-			for (const [key, value] of Object.entries(overrides)) if (value === undefined) delete body[key];
-			writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify(body)}\n`);
-			const result = run({ install, release, tools, log, version: "stable" });
-			assert.notEqual(result.status, 0, why);
-			assert.match(result.stderr, /stable release pointer is not a valid/u, why);
-			assert.equal(existsSync(path.join(install, "ceal")), false, why);
-		});
+		assertStablePointerRefused(
+			(release) => {
+				const overrides = pointer(release);
+				const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSetOf(release), ...overrides };
+				for (const [key, value] of Object.entries(overrides)) if (value === undefined) delete body[key];
+				writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify(body)}\n`);
+			},
+			/stable release pointer is not a valid/u,
+			why,
+		);
 	}
 
 	// A duplicate key must be refused outright rather than resolved to whichever
 	// copy the reader happened to match, so put the decoy first.
-	withFixture(({ install, release, tools, log }) => {
+	assertStablePointerRefused((release) => {
 		writeFileSync(
 			path.join(release, "ceal-worker-stable-release.json"),
 			`{"schema_version":"ceal.worker_stable_release.v1","tag":"ceal-v9.9.9","tag":"${TAG}","sha256sums_sha256":"${releaseSetOf(release)}"}\n`,
 		);
-		const result = run({ install, release, tools, log, version: "stable" });
-		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /stable release pointer is not a valid/u);
-		assert.equal(existsSync(path.join(install, "ceal")), false);
-	});
+	}, /stable release pointer is not a valid/u);
 });
 
 // Already installed generations re-run their own copy of this script against
@@ -245,8 +241,7 @@ test("worker installer resolves a reordered, extended, or pretty-printed pointer
 				sha256sums_sha256: digest(readFileSync(path.join(release, "SHA256SUMS"))),
 			};
 			writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${render(body)}\n`);
-			const result = run({ install, release, tools, log, version: "stable" });
-			assert.equal(result.status, 0, result.stderr);
+			runSuccessfully({ install, release, tools, log, version: "stable" });
 			assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-arm64");
 		});
 	}
@@ -318,7 +313,7 @@ test("worker installer refuses a signed guide archive containing a symlink befor
 		writeFileSync(path.join(hostile, "SKILL.md"), "---\nname: ceal-guide\n---\n");
 		symlinkSync("/tmp/ceal-guide-escape", path.join(hostile, "references", "escape"));
 		const archive = path.join(release, "ceal-guide.tar");
-		const packed = spawnSync("tar", ["-cf", archive, "-C", hostile, "SKILL.md", "references/escape"], { encoding: "utf8" });
+		const packed = runSyncReleaseProcess("tar", ["-cf", archive, "-C", hostile, "SKILL.md", "references/escape"], { encoding: "utf8" });
 		assert.equal(packed.status, 0, packed.stderr);
 		for (const platform of ["linux-arm64", "linux-amd64"]) writeManifest(release, platform);
 		rewriteChecksumsAndSidecars(release);
@@ -354,8 +349,7 @@ test("worker installer refuses a damaged or widened existing generation", () => 
 		(generation) => chmodSync(path.join(generation, "guide", "references", "workflow.md"), 0o755),
 	]) {
 		withFixture(({ install, release, tools, log }) => {
-			const installed = run({ install, release, tools, log, version: TAG });
-			assert.equal(installed.status, 0, installed.stderr);
+			runSuccessfully({ install, release, tools, log, version: TAG });
 			const current = realpathSync(path.join(install, ".ceal-cli", "worker", "current"));
 			mutate(current);
 			const repeated = run({ install, release, tools, log, version: TAG });
@@ -461,7 +455,7 @@ platformProofTest(
 			assert.equal(result.status, 0, result.stderr);
 			assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 			const installed = path.join(install, "ceal");
-			const version = parse(spawnSync(installed, ["version"], { encoding: "utf8" }).stdout);
+			const version = parse(runSyncReleaseProcess(installed, ["version"], { encoding: "utf8" }).stdout);
 			assert.equal(version.version, built.version);
 			assert.equal(version.protocol_version, "1.3.0");
 
@@ -469,7 +463,7 @@ platformProofTest(
 				gatewayEndpoint: "http://127.0.0.1:1/gateway/client",
 				label: "installer-fixture",
 			});
-			const unavailable = spawnSync(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
+			const unavailable = runSyncReleaseProcess(installed, ["call", "message.search", "--target", "target:team-inbox", "query=launch"], {
 				encoding: "utf8",
 				env: { ...process.env, HOME: install },
 			});
@@ -479,7 +473,7 @@ platformProofTest(
 			assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
 			assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
 
-			const updated = spawnSync(installed, ["update"], {
+			const updated = runSyncReleaseProcess(installed, ["update"], {
 				encoding: "utf8",
 				env: {
 					...process.env,
@@ -559,7 +553,7 @@ function run({
 	minimumVersion = "",
 	urlLog = "",
 }) {
-	return spawnSync("/bin/sh", [INSTALLER], {
+	return runSyncReleaseProcess("/bin/sh", [INSTALLER], {
 		encoding: "utf8",
 		env: {
 			...process.env,
@@ -577,13 +571,29 @@ function run({
 	});
 }
 
+function runSuccessfully(options) {
+	const result = run(options);
+	assert.equal(result.status, 0, result.stderr);
+	return result;
+}
+
+function assertStablePointerRefused(prepare, message, why) {
+	withFixture(({ install, release, tools, log }) => {
+		prepare(release);
+		const result = run({ install, release, tools, log, version: "stable" });
+		assert.notEqual(result.status, 0, why);
+		assert.match(result.stderr, message, why);
+		assert.equal(existsSync(path.join(install, "ceal")), false, why);
+	});
+}
+
 // A darwin host has shasum but neither sha256sum nor flock; the restricted
 // PATH proves the portable lane end to end on this Linux host. The simulation
 // is built by faking shasum on top of a real sha256sum, so it needs a host that
 // has one — which a real darwin runner does not. Skipping there loses nothing:
 // the host being simulated is the host running the test.
 function restrictedTools(tools) {
-	const resolve = (name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+	const resolve = (name) => runSyncReleaseProcess("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 	// Models a stock Mac: awk is present, python3 is deliberately absent, so an
 	// installer that reaches for python3 again fails here instead of on a
 	// colleague's machine.

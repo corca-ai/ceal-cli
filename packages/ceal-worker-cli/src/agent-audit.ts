@@ -1,7 +1,7 @@
 import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, openSync, readSync, type Stats } from "node:fs";
 import path from "node:path";
-import { performance } from "node:perf_hooks";
 import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-guide.js";
+import { defaultMonotonicNow } from "./monotonic-clock.js";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
 // runtimes' native transcript roots, rendered by the observer Workbench
@@ -27,7 +27,6 @@ const MAX_ENTRIES_EXAMINED = 2000;
 // The entry cap cannot bound one large directory before its names are read.
 // A monotonic deadline closes that gap without depending on wall-clock changes.
 const MAX_WALK_DURATION_MS = 100;
-const DEFAULT_MONOTONIC_NOW = () => performance.now();
 const RENDERED_SESSIONS = 10;
 // Exactly the UUID grammar Claude Code uses for transcript filenames, so a
 // human-meaningful filename can never surface as a rendered session_ref.
@@ -240,12 +239,12 @@ export function inspectAgentSessionEvents(
 		runtime === "claude"
 			? {
 					directory: path.join(root, "projects"),
-					collect: (directory: string) => collectClaudeSessions(directory, dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW),
+					collect: (directory: string) => collectClaudeSessions(directory, dependencies.monotonicNow ?? defaultMonotonicNow),
 					lines: CLAUDE_LINE_ADAPTER,
 				}
 			: {
 					directory: path.join(root, "sessions"),
-					collect: (directory: string) => collectCodexSessions(directory, dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW),
+					collect: (directory: string) => collectCodexSessions(directory, dependencies.monotonicNow ?? defaultMonotonicNow),
 					lines: CODEX_LINE_ADAPTER,
 				};
 	const collected = collectTranscriptSessions(adapter.directory, adapter.collect);
@@ -271,7 +270,7 @@ export function inspectAgentAudit(
 	now: number,
 	dependencies: AgentAuditRuntime = {},
 ): CealAgentAuditState {
-	const monotonicNow = dependencies.monotonicNow ?? DEFAULT_MONOTONIC_NOW;
+	const monotonicNow = dependencies.monotonicNow ?? defaultMonotonicNow;
 	const adapters: CealAgentAuditAdapterState[] = [
 		observeHostAdapter(
 			"claude",

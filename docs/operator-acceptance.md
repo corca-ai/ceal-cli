@@ -7,9 +7,9 @@ successor who inherits this repository without inheriting anyone's credentials.
 Roles, not hosts: this repository is owned by the **worker lane** (worker CLI,
 client SDK, `ceal-guide`). Gateway routes, connector execution, Profile policy,
 audit custody, `cealctl`, and the canonical protocol are owned by the **Gateway
-lane**, a different operator on a different machine. `AGENTS.md` resolves which
-lane a given checkout is from `hostname`; every step below that says "the Gateway
-lane" means a request to that operator, not a command you can run here.
+lane**, a different operator on a different machine. `AGENTS.md` declares this
+checkout's lane directly; every step below that says "the Gateway lane" means a
+request to that operator, not a command you can run here.
 
 Re-verify rather than quote. Every fact below was read from the repository or
 from GitHub on 2026-07-27 and each one carries the command that re-reads it. A
@@ -18,13 +18,14 @@ exists to prevent.
 
 ## The Ceiling Without A Gateway Session
 
-These need nothing but a built or installed worker CLI. They are the whole set.
+These representative routes need nothing but a built or installed worker CLI.
 
 | Route | Proves |
 | --- | --- |
 | `ceal version` | which build is installed |
 | `ceal commands` | the declared route surface, effects included |
 | `ceal guide status` | the signed guide asset resolves beside the binary, and where it would register |
+| `ceal session status` | whether this HOME has a configured client session |
 | `ceal observe` | the local page renders this client's cached state; serves until Ctrl-C |
 
 `ceal guide status` needs a **signed installed release**, not a session: the
@@ -32,12 +33,16 @@ guide is resolved relative to the real executable, so a `node dist/bin.js` run
 from a checkout answers `guide_unavailable` no matter how healthy the install
 is. That is a property of the dev build, not a failure.
 
-Everything else fails closed without a Gateway-issued client session, and
-failing closed is the correct answer rather than a broken one:
+Gateway- and session-bound routes fail closed without a Gateway-issued client
+session, and failing closed is the correct answer rather than a broken one:
 
 - `ceal capabilities`, `ceal capabilities targets` — `client_session_unavailable`
 - `ceal call`, `ceal receipt show` — no session to authorize or read back with
 - `ceal session enroll` — needs an enrollment code the Gateway lane issues
+
+Local routes are separate: `ceal update` and `ceal guide register codex|claude`
+need no Gateway session, but they are local writes and are not part of a
+read-only ceiling probe.
 
 Read the ceiling back yourself, in a throwaway HOME that cannot touch real state:
 
@@ -53,12 +58,13 @@ them through the guard; if the stored bearer is no longer usable, run the
 separately declared `remote_write` route `ceal session refresh`. `ceal call`
 remains `remote_write` and may renew before its already-write-capable operation.
 
-**This is the ceiling.** With no session you can prove the CLI's shape, its
-declared effects, its local rendering, and its refusals. You cannot prove that
-any capability executes, that a receipt is real, that a Profile policy decided
-anything, or that an audit record exists. Do not describe work at this level as
-verified end to end — `AGENTS.md` requires naming the highest proof level
-actually reached, and this level is `surface`.
+The commands above prove the checkout-built surface in a throwaway HOME. A
+separate signed-install run of `ceal version` and `ceal guide status` proves the
+installed release and its adjacent guide. Neither level proves that any
+capability executes, that a receipt is real, that a Profile policy decided
+anything, or that an audit record exists. Do not describe work at either level
+as verified end to end — `AGENTS.md` requires naming the highest proof level
+actually reached.
 
 ## What Needs The Gateway Lane
 
@@ -145,8 +151,7 @@ gh api repos/corca-ai/ceal-cli/environments/ceal-npm-release/variables --jq '.va
 
 With `CEAL_NPM_BOOTSTRAP_COMPLETE` unset the workflow's first gate refuses
 immediately, so a bare `v*` tag pushed today burns that version for a publish
-that cannot happen. Bare `v*` tags also belong to the frozen dual release lane
-described in `AGENTS.md`; this lane does not push them.
+that cannot happen. This lane does not push them.
 
 ## Naming What You Could Not Prove
 

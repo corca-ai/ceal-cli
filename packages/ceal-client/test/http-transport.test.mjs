@@ -445,6 +445,41 @@ test("HTTP transport enforces the total request timeout even when injected fetch
 	await assert.rejects(client.request(request), hasTransportCode("request_timeout"));
 });
 
+test("HTTP transport preserves timeout classification when injected fetch rejects on abort", async () => {
+	const client = createCealClient(
+		createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "safe-token",
+			timeoutMs: 5,
+			fetchFn: async (_url, init) =>
+				new Promise((_resolve, reject) => {
+					init.signal.addEventListener("abort", () => reject(new Error("aborted fetch")), { once: true });
+				}),
+		}),
+	);
+	await assert.rejects(client.request(request), hasTransportCode("request_timeout"));
+});
+
+test("HTTP transport preserves timeout classification when response body rejects on abort", async () => {
+	const client = createCealClient(
+		createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "safe-token",
+			timeoutMs: 5,
+			fetchFn: async (_url, init) =>
+				new globalThis.Response(
+					new globalThis.ReadableStream({
+						start(stream) {
+							init.signal.addEventListener("abort", () => stream.error(new Error("aborted body")), { once: true });
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+		}),
+	);
+	await assert.rejects(client.request(request), hasTransportCode("request_timeout"));
+});
+
 function hasTransportCode(code) {
 	return (error) => error instanceof CealHttpTransportError && error.code === code;
 }

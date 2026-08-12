@@ -29,11 +29,14 @@ apply remain separately approved boundaries.
   already enforced by the renewal-mode and CLI tests; the stale sibling-goal
   claim must not cause a duplicate repair here.
 - The current source also contains the client deadline/status/media-type and
-  adoption-request boundary repairs, narrowed command session capabilities,
-  bounded subprocess and Unix-socket settlement, managed-install integrity,
-  dependency-closure package hooks, reduced guide-contract spawning, and the
-  directory skill carrier. These are local source/test results, not installed
-  worker claims.
+  adoption-request boundary repairs, generic HTTP timeout classification,
+  narrowed command session capabilities, explicit guide-register provenance,
+  bounded subprocess and Unix-socket settlement, monotonic local-store waits,
+  managed-install integrity, dependency-closure package hooks, bounded native
+  and installer process probes, reduced guide-contract spawning, and the
+  directory skill carrier. Ship-facing asset merge now re-asserts the Protocol
+  quarantine before reading composed inputs. These are local source/test
+  results, not installed worker claims.
 - Signed `0.76.1` understands only the legacy single-file guide updater. The
   operator accepted direct rollout of the directory carrier: an upgrade from
   `0.76.1` requires one stable-bootstrap reinstall; archive-capable successors
@@ -46,7 +49,7 @@ apply remain separately approved boundaries.
   stay correctly refused.
 - `npm run check:unit` is the aggregate development iteration gate. Contract
   behavior runs through a real converged scratch repository, while separate
-  reachability tests prove both production ship guards refuse divergence before
+  reachability tests prove the production ship guards refuse divergence before
   reading release inputs or an installed binary. `npm run check:protocol-dev`
   remains the narrower Protocol/client proof. The full gate, release builders,
   packing, and acceptance stay blocked on the live diverged pin.

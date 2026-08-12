@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -21,6 +22,7 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
+import { runFixtureGit } from "../converged-protocol-repo-fixture.mjs";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
 const CARRIER_CONTRACT_BYTES = readFileSync(CARRIER_CONTRACT_PATH);
@@ -449,6 +451,24 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	);
 });
 
+test("merge refuses a declared proof and shipment Protocol divergence before reading composed assets", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-diverged-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const missingInput = path.join(root, "missing-assets");
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "converged-output"), inputs: [missingInput], repoRoot }),
+		hasCode("merge_inputs_required"),
+	);
+	declareFixtureDivergence(repoRoot);
+	const outputDirectory = path.join(root, "merged");
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory, inputs: [missingInput], repoRoot }),
+		hasCode("proof_shipment_protocol_divergence"),
+	);
+	assert.equal(existsSync(outputDirectory), false);
+});
+
 test("worker release workflow signs only the worker inventory from the locked archive", () => {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
 	// The tag trigger is asserted against parsed YAML in repo-gates.test.mjs; the
@@ -740,12 +760,53 @@ function fixtureRepo(root) {
 	writeFileSync(path.join(clientDirectory, "package.json"), `${JSON.stringify({ name: "@corca-ai/ceal", version: "0.65.0" })}\n`);
 	writeFileSync(path.join(contractDirectory, "leased-consumer-carrier-contract.json"), CARRIER_CONTRACT_BYTES);
 	writeFileSync(path.join(contractDirectory, "leased-consumer-control-session-contract.json"), CONTROL_SESSION_CONTRACT_BYTES);
-	writeFileSync(
-		path.join(repo, "gateway-protocol-handoff-lock.json"),
-		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
-	);
 	writeGatewayHandoffFixture(repo);
+	if (!existsSync(path.join(repo, ".git"))) {
+		const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+		materializeGitTree(lock.gateway.protocol_tree, path.join(repo, "packages", "ceal-protocol"));
+		runFixtureGit(repo, ["init", "--quiet"]);
+		runFixtureGit(repo, ["config", "user.name", "Ceal Release Assets Fixture"]);
+		runFixtureGit(repo, ["config", "user.email", "fixture@invalid.example"]);
+		runFixtureGit(repo, ["add", "."]);
+		runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: seed release assets checkout"]);
+		const protocolTree = runFixtureGit(repo, ["rev-parse", "HEAD:packages/ceal-protocol"]);
+		writeFileSync(path.join(repo, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
+		const pin = JSON.parse(readFileSync(path.join(REPO_ROOT, "protocol-vendor-pin.json"), "utf8"));
+		pin.source.commit = lock.gateway.commit;
+		pin.source.tree = protocolTree;
+		pin.shipped.status = "agreed";
+		pin.shipped.gateway_commit = lock.gateway.commit;
+		pin.shipped.protocol_tree = protocolTree;
+		delete pin.shipped.reason;
+		delete pin.shipped.disposition_owner;
+		delete pin.shipped.disposition_request;
+		writeFileSync(path.join(repo, "protocol-vendor-pin.json"), `${JSON.stringify(pin, null, 2)}\n`);
+		runFixtureGit(repo, ["add", "."]);
+		runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: converge release Protocol identity"]);
+	}
 	return repo;
+}
+
+function declareFixtureDivergence(repo) {
+	const request = "docs/requests/fixture-divergence.md";
+	const pinPath = path.join(repo, "protocol-vendor-pin.json");
+	const pin = JSON.parse(readFileSync(pinPath, "utf8"));
+	pin.source.commit = "d".repeat(40);
+	pin.shipped.status = "diverged";
+	pin.shipped.reason = "fixture divergence";
+	pin.shipped.disposition_owner = "fixture";
+	pin.shipped.disposition_request = request;
+	mkdirSync(path.dirname(path.join(repo, request)), { recursive: true });
+	writeFileSync(path.join(repo, request), "# Fixture divergence\n");
+	writeFileSync(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
+	runFixtureGit(repo, ["add", "."]);
+	runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: declare Protocol divergence"]);
+}
+
+function materializeGitTree(tree, destination) {
+	mkdirSync(destination, { recursive: true });
+	const archive = execFileSync("git", ["archive", tree], { cwd: REPO_ROOT });
+	execFileSync("tar", ["-xf", "-", "-C", destination], { input: archive });
 }
 
 function writeGatewayHandoffFixture(root) {

@@ -30,12 +30,12 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 		copy("packages/ceal-worker-cli/dist", root);
 	}
 
-	git(root, ["init", "--quiet"]);
-	git(root, ["config", "user.name", "Ceal Contract Fixture"]);
-	git(root, ["config", "user.email", "fixture@invalid.example"]);
-	git(root, ["add", "."]);
-	git(root, ["commit", "--quiet", "-m", "fixture: seed protocol tree"]);
-	const protocolTree = git(root, ["rev-parse", "HEAD:packages/ceal-protocol"]);
+	runFixtureGit(root, ["init", "--quiet"]);
+	runFixtureGit(root, ["config", "user.name", "Ceal Contract Fixture"]);
+	runFixtureGit(root, ["config", "user.email", "fixture@invalid.example"]);
+	runFixtureGit(root, ["add", "."]);
+	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: seed protocol tree"]);
+	const protocolTree = runFixtureGit(root, ["rev-parse", "HEAD:packages/ceal-protocol"]);
 
 	const lock = JSON.parse(readFileSync(path.join(SOURCE_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
 	lock.gateway.commit = FIXTURE_GATEWAY_COMMIT;
@@ -60,8 +60,8 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	}
 	writeJson(path.join(root, "protocol-vendor-pin.json"), pin);
 
-	git(root, ["add", "."]);
-	git(root, ["commit", "--quiet", "-m", "fixture: bind converged protocol identity"]);
+	runFixtureGit(root, ["add", "."]);
+	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: bind converged protocol identity"]);
 	return {
 		root,
 		gateway: { repository: lock.gateway.repository, commit: lock.gateway.commit, tree: lock.gateway.tree, protocol_tree: protocolTree },
@@ -76,7 +76,7 @@ function copy(relative, destinationRoot) {
 	cpSync(source, destination, { recursive: true });
 }
 
-function git(root, args) {
+export function runFixtureGit(root, args) {
 	return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 

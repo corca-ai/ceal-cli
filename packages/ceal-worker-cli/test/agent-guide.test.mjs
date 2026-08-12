@@ -39,7 +39,9 @@ test("Codex guide registration follows the role current pointer across releases"
 				{ agent: "claude", status: "staged", registration_path: path.join(claudeConfig, "skills", "ceal-guide"), registered: false },
 			],
 		});
-		assert.equal(store.register().hosts.find((host) => host.agent === "codex").registered, true);
+		const registeredResult = store.register();
+		assert.equal(registeredResult.hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal("agent_source" in registeredResult, false);
 		const registration = path.join(codexHome, "skills", "ceal-guide");
 		assert.equal(lstatSync(registration).isSymbolicLink(), true);
 		assert.equal(readlinkSync(registration), path.join(state, "current", "guide"));
@@ -171,6 +173,7 @@ test("guide registration refuses to replace an existing Claude Code skill direct
 		assert.ok(store);
 		const result = store.register("claude");
 		assert.equal(result.status, "unavailable");
+		assert.equal("agent_source" in result, false);
 		assert.equal(result.error?.kind, "registration_conflict");
 		assert.match(result.error?.message, /Claude Code/u);
 		assert.equal(lstatSync(path.join(root, ".claude", "skills", "ceal-guide")).isDirectory(), true);
@@ -312,6 +315,7 @@ test("a missing guide asset answers as the requested host", () => {
 			const state = store.register(agent);
 			assert.equal(state.status, "unavailable");
 			assert.equal(state.agent, agent);
+			assert.equal("agent_source" in state, false);
 			assert.equal(state.error?.kind, "guide_unavailable");
 			// No guide asset means no path was inspected, so no per-host list is
 			// claimed either.

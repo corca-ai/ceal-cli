@@ -511,7 +511,7 @@ function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register"
 		effect: action === "status" ? "read_only" : "local_write",
 		status: "unavailable",
 		agent,
-		agent_source: "default",
+		...(action === "status" ? { agent_source: "default" as const } : {}),
 		guide_id: "ceal-guide",
 		registered: false,
 		update_safe: false,

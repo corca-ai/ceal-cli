@@ -706,12 +706,14 @@ test("guide status and per-host registration expose one update-safe local skill 
 			assert.equal(result.registration_path, registrationPaths[agent]);
 			assert.equal(result.effect, "local_write");
 			assert.equal(result.update_safe, true);
+			assert.equal("agent_source" in result, false);
 		}
 		// With no store at all, a register route still answers as that host.
 		const unavailable = await yamlRun(["guide", "register", "claude"], 3);
 		assert.equal(unavailable.agent, "claude");
 		assert.equal(unavailable.action, "register");
 		assert.equal(unavailable.effect, "local_write");
+		assert.equal("agent_source" in unavailable, false);
 		assert.equal(unavailable.error.kind, "guide_unavailable");
 	} finally {
 		rmSync(root, { recursive: true, force: true });

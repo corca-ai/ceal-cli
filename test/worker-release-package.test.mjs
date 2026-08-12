@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +9,7 @@ import {
 	runCli,
 	WorkerReleasePackageError,
 } from "../scripts/build-worker-release-package.mjs";
+import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.mjs";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.mjs";
 
 let packedFixture;
@@ -48,17 +48,8 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 		false,
 	);
 	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-release-package-manifest.json"), "utf8"));
-	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
-	assert.deepEqual(manifest.client, result.client);
-	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
-	assert.equal(manifest.guide.format, "ustar");
-	assert.deepEqual(
-		execFileSync("tar", ["-tf", path.join(output, "ceal-guide.tar")], { encoding: "utf8" })
-			.trim()
-			.split("\n"),
-		manifest.guide.files.map((file) => file.path),
-	);
-	assert.ok(manifest.guide.files.some((file) => file.path === "references/linked-private-context.md"));
+	assertReleaseManifestProvenance(manifest, result, fixture.provenance.artifact.sha256);
+	assertReleaseGuideArchive(manifest, output, "references/linked-private-context.md");
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => name !== ".ceal-worker-release-package" && name !== "SHA256SUMS")) {
 		assert.equal(
@@ -66,7 +57,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 			true,
 		);
 	}
-	const packedPaths = execFileSync("tar", ["-tzf", path.join(output, result.artifact.name)], { encoding: "utf8" });
+	const packedPaths = execReleaseTestProcess("tar", ["-tzf", path.join(output, result.artifact.name)], { encoding: "utf8" });
 	assert.match(packedPaths, /^package\/dist\/bin[.]js$/mu);
 	assert.doesNotMatch(packedPaths, /(?:^|\/)src\//u);
 	assert.doesNotMatch(packedPaths, /cealctl|operator/u);

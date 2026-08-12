@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { resolveAnchoredDirectory } from "./local-store-anchor.js";
+import { defaultMonotonicNow } from "./monotonic-clock.js";
 
 // The mutual exclusion every local store under HOME uses to make a
 // read-modify-write of its state file atomic across separate `ceal` processes.
@@ -65,6 +66,8 @@ export interface LocalStoreLockOptions {
 	onBusy: () => never;
 	/** Observation-only callback after this generation owns the lock. */
 	onAcquired?: (waitedMs: number) => void;
+	/** @testOnly Monotonic deadline source; production uses performance.now. */
+	monotonicNow?: () => number;
 }
 
 /**
@@ -74,10 +77,11 @@ export interface LocalStoreLockOptions {
  * not create it, because the two stores hold different mode contracts on it.
  */
 export async function withLocalStoreLock<T>(options: LocalStoreLockOptions, action: () => Promise<T>): Promise<T> {
-	const startedAt = Date.now();
-	const release = await acquireLock(options);
+	const monotonicNow = options.monotonicNow ?? defaultMonotonicNow;
+	const startedAt = monotonicNow();
+	const release = await acquireLock(options, monotonicNow);
 	try {
-		options.onAcquired?.(Math.max(0, Date.now() - startedAt));
+		options.onAcquired?.(Math.max(0, monotonicNow() - startedAt));
 	} catch {
 		/* diagnostics may never change whether the protected operation runs */
 	}
@@ -92,10 +96,10 @@ export async function withLocalStoreLock<T>(options: LocalStoreLockOptions, acti
 	}
 }
 
-async function acquireLock(options: LocalStoreLockOptions): Promise<() => void> {
+async function acquireLock(options: LocalStoreLockOptions, monotonicNow: () => number): Promise<() => void> {
 	const anchored = anchorLockParent(options);
 	try {
-		const deadline = Date.now() + options.maxWaitMs;
+		const deadline = monotonicNow() + options.maxWaitMs;
 		while (true) {
 			const nonce = createLock(anchored.options);
 			if (nonce)
@@ -106,7 +110,7 @@ async function acquireLock(options: LocalStoreLockOptions): Promise<() => void> 
 						closeSync(anchored.parentHandle);
 					}
 				};
-			await waitForLock(anchored.options, deadline);
+			await waitForLock(anchored.options, deadline, monotonicNow);
 		}
 	} catch (error) {
 		closeSync(anchored.parentHandle);
@@ -184,9 +188,9 @@ function lockPathAbsentOrEmpty(options: LocalStoreLockOptions): boolean {
 	}
 }
 
-async function waitForLock(options: LocalStoreLockOptions, deadline: number): Promise<void> {
+async function waitForLock(options: LocalStoreLockOptions, deadline: number, monotonicNow: () => number): Promise<void> {
 	if (removeStaleLock(options)) return;
-	if (Date.now() >= deadline) options.onBusy();
+	if (monotonicNow() >= deadline) options.onBusy();
 	await sleep(options.pollMs ?? LOCK_POLL_MS);
 }
 

@@ -17,6 +17,7 @@ import {
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
+import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -221,6 +222,12 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 
 export function mergeWorkerReleaseAssetSets(options = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	try {
+		assertShippableProtocolVendorPin({ repoRoot });
+	} catch (error) {
+		if (error instanceof ProtocolVendorPinError) throw new WorkerReleaseAssetsError(error.code, error.message);
+		throw error;
+	}
 	const output = inspectOutputDirectory(options.outputDirectory, {
 		repoRoot,
 		force: options.force === true,

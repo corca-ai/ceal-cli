@@ -36,9 +36,10 @@ between the copy and the shipped archive. The second fails
 is not what a release would ship. A divergence may still be declared — naming a
 disposition owner and a tracked request under `docs/requests/` — but a
 declaration is a quarantine, not a clearance, and re-syncing the copy or bumping
-`gateway-protocol-handoff-lock.json` expires it. `npm run check:protocol-dev` is the
-development-only path that keeps working meanwhile; it proves nothing about a
-release or an installed worker and says so in its own output.
+`gateway-protocol-handoff-lock.json` expires it. `npm run check:unit` remains the
+aggregate development iteration gate through converged fixtures, while `npm run
+check:protocol-dev` is the narrower Protocol/client path. Neither proves a release
+or an installed worker; the full and ship-facing paths remain refused.
 
 The check reaches no remote, so it cannot see the copy falling behind its owner,
 and `source.commit` is a recorded observation rather than a locally verified one
@@ -62,9 +63,10 @@ than its exclusion.
 - `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing
   `ceal` binary.
 
-A worker source build consumes only a supplied packed Gateway protocol artifact.
-Run `npm run verify:protocol-consumer -- --help` for that local, no-network
-consumer proof.
+The release packed-consumer build consumes a supplied packed Gateway Protocol
+artifact rather than the workspace copy. Run `npm run verify:protocol-consumer
+-- --help` to discover the verifier's required inputs; an actual invocation
+with those inputs performs the local, no-network consumer proof.
 
 `@corca-ai/ceal` names only the client SDK. It does not contain the CLI, Agent
 runner, Gateway server, or an umbrella SDK.
@@ -172,10 +174,10 @@ npm run check
 ```
 
 `npm run check` is the final worker proof gate: lint, build, then every
-worker-owned suite. Most of its wall clock is the release-artifact and
-native-binary suites, which cannot observe CLI or client behavior. While
-iterating, use the fast lane and keep the full gate for the last run before
-pushing or tagging:
+worker-owned suite. Its expensive release suites primarily prove packed and
+native delivery boundaries, while their smoke steps also exercise selected CLI
+and client behavior. While iterating, use the fast lane and keep the full gate
+for the last run before pushing or tagging:
 
 ```sh
 npm run check:unit   # lint + worker build + client/worker suites + test/contract
@@ -196,8 +198,9 @@ frozen packages are excluded on purpose. Formatting-only commits are listed in
 `.git-blame-ignore-revs` so `git blame` skips them, which `npm run hooks:install`
 configures for the clone.
 
-Probing an installed surface is a read-only question, so route it through the
-declared-effect guard rather than typing the binary at your own `HOME`:
+Probing the checkout-built command surface is a read-only question, so route it
+through the declared-effect guard rather than typing the binary at your own
+`HOME`:
 
 ```sh
 npm run probe -- ceal capabilities targets --help
@@ -208,6 +211,7 @@ The guard resolves the route through the same declaration help renders from,
 refuses any route whose declared effect is not `read_only`, and runs in a
 throwaway `HOME`. `--allow-effect <effect>` opts into a declared *local* write
 while keeping the isolation; nothing in the guard can reach real local state.
+This is checkout proof, not evidence about an installed or signed release.
 
 The effect vocabulary names remote change as well as local: `remote_write` is a
 route that may change the Gateway or a provider. It covers provider calls,
@@ -225,11 +229,6 @@ A stored session belongs to one adopted host. Do not copy its one-time refresh
 credential to another machine: replay detection intentionally revokes the
 session family. Adopt each host separately so credential rotation and recovery
 remain independently attributable.
-
-The composite extraction verifier still packs all four historical packages,
-installs them into an isolated consumer, and scans the archives for private
-paths and cross-command implementation. It remains deletion-gate evidence only;
-it is not a worker-release builder.
 
 ## Worker release boundary
 

@@ -208,7 +208,7 @@ export function createCealAgentGuideStore(
 	});
 	return {
 		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved))),
-		register: (agent) => sourced(act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved))),
+		register: (agent) => act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved)),
 	};
 }
 
@@ -224,7 +224,10 @@ function unavailableStore(defaultAgent: CealAgentGuideHost, detectedHost: CealAg
 		const target = isCealAgentGuideHost(agent) ? agent : defaultAgent;
 		return { ...unavailableState(target), agent_source: target === detectedHost ? "detected" : "default" };
 	};
-	return { inspect: (agent) => state(agent), register: (agent) => state(agent) };
+	return {
+		inspect: (agent) => state(agent),
+		register: (agent) => unavailableState(isCealAgentGuideHost(agent) ? agent : defaultAgent),
+	};
 }
 
 function unavailableState(agent: CealAgentGuideHost): CealAgentGuideState {

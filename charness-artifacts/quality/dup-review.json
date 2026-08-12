@@ -2,6 +2,27 @@
   "entries": [
     {
       "surface": "code",
+      "id": "a6a63e638a33a9a5",
+      "class": "intentional",
+      "reviewed_at": "2026-08-11",
+      "note": "Re-key of the composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets family already reviewed at 1d37623e5019a67e. The new merge ship guard changed one member's content, but the ownership decision is unchanged: composition builds one platform's unsigned candidate while merge reconciles platform-composed build handoffs before signing, and their shared output publication already lives in output-directory.mjs. Combining their remaining bodies would hide two trust boundaries behind callbacks."
+    },
+    {
+      "surface": "code",
+      "id": "e16f0d93af7ec761",
+      "class": "intentional",
+      "reviewed_at": "2026-08-11",
+      "note": "Re-key of the native and package builder calls to the shared output-directory guard reviewed at 81ed10bf66f9701b. Each caller supplies its own marker and subject; the implementation fact is already extracted, and wrapping the two invocations would only move those differing arguments into another helper."
+    },
+    {
+      "surface": "code",
+      "id": "f30187c77acbf7e4",
+      "class": "intentional",
+      "reviewed_at": "2026-08-11",
+      "note": "Re-key of the agent-guide host-table consumers reviewed at 04e6fe40984b7b6a. The source edit narrowed register provenance and regrouped the same host detection, type narrowing, row lookup, registration map, and projection members. CEAL_AGENT_GUIDE_HOSTS is already their one shared fact; combining the consumers would merge path resolution, mutation, and rendering."
+    },
+    {
+      "surface": "code",
       "id": "1d37623e5019a67e",
       "class": "intentional",
       "reviewed_at": "2026-08-09",

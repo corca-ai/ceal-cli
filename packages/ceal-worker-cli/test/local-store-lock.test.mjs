@@ -169,6 +169,31 @@ test("a lock held by a live process is waited for and then refused as busy", asy
 	});
 });
 
+test("the busy deadline is driven by a monotonic clock", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		writeOwnedLock(lockPath, process.pid);
+		const originalDateNow = Date.now;
+		try {
+			Date.now = () => {
+				throw new Error("wall clock reached by monotonic deadline");
+			};
+			await assert.rejects(
+				withLocalStoreLock(
+					options(directory, {
+						maxWaitMs: 0,
+					}),
+					async () => {},
+				),
+				TestBusy,
+			);
+		} finally {
+			Date.now = originalDateNow;
+		}
+		assert.equal(existsSync(lockPath), true);
+	});
+});
+
 test("a lock orphaned by a dead process is reclaimed rather than waited out", async () => {
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
@@ -439,9 +464,14 @@ function parentSwapBeforeQuarantine(moduleDirectory, directory, moved) {
 function injectableLockSource() {
 	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
 	const relativeImport = 'from "./local-store-anchor.js";';
+	const relativeClockImport = 'from "./monotonic-clock.js";';
 	assert.ok(source.includes(relativeImport), "the lock no longer imports its shared anchor beside itself");
+	assert.ok(source.includes(relativeClockImport), "the lock no longer imports its monotonic clock beside itself");
 	const anchorUrl = new URL("../dist/local-store-anchor.js", import.meta.url).href;
-	return source.replace(relativeImport, `from ${JSON.stringify(anchorUrl)};`);
+	const clockUrl = new URL("../dist/monotonic-clock.js", import.meta.url).href;
+	return source
+		.replace(relativeImport, `from ${JSON.stringify(anchorUrl)};`)
+		.replace(relativeClockImport, `from ${JSON.stringify(clockUrl)};`);
 }
 
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {
