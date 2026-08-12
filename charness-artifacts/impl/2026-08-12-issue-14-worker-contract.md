@@ -9,8 +9,8 @@
 - Unknown writes retain the exact returned request reference. The recovery
   guidance tells agents to preserve the original call inputs and the original
   idempotency key when the discovered contract required one.
-  `audit_event_not_found` is not retry permission; only an explicit terminal
-  provider-not-started result may unlock Gateway-governed recovery.
+  `audit_event_not_found` is not retry permission. This Worker exposes no retry
+  authorization for the write, which stays unresolved for the operator.
 - Generated call purpose and the public command description no longer call a
   capability approved before the Gateway decision.
 - The two target-catalog failures reported in `ceal-cli#13` retain their exact

@@ -56,7 +56,7 @@ Use these rules after the core guide selects a capability-oriented task.
   `receipt.request_ref`, the original call inputs, and the original idempotency
   key when one was required. Inspect that receipt; do not create another request
   or key, repeat the write, or treat `audit_event_not_found` as permission to
-  retry unless the Gateway explicitly reports a terminal provider-not-started
-  outcome.
+  retry. This Worker exposes no retry authorization for that write; leave it
+  unresolved for the operator.
 - On a structured error, follow its recovery or next action and rediscover help
   if installation or runtime drift may have changed the surface.

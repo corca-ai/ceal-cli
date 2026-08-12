@@ -45,11 +45,11 @@ separately approved boundaries.
   audit readback from provider-state readback while retaining legacy tokens;
   unknown writes retain their exact request reference, while the guide tells
   agents to preserve their inputs and required idempotency key. They remain
-  non-retryable until the Gateway explicitly reports a terminal
-  provider-not-started outcome. The generated purpose and public command
-  description no longer claim pre-approval. Gateway-owned replay, purpose
-  provenance, terminal receipt, input-contract, and provider-evidence semantics
-  remain outside this local projection.
+  unresolved for the operator because this Worker exposes no retry authorization
+  for the write. The generated purpose and public command description no longer
+  claim pre-approval. Gateway-owned replay, purpose provenance, terminal receipt,
+  input-contract, and provider-evidence semantics remain outside this local
+  projection.
 - The current source also contains the client deadline/status/media-type and
   adoption-request boundary repairs, generic HTTP timeout classification,
   narrowed command session capabilities, explicit guide-register provenance,

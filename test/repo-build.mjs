@@ -91,10 +91,13 @@ function acquire() {
 		// clock cannot tell a slow compile on a loaded runner from a dead holder,
 		// and breaking a live holder recreates the double-writer state this lock
 		// exists to prevent. `local-store-lock.ts` reaches the same conclusion.
-		reclaimIfHolderIsGone();
+		const reclaimed = reclaimIfHolderIsGone();
 		// Always perform one liveness check after a failed acquisition, even when
 		// filesystem scheduling consumed the wait deadline. The deadline bounds
 		// waiting for a live holder; it must not shadow a dead-holder reclamation.
+		// A successful reclaim earns one immediate acquisition attempt even when the
+		// deadline elapsed while inspecting or quarantining that stale generation.
+		if (reclaimed) continue;
 		if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
 		sleep(25);
 	}
@@ -140,35 +143,39 @@ function reclaimIfHolderIsGone() {
 	let generation;
 	try {
 		generation = statSync(LOCK);
-	} catch {
-		return;
+	} catch (error) {
+		return error.code === "ENOENT";
 	}
 	const owner = readOwner();
 	if (owner) {
-		if (!processIsGone(owner.pid)) return;
-		quarantineGeneration(generation, owner.nonce, `dead pid ${owner.pid}`);
-		return;
+		if (!processIsGone(owner.pid)) return false;
+		return quarantineGeneration(generation, owner.nonce, `dead pid ${owner.pid}`);
 	}
 	// New holders publish a completed private candidate atomically. An empty
 	// visible directory can only be a legacy holder that died before its owner
 	// write; rmdir is deliberate because it cannot remove a non-empty successor.
-	if (Date.now() - generation.mtimeMs < OWNER_WRITE_GRACE_MS) return;
+	if (Date.now() - generation.mtimeMs < OWNER_WRITE_GRACE_MS) return false;
 	let entries;
 	try {
 		entries = readdirSync(LOCK);
 	} catch {
-		return;
+		return false;
 	}
 	if (entries.length === 0) {
 		try {
 			rmdirSync(LOCK);
 			process.emitWarning(`reclaiming the workspace dist lock from a legacy owner-less holder: ${LOCK}`);
+			return true;
 		} catch (error) {
 			if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY" && error.code !== "EEXIST") throw error;
+			return error.code === "ENOENT";
 		}
-		return;
 	}
-	quarantineGeneration(generation, `invalid-${generation.dev.toString(16)}-${generation.ino.toString(16)}`, "an invalid owner generation");
+	return quarantineGeneration(
+		generation,
+		`invalid-${generation.dev.toString(16)}-${generation.ino.toString(16)}`,
+		"an invalid owner generation",
+	);
 }
 
 function quarantineGeneration(generation, suffix, reason) {
@@ -176,15 +183,16 @@ function quarantineGeneration(generation, suffix, reason) {
 	try {
 		renameSync(LOCK, tombstone);
 		process.emitWarning(`reclaiming the workspace dist lock from ${reason}: ${LOCK}`);
-		return;
+		return true;
 	} catch (error) {
-		if (error.code === "ENOENT") return;
+		if (error.code === "ENOENT") return true;
 		if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error;
 	}
 	const retained = statSync(tombstone);
 	if (retained.dev !== generation.dev || retained.ino !== generation.ino) {
 		throw new Error(`workspace dist lock tombstone identity mismatch at ${tombstone}`);
 	}
+	return true;
 }
 
 function readOwner(lockPath = LOCK) {

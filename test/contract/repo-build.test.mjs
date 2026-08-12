@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { ensurePackageBuilt, REPO_ROOT, withDistLock } from "../repo-build.mjs";
+import { scratchDir } from "../scratch-dir.mjs";
 
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const HELPER = path.join(REPO_ROOT, "test", "repo-build.mjs");
@@ -82,14 +83,40 @@ test("a live holder is not reclaimed, however long it holds", async () => {
 test("a lock abandoned by a dead process is reclaimed rather than waited out forever", async (context) => {
 	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-dead-");
 	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
-	mkdirSync(lock, { recursive: true });
 	// A pid that cannot be running: the kernel would have to have wrapped past it,
 	// and `pid_max` is far below this on every supported host.
-	writeFileSync(path.join(lock, "owner"), `2147483646 ${"a".repeat(32)}\n`);
+	writeDeadHolder(lock);
 	const isolated = await import(`${new URL(`file://${scratch.modulePath}`).href}?dead=${Date.now()}`);
 	assert.equal(
 		isolated.withDistLock(() => "reclaimed"),
 		"reclaimed",
+	);
+	assert.equal(existsSync(lock), false);
+});
+
+test("a stale holder reclaimed after the wait deadline still gets one acquisition attempt", async (context) => {
+	const { lock, modulePath } = expiredAcquisitionRepoBuild(context, "ceal-dist-lock-expired-reclaim-");
+	writeDeadHolder(lock);
+	const isolated = await import(`${new URL(`file://${modulePath}`).href}?expired=${Date.now()}`);
+	assert.equal(
+		isolated.withDistLock(() => "reclaimed-after-deadline"),
+		"reclaimed-after-deadline",
+	);
+	assert.equal(existsSync(lock), false);
+});
+
+test("a holder released after the wait deadline still gets one acquisition attempt", async (context) => {
+	const { lock, modulePath } = expiredAcquisitionRepoBuild(
+		context,
+		"ceal-dist-lock-expired-release-",
+		"rmSync(LOCK, { recursive: true, force: true });",
+	);
+	mkdirSync(lock, { recursive: true });
+	writeFileSync(path.join(lock, "owner"), `${process.pid} ${"b".repeat(32)}\n`);
+	const isolated = await import(`${new URL(`file://${modulePath}`).href}?released=${Date.now()}`);
+	assert.equal(
+		isolated.withDistLock(() => "released-after-deadline"),
+		"released-after-deadline",
 	);
 	assert.equal(existsSync(lock), false);
 });
@@ -139,8 +166,7 @@ test("a process cannot delete a lock it does not own", () => {
 });
 
 test("a late stale-lock reclaimer cannot move the successor generation", async (context) => {
-	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-dist-lock-late-reclaimer-"));
-	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const scratch = scratchDir(context, "ceal-dist-lock-late-reclaimer-");
 	const modulePath = injectedRepoBuild(
 		scratch,
 		"renameSync(LOCK, tombstone);",
@@ -151,16 +177,14 @@ test("a late stale-lock reclaimer cannot move the successor generation", async (
 		].join("\n"),
 	);
 	const lock = path.join(scratch, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
-	mkdirSync(lock, { recursive: true });
-	writeFileSync(path.join(lock, "owner"), `2147483646 ${"a".repeat(32)}\n`);
+	writeDeadHolder(lock);
 	const raced = await import(`${new URL(`file://${modulePath}`).href}?late=${Date.now()}`);
 	assert.throws(() => raced.withDistLock(() => undefined), /timed out waiting/u);
 	assert.equal(readFileSync(path.join(lock, "owner"), "utf8").trim(), `${process.pid} ${"c".repeat(32)}`);
 });
 
 test("a completed candidate that loses publication cannot replace the winner", async (context) => {
-	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-dist-lock-publish-race-"));
-	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const scratch = scratchDir(context, "ceal-dist-lock-publish-race-");
 	const modulePath = injectedRepoBuild(
 		scratch,
 		"renameSync(candidate, LOCK);",
@@ -262,6 +286,26 @@ function runHolder(source) {
 	return spawnHolder(source).result;
 }
 
+function writeDeadHolder(lock) {
+	mkdirSync(lock, { recursive: true });
+	writeFileSync(path.join(lock, "owner"), `2147483646 ${"a".repeat(32)}\n`);
+}
+
+function expiredAcquisitionRepoBuild(context, prefix, beforeReclaim = undefined) {
+	const root = scratchDir(context, prefix);
+	const replacement = [
+		"Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);",
+		beforeReclaim,
+		"const reclaimed = reclaimIfHolderIsGone();",
+	]
+		.filter(Boolean)
+		.join("\n");
+	return {
+		lock: path.join(root, "node_modules", ".cache", "ceal-test-workspace-dist.lock"),
+		modulePath: injectedRepoBuild(root, "const reclaimed = reclaimIfHolderIsGone();", replacement),
+	};
+}
+
 function spawnHolder(source, readyMarker = undefined) {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
 	let stderr = "";
@@ -312,7 +356,6 @@ function injectedRepoBuild(root, anchor, replacement) {
 }
 
 function isolatedRepoBuild(context, prefix) {
-	const root = mkdtempSync(path.join(tmpdir(), prefix));
-	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const root = scratchDir(context, prefix);
 	return { root, modulePath: injectedRepoBuild(root) };
 }

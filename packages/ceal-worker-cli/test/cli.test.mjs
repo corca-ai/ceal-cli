@@ -2340,7 +2340,7 @@ test("an unknown outcome points at the Gateway's own answer and does not invent 
 		code: "audit_event_not_found",
 		message: "The Gateway has no audited outcome for that request reference.",
 		nextAction:
-			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. Keep the write unresolved and do not repeat it unless the Gateway explicitly reports a terminal provider-not-started outcome.",
+			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. This Worker exposes no retry authorization for that write; keep it unresolved for the operator.",
 		denial: false,
 	});
 	const receiptLeaf = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "receipt");

@@ -143,9 +143,8 @@ If a write returns unknown, preserve its exact `receipt.request_ref`, original
 call inputs, and required idempotency key; do not create another request or key
 or claim success. Inspect the receipt after a short wait. An
 `audit_event_not_found` response is not permission to repeat the write. Retry
-only when the Gateway explicitly reports a terminal provider-not-started state
-and its recovery contract permits the same intended effect; otherwise leave it
-unresolved for the operator.
+only the readback after a short wait. This Worker exposes no retry authorization
+for the write; leave it unresolved for the operator.
 
 ## Report and GitHub publication
 
