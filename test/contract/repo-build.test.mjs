@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
-import { ensurePackageBuilt, REPO_ROOT, withDistLock } from "../repo-build.mjs";
+import { ensurePackageBuilt, processIsGone, REPO_ROOT, withDistLock } from "../repo-build.mjs";
 import { scratchDir } from "../scratch-dir.mjs";
 
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
@@ -119,6 +130,20 @@ test("a holder released after the wait deadline still gets one acquisition attem
 		"released-after-deadline",
 	);
 	assert.equal(existsSync(lock), false);
+});
+
+test("live-holder wait uses a monotonic deadline instead of the adjustable wall clock", async (context) => {
+	const root = scratchDir(context, "ceal-dist-lock-monotonic-");
+	const modulePath = injectedRepoBuild(
+		root,
+		"const deadline = performance.now() + WAIT_TIMEOUT_MS;",
+		"const Date = { now: () => { throw new Error('wall clock used for live-holder deadline'); } };\n\tconst deadline = performance.now() + WAIT_TIMEOUT_MS;",
+	);
+	const lock = path.join(root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	mkdirSync(lock, { recursive: true });
+	writeFileSync(path.join(lock, "owner"), `${process.pid} ${"b".repeat(32)}\n`);
+	const isolated = await import(`${new URL(`file://${modulePath}`).href}?monotonic=${Date.now()}`);
+	assert.throws(() => isolated.withDistLock(() => assert.fail("live holder was bypassed")), /timed out waiting/u);
 });
 
 test("an owner-less lock is reclaimed after the owner-write grace, not waited out", async (context) => {
@@ -245,6 +270,48 @@ test("ensurePackageBuilt runs the build exactly once per package per process", (
 	assert.deepEqual(calls, ["packages/fixture-a", "packages/fixture-b"]);
 });
 
+test("a timed-out workspace build kills its TERM-ignoring process group before releasing the lock", async (context) => {
+	const root = scratchDir(context, "ceal-dist-build-timeout-");
+	const modulePath = injectedRepoBuild(root);
+	const packageRoot = path.join(root, "packages", "fixture");
+	const bin = path.join(root, "bin");
+	const lock = path.join(root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	const leaderPid = path.join(root, "leader.pid");
+	const descendantPid = path.join(root, "descendant.pid");
+	const termMarker = path.join(root, "term.marker");
+	mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+	mkdirSync(bin);
+	const npm = path.join(bin, "npm");
+	writeFileSync(
+		npm,
+		`#!/bin/sh
+trap '[ -d ${JSON.stringify(lock)} ] && printf held > ${JSON.stringify(termMarker)}' TERM
+printf '%s\n' "$$" > ${JSON.stringify(leaderPid)}
+sh -c 'trap "" TERM; printf "%s\\n" "$$" > "$1"; while :; do sleep 1; done' sh ${JSON.stringify(descendantPid)} </dev/null >/dev/null 2>&1 &
+while :; do sleep 1; done
+`,
+	);
+	chmodSync(npm, 0o755);
+	const previousPath = process.env.PATH;
+	process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
+	try {
+		const isolated = await import(`${new URL(`file://${modulePath}`).href}?build-timeout=${Date.now()}`);
+		assert.throws(
+			() => isolated.withBuiltPackages(["packages/fixture"], () => assert.fail("timed-out build reached its reader")),
+			/timed out/u,
+		);
+	} finally {
+		process.env.PATH = previousPath;
+	}
+	assert.equal(readFileSync(termMarker, "utf8"), "held", "the dist lock was not held when timeout cleanup began");
+	assert.equal(existsSync(lock), false, "the dist lock remained after the failed build settled");
+	for (const pidPath of [leaderPid, descendantPid]) {
+		const pid = Number(readFileSync(pidPath, "utf8").trim());
+		context.after(() => killIfAlive(pid));
+		assert.equal(processIsGone(pid), true, `${path.basename(pidPath)} ${pid} survived the build timeout`);
+	}
+});
+
 test("standalone package tests enter the dist owner", () => {
 	for (const [packageName, closure] of [
 		["ceal-client", "packages/ceal-protocol packages/ceal-client"],
@@ -349,13 +416,26 @@ function injectedRepoBuild(root, anchor, replacement) {
 	const toolchainImport = new URL("../../scripts/lib/toolchain-env.mjs", import.meta.url).href;
 	source = source.replace('from "../scripts/lib/toolchain-env.mjs"', `from ${JSON.stringify(toolchainImport)}`);
 	source = source.replace("const WAIT_TIMEOUT_MS = 600_000;", "const WAIT_TIMEOUT_MS = 20;");
+	source = source.replace("const BUILD_TIMEOUT_MS = 600_000;", "const BUILD_TIMEOUT_MS = 500;");
+	source = source.replace("const BUILD_TERMINATION_GRACE_MS = 2_000;", "const BUILD_TERMINATION_GRACE_MS = 80;");
+	source = source.replace("const BUILD_POST_KILL_REPORT_MS = 1_000;", "const BUILD_POST_KILL_REPORT_MS = 80;");
 	if (anchor) source = source.replace(anchor, replacement);
 	const modulePath = path.join(directory, "repo-build.mjs");
 	writeFileSync(modulePath, source);
+	writeFileSync(path.join(directory, "repo-build-supervisor.mjs"), readFileSync(path.join(REPO_ROOT, "test", "repo-build-supervisor.mjs")));
 	return modulePath;
 }
 
 function isolatedRepoBuild(context, prefix) {
 	const root = scratchDir(context, prefix);
 	return { root, modulePath: injectedRepoBuild(root) };
+}
+
+function killIfAlive(pid) {
+	if (!Number.isInteger(pid) || pid <= 0 || processIsGone(pid)) return;
+	try {
+		process.kill(pid, "SIGKILL");
+	} catch {
+		/* Already gone. */
+	}
 }

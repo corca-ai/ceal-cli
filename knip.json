@@ -10,7 +10,7 @@
 			"project": ["src/**/*.ts"]
 		},
 		"packages/ceal-worker-cli": {
-			"entry": ["src/index.ts", "src/bin.ts"],
+			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts"],
 			"project": ["src/**/*.ts"]
 		}
 	},

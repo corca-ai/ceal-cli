@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
@@ -27,6 +28,12 @@ export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.ur
 const BUILT = new Set();
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const WAIT_TIMEOUT_MS = 600_000;
+const BUILD_TIMEOUT_MS = 600_000;
+const BUILD_TERMINATION_GRACE_MS = 2_000;
+const BUILD_POST_KILL_REPORT_MS = 1_000;
+const BUILD_POST_EXIT_DRAIN_MS = 250;
+const BUILD_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+const BUILD_SUPERVISOR = fileURLToPath(new URL("repo-build-supervisor.mjs", import.meta.url));
 // A holder writes its owner record immediately after `mkdir`, so a lock that is
 // still owner-less this long after its directory was created belongs to a process
 // that died in that window. Without this the wait is unbounded in practice: an
@@ -63,11 +70,39 @@ function runNpmBuild(packagePath) {
 	// fail-closed signal that the cache must go with it.
 	if (!existsSync(path.join(packageRoot, "dist"))) rmSync(cache, { force: true });
 	mkdirSync(path.dirname(cache), { recursive: true });
-	execFileSync("npm", ["run", "build", "--", "--incremental", "--tsBuildInfoFile", cache], {
-		cwd: packageRoot,
-		stdio: "pipe",
+	const result = spawnSync(process.execPath, [BUILD_SUPERVISOR], {
+		encoding: "utf8",
 		env: toolchainEnv(),
+		input: JSON.stringify({
+			command: "npm",
+			args: ["run", "build", "--", "--incremental", "--tsBuildInfoFile", cache],
+			cwd: packageRoot,
+			env: toolchainEnv(),
+			timeoutMs: BUILD_TIMEOUT_MS,
+			terminationGraceMs: BUILD_TERMINATION_GRACE_MS,
+			postKillReportMs: BUILD_POST_KILL_REPORT_MS,
+			postExitDrainMs: BUILD_POST_EXIT_DRAIN_MS,
+			maxCapturedOutputBytes: BUILD_MAX_OUTPUT_BYTES,
+		}),
+		killSignal: "SIGKILL",
+		// JSON escaping can expand a captured control byte to six output bytes.
+		maxBuffer: BUILD_MAX_OUTPUT_BYTES * 8,
+		timeout: BUILD_TIMEOUT_MS + BUILD_TERMINATION_GRACE_MS + BUILD_POST_KILL_REPORT_MS + BUILD_POST_EXIT_DRAIN_MS + 5_000,
 	});
+	if (result.error || result.status !== 0) throw result.error ?? new Error(`build supervisor exited ${result.status}: ${result.stderr}`);
+	const build = JSON.parse(result.stdout);
+	if (build.spawnError || build.timedOut || build.truncated || build.orphaned || build.code !== 0) {
+		const reason = build.spawnError
+			? `could not start (${build.spawnError})`
+			: build.timedOut
+				? "timed out"
+				: build.truncated
+					? "exceeded its output bound"
+					: build.orphaned
+						? "left a descendant running"
+						: `exited ${build.code}${build.signal ? ` on ${build.signal}` : ""}`;
+		throw new Error(`workspace package build ${reason}: ${packagePath}\n${build.stderr || build.stdout}`);
+	}
 }
 
 // Exported so the mutex can be proven against a cheap body instead of only
@@ -83,7 +118,7 @@ export function withDistLock(run) {
 
 function acquire() {
 	mkdirSync(path.dirname(LOCK), { recursive: true });
-	const deadline = Date.now() + WAIT_TIMEOUT_MS;
+	const deadline = performance.now() + WAIT_TIMEOUT_MS;
 	for (;;) {
 		const nonce = publishCandidate();
 		if (nonce) return nonce;
@@ -98,7 +133,7 @@ function acquire() {
 		// A successful reclaim earns one immediate acquisition attempt even when the
 		// deadline elapsed while inspecting or quarantining that stale generation.
 		if (reclaimed) continue;
-		if (Date.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
+		if (performance.now() > deadline) throw new Error(`timed out waiting for the workspace dist lock at ${LOCK}`);
 		sleep(25);
 	}
 }
@@ -209,7 +244,7 @@ function readOwner(lockPath = LOCK) {
 	return Number.isSafeInteger(parsedPid) && parsedPid > 0 && /^[a-f0-9]{32}$/u.test(nonce ?? "") ? { pid: parsedPid, nonce } : null;
 }
 
-function processIsGone(pid) {
+export function processIsGone(pid) {
 	try {
 		// Signal 0 performs the permission and existence checks without delivering a
 		// signal, so this asks "is that pid alive" and nothing else.

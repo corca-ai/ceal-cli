@@ -17,6 +17,7 @@
 // command reads back the receipt of one that already happened.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { projectAcceptanceReceipt } from "./acceptance-receipt.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import { sha256 } from "./sha256.js";
 
@@ -135,15 +136,15 @@ function readChecksum(file: string, name: string): string | undefined {
 }
 
 /**
- * The one declaration of what a `bounded_capability_call` row may contain, and
- * of what its receipt may contain.
+ * The one declaration of what the acceptance row and its bounded call may
+ * contain. The nested receipt keys and projection live in
+ * `acceptance-receipt.ts`, which both emitters can consume directly.
  *
  * Two emitters answer this schema — this module for the installed binary, and
- * `scripts/worker-acceptance-packet.mjs` from a checkout — and they cannot share
- * an implementation: one holds decoded Gateway events, the other only the
- * installed binary's rendered stdout. The checkout script now imports package
- * build output for shared install and child-process policy; this field list
- * remains here because the installed emitter owns the schema.
+ * `scripts/worker-acceptance-packet.mjs` from a checkout. They cannot share the
+ * observation logic: one holds decoded Gateway events, the other only the
+ * installed binary's rendered stdout. They do share the receipt projection so
+ * missing observations still produce the same total schema.
  * `test/contract/worker-acceptance-packet.test.mjs` binds the script's output to
  * it. Until this existed the two emitters
  * declared one schema version while carrying different field sets.
@@ -198,26 +199,6 @@ export const CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS = Object.freeze([
 	"evidence",
 	"request_ref",
 	"receipt",
-] as const);
-
-/**
- * Refs only. The Gateway audit event carries `membership_ref`, `subject_ref`,
- * `registration_ref`, `client_ref` and a grant snapshot, and this record leaves
- * the machine — a released record under `docs/acceptance/ceal-v0.69.0/` shows
- * two of those because the installed emitter used to ship the raw event.
- *
- * @testOnly Same reason as the list above.
- */
-export const CEAL_ACCEPTANCE_RECEIPT_KEYS = Object.freeze([
-	"readback_status",
-	"gateway_audit_readback",
-	"provider_state_readback",
-	"outcome",
-	"authorization",
-	"audit_refs",
-	"gateway_elapsed_ms",
-	"exit_code",
-	"elapsed_ms",
 ] as const);
 
 export interface CealAcceptanceBoundedCall {
@@ -331,7 +312,7 @@ function projectBoundedCall(call: CealAcceptanceBoundedCall | null): Record<stri
 	const source = call as unknown as Record<string, unknown>;
 	const row = projectByKeys(source, CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS);
 	const receipt = source.receipt as Record<string, unknown> | null | undefined;
-	row.receipt = receipt ? projectByKeys(receipt, CEAL_ACCEPTANCE_RECEIPT_KEYS) : null;
+	row.receipt = receipt ? projectAcceptanceReceipt(receipt) : null;
 	return row;
 }
 

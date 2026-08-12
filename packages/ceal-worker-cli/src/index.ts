@@ -133,7 +133,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
 	const requestRef = parsed.values.get("--request-ref");
 	const profileOption = parsed.values.get("--profile");
-	if (profileOption !== undefined && !isSafeProfileRef(profileOption))
+	if ((requestRef !== undefined && !isSafeRequestRef(requestRef)) || (profileOption !== undefined && !isSafeProfileRef(profileOption)))
 		return writeAcceptanceRefusal("invalid_argument", "Invalid ceal acceptance emit options.", io, "Run 'ceal acceptance emit --help'.");
 
 	const reading = (runtime.readInstalledReleaseFacts ?? readInstalledReleaseFacts)(process.execPath);

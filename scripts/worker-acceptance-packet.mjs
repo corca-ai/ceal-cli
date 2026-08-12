@@ -26,6 +26,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { projectAcceptanceReceipt } from "../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
 import { resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
 import { codedErrorClass } from "./lib/coded-error.mjs";
@@ -275,10 +276,8 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 		let receipt;
 		if (requestRef) {
 			const shown = await runInstalledCommand(binaryPath, ["receipt", "show", requestRef], installedCommandOptions);
-			// Field-for-field the installed emitter's receipt row, in the order
-			// CEAL_ACCEPTANCE_RECEIPT_KEYS declares. That list is the one home and
-			// the contract test binds this object to it; the two cannot share an
-			// implementation because this side has only rendered stdout to read.
+			// These are the rendered observations available on the checkout side.
+			// The shared receipt projector below supplies the declared total key set.
 			receipt = {
 				readback_status: scalar(shown.stdout, "status"),
 				gateway_audit_readback: scalar(shown.stdout, "gateway_audit_readback"),
@@ -415,7 +414,7 @@ export function sanitizedAcceptanceRecord(packet) {
 					// this row the same way, and passing the object through is how an
 					// identity ref rode into a published record in the first place.
 					receipt: call.receipt
-						? {
+						? projectAcceptanceReceipt({
 								readback_status: call.receipt.readback_status,
 								gateway_audit_readback: call.receipt.gateway_audit_readback,
 								provider_state_readback: call.receipt.provider_state_readback,
@@ -425,7 +424,7 @@ export function sanitizedAcceptanceRecord(packet) {
 								gateway_elapsed_ms: call.receipt.gateway_elapsed_ms,
 								exit_code: call.receipt.exit_code,
 								elapsed_ms: call.receipt.elapsed_ms,
-							}
+							})
 						: null,
 				}
 			: null,

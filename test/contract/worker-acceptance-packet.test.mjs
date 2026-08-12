@@ -4,10 +4,10 @@ import { chmodSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileS
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CEAL_ACCEPTANCE_RECEIPT_KEYS } from "../../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import {
 	CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS,
 	CEAL_ACCEPTANCE_GUIDE_KEYS,
-	CEAL_ACCEPTANCE_RECEIPT_KEYS,
 	CEAL_ACCEPTANCE_SESSION_KEYS,
 	CEAL_ACCEPTANCE_TOP_LEVEL_KEYS,
 	readInstalledReleaseFacts,
@@ -662,6 +662,26 @@ test("the checkout emitter answers the record schema with exactly its declared k
 	assert.equal(record.command, "ceal");
 	assert.equal(record.status, "emitted");
 	assert.equal(record.emitted_by, "source_checkout");
+});
+
+test("the checkout emitter keeps every declared receipt key when readback reports no fields", () => {
+	const packet = packetFixture();
+	packet.bounded_capability_call = {
+		capability: "message.search",
+		target: "target:aaaaaaaa",
+		status: "error",
+		exit_code: 3,
+		elapsed_ms: 12,
+		evidence: "outcome_unknown",
+		request_ref: "ceal:fixture:call",
+		receipt: { exit_code: 3, elapsed_ms: 4 },
+	};
+	const receipt = sanitizedAcceptanceRecord(packet).bounded_capability_call.receipt;
+	assert.deepEqual(Object.keys(receipt).sort(), [...CEAL_ACCEPTANCE_RECEIPT_KEYS].sort());
+	for (const key of CEAL_ACCEPTANCE_RECEIPT_KEYS) {
+		if (key !== "exit_code" && key !== "elapsed_ms") assert.equal(receipt[key], null, `${key} must remain explicit`);
+	}
+	assert.deepEqual(JSON.parse(JSON.stringify(receipt)), receipt, "JSON serialization must not drop an undefined key");
 });
 
 // The two emitters cannot share an implementation, so this is what makes "one

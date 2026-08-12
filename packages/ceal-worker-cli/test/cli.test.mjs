@@ -4003,6 +4003,14 @@ test("every stored-session --profile consumer enforces the public Profile refere
 	}
 });
 
+test("acceptance rejects an unsafe request reference before release or session work", async () => {
+	const payload = await yamlRun(["acceptance", "emit", "--request-ref", "free text with spaces"], 2, {
+		loadSession: () => assert.fail("unsafe acceptance request ref must reject before local session work"),
+		readInstalledReleaseFacts: () => assert.fail("unsafe acceptance request ref must reject before release inspection"),
+	});
+	assert.equal(payload.error.kind, "invalid_argument");
+});
+
 test("JSON modes and unsafe commands fail as redacted YAML", async () => {
 	for (const args of [
 		["version", "--json"],

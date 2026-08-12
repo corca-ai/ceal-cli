@@ -92,6 +92,12 @@ separately approved boundaries.
   canonical directory bundle as both release builders; its focused release test
   passes. The live package/native release positives still refuse the signed-pin
   divergence as required.
+- A post-`e695ac9` residual sweep closed four more local sibling gaps: acceptance
+  now rejects unsafe request refs before release/session work, both acceptance
+  emitters keep the declared receipt key set total with explicit nulls, the
+  workspace dist-lock deadline is monotonic, and a bounded npm/tsc process-group
+  supervisor settles timed-out builds before the lock is released. These remain
+  checkout tests, not installed or release proof.
 
 ## Next Action
 

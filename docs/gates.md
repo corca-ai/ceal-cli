@@ -464,6 +464,11 @@ earns its place:
   so without the entry it calls the whole SEA graph dead — 7 unused files
   including `bin.ts` itself and both leased-consumer modules. Drop the line and
   re-run to see it.
+- `entry` also names the narrow `src/acceptance-receipt.ts`. The checkout
+  acceptance emitter imports that module's compiled `dist` form so it can share
+  the installed emitter's receipt keys and projection. `knip` cannot map that
+  compiled import back to TypeScript source; keeping this entry narrow avoids
+  exempting the rest of the acceptance-record implementation.
 - `ignoreDependencies` carries `postject`, which the native build reaches through
   `require.resolve` rather than an import.
 - `ignoreBinaries` carries `nose` and `shellcheck`. Both are real dependencies of
