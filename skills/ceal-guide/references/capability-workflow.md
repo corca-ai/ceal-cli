@@ -10,15 +10,27 @@ Use these rules after the core guide selects a capability-oriented task.
   Add `--fresh` when the result must claim live discovery or grants may just have
   changed. Cached discovery reports only the narrower claims it actually proves.
 - Discovery intentionally omits target inventory. When selection is required,
-  use the target child with one discovered capability and a precise text or URL
-  match. Omit `--match` only when help permits a small unfiltered page.
+  use the target child with one discovered capability and only a selector form
+  declared by current Gateway guidance or leaf help. Target selection is a
+  separate contract from the capability's `input_contract`: do not reuse a call
+  argument, source URL, or opaque resource ref as `--match` unless that selector
+  form is explicitly declared. Omit `--match` when help permits a bounded
+  unfiltered page.
+- Read `target_selection.request_kind` with `target_catalog`. When a `match`
+  request returns a complete catalog with `target_count: 0`, the request
+  included a selector and the Gateway response contained no current targets;
+  that response alone does not prove the Profile has no authorized target for
+  the capability. Follow its returned `next_action` to inspect a bounded
+  unfiltered page. A resolver may return an opaque ref for another capability's
+  call input without making that ref a valid target selector.
 - Follow an opaque target `next_cursor` only for the same capability. Result
   paging is separate: use only the continuation field and bounds declared by
   that capability. If concise discovery omits them, run
   `ceal capabilities --profile <profile-ref> --detail`. Its detailed
-  `input_contract` is the source of truth for required input fields, selectors,
-  and bounds, including capabilities that enumerate or resolve resources. If it
-  declares no continuation field, report the page as bounded.
+  `input_contract` is the source of truth for required call-input fields and
+  result bounds, including capabilities that enumerate or resolve resources. It
+  is not the target-selector contract. If it declares no continuation field,
+  report the page as bounded.
 - Use only ids, fields, target refs, cursors, and request refs returned by help or
   the Gateway. Never construct or decode opaque refs, substitute raw provider
   ids or paths, or infer a field from a label or another capability. A catalog

@@ -97,9 +97,14 @@ readiness, recovery, and a bounded target-catalog summary; it intentionally
 does not dump a target inventory. The default output is concise (id, label,
 effect, and target requirement per capability); pass `--detail` to include each
 capability's full `input_contract`. `ceal capabilities targets --capability
-<capability-id> --match <text-or-url>` returns a bounded, current selection of
-opaque target references. Neither surface exposes Slack, GitHub, Notion, another
-provider's credential kind, API mode, or internal connector binding. `ceal call
+<capability-id> --match <selector>` submits one capability-specific target
+selector and returns a bounded, current selection of opaque target references.
+The result names whether the request included a match selector, continued a
+cursor, or requested an unfiltered page;
+`input_contract` fields and opaque call refs are not target selectors unless
+current Gateway guidance explicitly says otherwise. Neither surface exposes
+Slack, GitHub, Notion, another provider's credential kind, API mode, or
+internal connector binding. `ceal call
 <capability-id> --target <target-ref> [key=value ...]` forwards only that
 discovered vocabulary without requiring a new top-level CLI command or
 client-side provider grammar. The Gateway validates capability input, Profile

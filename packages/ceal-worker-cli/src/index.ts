@@ -951,6 +951,8 @@ function writeCapabilitiesAvailable(
 	runtime: CealCommandContext,
 ): number {
 	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
+	const targetSelection = targetSelectionProjection(selection);
+	const nextAction = capabilityCatalogNextAction(discovery.value.target_catalog, selection);
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
@@ -979,6 +981,7 @@ function writeCapabilitiesAvailable(
 		// so a compact default never reads as "this capability has no contract".
 		...(detail ? {} : { capability_detail: "Re-run 'ceal capabilities --detail' for per-capability input_contract." }),
 		target_catalog: discovery.value.target_catalog,
+		...(targetSelection ? { target_selection: targetSelection } : {}),
 		proof_level: discovery.value.proof_level,
 		live_gateway_checked: true,
 		// `live_gateway_checked` reports the live handshake (the auth gate, always
@@ -996,12 +999,20 @@ function writeCapabilitiesAvailable(
 		claims_allowed: provenance.source === "cached_discovery" ? ["gateway_handshake"] : ["gateway_handshake", "gateway_discovery"],
 		non_claims: discovery.value.non_claims,
 		request_ids: { handshake: handshake.request_id, discovery: discovery.request_id },
-		...(capabilityCatalogNextAction(discovery.value.target_catalog, selection)
-			? { next_action: capabilityCatalogNextAction(discovery.value.target_catalog, selection) }
-			: {}),
+		...(nextAction ? { next_action: nextAction } : {}),
 		...(profileSelectionHint(handshake.value) ? { profile_selection: profileSelectionHint(handshake.value) } : {}),
 		...unregisteredGuideAdvisory(runtime),
 	});
+}
+
+function targetSelectionProjection(
+	selection: Exclude<ParsedTargetCatalogOptions, null>,
+): { capability_id: string; request_kind: "match" | "cursor" | "unfiltered" } | null {
+	if (selection.kind !== "targets") return null;
+	return {
+		capability_id: selection.body.capability_id,
+		request_kind: selection.body.match ? "match" : selection.body.cursor ? "cursor" : "unfiltered",
+	};
 }
 
 // Client-local selection code named by the Profile contract: a session with
@@ -1066,9 +1077,16 @@ function capabilityCatalogNextAction(
 	catalog: CealGatewayDiscoveryValue["target_catalog"],
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 ): string | null {
-	if (catalog.selection_required) return "Run 'ceal capabilities targets --capability <capability-id> --match <name-or-url>'.";
+	const selectedCapability = selection.kind === "targets" ? selection.body.capability_id : "<capability-id>";
+	const profile = selection.kind === "targets" && selection.profileRef ? ` --profile ${selection.profileRef}` : "";
+	if (catalog.selection_required) {
+		return `Run 'ceal capabilities targets --capability ${selectedCapability}${profile} --match <selector>'.`;
+	}
 	if (catalog.next_cursor && selection.kind === "targets") {
-		return `Run 'ceal capabilities targets --capability ${selection.body.capability_id} --cursor ${catalog.next_cursor}'.`;
+		return `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --cursor ${catalog.next_cursor}'.`;
+	}
+	if (selection.kind === "targets" && selection.body.match && catalog.complete && catalog.target_count === 0) {
+		return `This target-selection request included --match, and the Gateway response contained no current targets for '${selection.body.capability_id}'. This response alone does not prove the capability has no authorized targets. Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' to inspect a bounded unfiltered page; treat input_contract fields and opaque call refs as call inputs, not target selectors, unless current Gateway guidance explicitly says otherwise.`;
 	}
 	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
 }

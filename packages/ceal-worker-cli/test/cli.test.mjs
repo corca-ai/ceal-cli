@@ -360,11 +360,17 @@ test("declared result schemas exist in the emitting package", () => {
 // whether an unfiltered page is in contract instead of erroring.
 test("target selection help states its unfiltered-page bound", async () => {
 	const { code, stdout } = await run(["capabilities", "targets", "--help"]);
+	const parentHelp = (await run(["capabilities", "--help"])).stdout;
 	assert.equal(code, 0);
 	assert.match(stdout, /An unfiltered page is permitted/u);
 	assert.match(stdout, /--limit <1-64>/u);
 	assert.match(stdout, /target_catalog\.selection_required/u);
 	assert.match(stdout, /target_catalog\.next_cursor/u);
+	assert.match(stdout, /Target selectors are capability-specific/u);
+	assert.match(stdout, /input_contract describes\s+call arguments, not what --match accepts/u);
+	assert.doesNotMatch(stdout, /--match <text-or-url>|target labels, or an approved source URL/u);
+	assert.match(parentHelp, /--match <selector>/u);
+	assert.doesNotMatch(parentHelp, /--match <text-or-url>/u);
 	assert.match(stdout, /--detail/u);
 });
 
@@ -3659,24 +3665,135 @@ test("capabilities omits eligible_profiles when the Gateway does not negotiate t
 	});
 });
 
-test("capabilities selects a bounded target page through the stored client session", async () => {
+test("capabilities identifies each target request kind without copying its selector or cursor", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
-		const payload = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1"], 0, {
+		const runtime = {
 			loadSession: async () => storedSession(endpoint, { accessToken: token }),
 			nextRequestId: () => "narnia:target-catalog:001",
-		});
+		};
+		const payload = await yamlRun(
+			["capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1"],
+			0,
+			runtime,
+		);
 		assert.equal(payload.status, "available");
 		assert.deepEqual(
 			payload.targets.map((item) => item.target_ref),
 			["target:team-inbox"],
 		);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
+		assert.deepEqual(payload.target_selection, { capability_id: "message.search", request_kind: "match" });
+		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 0, runtime);
+		assert.deepEqual(unfiltered.target_selection, { capability_id: "message.search", request_kind: "unfiltered" });
+		const cursor = `cursor:${"c".repeat(48)}`;
+		const continued = await yamlRun(
+			["capabilities", "targets", "--capability", "message.search", "--cursor", cursor, "--limit", "1"],
+			0,
+			runtime,
+		);
+		assert.deepEqual(continued.target_selection, { capability_id: "message.search", request_kind: "cursor" });
+		assert.doesNotMatch(JSON.stringify(continued), new RegExp(cursor, "u"));
+		const catalog = await yamlRun(["capabilities"], 0, runtime);
+		assert.equal(Object.hasOwn(catalog, "target_selection"), false);
 		assert.deepEqual(
 			requests.map((item) => item.body.body),
-			[{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } }, { capability_id: "message.search", match: "team", limit: 1 }],
+			[
+				{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } },
+				{ capability_id: "message.search", match: "team", limit: 1 },
+				{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } },
+				{ capability_id: "message.search", limit: 1 },
+				{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } },
+				{ capability_id: "message.search", cursor, limit: 1 },
+				{ client: { name: "ceal", version: WORKER_PACKAGE_VERSION } },
+				{},
+			],
 		);
 	});
+});
+
+test("an empty target match is distinguished from an empty authorized catalog without echoing the selector", async () => {
+	const selector = `https://www.notion.so/${"a".repeat(32)}`;
+	const responseFactory = (request) =>
+		request.operation === "handshake"
+			? handshakeResponse(request)
+			: success(request, {
+					schema_version: "ceal.gateway_discovery.v2",
+					profile_ref: request.profile_ref,
+					membership_ref: "membership:narnia",
+					capabilities: [
+						{
+							capability_id: "notion.page.get",
+							label: "Read one Notion page",
+							effect: "read",
+							target_requirement: "required",
+							input_contract: {
+								schema_version: "ceal.notion_page_get_input.v1",
+								required: ["ref"],
+								ref: { type: "string", format: "notion_page_ref" },
+							},
+							evidence_requirement: "gateway_audit",
+						},
+					],
+					targets: [],
+					target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+					host_decision: "accepted",
+					proof_level: "host_decision",
+					non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+				});
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(
+			["capabilities", "targets", "--capability", "notion.page.get", "--profile", "profile:narnia", "--match", selector],
+			0,
+			{
+				loadSession: async () => storedSession(endpoint),
+				nextRequestId: () => "narnia:target-catalog:empty-match",
+			},
+		);
+		assert.deepEqual(payload.target_catalog, { target_count: 0, returned_count: 0, complete: true, selection_required: false });
+		assert.deepEqual(payload.target_selection, { capability_id: "notion.page.get", request_kind: "match" });
+		assert.match(payload.next_action, /response alone does not prove the capability has no authorized targets/u);
+		assert.match(payload.next_action, /ceal capabilities targets --capability notion\.page\.get --profile profile:narnia --limit 64/u);
+		assert.doesNotMatch(payload.next_action, /<1-64>/u);
+		assert.match(payload.next_action, /call inputs, not target selectors/u);
+		assert.doesNotMatch(JSON.stringify(payload), new RegExp(selector, "u"));
+		assert.equal(requests[1].body.body.match, selector, "the test must exercise a real match request");
+	}, responseFactory);
+});
+
+test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {
+	let selectedCatalog = {
+		target_count: 1,
+		returned_count: 0,
+		complete: false,
+		selection_required: false,
+		next_cursor: `cursor:${"a".repeat(48)}`,
+	};
+	const responseFactory = (request) =>
+		request.operation === "handshake"
+			? handshakeResponse(request)
+			: success(request, {
+					...discoveryResponse(request).value,
+					targets: [],
+					target_catalog: selectedCatalog,
+				});
+	await withGateway(async ({ endpoint }) => {
+		const runtime = { loadSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:target-recovery" };
+		const args = ["capabilities", "targets", "--capability", "message.search", "--profile", "profile:narnia", "--match", "team"];
+		const continued = await yamlRun(args, 0, runtime);
+		assert.deepEqual(continued.target_selection, { capability_id: "message.search", request_kind: "match" });
+		assert.equal(
+			continued.next_action,
+			`Run 'ceal capabilities targets --capability message.search --profile profile:narnia --cursor ${selectedCatalog.next_cursor}'.`,
+		);
+
+		selectedCatalog = { target_count: 1, returned_count: 0, complete: false, selection_required: true };
+		const narrowed = await yamlRun(args, 0, runtime);
+		assert.equal(
+			narrowed.next_action,
+			"Run 'ceal capabilities targets --capability message.search --profile profile:narnia --match <selector>'.",
+		);
+	}, responseFactory);
 });
 
 test("packaged bin reads stdin, completes async discovery, and preserves safe exit behavior", async () => {

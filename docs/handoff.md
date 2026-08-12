@@ -30,6 +30,15 @@ separately approved boundaries.
   points to the explicit `ceal session refresh` remote-write route. This is
   already enforced by the renewal-mode and CLI tests; the stale sibling-goal
   claim must not cause a duplicate repair here.
+- The Worker-side half of `ceal-cli#13` is locally repaired. Target-selection
+  results now identify whether a request included a match, continued a cursor,
+  or requested an unfiltered page without copying a selector into that local
+  projection; a completed zero-count match response says it does not prove an
+  empty authorized catalog and points at a bounded unfiltered query. Help and
+  the installed guide no longer present URLs, call inputs, or opaque resource
+  refs as universal target selectors. Capability-specific selector semantics
+  and query provenance remain Gateway/Protocol work and are not invented in
+  this repository.
 - The current source also contains the client deadline/status/media-type and
   adoption-request boundary repairs, generic HTTP timeout classification,
   narrowed command session capabilities, explicit guide-register provenance,
@@ -80,8 +89,9 @@ separately approved boundaries.
    merely to restamp the quarantine.
 2. Review that exact artifact against the B1 response-depth, authority-key,
    closed-enum, notification-binding, request-envelope, and consecutive-frame
-   proofs; converge frozen tree, dependency, lock, pin, generated contracts,
-   and workflow input in one commit.
+   proofs, plus the `ceal-cli#13` capability-specific target-selector and empty
+   match provenance contract; converge frozen tree, dependency, lock, pin,
+   generated contracts, and workflow input in one commit.
 3. Run the ordinary release gates and tag-resolved `0.76.1` installer crossing plus explicit
    guide-register proof. Ask before choosing a version, pushing, tagging,
    publishing, or installing the new release. Before any tag, close the external
@@ -95,6 +105,8 @@ separately approved boundaries.
 - No final signed Protocol handoff has been received or reviewed.
 - No current source change is signed, released, installed, selected by a
   Gateway, or proved against a live provider.
+- No Gateway capability-specific selector declaration or wire-level distinction
+  between a selector miss and an empty authorized catalog has been received.
 - D2 and bounded D3 are locally complete but remain unreleased.
 - Response-latency and concurrent notification/channel-loss proofs remain
   downstream of coherent signed selection and apply.
@@ -102,6 +114,7 @@ separately approved boundaries.
 ## References
 
 - [update and embedded-guide independence closeout](../charness-artifacts/impl/2026-08-12-update-guide-independence.md)
+- [target-selection ambiguity closeout](../charness-artifacts/impl/2026-08-12-target-selection-ambiguity.md)
 - [pre-handoff Worker contract](../charness-artifacts/spec/2026-08-11-pre-handoff-worker-closeout.md)
 - [B1 consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [superseded B1 handoff request](requests/2026-08-11-to-gateway-final-b1-protocol-handoff.md)

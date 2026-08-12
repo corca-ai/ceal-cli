@@ -159,7 +159,7 @@ export const CEAL_SUBCOMMANDS = [
 		route: ["targets"],
 		description: "Select bounded targets for one capability with the stored access token.",
 		usage:
-			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <text-or-url> | --cursor <opaque>] [--limit <1-64>] [--detail]",
+			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <selector> | --cursor <opaque>] [--limit <1-64>] [--detail]",
 		effect: "read_only",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
@@ -173,6 +173,10 @@ export const CEAL_SUBCOMMANDS = [
 			"authoritative: when it needs a narrower selection it answers",
 			"'target_catalog.selection_required' with no targets and no cursor, so follow",
 			"the returned 'next_action' rather than assuming a page is always available.",
+			"Target selectors are capability-specific. A capability input_contract describes",
+			"call arguments, not what --match accepts; do not reuse an input value, source",
+			"URL, or opaque resource ref as a target selector unless current Gateway guidance",
+			"explicitly declares that selector form.",
 			"--match and --cursor are mutually exclusive. This route is always a live",
 			"query and is never served from the client discovery cache; the catalog-only",
 			"cache flag is rejected here.",
@@ -180,7 +184,7 @@ export const CEAL_SUBCOMMANDS = [
 		options: [
 			"  --capability <id>       Capability returned by 'ceal capabilities'.",
 			"  --profile <profile-ref> Select one assigned Profile for target discovery.",
-			"  --match <text-or-url>   Select current target labels, or an approved source URL.",
+			"  --match <selector>      Submit one capability-specific target selector.",
 			"  --cursor <opaque>       Continue one Gateway-issued selected target page.",
 			"  --limit <1-64>          Bound one selected target page (default: Gateway choice).",
 			"  --detail                Include full per-capability input contracts.",

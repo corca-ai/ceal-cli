@@ -62,7 +62,7 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 });
 
 test("a cold-start worker intent selects capabilities and preserves proof limits", async () => {
-	const guide = `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
+	const guide = readCapabilityGuide();
 	assert.match(guide, /command registry is navigation only|Command discovery is navigation only/u);
 	assert.match(guide, /Read help incrementally along the selected intent/u);
 	assert.match(guide, /Do not front-load downstream\s+call or receipt help before live discovery/u);
@@ -96,9 +96,15 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 });
 
 test("the worker guide teaches detailed contracts and diagnosis of a blocked first Gateway call", async () => {
-	const guide = `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
+	const guide = readCapabilityGuide();
 	assert.match(guide, /`ceal capabilities --profile <profile-ref> --detail`/u);
-	assert.match(guide, /source of truth for required input\s+fields, selectors,\s+and bounds/u);
+	assert.match(guide, /source of truth for required call-input fields and\s+result bounds/u);
+	assert.match(guide, /not the target-selector contract/u);
+	assert.match(guide, /`target_selection\.request_kind`/u);
+	assert.match(guide, /complete catalog with `target_count: 0`.*does not prove the Profile has no authorized target/su);
+	assert.match(guide, /Follow its returned `next_action` to inspect a bounded\s+unfiltered page/u);
+	assert.match(guide, /opaque ref for another capability's\s+call input without making that ref a valid target selector/u);
+	assert.doesNotMatch(guide, /precise text or URL\s+match/u);
 	assert.match(guide, /capabilities that enumerate or\s+resolve resources/u);
 	assert.match(guide, /host sandbox or network policy/u);
 	assert.match(guide, /report host reachability separately from Ceal\s+capability availability/u);
@@ -170,6 +176,10 @@ function runBinarySmoke(name) {
 	assert.equal(result.status, smoke.expectedStatus, result.stderr || result.stdout);
 	assert.equal(result.stderr, "");
 	return result;
+}
+
+function readCapabilityGuide() {
+	return `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
 }
 
 async function runCommand(args) {
