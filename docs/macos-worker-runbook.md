@@ -69,9 +69,10 @@ npm run release:worker:assets -- compose \
   --json
 ```
 
-The output directory is already installer-shaped for one platform: binary,
-platform manifest, deterministic `ceal-guide.tar` containing the complete skill
-directory, notices, `install-ceal.sh`, and `SHA256SUMS`.
+The output directory is already installer-shaped for one platform: a binary
+embedding the deterministic complete guide directory, platform manifest,
+self-contained `ceal-guide-SKILL.md` old-installer compatibility bridge,
+notices, `install-ceal.sh`, and `SHA256SUMS`.
 
 ## 4. What this proves, and what it does not
 

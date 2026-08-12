@@ -24,14 +24,15 @@ These representative routes need nothing but a built or installed worker CLI.
 | --- | --- |
 | `ceal version` | which build is installed |
 | `ceal commands` | the declared route surface, effects included |
-| `ceal guide status` | the signed guide asset resolves beside the binary, and where it would register |
+| `ceal guide status` | the signed embedded guide carrier is available, and where it would register |
 | `ceal session status` | whether this HOME has a configured client session |
 | `ceal observe` | the local page renders this client's cached state; serves until Ctrl-C |
 
 `ceal guide status` needs a **signed installed release**, not a session: the
-guide is resolved relative to the real executable, so a `node dist/bin.js` run
-from a checkout answers `guide_unavailable` no matter how healthy the install
-is. That is a property of the dev build, not a failure.
+complete guide directory is embedded in the real executable and is materialized
+only by explicit registration, so a `node dist/bin.js` run from a checkout
+answers `guide_unavailable` no matter how healthy the install is. That is a
+property of the dev build, not a failure.
 
 Gateway- and session-bound routes fail closed without a Gateway-issued client
 session, and failing closed is the correct answer rather than a broken one:
@@ -60,7 +61,7 @@ remains `remote_write` and may renew before its already-write-capable operation.
 
 The commands above prove the checkout-built surface in a throwaway HOME. A
 separate signed-install run of `ceal version` and `ceal guide status` proves the
-installed release and its adjacent guide. Neither level proves that any
+installed release and its embedded guide carrier. Neither level proves that any
 capability executes, that a receipt is real, that a Profile policy decided
 anything, or that an audit record exists. Do not describe work at either level
 as verified end to end — `AGENTS.md` requires naming the highest proof level
@@ -133,9 +134,11 @@ spending anything:
 gh api repos/corca-ai/ceal-cli --jq '.permissions'
 ```
 
-Then follow `docs/release-and-enrollment.md`, whose final bootstrap-or-update →
-readback step is what turns a published artifact into an accepted one. The first
-directory-carrier release requires bootstrap reinstall from `ceal-v0.76.1`.
+Then follow `docs/release-and-enrollment.md`, whose final update → binary
+readback → explicit guide registration/readback step turns a published artifact
+into an accepted one. The exact tagged `ceal-v0.76.1` installer is a required
+direct-update compatibility proof; no bootstrap reinstall is part of the
+directory-carrier rollout.
 
 ### The npm lane is a separate, currently unconfigured lane
 

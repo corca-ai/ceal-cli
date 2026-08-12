@@ -361,7 +361,7 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandContext): Promise<nu
 			error: {
 				kind: "update_failed",
 				message: "The stable signed worker update could not be completed.",
-				next_action: "Retry once, then reinstall an explicitly approved signed worker release.",
+				next_action: "Retry once. If the signed binary update still fails, report the update result before changing the installed release.",
 			},
 		});
 	}
@@ -397,6 +397,7 @@ function writeUpdate(io: CealCliIo, result: CealStableUpdateResult): number {
 		...(result.platform ? { platform: result.platform } : {}),
 		...(result.artifact_sha256 ? { artifact_sha256: result.artifact_sha256 } : {}),
 		...(result.elapsed_ms === undefined ? {} : { elapsed_ms: result.elapsed_ms }),
+		...(result.guide ? { guide: result.guide } : {}),
 		...(result.error ? { error: result.error } : {}),
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
@@ -518,7 +519,7 @@ function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register"
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available from this command runtime.",
-			next_action: "Reinstall a signed Ceal worker release, then run 'ceal guide status'.",
+			next_action: "Run 'ceal update', then retry 'ceal guide status'. Binary update success does not depend on guide registration.",
 		},
 	});
 	return 3;

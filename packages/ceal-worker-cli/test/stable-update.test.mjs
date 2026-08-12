@@ -46,6 +46,11 @@ test("stable updater only launches a current managed worker generation and reads
 	assert.equal(result.installed_version, "0.65.1");
 	assert.equal(result.platform, "linux-amd64");
 	assert.equal(result.artifact_sha256, sha256(readFileSync(path.join(second, "ceal-linux-amd64"))));
+	assert.deepEqual(result.guide, {
+		status: "registration_not_attempted",
+		next_action: "Run 'ceal guide status', then run 'ceal guide register codex' or 'ceal guide register claude' for the agent host you use.",
+		non_claim: "Guide staging and registration were not attempted and cannot change this binary update result.",
+	});
 	assert.equal(typeof result.elapsed_ms, "number");
 	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 	assert.deepEqual(stages, ["check", "download_install", "verify", "installed_readback"]);
@@ -72,6 +77,16 @@ test("stable updater recognizes a managed darwin worker generation", async (cont
 	assert.equal(result.installed_version, "0.65.2");
 	assert.equal(result.platform, "darwin-arm64");
 	assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-darwin-arm64");
+});
+
+test("stable updater names the detected host without attempting guide registration", async (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-stable-update-guide-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const install = installedGeneration(root, "exit 0\n");
+	const result = await createCealStableUpdateRunner(install, { PATH: process.env.PATH, CODEX_THREAD_ID: "thread" })();
+	assert.equal(result.status, "unchanged");
+	assert.match(result.guide.next_action, /ceal guide register codex/u);
+	assert.equal(result.guide.status, "registration_not_attempted");
 });
 
 test("stable updater fails closed for an unmanaged or tampered staged installer", async (context) => {

@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { sha256 } from "./sha256.js";
+import { isSha256Digest, sha256 } from "./sha256.js";
 
 export interface InstalledWorkerRelease {
 	commandPath: string;
@@ -32,10 +32,11 @@ export function resolveInstalledWorkerRelease(executablePath: string): Installed
 	const inventory = readFileSync(inventoryPath, "utf8");
 	const commandName = basename(commandPath);
 	const platform = /^ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(commandName)?.[1];
-	const generation = /^(?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)-((?:linux|darwin)-(?:arm64|amd64))-([a-f0-9]{64})$/u.exec(
+	const generation = /^(?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)-((?:linux|darwin)-(?:arm64|amd64))-([^-]+)$/u.exec(
 		basename(generationDirectory),
 	);
-	if (!platform || generation?.[1] !== platform || generation[2] !== sha256(inventory)) throw new Error("unmanaged_generation_identity");
+	if (!platform || generation?.[1] !== platform || !isSha256Digest(generation[2]) || generation[2] !== sha256(inventory))
+		throw new Error("unmanaged_generation_identity");
 	const commandLink = join(installDirectory, "ceal");
 	if (!lstatSync(commandLink).isSymbolicLink() || realpathSync(commandLink) !== commandPath) throw new Error("unmanaged_command_link");
 	const installerPath = findVerifiedInstaller(generationDirectory, inventory);
@@ -48,8 +49,8 @@ function findVerifiedInstaller(generationDirectory: string, inventory: string): 
 		try {
 			const stat = lstatSync(file);
 			if (!stat.isFile() || stat.isSymbolicLink()) return [];
-			const expected = new RegExp(`^([a-f0-9]{64}) {2}${escapePattern(name)}$`, "mu").exec(inventory)?.[1];
-			return expected === sha256(readFileSync(file)) ? [file] : [];
+			const expected = new RegExp(`^([^ ]+) {2}${escapePattern(name)}$`, "mu").exec(inventory)?.[1];
+			return isSha256Digest(expected) && expected === sha256(readFileSync(file)) ? [file] : [];
 		} catch {
 			return [];
 		}

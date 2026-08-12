@@ -22,7 +22,11 @@ import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./veri
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
 const INSTALLER_NAME = "install-ceal.sh";
-const GUIDE_ASSET = "ceal-guide.tar";
+// Keep the signed primary inventory readable by every installed updater,
+// including 0.76.1. The complete directory is carried inside each signed SEA
+// binary; this external SKILL.md is only the old installer's compatibility
+// projection and is never the canonical guide source.
+const GUIDE_ASSET = "ceal-guide-SKILL.md";
 const NOTICE_NAME = "THIRD_PARTY_NOTICES.txt";
 const PRIVATE_CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const PRIVATE_CONTROL_SESSION_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-control-session-contract.json";
@@ -104,15 +108,18 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		const binaryName = `ceal-${native.platform}`;
 		const binary = readStagedFile(path.join(nativeOut, binaryName), "native_output_incomplete");
 		if (sha256(binary) !== native.artifact.sha256) fail("native_output_incomplete", "Native worker artifact bytes drifted after its build.");
-		const guide = readStagedFile(path.join(nativeOut, GUIDE_ASSET), "native_output_incomplete");
+		const compatibilityGuide = readStagedFile(path.join(nativeOut, GUIDE_ASSET), "native_output_incomplete");
 		if (
-			native.guide?.name !== GUIDE_ASSET ||
+			native.compatibility_guide?.name !== GUIDE_ASSET ||
+			native.compatibility_guide.sha256 !== sha256(compatibilityGuide) ||
+			native.guide?.name !== "ceal-guide.tar" ||
 			native.guide.format !== "ustar" ||
-			native.guide.sha256 !== sha256(guide) ||
 			!Array.isArray(native.guide.files) ||
-			!native.guide.files.some((file) => file?.path === "SKILL.md")
+			!native.guide.files.some((file) => file?.path === "SKILL.md") ||
+			native.native_smoke?.embedded_guide_sha256 !== native.guide.sha256 ||
+			native.native_smoke?.guide_registration !== true
 		)
-			fail("native_output_incomplete", "Native worker guide bundle metadata is incomplete or drifted.");
+			fail("native_output_incomplete", "Native worker embedded guide metadata is incomplete or drifted.");
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
 		let privateCarrierContract;
@@ -159,7 +166,8 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			command: "ceal",
 			artifact: { name: binaryName, bytes: binary.length, sha256: native.artifact.sha256 },
 			client,
-			guide: { ...native.guide, bytes: guide.length, sha256: sha256(guide) },
+			guide: { ...native.compatibility_guide, bytes: compatibilityGuide.length, sha256: sha256(compatibilityGuide) },
+			embedded_guide: native.guide,
 			installer: { name: INSTALLER_NAME, bytes: installer.length, sha256: sha256(installer) },
 			third_party_notices: { name: NOTICE_NAME, bytes: notices.length, sha256: sha256(notices) },
 			protocol: native.protocol,
@@ -184,7 +192,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		try {
 			writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
 			writeFileSync(path.join(staging, binaryName), binary, { mode: 0o755 });
-			writeFileSync(path.join(staging, GUIDE_ASSET), guide, { mode: 0o644 });
+			writeFileSync(path.join(staging, GUIDE_ASSET), compatibilityGuide, { mode: 0o644 });
 			writeFileSync(path.join(staging, NOTICE_NAME), notices, { mode: 0o644 });
 			writeFileSync(path.join(staging, INSTALLER_NAME), installer, { mode: 0o755 });
 			writeFileSync(path.join(staging, manifestName), manifestBytes, { mode: 0o644 });
@@ -205,7 +213,8 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			assets: {
 				binary: { name: binaryName, sha256: native.artifact.sha256 },
 				manifest: { name: manifestName, sha256: sha256(manifestBytes) },
-				guide: { name: GUIDE_ASSET, sha256: sha256(guide) },
+				guide: { name: GUIDE_ASSET, sha256: sha256(compatibilityGuide) },
+				embedded_guide: { name: native.guide.name, sha256: native.guide.sha256 },
 				installer: { name: INSTALLER_NAME, sha256: sha256(installer) },
 				third_party_notices: { name: NOTICE_NAME, sha256: sha256(notices) },
 			},

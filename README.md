@@ -292,15 +292,16 @@ begins before any worker executable is accepted; the bootstrap script itself
 is re-verified as a signed versioned asset during installation. New releases target
 `linux-arm64`, `linux-amd64`, and `darwin-arm64` (Apple Silicon). Existing Intel
 macOS releases remain immutable historical artifacts but receive no new stable update.
-The installer verifies every
-asset against its cosign keyless identity and the signed `SHA256SUMS`
-inventory before an atomic generation switch under
+The installer verifies its downloaded assets against their cosign keyless
+identity and the signed `SHA256SUMS` inventory before an atomic generation switch under
 `$CEAL_INSTALL_DIR/.ceal-cli/worker/` (default `~/.local/bin`), and the
 installed `ceal update` re-runs the release-staged installer stable-only.
-The first release carrying the complete `ceal-guide.tar` directory is an
-intentional update discontinuity: an installed `ceal-v0.76.1` cannot consume
-that inventory and must use the stable bootstrap command above once. Later
-archive-capable generations resume normal `ceal update` behavior.
+The signed binary embeds the complete deterministic `ceal-guide.tar`; guide
+materialization and host registration are explicit `ceal guide register
+codex|claude` actions and cannot reverse a successful binary update. The signed
+inventory retains a self-contained `ceal-guide-SKILL.md` compatibility bridge
+so the immutable `ceal-v0.76.1` installer can update directly without a
+bootstrap reinstall. New installers neither download nor stage that bridge.
 The tagged CI lane is configured to build and sign these three platforms. A Mac checkout
 can still produce an unsigned local candidate for diagnosis
 ([docs/macos-worker-runbook.md](docs/macos-worker-runbook.md)), but the
@@ -337,9 +338,9 @@ native command builds one host-native `ceal` executable from that internal
 packed consumer (on macOS the Mach-O signature is removed before SEA
 injection and ad-hoc re-signed after); and `release:worker:assets compose`
 turns one native candidate into the installer-facing per-platform set —
-`ceal-<platform>`, `ceal-worker-release-manifest-<platform>.json`, the complete
-skill directory as a deterministic signed `ceal-guide.tar`, notices,
-`install-ceal.sh`, and a checksum inventory — while
+`ceal-<platform>` with the complete deterministic guide directory embedded,
+`ceal-worker-release-manifest-<platform>.json`, the old-installer compatibility
+`ceal-guide-SKILL.md`, notices, `install-ceal.sh`, and a checksum inventory — while
 `release:worker:assets merge` combines per-platform sets into the one exact
 release inventory (shared assets byte-identical, every platform a complete
 binary+manifest pair; a platform never shares another platform's manifest).

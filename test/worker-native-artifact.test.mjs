@@ -13,7 +13,6 @@ import {
 } from "../scripts/build-worker-native-artifact.mjs";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
 import {
-	assertReleaseGuideArchive,
 	assertReleaseManifestProvenance,
 	execReleaseTestProcess,
 	processIsAlive,
@@ -52,7 +51,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 			".ceal-worker-native-artifact",
 			"SHA256SUMS",
 			"THIRD_PARTY_NOTICES.txt",
-			"ceal-guide.tar",
+			"ceal-guide-SKILL.md",
 			"ceal-worker-native-artifact-manifest.json",
 			result.artifact.name,
 		].sort(),
@@ -65,7 +64,11 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	assertReleaseManifestProvenance(manifest, result, fixture.provenance.artifact.sha256);
 	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
 	assert.equal(manifest.native_smoke.operator_surface_absent, true);
-	assertReleaseGuideArchive(manifest, output, "references/capability-workflow.md");
+	assert.equal(manifest.guide.name, "ceal-guide.tar");
+	assert.ok(manifest.guide.files.some((file) => file.path === "references/capability-workflow.md"));
+	assert.equal(manifest.compatibility_guide.name, "ceal-guide-SKILL.md");
+	assert.equal(result.native_smoke.embedded_guide_sha256, manifest.guide.sha256);
+	assert.equal(result.native_smoke.guide_registration, true);
 	const outputCommands = execReleaseTestProcess(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
 	assert.match(outputCommands, /command: ceal\n/u);
 	assert.match(outputCommands, /name: update\n/u);

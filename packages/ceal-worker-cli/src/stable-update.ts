@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
+import { detectCealAgentGuideHost } from "./agent-guide.js";
 import { runBoundedProcess } from "./bounded-process.js";
 import type { CealStableUpdateOptions, CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
@@ -71,6 +72,7 @@ export function createCealStableUpdateRunner(
 	overrides: Partial<CealStableUpdateDeadlines> = {},
 ): () => Promise<CealStableUpdateResult> {
 	const deadlines = { ...DEFAULT_DEADLINES, ...overrides };
+	const detectedGuideHost = detectCealAgentGuideHost(environment);
 	return async (options: CealStableUpdateOptions = {}) => {
 		const startedAt = Date.now();
 		options.onProgress?.("check");
@@ -158,6 +160,13 @@ export function createCealStableUpdateRunner(
 			platform: current.platform,
 			artifact_sha256: sha256(readFileSync(updated.commandPath)),
 			elapsed_ms,
+			guide: {
+				status: "registration_not_attempted",
+				next_action: detectedGuideHost
+					? `Run 'ceal guide register ${detectedGuideHost}' from the updated command to stage and register its signed guide.`
+					: "Run 'ceal guide status', then run 'ceal guide register codex' or 'ceal guide register claude' for the agent host you use.",
+				non_claim: "Guide staging and registration were not attempted and cannot change this binary update result.",
+			},
 		};
 	};
 }

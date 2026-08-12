@@ -540,7 +540,12 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 
 test("update is option-free, stable-only, and keeps child execution behind one YAML result", async () => {
 	let invoked = 0;
+	let guideWrites = 0;
 	const payload = await yamlRun(["update"], 0, {
+		registerAgentGuide: () => {
+			guideWrites += 1;
+			throw new Error("guide registration must remain separate");
+		},
 		runStableUpdate: async () => {
 			invoked += 1;
 			return {
@@ -550,6 +555,11 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 				platform: "linux-arm64",
 				artifact_sha256: "a".repeat(64),
 				elapsed_ms: 42,
+				guide: {
+					status: "registration_not_attempted",
+					next_action: "Run 'ceal guide register codex' from the updated command.",
+					non_claim: "Guide registration was not attempted.",
+				},
 			};
 		},
 	});
@@ -565,6 +575,11 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 		platform: "linux-arm64",
 		artifact_sha256: "a".repeat(64),
 		elapsed_ms: 42,
+		guide: {
+			status: "registration_not_attempted",
+			next_action: "Run 'ceal guide register codex' from the updated command.",
+			non_claim: "Guide registration was not attempted.",
+		},
 		non_claims: ["Gateway_not_contacted", "Agent_not_updated", "operator_cli_not_updated"],
 	});
 	const invalid = await run(["update", "v1.2.3"], {
@@ -575,6 +590,7 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 	});
 	assert.equal(invalid.code, 2);
 	assert.equal(invoked, 1);
+	assert.equal(guideWrites, 0);
 	const unavailable = await yamlRun(["update"], 3);
 	assert.equal(unavailable.schema_version, "ceal.update.v1");
 	assert.equal(unavailable.status, "unavailable");

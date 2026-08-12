@@ -12,7 +12,9 @@
 	},
 	"guide": {
 		"source_path": "skills/ceal-guide",
-		"asset": "ceal-guide.tar",
+		"compatibility_source_path": "scripts/assets/ceal-guide-compatibility-SKILL.md",
+		"compatibility_asset": "ceal-guide-SKILL.md",
+		"embedded_asset": "ceal-guide.tar",
 		"format": "ustar"
 	},
 	"required_gateway_protocol": {

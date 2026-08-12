@@ -299,12 +299,20 @@ function assertClient(client, repoRoot) {
 }
 
 function assertGuide(guide, repoRoot) {
-	if (!isPlainObject(guide) || guide.asset !== "ceal-guide.tar" || guide.source_path !== "skills/ceal-guide" || guide.format !== "ustar")
+	if (
+		!isPlainObject(guide) ||
+		guide.compatibility_asset !== "ceal-guide-SKILL.md" ||
+		guide.compatibility_source_path !== "scripts/assets/ceal-guide-compatibility-SKILL.md" ||
+		guide.embedded_asset !== "ceal-guide.tar" ||
+		guide.source_path !== "skills/ceal-guide" ||
+		guide.format !== "ustar"
+	)
 		fail("invalid_inventory", "Worker release inventory has an invalid guide identity.");
 	const directory = path.join(repoRoot, guide.source_path);
 	if (!existsSync(directory) || !lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
 		fail("invalid_inventory", "Worker release guide input must be a regular non-symlink directory.");
 	requireRegularFile(path.join(directory, "SKILL.md"), "invalid_inventory");
+	requireRegularFile(path.join(repoRoot, guide.compatibility_source_path), "invalid_inventory");
 }
 
 function assertPackageSource(repoRoot, sourcePath, expectedName, command) {

@@ -2,7 +2,18 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -109,11 +120,21 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						dependencies,
 					});
 					const version = resolveVersion(repoRoot, inputs);
-					const artifact = await buildNativeArtifact({ stage, packed, platform, version, dependencies });
-					const guide = materializeOutput({
+					const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
+					const artifact = await buildNativeArtifact({
+						stage,
+						packed,
+						platform,
+						version,
+						guide,
+						guideAsset: inputs.guide.embedded_asset,
+						dependencies,
+					});
+					const guideOutput = materializeOutput({
 						output,
 						repoRoot,
 						inputs,
+						guide,
 						version,
 						platform,
 						artifact,
@@ -132,7 +153,8 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						platform,
 						artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
 						client: packed.client,
-						guide,
+						guide: guideOutput.embedded,
+						compatibility_guide: guideOutput.compatibility,
 						consumer_smoke: packed.consumerSmoke,
 						native_smoke: artifact.smoke,
 						protocol: inputs.protocol,
@@ -158,19 +180,21 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 	}
 }
 
-async function buildNativeArtifact({ stage, packed, platform, version, dependencies }) {
+async function buildNativeArtifact({ stage, packed, platform, version, guide, guideAsset, dependencies }) {
 	const work = path.join(stage, "native");
 	mkdirSync(work, { recursive: true, mode: 0o755 });
 	const bundlePath = path.join(work, "ceal.cjs");
 	const blobPath = path.join(work, "ceal.blob");
+	const guideBundlePath = path.join(work, guideAsset);
 	const artifactPath = path.join(work, `ceal-${platform}`);
 	try {
+		writeFileSync(guideBundlePath, guide.bytes, { mode: 0o644 });
 		await (dependencies.bundle ?? bundleInstalledWorker)({
 			workerBin: packed.consumer.workerBin,
 			bundlePath,
 			consumerDirectory: packed.consumer.directory,
 		});
-		(dependencies.createBlob ?? createBlob)({ bundlePath, blobPath, work });
+		(dependencies.createBlob ?? createBlob)({ bundlePath, blobPath, work, guideBundlePath, guideAsset });
 		(dependencies.copyRuntime ?? copyRuntime)({ artifactPath });
 		chmodSync(artifactPath, 0o755);
 		if (platform.startsWith("darwin-")) (dependencies.removeMachoSignature ?? removeMachoSignature)({ artifactPath });
@@ -181,7 +205,7 @@ async function buildNativeArtifact({ stage, packed, platform, version, dependenc
 			postjectCli: dependencies.resolvePostjectCli?.() ?? resolvePostjectCli(),
 		});
 		if (platform.startsWith("darwin-")) (dependencies.signMachoAdhoc ?? signMachoAdhoc)({ artifactPath });
-		const smoke = (dependencies.smoke ?? smokeArtifact)({ artifactPath, version });
+		const smoke = (dependencies.smoke ?? smokeArtifact)({ artifactPath, version, guide });
 		const bytes = readFileSync(artifactPath);
 		return { name: path.basename(artifactPath), path: artifactPath, bytes: bytes.length, sha256: sha256(bytes), smoke };
 	} catch (error) {
@@ -212,7 +236,7 @@ async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory 
 	}
 }
 
-function createBlob({ bundlePath, blobPath, work }) {
+function createBlob({ bundlePath, blobPath, work, guideBundlePath, guideAsset }) {
 	const config = path.join(work, "ceal.sea.json");
 	writeFileSync(
 		config,
@@ -221,6 +245,7 @@ function createBlob({ bundlePath, blobPath, work }) {
 				main: path.basename(bundlePath),
 				output: path.basename(blobPath),
 				executable: process.execPath,
+				assets: { [guideAsset]: path.basename(guideBundlePath) },
 				disableExperimentalSEAWarning: true,
 				useCodeCache: false,
 				useSnapshot: false,
@@ -273,31 +298,55 @@ function signMachoAdhoc({ artifactPath }) {
 	}
 }
 
-function smokeArtifact({ artifactPath, version }) {
+function smokeArtifact({ artifactPath, version, guide }) {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-smoke-home-"));
+	const installedCommand = prepareManagedSmokeInstall(artifactPath, home, version);
 	const run = (args) =>
-		execFileSync(artifactPath, args, {
+		execFileSync(installedCommand, args, {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, HOME: home },
+			env: {
+				...process.env,
+				HOME: home,
+				CODEX_HOME: path.join(home, ".codex"),
+				CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
+			},
 		});
 	try {
 		const identity = parse(run(["version"]));
 		const commands = parse(run(["commands"]));
 		const help = run(["--help"]);
+		const guideStatus = parse(run(["guide", "status"]));
+		const guideRegistration = parse(run(["guide", "register", "codex"]));
 		const names = Array.isArray(commands?.commands)
 			? commands.commands.map((entry) => entry?.name).filter((entry) => typeof entry === "string")
 			: [];
 		if (
 			identity?.command !== "ceal" ||
 			identity?.version !== version ||
+			guideStatus?.status !== "available" ||
+			guideRegistration?.status !== "available" ||
+			guideRegistration?.hosts?.find?.((host) => host?.agent === "codex")?.registered !== true ||
 			!/^Usage: ceal (?:\[[^\]\n]+\] )*<command> \[options\]$/mu.test(help) ||
 			REQUIRED_COMMANDS.some((name) => !names.includes(name)) ||
 			names.includes("cealctl")
 		) {
 			fail("worker_native_smoke_failed", "Native worker artifact did not expose the expected worker-only command surface.");
 		}
-		return { command: "ceal", version, help: true, required_commands: [...REQUIRED_COMMANDS], operator_surface_absent: true };
+		for (const file of guide.files) {
+			const materialized = path.join(guideRegistration.guide_path, ...file.path.split("/"));
+			if (!existsSync(materialized) || sha256(readFileSync(materialized)) !== file.sha256)
+				fail("worker_native_smoke_failed", "Native worker artifact did not materialize its complete signed guide directory.");
+		}
+		return {
+			command: "ceal",
+			version,
+			help: true,
+			required_commands: [...REQUIRED_COMMANDS],
+			operator_surface_absent: true,
+			embedded_guide_sha256: guide.sha256,
+			guide_registration: true,
+		};
 	} catch (error) {
 		if (error instanceof WorkerNativeArtifactError) throw error;
 		fail("worker_native_smoke_failed", "Native worker artifact could not run its worker-only smoke checks.");
@@ -306,10 +355,31 @@ function smokeArtifact({ artifactPath, version }) {
 	}
 }
 
+function prepareManagedSmokeInstall(artifactPath, home, version) {
+	const platform = /^ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(path.basename(artifactPath))?.[1];
+	if (!platform) fail("worker_native_smoke_failed", "Native worker artifact has an invalid platform name.");
+	const install = path.join(home, "install");
+	const worker = path.join(install, ".ceal-cli", "worker");
+	const installer = Buffer.from("#!/bin/sh\nexit 0\n");
+	const artifact = readFileSync(artifactPath);
+	const commandName = path.basename(artifactPath);
+	const inventory = Buffer.from(`${sha256(artifact)}  ${commandName}\n${sha256(installer)}  install-ceal.sh\n`);
+	const generationId = `${version}-${platform}-${sha256(inventory)}`;
+	const generation = path.join(worker, "releases", generationId);
+	mkdirSync(generation, { recursive: true, mode: 0o700 });
+	writeFileSync(path.join(generation, commandName), artifact, { mode: 0o755 });
+	writeFileSync(path.join(generation, "install-ceal.sh"), installer, { mode: 0o755 });
+	writeFileSync(path.join(generation, "SHA256SUMS"), inventory, { mode: 0o644 });
+	symlinkSync(path.join("releases", generationId), path.join(worker, "current"));
+	symlinkSync(path.join(".ceal-cli", "worker", "current", commandName), path.join(install, "ceal"));
+	return path.join(install, "ceal");
+}
+
 function materializeOutput({
 	output,
 	repoRoot,
 	inputs,
+	guide,
 	version,
 	platform,
 	artifact,
@@ -323,9 +393,9 @@ function materializeOutput({
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
 		copyFileSync(artifact.path, path.join(staging, artifact.name));
 		chmodSync(path.join(staging, artifact.name), 0o755);
-		const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
+		const compatibilityGuide = readFileSync(path.join(repoRoot, inputs.guide.compatibility_source_path));
 		const notice = readFileSync(path.join(repoRoot, NOTICE_FILENAME));
-		writeFileSync(path.join(staging, inputs.guide.asset), guide.bytes, { mode: 0o644 });
+		writeFileSync(path.join(staging, inputs.guide.compatibility_asset), compatibilityGuide, { mode: 0o644 });
 		writeFileSync(path.join(staging, NOTICE_FILENAME), notice, { mode: 0o644 });
 		const manifest = {
 			schema_version: "ceal.worker_native_artifact_manifest.v1",
@@ -334,7 +404,18 @@ function materializeOutput({
 			platform,
 			artifact: { name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 },
 			client,
-			guide: { name: inputs.guide.asset, format: inputs.guide.format, bytes: guide.bytes.length, sha256: guide.sha256, files: guide.files },
+			guide: {
+				name: inputs.guide.embedded_asset,
+				format: inputs.guide.format,
+				bytes: guide.bytes.length,
+				sha256: guide.sha256,
+				files: guide.files,
+			},
+			compatibility_guide: {
+				name: inputs.guide.compatibility_asset,
+				bytes: compatibilityGuide.length,
+				sha256: sha256(compatibilityGuide),
+			},
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,
 			private_leased_consumer_carrier: privateCarrierContract,
@@ -349,7 +430,7 @@ function materializeOutput({
 		writeFileSync(path.join(staging, MANIFEST_FILENAME), manifestBytes, { mode: 0o644 });
 		const entries = [
 			{ name: artifact.name, sha256: artifact.sha256 },
-			{ name: inputs.guide.asset, sha256: guide.sha256 },
+			{ name: inputs.guide.compatibility_asset, sha256: sha256(compatibilityGuide) },
 			{ name: NOTICE_FILENAME, sha256: sha256(notice) },
 			{ name: MANIFEST_FILENAME, sha256: sha256(manifestBytes) },
 		].sort((left, right) => left.name.localeCompare(right.name));
@@ -357,7 +438,7 @@ function materializeOutput({
 			mode: 0o644,
 		});
 		publishOutputDirectory(staging, output);
-		return manifest.guide;
+		return { embedded: manifest.guide, compatibility: manifest.compatibility_guide };
 	} catch (error) {
 		rmSync(staging, { recursive: true, force: true });
 		throw error;

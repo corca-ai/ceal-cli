@@ -221,11 +221,11 @@ verify_checksum() {
 # must stay worker-only: shared assets exactly once, every named platform as a
 # complete binary+manifest pair, and nothing outside the allowlist.
 verify_checksum_inventory() {
-  invalid="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-(linux|darwin)-(amd64|arm64)[.]json|ceal-guide[.]tar|ceal-(linux|darwin)-(amd64|arm64)|install-ceal[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
+  invalid="$(grep -Evc '^[a-f0-9]{64}  (THIRD_PARTY_NOTICES[.]txt|ceal-worker-release-manifest-(linux|darwin)-(amd64|arm64)[.]json|ceal-guide-SKILL[.]md|ceal-(linux|darwin)-(amd64|arm64)|install-ceal[.]sh)$' "$TMP_DIR/SHA256SUMS" || true)"
   [ "$invalid" = 0 ] || fail "SHA256SUMS contains a malformed or unexpected worker entry"
   observed="$(sed -n 's/^[a-f0-9]\{64\}  //p' "$TMP_DIR/SHA256SUMS" | sort)"
   [ -z "$(printf '%s\n' "$observed" | uniq -d)" ] || fail "SHA256SUMS contains a duplicate worker entry"
-  for shared in THIRD_PARTY_NOTICES.txt ceal-guide.tar install-ceal.sh; do
+  for shared in THIRD_PARTY_NOTICES.txt ceal-guide-SKILL.md install-ceal.sh; do
     printf '%s\n' "$observed" | grep -Fqx "$shared" || fail "SHA256SUMS is missing the required worker entry $shared"
   done
   release_platforms=0
@@ -239,11 +239,15 @@ verify_checksum_inventory() {
   [ "$release_platforms" -ge 1 ] || fail "SHA256SUMS names no worker release platform"
   [ "$(wc -l < "$TMP_DIR/SHA256SUMS" | tr -d ' ')" = "$((3 + 2 * release_platforms))" ] || fail "SHA256SUMS must contain exactly the worker-only release entries"
   printf '%s\n' "$observed" | grep -Fqx "ceal-$PLATFORM" || fail "Signed worker release does not include this platform: $PLATFORM"
-  for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt ceal-guide.tar install-ceal.sh; do verify_checksum "$asset"; done
+  # ceal-guide-SKILL.md remains in the signed inventory solely so 0.76.1's
+  # immutable installer can cross to this release. This installer never fetches
+  # or stages it: the complete guide directory is embedded in the signed binary
+  # and explicit `ceal guide register <host>` owns local materialization.
+  for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt install-ceal.sh; do verify_checksum "$asset"; done
 }
 
 verify_manifest_guide() {
-  guide_sha="$(grep -E '^[a-f0-9]{64}  ceal-guide[.]tar$' "$TMP_DIR/SHA256SUMS" | cut -d' ' -f1)"
+  guide_sha="$(compatibility_guide_sha)"
   # These bytes are already signature-verified, so this is a shape and binding
   # check, not a trust boundary. Anchored on the generator's exact two-space
   # layout so a top-level key cannot be satisfied by its namesake nested inside
@@ -262,19 +266,22 @@ verify_manifest_guide() {
     /^  "guide": \{$/                 { in_guide = 1; guide_count += 1; next }
     in_guide && /^  \},?$/            { in_guide = 0; next }
     in_guide && /^    "name": "[^"]*",?$/   { guide_name = scalar($0); guide_name_count += 1; next }
-    in_guide && /^    "format": "[^"]*",?$/ { guide_format = scalar($0); guide_format_count += 1; next }
     in_guide && /^    "sha256": "[^"]*",?$/ { guide_sha = scalar($0); guide_sha_count += 1; next }
     END {
       if (schema_count != 1 || version_count != 1 || platform_count != 1) exit 1
       if (command_count != 1 || guide_count != 1) exit 1
-      if (guide_name_count != 1 || guide_format_count != 1 || guide_sha_count != 1) exit 1
+      if (guide_name_count != 1 || guide_sha_count != 1) exit 1
       if (schema_version != "ceal.worker_release_manifest.v1") exit 1
       if (version != expected_version || platform != expected_platform) exit 1
       if (command != "ceal") exit 1
-      if (guide_name != "ceal-guide.tar" || guide_format != "ustar" || guide_sha != expected_guide_sha) exit 1
+      if (guide_name != "ceal-guide-SKILL.md" || guide_sha != expected_guide_sha) exit 1
     }
   ' "$TMP_DIR/$MANIFEST_ASSET" \
     || fail "Selected guide does not match the signed worker platform manifest"
+}
+
+compatibility_guide_sha() {
+  grep -E '^[a-f0-9]{64}  ceal-guide-SKILL[.]md$' "$TMP_DIR/SHA256SUMS" | cut -d' ' -f1
 }
 
 verify_version_output() {
@@ -304,48 +311,29 @@ download_signed_asset() { asset="$1"; download_asset "$asset"; download_asset "$
 require_regular_directory() { [ -d "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 require_regular_file() { [ -f "$1" ] && [ ! -L "$1" ] || fail "Existing worker release generation is unsafe"; }
 
-verify_and_extract_guide() {
-  guide_members="$TMP_DIR/guide-members"
-  tar -tf "$TMP_DIR/ceal-guide.tar" > "$guide_members" || fail "Signed guide bundle is not a readable tar archive"
-  [ "$(grep -c '^SKILL[.]md$' "$guide_members" || true)" = 1 ] || fail "Signed guide bundle must contain exactly one SKILL.md"
-  [ -z "$(sort "$guide_members" | uniq -d)" ] || fail "Signed guide bundle contains duplicate paths"
-  invalid="$(grep -Evc '^(SKILL[.]md|(agents|assets|references|scripts)/[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*)$' "$guide_members" || true)"
-  [ "$invalid" = 0 ] || fail "Signed guide bundle contains an unsafe or unsupported path"
-  tar -tvf "$TMP_DIR/ceal-guide.tar" > "$TMP_DIR/guide-members-verbose" || fail "Signed guide bundle metadata is unreadable"
-  [ "$(wc -l < "$TMP_DIR/guide-members-verbose" | tr -d ' ')" = "$(wc -l < "$guide_members" | tr -d ' ')" ] || fail "Signed guide bundle metadata is inconsistent"
-  [ "$(grep -Evc '^-' "$TMP_DIR/guide-members-verbose" || true)" = 0 ] || fail "Signed guide bundle contains a link or special file"
-  mkdir "$TMP_DIR/guide"
-  tar -xf "$TMP_DIR/ceal-guide.tar" -C "$TMP_DIR/guide" || fail "Signed guide bundle could not be extracted"
-  unsafe="$(find "$TMP_DIR/guide" ! -type d ! -type f -print)"
-  [ -z "$unsafe" ] || fail "Signed guide bundle contains a link or special file"
-  require_regular_file "$TMP_DIR/guide/SKILL.md"
-}
-
-guide_inventory() {
-  (cd "$1" && find . -mindepth 1 \( -type d -o -type f \) -print | LC_ALL=C sort)
-}
-
-compare_guide_directory() {
-  expected="$1"; actual="$2"
-  [ -z "$(find "$actual" ! -type d ! -type f -print)" ] || fail "Existing worker release generation is unsafe"
-  [ "$(guide_inventory "$expected")" = "$(guide_inventory "$actual")" ] || fail "Existing worker release generation does not match the signed guide"
-  guide_inventory "$expected" | while IFS= read -r relative; do
-    [ -f "$expected/$relative" ] || continue
-    require_regular_file "$actual/$relative"
-    cmp "$expected/$relative" "$actual/$relative" >/dev/null || fail "Existing worker release generation does not match the signed guide"
-    if [ -x "$expected/$relative" ]; then
-      [ -x "$actual/$relative" ] || fail "Existing worker release generation does not match the signed guide mode"
-    else
-      [ ! -x "$actual/$relative" ] || fail "Existing worker release generation does not match the signed guide mode"
-    fi
-  done
-}
-
 verify_generation_root() {
   generation="$1"
-  expected="$({ for asset in $GENERATION_ASSETS; do printf './%s\n' "$asset"; done; printf './guide\n'; } | LC_ALL=C sort)"
+  expected="$(for asset in $GENERATION_ASSETS; do printf './%s\n' "$asset"; done | LC_ALL=C sort)"
   actual="$(cd "$generation" && find . ! -name . -prune -print | LC_ALL=C sort)"
-  [ "$actual" = "$expected" ] || fail "Existing worker release generation contains an unexpected root entry"
+  legacy_expected="$({ printf '%s\n' "$expected"; printf './guide\n'; } | LC_ALL=C sort)"
+  if [ "$actual" = "$legacy_expected" ]; then
+    require_regular_directory "$generation/guide"
+    require_regular_file "$generation/guide/SKILL.md"
+    [ "$(cd "$generation/guide" && find . ! -name . -print | LC_ALL=C sort)" = './SKILL.md' ] \
+      || fail "Existing worker release generation contains an unexpected guide entry"
+    # The immutable 0.76.1 installer inherited the caller's umask for these two
+    # noncanonical compatibility entries. Their enclosing worker state is
+    # owner-only, so accept that historical mode range while still refusing
+    # special bits, executable guide files, links, extra entries, and byte drift.
+    [ "$(find "$generation/guide" -type d -perm -0700 ! -perm -04000 ! -perm -02000 ! -perm -01000 -print)" = "$generation/guide" ] \
+      || fail "Existing worker release generation has an unsafe compatibility guide directory mode"
+    [ "$(find "$generation/guide/SKILL.md" -type f -perm -0600 ! -perm -0100 ! -perm -0010 ! -perm -0001 ! -perm -04000 ! -perm -02000 ! -perm -01000 -print)" = "$generation/guide/SKILL.md" ] \
+      || fail "Existing worker release generation has an unsafe compatibility guide file mode"
+    [ "$(sha256_of "$generation/guide/SKILL.md")" = "$(compatibility_guide_sha)" ] \
+      || fail "Existing worker release generation does not match the signed compatibility guide"
+  else
+    [ "$actual" = "$expected" ] || fail "Existing worker release generation contains an unexpected root entry"
+  fi
   [ -x "$generation/$COMMAND_ASSET" ] || fail "Existing worker release generation has a non-executable worker binary"
   [ -x "$generation/install-ceal.sh" ] || fail "Existing worker release generation has a non-executable installer"
   for asset in "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt SHA256SUMS; do
@@ -416,7 +404,7 @@ need mktemp; TMP_DIR="$(mktemp -d)"; trap cleanup EXIT HUP INT TERM
 probe_mv_t
 bootstrap_cosign
 need_sha256
-for tool in awk cmp curl cosign cut find grep sed sort tar tr uniq wc uname mktemp readlink; do need "$tool"; done
+for tool in awk cp curl cosign cut find grep sed sort tr uniq wc uname mktemp readlink; do need "$tool"; done
 if [ "$VERSION" = stable ]; then resolve_stable_release; fi
 if [ -n "${CEAL_MINIMUM_VERSION:-}" ]; then
   printf '%s\n' "$CEAL_MINIMUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || fail "CEAL_MINIMUM_VERSION must be a semantic version when stable update is requested"
@@ -433,9 +421,9 @@ STATE_DIR="$STATE_ROOT/worker"; [ ! -e "$STATE_DIR" ] && (umask 077; mkdir "$STA
 LOCK_PATH="$STATE_DIR/install.lock"; acquire_install_lock
 COMMAND_ASSET="ceal-$PLATFORM"; MANIFEST_ASSET="ceal-worker-release-manifest-$PLATFORM.json"
 GENERATION_ASSETS="$COMMAND_ASSET $MANIFEST_ASSET THIRD_PARTY_NOTICES.txt install-ceal.sh SHA256SUMS"
-for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt ceal-guide.tar install-ceal.sh SHA256SUMS; do download_signed_asset "$asset"; verify_signature "$asset"; done
+for asset in "$COMMAND_ASSET" "$MANIFEST_ASSET" THIRD_PARTY_NOTICES.txt install-ceal.sh SHA256SUMS; do download_signed_asset "$asset"; verify_signature "$asset"; done
 [ -z "$STABLE_RELEASE_SET_SHA" ] || [ "$(sha256_of "$TMP_DIR/SHA256SUMS")" = "$STABLE_RELEASE_SET_SHA" ] || fail "Stable release pointer does not match the downloaded signed SHA256SUMS"
-verify_checksum_inventory; verify_manifest_guide; verify_and_extract_guide
+verify_checksum_inventory; verify_manifest_guide
 chmod 755 "$TMP_DIR/$COMMAND_ASSET"; verify_version_output "$TMP_DIR/$COMMAND_ASSET"; "$TMP_DIR/$COMMAND_ASSET" --help >/dev/null
 COMMAND_TARGET="$INSTALL_DIR/ceal"; COMMAND_LINK_TARGET=".ceal-cli/worker/current/$COMMAND_ASSET"; LEGACY_COMMAND_LINK_TARGET=".ceal-cli/current/$COMMAND_ASSET"; CURRENT_LINK="$STATE_DIR/current"; capture_target
 if [ -L "$CURRENT_LINK" ]; then PREVIOUS_CURRENT="$(readlink "$CURRENT_LINK")"; elif [ -e "$CURRENT_LINK" ]; then fail "Worker current pointer must be a symlink"; fi
@@ -443,17 +431,16 @@ RELEASE_SET_SHA="$(sha256_of "$TMP_DIR/SHA256SUMS")"; GENERATION_ID="${VERSION#c
 if [ ! -e "$GENERATION_DIR" ]; then
   STAGED_GENERATION="$STATE_DIR/releases/.next-$GENERATION_ID-$$"; mkdir "$STAGED_GENERATION"
   for asset in $GENERATION_ASSETS; do cp "$TMP_DIR/$asset" "$STAGED_GENERATION/$asset"; done
-  cp -R "$TMP_DIR/guide" "$STAGED_GENERATION/guide"; chmod 755 "$STAGED_GENERATION/$COMMAND_ASSET" "$STAGED_GENERATION/install-ceal.sh"
+  chmod 755 "$STAGED_GENERATION/$COMMAND_ASSET" "$STAGED_GENERATION/install-ceal.sh"
   GENERATION_CREATED=1; mv "$STAGED_GENERATION" "$GENERATION_DIR"
 else
-  require_regular_directory "$GENERATION_DIR"; require_regular_directory "$GENERATION_DIR/guide"
+  require_regular_directory "$GENERATION_DIR"
   verify_generation_root "$GENERATION_DIR"
   for asset in $GENERATION_ASSETS; do require_regular_file "$GENERATION_DIR/$asset"; [ "$(sha256_of "$GENERATION_DIR/$asset")" = "$(sha256_of "$TMP_DIR/$asset")" ] || fail "Existing worker release generation does not match the signed release"; done
-  compare_guide_directory "$TMP_DIR/guide" "$GENERATION_DIR/guide"
 fi
 replace_link "releases/$GENERATION_ID" "$CURRENT_LINK"; CURRENT_SWITCHED=1
 if [ "$TARGET_NEEDS_LINK_UPDATE" = 1 ]; then TARGET_MUTATED=1; rm -f "$COMMAND_TARGET"; ln -s "$COMMAND_LINK_TARGET" "$COMMAND_TARGET"; fi
 verify_version_output "$COMMAND_TARGET"; COMMITTED=1
 printf 'Installed ceal %s (%s) as worker at %s\n' "$VERSION" "$PLATFORM" "$INSTALL_DIR"
 print_path_guidance
-printf 'Signed guide staged at %s; register it through the selected agent runtime (it is not auto-loaded).\n' "$GENERATION_DIR/guide/SKILL.md"
+printf "The signed binary carries the complete guide directory. Run 'ceal guide register codex' or 'ceal guide register claude' explicitly; guide registration never changes this install result.\n"

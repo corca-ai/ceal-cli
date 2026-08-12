@@ -1,5 +1,22 @@
-import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, symlinkSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { type CealGuideBundle, decodeCealGuideBundle } from "./guide-bundle.js";
+import { resolveInstalledWorkerRelease } from "./managed-worker-install.js";
+import { isSha256Digest, sha256 } from "./sha256.js";
 
 export type CealAgentGuideHost = "codex" | "claude";
 
@@ -141,6 +158,9 @@ export interface CealAgentGuideState {
 	guide_id: "ceal-guide";
 	guide_path?: string;
 	update_safe: boolean;
+	carrier?: "generation" | "embedded";
+	materialized?: boolean;
+	next_action?: string;
 	// Whether `agent` names the host this process is running inside, or a
 	// fallback because no host identified itself. A reader that only reads the
 	// top-level fields is right by default when this says `detected`.
@@ -170,6 +190,7 @@ export function createCealAgentGuideStore(
 	codexHomeDirectory: string | undefined,
 	claudeConfigDirectory?: string | undefined,
 	detectedHost?: CealAgentGuideHost | undefined,
+	embeddedGuideBundle?: Uint8Array | null | undefined,
 ): CealAgentGuideStore | undefined {
 	// The host this process runs inside answers "you" better than a table order.
 	const defaultAgent = detectedHost ?? DEFAULT_AGENT_GUIDE_HOST;
@@ -186,10 +207,21 @@ export function createCealAgentGuideStore(
 		});
 	}
 	let guidePath: string;
+	let legacyGuidePath: string | undefined;
+	let embedded: { bundle: CealGuideBundle; stateRoot: string } | undefined;
 	try {
 		const releaseDirectory = dirname(realpathSync(executablePath));
-		guidePath = resolve(releaseDirectory, "..", "..", "current", "guide");
-		assertGuideAvailable(guidePath);
+		legacyGuidePath = resolve(releaseDirectory, "..", "..", "current", "guide");
+		if (embeddedGuideBundle !== undefined) {
+			if (embeddedGuideBundle === null) throw new Error("embedded_guide_missing");
+			const installed = resolveInstalledWorkerRelease(executablePath);
+			const workerState = dirname(dirname(installed.generationDirectory));
+			embedded = { bundle: decodeCealGuideBundle(embeddedGuideBundle), stateRoot: join(workerState, "guides") };
+			guidePath = join(embedded.stateRoot, "versions", embedded.bundle.sha256);
+		} else {
+			guidePath = legacyGuidePath;
+			assertGuideAvailable(guidePath);
+		}
 	} catch {
 		return unavailableStore(defaultAgent, detectedHost);
 	}
@@ -207,8 +239,20 @@ export function createCealAgentGuideStore(
 		agent_source: state.agent === detectedHost ? "detected" : "default",
 	});
 	return {
-		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved))),
-		register: (agent) => act(agent, (target, registrationPath) => registerGuide(guidePath, target, registrationPath, resolved)),
+		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved, embedded?.bundle))),
+		register: (agent) =>
+			act(agent, (target, registrationPath) => {
+				if (embedded) {
+					if (!registrationCanBeUpdated(registrationPath, guidePath, legacyGuidePath, embedded.stateRoot))
+						return conflictState(guidePath, target, resolved, embedded.bundle);
+					try {
+						materializeEmbeddedGuide(embedded.stateRoot, embedded.bundle);
+					} catch {
+						return guideMaterializationFailure(guidePath, target, resolved, embedded.bundle);
+					}
+				}
+				return registerGuide(guidePath, target, registrationPath, resolved, legacyGuidePath, embedded?.stateRoot, embedded?.bundle);
+			}),
 	};
 }
 
@@ -239,7 +283,8 @@ function unavailableState(agent: CealAgentGuideHost): CealAgentGuideState {
 		error: {
 			kind: "guide_unavailable",
 			message: "The signed Ceal guide is not available beside this installed binary.",
-			next_action: "Reinstall a signed Ceal worker release, then run 'ceal guide status'.",
+			next_action:
+				"The installed binary remains usable. Run 'ceal update' when a newer signed release is available, then retry 'ceal guide status'; report the release if the guide is still unavailable.",
 		},
 	};
 }
@@ -278,14 +323,18 @@ function assertGuideAvailable(guidePath: string): void {
 	if (!existsSync(skillPath) || !lstatSync(skillPath).isFile()) throw new Error("guide_unavailable");
 }
 
-function hostStates(guidePath: string, resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>): readonly CealAgentGuideHostState[] {
+function hostStates(
+	guidePath: string,
+	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	guideUsable = true,
+): readonly CealAgentGuideHostState[] {
 	return CEAL_AGENT_GUIDE_HOSTS.map((host) => {
 		const registrationPath = resolved.get(host.agent)?.registrationPath;
 		if (!registrationPath) return { agent: host.agent, status: "unresolved", registered: false } satisfies CealAgentGuideHostState;
-		const registered = registrationMatches(guidePath, registrationPath);
+		const registered = guideUsable && registrationMatches(guidePath, registrationPath);
 		return {
 			agent: host.agent,
-			status: registered ? "registered" : "staged",
+			status: registered ? "registered" : guideUsable ? "staged" : "unavailable",
 			registration_path: registrationPath,
 			registered,
 		} satisfies CealAgentGuideHostState;
@@ -299,13 +348,35 @@ function inspectRegistration(
 	guidePath: string,
 	agent: CealAgentGuideHost,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	embeddedBundle?: CealGuideBundle,
 ): CealAgentGuideState {
+	const embedded = embeddedBundle !== undefined;
+	const materialized = pathEntryExists(guidePath);
+	if (embeddedBundle && materialized) {
+		try {
+			verifyMaterializedGuide(guidePath, embeddedBundle);
+		} catch {
+			return guideIntegrityFailure(guidePath, agent, resolved);
+		}
+	}
+	const registered = resolved.get(agent)?.registrationPath ? registrationMatches(guidePath, resolved.get(agent)!.registrationPath!) : false;
 	return {
 		status: "available",
 		agent,
 		guide_id: "ceal-guide",
-		guide_path: guidePath,
-		update_safe: true,
+		...(!embedded || materialized ? { guide_path: guidePath } : {}),
+		update_safe: !embedded,
+		...(embedded
+			? {
+					carrier: "embedded" as const,
+					materialized,
+					...(registered
+						? {}
+						: {
+								next_action: `Run 'ceal guide register ${agent}' to stage and register this signed guide directory for ${hostRow(agent).label}.`,
+							}),
+				}
+			: {}),
 		hosts: hostStates(guidePath, resolved),
 	};
 }
@@ -323,45 +394,208 @@ function registerGuide(
 	agent: CealAgentGuideHost,
 	registrationPath: string,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	legacyGuidePath?: string,
+	embeddedStateRoot?: string,
+	embeddedBundle?: CealGuideBundle,
 ): CealAgentGuideState {
 	try {
 		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) {
-			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved);
-			return conflictState(guidePath, agent, resolved);
+			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+			// The signed 0.76.1 runtime registered the generation-local `current/guide`
+			// path. The embedded directory carrier replaces only that installer-owned
+			// link automatically; every other occupant remains a deliberate conflict.
+			if (
+				(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
+				(embeddedStateRoot && registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot))
+			)
+				replaceManagedRegistration(registrationPath, guidePath);
+			else return conflictState(guidePath, agent, resolved, embeddedBundle);
+			return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
 		}
 		mkdirSync(dirname(registrationPath), { recursive: true, mode: 0o700 });
 		symlinkSync(guidePath, registrationPath, "dir");
-		return inspectRegistration(guidePath, agent, resolved);
+		return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
 	} catch {
 		// Another process can publish the same registration after the existence
 		// check and before symlinkSync. The requested final state is success even
 		// when this process lost that race; a different occupant is still the same
 		// deliberate conflict the pre-check reports.
-		if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved);
-		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) return conflictState(guidePath, agent, resolved);
-		const inspected = inspectRegistration(guidePath, agent, resolved);
+		if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) return conflictState(guidePath, agent, resolved, embeddedBundle);
+		const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
 		// Distinguish "the skills directory itself is unusable" from "something
 		// occupies the registration path". Found on a real host whose
 		// `~/.claude/skills` is a link to a directory that does not exist: the
 		// generic advice to retry "without replacing an existing skill directory"
 		// sent the operator looking for a file that was never there.
 		const danglingParent = danglingParentTarget(registrationPath);
-		return {
-			...inspected,
-			status: "unavailable",
-			hosts: withActingHostUnavailable(inspected, agent),
-			error: {
-				kind: "registration_failed",
-				message:
-					danglingParent === undefined
-						? `The Ceal guide could not be registered with ${hostRow(agent).label}.`
-						: `The ${hostRow(agent).label} skills directory is a link to '${danglingParent}', which does not exist.`,
-				next_action:
-					danglingParent === undefined
-						? "Inspect the reported registration path and retry without replacing an existing skill directory."
-						: `Create that directory, or set ${hostRow(agent).environmentVariable} to a usable configuration directory, then retry.`,
-			},
-		};
+		return unavailableFromInspection(inspected, agent, {
+			kind: "registration_failed",
+			message:
+				danglingParent === undefined
+					? `The Ceal guide could not be registered with ${hostRow(agent).label}.`
+					: `The ${hostRow(agent).label} skills directory is a link to '${danglingParent}', which does not exist.`,
+			next_action:
+				danglingParent === undefined
+					? "Inspect the reported registration path and retry without replacing an existing skill directory."
+					: `Create that directory, or set ${hostRow(agent).environmentVariable} to a usable configuration directory, then retry.`,
+		});
+	}
+}
+
+function guideMaterializationFailure(
+	guidePath: string,
+	agent: CealAgentGuideHost,
+	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	embeddedBundle: CealGuideBundle,
+): CealAgentGuideState {
+	const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+	return unavailableFromInspection(inspected, agent, {
+		kind: "registration_failed",
+		message: "The signed Ceal guide could not be staged in local guide state.",
+		next_action: `Inspect '${dirname(guidePath)}' and retry 'ceal guide register ${agent}'. The installed Ceal binary is unaffected.`,
+	});
+}
+
+function guideIntegrityFailure(
+	guidePath: string,
+	agent: CealAgentGuideHost,
+	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+): CealAgentGuideState {
+	return {
+		status: "unavailable",
+		agent,
+		guide_id: "ceal-guide",
+		update_safe: false,
+		carrier: "embedded",
+		materialized: false,
+		hosts: hostStates(guidePath, resolved, false),
+		error: {
+			kind: "registration_failed",
+			message: "The materialized Ceal guide does not match the signed guide carried by this binary.",
+			next_action: `Inspect '${guidePath}' and report the integrity failure. The installed Ceal binary is unaffected.`,
+		},
+	};
+}
+
+function materializeEmbeddedGuide(stateRoot: string, bundle: CealGuideBundle): void {
+	const versions = join(stateRoot, "versions");
+	const ownership = join(stateRoot, "ownership");
+	ensureRegularDirectory(stateRoot);
+	ensureRegularDirectory(versions);
+	ensureRegularDirectory(ownership);
+	const target = join(versions, bundle.sha256);
+	if (pathEntryExists(target)) verifyMaterializedGuide(target, bundle);
+	else {
+		const staging = mkdtempSync(join(versions, `.next-${bundle.sha256}-`));
+		try {
+			for (const file of bundle.files) {
+				const destination = join(staging, ...file.path.split("/"));
+				ensureRegularDirectory(dirname(destination));
+				writeFileSync(destination, file.bytes, { flag: "wx", mode: file.mode });
+				chmodSync(destination, file.mode);
+			}
+			try {
+				renameSync(staging, target);
+			} catch {
+				if (!pathEntryExists(target)) throw new Error("guide_publish_failed");
+			}
+		} finally {
+			rmSync(staging, { recursive: true, force: true });
+		}
+		verifyMaterializedGuide(target, bundle);
+	}
+	ensureGuideOwnershipMarker(ownership, bundle.sha256);
+}
+
+function ensureGuideOwnershipMarker(ownership: string, digest: string): void {
+	const marker = join(ownership, digest);
+	const expected = `ceal.worker_guide_materialization.v1 ${digest}\n`;
+	try {
+		writeFileSync(marker, expected, { flag: "wx", mode: 0o600 });
+	} catch {
+		// A concurrent registration can publish the same immutable version. Its
+		// marker is acceptable only when it is the exact Ceal-owned statement.
+	}
+	const stat = lstatSync(marker);
+	if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o7777) !== 0o600 || readFileSync(marker, "utf8") !== expected)
+		throw new Error("unsafe_guide_state");
+}
+
+function pathEntryExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function ensureRegularDirectory(path: string): void {
+	if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 });
+	const stat = lstatSync(path);
+	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o7022) !== 0) throw new Error("unsafe_guide_state");
+}
+
+function verifyMaterializedGuide(root: string, bundle: CealGuideBundle): void {
+	const rootStat = lstatSync(root);
+	if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || (rootStat.mode & 0o7777) !== 0o700) throw new Error("unsafe_guide_state");
+	const expected = new Map(bundle.files.map((file) => [file.path, file]));
+	const observed: string[] = [];
+	const visit = (directory: string, prefix: string): void => {
+		for (const entry of readdirSync(directory).sort()) {
+			const relative = prefix ? `${prefix}/${entry}` : entry;
+			const absolute = join(directory, entry);
+			const stat = lstatSync(absolute);
+			if (stat.isSymbolicLink()) throw new Error("unsafe_guide_state");
+			if (stat.isDirectory()) {
+				if ((stat.mode & 0o7777) !== 0o700) throw new Error("unsafe_guide_state");
+				visit(absolute, relative);
+			} else if (stat.isFile()) observed.push(relative);
+			else throw new Error("unsafe_guide_state");
+		}
+	};
+	visit(root, "");
+	if (observed.length !== expected.size || observed.some((path) => !expected.has(path))) throw new Error("guide_state_drift");
+	for (const [path, file] of expected) {
+		const absolute = join(root, ...path.split("/"));
+		const stat = lstatSync(absolute);
+		if (sha256(readFileSync(absolute)) !== sha256(Buffer.from(file.bytes)) || (stat.mode & 0o7777) !== file.mode)
+			throw new Error("guide_state_drift");
+	}
+}
+
+function registrationPointsIntoEmbeddedState(registrationPath: string, stateRoot: string): boolean {
+	try {
+		const target = registrationTarget(registrationPath);
+		if (!target) return false;
+		const versions = join(stateRoot, "versions");
+		const digest = target.slice(target.lastIndexOf("/") + 1);
+		if (dirname(target) !== versions || !isSha256Digest(digest)) return false;
+		const targetStat = lstatSync(target);
+		const marker = join(stateRoot, "ownership", digest);
+		const markerStat = lstatSync(marker);
+		return (
+			targetStat.isDirectory() &&
+			!targetStat.isSymbolicLink() &&
+			markerStat.isFile() &&
+			!markerStat.isSymbolicLink() &&
+			(markerStat.mode & 0o7777) === 0o600 &&
+			readFileSync(marker, "utf8") === `ceal.worker_guide_materialization.v1 ${digest}\n`
+		);
+	} catch {
+		return false;
+	}
+}
+
+function replaceManagedRegistration(registrationPath: string, guidePath: string): void {
+	const candidate = join(dirname(registrationPath), `.ceal-guide-next-${process.pid}`);
+	rmSync(candidate, { force: true });
+	try {
+		symlinkSync(guidePath, candidate, "dir");
+		renameSync(candidate, registrationPath);
+	} finally {
+		rmSync(candidate, { force: true });
 	}
 }
 
@@ -369,28 +603,64 @@ function conflictState(
 	guidePath: string,
 	agent: CealAgentGuideHost,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	embeddedBundle?: CealGuideBundle,
 ): CealAgentGuideState {
-	const inspected = inspectRegistration(guidePath, agent, resolved);
+	const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+	return unavailableFromInspection(inspected, agent, {
+		kind: "registration_conflict",
+		message: `The ${hostRow(agent).label} ceal-guide path already contains an unmanaged file, directory, or link.`,
+		next_action: "Inspect the existing registration path and replace it deliberately before retrying.",
+	});
+}
+
+function unavailableFromInspection(
+	inspected: CealAgentGuideState,
+	agent: CealAgentGuideHost,
+	error: NonNullable<CealAgentGuideState["error"]>,
+): CealAgentGuideState {
 	return {
 		...inspected,
 		status: "unavailable",
 		hosts: withActingHostUnavailable(inspected, agent),
-		error: {
-			kind: "registration_conflict",
-			message: `The ${hostRow(agent).label} ceal-guide path already contains an unmanaged file, directory, or link.`,
-			next_action: "Inspect the existing registration path and replace it deliberately before retrying.",
-		},
+		error,
 	};
+}
+
+function registrationCanBeUpdated(
+	registrationPath: string,
+	guidePath: string,
+	legacyGuidePath: string | undefined,
+	embeddedStateRoot: string,
+): boolean {
+	if (!existsSync(registrationPath) && !isDanglingSymlink(registrationPath)) return true;
+	return (
+		registrationPointsTo(registrationPath, guidePath) ||
+		Boolean(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
+		registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot)
+	);
+}
+
+function registrationPointsTo(registrationPath: string, targetPath: string): boolean {
+	return registrationTarget(registrationPath) === targetPath;
 }
 
 function registrationMatches(guidePath: string, registrationPath: string): boolean {
 	try {
-		if (!lstatSync(registrationPath).isSymbolicLink()) return false;
-		const link = readlinkSync(registrationPath);
-		const resolvedLink = isAbsolute(link) ? link : resolve(dirname(registrationPath), link);
+		const resolvedLink = registrationTarget(registrationPath);
+		if (!resolvedLink) return false;
 		return realpathSync(resolvedLink) === realpathSync(guidePath);
 	} catch {
 		return false;
+	}
+}
+
+function registrationTarget(registrationPath: string): string | undefined {
+	try {
+		if (!lstatSync(registrationPath).isSymbolicLink()) return undefined;
+		const link = readlinkSync(registrationPath);
+		return isAbsolute(link) ? link : resolve(dirname(registrationPath), link);
+	} catch {
+		return undefined;
 	}
 }
 

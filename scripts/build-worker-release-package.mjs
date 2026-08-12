@@ -323,7 +323,7 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 		cpSync(packed.worker.path, artifactPath, { dereference: false });
 		const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
 		const notice = readFileSync(path.join(repoRoot, NOTICE_FILENAME));
-		writeFileSync(path.join(staging, inputs.guide.asset), guide.bytes, { mode: 0o644 });
+		writeFileSync(path.join(staging, inputs.guide.embedded_asset), guide.bytes, { mode: 0o644 });
 		writeFileSync(path.join(staging, NOTICE_FILENAME), notice, { mode: 0o644 });
 		const manifest = {
 			schema_version: "ceal.worker_release_package_manifest.v1",
@@ -331,7 +331,13 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 			version,
 			artifact: { name: packed.worker.name, bytes: packed.worker.bytes, sha256: packed.worker.sha256 },
 			client: packed.client,
-			guide: { name: inputs.guide.asset, format: inputs.guide.format, bytes: guide.bytes.length, sha256: guide.sha256, files: guide.files },
+			guide: {
+				name: inputs.guide.embedded_asset,
+				format: inputs.guide.format,
+				bytes: guide.bytes.length,
+				sha256: guide.sha256,
+				files: guide.files,
+			},
 			third_party_notices: { name: NOTICE_FILENAME, bytes: notice.length, sha256: sha256(notice) },
 			protocol: inputs.protocol,
 			consumer_smoke: packed.consumerSmoke,
@@ -341,7 +347,7 @@ function materializeOutput({ output, repoRoot, inputs, version, packed }) {
 		writeFileSync(path.join(staging, MANIFEST_FILENAME), manifestBytes, { mode: 0o644 });
 		const checksumEntries = [
 			{ name: packed.worker.name, sha256: packed.worker.sha256 },
-			{ name: inputs.guide.asset, sha256: guide.sha256 },
+			{ name: inputs.guide.embedded_asset, sha256: guide.sha256 },
 			{ name: NOTICE_FILENAME, sha256: sha256(notice) },
 			{ name: MANIFEST_FILENAME, sha256: sha256(manifestBytes) },
 		].sort((left, right) => left.name.localeCompare(right.name));

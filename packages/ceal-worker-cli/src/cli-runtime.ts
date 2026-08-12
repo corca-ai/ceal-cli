@@ -22,6 +22,12 @@ export interface CealStableUpdateResult {
 	platform?: CealWorkerPlatform;
 	artifact_sha256?: string;
 	elapsed_ms?: number;
+	/** Guide activation is an explicit local action and never part of update success. */
+	guide?: {
+		status: "registration_not_attempted";
+		next_action: string;
+		non_claim: string;
+	};
 	error?: {
 		kind: "update_unavailable" | "update_failed" | "update_readback_failed";
 		message: string;

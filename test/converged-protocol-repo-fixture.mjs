@@ -20,6 +20,7 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	copy("packages/ceal-client/package.json", root);
 	copy("packages/ceal-worker-cli/package.json", root);
 	copy("skills/ceal-guide", root);
+	copy("scripts/assets/ceal-guide-compatibility-SKILL.md", root);
 	copy("worker-release-inputs.json", root);
 	copy("install-ceal.sh", root);
 	mkdirSync(path.join(root, "docs", "requests"), { recursive: true });

@@ -37,12 +37,13 @@ export const CEAL_SUBCOMMANDS = [
 		effect: "read_only",
 		evidence: "surface",
 		result_schema: "ceal.guide.v1",
-		recovery: "Reinstall a signed Ceal worker release, then run 'ceal guide status' again.",
+		recovery:
+			"Run 'ceal update' when a newer signed release is available, then retry; report a still-missing guide without reinstalling the binary.",
 	},
 	{
 		parent: "guide",
 		route: ["register", "codex"],
-		description: "Link the update-safe signed guide into the configured Codex skill directory.",
+		description: "Materialize and link the installed binary's signed guide into the configured Codex skill directory.",
 		usage: "ceal guide register codex",
 		effect: "local_write",
 		evidence: "surface",
@@ -52,7 +53,7 @@ export const CEAL_SUBCOMMANDS = [
 	{
 		parent: "guide",
 		route: ["register", "claude"],
-		description: "Link the update-safe signed guide into the configured Claude Code skill directory.",
+		description: "Materialize and link the installed binary's signed guide into the configured Claude Code skill directory.",
 		usage: "ceal guide register claude",
 		effect: "local_write",
 		evidence: "surface",

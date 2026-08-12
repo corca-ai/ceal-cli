@@ -37,10 +37,12 @@ apply remain separately approved boundaries.
   directory skill carrier. Ship-facing asset merge now re-asserts the Protocol
   quarantine before reading composed inputs. These are local source/test
   results, not installed worker claims.
-- Signed `0.76.1` understands only the legacy single-file guide updater. The
-  operator accepted direct rollout of the directory carrier: an upgrade from
-  `0.76.1` requires one stable-bootstrap reinstall; archive-capable successors
-  can resume ordinary updates.
+- The next binary embeds the complete deterministic guide directory. Binary
+  update is separate from explicit per-host `ceal guide register codex|claude`:
+  guide materialization failure cannot reverse update success. A permanent
+  self-contained compatibility asset keeps the immutable `0.76.1` installer
+  able to cross directly without reinstall; that old binary cannot emit the new
+  guide advisory, so read it from the updated command afterwards.
 - The frozen Protocol copy and client/worker dependencies retain reviewed local
   `0.72.17` as a quarantined B1 development baseline. The Gateway has since
   moved the subtree and scheduled one final signed cut after C1; no intermediate
@@ -71,9 +73,9 @@ apply remain separately approved boundaries.
    closed-enum, notification-binding, request-envelope, and consecutive-frame
    proofs; converge frozen tree, dependency, lock, pin, generated contracts,
    and workflow input in one commit.
-3. Run the ordinary release gates and bootstrap-install proof for the directory
-   guide carrier. Ask before choosing a version, pushing, tagging, publishing,
-   or installing the new release.
+3. Run the ordinary release gates and exact `0.76.1` direct-update plus explicit
+   guide-register proof. Ask before choosing a version, pushing, tagging,
+   publishing, or installing the new release.
 4. After B2 serves ordered guidance and caller identity, finish B3 with
    installed-guide dogfood. Do not invent those future fields in this repo.
 
@@ -88,6 +90,7 @@ apply remain separately approved boundaries.
 
 ## References
 
+- [update and embedded-guide independence closeout](../charness-artifacts/impl/2026-08-12-update-guide-independence.md)
 - [pre-handoff Worker contract](../charness-artifacts/spec/2026-08-11-pre-handoff-worker-closeout.md)
 - [B1 consumer closeout](../charness-artifacts/impl/2026-08-11-b1-additive-response-generation.md)
 - [superseded B1 handoff request](requests/2026-08-11-to-gateway-final-b1-protocol-handoff.md)

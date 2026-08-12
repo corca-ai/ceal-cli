@@ -2,6 +2,97 @@
   "entries": [
     {
       "surface": "code",
+      "id": "07485297e1542615",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the release-asset composer versus native-artifact builder family reviewed at 416cfcf08f3ed0ae and 401c404aa5ef00fd. The two members publish different artifact schemas across different trust boundaries; their common safe-output publication already lives in scripts/lib/output-directory.mjs, and combining the remaining bodies would hide composition and executable-building policy behind callbacks."
+    },
+    {
+      "surface": "code",
+      "id": "43301d525a461c33",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "ES module import-header overlap between independently runnable release scripts. This is the import-scaffolding class already reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0, not a duplicated implementation fact."
+    },
+    {
+      "surface": "code",
+      "id": "4a027b206a818841",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder family reviewed at 56e6161f8a085070, d3d10b19e3927fba, and 4e437a213994e8b8. One proves an isolated packed install while the other stages a hermetic release package; sharing their orchestration would erase the proof distinction."
+    },
+    {
+      "surface": "code",
+      "id": "75e91ff6508bc229",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the independent native and package release-output assertions reviewed at bdcc97715c0ed28c and ed49982afe11137e. The inventories intentionally differ because the native artifact exposes the legacy compatibility bridge while the package artifact carries the canonical embedded tar; a shared expected list would conflate those contracts."
+    },
+    {
+      "surface": "code",
+      "id": "8eae3607d8cf4786",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the CEAL_AGENT_GUIDE_HOSTS consumers reviewed at f30187c77acbf7e4 and 04e6fe40984b7b6a. The table is already the one home; detection, type narrowing, path resolution, row lookup, and state rendering are distinct consumers rather than duplicate host declarations."
+    },
+    {
+      "surface": "code",
+      "id": "94d117266d9477ea",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "The build-time skill source collector and runtime materialized-guide verifier both walk directories but enforce opposite trust contracts. The collector constructs a portable deterministic inventory; the verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. A callback traversal would merge their anomaly policies rather than create one fact owner."
+    },
+    {
+      "surface": "code",
+      "id": "c118db9cf39510f0",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Import-block overlap between an installer test and the native release builder. This is the non-extractable executable/test scaffolding class reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0."
+    },
+    {
+      "surface": "code",
+      "id": "c5e71256aff1cc5b",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of the native/package materializeOutput pair reviewed at 454f7c4c56066d18, 6df6b80781ef0564, and e076bb930a4d6684. Executable and package artifacts deliberately have different modes, manifests, assets, and smoke evidence; their common output publication tail is already shared."
+    },
+    {
+      "surface": "code",
+      "id": "cc524d5d6b6ab5fd",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Normal guide inspection and guide-integrity failure share the public response schema but not their derivation. Normal inspection dispatches to the integrity failure when exact verification fails, so routing both through one state constructor would invite recursion or weaken the fail-closed projection."
+    },
+    {
+      "surface": "code",
+      "id": "cda8e71ff1cff6b0",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Three adjacent fixture-path declarations in independent contract and installer tests. The paths name different fixture schemas and lifecycles; extracting variable declarations would couple the test tiers without removing an implementation of a shared fact."
+    },
+    {
+      "surface": "code",
+      "id": "cfc87d95f6cb4b33",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at 9111f25a708e0c00 and 1d37623e5019a67e. Composition produces one platform candidate while merge reconciles unsigned platform handoffs before signing; their remaining bodies own different trust decisions."
+    },
+    {
+      "surface": "code",
+      "id": "de82628d582ec1c9",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "The worker runtime now owns its SHA-256 shape predicate in sha256.ts, while independently runnable release scripts retain local boundary predicates. This is the cross-runtime primitive class reviewed for SHA helpers at 40e06511f93f62bc and 2c4224859ea718e0; making release scripts import built worker dist would add a build-order dependency without centralizing mutable policy."
+    },
+    {
+      "surface": "code",
+      "id": "dfb806c62157194d",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Detector clustering across materialized signed-guide verification, guide-state directory safety, and generic release-source enumeration. Their expected inventories, permitted modes, symlink rules, and typed failures are boundary-specific; a shared traversal callback would combine distinct security policies."
+    },
+    {
+      "surface": "code",
       "id": "a6a63e638a33a9a5",
       "class": "intentional",
       "reviewed_at": "2026-08-11",

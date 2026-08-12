@@ -64,7 +64,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		effect: "local_write",
 		evidence: "surface",
 		result_schema: "ceal.update.v1",
-		recovery: "Reinstall an explicitly approved signed worker release if this installed CLI cannot update itself.",
+		recovery: "Retry the signed binary update; guide staging and registration are separate explicit local actions.",
 	},
 	{
 		name: "session",

@@ -61,20 +61,22 @@ fails a commit that retypes it or lets the manifests disagree. `npm run check`
 does not gate the lockfile, but the tagged workflow's
 `npm ci --ignore-scripts` does.
 
-The guide release input is the complete `skills/ceal-guide/` directory. Builders
-encode it as deterministic `ceal-guide.tar`; the manifest, checksum inventory,
-and signatures bind that archive, and the installer validates member paths and
-types before extracting the whole directory. Never publish only `SKILL.md` or
-maintain a second hand-written member list.
+The canonical guide release input is the complete `skills/ceal-guide/`
+directory. Builders encode it as deterministic `ceal-guide.tar` and embed those
+bytes in each signed native binary. The binary validates member paths, types,
+and modes before an explicit `ceal guide register codex|claude` materializes a
+content-addressed local directory. Binary installation and update never perform
+that materialization or host registration.
 
-The first archive rollout deliberately does not support in-place `ceal update`
-from signed `ceal-v0.76.1`: that installed generation's updater accepts only
-`ceal-guide-SKILL.md` and fails before a tar-capable successor installer can run.
-The operator accepted this discontinuity instead of adding a bridge release,
-because clients that skip the bridge would retain the same failure. Install the
-first archive release through the published stable bootstrap command, then use
-`ceal update` normally between archive-capable generations. Release notes must
-state the manual reinstall requirement.
+The published inventory also retains
+`scripts/assets/ceal-guide-compatibility-SKILL.md` under the historical
+`ceal-guide-SKILL.md` asset name. It is a self-contained bridge, not a second
+canonical guide: its only purpose is to let the immutable `ceal-v0.76.1`
+installer consume the new release inventory. The exact tagged installer must
+cross directly in the release test. The old binary owns the first-hop YAML and
+cannot print the new guide advisory; after the update, run `ceal guide status`
+and the appropriate register command. New-to-new update YAML reports
+`registration_not_attempted` and the same next action.
 
 Then:
 
@@ -82,7 +84,7 @@ Then:
 npm ci → npm run check → commit the version slice → push main
 → confirm origin/main is that commit and its check.yml run is green
 → dry-run the release lane → tag → watch
-→ bootstrap install for the first archive release, otherwise ceal update → readback
+→ ceal update → binary readback → ceal guide status/register → guide readback
 ```
 
 Before the first `ceal update` that crosses from a release using the legacy

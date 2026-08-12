@@ -147,6 +147,11 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 	cpSync(path.join(ROOT, "packages/ceal-client/package.json"), path.join(scratch, "packages/ceal-client/package.json"));
 	cpSync(path.join(ROOT, "packages/ceal-worker-cli/package.json"), path.join(scratch, "packages/ceal-worker-cli/package.json"));
 	cpSync(path.join(ROOT, "skills/ceal-guide"), path.join(scratch, "skills/ceal-guide"), { recursive: true });
+	mkdirSync(path.join(scratch, "scripts", "assets"), { recursive: true });
+	cpSync(
+		path.join(ROOT, "scripts", "assets", "ceal-guide-compatibility-SKILL.md"),
+		path.join(scratch, "scripts", "assets", "ceal-guide-compatibility-SKILL.md"),
+	);
 
 	// Absolute paths that do not exist. If the guard runs, it refuses first and
 	// these are never read; if it does not, `protocol_tarball` is the next failure.

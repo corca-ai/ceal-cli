@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CealStoredSession } from "./profile-store.js";
+import { isSha256Digest } from "./sha256.js";
 
 // One home for the bindings that define which operator identity a stored
 // session represents. Enrollment replacement and every session-derived local
@@ -30,5 +31,5 @@ export function sessionIdentityDiscriminator(session: CealStoredSession): string
 }
 
 export function validSessionIdentityDiscriminator(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+	return isSha256Digest(value);
 }

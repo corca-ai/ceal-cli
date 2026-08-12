@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs, {
+	chmodSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -7,6 +8,7 @@ import fs, {
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -15,7 +17,10 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.mjs";
 import { countRegisteredGuideHosts, createCealAgentGuideStore, detectCealAgentGuideHost } from "../dist/agent-guide.js";
+import { decodeCealGuideBundle } from "../dist/guide-bundle.js";
+import { sha256 } from "../dist/sha256.js";
 
 test("Codex guide registration follows the role current pointer across releases", () => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-")));
@@ -410,10 +415,234 @@ test("an installed guide without a resolvable host reports the missing configura
 	}
 });
 
-test("a missing guide remains an install failure even when no host resolves", () => {
+test("a missing guide remains unavailable without advising reinstall when no host resolves", () => {
 	const store = createCealAgentGuideStore("/nonexistent/ceal", undefined, undefined, undefined);
 	assert.ok(store);
 	assert.equal(store.inspect().error?.kind, "guide_unavailable");
+	assert.doesNotMatch(store.inspect().error?.next_action, /reinstall/u);
+});
+
+test("embedded guide status is read-only and explicit registration materializes the complete directory", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const store = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			"codex",
+			fixture.bundle.bytes,
+		);
+		const before = store.inspect();
+		assert.equal(before.status, "available");
+		assert.equal(before.carrier, "embedded");
+		assert.equal(before.materialized, false);
+		assert.equal(before.update_safe, false);
+		assert.equal("guide_path" in before, false);
+		assert.match(before.next_action, /ceal guide register codex/u);
+		assert.equal(existsSync(path.join(fixture.worker, "guides")), false, "status must not stage guide state");
+
+		const registered = store.register("codex");
+		assert.equal(registered.status, "available");
+		assert.equal(registered.materialized, true);
+		assert.equal(registered.hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(registered.hosts.find((host) => host.agent === "claude").registered, false);
+		assert.match(readFile(path.join(registered.guide_path, "references", "workflow.md")), /complete directory/u);
+		assert.equal(existsSync(path.join(fixture.claudeHome, "skills", "ceal-guide")), false);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("embedded registration conflict writes no guide state and leaves another host untouched", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const store = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			undefined,
+			fixture.bundle.bytes,
+		);
+		const claude = store.register("claude");
+		const claudeTarget = realpathSync(claude.guide_path);
+		const codexRegistration = path.join(fixture.codexHome, "skills", "ceal-guide");
+		mkdirSync(codexRegistration, { recursive: true });
+		writeFileSync(path.join(codexRegistration, "foreign"), "owned elsewhere\n");
+		const alternateSource = path.join(fixture.root, "alternate-guide");
+		mkdirSync(alternateSource);
+		writeFileSync(path.join(alternateSource, "SKILL.md"), "---\nname: ceal-guide\n---\nalternate\n");
+		const alternate = createSkillDirectoryBundle(alternateSource);
+		const alternateStore = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			undefined,
+			alternate.bytes,
+		);
+		const versionsBefore = fs.readdirSync(path.join(fixture.worker, "guides", "versions"));
+
+		const refused = alternateStore.register("codex");
+		assert.equal(refused.error?.kind, "registration_conflict");
+		assert.deepEqual(fs.readdirSync(path.join(fixture.worker, "guides", "versions")), versionsBefore);
+		assert.equal(realpathSync(path.join(fixture.claudeHome, "skills", "ceal-guide")), claudeTarget);
+		assert.equal(readFile(path.join(codexRegistration, "foreign")), "owned elsewhere\n");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("embedded registration atomically migrates the exact dangling legacy managed link", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const registration = path.join(fixture.codexHome, "skills", "ceal-guide");
+		mkdirSync(path.dirname(registration), { recursive: true });
+		symlinkSync(path.join(fixture.worker, "current", "guide"), registration, "dir");
+		const store = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			undefined,
+			fixture.bundle.bytes,
+		);
+		const result = store.register("codex");
+		assert.equal(result.status, "available");
+		assert.notEqual(readlinkSync(registration), path.join(fixture.worker, "current", "guide"));
+		assert.match(readFile(path.join(registration, "references", "workflow.md")), /complete directory/u);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("a missing embedded SEA guide never falls back to the compatibility projection", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const store = createCealAgentGuideStore(fixture.command, fixture.root, fixture.codexHome, fixture.claudeHome, undefined, null);
+		assert.equal(store.inspect().status, "unavailable");
+		assert.equal(store.inspect().error?.kind, "guide_unavailable");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("embedded registration refuses a symlink planted at the content-addressed version path", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const versions = path.join(fixture.worker, "guides", "versions");
+		mkdirSync(versions, { recursive: true });
+		const hostile = path.join(fixture.root, "hostile-guide");
+		mkdirSync(hostile);
+		symlinkSync(hostile, path.join(versions, fixture.bundle.sha256), "dir");
+		const store = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			undefined,
+			fixture.bundle.bytes,
+		);
+
+		const result = store.register("codex");
+		assert.equal(result.status, "unavailable");
+		assert.equal(result.error?.kind, "registration_failed");
+		assert.equal(existsSync(path.join(fixture.codexHome, "skills", "ceal-guide")), false);
+		assert.equal(lstatSync(path.join(versions, fixture.bundle.sha256)).isSymbolicLink(), true);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("embedded guide status refuses content, mode, and symlink drift after registration", () => {
+	for (const [label, mutate] of [
+		["content", (root) => writeFileSync(path.join(root, "SKILL.md"), "tampered\n")],
+		["mode", (root) => chmodSync(path.join(root, "SKILL.md"), 0o666)],
+		["file special mode", (root) => chmodSync(path.join(root, "SKILL.md"), 0o4644)],
+		["directory special mode", (root) => chmodSync(root, 0o2700)],
+		[
+			"symlink",
+			(root, fixture) => {
+				const file = path.join(root, "references", "workflow.md");
+				rmSync(file);
+				const foreign = path.join(fixture.root, "foreign-workflow.md");
+				writeFileSync(foreign, "complete directory\n");
+				symlinkSync(foreign, file);
+			},
+		],
+	]) {
+		const fixture = embeddedGuideFixture();
+		try {
+			const store = createCealAgentGuideStore(
+				fixture.command,
+				fixture.root,
+				fixture.codexHome,
+				fixture.claudeHome,
+				undefined,
+				fixture.bundle.bytes,
+			);
+			const registered = store.register("codex");
+			mutate(registered.guide_path, fixture);
+
+			const status = store.inspect("codex");
+			assert.equal(status.status, "unavailable", label);
+			assert.equal(status.materialized, false, label);
+			assert.equal(status.hosts.find((host) => host.agent === "codex").registered, false, label);
+			assert.equal(status.error?.kind, "registration_failed", label);
+			assert.match(status.error?.message, /does not match the signed guide/u, label);
+		} finally {
+			fixture.cleanup();
+		}
+	}
+});
+
+test("embedded registration refuses a special-mode ownership marker", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		const store = createCealAgentGuideStore(
+			fixture.command,
+			fixture.root,
+			fixture.codexHome,
+			fixture.claudeHome,
+			undefined,
+			fixture.bundle.bytes,
+		);
+		const registered = store.register("codex");
+		const marker = path.join(fixture.worker, "guides", "ownership", path.basename(registered.guide_path));
+		chmodSync(marker, 0o4600);
+
+		const result = store.register("claude");
+		assert.equal(result.status, "unavailable");
+		assert.equal(result.error?.kind, "registration_failed");
+		assert.equal(existsSync(path.join(fixture.claudeHome, "skills", "ceal-guide")), false);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("embedded guide decoder refuses traversal, duplicate paths, links, and damaged headers", () => {
+	const fixture = embeddedGuideFixture();
+	try {
+		assert.deepEqual(
+			decodeCealGuideBundle(fixture.bundle.bytes).files.map((file) => file.path),
+			["SKILL.md", "references/workflow.md"],
+		);
+		for (const mutate of [
+			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { name: "../escape" }),
+			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { name: "SKILL.md" }),
+			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { type: 0x32 }),
+			(bytes) => {
+				bytes[0] ^= 1;
+			},
+		]) {
+			const hostile = Buffer.from(fixture.bundle.bytes);
+			mutate(hostile);
+			assert.throws(() => decodeCealGuideBundle(hostile), /invalid_guide_bundle/u);
+		}
+	} finally {
+		fixture.cleanup();
+	}
 });
 
 function createRelease(state, name) {
@@ -424,7 +653,66 @@ function createRelease(state, name) {
 	return release;
 }
 
+function embeddedGuideFixture() {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-embedded-guide-")));
+	const install = path.join(root, "install");
+	const worker = path.join(install, ".ceal-cli", "worker");
+	const staged = path.join(worker, "releases", ".staged");
+	const source = path.join(root, "source-guide");
+	const codexHome = path.join(root, "codex");
+	const claudeHome = path.join(root, "claude");
+	mkdirSync(staged, { recursive: true });
+	mkdirSync(path.join(source, "references"), { recursive: true });
+	writeFileSync(path.join(source, "SKILL.md"), "---\nname: ceal-guide\n---\nRead references/workflow.md.\n");
+	writeFileSync(path.join(source, "references", "workflow.md"), "complete directory\n");
+	writeFileSync(path.join(staged, "ceal-linux-arm64"), "binary\n");
+	writeFileSync(path.join(staged, "install-ceal.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	const inventory = `${sha256(readFileSync(path.join(staged, "ceal-linux-arm64")))}  ceal-linux-arm64\n${sha256(
+		readFileSync(path.join(staged, "install-ceal.sh")),
+	)}  install-ceal.sh\n`;
+	writeFileSync(path.join(staged, "SHA256SUMS"), inventory);
+	const release = path.join(worker, "releases", `0.76.2-linux-arm64-${sha256(inventory)}`);
+	renameSync(staged, release);
+	symlinkSync(path.join("releases", path.basename(release)), path.join(worker, "current"));
+	symlinkSync(path.join(".ceal-cli", "worker", "current", "ceal-linux-arm64"), path.join(install, "ceal"));
+	return {
+		root,
+		worker,
+		command: path.join(install, "ceal"),
+		codexHome,
+		claudeHome,
+		bundle: createSkillDirectoryBundle(source),
+		cleanup: () => rmSync(root, { recursive: true, force: true }),
+	};
+}
+
 function readFile(file) {
 	assert.equal(existsSync(file), true);
 	return readFileSync(file, "utf8");
+}
+
+function rewriteTarHeader(bytes, member, { name, type } = {}) {
+	for (let offset = 0; offset + 512 <= bytes.length; ) {
+		const header = bytes.subarray(offset, offset + 512);
+		const observed = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
+		if (observed === member) {
+			if (name) {
+				header.fill(0, 0, 100);
+				header.write(name, 0, 100, "utf8");
+			}
+			if (type !== undefined) header[156] = type;
+			header.fill(0x20, 148, 156);
+			const checksum = header
+				.reduce((sum, byte) => sum + byte, 0)
+				.toString(8)
+				.padStart(6, "0");
+			header.write(checksum, 148, 6, "ascii");
+			header[154] = 0;
+			header[155] = 0x20;
+			return;
+		}
+		const size = Number.parseInt(header.subarray(124, 136).toString("ascii").replace(/\0.*$/u, "").trim() || "0", 8);
+		offset += 512 + Math.ceil(size / 512) * 512;
+	}
+	assert.fail(`tar member not found: ${member}`);
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { inspectAgentAudit, inspectAgentSessionEvents } from "./agent-audit.js";
 import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-guide.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
+import { readEmbeddedCealGuideBundle } from "./embedded-guide.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { runCealCommand } from "./index.js";
 import { createCealSessionStore } from "./profile-store.js";
@@ -40,6 +41,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 		agentHostOverrides.codex,
 		agentHostOverrides.claude,
 		detectCealAgentGuideHost(process.env),
+		readEmbeddedCealGuideBundle(),
 	);
 	const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
 	finishCealTiming(prepareTiming, "ok");
