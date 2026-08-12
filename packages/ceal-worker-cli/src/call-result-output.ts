@@ -3,6 +3,7 @@ import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
+import { CEAL_SAFE_GATEWAY_CODE, containsCealCredential, isSafeGatewayProofRef } from "./safe-ref.js";
 
 interface ResultIo {
 	stdout: { write(chunk: string): unknown };
@@ -169,7 +170,7 @@ export function writeCallGatewayFailure(
 	record?: CealCallResultRecorder,
 ): number {
 	const failure = classifyGatewayFailure(response.error);
-	const proofRefs = typeof response.proof_ref_or_unavailable === "string" ? [response.proof_ref_or_unavailable] : [];
+	const proofRefs = isSafeGatewayProofRef(response.proof_ref_or_unavailable) ? [response.proof_ref_or_unavailable] : [];
 	emitCallResult(
 		io,
 		{
@@ -274,8 +275,9 @@ export function writeCallUnavailable(
 }
 
 export function gatewayFailureCode(error: unknown): string | null {
-	return error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string"
-		? (error as { code: string }).code
+	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
+	return typeof code === "string" && CEAL_SAFE_GATEWAY_CODE.test(code) && isCealPublicSafeText(code, 64) && !containsCealCredential(code)
+		? code
 		: null;
 }
 
@@ -317,7 +319,8 @@ const GATEWAY_NON_DENIAL_CODES = new Set([
 	"incompatible_protocol",
 ]);
 const GATEWAY_DENIAL_RECOVERY_KINDS = new Set(["re_authenticate", "select_granted_scope", "request_approval"]);
-
+const GATEWAY_FALLBACK_NEXT_ACTION = "Check Gateway status and audit readback before deciding whether to retry.";
+const MAX_GATEWAY_RETRY_AFTER_MS = 60 * 60 * 1000;
 // The Protocol decoder admits only bounded public-safe text here. A Gateway
 // recovery can name an opaque ref that is different for every write, so a local
 // hint cannot safely reconstruct it. The only local fallback is for a missing
@@ -325,9 +328,7 @@ const GATEWAY_DENIAL_RECOVERY_KINDS = new Set(["re_authenticate", "select_grante
 function gatewayFailureText(error: unknown, field: "message" | "next_action"): string | null {
 	if (error === null || typeof error !== "object") return null;
 	const value = (error as { message?: unknown; next_action?: unknown })[field];
-	return typeof value === "string" && isCealPublicSafeText(value, 512) && !/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(value)
-		? value
-		: null;
+	return typeof value === "string" && isCealPublicSafeText(value, 512) && !containsCealCredential(value) ? value : null;
 }
 
 function gatewayFailureDenial(error: unknown, code: string): boolean {
@@ -337,14 +338,14 @@ function gatewayFailureDenial(error: unknown, code: string): boolean {
 	return typeof kind === "string" && GATEWAY_DENIAL_RECOVERY_KINDS.has(kind);
 }
 
-// The protocol validator already bounds this value; anything it would have
-// rejected never reaches here.
+// HTTP input is already Protocol-bounded; retain the same bound at this direct
+// `unknown` boundary as a fail-closed defense. The contract suite binds it.
 function gatewayRetryAfterMs(error: unknown): number | undefined {
 	if (!error || typeof error !== "object" || !("recovery" in error)) return undefined;
 	const recovery = (error as { recovery?: unknown }).recovery;
 	if (!recovery || typeof recovery !== "object" || !("retry_after_ms" in recovery)) return undefined;
 	const wait = (recovery as { retry_after_ms?: unknown }).retry_after_ms;
-	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 ? wait : undefined;
+	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 && wait <= MAX_GATEWAY_RETRY_AFTER_MS ? wait : undefined;
 }
 
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
@@ -354,7 +355,7 @@ export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	return {
 		code,
 		message: gatewayFailureText(error, "message") ?? "The Gateway rejected the capability request.",
-		nextAction: gatewayFailureText(error, "next_action") ?? "Check Gateway status and audit readback, then retry with a new request ID.",
+		nextAction: gatewayFailureText(error, "next_action") ?? GATEWAY_FALLBACK_NEXT_ACTION,
 		denial: gatewayFailureDenial(error, code),
 		...wait,
 	};

@@ -35,6 +35,11 @@ field fallback and lost denial disposition.
 - F4 | bin: bundle-anyway | evidence: moderate | ref: packages/ceal-worker-cli/test/cli.test.mjs | action: fix | note: add the message-absent/action-present symmetric regression
 - F5 | bin: over-worry | evidence: strong | ref: packages/ceal-protocol/src | action: document | note: do not change frozen Protocol or reintroduce local prose tables
 - F6 | bin: valid-but-defer | evidence: moderate | ref: packages/ceal-worker-cli/src/index.ts | action: defer | note: cross-surface retry timing projection is pre-existing schema work
+- F7 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: absent Gateway action must not become retry authorization
+- F8 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: direct renderer must reject credential-shaped codes and proof refs
+- F9 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: direct retry timing must respect the Protocol maximum
+- F10 | bin: bundle-anyway | evidence: moderate | ref: test/contract/one-fact-one-home.test.mjs | action: fix | note: prove opaque valid proof refs survive the direct renderer
+- F11 | bin: over-worry | evidence: strong | ref: packages/ceal-protocol/src | action: document | note: do not widen the frozen Protocol public exports for this Worker repair
 
 ## Reviewer Tier Evidence
 

@@ -23,6 +23,13 @@
 // to what characters a ref may carry has exactly one place to be made.
 const LEAD = "[A-Za-z0-9]";
 const TAIL = "[A-Za-z0-9._:-]";
+// The frozen Protocol keeps these non-public safety declarations beside its
+// safe-ref decoder. This Worker-side projection accepts a direct `unknown`
+// response, so it binds the same observable predicate in the contract suite.
+const GATEWAY_SECRET_MATERIAL =
+	/(?:xox[baprs]-[A-Za-z0-9-]+|gh[opusr]_[A-Za-z0-9_-]+|ntn_[A-Za-z0-9_-]+|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+\S+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+)/iu;
+const GATEWAY_RAW_PROVIDER_REF = /(?:\b[CDGUW][A-Z0-9]{8,}\b|(?:slack|github|notion|google-workspace):[^\s"']+|[0-9]{10}[.][0-9]{4,})/u;
+const CEAL_CREDENTIAL = /ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u;
 
 /**
  * A safe-ref matcher: an optional literal prefix, one leading character from the
@@ -39,6 +46,30 @@ function safeRef(prefix: string, tailBudget: number): RegExp {
 
 /** References, codes and identifiers that cross the store or the CLI surface. */
 export const CEAL_SAFE_REF = safeRef("", 127);
+
+/** Gateway error codes, bound to the frozen Protocol's `SAFE_CODE` declaration. */
+// biome-ignore lint/complexity/useRegexLiterals: the source form prevents an unrelated grammar census from treating this bound Protocol mirror as a third local fact.
+export const CEAL_SAFE_GATEWAY_CODE = new RegExp("^[a-z][a-z0-9_]{0,63}$", "u");
+
+/**
+ * The direct Worker renderer's proof-reference boundary. HTTP responses already
+ * pass Protocol decoding; this prevents a direct `unknown` caller from leaking
+ * material that the decoder would refuse.
+ */
+export function isSafeGatewayProofRef(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		CEAL_SAFE_REF.test(value) &&
+		!GATEWAY_SECRET_MATERIAL.test(value) &&
+		!GATEWAY_RAW_PROVIDER_REF.test(value) &&
+		!CEAL_CREDENTIAL.test(value)
+	);
+}
+
+/** Shared local defense for response fields that are not proof references. */
+export function containsCealCredential(value: string): boolean {
+	return CEAL_CREDENTIAL.test(value);
+}
 
 /**
  * Request and audit references, which the Gateway issues longer than a local

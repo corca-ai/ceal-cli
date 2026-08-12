@@ -23,7 +23,7 @@ import { fileURLToPath, URL } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { buildAcceptanceRecord, readInstalledReleaseFacts } from "../dist/acceptance-record.js";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
-import { classifyGatewayFailure, writeCallCompleted } from "../dist/call-result-output.js";
+import { classifyGatewayFailure, writeCallCompleted, writeCallGatewayFailure } from "../dist/call-result-output.js";
 import { createCealCommandContext } from "../dist/command-context.js";
 import {
 	CEAL_COMMANDS,
@@ -1452,6 +1452,7 @@ test("capabilities authentication failure names the explicit session refresh act
 					loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
 				});
 				assert.equal(payload.error.kind, "authentication_failed");
+				assert.equal(payload.status, "denied");
 				assert.match(payload.error.next_action, /ceal session refresh/u);
 				assert.equal(refreshCalls(), 0);
 				assert.deepEqual(
@@ -3007,7 +3008,7 @@ test("a throttle carries the Gateway's own wait instead of making the caller gue
 	assert.equal(Object.hasOwn(noRecovery, "retryAfterMs"), false);
 
 	// A value the protocol would never have passed is not rendered either.
-	for (const bad of [-1, 1.5, "45000", null]) {
+	for (const bad of [-1, 1.5, "45000", null, 3_600_001]) {
 		const rejected = classifyGatewayFailure({
 			code: "rate_limited",
 			message: "x",
@@ -3042,7 +3043,7 @@ test("a safe Gateway message survives when optional next_action is absent", () =
 	assert.deepEqual(classifyGatewayFailure({ code: "duplicate_write_refused", message: "The previous write is message:already-sent_001." }), {
 		code: "duplicate_write_refused",
 		message: "The previous write is message:already-sent_001.",
-		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		nextAction: "Check Gateway status and audit readback before deciding whether to retry.",
 		denial: false,
 	});
 });
@@ -3056,14 +3057,50 @@ test("a safe Gateway action survives when the message is missing", () => {
 	});
 });
 
-test("a Gateway failure never reflects unsafe text outside the HTTP decoder path", () => {
-	const unsafe = "Bearer abcdefghijklmnop";
-	assert.deepEqual(classifyGatewayFailure({ code: "legacy_failure", message: unsafe, next_action: unsafe }), {
-		code: "legacy_failure",
+test("a direct Gateway failure renderer never reflects unsafe code, text, or proof refs", () => {
+	const unsafe = `ceal_refresh_${"r".repeat(43)}`;
+	const unsafeProofRef = `ghp_${"a".repeat(36)}`;
+	const opaqueProofRef = "audit:AbcDef123456789012345678";
+	assert.deepEqual(classifyGatewayFailure({ code: unsafe, message: unsafe, next_action: unsafe }), {
+		code: "gateway_request_failed",
 		message: "The Gateway rejected the capability request.",
-		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		nextAction: "Check Gateway status and audit readback before deciding whether to retry.",
 		denial: false,
 	});
+	let stdout = "";
+	writeCallGatewayFailure(
+		{ error: { code: unsafe, message: unsafe, next_action: unsafe }, proof_ref_or_unavailable: unsafeProofRef },
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-unsafe",
+	);
+	const payload = parseYaml(stdout);
+	assert.equal(payload.error.kind, "gateway_request_failed");
+	assert.deepEqual(payload.receipt.audit_refs, []);
+	assert.doesNotMatch(JSON.stringify(payload), new RegExp(unsafe, "u"));
+	assert.doesNotMatch(JSON.stringify(payload), new RegExp(unsafeProofRef, "u"));
+	stdout = "";
+	writeCallGatewayFailure(
+		{ error: { code: "legacy_failure", message: "safe", next_action: "safe" }, proof_ref_or_unavailable: opaqueProofRef },
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-opaque",
+	);
+	assert.deepEqual(parseYaml(stdout).receipt.audit_refs, [opaqueProofRef]);
 });
 
 test("Gateway authorization classifications keep denials separate from availability", () => {
@@ -3174,7 +3211,7 @@ test("a duplicate-write refusal keeps its safe message when the optional action 
 				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:optional-action" },
 			);
 			assert.equal(payload.error.message, message);
-			assert.equal(payload.error.next_action, "Check Gateway status and audit readback, then retry with a new request ID.");
+			assert.equal(payload.error.next_action, "Check Gateway status and audit readback before deciding whether to retry.");
 		},
 		(request) =>
 			request.operation === "call"
@@ -3973,6 +4010,37 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 			request_id: request.request_id,
 			protocol_version: "1.3.0",
 			error: { code: "internal_error", message: token, next_action: token },
+		}),
+	);
+});
+
+test("an HTTP Gateway failure missing its required message is refused before CLI rendering", async () => {
+	const action = "This must not reach the CLI.";
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(
+				[
+					"capabilities",
+					"--endpoint",
+					endpoint,
+					"--profile",
+					"profile:narnia",
+					"--request-id",
+					"narnia:failure:missing-message",
+					"--token-stdin",
+				],
+				3,
+				{ readSecret: async () => `ceal_personal_${"P".repeat(43)}` },
+			);
+			assert.equal(payload.status, "unavailable");
+			assert.equal(payload.error.kind, "invalid_response");
+			assert.doesNotMatch(JSON.stringify(payload), new RegExp(action, "u"));
+		},
+		(request) => ({
+			ok: false,
+			request_id: request.request_id,
+			protocol_version: "1.3.0",
+			error: { code: "legacy_failure", next_action: action },
 		}),
 	);
 });

@@ -23,6 +23,11 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - Keep the frozen Protocol package and sibling Gateway source unchanged.
 - Keep the local fallback for absent or unsafe presentation; do not reintroduce
   a per-error-code prose table.
+- Make the generic fallback observational: it may direct Gateway status and
+  audit readback, but it must not direct a new write or request ID.
+- Treat the exported Worker renderer as a defensive boundary too: unsafe error
+  codes and proof references fall back or disappear before YAML projection, but
+  Protocol-valid opaque proof references remain intact.
 - Backward compatibility is not a constraint for this pre-public product.
 
 ## Probe Questions
@@ -62,6 +67,11 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - A safe duplicate-write response preserves its exact confirmation reference in
   CLI `error.message` and `error.next_action`.
 - Unsafe or incomplete error presentation cannot be echoed into YAML.
+- A missing Gateway action never becomes local retry authorization.
+- Invalid HTTP failures are rejected by Protocol before CLI rendering, and
+  direct renderer inputs cannot reflect credential-shaped codes or proof refs
+  while retaining a Protocol-valid opaque proof ref; they also cannot emit
+  retry timing beyond the Protocol bound.
 - Existing status, retry timing, and `policy_denied` classification have a
   focused executable assertion or a documented deliberate result.
 - The converged fixture remains a valid contract fixture; a diverged fixture
@@ -72,7 +82,8 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - `integration`: a local HTTP Gateway fixture drives `ceal call` and asserts the
   exact duplicate-write text and opaque reference in YAML.
 - `unit`: classifier cases cover safe, incomplete, and credential-shaped error
-  presentation plus retry/denial metadata.
+  presentation plus retry/denial metadata; a missing action has neutral,
+  readback-first fallback guidance.
 - `integration`: `test/contract/worker-acceptance-packet.test.mjs` proves the
   diverged fixture reaches `proof_shipment_protocol_divergence`.
 - `manual`: `npm run check:unit` and `.githooks/pre-push` pass; a full-gate
@@ -91,9 +102,9 @@ supporting contract fixtures. Repair only a reproduced local defect.
   YAML, while converged fixtures must not accidentally clear the live ship gate.
 - Chosen Next Step: focused audit, then a smallest reproduced Worker repair.
 - Impl Status: allowed.
-- Impl Status Reason: the audit reproduced an optional-field relay defect and
-  an authorization-disposition regression; the Worker repair and focused
-  HTTP-to-YAML regression tests close both without restoring local prose.
+- Impl Status Reason: the audit reproduced optional-field, disposition, and
+  fallback-retry defects; the Worker repair and focused HTTP-to-YAML regression
+  tests close them without restoring local prose.
 - What Disproving Observation Is Resolved: a local HTTP-to-YAML fixture already
   proves duplicate-reference propagation; the completed audit added partial,
   unsafe, and authorization status coverage.

@@ -215,6 +215,32 @@ test("the safe-ref grammar agrees across the Protocol, the worker and the client
 	const accepted = `a${"b".repeat(120)}`;
 	assert.equal(protocol.SAFE_REF.test(accepted), true, "positive control: the grammar accepts something");
 	assert.equal(worker.CEAL_SAFE_REF.test(accepted), true);
+	assert.equal(worker.CEAL_SAFE_GATEWAY_CODE.source, protocol.SAFE_CODE.source, "the Worker error-code grammar matches Protocol");
+	assert.equal(worker.CEAL_SAFE_GATEWAY_CODE.flags, protocol.SAFE_CODE.flags);
+});
+
+test("the Worker direct proof-ref defense agrees with Protocol safe refs", async () => {
+	const protocol = await import(path.join(ROOT, "packages/ceal-protocol/dist/gateway-validation-primitives.js"));
+	const worker = await import(path.join(ROOT, "packages/ceal-worker-cli/dist/safe-ref.js"));
+	const opaque = "audit:AbcDef123456789012345678";
+	assert.doesNotThrow(() => protocol.requireSafeRef(opaque));
+	assert.equal(worker.isSafeGatewayProofRef(opaque), true);
+	for (const rejected of [`ghp_${"a".repeat(36)}`, "AKIAABCDEFGHIJKLMNOP", "slack:C012345678", "ceal_refresh_" + "r".repeat(43)]) {
+		if (!rejected.startsWith("ceal_refresh_")) assert.throws(() => protocol.requireSafeRef(rejected));
+		assert.equal(worker.isSafeGatewayProofRef(rejected), false, rejected);
+	}
+});
+
+test("the Worker direct retry ceiling is bound to the Protocol decoder", () => {
+	const limitExpression = (relative, name) => {
+		const source = readFileSync(path.join(ROOT, relative), "utf8");
+		const match = new RegExp(`const ${name} = (?<expression>[^;]+);`, "u").exec(source);
+		assert.ok(match?.groups?.expression, `${relative} declares ${name} — re-aim this binding if ownership moves`);
+		return match.groups.expression;
+	};
+	const protocol = limitExpression("packages/ceal-protocol/src/index.ts", "MAX_RECOVERY_RETRY_AFTER_MS");
+	const worker = limitExpression("packages/ceal-worker-cli/src/call-result-output.ts", "MAX_GATEWAY_RETRY_AFTER_MS");
+	assert.equal(worker, protocol, "the direct renderer refuses waits the Protocol decoder would reject");
 });
 
 test("the refresh-token grammar agrees across the Protocol, the worker and the client", () => {
