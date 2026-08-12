@@ -1,4 +1,4 @@
-import type { CealGatewayCallValue } from "@corca-ai/ceal-protocol";
+import { type CealGatewayCallValue, isCealPublicSafeText } from "@corca-ai/ceal-protocol";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { writeYaml } from "./output.js";
@@ -297,19 +297,44 @@ interface SafeGatewayFailure {
 	retryAfterMs?: number;
 }
 
+const GATEWAY_DENIAL_CODES = new Set([
+	"policy_denied",
+	"authentication_failed",
+	"profile_binding_denied",
+	"profile_access_denied",
+	"target_catalog_capability_not_granted",
+]);
+const GATEWAY_NON_DENIAL_CODES = new Set([
+	"resource_not_available",
+	"continuation_not_available",
+	"invalid_arguments",
+	"audit_event_not_found",
+	"target_catalog_selection_invalid",
+	"invalid_readback_request",
+	"connector_unavailable",
+	"rate_limited",
+	"idempotency_conflict",
+	"incompatible_protocol",
+]);
+const GATEWAY_DENIAL_RECOVERY_KINDS = new Set(["re_authenticate", "select_granted_scope", "request_approval"]);
+
 // The Protocol decoder admits only bounded public-safe text here. A Gateway
 // recovery can name an opaque ref that is different for every write, so a local
-// hint cannot safely reconstruct it. The only local fallback is for malformed
-// or legacy responses that carry no complete presentation.
-function gatewayFailurePresentation(error: unknown): Pick<SafeGatewayFailure, "message" | "nextAction"> | null {
+// hint cannot safely reconstruct it. The only local fallback is for a missing
+// or unsafe individual field.
+function gatewayFailureText(error: unknown, field: "message" | "next_action"): string | null {
 	if (error === null || typeof error !== "object") return null;
-	const candidate = error as { message?: unknown; next_action?: unknown };
-	return typeof candidate.message === "string" &&
-		typeof candidate.next_action === "string" &&
-		!/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(candidate.message) &&
-		!/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(candidate.next_action)
-		? { message: candidate.message, nextAction: candidate.next_action }
+	const value = (error as { message?: unknown; next_action?: unknown })[field];
+	return typeof value === "string" && isCealPublicSafeText(value, 512) && !/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(value)
+		? value
 		: null;
+}
+
+function gatewayFailureDenial(error: unknown, code: string): boolean {
+	if (GATEWAY_DENIAL_CODES.has(code)) return true;
+	if (GATEWAY_NON_DENIAL_CODES.has(code) || !error || typeof error !== "object") return false;
+	const kind = (error as { recovery?: { kind?: unknown } }).recovery?.kind;
+	return typeof kind === "string" && GATEWAY_DENIAL_RECOVERY_KINDS.has(kind);
 }
 
 // The protocol validator already bounds this value; anything it would have
@@ -326,14 +351,11 @@ export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 	const code = gatewayFailureCode(error) ?? "gateway_request_failed";
 	const retryAfterMs = gatewayRetryAfterMs(error);
 	const wait = retryAfterMs === undefined ? {} : { retryAfterMs };
-	const presentation = gatewayFailurePresentation(error);
 	return {
 		code,
-		...(presentation ?? {
-			message: "The Gateway rejected the capability request.",
-			nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
-		}),
-		denial: code === "policy_denied",
+		message: gatewayFailureText(error, "message") ?? "The Gateway rejected the capability request.",
+		nextAction: gatewayFailureText(error, "next_action") ?? "Check Gateway status and audit readback, then retry with a new request ID.",
+		denial: gatewayFailureDenial(error, code),
 		...wait,
 	};
 }

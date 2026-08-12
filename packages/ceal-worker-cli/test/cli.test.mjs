@@ -2528,10 +2528,12 @@ test("target-catalog failures keep their exact code through the capabilities tar
 	for (const expected of [
 		{
 			code: "target_catalog_selection_invalid",
+			status: "unavailable",
 			message: "server-controlled",
 		},
 		{
 			code: "target_catalog_capability_not_granted",
+			status: "denied",
 			message: "server-controlled",
 		},
 	]) {
@@ -2543,6 +2545,8 @@ test("target-catalog failures keep their exact code through the capabilities tar
 				});
 				assert.equal(payload.error.kind, expected.code);
 				assert.equal(payload.error.message, expected.message);
+				assert.equal(payload.error.next_action, "server-controlled action");
+				assert.equal(payload.status, expected.status);
 				assert.equal(payload.live_gateway_checked, true);
 				assert.deepEqual(
 					requests.map((request) => request.body.operation),
@@ -3034,6 +3038,58 @@ test("a Gateway-authored recovery preserves its exact bounded text", () => {
 	);
 });
 
+test("a safe Gateway message survives when optional next_action is absent", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "duplicate_write_refused", message: "The previous write is message:already-sent_001." }), {
+		code: "duplicate_write_refused",
+		message: "The previous write is message:already-sent_001.",
+		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		denial: false,
+	});
+});
+
+test("a safe Gateway action survives when the message is missing", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "legacy_failure", next_action: "Use the Gateway-issued confirmation reference." }), {
+		code: "legacy_failure",
+		message: "The Gateway rejected the capability request.",
+		nextAction: "Use the Gateway-issued confirmation reference.",
+		denial: false,
+	});
+});
+
+test("a Gateway failure never reflects unsafe text outside the HTTP decoder path", () => {
+	const unsafe = "Bearer abcdefghijklmnop";
+	assert.deepEqual(classifyGatewayFailure({ code: "legacy_failure", message: unsafe, next_action: unsafe }), {
+		code: "legacy_failure",
+		message: "The Gateway rejected the capability request.",
+		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		denial: false,
+	});
+});
+
+test("Gateway authorization classifications keep denials separate from availability", () => {
+	for (const code of ["authentication_failed", "profile_binding_denied", "profile_access_denied", "target_catalog_capability_not_granted"]) {
+		assert.equal(classifyGatewayFailure({ code, message: "server-controlled", next_action: "server-controlled action" }).denial, true, code);
+	}
+	assert.equal(
+		classifyGatewayFailure({
+			code: "unknown_gateway_code",
+			message: "server-controlled",
+			next_action: "server-controlled action",
+			recovery: { kind: "request_approval" },
+		}).denial,
+		true,
+	);
+	assert.equal(
+		classifyGatewayFailure({
+			code: "target_catalog_selection_invalid",
+			message: "server-controlled",
+			next_action: "server-controlled action",
+			recovery: { kind: "select_granted_scope" },
+		}).denial,
+		false,
+	);
+});
+
 test("receipt projects safe connector route provenance without provider material", async () => {
 	await withGateway(
 		async ({ endpoint }) => {
@@ -3103,6 +3159,58 @@ test("a duplicate-write refusal preserves the Gateway-issued confirmation refere
 						request_id: request.request_id,
 						protocol_version: "1.3.0",
 						error: { code: "duplicate_write_refused", message, next_action: nextAction },
+					}
+				: failedReadbackResponse(request),
+	);
+});
+
+test("a duplicate-write refusal keeps its safe message when the optional action is absent", async () => {
+	const message = "An identical governed message was already sent as message:already-sent_001.";
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(
+				["call", "message.create", "--target", "target:team-inbox", "text=Approved", "idempotency_key=retry-001"],
+				3,
+				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:optional-action" },
+			);
+			assert.equal(payload.error.message, message);
+			assert.equal(payload.error.next_action, "Check Gateway status and audit readback, then retry with a new request ID.");
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						error: { code: "duplicate_write_refused", message },
+					}
+				: failedReadbackResponse(request),
+	);
+});
+
+test("a non-policy authorization refusal stays blocked on the call surface", async () => {
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(
+				["call", "message.create", "--target", "target:team-inbox", "text=Approved", "idempotency_key=denied-001"],
+				3,
+				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:target-denied:001" },
+			);
+			assert.equal(payload.status, "blocked");
+			assert.equal(payload.error.kind, "authorization_denied");
+			assert.equal(payload.error.message, "The target is not granted for this capability.");
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						error: {
+							code: "target_catalog_capability_not_granted",
+							message: "The target is not granted for this capability.",
+							next_action: "Choose a granted target.",
+						},
 					}
 				: failedReadbackResponse(request),
 	);
