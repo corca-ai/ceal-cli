@@ -1,8 +1,4 @@
-import {
-	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
-	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
-	type CealGatewayCallValue,
-} from "@corca-ai/ceal-protocol";
+import type { CealGatewayCallValue } from "@corca-ai/ceal-protocol";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { writeYaml } from "./output.js";
@@ -301,141 +297,23 @@ interface SafeGatewayFailure {
 	retryAfterMs?: number;
 }
 
-const GATEWAY_FAILURE_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "code">>> = Object.freeze({
-	policy_denied: { message: CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, nextAction: CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, denial: true },
-	authentication_failed: {
-		message: "The Gateway rejected the client credential.",
-		nextAction: "Obtain a current Gateway-issued client session and retry.",
-		denial: true,
-	},
-	profile_binding_denied: {
-		message: "The Gateway rejected the requested Profile selection.",
-		nextAction: "Use a Profile assigned to the authenticated subject and retry.",
-		denial: true,
-	},
-	profile_access_denied: {
-		message: "The Gateway rejected the requested Profile selection.",
-		nextAction: "Use a Profile assigned to the authenticated subject and retry.",
-		denial: true,
-	},
-	// Deliberately not a denial: the Gateway's opaque contract does not disclose
-	// whether policy or absence made the resource unavailable, so the call
-	// surface must not claim an authorization decision. The receipt readback is
-	// the authoritative audited disposition.
-	resource_not_available: {
-		message: "The Gateway reported the requested resource as not available to this client.",
-		nextAction:
-			"Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
-		denial: false,
-	},
-	continuation_not_available: {
-		message: "The approved continuation is no longer available.",
-		nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.",
-		denial: false,
-	},
-	invalid_arguments: {
-		message: "The capability arguments do not satisfy the published input contract.",
-		nextAction: "Correct the capability arguments, then retry the call with a new request ID.",
-		denial: false,
-	},
-	// The Gateway answers a readback for an unknown or not-yet-audited request
-	// reference with its own 404 code. Rendering that as the generic failure is
-	// what made an unknown outcome unresolvable: the caller was told to consult a
-	// receipt route that had, in fact, answered precisely — no audited outcome
-	// exists for this reference (corca-ai/ceal-cli#2).
-	audit_event_not_found: {
-		message: "The Gateway has no audited outcome for that request reference.",
-		nextAction:
-			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. This Worker exposes no retry authorization for that write; keep it unresolved for the operator.",
-		denial: false,
-	},
-	target_catalog_selection_invalid: {
-		message: "The Gateway could not safely use the requested target selection.",
-		nextAction: "Run fresh capability discovery, then make a new bounded target selection.",
-		denial: false,
-	},
-	target_catalog_capability_not_granted: {
-		message: "The selected Profile has no granted target for the requested capability.",
-		nextAction: "List the capabilities this Profile currently holds, then select a target for one of those capabilities.",
-		denial: true,
-	},
-	invalid_readback_request: {
-		message: "The request reference is not a readable Gateway request id.",
-		nextAction: "Use the exact 'receipt.request_ref' string a 'ceal call' returned; do not construct or truncate it.",
-		denial: false,
-	},
-	connector_unavailable: {
-		message: "The granted connector is currently unavailable.",
-		nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.",
-		denial: false,
-	},
-	rate_limited: {
-		message: "The Gateway rate quota for this client is temporarily exhausted.",
-		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-		denial: false,
-	},
-	idempotency_conflict: {
-		message: "The idempotency key names a different governed write.",
-		nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.",
-		denial: false,
-	},
-	incompatible_protocol: {
-		message: "The Ceal client and Gateway protocol versions are incompatible.",
-		nextAction: "Upgrade the Ceal client or Gateway to compatible releases.",
-		denial: false,
-	},
-});
-
-// Locally-owned rendering for the Gateway's closed recovery vocabulary. The
-// known code table wins on disagreement; a recovery class only rescues codes
-// this CLI does not know, so a new failure code degrades by class instead of
-// to the generic hint. Non-member kinds are never echoed into agent context.
-const GATEWAY_RECOVERY_HINTS: Readonly<Record<string, Omit<SafeGatewayFailure, "code">>> = Object.freeze({
-	retry: {
-		message: "The Gateway declined the request with a retryable rejection.",
-		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-		denial: false,
-	},
-	re_authenticate: {
-		message: "The Gateway rejected the client credential.",
-		nextAction: "Obtain a current Gateway-issued client session and retry.",
-		denial: true,
-	},
-	select_granted_scope: {
-		message: "The Gateway rejected the requested Profile or target selection.",
-		nextAction: "Use a Profile and target granted to the authenticated subject and retry.",
-		denial: true,
-	},
-	request_approval: {
-		message: "The Gateway declined the request pending policy approval.",
-		nextAction: "Request policy approval for this capability and target.",
-		denial: true,
-	},
-	operator_restore: {
-		message: "The Gateway reported the backing connector as unavailable.",
-		nextAction: "Ask the Gateway operator to restore the connector; requesting another grant will not fix this state.",
-		denial: false,
-	},
-	upgrade_client: {
-		message: "The Ceal client and Gateway protocol versions are incompatible.",
-		nextAction: "Upgrade the Ceal client or Gateway to compatible releases.",
-		denial: false,
-	},
-});
-
-function gatewayRecoveryKind(error: unknown): string | null {
-	if (!error || typeof error !== "object" || !("recovery" in error)) return null;
-	const recovery = (error as { recovery?: unknown }).recovery;
-	if (!recovery || typeof recovery !== "object" || !("kind" in recovery)) return null;
-	const kind = (recovery as { kind?: unknown }).kind;
-	return typeof kind === "string" && Object.hasOwn(GATEWAY_RECOVERY_HINTS, kind) ? kind : null;
+// The Protocol decoder admits only bounded public-safe text here. A Gateway
+// recovery can name an opaque ref that is different for every write, so a local
+// hint cannot safely reconstruct it. The only local fallback is for malformed
+// or legacy responses that carry no complete presentation.
+function gatewayFailurePresentation(error: unknown): Pick<SafeGatewayFailure, "message" | "nextAction"> | null {
+	if (error === null || typeof error !== "object") return null;
+	const candidate = error as { message?: unknown; next_action?: unknown };
+	return typeof candidate.message === "string" &&
+		typeof candidate.next_action === "string" &&
+		!/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(candidate.message) &&
+		!/ceal_(?:personal|refresh)_[A-Za-z0-9_-]*/u.test(candidate.next_action)
+		? { message: candidate.message, nextAction: candidate.next_action }
+		: null;
 }
 
-// Read independently of the recovery *kind*. The known-code table wins over a
-// disagreeing recovery class, so a `rate_limited` code takes its message from
-// the table and would otherwise discard the wait that arrived beside it — which
-// is the exact case #642 reports. The protocol validator already bounds this
-// value; anything it would have rejected never reaches here.
+// The protocol validator already bounds this value; anything it would have
+// rejected never reaches here.
 function gatewayRetryAfterMs(error: unknown): number | undefined {
 	if (!error || typeof error !== "object" || !("recovery" in error)) return undefined;
 	const recovery = (error as { recovery?: unknown }).recovery;
@@ -445,18 +323,17 @@ function gatewayRetryAfterMs(error: unknown): number | undefined {
 }
 
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
-	const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-	const hint = typeof code === "string" && Object.hasOwn(GATEWAY_FAILURE_HINTS, code) ? GATEWAY_FAILURE_HINTS[code] : undefined;
+	const code = gatewayFailureCode(error) ?? "gateway_request_failed";
 	const retryAfterMs = gatewayRetryAfterMs(error);
 	const wait = retryAfterMs === undefined ? {} : { retryAfterMs };
-	if (typeof code === "string" && hint) return { code, ...hint, ...wait };
-	const kind = gatewayRecoveryKind(error);
-	if (typeof code === "string" && kind) return { code, ...GATEWAY_RECOVERY_HINTS[kind], ...wait };
+	const presentation = gatewayFailurePresentation(error);
 	return {
+		code,
+		...(presentation ?? {
+			message: "The Gateway rejected the capability request.",
+			nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+		}),
+		denial: code === "policy_denied",
 		...wait,
-		code: "gateway_request_failed",
-		message: "The Gateway rejected the capability request.",
-		nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
-		denial: false,
 	};
 }

@@ -2332,22 +2332,6 @@ test("every call result names the issuing instance and the profile it used", asy
 	assert.equal(unresolved.gateway, undefined);
 });
 
-// corca-ai/ceal-cli#2: an unknown outcome told the caller to consult a receipt
-// route the same surface documented as completed-calls-only, and warned about a
-// write on a declared read.
-test("an unknown outcome points at the Gateway's own answer and does not invent a write", () => {
-	assert.deepEqual(classifyGatewayFailure({ code: "audit_event_not_found" }), {
-		code: "audit_event_not_found",
-		message: "The Gateway has no audited outcome for that request reference.",
-		nextAction:
-			"If the reference came from a call whose outcome was unknown, retry this readback after a short wait. This Worker exposes no retry authorization for that write; keep it unresolved for the operator.",
-		denial: false,
-	});
-	const receiptLeaf = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "receipt");
-	assert.match(receiptLeaf.recovery, /audit_event_not_found/u);
-	assert.doesNotMatch(receiptLeaf.description, /completed call\b/u);
-});
-
 test("compatibility result data passes through without a client-side message projection", () => {
 	let stdout = "";
 	const code = writeCallCompleted(
@@ -2540,55 +2524,15 @@ test("a rejected call followed by failed pre-send refresh quarantine is known pr
 	);
 });
 
-test("rate-limited calls explain a retryable recovery instead of operator restoration", () => {
-	assert.deepEqual(classifyGatewayFailure({ code: "rate_limited", message: "server-controlled" }), {
-		code: "rate_limited",
-		message: "The Gateway rate quota for this client is temporarily exhausted.",
-		nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-		denial: false,
-	});
-});
-
-test("target-catalog failures keep their exact diagnosis instead of collapsing to one scope denial", () => {
-	assert.deepEqual(
-		classifyGatewayFailure({
-			code: "target_catalog_selection_invalid",
-			message: "server-controlled",
-			recovery: { kind: "select_granted_scope" },
-		}),
-		{
-			code: "target_catalog_selection_invalid",
-			message: "The Gateway could not safely use the requested target selection.",
-			nextAction: "Run fresh capability discovery, then make a new bounded target selection.",
-			denial: false,
-		},
-	);
-	assert.deepEqual(
-		classifyGatewayFailure({
-			code: "target_catalog_capability_not_granted",
-			message: "server-controlled",
-			recovery: { kind: "select_granted_scope" },
-		}),
-		{
-			code: "target_catalog_capability_not_granted",
-			message: "The selected Profile has no granted target for the requested capability.",
-			nextAction: "List the capabilities this Profile currently holds, then select a target for one of those capabilities.",
-			denial: true,
-		},
-	);
-});
-
 test("target-catalog failures keep their exact code through the capabilities targets route", async () => {
 	for (const expected of [
 		{
 			code: "target_catalog_selection_invalid",
-			status: "unavailable",
-			message: "The Gateway could not safely use the requested target selection.",
+			message: "server-controlled",
 		},
 		{
 			code: "target_catalog_capability_not_granted",
-			status: "denied",
-			message: "The selected Profile has no granted target for the requested capability.",
+			message: "server-controlled",
 		},
 	]) {
 		await withGateway(
@@ -2599,7 +2543,6 @@ test("target-catalog failures keep their exact code through the capabilities tar
 				});
 				assert.equal(payload.error.kind, expected.code);
 				assert.equal(payload.error.message, expected.message);
-				assert.equal(payload.status, expected.status);
 				assert.equal(payload.live_gateway_checked, true);
 				assert.deepEqual(
 					requests.map((request) => request.body.operation),
@@ -2616,20 +2559,12 @@ test("target-catalog failures keep their exact code through the capabilities tar
 							error: {
 								code: expected.code,
 								message: "server-controlled",
+								next_action: "server-controlled action",
 								recovery: { kind: "select_granted_scope" },
 							},
 						},
 		);
 	}
-});
-
-test("invalid capability arguments ask the caller to correct input instead of retrying the same request", () => {
-	assert.deepEqual(classifyGatewayFailure({ code: "invalid_arguments", message: "server-controlled" }), {
-		code: "invalid_arguments",
-		message: "The capability arguments do not satisfy the published input contract.",
-		nextAction: "Correct the capability arguments, then retry the call with a new request ID.",
-		denial: false,
-	});
 });
 
 test("an invalid Gateway call renders caller correction without connector restoration", async () => {
@@ -2640,7 +2575,7 @@ test("an invalid Gateway call renders caller correction without connector restor
 				nextRequestId: () => "narnia:invalid-arguments:001",
 			});
 			assert.equal(payload.error.kind, "invalid_arguments");
-			assert.equal(payload.error.next_action, "Correct the capability arguments, then retry the call with a new request ID.");
+			assert.equal(payload.error.next_action, "server-controlled");
 			assert.doesNotMatch(payload.error.next_action, /connector|Gateway status|same call/iu);
 			assert.deepEqual(
 				requests.map(({ body }) => body.operation),
@@ -2648,47 +2583,6 @@ test("an invalid Gateway call renders caller correction without connector restor
 			);
 		},
 		(request) => (request.operation === "call" ? invalidArgumentsFailureResponse(request) : failedReadbackResponse(request)),
-	);
-});
-
-test("an unavailable continuation asks the agent to rediscover instead of restoring the connector", () => {
-	assert.deepEqual(classifyGatewayFailure({ code: "continuation_not_available", message: "server-controlled" }), {
-		code: "continuation_not_available",
-		message: "The approved continuation is no longer available.",
-		nextAction: "Run fresh capability discovery, then search or resolve the governed resource again and use its new reference.",
-		denial: false,
-	});
-});
-
-test("an unavailable resource keeps its own code without claiming an authorization decision", () => {
-	// Exact Stage 3 opaque-denial shape: a known code with no recovery hint must
-	// not degrade to the generic gateway_request_failed classification.
-	assert.deepEqual(classifyGatewayFailure({ code: "resource_not_available", message: "server-controlled" }), {
-		code: "resource_not_available",
-		message: "The Gateway reported the requested resource as not available to this client.",
-		nextAction:
-			"Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
-		denial: false,
-	});
-});
-
-test("a resource_not_available recovery hint cannot flip the opaque failure into a denial", () => {
-	// Precedence suppression: the known-code table wins even when the Gateway
-	// attaches an authorization-flavored recovery kind, so the call surface can
-	// never synthesize an authorization decision from an opaque failure.
-	assert.deepEqual(
-		classifyGatewayFailure({
-			code: "resource_not_available",
-			message: "server-controlled",
-			recovery: { kind: "request_approval" },
-		}),
-		{
-			code: "resource_not_available",
-			message: "The Gateway reported the requested resource as not available to this client.",
-			nextAction:
-				"Run fresh capability discovery, then search or resolve the resource again; repeating the same reference will not make it available.",
-			denial: false,
-		},
 	);
 });
 
@@ -2891,8 +2785,8 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 		}),
 		{
 			code: "quota_exceeded_v2",
-			message: "The Gateway declined the request with a retryable rejection.",
-			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+			message: "server-controlled",
+			nextAction: "server-controlled prose",
 			denial: false,
 			// The wait travels with the classification now (corca-ai/ceal#642); an
 			// unknown code degrading by recovery class keeps the Gateway's number.
@@ -3067,8 +2961,7 @@ test("a throttled call renders the Gateway's wait in its error document", async 
 			assert.equal(payload.status, "error");
 			assert.equal(payload.error.kind, "rate_limited");
 			assert.equal(payload.error.retry_after_ms, 45_000);
-			// The prose stays this client's; only the number is the Gateway's.
-			assert.equal(payload.error.message, "The Gateway rate quota for this client is temporarily exhausted.");
+			assert.equal(payload.error.message, "server-controlled");
 		},
 		(body) =>
 			body.operation === "handshake"
@@ -3097,9 +2990,8 @@ test("a throttle carries the Gateway's own wait instead of making the caller gue
 		next_action: "server-controlled prose",
 		recovery: { kind: "retry", retry_after_ms: 45_000 },
 	});
-	// The table still owns the words; only the number comes from the Gateway.
 	assert.equal(throttled.code, "rate_limited");
-	assert.equal(throttled.message, "The Gateway rate quota for this client is temporarily exhausted.");
+	assert.equal(throttled.message, "server-controlled");
 	assert.equal(throttled.retryAfterMs, 45_000);
 
 	// Absence must stay absent. A default would be a locally invented backoff
@@ -3122,7 +3014,7 @@ test("a throttle carries the Gateway's own wait instead of making the caller gue
 	}
 });
 
-test("an unknown failure code degrades by its typed recovery class, never by server prose", () => {
+test("a Gateway-authored recovery preserves its exact bounded text", () => {
 	assert.deepEqual(
 		classifyGatewayFailure({
 			code: "quota_exceeded_v2",
@@ -3132,8 +3024,8 @@ test("an unknown failure code degrades by its typed recovery class, never by ser
 		}),
 		{
 			code: "quota_exceeded_v2",
-			message: "The Gateway declined the request with a retryable rejection.",
-			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
+			message: "server-controlled",
+			nextAction: "server-controlled prose",
 			denial: false,
 			// The wait travels with the classification now (corca-ai/ceal#642); an
 			// unknown code degrading by recovery class keeps the Gateway's number.
@@ -3163,45 +3055,57 @@ test("receipt projects safe connector route provenance without provider material
 	);
 });
 
-test("the known code table wins over a disagreeing recovery class", () => {
-	assert.deepEqual(
-		classifyGatewayFailure({
-			code: "rate_limited",
-			message: "server-controlled",
-			recovery: { kind: "operator_restore" },
-		}),
-		{
-			code: "rate_limited",
-			message: "The Gateway rate quota for this client is temporarily exhausted.",
-			nextAction: "Wait briefly and retry the same call; the connector does not need operator restoration.",
-			denial: false,
-		},
-	);
-});
-
-test("a non-member recovery kind is never echoed and falls to the generic hint", () => {
+test("a non-member recovery kind stays unrendered while Gateway guidance survives", () => {
 	assert.deepEqual(
 		classifyGatewayFailure({
 			code: "mystery_code",
 			message: "server-controlled",
+			next_action: "server-controlled prose",
 			recovery: { kind: "reboot_universe" },
 		}),
 		{
-			code: "gateway_request_failed",
-			message: "The Gateway rejected the capability request.",
-			nextAction: "Check Gateway status and audit readback, then retry with a new request ID.",
+			code: "mystery_code",
+			message: "server-controlled",
+			nextAction: "server-controlled prose",
 			denial: false,
 		},
 	);
 });
 
-test("write idempotency conflicts explain safe recovery without exposing the original payload", () => {
-	assert.deepEqual(classifyGatewayFailure({ code: "idempotency_conflict", message: "server-controlled" }), {
-		code: "idempotency_conflict",
-		message: "The idempotency key names a different governed write.",
-		nextAction: "Reuse the exact original request, or choose a new idempotency key for a new intended write.",
-		denial: false,
-	});
+test("a duplicate-write refusal preserves the Gateway-issued confirmation reference", async () => {
+	const messageRef = "message:already-sent_001";
+	const message = `An identical governed message was already sent as ${messageRef}.`;
+	const nextAction = `Re-send the same call with duplicate_confirmed set to ${messageRef} to repeat it, or change the message.`;
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(
+				[
+					"call",
+					"message.create",
+					"--target",
+					"target:team-inbox",
+					"reply_to=message:approved_001",
+					"text=Approved",
+					"idempotency_key=retry-001",
+				],
+				3,
+				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:001" },
+			);
+			assert.equal(payload.error.kind, "duplicate_write_refused");
+			assert.equal(payload.error.message, message);
+			assert.equal(payload.error.next_action, nextAction);
+			assert.match(payload.error.next_action, new RegExp(messageRef, "u"));
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						error: { code: "duplicate_write_refused", message, next_action: nextAction },
+					}
+				: failedReadbackResponse(request),
+	);
 });
 
 test("compatibility link data passes through and unsafe input is left to the Gateway contract", async () => {
@@ -3953,7 +3857,7 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 			);
 			assert.equal(payload.status, "unavailable");
 			assert.equal(payload.proof_level, "host_decision");
-			assert.equal(payload.error.kind, "gateway_request_failed");
+			assert.equal(payload.error.kind, "internal_error");
 			assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 		},
 		(request) => ({

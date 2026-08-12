@@ -87,6 +87,12 @@ function workflowPaths() {
 		.map((name) => path.join(".github/workflows", name));
 }
 
+function checkedWorkflowPaths() {
+	const paths = workflowPaths();
+	assert.ok(paths.length >= 3, `only ${paths.length} workflows found; the scan is not reaching .github/workflows`);
+	return paths;
+}
+
 // Both gates below have to find "the step that runs the final gate", and both used
 // to do it with exact equality after `trim()`. Wrapping the step in a multi-line
 // `run:` — to export one env var, say — then made one of them vacuous and the
@@ -1096,12 +1102,10 @@ test("privileged release jobs consume only approved unprivileged handoffs", () =
 // `ceal-worker-stable-rollback.yml` were pinned only by habit. This asserts
 // across every workflow rather than a hand-kept list.
 test("every workflow pins every action to a full commit SHA", () => {
-	const directory = path.join(ROOT, ".github/workflows");
-	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let pinned = 0;
-	for (const name of workflows) {
-		const uses = [...read(path.join(".github/workflows", name)).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
+	for (const workflowPath of checkedWorkflowPaths()) {
+		const uses = [...read(workflowPath).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
+		const name = path.basename(workflowPath);
 		// A zero-match file would satisfy the loop below trivially, which is how a
 		// reformat or a flow-style `uses` key turns this kind of sweep vacuous.
 		assert.ok(uses.length > 0, `${name} declares no 'uses:' step; confirm that is real rather than a parse miss`);
@@ -1112,7 +1116,7 @@ test("every workflow pins every action to a full commit SHA", () => {
 			pinned += 1;
 		}
 	}
-	assert.ok(pinned >= 10, `only ${pinned} pinned action refs checked across ${workflows.length} workflows`);
+	assert.ok(pinned >= 10, `only ${pinned} pinned action refs checked across ${workflowPaths().length} workflows`);
 });
 
 // GitHub's default job timeout is six hours. `check.yml` bounded itself; the
@@ -1125,12 +1129,10 @@ test("every workflow pins every action to a full commit SHA", () => {
 // applies to every workflow without a hole in it.
 
 test("every workflow job this lane owns bounds its own runtime", () => {
-	const directory = path.join(ROOT, ".github/workflows");
-	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let bounded = 0;
-	for (const name of workflows) {
-		const jobs = Object.entries(parse(read(path.join(".github/workflows", name))).jobs ?? {});
+	for (const workflowPath of checkedWorkflowPaths()) {
+		const jobs = Object.entries(parse(read(workflowPath)).jobs ?? {});
+		const name = path.basename(workflowPath);
 		// A file that parses to zero jobs would satisfy the loop trivially, which
 		// is how this kind of sweep goes quietly vacuous after a restructure.
 		assert.ok(jobs.length > 0, `${name} declares no jobs; confirm that is real rather than a parse miss`);
@@ -1143,7 +1145,7 @@ test("every workflow job this lane owns bounds its own runtime", () => {
 			bounded += 1;
 		}
 	}
-	assert.ok(bounded >= 6, `only ${bounded} jobs checked across ${workflows.length} workflows`);
+	assert.ok(bounded >= 6, `only ${bounded} jobs checked across ${workflowPaths().length} workflows`);
 });
 
 // `npm run check` skips the release-artifact and installer proofs on a host that

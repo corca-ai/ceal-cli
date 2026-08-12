@@ -25,6 +25,7 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	copy("install-ceal.sh", root);
 	mkdirSync(path.join(root, "docs", "requests"), { recursive: true });
 	writeFileSync(path.join(root, "docs", "requests", "README.md"), "# Fixture request\n");
+	if (diverged) writeFileSync(path.join(root, "docs", "protocol-quarantine.md"), "# Fixture quarantine\n");
 
 	if (acceptanceCli) {
 		copy("scripts", root);
