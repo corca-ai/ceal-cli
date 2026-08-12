@@ -494,7 +494,7 @@ test("embedded registration conflict writes no guide state and leaves another ho
 	}
 });
 
-test("embedded registration atomically migrates the exact dangling legacy managed link", () => {
+test("embedded registration preserves an exact legacy managed link and asks for explicit cleanup", () => {
 	const fixture = embeddedGuideFixture();
 	try {
 		const registration = path.join(fixture.codexHome, "skills", "ceal-guide");
@@ -509,9 +509,11 @@ test("embedded registration atomically migrates the exact dangling legacy manage
 			fixture.bundle.bytes,
 		);
 		const result = store.register("codex");
-		assert.equal(result.status, "available");
-		assert.notEqual(readlinkSync(registration), path.join(fixture.worker, "current", "guide"));
-		assert.match(readFile(path.join(registration, "references", "workflow.md")), /complete directory/u);
+		assert.equal(result.error?.kind, "registration_conflict");
+		assert.equal(readlinkSync(registration), path.join(fixture.worker, "current", "guide"));
+		assert.match(result.error?.next_action ?? "", /Remove the existing link/u);
+		assert.match(result.error?.next_action ?? "", /ceal guide register codex/u);
+		assert.equal(existsSync(path.join(fixture.worker, "guides")), false, "a refused migration must not materialize guide state");
 	} finally {
 		fixture.cleanup();
 	}
@@ -523,6 +525,8 @@ test("a missing embedded SEA guide never falls back to the compatibility project
 		const store = createCealAgentGuideStore(fixture.command, fixture.root, fixture.codexHome, fixture.claudeHome, undefined, null);
 		assert.equal(store.inspect().status, "unavailable");
 		assert.equal(store.inspect().error?.kind, "guide_unavailable");
+		assert.match(store.inspect().error?.message ?? "", /carried by this installed binary/u);
+		assert.doesNotMatch(store.inspect().error?.message ?? "", /beside/u);
 	} finally {
 		fixture.cleanup();
 	}
@@ -560,6 +564,10 @@ test("embedded guide status refuses content, mode, and symlink drift after regis
 		["content", (root) => writeFileSync(path.join(root, "SKILL.md"), "tampered\n")],
 		["mode", (root) => chmodSync(path.join(root, "SKILL.md"), 0o666)],
 		["file special mode", (root) => chmodSync(path.join(root, "SKILL.md"), 0o4644)],
+		["missing file", (root) => rmSync(path.join(root, "references", "workflow.md"))],
+		["unexpected file", (root) => writeFileSync(path.join(root, "unexpected.md"), "not signed\n")],
+		["root mode", (root) => chmodSync(root, 0o755)],
+		["nested directory mode", (root) => chmodSync(path.join(root, "references"), 0o755)],
 		["directory special mode", (root) => chmodSync(root, 0o2700)],
 		[
 			"symlink",
@@ -630,8 +638,10 @@ test("embedded guide decoder refuses traversal, duplicate paths, links, and dama
 		);
 		for (const mutate of [
 			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { name: "../escape" }),
+			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { name: "docs/workflow.md" }),
 			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { name: "SKILL.md" }),
 			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { type: 0x32 }),
+			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { mode: 0o600 }),
 			(bytes) => {
 				bytes[0] ^= 1;
 			},
@@ -691,7 +701,7 @@ function readFile(file) {
 	return readFileSync(file, "utf8");
 }
 
-function rewriteTarHeader(bytes, member, { name, type } = {}) {
+function rewriteTarHeader(bytes, member, { name, type, mode } = {}) {
 	for (let offset = 0; offset + 512 <= bytes.length; ) {
 		const header = bytes.subarray(offset, offset + 512);
 		const observed = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
@@ -701,6 +711,10 @@ function rewriteTarHeader(bytes, member, { name, type } = {}) {
 				header.write(name, 0, 100, "utf8");
 			}
 			if (type !== undefined) header[156] = type;
+			if (mode !== undefined) {
+				header.fill(0, 100, 108);
+				header.write(mode.toString(8).padStart(7, "0"), 100, 7, "ascii");
+			}
 			header.fill(0x20, 148, 156);
 			const checksum = header
 				.reduce((sum, byte) => sum + byte, 0)

@@ -43,6 +43,15 @@ const GATEWAY_PROTOCOL_REQUIREMENT = Object.freeze({
 	required_exports: Object.freeze([".", "./conformance"]),
 });
 
+export function resolveWorkerReleaseGuideInput(options = {}) {
+	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	const inventory = readInventory(options.inventoryPath ?? path.join(repoRoot, INPUTS_FILENAME));
+	if (!isPlainObject(inventory) || inventory.schema_version !== SCHEMA_VERSION || inventory.status !== "local_candidate_not_published")
+		fail("invalid_inventory", "Worker release input inventory is invalid.");
+	assertGuide(inventory.guide, repoRoot);
+	return { ...inventory.guide };
+}
+
 // Re-raised as this module's error type so a caller catching WorkerReleaseInputError
 // sees the refusal rather than an unrelated exception escaping the release lane.
 // The code is carried through unchanged: `proof_shipment_protocol_divergence` is

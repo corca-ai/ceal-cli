@@ -243,8 +243,9 @@ export function createCealAgentGuideStore(
 		register: (agent) =>
 			act(agent, (target, registrationPath) => {
 				if (embedded) {
-					if (!registrationCanBeUpdated(registrationPath, guidePath, legacyGuidePath, embedded.stateRoot))
-						return conflictState(guidePath, target, resolved, embedded.bundle);
+					const disposition = registrationDisposition(registrationPath, guidePath, legacyGuidePath, embedded.stateRoot);
+					if (disposition === "managed_previous") return conflictState(guidePath, target, resolved, embedded.bundle, registrationPath);
+					if (disposition === "foreign") return conflictState(guidePath, target, resolved, embedded.bundle);
 					try {
 						materializeEmbeddedGuide(embedded.stateRoot, embedded.bundle);
 					} catch {
@@ -282,7 +283,7 @@ function unavailableState(agent: CealAgentGuideHost): CealAgentGuideState {
 		update_safe: false,
 		error: {
 			kind: "guide_unavailable",
-			message: "The signed Ceal guide is not available beside this installed binary.",
+			message: "The signed Ceal guide is not carried by this installed binary.",
 			next_action:
 				"The installed binary remains usable. Run 'ceal update' when a newer signed release is available, then retry 'ceal guide status'; report the release if the guide is still unavailable.",
 		},
@@ -404,13 +405,11 @@ function registerGuide(
 			// The signed 0.76.1 runtime registered the generation-local `current/guide`
 			// path. The embedded directory carrier replaces only that installer-owned
 			// link automatically; every other occupant remains a deliberate conflict.
-			if (
+			const managedPrevious =
 				(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
-				(embeddedStateRoot && registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot))
-			)
-				replaceManagedRegistration(registrationPath, guidePath);
-			else return conflictState(guidePath, agent, resolved, embeddedBundle);
-			return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+				(embeddedStateRoot && registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot));
+			if (managedPrevious) return conflictState(guidePath, agent, resolved, embeddedBundle, registrationPath);
+			return conflictState(guidePath, agent, resolved, embeddedBundle);
 		}
 		mkdirSync(dirname(registrationPath), { recursive: true, mode: 0o700 });
 		symlinkSync(guidePath, registrationPath, "dir");
@@ -588,28 +587,24 @@ function registrationPointsIntoEmbeddedState(registrationPath: string, stateRoot
 	}
 }
 
-function replaceManagedRegistration(registrationPath: string, guidePath: string): void {
-	const candidate = join(dirname(registrationPath), `.ceal-guide-next-${process.pid}`);
-	rmSync(candidate, { force: true });
-	try {
-		symlinkSync(guidePath, candidate, "dir");
-		renameSync(candidate, registrationPath);
-	} finally {
-		rmSync(candidate, { force: true });
-	}
-}
-
 function conflictState(
 	guidePath: string,
 	agent: CealAgentGuideHost,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 	embeddedBundle?: CealGuideBundle,
+	managedPreviousPath?: string,
 ): CealAgentGuideState {
 	const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
 	return unavailableFromInspection(inspected, agent, {
 		kind: "registration_conflict",
-		message: `The ${hostRow(agent).label} ceal-guide path already contains an unmanaged file, directory, or link.`,
-		next_action: "Inspect the existing registration path and replace it deliberately before retrying.",
+		message:
+			managedPreviousPath === undefined
+				? `The ${hostRow(agent).label} ceal-guide path already contains an unmanaged file, directory, or link.`
+				: `The ${hostRow(agent).label} ceal-guide path still points at an earlier Ceal-managed guide.`,
+		next_action:
+			managedPreviousPath === undefined
+				? "Inspect the existing registration path and replace it deliberately before retrying."
+				: `Remove the existing link at '${managedPreviousPath}', then retry 'ceal guide register ${agent}'. It is preserved because portable filesystems provide no conditional atomic link replacement.`,
 	});
 }
 
@@ -626,18 +621,20 @@ function unavailableFromInspection(
 	};
 }
 
-function registrationCanBeUpdated(
+function registrationDisposition(
 	registrationPath: string,
 	guidePath: string,
 	legacyGuidePath: string | undefined,
 	embeddedStateRoot: string,
-): boolean {
-	if (!existsSync(registrationPath) && !isDanglingSymlink(registrationPath)) return true;
-	return (
-		registrationPointsTo(registrationPath, guidePath) ||
-		Boolean(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
+): "empty" | "current" | "managed_previous" | "foreign" {
+	if (!existsSync(registrationPath) && !isDanglingSymlink(registrationPath)) return "empty";
+	if (registrationPointsTo(registrationPath, guidePath)) return "current";
+	if (
+		(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
 		registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot)
-	);
+	)
+		return "managed_previous";
+	return "foreign";
 }
 
 function registrationPointsTo(registrationPath: string, targetPath: string): boolean {

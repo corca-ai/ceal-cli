@@ -175,6 +175,8 @@ test("a staged installer that never finishes is stopped and reported, not waited
 	// The message has to say the deadline stopped it. "did not complete" would
 	// send an operator to reinstall a release that is very likely fine.
 	assert.match(result.error.message, /deadline/u);
+	assert.match(result.error.next_action, /ceal version/u);
+	assert.doesNotMatch(result.error.next_action, /rolled back/u);
 	// The bound is the assertion: without it this resolves in 20 seconds.
 	assert.ok(elapsed < 5_000, `the update took ${elapsed}ms; its deadline did not bound it`);
 });

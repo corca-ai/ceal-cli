@@ -90,6 +90,22 @@ function runsFinalGate(step) {
 	return (step.run ?? "").split("\n").some((line) => line.trim() === "npm run check");
 }
 
+test("workflows that exercise release proofs retain historical tags", () => {
+	for (const workflowPath of [".github/workflows/check.yml", ".github/workflows/ceal-release.yml"]) {
+		const workflow = parse(read(workflowPath));
+		for (const [jobName, job] of Object.entries(workflow.jobs)) {
+			const steps = job.steps ?? [];
+			const exercisesReleaseProof = steps.some(
+				(step) => runsFinalGate(step) || /npm run test:release/u.test(step.run ?? "") || /build-worker-release-assets/u.test(step.run ?? ""),
+			);
+			if (!exercisesReleaseProof) continue;
+			const checkout = steps.find((step) => (step.uses ?? "").startsWith("actions/checkout"));
+			assert.ok(checkout, `${workflowPath} ${jobName} must check out the source it proves`);
+			assert.equal(checkout.with?.["fetch-depth"], 0, `${workflowPath} ${jobName} must resolve historical installer tags`);
+		}
+	}
+});
+
 // A lint step that only some entry points run is a lint step maintainers learn
 // to route around. Both gates must carry it, or "green" means different things
 // depending on which command was typed.

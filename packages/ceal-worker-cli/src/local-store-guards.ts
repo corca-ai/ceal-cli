@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, type Stats, unlinkSync } from "node:fs";
 import path from "node:path";
+import { permissionMode } from "./filesystem-mode.js";
 import { resolveAnchoredDirectory } from "./local-store-anchor.js";
 
 // The filesystem safety checks every local store under HOME performs before it
@@ -33,10 +34,6 @@ export type UnsafeStore = () => never;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 
-function modeOf(stat: { mode: number }): number {
-	return stat.mode & 0o777;
-}
-
 /**
  * Whether `file` inside `directory` is safe to read: both must be non-symlinks
  * of the right type, the directory at 0o700 and the file at 0o600.
@@ -51,7 +48,7 @@ export function safeExistingFile(directory: string, file: string, requireFileMod
 		// store's assertDirectory, because the explicit-gateway path reaches this
 		// function without running that store at all. A wider-mode directory
 		// soft-fails to a live probe rather than being trusted.
-		if (dir.isSymbolicLink() || !dir.isDirectory() || modeOf(dir) !== DIRECTORY_MODE) return false;
+		if (dir.isSymbolicLink() || !dir.isDirectory() || permissionMode(dir) !== DIRECTORY_MODE) return false;
 		const stat = lstatSync(file);
 		if (stat.isSymbolicLink() || !stat.isFile()) return false;
 		// `requireFileMode: false` is for a caller that is about to *rewrite* this
@@ -59,7 +56,7 @@ export function safeExistingFile(directory: string, file: string, requireFileMod
 		// It stays safe because the directory check above is unconditional: inside a
 		// 0o700 directory nobody else can traverse to the file, let alone replace
 		// it, so a widened file mode exposes nothing and the rewrite repairs it.
-		return !requireFileMode || modeOf(stat) === FILE_MODE;
+		return !requireFileMode || permissionMode(stat) === FILE_MODE;
 	} catch {
 		return false;
 	}
@@ -106,7 +103,7 @@ export function assertDirectory(directory: string, unsafe: UnsafeStore, requireM
 
 function assertDirectoryStat(stat: Stats, unsafe: UnsafeStore, requireMode: boolean): void {
 	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
-	if (requireMode && modeOf(stat) !== DIRECTORY_MODE) unsafe();
+	if (requireMode && permissionMode(stat) !== DIRECTORY_MODE) unsafe();
 }
 
 /**
@@ -125,7 +122,7 @@ export function assertDirectoryIfPresent(directory: string, unsafe: UnsafeStore,
 export function assertFile(file: string, unsafe: UnsafeStore, requireMode = false): void {
 	const stat = lstatSync(file);
 	if (stat.isSymbolicLink() || !stat.isFile()) unsafe();
-	if (requireMode && modeOf(stat) !== FILE_MODE) unsafe();
+	if (requireMode && permissionMode(stat) !== FILE_MODE) unsafe();
 }
 
 function existingPathOperation<T>(operation: () => T, unsafe: UnsafeStore): { found: true; value: T } | { found: false } {
@@ -162,7 +159,7 @@ export function removeOwnedFile(directory: string, file: string, unsafe: UnsafeS
 	}
 	try {
 		const directoryStat = fstatSync(directoryHandle);
-		if (!directoryStat.isDirectory() || modeOf(directoryStat) !== DIRECTORY_MODE) unsafe();
+		if (!directoryStat.isDirectory() || permissionMode(directoryStat) !== DIRECTORY_MODE) unsafe();
 		const anchoredFile = () =>
 			path.join(resolveAnchoredDirectory(directoryHandle, directory, directoryStat, DIRECTORY_MODE, unsafe), path.basename(file));
 		const openedFile = existingPathOperation(() => openSync(anchoredFile(), constants.O_RDONLY | constants.O_NOFOLLOW), unsafe);

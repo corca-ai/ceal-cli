@@ -73,7 +73,7 @@ apply remain separately approved boundaries.
    closed-enum, notification-binding, request-envelope, and consecutive-frame
    proofs; converge frozen tree, dependency, lock, pin, generated contracts,
    and workflow input in one commit.
-3. Run the ordinary release gates and exact `0.76.1` direct-update plus explicit
+3. Run the ordinary release gates and tag-resolved `0.76.1` installer crossing plus explicit
    guide-register proof. Ask before choosing a version, pushing, tagging,
    publishing, or installing the new release.
 4. After B2 serves ordered guidance and caller identity, finish B3 with

@@ -10,7 +10,10 @@
   `ceal guide register codex` or `ceal guide register claude`.
 - The signed worker embeds the complete deterministic guide directory. Explicit
   registration verifies and materializes that directory in content-addressed
-  worker state, then atomically changes only the requested host registration.
+  worker state, then creates only an empty requested-host registration path.
+  An earlier Ceal-managed link is preserved with exact cleanup-and-retry advice;
+  portable filesystems do not offer the conditional atomic replacement needed
+  to overwrite it without a foreign-occupant race.
 - Read-only guide status distinguishes an embedded carrier from a materialized
   registration and refuses content, inventory, symlink, ordinary-mode, or
   special-mode drift.
@@ -38,7 +41,7 @@ output.
 
 - `npm run check:unit` passed on the repaired tree.
 - Focused worker guide, update, CLI, release-input, release-asset, and installer
-  tests passed, including exact `ceal-v0.76.1` installer compatibility and an
+  tests passed, including tag-resolved `ceal-v0.76.1` installer compatibility and an
   unchanged rerun through the newly staged installer.
 - Installer mutation proofs refuse each execute bit and each setuid, setgid, or
   sticky bit independently for the historical compatibility entry.
@@ -53,7 +56,7 @@ output.
   with `proof_shipment_protocol_divergence`. Those refusals prevent the release
   paths from reaching the scripts coverage floor; they are the existing signed
   handoff quarantine, not released-worker proof.
-- Verification level: local checkout, exact historical-installer fixture, and
+- Verification level: local checkout, tag-resolved historical-installer fixture, and
   development artifact behavior. No signed successor, installed successor, or
   live Gateway/provider proof was produced.
 

@@ -14,6 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { permissionMode } from "./filesystem-mode.js";
 import { resolveAnchoredDirectory } from "./local-store-anchor.js";
 import { defaultMonotonicNow } from "./monotonic-clock.js";
 
@@ -130,7 +131,7 @@ function anchorLockParent(options: LocalStoreLockOptions): { options: LocalStore
 	}
 	try {
 		const stat = fstatSync(parentHandle);
-		if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o700) options.onUnsafe();
+		if (!stat.isDirectory() || permissionMode(stat) !== 0o700) options.onUnsafe();
 		const anchoredOptions = { ...options };
 		Object.defineProperty(anchoredOptions, "lockPath", {
 			enumerable: true,

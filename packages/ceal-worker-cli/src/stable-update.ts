@@ -116,7 +116,7 @@ export function createCealStableUpdateRunner(
 			return unavailable(
 				"update_failed",
 				"The stable signed worker update did not finish within its deadline and was stopped.",
-				"Check connectivity to the worker release origin, then retry; the installer rolled back whatever it had staged.",
+				"Check connectivity to the worker release origin, run 'ceal version' to confirm the active release, then retry. Do not infer update completion from the timed-out process.",
 			);
 		if (run.code !== 0 || run.truncated)
 			return unavailable(

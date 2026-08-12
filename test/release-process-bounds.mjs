@@ -21,6 +21,8 @@ export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = R
 		timeoutMs,
 		terminationGraceMs: Math.min(DEFAULT_ASYNC_BOUNDS.terminationGraceMs, timeoutMs),
 		postKillReportMs: Math.min(DEFAULT_ASYNC_BOUNDS.postKillReportMs, timeoutMs),
+		timeoutStartMarker: options.timeoutStartMarker,
+		timeoutStartDeadlineMs: options.timeoutStartDeadlineMs,
 		cwd: options.cwd ?? process.cwd(),
 		env: targetEnv,
 	};

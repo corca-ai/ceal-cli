@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -22,6 +22,7 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.mjs";
+import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.mjs";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.mjs";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
@@ -354,6 +355,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// commit, and a manifest that names a version with no producer at all.
 	const driftCases = [
 		["client", (manifest) => (manifest.client.sha256 = "d".repeat(64)), "merge_client_provenance_drift"],
+		["embedded-guide", (manifest) => (manifest.embedded_guide.sha256 = "d".repeat(64)), "merge_embedded_guide_drift"],
 		["carrier", (manifest) => (manifest.private_leased_consumer_carrier.contract_json = "{}"), "merge_private_carrier_contract_drift"],
 		["handoff", (manifest) => (manifest.private_leased_consumer_handoff.sha256 = "0".repeat(64)), "merge_private_carrier_handoff_drift"],
 		[
@@ -403,6 +405,14 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// That is the ordinary shape, not an exotic one — every leg stages from one
 	// snapshot, so a stale or tampered snapshot reaches all of them the same way.
 	const identicalDriftCases = [
+		[
+			"embedded-guide",
+			(manifest) => {
+				manifest.embedded_guide.sha256 = "0".repeat(64);
+				manifest.native_smoke.embedded_guide_sha256 = "0".repeat(64);
+			},
+			"merge_embedded_guide_drift",
+		],
 		[
 			"control-session",
 			(manifest) => {
@@ -718,7 +728,7 @@ function fakeNativeBuild(
 		mkdirSync(outputDirectory, { recursive: true });
 		const binary = Buffer.from(`native-${platform}\n`);
 		writeFileSync(path.join(outputDirectory, `ceal-${platform}`), binary, { mode: 0o755 });
-		const guide = Buffer.from("fixture guide archive\n");
+		const guide = createSkillDirectoryBundle(path.join(REPO_ROOT, "skills", "ceal-guide"));
 		const compatibilityGuide = readFileSync(path.join(REPO_ROOT, "scripts", "assets", "ceal-guide-compatibility-SKILL.md"));
 		writeFileSync(path.join(outputDirectory, "ceal-guide-SKILL.md"), compatibilityGuide);
 		writeFileSync(path.join(outputDirectory, "THIRD_PARTY_NOTICES.txt"), "notice\n");
@@ -730,9 +740,9 @@ function fakeNativeBuild(
 			guide: {
 				name: "ceal-guide.tar",
 				format: "ustar",
-				bytes: guide.length,
-				sha256: digest(guide),
-				files: [{ path: "SKILL.md", bytes: 1, sha256: digest("x"), mode: 0o644 }],
+				bytes: guide.bytes.length,
+				sha256: guide.sha256,
+				files: guide.files,
 			},
 			compatibility_guide: {
 				name: "ceal-guide-SKILL.md",
@@ -759,7 +769,7 @@ function fakeNativeBuild(
 				command: "ceal",
 				version,
 				operator_surface_absent: true,
-				embedded_guide_sha256: digest(guide),
+				embedded_guide_sha256: guide.sha256,
 				guide_registration: true,
 			},
 		};
@@ -770,6 +780,13 @@ function fixtureRepo(root) {
 	const repo = path.join(root, "repo");
 	mkdirSync(repo, { recursive: true });
 	writeFileSync(path.join(repo, "install-ceal.sh"), "#!/usr/bin/env sh\nexit 0\n", { mode: 0o755 });
+	cpSync(path.join(REPO_ROOT, "worker-release-inputs.json"), path.join(repo, "worker-release-inputs.json"));
+	cpSync(path.join(REPO_ROOT, "skills", "ceal-guide"), path.join(repo, "skills", "ceal-guide"), { recursive: true });
+	mkdirSync(path.join(repo, "scripts", "assets"), { recursive: true });
+	cpSync(
+		path.join(REPO_ROOT, "scripts", "assets", "ceal-guide-compatibility-SKILL.md"),
+		path.join(repo, "scripts", "assets", "ceal-guide-compatibility-SKILL.md"),
+	);
 	const contractDirectory = path.join(repo, "packages", "ceal-worker-cli");
 	mkdirSync(contractDirectory, { recursive: true });
 	const clientDirectory = path.join(repo, "packages", "ceal-client");

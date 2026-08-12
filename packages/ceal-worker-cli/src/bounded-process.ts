@@ -8,6 +8,10 @@ export interface BoundedProcessOptions {
 	postKillReportMs: number;
 	postExitDrainMs: number;
 	maxCapturedOutputBytes: number;
+	/** Test-fixture seam: arm the deadline only after stdout contains this marker. */
+	timeoutStartMarker?: string;
+	/** Test-fixture seam: bound a fixture that fails before it emits the marker. */
+	timeoutStartDeadlineMs?: number;
 }
 
 export interface BoundedProcessResult {
@@ -57,14 +61,28 @@ export async function runBoundedProcess(
 			timer.unref();
 			timers.push(timer);
 		};
-		after(options.timeoutMs, () => {
+		const expire = () => {
 			timedOut = true;
 			signalGroup(child, "SIGTERM");
 			after(options.terminationGraceMs, () => {
 				signalGroup(child, "SIGKILL");
 				after(options.postKillReportMs, () => settle(null));
 			});
-		});
+		};
+		let timeoutArmed = false;
+		let markerDeadline: NodeJS.Timeout | undefined;
+		const armTimeout = () => {
+			if (timeoutArmed) return;
+			timeoutArmed = true;
+			if (markerDeadline) clearTimeout(markerDeadline);
+			after(options.timeoutMs, expire);
+		};
+		if (options.timeoutStartMarker === undefined) armTimeout();
+		else {
+			markerDeadline = setTimeout(expire, options.timeoutStartDeadlineMs ?? options.timeoutMs);
+			markerDeadline.unref();
+			timers.push(markerDeadline);
+		}
 		const capture = (stream: "stdout" | "stderr", chunk: Buffer) => {
 			if (truncated) return;
 			if (capturedBytes + chunk.byteLength > options.maxCapturedOutputBytes) {
@@ -77,6 +95,7 @@ export async function runBoundedProcess(
 			const next = (stream === "stdout" ? stdout : stderr) + chunk.toString("utf8");
 			if (stream === "stdout") stdout = next;
 			else stderr = next;
+			if (stream === "stdout" && options.timeoutStartMarker !== undefined && stdout.includes(options.timeoutStartMarker)) armTimeout();
 		};
 		child.stdout.on("data", (chunk: Buffer) => capture("stdout", chunk));
 		child.stderr.on("data", (chunk: Buffer) => capture("stderr", chunk));

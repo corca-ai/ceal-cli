@@ -169,6 +169,16 @@ test("a lock held by a live process is waited for and then refused as busy", asy
 	});
 });
 
+test("a lock parent with special permission bits is refused as unsafe", async () => {
+	await withStore(async (directory) => {
+		fs.chmodSync(directory, 0o2700);
+		await assert.rejects(
+			withLocalStoreLock(options(directory), async () => {}),
+			TestUnsafe,
+		);
+	});
+});
+
 test("the busy deadline is driven by a monotonic clock", async () => {
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
@@ -465,13 +475,17 @@ function injectableLockSource() {
 	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
 	const relativeImport = 'from "./local-store-anchor.js";';
 	const relativeClockImport = 'from "./monotonic-clock.js";';
+	const relativeModeImport = 'from "./filesystem-mode.js";';
 	assert.ok(source.includes(relativeImport), "the lock no longer imports its shared anchor beside itself");
 	assert.ok(source.includes(relativeClockImport), "the lock no longer imports its monotonic clock beside itself");
+	assert.ok(source.includes(relativeModeImport), "the lock no longer imports its shared permission-mode owner beside itself");
 	const anchorUrl = new URL("../dist/local-store-anchor.js", import.meta.url).href;
 	const clockUrl = new URL("../dist/monotonic-clock.js", import.meta.url).href;
+	const modeUrl = new URL("../dist/filesystem-mode.js", import.meta.url).href;
 	return source
 		.replace(relativeImport, `from ${JSON.stringify(anchorUrl)};`)
-		.replace(relativeClockImport, `from ${JSON.stringify(clockUrl)};`);
+		.replace(relativeClockImport, `from ${JSON.stringify(clockUrl)};`)
+		.replace(relativeModeImport, `from ${JSON.stringify(modeUrl)};`);
 }
 
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {

@@ -1,5 +1,6 @@
 import { lstatSync, type Stats } from "node:fs";
 import path from "node:path";
+import { permissionMode } from "./filesystem-mode.js";
 
 /** Resolve child operations back to one already-open owner-only directory. */
 export function resolveAnchoredDirectory(
@@ -26,7 +27,7 @@ export function resolveAnchoredDirectory(
 		observed.isSymbolicLink() ||
 		observed.dev !== expected.dev ||
 		observed.ino !== expected.ino ||
-		(observed.mode & 0o777) !== expectedMode
+		permissionMode(observed) !== expectedMode
 	)
 		unsafe();
 	return directory;

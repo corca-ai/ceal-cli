@@ -196,9 +196,9 @@ test("release sync-process proof kills a TERM-ignoring command tree", (context) 
 		"/bin/sh",
 		[
 			"-c",
-			`${process.execPath} -e 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; trap '' TERM; wait`,
+			`trap '' TERM; /bin/sh -c 'while :; do sleep 1; done' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; printf 'ready\\n'; wait`,
 		],
-		{ encoding: "utf8" },
+		{ encoding: "utf8", timeoutStartMarker: "ready\n", timeoutStartDeadlineMs: 5_000 },
 		50,
 	);
 	assert.equal(result.error?.code, "ETIMEDOUT");

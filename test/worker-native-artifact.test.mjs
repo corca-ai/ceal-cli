@@ -213,10 +213,17 @@ test("native artifact process proof kills a command tree that exceeds its deadli
 		"/bin/sh",
 		[
 			"-c",
-			`${process.execPath} -e 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; trap '' TERM; wait`,
+			`trap '' TERM; /bin/sh -c 'while :; do sleep 1; done' & child=$!; printf '%s %s' "$$" "$child" > ${JSON.stringify(pidFile)}; printf 'ready\\n'; wait`,
 		],
 		root,
-		{ timeoutMs: 50, terminationGraceMs: 50, postKillReportMs: 50, postExitDrainMs: 10 },
+		{
+			timeoutMs: 50,
+			terminationGraceMs: 50,
+			postKillReportMs: 50,
+			postExitDrainMs: 10,
+			timeoutStartMarker: "ready\n",
+			timeoutStartDeadlineMs: 5_000,
+		},
 	);
 	assert.equal(result.timedOut, true);
 	assert.equal(result.signal, "SIGKILL");

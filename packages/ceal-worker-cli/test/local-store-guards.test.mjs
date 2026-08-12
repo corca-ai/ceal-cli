@@ -41,6 +41,12 @@ test("a 0o700 directory holding a 0o600 file is the only safe read", (context) =
 	// A file another user could read must not be trusted either.
 	chmodSync(file, 0o644);
 	assert.equal(safeExistingFile(directory, file), false);
+
+	chmodSync(file, 0o4600);
+	assert.equal(safeExistingFile(directory, file), false, "setuid must not be hidden by the permission mask");
+	chmodSync(file, 0o600);
+	chmodSync(directory, 0o2700);
+	assert.equal(safeExistingFile(directory, file), false, "setgid must not be hidden by the permission mask");
 });
 
 test("safeExistingFile never throws, so a store falls back to a live probe", (context) => {
@@ -188,6 +194,12 @@ test("requireMode decides whether a wrong-mode directory is repaired or refused"
 	assert.throws(() => prepareDirectory(directory, unsafe, true), Refused);
 	assert.throws(() => assertDirectory(directory, unsafe, true), Refused);
 	assert.doesNotThrow(() => assertDirectory(directory, unsafe));
+
+	chmodSync(directory, 0o2700);
+	assert.throws(() => prepareDirectory(directory, unsafe, true), Refused);
+	assert.throws(() => assertDirectory(directory, unsafe, true), Refused);
+	prepareDirectory(directory, unsafe);
+	assert.equal(statSync(directory).mode & 0o7777, 0o700, "repairing stores must clear special bits too");
 });
 
 test("requireMode decides whether a wrong-mode file is refused", (context) => {
@@ -196,6 +208,8 @@ test("requireMode decides whether a wrong-mode file is refused", (context) => {
 	// Pre-write callers chmod immediately afterwards, so shape alone is enough.
 	assert.doesNotThrow(() => assertFile(file, unsafe));
 	// Read-path callers have nothing downstream to fix it.
+	assert.throws(() => assertFile(file, unsafe, true), Refused);
+	chmodSync(file, 0o4600);
 	assert.throws(() => assertFile(file, unsafe, true), Refused);
 });
 

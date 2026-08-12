@@ -2,6 +2,13 @@
   "entries": [
     {
       "surface": "code",
+      "id": "a65fd5dcda4e5280",
+      "class": "intentional",
+      "reviewed_at": "2026-08-12",
+      "note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at cfc87d95f6cb4b33, 9111f25a708e0c00, and 1d37623e5019a67e. Composition builds one platform's unsigned candidate; merge reconciles platform handoffs and now independently rebinds the canonical embedded guide before signing. Their shared output publication already lives in scripts/lib/output-directory.mjs, while combining the remaining bodies would merge producer and reconciler trust decisions behind callbacks."
+    },
+    {
+      "surface": "code",
       "id": "07485297e1542615",
       "class": "intentional",
       "reviewed_at": "2026-08-12",

@@ -17,7 +17,9 @@ import {
 import { codedErrorClass } from "./lib/coded-error.mjs";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
+import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
+import { resolveWorkerReleaseGuideInput } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";
@@ -272,6 +274,13 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
 	if (platforms.size === 0) fail("merge_input_incomplete", "Merged worker release set names no platform.");
+	let sourceGuide;
+	try {
+		const guideInput = resolveWorkerReleaseGuideInput({ repoRoot });
+		sourceGuide = createSkillDirectoryBundle(path.join(repoRoot, guideInput.source_path));
+	} catch {
+		fail("merge_embedded_guide_invalid", "Merged worker release assets require the canonical source guide directory.");
+	}
 	// All three private inputs are re-read from the checkout and compared, not
 	// only agreed across platforms. Cross-platform agreement alone accepts a
 	// corruption that hit every leg identically, which is the ordinary shape when
@@ -305,6 +314,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	// nothing. Agreement is the consequence; equality with the source is the rule.
 	for (const [platform, entries] of platforms) {
 		const manifestBytes = entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes;
+		embeddedGuideIdentity(manifestBytes, sourceGuide);
 		carrierContractIdentity(manifestBytes, sourceCarrierContract);
 		carrierHandoffIdentity(manifestBytes, sourceCarrierHandoff);
 		controlSessionContractIdentity(manifestBytes, sourceControlSessionContract);
@@ -358,6 +368,27 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		platforms: [...platforms.keys()].sort(),
 		entry_count: 3 + 2 * platforms.size,
 	};
+}
+
+function embeddedGuideIdentity(bytes, sourceGuide) {
+	try {
+		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
+		const expected = {
+			name: "ceal-guide.tar",
+			format: "ustar",
+			bytes: sourceGuide.bytes.length,
+			sha256: sourceGuide.sha256,
+			files: sourceGuide.files,
+		};
+		if (
+			JSON.stringify(manifest?.embedded_guide) !== JSON.stringify(expected) ||
+			manifest?.native_smoke?.embedded_guide_sha256 !== sourceGuide.sha256 ||
+			manifest?.native_smoke?.guide_registration !== true
+		)
+			throw new Error("embedded guide drift");
+	} catch {
+		fail("merge_embedded_guide_drift", "Merged worker release assets require the embedded guide bound by the source skill directory.");
+	}
 }
 
 function platformOfAsset(name) {
