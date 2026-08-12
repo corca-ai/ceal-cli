@@ -92,8 +92,8 @@ emitters now answer one schema with one field set —
 `ceal.worker_acceptance_result.v2`.** The installed command attached the decoded
 Gateway audit event whole, so `membership_ref`, `subject_ref`,
 `registration_ref`, `client_ref` and the grant snapshot travelled in a document
-whose own comment claimed an allow-list. `docs/acceptance/ceal-v0.69.0/linux-amd64.yaml`
-shows two of them. The projection `ceal receipt show` already used was right
+whose own comment claimed an allow-list. The legacy acceptance record showed two
+of them. The projection `ceal receipt show` already used was right
 there and unused by this one path.
 
 - The bounded-call row is now assembled from a declared key list rather than from
@@ -113,8 +113,7 @@ emitter had learned that and the checkout-side one had not, so the artifact a
 maintainer produces from a checkout read as `ok: undefined` — falsy — to a reader
 following the instruction. The same fix at the other half of its own invariant.
 
-Records already published under `docs/acceptance/` stay `.v1` and stay as
-written.
+The legacy records stayed `.v1` as written until the public-surface cleanup.
 
 **The private leased-consumer carrier's outbound service call now has a
 deadline.** It read its service channel off FD 4 under a 2,000 ms bound and then

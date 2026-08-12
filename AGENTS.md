@@ -23,8 +23,6 @@ history or full rationale.
   Protocol/conformance source. Read it there; do not re-vendor deleted surfaces.
 - `packages/ceal-protocol` is frozen. Consume a Gateway-issued artifact and
   re-pin it in one commit; never originate an edit there.
-- `.github/workflows/npm-package-stage.yml` and bare `v*` tags are worker-lane
-  material, but are not worker-release inputs.
 
 ## Gates
 
@@ -43,8 +41,8 @@ history or full rationale.
   `node scripts/install-git-hooks.mjs --check`. Pre-push runs the iteration gate,
   or the full gate for a tag. Bypass visibly with `git push --no-verify`, never by editing the hook.
 - `protocol-vendor-pin.json` binds the frozen copy. Proof/shipment divergence is
-  fatal and blocks release, packing, and acceptance even when declared under
-  `docs/requests/`; a declaration quarantines, never clears. `npm run check:unit`
+  fatal and blocks release, packing, and acceptance even when declared in the
+  Protocol quarantine record; a declaration quarantines, never clears. `npm run check:unit`
   remains the development iteration gate by using converged contract fixtures;
   `npm run check:protocol-dev` is the narrower Protocol/client proof. Neither is
   release proof, and the full gate and every ship-facing command remain blocked.

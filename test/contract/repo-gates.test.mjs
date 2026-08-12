@@ -120,29 +120,7 @@ function assertNoCheckedOutSource(job, label) {
 	);
 }
 
-function assertPrivilegedReleaseBoundaries({ npmStage, worker, rollback }) {
-	const npmProof = npmStage.jobs.prove;
-	const npmPublish = npmStage.jobs.stage;
-	assert.equal(npmProof.permissions?.["id-token"], undefined, "source proof must not receive an OIDC minting permission");
-	assert.equal(npmPublish.permissions?.["id-token"], "write", "only the staged-publish job may mint npm provenance");
-	assert.equal(npmPublish.environment, "ceal-npm-release");
-	assert.equal(npmPublish.needs, "prove");
-	const npmProofApproval = namedStep(npmProof, "Require approved tag identity before source execution");
-	assertRunContains(npmProofApproval, ['[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]', '[ "$APPROVED_VERSION" = "$version" ]']);
-	const npmCheckout = npmProof.steps.findIndex((step) => (step.uses ?? "").startsWith("actions/checkout"));
-	assert.ok(npmProof.steps.indexOf(npmProofApproval) < npmCheckout, "npm identity approval must precede checkout and source execution");
-	assertNoCheckedOutSource(npmPublish, "the OIDC-capable npm publish job");
-	assertRunContains(namedStep(npmPublish, "Require approved staged-publish identity"), [
-		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
-		'[ "$APPROVED_VERSION" = "$version" ]',
-	]);
-	assertRunContains(namedStep(npmPublish, "Re-verify the privileged handoff"), [
-		'sha256sum "npm-stage-inputs/corca-ai-ceal-protocol-${version}.tgz"',
-		'= "$APPROVED_PROTOCOL_SHA256" ]',
-		'sha256sum "npm-stage-inputs/corca-ai-ceal-${version}.tgz"',
-		'= "$APPROVED_CLIENT_SHA256" ]',
-	]);
-
+function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 	const publish = worker.jobs["sign-and-publish"];
 	assert.equal(publish.environment, "ceal-cli-release");
 	assert.equal(publish.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
@@ -460,7 +438,7 @@ function lastCommand(segment) {
  */
 function forEachWorkflowRunBlock(visit) {
 	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
-	assert.ok(workflows.length > 3, `only ${workflows.length} workflows scanned; the sweep is not reaching .github/workflows`);
+	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows scanned; the sweep is not reaching .github/workflows`);
 	let scanned = 0;
 	for (const name of workflows) {
 		for (const job of Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {})) {
@@ -1093,7 +1071,6 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 
 test("privileged release jobs consume only approved unprivileged handoffs", () => {
 	const workflows = {
-		npmStage: parse(read(".github/workflows/npm-package-stage.yml")),
 		worker: parse(read(".github/workflows/ceal-release.yml")),
 		rollback: parse(read(".github/workflows/ceal-worker-stable-rollback.yml")),
 	};
@@ -1102,10 +1079,6 @@ test("privileged release jobs consume only approved unprivileged handoffs", () =
 	const withoutCommitComparison = structuredClone(workflows);
 	namedStep(withoutCommitComparison.worker.jobs["sign-and-publish"], "Require approved worker release identity").run = "true";
 	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutCommitComparison));
-
-	const withoutNpmTarballHashes = structuredClone(workflows);
-	namedStep(withoutNpmTarballHashes.npmStage.jobs.stage, "Re-verify the privileged handoff").run = "true";
-	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutNpmTarballHashes));
 
 	const withoutRollbackBootstrapBinding = structuredClone(workflows);
 	namedStep(withoutRollbackBootstrapBinding.rollback.jobs.activate, "Require the approved rollback identity").run = "true";
@@ -1125,7 +1098,7 @@ test("privileged release jobs consume only approved unprivileged handoffs", () =
 test("every workflow pins every action to a full commit SHA", () => {
 	const directory = path.join(ROOT, ".github/workflows");
 	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 4, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let pinned = 0;
 	for (const name of workflows) {
 		const uses = [...read(path.join(".github/workflows", name)).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
@@ -1154,7 +1127,7 @@ test("every workflow pins every action to a full commit SHA", () => {
 test("every workflow job this lane owns bounds its own runtime", () => {
 	const directory = path.join(ROOT, ".github/workflows");
 	const workflows = readdirSync(directory).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
-	assert.ok(workflows.length >= 4, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
+	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows found; the scan is not reaching .github/workflows`);
 	let bounded = 0;
 	for (const name of workflows) {
 		const jobs = Object.entries(parse(read(path.join(".github/workflows", name))).jobs ?? {});

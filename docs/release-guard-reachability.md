@@ -142,8 +142,7 @@ manifest carried the right `version` and `platform` — bytes and shape, never
 protocol producer's `repository`, `commit` and `tree`, and
 `verifyProtocolProvenance` (`scripts/worker-acceptance-packet.mjs:136`) compared
 them against the lock, failing `protocol_provenance_disagreement` at `:162`.
-`docs/acceptance/ceal-v0.67.1/linux-amd64.json` carries a real one. So this was
-wiring, not design. The then-open missing-client-package hole was separate; the
+The acceptance-packet fixture carries a real one. So this was wiring, not design. The then-open missing-client-package hole was separate; the
 current merge now validates exact client provenance beside the Protocol check.
 
 But the catch then was late rather than absent: the only production caller was

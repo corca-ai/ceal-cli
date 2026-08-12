@@ -5301,8 +5301,8 @@ test("the record states what it did not do, including that it called no provider
 	assert.match(withCall.non_claims.join("\n"), /performed no provider call/u);
 });
 
-// docs/acceptance/ceal-v0.69.0/linux-amd64.yaml carries `membership_ref` and
-// `subject_ref` because this builder used to emit whatever bounded-call object it
+// A legacy acceptance record carried `membership_ref` and `subject_ref` because
+// this builder used to emit whatever bounded-call object it
 // was handed, and the acceptance path handed it the decoded Gateway audit event.
 // The projection is now by declared key, so this asserts the property — an
 // undeclared key cannot travel — rather than re-listing the forbidden names.

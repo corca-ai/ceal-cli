@@ -36,12 +36,9 @@ const DIVERGED = Object.freeze({
 		protocol_tree: LOCK.gateway.protocol_tree,
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
-		// A real tracked file, because the gate now requires one. It points at the
-		// directory's own README rather than at any dated request: it used to name
-		// a received Gateway-lane decision, and deleting that correspondence turned
-		// three tests red for a reason unrelated to the code. The README is the one
-		// file under `docs/requests/` that outlives every individual request.
-		disposition_request: "docs/requests/README.md",
+		// A real tracked file, because the gate requires one stable quarantine
+		// record rather than dated cross-repository correspondence.
+		disposition_request: "docs/protocol-quarantine.md",
 	},
 	non_claims: ["fixture"],
 });
@@ -208,13 +205,12 @@ test("a shipped protocol subtree the lock does not bind is refused", () => {
 });
 
 // Existence alone was too weak: every path in the tree satisfied it, so a
-// one-character edit could keep a dead declaration alive by aiming it at
-// README.md. A request has to be somewhere a reader would look for one, and it
-// has to be tracked, or nobody but its author can read it.
-test("a divergence must point at a tracked file under docs/requests/", () => {
+// one-character edit could keep a dead declaration alive by aiming it at an
+// unrelated document. The pin must name the single tracked quarantine record.
+test("a divergence must point at the tracked Protocol quarantine record", () => {
 	for (const [request, label] of [
-		["docs/requests/does-not-exist.md", "a deleted request"],
-		["README.md", "a file that is not a request"],
+		["docs/protocol-quarantine-missing.md", "a deleted quarantine record"],
+		["README.md", "an unrelated file"],
 		["protocol-vendor-pin.json", "the pin pointing at itself"],
 	]) {
 		const orphaned = clone(DIVERGED);

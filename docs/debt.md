@@ -17,11 +17,3 @@ Everything else not listed is owned by the comment at the site and by
   only on `linux`/`x64`, so every installed-binary and installer proof self-skips
   on macOS. Do not "fix" this by flipping the flag — requiring it across all of
   `linux-*` is what burned `ceal-v0.67.0`.
-- **Two published acceptance records overstate guide registration, and one leaks
-  identity refs.** `docs/acceptance/ceal-v0.69.0/` and `ceal-v0.67.1/` were
-  emitted while `registered_host_count` counted resolved host directories rather
-  than registrations, and `ceal-v0.69.0/linux-amd64.yaml` carries
-  `membership_ref` and `subject_ref` from the pre-`.v2` emitter. Both emitters are
-  fixed; the records are historical artifacts and were left as written rather
-  than rewritten after the fact. Anyone re-publishing them owes a re-emit, not an
-  edit.

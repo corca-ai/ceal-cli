@@ -53,7 +53,7 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	if (diverged) {
 		pin.shipped.reason = "fixture divergence";
 		pin.shipped.disposition_owner = "fixture";
-		pin.shipped.disposition_request = "docs/requests/README.md";
+		pin.shipped.disposition_request = "docs/protocol-quarantine.md";
 	} else {
 		delete pin.shipped.reason;
 		delete pin.shipped.disposition_owner;

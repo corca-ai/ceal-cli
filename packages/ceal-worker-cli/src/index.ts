@@ -184,7 +184,8 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 			// Through the same projection `ceal receipt show` renders, not around it.
 			// This branch used to attach the decoded Gateway events whole, so
 			// `membership_ref` and `subject_ref` travelled in a document that leaves
-			// the machine — `docs/acceptance/ceal-v0.69.0/linux-amd64.yaml` shows both.
+			// the machine. The projection is intentionally keyed, rather than copying
+			// decoded Gateway events wholesale.
 			const projected = readback.readback.value.events.map((event) => projectReceiptEvent(event));
 			boundedCall = {
 				capability: null,

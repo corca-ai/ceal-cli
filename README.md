@@ -1,8 +1,8 @@
 # Ceal CLI source candidate
 
-This tree is the local source candidate for the private `corca-ai/ceal-cli`
-repository. It is a transitional composite: its current source authority is the
-public `@corca-ai/ceal` client SDK and the agent-facing `ceal` worker.
+This tree is the source candidate for `corca-ai/ceal-cli`. It is a transitional
+composite: its current source authority is the public `@corca-ai/ceal` client
+SDK and the agent-facing `ceal` worker.
 
 ## Ownership status
 
@@ -34,7 +34,7 @@ failures are fatal: the copy drifting from its recorded source, and a divergence
 between the copy and the shipped archive. The second fails
 `proof_shipment_protocol_divergence`, because it means what this repository tests
 is not what a release would ship. A divergence may still be declared — naming a
-disposition owner and a tracked request under `docs/requests/` — but a
+disposition owner and the tracked `docs/protocol-quarantine.md` record — but a
 declaration is a quarantine, not a clearance, and re-syncing the copy or bumping
 `gateway-protocol-handoff-lock.json` expires it. `npm run check:unit` remains the
 aggregate development iteration gate through converged fixtures, while `npm run
@@ -247,10 +247,9 @@ origin. A successful tag run promotes that verified release to the stable lane
 (`CEAL_VERSION=stable` / `ceal update`) by rotating
 `releases/worker/stable/ceal-worker-stable-release.json` last.
 The historical dual lane — `install.sh`, `release:binaries`, `release:manifest`,
-and `.github/workflows/cealctl-release.yml` — is deleted. Bare `v*` tags now
-belong solely to `.github/workflows/npm-package-stage.yml`, which stages
-`@corca-ai/ceal-protocol` and `@corca-ai/ceal` to npm. To install `cealctl`, use
-`corca-ai/ceal`; nothing in this checkout installs it.
+and `.github/workflows/cealctl-release.yml` — is deleted. This repository does
+not publish packages to npm. To install `cealctl`, use `corca-ai/ceal`; nothing
+in this checkout installs it.
 
 ### Installing the worker
 

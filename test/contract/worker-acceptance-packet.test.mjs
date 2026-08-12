@@ -764,8 +764,8 @@ test("both emitters answer the record schema with the same key sets", async () =
 	assert.notEqual(installed.emitted_by, checkout.emitted_by);
 });
 
-// The released record docs/acceptance/ceal-v0.69.0/linux-amd64.yaml carries
-// `membership_ref` and `subject_ref` because the installed emitter shipped the
+// A legacy acceptance record carried `membership_ref` and `subject_ref` because
+// the installed emitter shipped the
 // decoded Gateway audit event whole. Neither emitter's key list admits them now,
 // and this asserts the property rather than re-listing the forbidden names in a
 // second place: an identity ref can only arrive inside a key nobody declared.

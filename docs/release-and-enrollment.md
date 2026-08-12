@@ -154,17 +154,9 @@ one-time refresh credential to another machine: replay detection deliberately
 revokes that session family. Run adoption or enrollment independently on each
 host so renewal, revocation, and audit stay host-attributable.
 
-On the Gateway host (`ssh oc`), use the owner copy at
-`~/ceal/packages/ceal-operator-cli`. The installed `cealctl 0.65.3` there is the
-other lineage and has no `enrollments` route.
-
-```
-cealctl login <admin-origin> --session <name>
-cealctl enrollments create --client narnia --profile work --subject hwidong \
-  --instance <name> --operator-session <name>
-```
-
-Then locally:
+Ask the Gateway owner to issue the worker enrollment code through its canonical
+operator procedure. This repository neither owns nor documents `cealctl`,
+Gateway-host paths, host names, subjects, or operator sessions. Then locally:
 
 ```
 ceal session enroll --gateway <https-url> --code-stdin

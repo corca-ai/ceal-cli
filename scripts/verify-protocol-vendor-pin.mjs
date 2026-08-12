@@ -45,7 +45,7 @@ const SCHEMA = "ceal.protocol_vendor_pin.v1";
 const VENDORED_PATH = "packages/ceal-protocol";
 const SOURCE_REPOSITORY = "corca-ai/ceal";
 const LOCK_FILE = "gateway-protocol-handoff-lock.json";
-const REQUESTS_DIRECTORY = "docs/requests";
+const QUARANTINE_RECORD = "docs/protocol-quarantine.md";
 const STATUSES = new Set(["agreed", "diverged"]);
 
 export const ProtocolVendorPinError = codedErrorClass("ProtocolVendorPinError");
@@ -190,23 +190,22 @@ export function validateProtocolVendorPin({
 				"The pin declares a proof/ship divergence that its own recorded trees say no longer exists; close the declaration.",
 			);
 		}
-		// A declaration whose disposition request has been deleted or renamed is
-		// no longer a pointer to an open question, just an excuse. Existence alone
-		// is too weak a check: any path in the tree satisfies it, so a one-character
-		// edit keeps a dead declaration alive by pointing it at README.md. It must
-		// be a tracked file under the directory that actually holds requests.
+		// A declaration whose quarantine record has been deleted or renamed is no
+		// longer a pointer to an open question, just an excuse. Existence alone is
+		// too weak: any path in the tree satisfies it, so the pin is bound to the
+		// one tracked record that owns this quarantine rather than arbitrary prose.
 		const request = candidate.shipped.disposition_request;
-		if (!request.startsWith(`${REQUESTS_DIRECTORY}/`)) {
+		if (request !== QUARANTINE_RECORD) {
 			throw new ProtocolVendorPinError(
 				"stale_divergence_record",
-				`A divergence disposition request must live under ${REQUESTS_DIRECTORY}/; ${request} is some other file.`,
+				`A divergence disposition must point at ${QUARANTINE_RECORD}; ${request} is some other file.`,
 			);
 		}
 		assertRegularFile(root, request, "stale_divergence_record");
 		if (!(requestTracked ?? isTracked(root, request))) {
 			throw new ProtocolVendorPinError(
 				"stale_divergence_record",
-				`${request} is not tracked in Git, so it is not a request anyone else can read.`,
+				`${request} is not tracked in Git, so its quarantine record is not reviewable.`,
 			);
 		}
 	}
@@ -279,7 +278,7 @@ function assertPinShape(pin) {
 	) {
 		throw new ProtocolVendorPinError(
 			"invalid_protocol_vendor_pin",
-			"A declared proof/ship divergence must name its reason, its disposition owner, and the request that asks for the disposition.",
+			"A declared proof/ship divergence must name its reason, its disposition owner, and its quarantine record.",
 		);
 	}
 	if (!Array.isArray(pin.non_claims) || pin.non_claims.length === 0 || !pin.non_claims.every(isNonEmptyString)) {

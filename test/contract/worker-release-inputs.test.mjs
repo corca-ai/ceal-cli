@@ -191,10 +191,9 @@ test("worker release inventory rejects Gateway and legacy composite paths", (con
 	// The loop below iterates whatever the file happens to contain, so on its own
 	// it would stay green if someone emptied the list. `verify-worker-release-inputs.mjs`
 	// used to pin the contents against a frozen constant; that script is gone, so
-	// the pin lives here. Both entries are load-bearing: the protocol is
-	// Gateway-owned source that must arrive as a signed artifact, and the npm
-	// staging lane is a different lane with a different tag.
-	assert.deepEqual([...inventory.forbidden_release_inputs].sort(), [".github/workflows/npm-package-stage.yml", "packages/ceal-protocol"]);
+	// the pin lives here. The Protocol is Gateway-owned source that must arrive
+	// as a signed artifact, never a worker release input copied from this tree.
+	assert.deepEqual([...inventory.forbidden_release_inputs].sort(), ["packages/ceal-protocol"]);
 	// What the list still does, now that `assertWorkerReleaseSourcePath` is gone: it
 	// constrains the inventory *file*, not any copy. The composer takes every path
 	// it stages straight from this inventory, so a per-path admission check there

@@ -823,7 +823,7 @@ function fixtureRepo(root) {
 }
 
 function declareFixtureDivergence(repo) {
-	const request = "docs/requests/fixture-divergence.md";
+	const request = "docs/protocol-quarantine.md";
 	const pinPath = path.join(repo, "protocol-vendor-pin.json");
 	const pin = JSON.parse(readFileSync(pinPath, "utf8"));
 	pin.source.commit = "d".repeat(40);

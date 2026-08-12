@@ -166,7 +166,8 @@ than a check of anything. The residual limit is worth stating plainly:
 without making convergence *observable*.
 
 A divergence is still declarable, and the declaration still has to name its
-reason, its disposition owner, and a tracked request under `docs/requests/` — but
+reason, its disposition owner, and the tracked `docs/protocol-quarantine.md`
+record — but
 a declaration is now a **quarantine, not a clearance**. It records why the state
 exists; it does not let anything ship. Plain existence was too weak a check for
 the request: every path in the tree satisfied it, so a one-character edit could

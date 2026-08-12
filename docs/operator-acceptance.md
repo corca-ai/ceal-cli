@@ -84,9 +84,10 @@ access has no substitute and no fallback path:
   `--force` is the only path that replaces one. That turns a silent loss into a
   deliberate one; it does not give the prod binding back.
 
-The route in: ask the Gateway lane operator directly. This lane's standing
-practice is to leave the request as a written prompt under `docs/requests/`, so
-the ask is reviewable and the answer has something to attach to.
+The route in: ask the Gateway lane operator directly. The worker repository
+records the open release-blocking Protocol state in
+`docs/protocol-quarantine.md`; do not copy internal correspondence into this
+repository.
 
 ## Before Spending A Release Tag
 
@@ -163,23 +164,6 @@ readback → explicit guide registration/readback step turns a published artifac
 into an accepted one. The exact tagged `ceal-v0.76.1` installer is a required
 direct-update compatibility proof; no bootstrap reinstall is part of the
 directory-carrier rollout.
-
-### The npm lane is a separate, currently unconfigured lane
-
-Bare `v*.*.*` tags trigger `.github/workflows/npm-package-stage.yml` — not the
-worker lane. They also triggered the frozen `cealctl-release.yml` until that lane
-was deleted, so the tag now belongs to the npm lane alone. The npm lane gates on
-environment variables in `ceal-npm-release`, and that environment held **no
-variables** on 2026-07-27:
-
-```
-gh api repos/corca-ai/ceal-cli/environments/ceal-npm-release/variables --jq '.variables[].name'
-```
-
-With `CEAL_NPM_BOOTSTRAP_COMPLETE` unset the unprivileged proof job refuses
-before checkout or source execution, so a bare `v*` tag pushed today burns that
-version for a publish that cannot happen. Only its downstream Environment-bound
-job has OIDC permission. This lane does not push those tags.
 
 ## Naming What You Could Not Prove
 
