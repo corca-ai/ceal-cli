@@ -35,10 +35,11 @@ separately approved boundaries.
   or requested an unfiltered page without copying a selector into that local
   projection; a completed zero-count match response says it does not prove an
   empty authorized catalog and points at a bounded unfiltered query. Help and
-  the installed guide no longer present URLs, call inputs, or opaque resource
-  refs as universal target selectors. Capability-specific selector semantics
-  and query provenance remain Gateway/Protocol work and are not invented in
-  this repository.
+  the checkout/next embedded guide no longer presents URLs, call inputs, or
+  opaque resource refs as universal target selectors. The installed `0.76.1`
+  guide still carries the reported wording until a successor is released and
+  registered. Capability-specific selector semantics and query provenance
+  remain Gateway/Protocol work and are not invented in this repository.
 - The current source also contains the client deadline/status/media-type and
   adoption-request boundary repairs, generic HTTP timeout classification,
   narrowed command session capabilities, explicit guide-register provenance,

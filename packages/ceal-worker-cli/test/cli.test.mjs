@@ -3511,7 +3511,9 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 		);
 		assert.deepEqual(payload.targets, []);
 		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 0, complete: false, selection_required: true });
-		assert.match(payload.next_action, /capabilities targets/u);
+		assert.match(payload.next_action, /The current catalog requires a capability-specific target selector/u);
+		assert.match(payload.next_action, /Run 'ceal capabilities targets --help'/u);
+		assert.doesNotMatch(payload.next_action, /--match <selector>/u);
 		assert.deepEqual(
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
@@ -3789,10 +3791,16 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 
 		selectedCatalog = { target_count: 1, returned_count: 0, complete: false, selection_required: true };
 		const narrowed = await yamlRun(args, 0, runtime);
-		assert.equal(
-			narrowed.next_action,
-			"Run 'ceal capabilities targets --capability message.search --profile profile:narnia --match <selector>'.",
-		);
+		assert.match(narrowed.next_action, /Capability 'message\.search' with 'profile:narnia' requires a capability-specific target selector/u);
+		assert.match(narrowed.next_action, /Run 'ceal capabilities targets --help'/u);
+		assert.match(narrowed.next_action, /stop and ask the Gateway operator/u);
+		assert.doesNotMatch(narrowed.next_action, /--match <selector>/u);
+
+		selectedCatalog = { target_count: 0, returned_count: 0, complete: true, selection_required: true };
+		const ambiguousEmpty = await yamlRun(args, 0, runtime);
+		assert.match(ambiguousEmpty.next_action, /response alone does not prove the capability has no authorized targets/u);
+		assert.match(ambiguousEmpty.next_action, /--profile profile:narnia --limit 64/u);
+		assert.doesNotMatch(ambiguousEmpty.next_action, /--match <selector>/u);
 	}, responseFactory);
 });
 

@@ -13,7 +13,7 @@
   included `--match` and the Gateway response contained no current targets. It
   refuses to infer an empty authorized catalog and names an executable bounded
   unfiltered query that preserves an explicit Profile selection.
-- The installed guide separates target selection from the capability
+- The checkout/next embedded guide separates target selection from the capability
   `input_contract`. Call inputs, source URLs, and opaque resource refs are not
   target selectors unless current Gateway guidance explicitly declares them.
 
@@ -24,11 +24,11 @@ installed `0.76.1` failure: a Notion URL and the `resource.resolve` result ref
 both produced an indistinguishable empty `notion.page.get` target page, while an
 unfiltered page exposed an authorized target and the call succeeded.
 
-The Worker owns safe request projection, recovery, leaf help, and the installed
-guide. The Gateway owns capability-specific selector behavior; its Protocol
-artifact owns any future wire declaration or query provenance. This slice does
-not add a field to frozen `packages/ceal-protocol` or hard-code a provider route
-into the Worker or skill.
+The Worker owns safe request projection, recovery, leaf help, and the guide
+source embedded in its next release. The Gateway owns capability-specific
+selector behavior; its Protocol artifact owns any future wire declaration or
+query provenance. This slice does not add a field to frozen
+`packages/ceal-protocol` or hard-code a provider route into the Worker or skill.
 
 ## Verification
 
@@ -48,6 +48,10 @@ into the Worker or skill.
 - `node scripts/verify-protocol-vendor-pin.mjs` refused release proof with the
   pre-existing `proof_shipment_protocol_divergence`. No installed or releasable
   claim is made from this development-only slice.
+- A follow-up quality sweep replaced the remaining non-runnable
+  `--match <selector>` recovery with an honest help/stop path and proved the
+  Protocol-valid complete-zero plus `selection_required` combination takes the
+  bounded unfiltered recovery. The repaired tree passed `npm run check:unit`.
 
 ## Lint Gate
 
@@ -106,8 +110,8 @@ is unchanged.
 ## Completion Categories
 
 - **Completed locally:** truthful selector help, request-kind projection,
-  bounded recovery, installed-guide correction, regression tests, and local
-  truth-surface sync.
+  bounded recovery, checkout/next embedded-guide correction, regression tests,
+  and local truth-surface sync.
 - **Deferred to an external owner:** Gateway selector behavior and its final
   signed Protocol handoff.
 - **Blocked by external state:** installed candidate and live provider readback
@@ -117,9 +121,9 @@ is unchanged.
 ## Contract Updates
 
 No Protocol contract was changed locally. The only new result field is the
-Worker-owned `target_selection` projection; command help and the installed
-skill now derive their advice from that same Worker behavior rather than
-restating a provider selector grammar.
+Worker-owned `target_selection` projection; command help and the skill source
+embedded in the next release now derive their advice from that same Worker
+behavior rather than restating a provider selector grammar.
 
 ## Next Slice
 
