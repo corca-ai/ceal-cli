@@ -96,6 +96,93 @@ function runsFinalGate(step) {
 	return (step.run ?? "").split("\n").some((line) => line.trim() === "npm run check");
 }
 
+function namedStep(job, name) {
+	const step = (job.steps ?? []).find((candidate) => candidate.name === name);
+	assert.ok(step, `missing workflow step: ${name}`);
+	return step;
+}
+
+function assertRunContains(step, fragments) {
+	const source = step.run ?? "";
+	for (const fragment of fragments) assert.ok(source.includes(fragment), `${step.name} must contain: ${fragment}`);
+}
+
+function assertNoCheckedOutSource(job, label) {
+	assert.equal(
+		(job.steps ?? []).some((step) => (step.uses ?? "").startsWith("actions/checkout")),
+		false,
+		`${label} must not check out repository source`,
+	);
+	assert.equal(
+		(job.steps ?? []).some((step) => /\bnode\s+(?:\.\/)?scripts\/|\bnpm\s+run\b/u.test(step.run ?? "")),
+		false,
+		`${label} must not execute repository source`,
+	);
+}
+
+function assertPrivilegedReleaseBoundaries({ npmStage, worker, rollback }) {
+	const npmProof = npmStage.jobs.prove;
+	const npmPublish = npmStage.jobs.stage;
+	assert.equal(npmProof.permissions?.["id-token"], undefined, "source proof must not receive an OIDC minting permission");
+	assert.equal(npmPublish.permissions?.["id-token"], "write", "only the staged-publish job may mint npm provenance");
+	assert.equal(npmPublish.environment, "ceal-npm-release");
+	assert.equal(npmPublish.needs, "prove");
+	const npmProofApproval = namedStep(npmProof, "Require approved tag identity before source execution");
+	assertRunContains(npmProofApproval, ['[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]', '[ "$APPROVED_VERSION" = "$version" ]']);
+	const npmCheckout = npmProof.steps.findIndex((step) => (step.uses ?? "").startsWith("actions/checkout"));
+	assert.ok(npmProof.steps.indexOf(npmProofApproval) < npmCheckout, "npm identity approval must precede checkout and source execution");
+	assertNoCheckedOutSource(npmPublish, "the OIDC-capable npm publish job");
+	assertRunContains(namedStep(npmPublish, "Require approved staged-publish identity"), [
+		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
+		'[ "$APPROVED_VERSION" = "$version" ]',
+	]);
+	assertRunContains(namedStep(npmPublish, "Re-verify the privileged handoff"), [
+		'sha256sum "npm-stage-inputs/corca-ai-ceal-protocol-${version}.tgz"',
+		'= "$APPROVED_PROTOCOL_SHA256" ]',
+		'sha256sum "npm-stage-inputs/corca-ai-ceal-${version}.tgz"',
+		'= "$APPROVED_CLIENT_SHA256" ]',
+	]);
+
+	const publish = worker.jobs["sign-and-publish"];
+	assert.equal(publish.environment, "ceal-cli-release");
+	assert.equal(publish.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(publish.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assertNoCheckedOutSource(publish, "the OIDC-capable worker publish job");
+	assertRunContains(namedStep(publish, "Require approved worker release identity"), [
+		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
+		'[ "$APPROVED_SHA256SUMS_SHA256" = "$ASSEMBLED_SHA256SUMS_SHA256" ]',
+	]);
+	assertRunContains(namedStep(publish, "Verify the assembled worker inventory"), [
+		'[ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ]',
+		'[ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ]',
+		"sha256sum -c SHA256SUMS",
+	]);
+
+	assert.equal(rollback.jobs.verify.environment, undefined, "checked-out rollback verifier must stay unprivileged");
+	const activate = rollback.jobs.activate;
+	assert.equal(activate.environment, "ceal-cli-release");
+	assert.equal(activate.needs, "verify");
+	assert.equal(activate.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(activate.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assertNoCheckedOutSource(activate, "the release-origin rollback job");
+	assertRunContains(namedStep(activate, "Require approved rollback workflow identity"), [
+		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
+		'[ "$APPROVED_SHA256SUMS_SHA256" = "$VERIFIED_SHA256SUMS_SHA256" ]',
+	]);
+	assertRunContains(namedStep(activate, "Require the approved rollback identity"), [
+		"sha256sum stable/SHA256SUMS",
+		"awk '$2 == \"install-ceal.sh\" { print $1 }' stable/SHA256SUMS",
+		"sha256sum stable/install-ceal.sh",
+		'[ "$expected_installer" = "$observed_installer" ]',
+	]);
+	assert.ok(
+		(rollback.jobs.verify.steps ?? []).some(
+			(step) => step.name === "Re-verify an immutable worker release" && (step.run ?? "").includes('cp "$readback_dir/SHA256SUMS"'),
+		),
+		"rollback handoff must carry the verified inventory that binds its bootstrap",
+	);
+}
+
 test("workflows that exercise release proofs retain historical tags", () => {
 	let exercisingJobs = 0;
 	for (const workflowPath of workflowPaths()) {
@@ -1002,6 +1089,31 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 		}
 	}
 	assert.ok(gateJobs > 0, "no workflow job runs the final gate; the offline-cache prerequisite check became vacuous");
+});
+
+test("privileged release jobs consume only approved unprivileged handoffs", () => {
+	const workflows = {
+		npmStage: parse(read(".github/workflows/npm-package-stage.yml")),
+		worker: parse(read(".github/workflows/ceal-release.yml")),
+		rollback: parse(read(".github/workflows/ceal-worker-stable-rollback.yml")),
+	};
+	assertPrivilegedReleaseBoundaries(workflows);
+
+	const withoutCommitComparison = structuredClone(workflows);
+	namedStep(withoutCommitComparison.worker.jobs["sign-and-publish"], "Require approved worker release identity").run = "true";
+	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutCommitComparison));
+
+	const withoutNpmTarballHashes = structuredClone(workflows);
+	namedStep(withoutNpmTarballHashes.npmStage.jobs.stage, "Re-verify the privileged handoff").run = "true";
+	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutNpmTarballHashes));
+
+	const withoutRollbackBootstrapBinding = structuredClone(workflows);
+	namedStep(withoutRollbackBootstrapBinding.rollback.jobs.activate, "Require the approved rollback identity").run = "true";
+	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutRollbackBootstrapBinding));
+
+	const withCheckedOutSource = structuredClone(workflows);
+	withCheckedOutSource.worker.jobs["sign-and-publish"].steps.unshift({ uses: "actions/checkout@deadbeef" });
+	assert.throws(() => assertPrivilegedReleaseBoundaries(withCheckedOutSource));
 });
 
 // A mutable action ref resolves to whatever the tag points at when the lane runs,

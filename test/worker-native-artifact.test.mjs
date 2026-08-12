@@ -17,6 +17,7 @@ import {
 	execReleaseTestProcess,
 	processIsAlive,
 	runAsyncReleaseProcess,
+	runSyncReleaseProcess,
 } from "./release-process-bounds.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
@@ -268,6 +269,22 @@ test("release process fixture-ready marker has its own missing-marker deadline",
 	});
 	assert.equal(result.timedOut, true);
 	assert.doesNotMatch(result.stdout, /ready/u);
+});
+
+test("sync release supervisor budgets the fixture-ready deadline before the command timeout", () => {
+	const result = runSyncReleaseProcess(
+		process.execPath,
+		["-e", "setTimeout(() => process.stdout.write('ready\\n'), 300); setTimeout(() => process.exit(0), 3_000)"],
+		{
+			encoding: "utf8",
+			timeoutStartMarker: "ready\n",
+			timeoutStartDeadlineMs: 500,
+		},
+		10,
+		0,
+	);
+	assert.equal(result.timedOut, true);
+	assert.match(result.stdout, /ready/u);
 });
 
 function hasCode(code) {

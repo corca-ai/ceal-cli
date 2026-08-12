@@ -150,10 +150,27 @@ export function verifyProtocolProvenance(manifest, { repoRoot = REPO_ROOT } = {}
 	return verifyProtocolProvenanceAgainstLock(manifest, { repoRoot, fail });
 }
 
+function acceptanceCommandEnv(base) {
+	const clean = { ...base };
+	for (const name of [
+		"ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+		"ACTIONS_ID_TOKEN_REQUEST_URL",
+		"ACTIONS_RUNTIME_TOKEN",
+		"GITHUB_TOKEN",
+		"NODE_AUTH_TOKEN",
+		"NPM_TOKEN",
+		"CLOUDFLARE_API_TOKEN",
+		"CEAL_GITHUB_TOKEN",
+	])
+		delete clean[name];
+	return clean;
+}
+
 export async function runInstalledCommand(
 	binaryPath,
 	args,
 	{
+		env = process.env,
 		timeoutMs = ACCEPTANCE_COMMAND_TIMEOUT_MS,
 		terminationGraceMs = ACCEPTANCE_TERMINATION_GRACE_MS,
 		postKillReportMs = ACCEPTANCE_POST_KILL_REPORT_MS,
@@ -164,7 +181,7 @@ export async function runInstalledCommand(
 	const started = Date.now();
 	const result = await runBoundedProcess(binaryPath, args, {
 		cwd: path.dirname(binaryPath),
-		env: process.env,
+		env: acceptanceCommandEnv(env),
 		timeoutMs,
 		terminationGraceMs,
 		postKillReportMs,
@@ -207,10 +224,11 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 	const release = inspectInstalledRelease(binaryPath);
 	const protocol = verifyProtocolProvenance(release.manifest, { repoRoot });
 
-	const version = await runInstalledCommand(binaryPath, ["version"], commandBounds);
+	const installedCommandOptions = { ...commandBounds, env };
+	const version = await runInstalledCommand(binaryPath, ["version"], installedCommandOptions);
 	if (version.status !== 0) fail("installed_binary_unusable", `'${binaryPath} version' exited ${version.status}.`);
-	const guide = await runInstalledCommand(binaryPath, ["guide", "status"], commandBounds);
-	const discovery = await runInstalledCommand(binaryPath, ["capabilities", "--fresh"], commandBounds);
+	const guide = await runInstalledCommand(binaryPath, ["guide", "status"], installedCommandOptions);
+	const discovery = await runInstalledCommand(binaryPath, ["capabilities", "--fresh"], installedCommandOptions);
 
 	const packet = {
 		schema_version: "ceal.worker_acceptance_packet.v1",
@@ -252,11 +270,11 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 	};
 
 	if (capability && target) {
-		const call = await runInstalledCommand(binaryPath, ["call", capability, "--target", target], commandBounds);
+		const call = await runInstalledCommand(binaryPath, ["call", capability, "--target", target], installedCommandOptions);
 		const requestRef = scalar(call.stdout, "request_ref");
 		let receipt;
 		if (requestRef) {
-			const shown = await runInstalledCommand(binaryPath, ["receipt", "show", requestRef], commandBounds);
+			const shown = await runInstalledCommand(binaryPath, ["receipt", "show", requestRef], installedCommandOptions);
 			// Field-for-field the installed emitter's receipt row, in the order
 			// CEAL_ACCEPTANCE_RECEIPT_KEYS declares. That list is the one home and
 			// the contract test binds this object to it; the two cannot share an

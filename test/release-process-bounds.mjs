@@ -14,7 +14,7 @@ const DEFAULT_ASYNC_BOUNDS = Object.freeze({
 	maxCapturedOutputBytes: 1024 * 1024,
 });
 
-export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = RELEASE_TEST_PROCESS_TIMEOUT_MS) {
+export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = RELEASE_TEST_PROCESS_TIMEOUT_MS, supervisorSlackMs = 5_000) {
 	const targetEnv = releaseTestEnv(options.env ?? process.env);
 	const bounds = {
 		...DEFAULT_ASYNC_BOUNDS,
@@ -32,7 +32,12 @@ export function runSyncReleaseProcess(command, args, options = {}, timeoutMs = R
 		input: JSON.stringify({ command, args, bounds }),
 		killSignal: "SIGKILL",
 		maxBuffer: DEFAULT_ASYNC_BOUNDS.maxCapturedOutputBytes * 3,
-		timeout: timeoutMs + bounds.terminationGraceMs + bounds.postKillReportMs + bounds.postExitDrainMs + 5_000,
+		timeout:
+			Math.max(timeoutMs, options.timeoutStartDeadlineMs ?? timeoutMs) +
+			bounds.terminationGraceMs +
+			bounds.postKillReportMs +
+			bounds.postExitDrainMs +
+			supervisorSlackMs,
 	});
 	if (supervisor.error || supervisor.status !== 0) return supervisor;
 	const result = JSON.parse(supervisor.stdout);

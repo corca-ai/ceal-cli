@@ -6,9 +6,11 @@ name: Ceal worker release
 # release path now. GitHub supplies source and OIDC signing identity, never release
 # artifact storage or the stable channel resolver.
 #
-# The tag push is the stable-release approval: only maintainers can push
-# ceal-v* tags in this repository. The immutable versioned object set is fully
-# read back and verified before one mutable stable pointer is advanced.
+# A tag push selects a candidate; it is not sufficient approval by itself.
+# The privileged job also requires the `ceal-cli-release` Environment, which the
+# operator must protect before release, and its exact approved commit/inventory
+# digest. The immutable versioned object set is fully read back and verified
+# before the stable bootstrap and pointer advance.
 #
 # `workflow_dispatch` is a DRY RUN and can never publish. It exists because a
 # release tag cannot be reused, so before this trigger the first execution of any
@@ -275,15 +277,28 @@ jobs:
     # credentials are named here, and the condition that keeps a dispatch away
     # from them belongs next to them.
     if: github.event_name == 'push'
+    environment: ceal-cli-release
     permissions:
       contents: read
       id-token: write
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_RELEASE_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}
     steps:
+      - name: Require approved worker release identity
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
+          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
+          ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
+        run: |
+          set -euo pipefail
+          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
+            || { echo "::error::ceal-cli-release has not approved commit $GITHUB_SHA"; exit 1; }
+          [ -n "$APPROVED_SHA256SUMS_SHA256" ] \
+            && [ "$APPROVED_SHA256SUMS_SHA256" = "$ASSEMBLED_SHA256SUMS_SHA256" ] \
+            || { echo "::error::ceal-cli-release has not approved the assembled SHA256SUMS"; exit 1; }
       - name: Download exact assembled release handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -291,11 +306,15 @@ jobs:
           path: dist
       - name: Verify the assembled worker inventory
         env:
+          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
+          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
           ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           observed="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+          [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ] \
+            || { echo "::error::ceal-cli-release has not approved SHA256SUMS $observed"; exit 1; }
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
             || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -not -name '.*' -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \

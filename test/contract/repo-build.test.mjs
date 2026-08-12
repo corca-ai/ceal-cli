@@ -54,19 +54,26 @@ test("a live holder is not reclaimed, however long it holds", async () => {
 	// holder recreates the double-writer state the lock exists to prevent. This
 	// asserts the direction that keeps the mutex sound; the test below asserts the
 	// direction that keeps it from deadlocking.
-	const slow = runHolder(`
+	const slow = spawnHolder(
+		`
 		import { withDistLock } from ${JSON.stringify(HELPER)};
-		withDistLock(() => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500));
+		withDistLock(() => {
+			console.log("slow-ready");
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+		});
 		console.log("slow-done");
-	`);
-	// Let the slow holder take the lock before the waiter starts contending.
-	await new Promise((resolve) => setTimeout(resolve, 300));
+	`,
+		"slow-ready\n",
+	);
+	// Start contention only after the holder says it owns the lock. A fixed sleep
+	// let a loaded host start the waiter first and pass without exercising reclaim.
+	await slow.ready;
 	const waiter = await runHolder(`
 		import { withDistLock } from ${JSON.stringify(HELPER)};
 		withDistLock(() => console.log("waiter-entered"));
 	`);
 	assert.equal(waiter.code, 0, waiter.stderr);
-	assert.equal((await slow).code, 0);
+	assert.equal((await slow.result).code, 0);
 	// If the waiter had reclaimed the live holder's lock it would still print this,
 	// so the real assertion is that it did not warn about reclaiming one.
 	assert.doesNotMatch(waiter.stderr, /reclaiming/u, "a live holder was reclaimed");
@@ -252,16 +259,42 @@ test("no test fixture builds or unsafely packs a workspace package outside repo-
 });
 
 function runHolder(source) {
+	return spawnHolder(source).result;
+}
+
+function spawnHolder(source, readyMarker = undefined) {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
 	let stderr = "";
 	let stdout = "";
+	let readyResolve;
+	let readyReject;
+	const ready =
+		readyMarker === undefined
+			? Promise.resolve()
+			: new Promise((resolve, reject) => {
+					readyResolve = resolve;
+					readyReject = reject;
+				});
+	const watchdog = setTimeout(() => child.kill("SIGKILL"), 10_000);
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk;
 	});
 	child.stdout.on("data", (chunk) => {
 		stdout += chunk;
+		if (readyResolve && stdout.includes(readyMarker)) {
+			readyResolve();
+			readyResolve = undefined;
+			readyReject = undefined;
+		}
 	});
-	return new Promise((resolve) => child.on("close", (code) => resolve({ code, stdout, stderr })));
+	const result = new Promise((resolve) =>
+		child.on("close", (code, signal) => {
+			clearTimeout(watchdog);
+			if (readyReject) readyReject(new Error(`holder exited before '${readyMarker}': ${stderr}`));
+			resolve({ code, signal, stdout, stderr });
+		}),
+	);
+	return { ready, result };
 }
 
 function injectedRepoBuild(root, anchor, replacement) {

@@ -51,6 +51,12 @@ separately approved boundaries.
   changes before one signed cut, and asks this repo for one consumer review at
   that cut. The signed lock, release workflow, and installed worker remain on
   `0.72.13`, so ship-facing builders and acceptance stay correctly refused.
+- The release workflows now keep checkout/source proof outside privileged jobs
+  and require the existing `ceal-cli-release` approval identity before worker
+  publish or rollback activation. Distinct `CEAL_ENV_*` credential names prevent
+  fallback to legacy repository-level values. GitHub configuration is still a
+  release blocker until that Environment has protection rules and owns those
+  values; a tag alone is not approval.
 - `npm run check:unit` is the aggregate development iteration gate. Contract
   behavior runs through a real converged scratch repository, while separate
   reachability tests prove the production ship guards refuse divergence before
@@ -78,7 +84,8 @@ separately approved boundaries.
    and workflow input in one commit.
 3. Run the ordinary release gates and tag-resolved `0.76.1` installer crossing plus explicit
    guide-register proof. Ask before choosing a version, pushing, tagging,
-   publishing, or installing the new release.
+   publishing, or installing the new release. Before any tag, close the external
+   `ceal-cli-release` Environment protection/secret move named in operator acceptance.
 4. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
    dogfood remains a proof opportunity after serving, not a separately scheduled
    worker slice. Do not invent future fields in this repo.

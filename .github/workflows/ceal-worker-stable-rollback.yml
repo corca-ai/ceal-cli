@@ -28,7 +28,7 @@ env:
   CEAL_RELEASE_BUCKET: ceal-release
 
 jobs:
-  rollback:
+  verify:
     if: ${{ inputs.confirmation == 'ROLLBACK' }}
     permissions:
       contents: read
@@ -36,10 +36,10 @@ jobs:
     # one holds the bad release live for the 6-hour default.
     timeout-minutes: 30
     runs-on: ubuntu-24.04
+    outputs:
+      sha256sums_sha256: ${{ steps.handoff.outputs.sha256sums_sha256 }}
     env:
       TAG: ${{ inputs.tag }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_RELEASE_CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Check out inventory verifier
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -51,14 +51,12 @@ jobs:
           node-version: 22.22.1
       - name: Install cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
-      - name: Re-verify an immutable worker release, then move stable
+      - name: Re-verify an immutable worker release
+        id: handoff
         run: |
           set -euo pipefail
           [[ "$TAG" =~ ^ceal-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
             || { echo "::error::Worker rollback tag must be canonical ceal-vMAJOR.MINOR.PATCH"; exit 1; }
-          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
-            [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
-          done
           readback_dir="$RUNNER_TEMP/ceal-worker-rollback-readback"
           mkdir -p "$readback_dir"
           version_url="$CEAL_RELEASE_ORIGIN/worker/$TAG"
@@ -117,22 +115,87 @@ jobs:
           stable_dir="$RUNNER_TEMP/ceal-worker-stable"
           mkdir -p "$stable_dir"
           cp "$readback_dir/install-ceal.sh" "$stable_dir/install-ceal.sh"
+          cp "$readback_dir/SHA256SUMS" "$stable_dir/SHA256SUMS"
           release_set_sha="$(sha256sum "$readback_dir/SHA256SUMS" | cut -d' ' -f1)"
           printf '{"schema_version":"ceal.worker_stable_release.v1","tag":"%s","sha256sums_sha256":"%s"}\n' "$TAG" "$release_set_sha" > "$stable_dir/ceal-worker-stable-release.json"
+          echo "sha256sums_sha256=$release_set_sha" >> "$GITHUB_OUTPUT"
+      - name: Preserve the verified rollback handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ceal-worker-rollback-${{ github.sha }}
+          retention-days: 1
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ceal-worker-stable/
+
+  activate:
+    needs: verify
+    environment: ceal-cli-release
+    permissions:
+      actions: read
+    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Require approved rollback workflow identity
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
+          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
+          VERIFIED_SHA256SUMS_SHA256: ${{ needs.verify.outputs.sha256sums_sha256 }}
+        run: |
+          set -euo pipefail
+          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
+            || { echo "::error::ceal-cli-release has not approved rollback workflow commit $GITHUB_SHA"; exit 1; }
+          [ -n "$APPROVED_SHA256SUMS_SHA256" ] \
+            && [ "$APPROVED_SHA256SUMS_SHA256" = "$VERIFIED_SHA256SUMS_SHA256" ] \
+            || { echo "::error::ceal-cli-release has not approved the verified rollback inventory"; exit 1; }
+      - name: Download the verified rollback handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-worker-rollback-${{ github.sha }}
+          path: stable
+      - name: Require the approved rollback identity
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
+          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
+          VERIFIED_SHA256SUMS_SHA256: ${{ needs.verify.outputs.sha256sums_sha256 }}
+        run: |
+          set -euo pipefail
+          pointer_digest="$(node -p 'JSON.parse(require("node:fs").readFileSync("stable/ceal-worker-stable-release.json", "utf8")).sha256sums_sha256')"
+          pointer_tag="$(node -p 'JSON.parse(require("node:fs").readFileSync("stable/ceal-worker-stable-release.json", "utf8")).tag')"
+          observed_digest="$(sha256sum stable/SHA256SUMS | cut -d' ' -f1)"
+          expected_installer="$(awk '$2 == "install-ceal.sh" { print $1 }' stable/SHA256SUMS)"
+          observed_installer="$(sha256sum stable/install-ceal.sh | cut -d' ' -f1)"
+          [ "$pointer_tag" = "$TAG" ] \
+            || { echo "::error::Downloaded rollback handoff names $pointer_tag instead of $TAG"; exit 1; }
+          [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed_digest" ] \
+            || { echo "::error::ceal-cli-release has not approved rollback SHA256SUMS $observed_digest"; exit 1; }
+          [ "$VERIFIED_SHA256SUMS_SHA256" = "$observed_digest" ] && [ "$pointer_digest" = "$observed_digest" ] \
+            || { echo "::error::Downloaded rollback handoff differs from the verified inventory"; exit 1; }
+          [[ "$expected_installer" =~ ^[a-f0-9]{64}$ ]] && [ "$expected_installer" = "$observed_installer" ] \
+            || { echo "::error::Downloaded rollback bootstrap differs from the approved inventory"; exit 1; }
+      - name: Move the stable bootstrap and pointer
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+            [ -n "${!name:-}" ] || { echo "::error::$name is required for the Ceal release origin"; exit 1; }
+          done
           npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
             "$CEAL_RELEASE_BUCKET/releases/worker/stable/install-ceal.sh" \
-            --file "$stable_dir/install-ceal.sh" --remote --cache-control "no-cache, max-age=0"
+            --file "stable/install-ceal.sh" --remote --cache-control "no-cache, max-age=0"
           curl --fail --silent --show-error --location \
             "$CEAL_RELEASE_ORIGIN/worker/stable/install-ceal.sh?readback=${GITHUB_SHA}-${RANDOM}" \
-            --output "$stable_dir/install-ceal-readback.sh"
-          cmp "$stable_dir/install-ceal.sh" "$stable_dir/install-ceal-readback.sh"
+            --output "stable/install-ceal-readback.sh"
+          cmp "stable/install-ceal.sh" "stable/install-ceal-readback.sh"
           npm exec --yes --package=wrangler@4.99.0 -- wrangler r2 object put \
             "$CEAL_RELEASE_BUCKET/releases/worker/stable/ceal-worker-stable-release.json" \
-            --file "$stable_dir/ceal-worker-stable-release.json" --remote --cache-control "no-cache, max-age=0"
+            --file "stable/ceal-worker-stable-release.json" --remote --cache-control "no-cache, max-age=0"
           curl --fail --silent --show-error --location \
             "$CEAL_RELEASE_ORIGIN/worker/stable/ceal-worker-stable-release.json?readback=${GITHUB_SHA}-${RANDOM}" \
-            --output "$stable_dir/ceal-worker-stable-release-readback.json"
-          cmp "$stable_dir/ceal-worker-stable-release.json" "$stable_dir/ceal-worker-stable-release-readback.json"
+            --output "stable/ceal-worker-stable-release-readback.json"
+          cmp "stable/ceal-worker-stable-release.json" "stable/ceal-worker-stable-release-readback.json"
           {
             echo "## Ceal worker stable rollback evidence"
             echo

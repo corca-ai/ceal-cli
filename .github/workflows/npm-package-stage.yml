@@ -8,16 +8,34 @@ on:
 permissions: {}
 
 jobs:
-  stage:
+  prove:
     environment: ceal-npm-release
     permissions:
       contents: read
-      id-token: write
     # Runs the full gate before publishing, so it is bounded like the release
     # lane rather than like the check lane.
     timeout-minutes: 45
     runs-on: ubuntu-24.04-arm
     steps:
+      - name: Require approved tag identity before source execution
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_NPM_APPROVED_COMMIT }}
+          APPROVED_CLIENT_SHA256: ${{ vars.CEAL_NPM_APPROVED_CLIENT_SHA256 }}
+          APPROVED_PROTOCOL_SHA256: ${{ vars.CEAL_NPM_APPROVED_PROTOCOL_SHA256 }}
+          APPROVED_VERSION: ${{ vars.CEAL_NPM_APPROVED_VERSION }}
+          BOOTSTRAP_COMPLETE: ${{ vars.CEAL_NPM_BOOTSTRAP_COMPLETE }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          [ "$BOOTSTRAP_COMPLETE" = "true" ] \
+            || { echo "The first direct 2FA bootstrap must finish before staged publishing is enabled." >&2; exit 1; }
+          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
+            || { echo "The ceal-npm-release environment has not approved commit $GITHUB_SHA" >&2; exit 1; }
+          [ -n "$APPROVED_VERSION" ] && [ "$APPROVED_VERSION" = "$version" ] \
+            || { echo "The ceal-npm-release environment has not approved version $version" >&2; exit 1; }
+          [ -n "$APPROVED_PROTOCOL_SHA256" ] && [ -n "$APPROVED_CLIENT_SHA256" ] \
+            || { echo "The ceal-npm-release environment has not approved both package digests." >&2; exit 1; }
       - name: Check out exact tag
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -38,25 +56,12 @@ jobs:
           node scripts/prewarm-offline-consumer-cache.mjs
           npm run check
           [ "$(npm --version)" = "11.18.0" ]
-      - name: Require approved post-bootstrap release identity
+      - name: Verify the approved package identities in source
         env:
-          APPROVED_COMMIT: ${{ vars.CEAL_NPM_APPROVED_COMMIT }}
-          APPROVED_CLIENT_SHA256: ${{ vars.CEAL_NPM_APPROVED_CLIENT_SHA256 }}
-          APPROVED_PROTOCOL_SHA256: ${{ vars.CEAL_NPM_APPROVED_PROTOCOL_SHA256 }}
-          APPROVED_VERSION: ${{ vars.CEAL_NPM_APPROVED_VERSION }}
-          BOOTSTRAP_COMPLETE: ${{ vars.CEAL_NPM_BOOTSTRAP_COMPLETE }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          [ "$BOOTSTRAP_COMPLETE" = "true" ] \
-            || { echo "The first direct 2FA bootstrap must finish before staged publishing is enabled." >&2; exit 1; }
-          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
-            || { echo "The ceal-npm-release environment has not approved commit $GITHUB_SHA" >&2; exit 1; }
-          [ -n "$APPROVED_VERSION" ] && [ "$APPROVED_VERSION" = "$version" ] \
-            || { echo "The ceal-npm-release environment has not approved version $version" >&2; exit 1; }
-          [ -n "$APPROVED_PROTOCOL_SHA256" ] && [ -n "$APPROVED_CLIENT_SHA256" ] \
-            || { echo "The ceal-npm-release environment has not approved both package digests." >&2; exit 1; }
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const version = process.argv[1];
@@ -74,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          mkdir npm-stage-inputs npm-stage-results
+          mkdir npm-stage-inputs
           (cd packages/ceal-protocol && npm pack --ignore-scripts --json --pack-destination "$GITHUB_WORKSPACE/npm-stage-inputs")
           (cd packages/ceal-client && npm pack --ignore-scripts --json --pack-destination "$GITHUB_WORKSPACE/npm-stage-inputs")
           protocol="npm-stage-inputs/corca-ai-ceal-protocol-${version}.tgz"
@@ -83,6 +88,67 @@ jobs:
             || { echo "Protocol tarball differs from the approved digest." >&2; exit 1; }
           [ "$(sha256sum "$client" | cut -d' ' -f1)" = "$APPROVED_CLIENT_SHA256" ] \
             || { echo "Client tarball differs from the approved digest." >&2; exit 1; }
+      - name: Preserve the approved package pair
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ceal-npm-stage-inputs-${{ github.sha }}
+          retention-days: 1
+          if-no-files-found: error
+          path: npm-stage-inputs/
+
+  stage:
+    needs: prove
+    environment: ceal-npm-release
+    permissions:
+      actions: read
+      id-token: write
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Require approved staged-publish identity
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_NPM_APPROVED_COMMIT }}
+          APPROVED_CLIENT_SHA256: ${{ vars.CEAL_NPM_APPROVED_CLIENT_SHA256 }}
+          APPROVED_PROTOCOL_SHA256: ${{ vars.CEAL_NPM_APPROVED_PROTOCOL_SHA256 }}
+          APPROVED_VERSION: ${{ vars.CEAL_NPM_APPROVED_VERSION }}
+          BOOTSTRAP_COMPLETE: ${{ vars.CEAL_NPM_BOOTSTRAP_COMPLETE }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          [ "$BOOTSTRAP_COMPLETE" = "true" ]
+          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]
+          [ -n "$APPROVED_VERSION" ] && [ "$APPROVED_VERSION" = "$version" ]
+          [ -n "$APPROVED_PROTOCOL_SHA256" ] && [ -n "$APPROVED_CLIENT_SHA256" ]
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22.22.1
+          registry-url: https://registry.npmjs.org
+      - name: Install the staged-publish npm client
+        run: npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+      - name: Download the exact approved package pair
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ceal-npm-stage-inputs-${{ github.sha }}
+          path: npm-stage-inputs
+      - name: Re-verify the privileged handoff
+        env:
+          APPROVED_COMMIT: ${{ vars.CEAL_NPM_APPROVED_COMMIT }}
+          APPROVED_CLIENT_SHA256: ${{ vars.CEAL_NPM_APPROVED_CLIENT_SHA256 }}
+          APPROVED_PROTOCOL_SHA256: ${{ vars.CEAL_NPM_APPROVED_PROTOCOL_SHA256 }}
+          APPROVED_VERSION: ${{ vars.CEAL_NPM_APPROVED_VERSION }}
+          BOOTSTRAP_COMPLETE: ${{ vars.CEAL_NPM_BOOTSTRAP_COMPLETE }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          [ "$BOOTSTRAP_COMPLETE" = "true" ]
+          [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]
+          [ "$APPROVED_VERSION" = "$version" ]
+          [ "$(sha256sum "npm-stage-inputs/corca-ai-ceal-protocol-${version}.tgz" | cut -d' ' -f1)" = "$APPROVED_PROTOCOL_SHA256" ]
+          [ "$(sha256sum "npm-stage-inputs/corca-ai-ceal-${version}.tgz" | cut -d' ' -f1)" = "$APPROVED_CLIENT_SHA256" ]
+          mkdir npm-stage-results
       - name: Stage the exact approved package pair
         env:
           TAG: ${{ github.ref_name }}
@@ -108,13 +174,12 @@ jobs:
             echo "- staged packages: @corca-ai/ceal-protocol, @corca-ai/ceal"
             echo "- promotion: requires separate human 2FA approval and registry readback"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preserve exact inputs and partial-stage recovery evidence
+      - name: Preserve partial-stage recovery evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ceal-npm-stage-${{ github.sha }}
+          name: ceal-npm-stage-results-${{ github.sha }}
           retention-days: 7
           if-no-files-found: error
           path: |
-            npm-stage-inputs/
             npm-stage-results/

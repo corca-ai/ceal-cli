@@ -95,15 +95,16 @@ and a burned tag is never reused — so a successor who tags to find out whether
 they have access pays a version number to learn it. Check first.
 
 The worker release lane fires on `ceal-v*.*.*` and drives
-`.github/workflows/ceal-release.yml`. It needs two repository-level values:
+`.github/workflows/ceal-release.yml`. Its `ceal-cli-release` Environment must be
+protected before release and must own the release-origin identity and credential:
 
 ```
-gh variable list -R corca-ai/ceal-cli     # expect CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID
-gh secret list   -R corca-ai/ceal-cli     # expect CEAL_RELEASE_CLOUDFLARE_API_TOKEN
+gh variable list -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_ACCOUNT_ID plus the two CEAL_CLI_APPROVED_* variables
+gh secret list   -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_API_TOKEN
 ```
 
-Both were present on 2026-07-27. The workflow re-checks them at run time and
-fails the job by name if either is empty, so an empty one costs the tag.
+The workflow re-checks them at run time and fails the job by name if either is
+empty, so a missing Environment value costs the tag.
 
 The proof/ship state no longer needs a separate look to avoid a wasted tag: it is
 a gate failure. A green `npm run check` already means the protocol bytes this
@@ -123,9 +124,32 @@ vendor identity and exercises the client suite — its output is stamped
 not be cited as release or installed-worker evidence. `docs/gates.md` says what
 the check does and does not cover.
 
-Signing is keyless — cosign uses the workflow's OIDC identity, so there is no
-signing secret to hold and nothing to check beyond the workflow being allowed to
-run under `id-token: write`.
+Signing is keyless, but publishing is privileged. The `sign-and-publish` and
+rollback activation jobs use the `ceal-cli-release` Environment, whose approved
+commit and SHA256SUMS digest are rechecked before signing or release-origin
+mutation. Distinct `CEAL_ENV_*` names make missing Environment credentials fail
+closed instead of falling back to legacy repository-wide values.
+
+The repository's unprotected `main` policy does not authorize an unprotected
+release boundary. Before spending a tag, verify the Environment has a real
+protection rule and inspect tag rules rather than trusting the workflow comment:
+
+```
+gh api repos/corca-ai/ceal-cli/environments/ceal-cli-release --jq '{protection_rules, deployment_branch_policy}'
+gh api repos/corca-ai/ceal-cli/rulesets --paginate
+gh api repos/corca-ai/ceal-cli/environments/ceal-cli-release/variables --jq '.variables[].name'
+gh secret list -R corca-ai/ceal-cli --env ceal-cli-release
+gh secret list -R corca-ai/ceal-cli
+```
+
+Expect `CEAL_CLI_APPROVED_COMMIT`,
+`CEAL_CLI_APPROVED_SHA256SUMS_SHA256`, and
+`CEAL_ENV_CLOUDFLARE_ACCOUNT_ID` in the Environment variables, and
+`CEAL_ENV_CLOUDFLARE_API_TOKEN` in its secrets. Do not release while the
+Environment has no protection rule, while any expected value is absent, or while
+a legacy `CEAL_RELEASE_*` credential remains configured. Also confirm no
+Cloudflare token is available repository-wide. A tag is a candidate input;
+Environment approval is the privileged release decision.
 
 You also need push and tag rights on `corca-ai/ceal-cli`. Verify without
 spending anything:
@@ -152,9 +176,10 @@ variables** on 2026-07-27:
 gh api repos/corca-ai/ceal-cli/environments/ceal-npm-release/variables --jq '.variables[].name'
 ```
 
-With `CEAL_NPM_BOOTSTRAP_COMPLETE` unset the workflow's first gate refuses
-immediately, so a bare `v*` tag pushed today burns that version for a publish
-that cannot happen. This lane does not push them.
+With `CEAL_NPM_BOOTSTRAP_COMPLETE` unset the unprivileged proof job refuses
+before checkout or source execution, so a bare `v*` tag pushed today burns that
+version for a publish that cannot happen. Only its downstream Environment-bound
+job has OIDC permission. This lane does not push those tags.
 
 ## Naming What You Could Not Prove
 

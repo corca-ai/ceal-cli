@@ -56,18 +56,23 @@ export async function runBoundedProcess(
 			child.unref();
 			resolveResult({ code, signal, spawnError, stdout, stderr, truncated, timedOut });
 		};
-		const after = (delay: number, action: () => void) => {
+		const after = (delay: number, action: () => void, keepProcessAlive = false) => {
 			const timer = setTimeout(action, delay);
-			timer.unref();
+			if (!keepProcessAlive) timer.unref();
 			timers.push(timer);
 		};
 		const expire = () => {
+			if (settled || timedOut) return;
 			timedOut = true;
 			signalGroup(child, "SIGTERM");
-			after(options.terminationGraceMs, () => {
-				signalGroup(child, "SIGKILL");
-				after(options.postKillReportMs, () => settle(null));
-			});
+			after(
+				options.terminationGraceMs,
+				() => {
+					signalGroup(child, "SIGKILL");
+					after(options.postKillReportMs, () => settle(null), true);
+				},
+				true,
+			);
 		};
 		let timeoutArmed = false;
 		let markerDeadline: NodeJS.Timeout | undefined;
@@ -106,10 +111,30 @@ export async function runBoundedProcess(
 		child.on("exit", (code, signal) => {
 			exitCode = code;
 			exitSignal = signal;
+			// A TERM-handling leader can exit while a TERM-ignoring descendant
+			// remains in its detached process group. Once expiry starts, only the
+			// scheduled group KILL/report path may settle; otherwise this drain
+			// timer clears the escalation and leaks the descendant.
+			if (timedOut) {
+				if (!processGroupAlive(child)) settle(exitCode);
+				return;
+			}
 			after(options.postExitDrainMs, () => settle(exitCode));
 		});
-		child.on("close", (code, signal) => settle(code, signal));
+		child.on("close", (code, signal) => {
+			if (!timedOut || !processGroupAlive(child)) settle(code, signal);
+		});
 	});
+}
+
+function processGroupAlive(child: ReturnType<typeof spawn>): boolean {
+	if (child.pid === undefined) return false;
+	try {
+		process.kill(-child.pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
 }
 
 function signalGroup(child: ReturnType<typeof spawn>, signal: "SIGTERM" | "SIGKILL"): void {

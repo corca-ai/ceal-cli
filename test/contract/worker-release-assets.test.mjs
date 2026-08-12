@@ -557,8 +557,9 @@ test("worker release workflow signs only the worker inventory from the locked ar
 		"every leg now runs a packed-consumer proof, so none of them may skip the prewarm",
 	);
 	assert.match(workflow, /concurrency:\n {2}group: ceal-worker-release-origin\n {2}cancel-in-progress: false/u);
-	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_ACCOUNT_ID/u);
-	assert.match(workflow, /CEAL_RELEASE_CLOUDFLARE_API_TOKEN/u);
+	assert.match(workflow, /CEAL_ENV_CLOUDFLARE_ACCOUNT_ID/u);
+	assert.match(workflow, /CEAL_ENV_CLOUDFLARE_API_TOKEN/u);
+	assert.doesNotMatch(workflow, /CEAL_RELEASE_CLOUDFLARE_(?:ACCOUNT_ID|API_TOKEN)/u);
 	assert.match(workflow, /wrangler r2 object put[\s\S]+--remote/u);
 	assert.match(workflow, /releases\/worker\/stable\/ceal-worker-stable-release[.]json/u);
 	assert.match(workflow, /ceal[.]worker_stable_release[.]v1/u);
@@ -594,8 +595,8 @@ test("worker release workflow builds, merges, and signs every platform it builds
 	// The rollback lane re-verifies this same set before moving stable, so it is
 	// a fifth platform-naming site and drifts silently without this assertion.
 	const rollback = parse(readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-worker-stable-rollback.yml"), "utf8"));
-	const rollbackInventory = runStepContaining(rollback.jobs.rollback, "parsePublishedWorkerReleaseInventory");
-	const rollbackSignature = runStepContaining(rollback.jobs.rollback, "SHA256SUMS.pem");
+	const rollbackInventory = runStepContaining(rollback.jobs.verify, "parsePublishedWorkerReleaseInventory");
+	const rollbackSignature = runStepContaining(rollback.jobs.verify, "SHA256SUMS.pem");
 	assert.match(rollbackInventory, /Verify the signed inventory itself before it is allowed to name any[\s\S]+later URL/u);
 	assert.match(rollbackSignature, /cosign verify-blob/u);
 	assert.ok(

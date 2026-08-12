@@ -402,6 +402,33 @@ test("installed command execution refuses a child that ignores TERM and a child 
 	);
 });
 
+test("installed command execution uses the caller environment without CI credential surfaces", async (context) => {
+	const root = scratchDir(context, "ceal-acceptance-env-");
+	const binary = path.join(root, "environment");
+	writeFileSync(
+		binary,
+		`#!/bin/sh
+printf '{"home":"%s","oidc":"%s","github":"%s","cloudflare":"%s"}' "$HOME" "\${ACTIONS_ID_TOKEN_REQUEST_TOKEN-}" "\${GITHUB_TOKEN-}" "\${CLOUDFLARE_API_TOKEN-}"
+`,
+	);
+	chmodSync(binary, 0o755);
+	const result = await runInstalledCommand(binary, ["version"], {
+		env: {
+			...process.env,
+			HOME: path.join(root, "selected-home"),
+			ACTIONS_ID_TOKEN_REQUEST_TOKEN: "must-not-leak",
+			GITHUB_TOKEN: "must-not-leak",
+			CLOUDFLARE_API_TOKEN: "must-not-leak",
+		},
+	});
+	assert.deepEqual(JSON.parse(result.stdout), {
+		home: path.join(root, "selected-home"),
+		oidc: "",
+		github: "",
+		cloudflare: "",
+	});
+});
+
 // The CLI entry, run as the process it really is. `parseArgs` and `render` have
 // no other caller, and exporting them to reach in-process would prove a surface
 // no operator uses. The child inherits NODE_V8_COVERAGE, so this counts.
