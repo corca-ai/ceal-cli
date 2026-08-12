@@ -3101,6 +3101,142 @@ test("a direct Gateway failure renderer never reflects unsafe code, text, or pro
 		"request:direct-opaque",
 	);
 	assert.deepEqual(parseYaml(stdout).receipt.audit_refs, [opaqueProofRef]);
+	stdout = "";
+	writeCallGatewayFailure(
+		{
+			error: {
+				code: "unknown_gateway_code",
+				message: "safe",
+				next_action: "safe",
+				recovery: { kind: "request_approval", retry_after_ms: -1 },
+			},
+		},
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-malformed-recovery",
+	);
+	const malformedRecovery = parseYaml(stdout);
+	assert.equal(malformedRecovery.status, "error");
+	assert.equal(malformedRecovery.error.kind, "unknown_gateway_code");
+	assert.equal(Object.hasOwn(malformedRecovery.error, "retry_after_ms"), false);
+	stdout = "";
+	writeCallGatewayFailure(
+		{ error: { code: "policy_denied", message: "safe", next_action: "safe" } },
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-partial-policy",
+	);
+	const partialPolicy = parseYaml(stdout);
+	assert.equal(partialPolicy.status, "error");
+	assert.equal(partialPolicy.error.kind, "policy_denied");
+	stdout = "";
+	writeCallGatewayFailure(
+		{
+			ok: false,
+			request_id: "request:direct-policy",
+			protocol_version: "1.3.0",
+			proof_ref_or_unavailable: "proof:policy:1",
+			error: {
+				code: "policy_denied",
+				message: "The authenticated profile is not granted this capability for the requested target.",
+				next_action: "Request policy approval for this capability and target.",
+				decision: {
+					schema_version: "ceal.gateway_policy_denial.v1",
+					capability_id: "message.create",
+					target_ref: "target:team-inbox",
+					host_decision: "denied",
+					proof_level: "host_decision",
+					non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+				},
+			},
+		},
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-policy",
+	);
+	const completePolicy = parseYaml(stdout);
+	assert.equal(completePolicy.status, "blocked");
+	assert.equal(completePolicy.error.kind, "authorization_denied");
+	stdout = "";
+	const datePolicy = Object.assign(new Date(), {
+		ok: false,
+		request_id: "request:direct-policy",
+		protocol_version: "1.3.0",
+		proof_ref_or_unavailable: "proof:policy:gateway",
+		error: {
+			code: "policy_denied",
+			message: "The authenticated profile is not granted this capability for the requested target.",
+			next_action: "Request policy approval for this capability and target.",
+			decision: {
+				schema_version: "ceal.gateway_policy_denial.v1",
+				capability_id: "message.create",
+				target_ref: "target:team-inbox",
+				host_decision: "denied",
+				proof_level: "host_decision",
+				non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+			},
+		},
+	});
+	writeCallGatewayFailure(
+		datePolicy,
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-policy",
+	);
+	assert.equal(parseYaml(stdout).status, "error");
+	stdout = "";
+	const forgedClaimsPolicy = {
+		...datePolicy,
+		error: {
+			...datePolicy.error,
+			decision: {
+				...datePolicy.error.decision,
+				non_claims: { toJSON: () => ["provider_execution_not_reached", "production_audit_not_reached"] },
+			},
+		},
+	};
+	writeCallGatewayFailure(
+		forgedClaimsPolicy,
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:team-inbox", arguments: {}, purpose: "Create" },
+		"request:direct-policy",
+	);
+	assert.equal(parseYaml(stdout).status, "error");
 });
 
 test("Gateway authorization classifications keep denials separate from availability", () => {
@@ -3124,6 +3260,76 @@ test("Gateway authorization classifications keep denials separate from availabil
 			recovery: { kind: "select_granted_scope" },
 		}).denial,
 		false,
+	);
+	for (const recovery of [
+		{ kind: "request_approval", retry_after_ms: -1 },
+		{ kind: "reboot_universe", retry_after_ms: 30_000 },
+		{ kind: "request_approval", retry_after_ms: 30_000, injected: true },
+	]) {
+		const malformed = classifyGatewayFailure({
+			code: "unknown_gateway_code",
+			message: "server-controlled",
+			next_action: "server-controlled action",
+			recovery,
+		});
+		assert.equal(malformed.denial, false, JSON.stringify(recovery));
+		assert.equal(Object.hasOwn(malformed, "retryAfterMs"), false, JSON.stringify(recovery));
+	}
+	const dateRecovery = Object.assign(new Date(), { kind: "request_approval" });
+	assert.equal(
+		classifyGatewayFailure({
+			code: "unknown_gateway_code",
+			message: "server-controlled",
+			next_action: "server-controlled action",
+			recovery: dateRecovery,
+		}).denial,
+		false,
+	);
+	const dateError = Object.assign(new Date(), {
+		code: "unknown_gateway_code",
+		message: "server-controlled",
+		next_action: "server-controlled action",
+		recovery: { kind: "request_approval" },
+	});
+	assert.deepEqual(classifyGatewayFailure(dateError), {
+		code: "gateway_request_failed",
+		message: "The Gateway rejected the capability request.",
+		nextAction: "Check Gateway status and audit readback before deciding whether to retry.",
+		denial: false,
+	});
+});
+
+test("a complete HTTP policy denial remains a blocked call", async () => {
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["call", "message.create", "--target", "target:team-inbox", "text=hello"], 3, {
+				loadSession: async () => storedSession(endpoint),
+			});
+			assert.equal(payload.status, "blocked");
+			assert.equal(payload.error.kind, "authorization_denied");
+		},
+		(request) =>
+			request.operation === "call"
+				? {
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.3.0",
+						proof_ref_or_unavailable: "proof:policy:gateway",
+						error: {
+							code: "policy_denied",
+							message: "The authenticated profile is not granted this capability for the requested target.",
+							next_action: "Request policy approval for this capability and target.",
+							decision: {
+								schema_version: "ceal.gateway_policy_denial.v1",
+								capability_id: request.body.capability_id,
+								target_ref: request.body.target_ref,
+								host_decision: "denied",
+								proof_level: "host_decision",
+								non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+							},
+						},
+					}
+				: handshakeResponse(request),
 	);
 });
 

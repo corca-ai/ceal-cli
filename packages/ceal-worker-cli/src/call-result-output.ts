@@ -1,4 +1,11 @@
-import { type CealGatewayCallValue, isCealPublicSafeText } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
+	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
+	CEAL_GATEWAY_RECOVERY_KINDS,
+	CEAL_PROTOCOL_VERSION,
+	type CealGatewayCallValue,
+	isCealPublicSafeText,
+} from "@corca-ai/ceal-protocol";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { writeYaml } from "./output.js";
@@ -162,7 +169,7 @@ export function writeCallCompleted(
 }
 
 export function writeCallGatewayFailure(
-	response: { error: unknown; proof_ref_or_unavailable?: unknown },
+	response: { error: unknown; proof_ref_or_unavailable?: unknown; ok?: unknown; protocol_version?: unknown; request_id?: unknown },
 	io: ResultIo,
 	session: CealStoredSession,
 	parsed: CealParsedCapabilityCall,
@@ -170,19 +177,20 @@ export function writeCallGatewayFailure(
 	record?: CealCallResultRecorder,
 ): number {
 	const failure = classifyGatewayFailure(response.error);
+	const denial = failure.denial || isSafeGatewayPolicyDenial(response, parsed, requestId);
 	const proofRefs = isSafeGatewayProofRef(response.proof_ref_or_unavailable) ? [response.proof_ref_or_unavailable] : [];
 	emitCallResult(
 		io,
 		{
 			schema_version: "ceal.result.v2",
 			ok: false,
-			status: failure.denial ? "blocked" : "error",
+			status: denial ? "blocked" : "error",
 			capability: parsed.capabilityId,
 			target: parsed.targetRef,
 			...gatewayResultIdentity(session, parsed.profileRef),
 			receipt: callReceipt("not_read_back", "not_read_back", requestId, proofRefs),
 			error: {
-				kind: failure.denial ? "authorization_denied" : failure.code,
+				kind: denial ? "authorization_denied" : failure.code,
 				message: failure.message,
 				next_action: failure.nextAction,
 				// Present only when the Gateway supplied it, so absence stays a
@@ -300,7 +308,6 @@ interface SafeGatewayFailure {
 }
 
 const GATEWAY_DENIAL_CODES = new Set([
-	"policy_denied",
 	"authentication_failed",
 	"profile_binding_denied",
 	"profile_access_denied",
@@ -331,32 +338,89 @@ function gatewayFailureText(error: unknown, field: "message" | "next_action"): s
 	return typeof value === "string" && isCealPublicSafeText(value, 512) && !containsCealCredential(value) ? value : null;
 }
 
-function gatewayFailureDenial(error: unknown, code: string): boolean {
-	if (GATEWAY_DENIAL_CODES.has(code)) return true;
-	if (GATEWAY_NON_DENIAL_CODES.has(code) || !error || typeof error !== "object") return false;
-	const kind = (error as { recovery?: { kind?: unknown } }).recovery?.kind;
-	return typeof kind === "string" && GATEWAY_DENIAL_RECOVERY_KINDS.has(kind);
+interface SafeGatewayRecovery {
+	kind: string;
+	retryAfterMs?: number;
 }
 
-// HTTP input is already Protocol-bounded; retain the same bound at this direct
-// `unknown` boundary as a fail-closed defense. The contract suite binds it.
-function gatewayRetryAfterMs(error: unknown): number | undefined {
-	if (!error || typeof error !== "object" || !("recovery" in error)) return undefined;
+function gatewayFailureRecovery(error: unknown): SafeGatewayRecovery | null {
+	if (!error || typeof error !== "object" || !("recovery" in error)) return null;
 	const recovery = (error as { recovery?: unknown }).recovery;
-	if (!recovery || typeof recovery !== "object" || !("retry_after_ms" in recovery)) return undefined;
+	if (!isPlainRecord(recovery) || !Object.hasOwn(recovery, "kind")) return null;
+	const keys = Object.keys(recovery);
+	if (keys.some((key) => key !== "kind" && key !== "retry_after_ms")) return null;
+	const kind = (recovery as { kind?: unknown }).kind;
+	if (typeof kind !== "string" || !(CEAL_GATEWAY_RECOVERY_KINDS as readonly string[]).includes(kind)) return null;
+	if (!Object.hasOwn(recovery, "retry_after_ms")) return { kind };
 	const wait = (recovery as { retry_after_ms?: unknown }).retry_after_ms;
-	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 && wait <= MAX_GATEWAY_RETRY_AFTER_MS ? wait : undefined;
+	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 && wait <= MAX_GATEWAY_RETRY_AFTER_MS
+		? { kind, retryAfterMs: wait }
+		: null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactOwnKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+	return isPlainRecord(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function hasExactStringValues(value: unknown, expected: readonly string[]): boolean {
+	return Array.isArray(value) && value.length === expected.length && expected.every((item, index) => value[index] === item);
+}
+
+function isSafeGatewayPolicyDenial(
+	response: { error: unknown; proof_ref_or_unavailable?: unknown; ok?: unknown; protocol_version?: unknown; request_id?: unknown },
+	parsed: CealParsedCapabilityCall,
+	requestId: string,
+): boolean {
+	if (
+		!hasExactOwnKeys(response, ["error", "ok", "proof_ref_or_unavailable", "protocol_version", "request_id"]) ||
+		response.ok !== false ||
+		response.request_id !== requestId ||
+		response.protocol_version !== CEAL_PROTOCOL_VERSION ||
+		!isSafeGatewayProofRef(response.proof_ref_or_unavailable) ||
+		!hasExactOwnKeys(response.error, ["code", "decision", "message", "next_action"])
+	)
+		return false;
+	const { error } = response;
+	if (
+		error.code !== "policy_denied" ||
+		error.message !== CEAL_GATEWAY_POLICY_DENIAL_MESSAGE ||
+		error.next_action !== CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION ||
+		!hasExactOwnKeys(error.decision, ["capability_id", "host_decision", "non_claims", "proof_level", "schema_version", "target_ref"])
+	)
+		return false;
+	const decision = error.decision;
+	return (
+		decision.schema_version === "ceal.gateway_policy_denial.v1" &&
+		decision.capability_id === parsed.capabilityId &&
+		decision.target_ref === parsed.targetRef &&
+		decision.host_decision === "denied" &&
+		decision.proof_level === "host_decision" &&
+		hasExactStringValues(decision.non_claims, ["provider_execution_not_reached", "production_audit_not_reached"])
+	);
+}
+
+function gatewayFailureDenial(recovery: SafeGatewayRecovery | null, code: string): boolean {
+	if (GATEWAY_DENIAL_CODES.has(code)) return true;
+	if (GATEWAY_NON_DENIAL_CODES.has(code)) return false;
+	return recovery !== null && GATEWAY_DENIAL_RECOVERY_KINDS.has(recovery.kind);
 }
 
 export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
-	const code = gatewayFailureCode(error) ?? "gateway_request_failed";
-	const retryAfterMs = gatewayRetryAfterMs(error);
-	const wait = retryAfterMs === undefined ? {} : { retryAfterMs };
+	const safeError = isPlainRecord(error) ? error : null;
+	const code = gatewayFailureCode(safeError) ?? "gateway_request_failed";
+	const recovery = gatewayFailureRecovery(safeError);
+	const wait = recovery?.retryAfterMs === undefined ? {} : { retryAfterMs: recovery.retryAfterMs };
 	return {
 		code,
-		message: gatewayFailureText(error, "message") ?? "The Gateway rejected the capability request.",
-		nextAction: gatewayFailureText(error, "next_action") ?? GATEWAY_FALLBACK_NEXT_ACTION,
-		denial: gatewayFailureDenial(error, code),
+		message: gatewayFailureText(safeError, "message") ?? "The Gateway rejected the capability request.",
+		nextAction: gatewayFailureText(safeError, "next_action") ?? GATEWAY_FALLBACK_NEXT_ACTION,
+		denial: gatewayFailureDenial(recovery, code),
 		...wait,
 	};
 }

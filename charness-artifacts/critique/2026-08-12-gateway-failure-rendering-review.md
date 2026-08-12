@@ -40,6 +40,9 @@ field fallback and lost denial disposition.
 - F9 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: direct retry timing must respect the Protocol maximum
 - F10 | bin: bundle-anyway | evidence: moderate | ref: test/contract/one-fact-one-home.test.mjs | action: fix | note: prove opaque valid proof refs survive the direct renderer
 - F11 | bin: over-worry | evidence: strong | ref: packages/ceal-protocol/src | action: document | note: do not widen the frozen Protocol public exports for this Worker repair
+- F12 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: normalize the whole direct recovery shape before deriving denial or pacing
+- F13 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: recognize policy denial only after its complete Protocol-shaped call envelope validates
+- F14 | bin: act-before-ship | evidence: strong | ref: packages/ceal-worker-cli/src/call-result-output.ts | action: fix | note: reject non-plain records and serialization-forged nested policy state before projecting authorization
 
 ## Reviewer Tier Evidence
 

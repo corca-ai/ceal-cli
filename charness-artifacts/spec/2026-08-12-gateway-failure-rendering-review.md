@@ -28,6 +28,12 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - Treat the exported Worker renderer as a defensive boundary too: unsafe error
   codes and proof references fall back or disappear before YAML projection, but
   Protocol-valid opaque proof references remain intact.
+- Normalize direct recovery objects before deriving denial or retry output;
+  malformed recovery is absent, not a partial authorization hint.
+- Recognize `policy_denied` as an authorization result only from its complete
+  Protocol-shaped call envelope; a partial direct error stays generic.
+- Treat only plain records and a real exact `non_claims` array as structured
+  direct input; serialization hooks and inherited shape do not authorize output.
 - Backward compatibility is not a constraint for this pre-public product.
 
 ## Probe Questions
@@ -70,8 +76,11 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - A missing Gateway action never becomes local retry authorization.
 - Invalid HTTP failures are rejected by Protocol before CLI rendering, and
   direct renderer inputs cannot reflect credential-shaped codes or proof refs
-  while retaining a Protocol-valid opaque proof ref; they also cannot emit
-  retry timing beyond the Protocol bound.
+  while retaining a Protocol-valid opaque proof ref; malformed recovery cannot
+  emit a denial or retry timing, and valid retry timing remains Protocol-bound.
+- A partial direct policy error cannot emit `blocked`; a complete policy
+  envelope retains its authorization result, while non-plain records or a
+  forged `non_claims` serialization remain errors.
 - Existing status, retry timing, and `policy_denied` classification have a
   focused executable assertion or a documented deliberate result.
 - The converged fixture remains a valid contract fixture; a diverged fixture
@@ -82,8 +91,8 @@ supporting contract fixtures. Repair only a reproduced local defect.
 - `integration`: a local HTTP Gateway fixture drives `ceal call` and asserts the
   exact duplicate-write text and opaque reference in YAML.
 - `unit`: classifier cases cover safe, incomplete, and credential-shaped error
-  presentation plus retry/denial metadata; a missing action has neutral,
-  readback-first fallback guidance.
+  presentation plus normalized retry/denial metadata; a missing action has
+  neutral, readback-first fallback guidance.
 - `integration`: `test/contract/worker-acceptance-packet.test.mjs` proves the
   diverged fixture reaches `proof_shipment_protocol_divergence`.
 - `manual`: `npm run check:unit` and `.githooks/pre-push` pass; a full-gate
