@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-cli-repository",
-	"version": "0.76.1",
+	"version": "0.77.0",
 	"private": true,
 	"license": "MIT",
 	"description": "Ceal worker CLI and client source; Gateway protocol/operator compatibility inputs are frozen",
