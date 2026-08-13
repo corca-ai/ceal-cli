@@ -1,0 +1,73 @@
+{
+  "kind": "charness.critique_prepare_packet",
+  "version": 1,
+  "repo": "ceal-cli",
+  "generated_at": "2026-08-13T02:40:18Z",
+  "prepared_for": "release test readiness isolation preimplementation",
+  "changed_ref": null,
+  "adapter_path": null,
+  "sections": [],
+  "section_count": 0,
+  "ok": true,
+  "reviewer_tier_evidence": {
+    "requested_tier": "high-leverage",
+    "requested_spawn_fields": {},
+    "host_exposure_state": "pending-parent-spawn",
+    "application_state": "unverified-by-packet",
+    "instruction": "Review artifacts must record requested_fields_sent, metadata-hidden, host-defaulted, unsupported, or applied only when host-confirmed."
+  },
+  "reviewed_input_identity": {
+    "algorithm": "sha256-v2",
+    "status": "captured",
+    "mode": "working-tree",
+    "changed_ref": null,
+    "resolved_changed_ref": [],
+    "base_head": "6785b508e0a0d6dbffe51fbb47057ade0740c6a3",
+    "base_head_role": "provenance-only",
+    "reviewed_paths": [
+      "charness-artifacts/spec/2026-08-13-release-test-readiness-isolation.md",
+      "scripts/worker-release-inputs.mjs",
+      "test/converged-protocol-repo-fixture.mjs",
+      "test/worker-native-artifact.test.mjs",
+      "test/worker-release-package-fixture.mjs",
+      "test/worker-release-package.test.mjs"
+    ],
+    "reviewed_content": [
+      {
+        "path": "charness-artifacts/spec/2026-08-13-release-test-readiness-isolation.md",
+        "content_sha256": "1b90ed9ba2a58c88e546ebefccdf7331e1134bb4c343cc120616424234f33e3d"
+      },
+      {
+        "path": "scripts/worker-release-inputs.mjs",
+        "content_sha256": "83156b224ca62878c5f8f4fab29352e509702ba29472956828f2db36e6974168"
+      },
+      {
+        "path": "test/converged-protocol-repo-fixture.mjs",
+        "content_sha256": "b174fa0dd700df62bb56ed3e2d5ab23dfb97e7fdd75cd710f894e0028bcd7281"
+      },
+      {
+        "path": "test/worker-native-artifact.test.mjs",
+        "content_sha256": "3e37439b81394f289f8c12f79abafa13ae559ae0b2261df8245ba853f73874de"
+      },
+      {
+        "path": "test/worker-release-package-fixture.mjs",
+        "content_sha256": "a2cdee9cdbbedbe62940ad5a84ac1d6db3cefb75984bf92189d3b5f1c1b34773"
+      },
+      {
+        "path": "test/worker-release-package.test.mjs",
+        "content_sha256": "47eb7cf1d1f184a08b007195e20b363bfb68d9b4b3d280ce33cc0b78e8c4824f"
+      }
+    ],
+    "reviewed_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "staged_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unstaged_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_untracked": [
+      {
+        "path": "charness-artifacts/spec/2026-08-13-release-test-readiness-isolation.md",
+        "content_sha256": "1b90ed9ba2a58c88e546ebefccdf7331e1134bb4c343cc120616424234f33e3d"
+      }
+    ],
+    "auto_excluded_paths": [],
+    "identity_sha256": "d84caa905f9cd26167576d3e26f4a31e7e900eee326fe5064100592335131d5b"
+  }
+}

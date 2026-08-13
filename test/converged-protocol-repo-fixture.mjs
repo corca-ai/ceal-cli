@@ -3,6 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { generateLeasedConsumerHandoffRuntime } from "../scripts/generate-leased-consumer-handoff-runtime.mjs";
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_GATEWAY_COMMIT = "a".repeat(40);
@@ -14,15 +15,21 @@ const FIXTURE_GATEWAY_TREE = "b".repeat(40);
  * without weakening the production guard or borrowing the live checkout's
  * current release-readiness state.
  */
-export function createProtocolRepoFixture({ acceptanceCli = false, diverged = false } = {}) {
+export function createProtocolRepoFixture({ acceptanceCli = false, diverged = false, releaseBuild = false } = {}) {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-converged-protocol-"));
 	copy("packages/ceal-protocol", root);
-	copy("packages/ceal-client/package.json", root);
-	copy("packages/ceal-worker-cli/package.json", root);
+	copyOwnedPackage("packages/ceal-client", root, releaseBuild);
+	copyOwnedPackage("packages/ceal-worker-cli", root, releaseBuild);
 	copy("skills/ceal-guide", root);
 	copy("scripts/assets/ceal-guide-compatibility-SKILL.md", root);
 	copy("worker-release-inputs.json", root);
 	copy("install-ceal.sh", root);
+	copy(".gitignore", root);
+	if (releaseBuild) {
+		copy("THIRD_PARTY_NOTICES.txt", root);
+		copy("gateway-leased-consumer-call-handoff-lock.json", root);
+		copy("vendor/gateway-leased-consumer-call", root);
+	}
 	mkdirSync(path.join(root, "docs", "requests"), { recursive: true });
 	writeFileSync(path.join(root, "docs", "requests", "README.md"), "# Fixture request\n");
 	if (diverged) writeFileSync(path.join(root, "docs", "protocol-quarantine.md"), "# Fixture quarantine\n");
@@ -61,14 +68,37 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 		delete pin.shipped.disposition_request;
 	}
 	writeJson(path.join(root, "protocol-vendor-pin.json"), pin);
+	if (releaseBuild) {
+		const controlContractPath = path.join(root, "packages/ceal-worker-cli/leased-consumer-control-session-contract.json");
+		const controlContract = JSON.parse(readFileSync(controlContractPath, "utf8"));
+		controlContract.gateway_protocol_handoff.gateway_tag = lock.gateway.tag;
+		controlContract.gateway_protocol_handoff.gateway_commit = lock.gateway.commit;
+		controlContract.gateway_protocol_handoff.protocol_tree = lock.gateway.protocol_tree;
+		controlContract.gateway_protocol_handoff.archive_sha256 = lock.archive.sha256;
+		writeJson(controlContractPath, controlContract);
+		generateLeasedConsumerHandoffRuntime({ repoRoot: root });
+	}
 
 	runFixtureGit(root, ["add", "."]);
 	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: bind converged protocol identity"]);
+	if (releaseBuild) {
+		for (const dependency of ["typescript", "yaml", "undici-types", "@types/node"]) copy(`node_modules/${dependency}`, root);
+	}
 	return {
 		root,
 		gateway: { repository: lock.gateway.repository, commit: lock.gateway.commit, tree: lock.gateway.tree, protocol_tree: protocolTree },
 		cleanup: () => rmSync(root, { recursive: true, force: true }),
 	};
+}
+
+function copyOwnedPackage(relative, destinationRoot, releaseBuild) {
+	copy(`${relative}/package.json`, destinationRoot);
+	if (!releaseBuild) return;
+	for (const entry of ["LICENSE", "src", "tsconfig.build.json", "tsconfig.json"]) copy(`${relative}/${entry}`, destinationRoot);
+	if (relative.endsWith("ceal-worker-cli")) {
+		copy(`${relative}/leased-consumer-carrier-contract.json`, destinationRoot);
+		copy(`${relative}/leased-consumer-control-session-contract.json`, destinationRoot);
+	}
 }
 
 function copy(relative, destinationRoot) {

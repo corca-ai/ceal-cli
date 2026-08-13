@@ -923,6 +923,55 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-11",
 			"note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder detector classified at d3d10b19e3927fba, a8bc38ab98549fd7, and 4e437a213994e8b8. The verifier now consumes the shared skill-directory bundler, but it still proves an isolated install while the builder stages a hermetic package."
+		},
+		{
+			"surface": "code",
+			"id": "3f9e0ba23bad1610",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Pre-existing exact nodeErrorCode helper pair in local-store-guards.ts and local-store-lock.ts, surfaced without either member changing. It is retained only as bounded gate debt for a later neutral errno-utility slice; changing local-store security primitives to pay that unrelated debt inside the release-fixture slice would widen the reviewed surface."
+		},
+		{
+			"surface": "code",
+			"id": "8bbc2a8c7ceb5e85",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "ES module import-header overlap among an independently runnable Protocol bootstrap and two release fixtures. Import declarations carry no shared implementation fact, and extracting them would couple production bootstrap and test-fixture lifecycles."
+		},
+		{
+			"surface": "code",
+			"id": "8bbc80668ccd459a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Two one-fact-one-home tests independently import Protocol and Worker modules so each proof has a non-vacuous positive control. Hiding the imports and assertions behind one fixture would couple the safe-ref and proof-ref contracts and risk comparing a producer with itself."
+		},
+		{
+			"surface": "code",
+			"id": "94be6b8c3e48d2d8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Detector grouping of the pre-existing local Node errno helper pair with Gateway error-code validation. The Gateway member owns public-safe grammar and credential filtering, while the filesystem members only extract Node error codes; one helper would merge unrelated trust boundaries. The exact local pair remains named debt under 3f9e0ba23bad1610."
+		},
+		{
+			"surface": "code",
+			"id": "a7dd1195ee8c469a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Re-key of the call-result Gateway-refusal versus unavailable-call family already reviewed at 4acc9d07ea33ad9e. Shared identity and receipt facts already have owners; the remaining overlap is the public result envelope around distinct denial/retry policy and pre/post-request unknown-outcome semantics."
+		},
+		{
+			"surface": "code",
+			"id": "b692008edf1e1673",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "The persisted session parser's exact JSON object boundary and the Gateway recovery plain-record predicate have different schemas, trust levels, and failure policies. A generic object guard would move both security decisions behind callbacks without centralizing a mutable fact."
+		},
+		{
+			"surface": "code",
+			"id": "f85de891f2491353",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Re-key of client session refresh/enrollment/logout public result projections. Their common YAML frame is the public schema style; status, revocation, local-removal, retry, and recovery truth differ by lifecycle boundary, so a parameterized writer would hide the state transition each output exists to expose."
 		}
 	],
 	"fixable_ceiling": 0,

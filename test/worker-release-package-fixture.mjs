@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
+import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.mjs";
 import { withBuiltPackages } from "./repo-build.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -12,18 +13,16 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export function packedProtocolFixture(context) {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
-	// The pack reads the shared workspace `dist`, so it happens inside one hold of
-	// the lock that also owns building it — see `test/repo-build.mjs`. Only the
-	// Protocol is packed here: the Gateway packet carries no client tarball, and
-	// the builders pack the client from `packages/ceal-client` themselves.
-	const [protocol] = withBuiltPackages(["packages/ceal-protocol"], () => [
-		packPackage(root, "packages/ceal-protocol", [".", "./conformance"]),
-	]);
+	// Snapshot the shared Protocol `dist` into the converged fixture while the
+	// build lock owns it — see `test/repo-build.mjs`. Packing can then happen
+	// outside the lock because it reads only that immutable fixture snapshot.
+	// The Gateway packet carries no client tarball; the builders pack the client
+	// from the fixture's owned `packages/ceal-client` source themselves.
+	const fixtureRepo = withBuiltPackages(["packages/ceal-protocol"], () => createProtocolRepoFixture({ releaseBuild: true }));
+	context.after(fixtureRepo.cleanup);
+	const protocol = packPackage(root, fixtureRepo.root, "packages/ceal-protocol", [".", "./conformance"]);
 	const producer = {
-		repository: "corca-ai/ceal",
-		commit: "a".repeat(40),
-		tree: "b".repeat(40),
-		protocol_tree: "e".repeat(40),
+		...fixtureRepo.gateway,
 		scoped_paths_clean: true,
 	};
 	writeFileSync(path.join(root, ".ceal-protocol-handoff-owner"), "ceal.gateway_protocol_handoff.v1\n");
@@ -77,6 +76,7 @@ export function packedProtocolFixture(context) {
 	);
 	return {
 		root,
+		repoRoot: fixtureRepo.root,
 		protocolTarball: protocol.tarball,
 		protocolProvenance,
 		controlConformance,
@@ -86,9 +86,10 @@ export function packedProtocolFixture(context) {
 	};
 }
 
-function packPackage(root, sourcePath, declaredExports) {
-	const packageDirectory = path.join(ROOT, sourcePath);
-	// Callers must already hold the workspace dist lock: this reads `dist`.
+function packPackage(root, repoRoot, sourcePath, declaredExports) {
+	const packageDirectory = path.join(repoRoot, sourcePath);
+	// This reads only the fixture-owned `dist` snapshot. Its caller copied that
+	// snapshot while holding the workspace build lock.
 	// `--ignore-scripts` is not optional here — this package's `prepack` is
 	// `rm -rf dist && tsc`, so without it a pack deletes the shared tree every
 	// other process is reading. `repo-build.test.mjs` gates that flag.

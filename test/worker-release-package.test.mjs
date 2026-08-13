@@ -20,7 +20,7 @@ test.before((context) => {
 test("worker package build consumes a manifest-bound packed Protocol and emits no operator material", () => {
 	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-package");
-	const result = buildWorkerReleasePackageFromDevelopmentInputs({ repoRoot: ROOT, outputDirectory: output, ...fixture });
+	const result = buildWorkerReleasePackageFromDevelopmentInputs({ outputDirectory: output, ...fixture });
 	assert.equal(result.ok, true);
 	assert.deepEqual(result.consumer_smoke, {
 		command: "ceal",
@@ -77,7 +77,7 @@ test("a failed worker compile carries the compiler's own output and its terminat
 	assert.throws(
 		() =>
 			buildWorkerReleasePackageFromDevelopmentInputs(
-				{ repoRoot: ROOT, outputDirectory: output, ...fixture },
+				{ outputDirectory: output, ...fixture },
 				{
 					runCompiler: () => {
 						throw killed;

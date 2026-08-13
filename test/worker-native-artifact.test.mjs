@@ -98,7 +98,9 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 		assert.equal(failedPayload.receipt.evidence, "not_read_back");
 		assert.match(failedPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
 		assert.equal(failedPayload.error.kind, "continuation_not_available");
-		assert.doesNotMatch(failed.stdout, /ceal_personal_|ceal_refresh_|server-controlled/u);
+		assert.equal(failedPayload.error.message, "The continuation is no longer available.");
+		assert.equal(failedPayload.error.next_action, "Inspect the receipt before starting a new request.");
+		assert.doesNotMatch(failed.stdout, /ceal_personal_|ceal_refresh_/u);
 	});
 	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
 	for (const name of files.filter((name) => !name.startsWith(".") && name !== "SHA256SUMS")) {
@@ -306,7 +308,11 @@ async function withFailureGateway(callback) {
 				ok: false,
 				request_id: body.request_id,
 				protocol_version: "1.3.0",
-				error: { code: "continuation_not_available", message: "server-controlled", next_action: "server-controlled" },
+				error: {
+					code: "continuation_not_available",
+					message: "The continuation is no longer available.",
+					next_action: "Inspect the receipt before starting a new request.",
+				},
 			}),
 		);
 	});
