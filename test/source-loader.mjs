@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { transformSync } from "esbuild";
+import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.mjs";
 
 const DEFAULT_REPO_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolvePath(process.env.CEAL_SOURCE_TEST_REPO_ROOT ?? DEFAULT_REPO_ROOT);
@@ -11,6 +12,14 @@ const PACKAGES = new Map([
 	["@corca-ai/ceal", "ceal-client"],
 	["@corca-ai/ceal-worker-cli", "ceal-worker-cli"],
 ]);
+
+const packageDirectories = new Set(PACKAGES.values());
+if (
+	packageDirectories.size !== WORKSPACE_PACKAGE_DIRECTORIES.length ||
+	WORKSPACE_PACKAGE_DIRECTORIES.some((directory) => !packageDirectories.has(directory))
+) {
+	throw new Error("source-test package names drifted from workspace source authority");
+}
 
 function packageSource(packageName, relativeSource = "index.ts") {
 	const packageDirectory = PACKAGES.get(packageName);
@@ -23,29 +32,15 @@ function packageSource(packageName, relativeSource = "index.ts") {
 function mappedWorkspaceUrl(url) {
 	if (!url.startsWith("file:")) return null;
 	const file = fileURLToPath(url);
-	const packageRoot = join(REPO_ROOT, "packages");
-	const packageRelative = relative(packageRoot, file);
-	if (packageRelative.startsWith(`..${sep}`) || packageRelative === "..") return null;
-	const [packageDirectory, tree, ...rest] = packageRelative.split(sep);
-	if (![...PACKAGES.values()].includes(packageDirectory)) return null;
-	if (tree === "dist") {
-		if (rest.length === 0 || !rest.at(-1).endsWith(".js")) {
-			throw new Error(`source-test lane refuses compiled workspace import ${url}`);
-		}
-		const source = join(packageRoot, packageDirectory, "src", ...rest);
-		const typedSource = source.slice(0, -3) + ".ts";
-		if (!existsSync(typedSource)) throw new Error(`source-test resolver found no source authority for ${url}`);
-		return pathToFileURL(typedSource).href;
-	}
-	return null;
+	const source = resolveWorkspaceSourceAuthority(file, { repoRoot: REPO_ROOT });
+	return source === file ? null : pathToFileURL(source).href;
 }
 
 function relativeTypeScriptUrl(specifier, parentURL) {
 	if (!parentURL?.startsWith("file:") || !specifier.startsWith(".") || !specifier.endsWith(".js")) return null;
 	const candidate = fileURLToPath(new URL(specifier, parentURL));
-	const typedSource = candidate.slice(0, -3) + ".ts";
-	if (!existsSync(typedSource)) return null;
-	return pathToFileURL(typedSource).href;
+	const source = resolveWorkspaceSourceAuthority(candidate, { repoRoot: REPO_ROOT });
+	return source === candidate ? null : pathToFileURL(source).href;
 }
 
 export function resolveSourceTestSpecifier(specifier, parentURL) {

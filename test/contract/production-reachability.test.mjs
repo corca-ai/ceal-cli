@@ -47,15 +47,84 @@ test("an export the production graph does not import but its own module calls is
 	assert.deepEqual(analyzeProductionReachability({ repoRoot: root, workflows: [] }).findings, []);
 });
 
-test("package artifact exports reached by a script are outside the script-surface verdict", (context) => {
+test("package artifact edges use current source and never poisoned checkout dist", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { used } from "../packages/example/dist/index.js";\nused();\n',
-		"packages/example/dist/index.js": "export function used() {}\nexport function publicButUnusedHere() {}\n",
+		"scripts/entry.mjs": 'import { used } from "../packages/ceal-client/dist/index.js";\nused();\n',
+		"packages/ceal-client/dist/index.js": 'throw new Error("poisoned dist executed");\n',
+		"packages/ceal-client/src/index.ts": 'import { value } from "./value.js";\nexport function used() { return value; }\n',
+		"packages/ceal-client/src/value.ts": 'export const value: string = "source";\n',
 	});
 	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
 	assert.deepEqual(report.findings, []);
-	assert.ok(report.reachable.includes("packages/example/dist/index.js"), "the graph must still traverse the artifact edge");
+	assert.ok(report.reachable.includes("packages/ceal-client/src/index.ts"));
+	assert.ok(report.reachable.includes("packages/ceal-client/src/value.ts"));
+	assert.ok(!report.reachable.includes("packages/ceal-client/dist/index.js"));
+});
+
+test("a workspace artifact edge with no source owner fails closed", (context) => {
+	const root = fixture(context, {
+		"package.json": MANIFEST,
+		"scripts/entry.mjs": 'import { orphan } from "../packages/ceal-client/dist/orphan.js";\norphan();\n',
+		"packages/ceal-client/dist/orphan.js": "export function orphan() {}\n",
+	});
+	assert.throws(() => analyzeProductionReachability({ repoRoot: root, workflows: [] }), /workspace source authority is missing/u);
+});
+
+test("an artifact edge outside declared workspace packages remains literal", (context) => {
+	const root = fixture(context, {
+		"package.json": MANIFEST,
+		"scripts/entry.mjs": 'import { used } from "../vendor/example/dist/index.js";\nused();\n',
+		"vendor/example/dist/index.js": "export function used() {}\n",
+	});
+	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
+	assert.ok(report.reachable.includes("vendor/example/dist/index.js"));
+});
+
+test("an inline workflow target uses the same workspace source authority", (context) => {
+	const root = fixture(context, {
+		"package.json": MANIFEST,
+		"scripts/entry.mjs": "export function unrelated() {}\nunrelated();\n",
+		"packages/ceal-client/dist/index.js": 'throw new Error("poisoned dist executed");\n',
+		"packages/ceal-client/src/index.ts": "export function used() {}\n",
+	});
+	const report = analyzeProductionReachability({
+		repoRoot: root,
+		workflows: [
+			{
+				workflow: ".github/workflows/release.yml",
+				target: path.join(root, "packages", "ceal-client", "dist", "index.js"),
+				names: ["used"],
+				namespace: false,
+			},
+		],
+	});
+	assert.ok(report.reachable.includes("packages/ceal-client/src/index.ts"));
+	assert.ok(!report.reachable.includes("packages/ceal-client/dist/index.js"));
+	assert.deepEqual(report.findings, []);
+});
+
+test("an inline workflow artifact target without source fails closed", (context) => {
+	const root = fixture(context, {
+		"package.json": MANIFEST,
+		"scripts/entry.mjs": "export function unrelated() {}\nunrelated();\n",
+		"packages/ceal-client/dist/orphan.js": "export function orphan() {}\n",
+	});
+	assert.throws(
+		() =>
+			analyzeProductionReachability({
+				repoRoot: root,
+				workflows: [
+					{
+						workflow: ".github/workflows/release.yml",
+						target: path.join(root, "packages", "ceal-client", "dist", "orphan.js"),
+						names: ["orphan"],
+						namespace: false,
+					},
+				],
+			}),
+		/workspace source authority is missing/u,
+	);
 });
 
 test("a module no entry reaches is reported as a file rather than export by export", (context) => {

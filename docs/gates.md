@@ -575,6 +575,14 @@ but package exports belong to the isolated emitted-ABI lane above; judging them
 here would make a script-wiring gate depend on whichever checkout `dist` another
 process last produced.
 
+Traversal is source-authoritative for those checkout package edges. An import
+spelled as `packages/<workspace>/dist/*.js` is mapped to its current
+`src/*.ts` owner, and source-local `.js` specifiers follow the same rule. A
+missing owner is a refusal, never a fallback to mutable compiled output. This
+keeps `lint:reachability` valid before `build` in a clean checkout; immutable
+artifact tests remain the only lane that treats emitted package bytes as
+authority.
+
 Three properties are worth keeping when this is edited:
 
 - **It is parsed, not matched.** A regex that quietly stops matching leaves a

@@ -20,10 +20,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.mjs";
 
 /** A file is production-reachable if some entry reaches it through static imports. */
 function parse(file, text) {
-	return ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
+	return ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, file.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS);
 }
 
 function isExported(node) {
@@ -100,9 +101,9 @@ function readModule(absolute, repoRoot) {
 	return { file: relative, absolute, exports, testOnly, imports, identifiers };
 }
 
-function resolve(fromAbsolute, specifier) {
+function resolve(repoRoot, fromAbsolute, specifier) {
 	if (!specifier.startsWith(".")) return undefined;
-	return path.resolve(path.dirname(fromAbsolute), specifier);
+	return resolveWorkspaceSourceAuthority(path.resolve(path.dirname(fromAbsolute), specifier), { repoRoot });
 }
 
 const INVOCATION = /node\s+(?:[\w-]+=\S+\s+)*(scripts\/[\w./-]+\.mjs)/gu;
@@ -201,6 +202,10 @@ export function analyzeProductionReachability({
 	workflows = workflowConsumers(repoRoot),
 	testOnlyFiles = declaredTestOnlyFiles(repoRoot),
 } = {}) {
+	const sourceWorkflows = workflows.map((consumer) => ({
+		...consumer,
+		target: resolveWorkspaceSourceAuthority(consumer.target, { repoRoot }),
+	}));
 	const modules = new Map();
 	const load = (absolute) => {
 		if (modules.has(absolute)) return modules.get(absolute);
@@ -211,13 +216,13 @@ export function analyzeProductionReachability({
 
 	// Reachability first: only a module an entry reaches can consume anything.
 	const reachable = new Set();
-	const queue = [...entries, ...workflows.map((consumer) => consumer.target)];
+	const queue = [...entries, ...sourceWorkflows.map((consumer) => consumer.target)];
 	while (queue.length > 0) {
 		const absolute = queue.pop();
 		if (reachable.has(absolute)) continue;
 		reachable.add(absolute);
 		for (const record of load(absolute).imports) {
-			const target = resolve(absolute, record.specifier);
+			const target = resolve(repoRoot, absolute, record.specifier);
 			if (target) queue.push(target);
 		}
 	}
@@ -227,7 +232,7 @@ export function analyzeProductionReachability({
 	const wholeModule = new Set();
 	for (const absolute of reachable) {
 		for (const record of load(absolute).imports) {
-			const target = resolve(absolute, record.specifier);
+			const target = resolve(repoRoot, absolute, record.specifier);
 			if (!target) continue;
 			if (record.namespace) wholeModule.add(target);
 			const names = consumed.get(target) ?? new Set();
@@ -235,7 +240,7 @@ export function analyzeProductionReachability({
 			consumed.set(target, names);
 		}
 	}
-	for (const consumer of workflows) {
+	for (const consumer of sourceWorkflows) {
 		if (consumer.namespace) wholeModule.add(consumer.target);
 		const names = consumed.get(consumer.target) ?? new Set();
 		for (const name of consumer.names) names.add(name);

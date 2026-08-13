@@ -70,7 +70,11 @@ test("source-test resolver fails closed when compiled output has no source autho
 		writeFileSync(path.join(packageRoot, "dist", "orphan.js"), "export const orphan = true;\n");
 		const result = importResult(root, new URL(`file://${path.join(packageRoot, "dist", "orphan.js")}`).href);
 		assert.notEqual(result.status, 0);
-		assert.match(result.stderr, /found no source authority/u);
+		assert.match(result.stderr, /workspace source authority is missing/u);
+		writeFileSync(path.join(packageRoot, "dist", "artifact.json"), "{}\n");
+		const compiledData = importResult(root, new URL(`file://${path.join(packageRoot, "dist", "artifact.json")}`).href);
+		assert.notEqual(compiledData.status, 0);
+		assert.match(compiledData.stderr, /workspace source authority refuses compiled import/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
