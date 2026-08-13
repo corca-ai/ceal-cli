@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 0.77.0 (`ceal-v0.77.0`)
+
+This release consumes the signed Gateway Protocol handoff v0.72.21 and moves
+the private capability-control session to its exact v6 contract. Discovery now
+preserves provider and target kinds, exposes granted targets without a separate
+selection-only mode, and tells agents which capability-issued handle supplies a
+required argument. The Worker accepts the signed Notion search/page-document,
+Google Drive file upload, and Sheets read/update/clear contracts without adding
+provider-specific command grammar.
+
+Rich results use the signed fixed materialization route. The released Worker
+derives that route and every sibling control route from the reviewed handoff
+sidecar, decodes the signed manifest/chunk/terminal frames under bounded file
+and byte limits, and exposes provider-neutral capability calls to the Agent.
+There is no caller-selected endpoint, local Notion capability table, or
+hardcoded route fallback.
+
+Behavior tests now execute editable TypeScript source and fail closed if they
+would fall back to stale checkout `dist`. Package, binary, declaration, and
+release proofs build an isolated immutable artifact instead. The signed
+Protocol source materializer likewise fetches the exact canonical tag and
+verifies its commit and package tree before replacing the frozen source; it
+does not copy from a sibling checkout.
+
+This tag proves the Worker package and release artifact contracts. It does not
+by itself prove that a Gateway instance advertises a capability, that a
+provider write or rich Notion read succeeds, or that the installed Worker and
+Agent have been updated; those require the separately bound release and live
+readbacks.
+
 ## 0.76.1 (`ceal-v0.76.1`)
 
 This patch repairs the private v5 notification session's normal shutdown. Once
