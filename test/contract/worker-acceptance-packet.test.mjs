@@ -437,7 +437,11 @@ printf '{"home":"%s","oidc":"%s","github":"%s","cloudflare":"%s"}' "$HOME" "\${A
 // no other caller, and exporting them to reach in-process would prove a surface
 // no operator uses. The child inherits NODE_V8_COVERAGE, so this counts.
 function runCli(args, options = {}) {
-	return spawnSync(process.execPath, [path.join(CONTRACT_REPO.root, "scripts", "worker-acceptance-packet.mjs"), ...args], {
+	return runCliAt(path.join(CONTRACT_REPO.root, "scripts", "worker-acceptance-packet.mjs"), args, options);
+}
+
+function runCliAt(script, args, options = {}) {
+	return spawnSync(process.execPath, [script, ...args], {
 		encoding: "utf8",
 		...options,
 	});
@@ -446,6 +450,8 @@ function runCli(args, options = {}) {
 test("the CLI renders a human packet, emits JSON on request, and refuses malformed argv", (context) => {
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
+	const linkedCli = path.join(root, "worker-acceptance-linked.mjs");
+	symlinkSync(path.join(CONTRACT_REPO.root, "scripts", "worker-acceptance-packet.mjs"), linkedCli);
 
 	const rendered = runCli(["--binary", binary]);
 	assert.equal(rendered.status, 0, rendered.stderr);
@@ -455,6 +461,9 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 	assert.match(rendered.stdout, /^gateway: {4}instance:fixture protocol 0[.]65[.]0 allow in \d+ms$/mu);
 	assert.match(rendered.stdout, /^call: {7}not requested$/mu);
 	assert.match(rendered.stdout, /^non_claims:$/mu);
+	const canonicalized = runCliAt(linkedCli, ["--binary", binary]);
+	assert.equal(canonicalized.status, 0, canonicalized.stderr);
+	assert.match(canonicalized.stdout, /^installed: {2}0[.]66[.]1 linux-amd64 {2}[0-9a-f]{64}$/mu);
 
 	// The call and receipt lines are a separate rendering branch, and the branch
 	// that prints "not requested" above cannot reach them.

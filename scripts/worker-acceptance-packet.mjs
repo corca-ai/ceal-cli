@@ -499,7 +499,7 @@ function render(packet) {
 	return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
 	try {
 		const options = parseArgs(process.argv.slice(2));
 		const packet = await buildAcceptancePacket(options);

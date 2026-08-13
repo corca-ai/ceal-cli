@@ -101,11 +101,10 @@ def read_regular_file_bounded(path: Path, remaining: int) -> bytes:
 
 def terminate_group(process: subprocess.Popen[bytes]) -> None:
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    time.sleep(0.05)
-    try:
+        # Settlement is bounded custody, not graceful shutdown. A TERM-then-KILL
+        # delay lets the group leader exit while descendants remain; on macOS a
+        # subsequent group signal can then fail the whole call with EPERM. Kill
+        # the still-owned session atomically while its leader is present.
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass

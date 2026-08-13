@@ -55,6 +55,12 @@ developer checkout. Emitted-artifact behavior remains owned by artifact tests.
   git-object proof skipped because an archive intentionally has no `.git`).
 - Focused repository proof passed 17/17, including workflow initial-edge source
   normalization and missing-source refusal.
+- The first post-repair CI run proved Linux green and source-authoritative
+  traversal on both operating systems, then exposed two independent macOS
+  portability siblings: TERM-then-KILL process-group settlement raised EPERM,
+  and raw `file://${argv}` direct-execution comparison skipped a CLI under the
+  canonical `/private/var` path. Their retained behavior tests are part of the
+  follow-up commit; exact hosted macOS readback remains the final proof.
 
 ## Root Cause
 
@@ -94,6 +100,8 @@ clean CI exposed it.
   output | retain | isolated artifact proof.
 - cross-file: package export reachability fixture currently blesses dist-only
   traversal | replace with source-backed mapping plus no-fallback mutation.
+- platform sibling: bounded audit termination and CLI direct-execution path
+  identity | repair in the same CI portability closeout | macOS failure log.
 
 ## Seam Risk
 

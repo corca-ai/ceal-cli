@@ -19,6 +19,9 @@ Resolve static edges into checkout `packages/<name>/dist/*.js` to their exact
 `packages/<name>/src/*.ts` owners, including subsequent source-local `.js`
 specifiers. Refuse an expected source owner that is absent. Do not change
 production imports, release artifacts, package exports, or check ordering.
+Close the two macOS portability siblings exposed only after the clean-checkout
+gate advanced: single-shot hard process-group settlement and canonical direct
+CLI path identity.
 
 ## Fixed Decisions
 
@@ -70,6 +73,8 @@ production imports, release artifacts, package exports, or check ordering.
 - `integration`: archived clean checkout plus dependencies runs
   `scripts/check-production-reachability.mjs` without build.
 - `e2e`: exact pushed commit passes Linux and macOS GitHub `Check` jobs.
+- `integration`: timeout/output-limit/descendant audit behavior and the actual
+  acceptance CLI process entry remain green on both runner families.
 
 ## Boundary Ownership
 
