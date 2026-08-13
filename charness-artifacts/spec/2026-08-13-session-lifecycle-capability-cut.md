@@ -2,7 +2,7 @@
 
 Date: 2026-08-13
 Title: Session Lifecycle Capability Cut
-Status: ready
+Status: locally proven
 
 ## Problem
 
@@ -85,3 +85,16 @@ capability:
 Local Worker source, declarations, deterministic tests, build output, and
 bounded fresh-eye review. No push, tag, publish, install, apply, or live
 Gateway/provider claim belongs to this slice.
+
+## Implementation Evidence
+
+- The public runtime now carries only `session?: CealSessionCapability`; the
+  raw hooks and projected command context are deleted.
+- Product composition and deterministic fixtures use the same
+  `createCealSessionCapability` factory over locked stores.
+- The focused lock mutation failed as intended, the real missing-`HOME` child
+  proof passed, and current V1/V2 payload tests remained green.
+- `npm run check:unit` passed from the staged target tree in proof job
+  `ceal-cli-session-lifecycle-check-unit/20260813c` (58.235 seconds).
+- Two bounded fresh-eye reviewers found no Act Before Ship blocker against the
+  current code packet.

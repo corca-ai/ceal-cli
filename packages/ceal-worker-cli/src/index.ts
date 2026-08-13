@@ -39,7 +39,6 @@ import {
 	SESSION_ROUTES,
 	writeClientSessionUnavailable,
 } from "./client-session.js";
-import { createCealCommandContext } from "./command-context.js";
 import {
 	type CealCommandDefinition,
 	CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT,
@@ -92,7 +91,7 @@ export async function runCealCommand(args: readonly string[], io: CealCliIo, run
 	if (staticResult !== undefined) return staticResult;
 	const command = findCealCommand(args[0]);
 	if (!command) throw new Error("static command dispatch did not handle an unknown command");
-	return runKnownCommand(command.name, args.slice(1), io, createCealCommandContext(runtime));
+	return runKnownCommand(command.name, args.slice(1), io, runtime);
 }
 
 async function runKnownCommand(
@@ -267,7 +266,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		port = Number(rawPort);
 	}
 	const server = createCealObserverServer({
-		loadSession: runtime.loadSession,
+		loadStoredSession: runtime.session ? () => runtime.session!.load() : undefined,
 		loadDiscoveryCache: runtime.loadDiscoveryCache,
 		loadReceiptSpool: runtime.loadReceiptSpool,
 		inspectAgentAudit: runtime.inspectAgentAudit,
@@ -823,7 +822,7 @@ async function resolveStoredGatewayAccessResult(
 	sessionRenewalMode: CealSessionRenewalMode,
 ): Promise<StoredGatewayAccessResolution> {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
-	if (!runtime.loadSession) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
+	if (!runtime.session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 	try {
 		const session = await loadStoredSessionForRenewalMode(runtime, mode);
 		if (!session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
@@ -848,7 +847,7 @@ async function loadStoredSessionForRenewalMode(
 	runtime: CealCommandContext,
 	mode: CealSessionRenewalMode,
 ): Promise<CealStoredSession | null> {
-	const loaded = await runtime.loadSession?.();
+	const loaded = await runtime.session?.load();
 	return loaded ? (mode === "renew" ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
 }
 
@@ -1388,7 +1387,7 @@ type CallSessionResolution = { ok: true; session: CealStoredSession } | { ok: fa
 
 async function resolveCallSession(runtime: CealCommandContext, sessionRenewalMode: CealSessionRenewalMode): Promise<CallSessionResolution> {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
-	if (!runtime.loadSession) return { ok: false, reason: "session_unavailable" };
+	if (!runtime.session) return { ok: false, reason: "session_unavailable" };
 	try {
 		const session = await loadStoredSessionForRenewalMode(runtime, mode);
 		return session ? { ok: true, session } : { ok: false, reason: "session_unavailable" };

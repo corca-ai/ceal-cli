@@ -1,11 +1,12 @@
 import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
-import type { CealCliIo, CealCommandContext, CealCommandRuntime } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandContext } from "./cli-runtime.js";
 import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { adoptSession } from "./device-adoption.js";
 import { parseNamedOptions } from "./named-options.js";
 import { writeYaml } from "./output.js";
 import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
+import type { CealSessionCapabilityDependencies } from "./session-capability.js";
 import {
 	type CealRevokeDisposition,
 	type CealSessionCommit,
@@ -53,7 +54,7 @@ export async function runSession(options: readonly string[], io: CealCliIo, runt
 async function showSession(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	let session: CealStoredSession | null;
 	try {
-		session = runtime.loadSession ? await runtime.loadSession() : null;
+		session = runtime.session ? await runtime.session.load() : null;
 	} catch {
 		return writeClientSessionUnavailable("session_load_failed", io);
 	}
@@ -118,10 +119,10 @@ function unconfiguredSessionSummary(): Record<string, unknown> {
 }
 
 async function runSessionRefresh(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
-	if (!runtime.loadSession) return writeSessionRefreshUnavailable(io, "session_runtime_unavailable");
+	if (!runtime.session) return writeSessionRefreshUnavailable(io, "session_runtime_unavailable");
 	let session: CealStoredSession | null;
 	try {
-		session = await runtime.loadSession();
+		session = await runtime.session.load();
 	} catch (error) {
 		return writeSessionRefreshUnavailable(io, error instanceof CealSessionStoreError ? error.code : "session_load_failed");
 	}
@@ -180,13 +181,12 @@ function writeSessionRefreshUnavailable(io: CealCliIo, reason: string): number {
 async function enrollSession(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseEnrollmentOptions(options);
 	if (!parsed.ok) return writeSessionInvalidArgument("enroll", "Invalid session enrollment options.", io);
-	const commitEnrolled = runtime.session.commitEnrolled;
-	if (!commitEnrolled || !runtime.loadSession) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
+	if (!runtime.session) return writeEnrollmentUnavailable("session_runtime_unavailable", io);
 	// Read the store before the code is read or spent. An enrollment code is
 	// one-time: discovering that this host's session file is unreadable *after*
 	// the Gateway has consumed it costs the operator a replacement code.
 	try {
-		await runtime.loadSession();
+		await runtime.session.load();
 	} catch (error) {
 		const reason = error instanceof CealSessionStoreError ? error.code : "session_load_failed";
 		return writeEnrollmentUnavailable(reason, io, enrollmentPreflightRecoveryAction(reason));
@@ -204,7 +204,7 @@ async function enrollSession(options: readonly string[], io: CealCliIo, runtime:
 		const reason = error instanceof CealEnrollmentClientError ? error.code : "session_save_failed";
 		return writeEnrollmentUnavailable(reason, io);
 	}
-	const commit = await commitEnrolled(stored, parsed.force);
+	const commit = await runtime.session.commitEnrolled(stored, parsed.force);
 	if (!commit.ok) {
 		if (commit.reason === "identity_conflict") return writeEnrollmentConflict(commit.changedBindings, commit.issuedSessionRevoked, io);
 		const commitRecovery = sessionCommitRecoveryAction(
@@ -315,21 +315,13 @@ function writeEnrollmentConflict(changedBindings: readonly string[], issuedSessi
 }
 
 async function runSessionLogout(io: CealCliIo, runtime: CealCommandContext): Promise<number> {
-	return runtime.session.logout ? runtime.session.logout(io) : writeLogoutUnavailable(io, "session_runtime_unavailable");
+	return runtime.session ? runtime.session.logout(io) : writeLogoutUnavailable(io, "session_runtime_unavailable");
 }
 
-export async function runSessionLogoutWithRuntime(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {
-	if (!runtime.loadSession || !runtime.removeSession) return writeLogoutUnavailable(io, "session_runtime_unavailable");
-	if (runtime.withSessionStateLock)
-		return runtime
-			.withSessionStateLock((store) => logoutFromStore(io, runtime, store, (error) => sessionStoreFailureCode(error, "session_load_failed")))
-			.catch((error) => writeLogoutUnavailable(io, sessionStoreFailureCode(error)));
-	return logoutFromStore(
-		io,
-		runtime,
-		{ load: () => runtime.loadSession?.() ?? Promise.resolve(null), remove: () => runtime.removeSession?.() ?? Promise.resolve() },
-		(error) => (error instanceof CealSessionStoreError ? error.code : "session_load_failed"),
-	);
+export async function runSessionLogoutWithDependencies(io: CealCliIo, dependencies: CealSessionCapabilityDependencies): Promise<number> {
+	return dependencies.store
+		.withStateLock((store) => logoutFromStore(io, dependencies, store, (error) => sessionStoreFailureCode(error, "session_load_failed")))
+		.catch((error) => writeLogoutUnavailable(io, sessionStoreFailureCode(error)));
 }
 
 interface LogoutSessionStore {
@@ -339,7 +331,7 @@ interface LogoutSessionStore {
 
 async function logoutFromStore(
 	io: CealCliIo,
-	runtime: CealCommandRuntime,
+	dependencies: CealSessionCapabilityDependencies,
 	store: LogoutSessionStore,
 	loadFailureCode: (error: unknown) => string,
 ): Promise<number> {
@@ -349,15 +341,15 @@ async function logoutFromStore(
 	} catch (error) {
 		return writeLogoutUnavailable(io, loadFailureCode(error));
 	}
-	if (!session) return writeAlreadyLoggedOut(io, await clearLogoutDerivedState(runtime));
-	const revocation = await revokeClientSession(session, runtime);
+	if (!session) return writeAlreadyLoggedOut(io, await clearLogoutDerivedState(dependencies));
+	const revocation = await revokeClientSession(session, dependencies);
 	if ("failure" in revocation) return writeLogoutUnavailable(io, revocation.failure);
 	try {
 		await store.remove();
 	} catch (error) {
 		return writeLogoutLocalFailure(io, revocation.disposition, sessionStoreFailureCode(error, "session_remove_failed"));
 	}
-	return writeLoggedOut(io, revocation.disposition, await clearSessionDerivedState(runtime));
+	return writeLoggedOut(io, revocation.disposition, await clearSessionDerivedState(dependencies));
 }
 
 function writeAlreadyLoggedOut(io: CealCliIo, derivedStateCleared: boolean): number {
@@ -466,11 +458,8 @@ function logoutNextAction(derivedStateCleared: boolean): string {
 		: `The Gateway session is no longer usable and the local session is absent, but cached local state could not be cleared. Correct the Ceal state directory and its permissions, then run 'ceal session logout' again. After cleanup succeeds, ${SESSION_SETUP_NEXT_ACTION}`;
 }
 
-async function clearLogoutDerivedState(runtime: CealCommandRuntime): Promise<boolean> {
-	// An embedding with neither advisory store has nothing to clear. Once it
-	// supplies either store, the shared cleanup requires both so a partial runtime
-	// cannot report the other session-derived state as removed.
-	return runtime.removeDiscoveryCache || runtime.removeReceiptSpool ? clearSessionDerivedState(runtime) : true;
+async function clearLogoutDerivedState(dependencies: CealSessionCapabilityDependencies): Promise<boolean> {
+	return dependencies.removeDiscoveryCache || dependencies.removeReceiptSpool ? clearSessionDerivedState(dependencies) : true;
 }
 
 export class CealClientSessionError extends Error {
@@ -484,35 +473,31 @@ export async function ensureCurrentSession(
 	runtime: CealCommandContext,
 	force = false,
 ): Promise<CealStoredSession> {
-	if (!runtime.session.ensureCurrent) throw new CealClientSessionError("reenrollment_required");
+	if (!runtime.session) throw new CealClientSessionError("reenrollment_required");
 	return runtime.session.ensureCurrent(session, force);
 }
 
-export async function ensureCurrentSessionWithRuntime(
+export async function ensureCurrentSessionWithDependencies(
 	session: CealStoredSession,
-	runtime: CealCommandRuntime,
+	dependencies: CealSessionCapabilityDependencies,
 	force = false,
 ): Promise<CealStoredSession> {
-	const now = runtime.now?.() ?? Date.now();
+	const now = dependencies.now?.() ?? Date.now();
 	if (!force && sessionIsCurrent(session, now)) return session;
-	if (runtime.withSessionStateLock && runtime.loadSession) {
-		try {
-			return await runtime.withSessionStateLock(async (store) => {
-				const current = await store.load();
-				if (!current) throw new CealClientSessionError("reenrollment_required");
-				assertSessionIdentity(current, session);
-				const refreshForced = force && current.refreshToken === session.refreshToken;
-				return withCealTiming(runtime.timing, "session_refresh", () =>
-					renewSession(current, now, refreshForced, async (rotated) => store.replace(current.refreshToken, rotated)),
-				);
-			});
-		} catch (error) {
-			if (error instanceof CealClientSessionError) throw error;
-			throw new CealClientSessionError(sessionStoreFailureCode(error));
-		}
+	try {
+		return await dependencies.store.withStateLock(async (store) => {
+			const current = await store.load();
+			if (!current) throw new CealClientSessionError("reenrollment_required");
+			assertSessionIdentity(current, session);
+			const refreshForced = force && current.refreshToken === session.refreshToken;
+			return withCealTiming(dependencies.timing, "session_refresh", () =>
+				renewSession(current, now, refreshForced, async (rotated) => store.replace(current.refreshToken, rotated)),
+			);
+		});
+	} catch (error) {
+		if (error instanceof CealClientSessionError) throw error;
+		throw new CealClientSessionError(sessionStoreFailureCode(error));
 	}
-	if (!runtime.saveSession) throw new CealClientSessionError("reenrollment_required");
-	return withCealTiming(runtime.timing, "session_refresh", () => renewSession(session, now, force, runtime.saveSession!));
 }
 
 async function renewSession(

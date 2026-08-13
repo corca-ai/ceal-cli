@@ -19,7 +19,7 @@ import {
 	deviceEnrollmentPublicKeyFingerprint,
 } from "@corca-ai/ceal-protocol";
 import packageJson from "../package.json" with { type: "json" };
-import type { CealCliIo, CealCommandContext } from "./cli-runtime.js";
+import type { CealCliIo, CealCommandContext, CealSessionCapability } from "./cli-runtime.js";
 import { generateCealDeviceProofKeyPair, signCealDeviceProof } from "./device-proof.js";
 import { generateCealHpkeKeyPair, openCealHpkeMessage } from "./hpke.js";
 import { parseNamedOptions } from "./named-options.js";
@@ -104,18 +104,19 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 			2,
 		);
 	}
-	if (!runtime.session.commitEnrolled || !runtime.loadSession) {
+	if (!runtime.session) {
 		return writeAdoptionFailure(io, {
 			code: "session_runtime_unavailable",
 			message: "This host has no writable session store, so an adopted session could not be kept.",
 			nextAction: "Run from a host with a home directory this user owns.",
 		});
 	}
+	const session = runtime.session;
 	// Read the store before the employee is asked for anything. A session this
 	// host cannot read is a session this command cannot decide it may replace,
 	// and finding that out after a mailbox verification wastes the employee's.
 	try {
-		await runtime.loadSession();
+		await session.load();
 	} catch {
 		return writeAdoptionFailure(io, {
 			code: "session_load_failed",
@@ -218,7 +219,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 
 		if (response.status === "failed") return writeAdoptionFailure(io, failureOutcome(response.code));
 		if (response.status === "sealed") {
-			return await completeAdoption(io, runtime, {
+			return await completeAdoption(io, session, {
 				gateway: parsed.gateway,
 				origin: parsed.origin,
 				force: parsed.force,
@@ -251,7 +252,7 @@ export async function adoptSession(options: readonly string[], io: CealCliIo, ru
 
 async function completeAdoption(
 	io: CealCliIo,
-	runtime: CealCommandContext,
+	session: CealSessionCapability,
 	delivery: {
 		gateway: string;
 		origin: string;
@@ -335,7 +336,7 @@ async function completeAdoption(
 	// A sealed delivery proves the Gateway meant this session for this device. It
 	// does not say this host is free to give the identity behind `ceal call` away,
 	// and that is a separate refusal with a separate remedy.
-	const commit = await runtime.session.commitEnrolled!(stored, delivery.force);
+	const commit = await session.commitEnrolled(stored, delivery.force);
 	if (!commit.ok) {
 		if (commit.reason === "identity_conflict") {
 			return writeAdoptionConflict(io, commit.changedBindings, commit.issuedSessionRevoked);

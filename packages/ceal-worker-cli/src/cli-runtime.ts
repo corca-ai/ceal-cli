@@ -1,9 +1,9 @@
-import type { CealDeviceAdoptionClient, CealPersonalClientSessionClient } from "@corca-ai/ceal";
+import type { CealDeviceAdoptionClient } from "@corca-ai/ceal";
 import type { CealInstalledReleaseReading } from "./acceptance-record.js";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
-import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
+import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 import type { CealSessionCommit } from "./session-replacement.js";
 import type { CealTimingRecorder } from "./timing.js";
@@ -44,6 +44,14 @@ export interface CealStableUpdateOptions {
 	onProgress?: (stage: CealStableUpdateProgressStage) => void;
 }
 
+/** The complete session lifecycle available to command handlers. */
+export interface CealSessionCapability {
+	load(): Promise<CealStoredSession | null>;
+	commitEnrolled(incoming: CealStoredSession, force: boolean): Promise<CealSessionCommit>;
+	ensureCurrent(session: CealStoredSession, force?: boolean): Promise<CealStoredSession>;
+	logout(io: CealCliIo): Promise<number>;
+}
+
 export interface CealCommandRuntime {
 	/** Present only for an explicit `ceal --timing ...` invocation. */
 	timing?: CealTimingRecorder;
@@ -53,20 +61,12 @@ export interface CealCommandRuntime {
 	/** Whether stderr is a human terminal suitable for transient progress text. */
 	isOutputTerminal?: () => boolean;
 	isInputTerminal?: () => boolean;
-	loadSession?: () => Promise<CealStoredSession | null>;
-	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
-	saveSession?: (session: CealStoredSession) => Promise<void>;
-	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
-	removeSession?: () => Promise<void>;
-	/** @deprecated Embedding input only; command handlers receive a semantic session facade. */
-	withSessionStateLock?: <T>(action: (store: CealLockedSessionStore) => Promise<T>) => Promise<T>;
+	/** Present only when the composition root owns a valid locked session store. */
+	session?: CealSessionCapability;
 	// Client-local discovery-catalog cache (advisory; failures degrade to a live
 	// probe). Present only when a home directory is available. See discovery-cache.ts.
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
-	removeDiscoveryCache?: () => Promise<void>;
-	/** Clear the receipt spool and its drop count; session-derived, so logout owns it. */
-	removeReceiptSpool?: () => Promise<void>;
 	// The agent host is the declared `guide register <host>` route token; `status`
 	// omits it and reads the default host projection plus every host's state.
 	inspectAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;
@@ -115,78 +115,7 @@ export interface CealCommandRuntime {
 	 * `@corca-ai/ceal`. Absent in the shipped binary, which builds the real one.
 	 */
 	createDeviceAdoptionClient?: (options: { endpoint: string }) => CealDeviceAdoptionClient;
-	/**
-	 * Personal client-session transport factory, for the same reason as the
-	 * adoption seam above: `session adopt` binds an https Gateway origin the
-	 * Protocol will not let a loopback test server stand in for, so the
-	 * revocation an identity replacement performs there is otherwise unreachable
-	 * from a test. Absent in the shipped binary, which builds the real one.
-	 */
-	createClientSessionClient?: (options: { endpoint: string }) => CealPersonalClientSessionClient;
 }
 
-/**
- * The only session mutations command code can name. Each operation is already
- * bound to the external runtime at the composition root, so no callback can
- * recover the raw store or turn a semantic transition into an arbitrary write.
- */
-interface CealSessionCommandFacade {
-	commitEnrolled?: (incoming: CealStoredSession, force: boolean) => Promise<CealSessionCommit>;
-	ensureCurrent?: (session: CealStoredSession, force?: boolean) => Promise<CealStoredSession>;
-	logout?: (io: CealCliIo) => Promise<number>;
-}
-
-type CealRawSessionMutationKey = "saveSession" | "removeSession" | "withSessionStateLock";
-type AssertNever<T extends never> = T;
-
-/**
- * The complete safe projection. Adding a runtime seam must classify it here or
- * as a raw session mutation before the worker can compile.
- */
-export const CEAL_COMMAND_CONTEXT_KEYS = [
-	"timing",
-	"readSecret",
-	"promptEnrollmentCode",
-	"isInteractiveTerminal",
-	"isOutputTerminal",
-	"isInputTerminal",
-	"loadSession",
-	"loadDiscoveryCache",
-	"saveDiscoveryCache",
-	"removeDiscoveryCache",
-	"removeReceiptSpool",
-	"inspectAgentGuide",
-	"registerAgentGuide",
-	"recordReceiptSpool",
-	"recordReceiptSpoolDrop",
-	"loadReceiptSpool",
-	"inspectAgentAudit",
-	"inspectAgentSession",
-	"runStableUpdate",
-	"readInstalledReleaseFacts",
-	"executablePath",
-	"onObserverListening",
-	"discoveryCacheTtlMs",
-	"nextRequestId",
-	"sleep",
-	"now",
-	"monotonicNow",
-	"createDeviceAdoptionClient",
-	"createClientSessionClient",
-] as const satisfies readonly Exclude<keyof CealCommandRuntime, CealRawSessionMutationKey>[];
-
-type CealProjectedCommandRuntimeKey = (typeof CEAL_COMMAND_CONTEXT_KEYS)[number];
-type CealCommandContextShape = Pick<CealCommandRuntime, CealProjectedCommandRuntimeKey> & {
-	session: CealSessionCommandFacade;
-};
-
-/** Package-internal projection passed below `runCealCommand`. */
-export type CealCommandContext = CealCommandContextShape &
-	// These fail compilation if a raw key enters or a safe runtime key is not classified.
-	Record<
-		AssertNever<
-			| Extract<keyof CealCommandContextShape, CealRawSessionMutationKey>
-			| Exclude<Exclude<keyof CealCommandRuntime, CealRawSessionMutationKey>, CealProjectedCommandRuntimeKey>
-		>,
-		never
-	>;
+/** Package-internal name for the one dependency contract handlers receive. */
+export type CealCommandContext = CealCommandRuntime;

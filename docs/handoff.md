@@ -51,8 +51,10 @@ separately approved boundaries.
   input-contract, and provider-evidence semantics remain outside this local
   projection.
 - The current source also contains the client deadline/status/media-type and
-  adoption-request boundary repairs, generic HTTP timeout classification,
-  narrowed command session capabilities, explicit guide-register provenance,
+  adoption-request boundary repairs, generic HTTP timeout classification, one
+  all-or-none session lifecycle capability with the compatibility-only raw
+  hooks, projected command context, and unlocked mutation fallbacks deleted,
+  explicit guide-register provenance,
   bounded subprocess and Unix-socket settlement, monotonic local-store waits,
   managed-install integrity, dependency-closure package hooks, bounded native
   and installer process probes, reduced guide-contract spawning, and the

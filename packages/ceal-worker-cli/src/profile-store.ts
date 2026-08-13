@@ -32,7 +32,7 @@ export class CealSessionStoreError extends Error {
 	}
 }
 
-export interface CealLockedSessionStore {
+interface CealLockedSessionStore {
 	load(): Promise<CealStoredSession | null>;
 	// Unconditional write, for the enrollment paths that decide what may replace
 	// what by comparing identities rather than by matching a refresh token. A
@@ -43,12 +43,14 @@ export interface CealLockedSessionStore {
 	remove(): Promise<void>;
 }
 
-export function createCealSessionStore(home: string | undefined): {
+export interface CealSessionStore {
 	load(): Promise<CealStoredSession | null>;
 	save(session: CealStoredSession, onLockAcquired?: (waitedMs: number) => void): Promise<void>;
 	remove(onLockAcquired?: (waitedMs: number) => void): Promise<void>;
 	withStateLock<T>(action: (store: CealLockedSessionStore) => Promise<T>, onLockAcquired?: (waitedMs: number) => void): Promise<T>;
-} {
+}
+
+export function createCealSessionStore(home: string | undefined): CealSessionStore {
 	if (!home || !path.isAbsolute(home)) throw new CealSessionStoreError("home_unavailable");
 	const directory = path.join(home, ".ceal");
 	const file = path.join(directory, "client-session.json");

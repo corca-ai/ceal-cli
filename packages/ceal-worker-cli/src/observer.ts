@@ -28,7 +28,7 @@ import type { CealReceiptSpoolState } from "./receipt-spool.js";
 // call-outcome metadata; the Gateway audit ledger stays authoritative.
 
 export interface CealObserverRuntime {
-	loadSession?: () => Promise<CealStoredSession | null>;
+	loadStoredSession?: () => Promise<CealStoredSession | null>;
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	loadReceiptSpool?: (session: CealStoredSession | null) => Promise<CealReceiptSpoolState | null>;
 	inspectAgentAudit?: () => CealAgentAuditState;
@@ -349,10 +349,10 @@ async function observeReceiptSpool(runtime: CealObserverRuntime, session: CealSt
 async function observeSession(
 	runtime: CealObserverRuntime,
 ): Promise<{ stored: CealStoredSession | null; observed: Record<string, unknown> }> {
-	if (!runtime.loadSession) return { stored: null, observed: { status: "unavailable" } };
+	if (!runtime.loadStoredSession) return { stored: null, observed: { status: "unavailable" } };
 	let session: CealStoredSession | null;
 	try {
-		session = await runtime.loadSession();
+		session = await runtime.loadStoredSession();
 	} catch {
 		return { stored: null, observed: { status: "unreadable" } };
 	}

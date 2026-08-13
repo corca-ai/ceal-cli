@@ -1,0 +1,103 @@
+{
+  "kind": "charness.critique_prepare_packet",
+  "version": 1,
+  "repo": "ceal-cli",
+  "generated_at": "2026-08-13T02:32:23Z",
+  "prepared_for": "Slice 4h session lifecycle implementation",
+  "changed_ref": null,
+  "adapter_path": null,
+  "sections": [],
+  "section_count": 0,
+  "ok": true,
+  "reviewer_tier_evidence": {
+    "requested_tier": "high-leverage",
+    "requested_spawn_fields": {},
+    "host_exposure_state": "pending-parent-spawn",
+    "application_state": "unverified-by-packet",
+    "instruction": "Review artifacts must record requested_fields_sent, metadata-hidden, host-defaulted, unsupported, or applied only when host-confirmed."
+  },
+  "reviewed_input_identity": {
+    "algorithm": "sha256-v2",
+    "status": "captured",
+    "mode": "working-tree",
+    "changed_ref": null,
+    "resolved_changed_ref": [],
+    "base_head": "42a05916e6d17c656854240ed44e57dd9ddb80e2",
+    "base_head_role": "provenance-only",
+    "reviewed_paths": [
+      "packages/ceal-worker-cli/src/cli-runtime.ts",
+      "packages/ceal-worker-cli/src/client-session.ts",
+      "packages/ceal-worker-cli/src/command-context.ts",
+      "packages/ceal-worker-cli/src/device-adoption.ts",
+      "packages/ceal-worker-cli/src/index.ts",
+      "packages/ceal-worker-cli/src/observer.ts",
+      "packages/ceal-worker-cli/src/profile-store.ts",
+      "packages/ceal-worker-cli/src/public-bin-runtime.ts",
+      "packages/ceal-worker-cli/src/session-capability.ts",
+      "packages/ceal-worker-cli/src/session-replacement.ts",
+      "packages/ceal-worker-cli/test/cli.test.mjs",
+      "packages/ceal-worker-cli/test/device-adoption.test.mjs",
+      "packages/ceal-worker-cli/test/observer.test.mjs"
+    ],
+    "reviewed_content": [
+      {
+        "path": "packages/ceal-worker-cli/src/cli-runtime.ts",
+        "content_sha256": "ed06527afd36081ea8076c8528de8c23eb7781eb80ef2cbf22e4e118e7f4e783"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/client-session.ts",
+        "content_sha256": "36c971509c59ea7a86ff1f3063fe998901051fb54ee3946a92702ec2e9f5e854"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/command-context.ts",
+        "content_sha256": null
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/device-adoption.ts",
+        "content_sha256": "d200096c9a5e2b2f761f5b7ca63938fdafc1f7bd82125971872680bee695ec9f"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/index.ts",
+        "content_sha256": "bed951570f695385438738ff3282107718433b281b3e24ea5e0c18bd061e4800"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/observer.ts",
+        "content_sha256": "9418628f470fe5215c21c2cada67ab337005d36548cc4a4a92838f99a5b81f1d"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/profile-store.ts",
+        "content_sha256": "7600b8deb86a5062de439ed590c79367d90c820b454e91cfc9651f56e2c58e33"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/public-bin-runtime.ts",
+        "content_sha256": "2e8aa7fba80faee6a73419adec6499ca752944143f1ac5f7cbf31ce88c354492"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/session-capability.ts",
+        "content_sha256": "a73ea2ee7192d7fb0f8d4ec741f00f1390219b8286d348a4f4353f0938f29d2f"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/session-replacement.ts",
+        "content_sha256": "a21fa1dd4b88a4e82afcf3e6b8981748213d75a3b14574cc2ba537fe17271cd8"
+      },
+      {
+        "path": "packages/ceal-worker-cli/test/cli.test.mjs",
+        "content_sha256": "5515827d576eb35a4d11f1b55976f8589f802564501dcc8ecbf35af2b76aeb72"
+      },
+      {
+        "path": "packages/ceal-worker-cli/test/device-adoption.test.mjs",
+        "content_sha256": "0b5a2322d2337180218fe5a832721dc16cb72826e349644cdd6c58a81ee707ab"
+      },
+      {
+        "path": "packages/ceal-worker-cli/test/observer.test.mjs",
+        "content_sha256": "691ef5fd0dbbb27bafb8666bbf841bcc744b6ced8277a0602fb4bde4e31bc8dc"
+      }
+    ],
+    "reviewed_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "staged_patch_sha256": "f9f6006677dd5a0f2d8a38dcc5ca308d93992ec4e244246471283ca4158e90a9",
+    "unstaged_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_untracked": [],
+    "auto_excluded_paths": [],
+    "identity_sha256": "e225820f86178aadfb5b5322fb98119c54dfef7f4909f35d32ea1a2d8ef79ac7"
+  }
+}

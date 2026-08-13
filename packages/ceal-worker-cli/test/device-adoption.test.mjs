@@ -12,6 +12,7 @@ import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
 import { runCealCommand } from "../dist/index.js";
 import { CealSessionStoreError } from "../dist/profile-store.js";
+import { createCealSessionCapability } from "../dist/session-capability.js";
 
 // The Gateway in these tests is a real sealer, not a stub that returns a
 // fixture: it opens the start request the command actually sent, seals a real
@@ -237,7 +238,7 @@ test("a malformed invocation is refused before any key or request exists", async
 		["--gateway", GATEWAY, "--email", EMAIL, "extra"],
 	]) {
 		const world = createWorld();
-		const code = await runCealCommand(["session", "adopt", ...options], world.io, world.runtime);
+		const code = await runCealCommand(["session", "adopt", ...options], world.io, prepareRuntime(world.runtime));
 		assert.equal(code, 2, `${JSON.stringify(options)} must be an argument error`);
 		assert.equal(world.result().error.kind, "invalid_argument");
 		assert.equal(world.gateway.startCount, 0, "no transaction may be started for a malformed invocation");
@@ -262,7 +263,7 @@ test("a store that cannot write reports failure instead of a session", async () 
 
 test("an adoption lock failure revokes the issued session and keeps recovery local", async () => {
 	const world = createWorld();
-	world.runtime.withSessionStateLock = async () => {
+	world.runtime.runWithLockedSession = async () => {
 		throw new CealSessionStoreError("refresh_busy");
 	};
 	assert.equal(await run(world), 3);
@@ -401,7 +402,48 @@ function storedSession(overrides = {}) {
 }
 
 function run(world, extraOptions = []) {
-	return runCealCommand(["session", "adopt", "--gateway", GATEWAY, "--email", EMAIL, ...extraOptions], world.io, world.runtime);
+	return runCealCommand(
+		["session", "adopt", "--gateway", GATEWAY, "--email", EMAIL, ...extraOptions],
+		world.io,
+		prepareRuntime(world.runtime),
+	);
+}
+
+function prepareRuntime(runtime) {
+	const {
+		readStoredSession,
+		writeStoredSession,
+		runWithLockedSession,
+		removeDiscoveryCache,
+		removeReceiptSpool,
+		createClientSessionClient,
+		...commandRuntime
+	} = runtime;
+	const load = readStoredSession;
+	const save = writeStoredSession;
+	const remove = async () => {};
+	const lockedStore = {
+		load,
+		save,
+		replace: async (_expectedRefreshToken, session) => save(session),
+		remove,
+	};
+	return {
+		...commandRuntime,
+		session: createCealSessionCapability({
+			store: {
+				load,
+				save,
+				remove,
+				withStateLock: runWithLockedSession ?? ((action) => action(lockedStore)),
+			},
+			timing: commandRuntime.timing,
+			now: commandRuntime.now,
+			removeDiscoveryCache,
+			removeReceiptSpool,
+			createClientSessionClient,
+		}),
+	};
 }
 
 function fingerprint(publicKey) {
@@ -433,11 +475,11 @@ function createWorld(options = {}) {
 		stderrText: () => stderr.join(""),
 		result: () => parseYamlish(stdout.join("")),
 		runtime: {
-			loadSession: async () => {
+			readStoredSession: async () => {
 				if (options.loadFails) throw new Error("unreadable store");
 				return stored;
 			},
-			saveSession: async (session) => {
+			writeStoredSession: async (session) => {
 				if (options.saveFails) throw new Error("read-only store");
 				stored = session;
 				saved.push(session);

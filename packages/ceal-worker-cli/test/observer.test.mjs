@@ -10,6 +10,7 @@ import { runCealCommand } from "../dist/index.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
+import { createCealSessionCapability } from "../dist/session-capability.js";
 
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
@@ -89,7 +90,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	let handle;
 	const handleReady = new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
-			loadSession: () => sessionStore.load(),
+			session: createCealSessionCapability({ store: sessionStore }),
 			loadDiscoveryCache: () => cacheStore.load(),
 			loadReceiptSpool: () => spoolStore.load(),
 			inspectAgentAudit: () => ({
@@ -695,7 +696,7 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		});
 	}
 	const runtime = {
-		loadSession: () => sessionStore.load(),
+		loadStoredSession: () => sessionStore.load(),
 		// No cached catalog at all: the genuinely missing case.
 		loadDiscoveryCache: async () => null,
 		loadReceiptSpool: () => spoolStore.load(),
@@ -791,7 +792,7 @@ test("observer binds its session and receipt projections to one session snapshot
 	const state = await buildObserverState({
 		// If the observer reads twice, this models enrollment replacing the session
 		// between the receipt projection and the visible session projection.
-		loadSession: async () => (++sessionReads === 1 ? oldSession : replacement),
+		loadStoredSession: async () => (++sessionReads === 1 ? oldSession : replacement),
 		loadReceiptSpool: async (session) => {
 			assert.equal(session, oldSession, "the receipt loader must receive the exact projected session snapshot");
 			return {
@@ -831,7 +832,7 @@ test("observer refuses to attribute another session's discovery cache to the cur
 		negotiatedProtocolVersion: "1.3.0",
 	};
 	const state = await buildObserverState({
-		loadSession: async () => current,
+		loadStoredSession: async () => current,
 		loadDiscoveryCache: async () => ({
 			key: foreignKey,
 			cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
@@ -889,7 +890,7 @@ test("the observer and the discovery cache agree on freshness, including a backw
 	for (const scenario of cases) {
 		const entry = { key, cachedAt: scenario.cachedAt, discovery };
 		const state = await buildObserverState({
-			loadSession: async () => sessionForCacheKey(key),
+			loadStoredSession: async () => sessionForCacheKey(key),
 			loadDiscoveryCache: async () => entry,
 			discoveryCacheTtlMs: ttl,
 			now: () => now,
@@ -933,7 +934,7 @@ test("the observer falls back to the SAME default window as the cli", async () =
 	const cachedAt = now - DEFAULT_DISCOVERY_CACHE_TTL_MS + 60_000;
 	const entry = { key, cachedAt, discovery };
 	const state = await buildObserverState({
-		loadSession: async () => sessionForCacheKey(key),
+		loadStoredSession: async () => sessionForCacheKey(key),
 		loadDiscoveryCache: async () => entry,
 		now: () => now,
 	});

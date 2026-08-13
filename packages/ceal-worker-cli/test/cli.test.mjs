@@ -24,7 +24,6 @@ import { parseAllDocuments } from "yaml";
 import { buildAcceptanceRecord, readInstalledReleaseFacts } from "../dist/acceptance-record.js";
 import { isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted, writeCallGatewayFailure } from "../dist/call-result-output.js";
-import { createCealCommandContext } from "../dist/command-context.js";
 import {
 	CEAL_COMMANDS,
 	CEAL_SUBCOMMANDS,
@@ -36,6 +35,7 @@ import {
 	subcommandRouteKey,
 } from "../dist/index.js";
 import { CealSessionStoreError } from "../dist/profile-store.js";
+import { createCealSessionCapability } from "../dist/session-capability.js";
 import { CEAL_TIMING_STAGES, createCealTimingRecorder } from "../dist/timing.js";
 
 // The version the worker introduces itself to the Gateway with is derived from
@@ -105,9 +105,53 @@ async function run(args, runtime = {}) {
 				},
 			},
 		},
-		runtime,
+		prepareRuntime(runtime),
 	);
 	return { code, stdout, stderr };
+}
+
+function prepareRuntime(runtime) {
+	const {
+		readStoredSession,
+		writeStoredSession,
+		deleteStoredSession,
+		runWithLockedSession,
+		removeDiscoveryCache,
+		removeReceiptSpool,
+		createClientSessionClient,
+		...commandRuntime
+	} = runtime;
+	if (!readStoredSession && !writeStoredSession && !deleteStoredSession && !runWithLockedSession) return commandRuntime;
+	const load = readStoredSession ?? (async () => null);
+	const save =
+		writeStoredSession ??
+		(async () => {
+			throw new CealSessionStoreError("home_unavailable");
+		});
+	const remove = deleteStoredSession ?? (async () => {});
+	const lockedStore = {
+		load,
+		save,
+		replace: async (_expectedRefreshToken, session) => save(session),
+		remove,
+	};
+	const store = {
+		load,
+		save,
+		remove,
+		withStateLock: runWithLockedSession ?? ((action) => action(lockedStore)),
+	};
+	return {
+		...commandRuntime,
+		session: createCealSessionCapability({
+			store,
+			timing: commandRuntime.timing,
+			now: commandRuntime.now,
+			removeDiscoveryCache,
+			removeReceiptSpool,
+			createClientSessionClient,
+		}),
+	};
 }
 
 async function yamlRun(args, expectedCode = 0, runtime = {}) {
@@ -192,7 +236,7 @@ test("route acceptance is derived from the declaration", async () => {
 	for (const parent of new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
 		// An undeclared route reaches no runner.
 		const bogus = await run([parent, "bogus-route"], {
-			loadSession: () => assert.fail("an undeclared route must not reach a runner"),
+			readStoredSession: () => assert.fail("an undeclared route must not reach a runner"),
 			inspectAgentGuide: () => assert.fail("an undeclared route must not reach a runner"),
 		});
 		// Refused before any runner work: the runtime hooks above would have failed.
@@ -428,7 +472,7 @@ test("a malformed known route points at the nearest help that can correct it", a
 	for (const { args, nextAction } of cases) {
 		const payload = await yamlRun(args, 2, {
 			runStableUpdate: () => assert.fail("an invalid update must not run"),
-			loadSession: () => assert.fail("invalid session arguments must not read state"),
+			readStoredSession: () => assert.fail("invalid session arguments must not read state"),
 		});
 		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
 		assert.ok(payload.error.next_action.startsWith(nextAction), `${args.join(" ")}: ${payload.error.next_action}`);
@@ -827,7 +871,7 @@ test("capabilities points an unregistered running host at the guide, and stays s
 	});
 	await withGateway(async ({ endpoint }) => {
 		const unregistered = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			inspectAgentGuide: guide(false, "detected"),
 		});
 		assert.equal(unregistered.agent_guide.agent, "claude");
@@ -843,7 +887,7 @@ test("capabilities points an unregistered running host at the guide, and stays s
 		});
 		for (const state of [guide(true, "detected"), guide(false, "default"), missingAsset]) {
 			const quiet = await yamlRun(["capabilities"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				inspectAgentGuide: state,
 			});
 			assert.equal("agent_guide" in quiet, false);
@@ -917,84 +961,53 @@ test("every command answers one success predicate that agrees with its exit code
 	}
 });
 
-test("command handlers receive semantic session operations without raw store mutation", async () => {
-	const externalRuntime = {
-		loadSession: async () => null,
-		saveSession: async () => assert.fail("status is read-only"),
-		removeSession: async () => assert.fail("status is read-only"),
-		withSessionStateLock: async () => assert.fail("status is read-only"),
+test("session lifecycle capability is all-or-none and owns the locked mutation interval", async () => {
+	let stored = null;
+	let lockEntries = 0;
+	const lockedStore = {
+		load: async () => stored,
+		save: async (session) => {
+			stored = session;
+		},
+		replace: async (_expectedRefreshToken, session) => {
+			stored = session;
+		},
+		remove: async () => {
+			stored = null;
+		},
 	};
-	const observedContext = createCealCommandContext(externalRuntime);
-	const payload = await yamlRun(["session", "status"], 0, externalRuntime);
-	assert.equal(payload.status, "unconfigured");
-	assert.equal(typeof observedContext.session.commitEnrolled, "function");
-	assert.equal(typeof observedContext.session.ensureCurrent, "function");
-	assert.equal(typeof observedContext.session.logout, "function");
-	assert.equal(Object.getPrototypeOf(observedContext), null, "the embedding prototype must not provide a mutation back door");
-	assert.equal(Object.isExtensible(observedContext), false, "raw keys cannot be defined after projection");
-	for (const rawKey of ["saveSession", "removeSession", "withSessionStateLock"]) {
-		assert.equal(Object.hasOwn(observedContext, rawKey), false, `${rawKey} must be physically absent below dispatch`);
-		assert.equal(rawKey in observedContext, false, `${rawKey} must be absent from the whole context chain`);
-		assert.equal(Reflect.defineProperty(observedContext, rawKey, { value: async () => {} }), false, `${rawKey} cannot be added later`);
-	}
-	assert.doesNotThrow(() => Reflect.ownKeys(observedContext), "reflection stays valid after the context is made non-extensible");
-});
-
-test("command context preserves class prototype and non-enumerable embedding seams", async () => {
-	const session = storedSession("https://ceal.example.test");
-	class Runtime {
-		async loadSession() {
-			assert.equal(this, runtime, "prototype methods keep the embedding receiver");
-			return session;
-		}
-	}
-	const runtime = new Runtime();
-	Object.defineProperty(runtime, "now", {
-		value() {
-			assert.equal(this, runtime, "non-enumerable methods keep the embedding receiver");
-			return Date.parse(session.expiresAt) - 1;
-		},
-	});
-	const payload = await yamlRun(["session", "status"], 0, runtime);
-	assert.equal(payload.status, "configured");
-	assert.equal(payload.access_status, "current");
-});
-
-test("command context preserves lazy accessors and tracks a changing function value", () => {
-	let reads = 0;
-	const runtime = {};
-	Object.defineProperty(runtime, "now", {
-		get() {
-			reads += 1;
-			return function () {
-				assert.equal(this, runtime);
-				return reads;
-			};
-		},
-	});
-	const context = createCealCommandContext(runtime);
-	assert.equal(Object.getOwnPropertyDescriptor(context, "now").get instanceof Function, true);
-	assert.equal(reads, 0, "descriptor inspection must not execute the embedding getter");
-	const first = context.now;
-	const second = context.now;
-	assert.notEqual(first, second, "a getter that changes its function is not pinned by the bind cache");
-	assert.equal(first(), 2);
-});
-
-test("unrelated commands do not inspect embedding session accessors", async () => {
-	let reads = 0;
-	const runtime = {};
-	for (const property of ["loadSession", "saveSession", "removeSession"]) {
-		Object.defineProperty(runtime, property, {
-			get() {
-				reads += 1;
-				throw new Error("unrelated session getter touched");
+	const capability = createCealSessionCapability({
+		store: {
+			...lockedStore,
+			withStateLock: async (action) => {
+				lockEntries += 1;
+				return action(lockedStore);
 			},
-		});
+		},
+	});
+	assert.deepEqual(Object.keys(capability).sort(), ["commitEnrolled", "ensureCurrent", "load", "logout"]);
+	assert.equal(Object.isFrozen(capability), true);
+	assert.equal(Object.hasOwn(prepareRuntime({}), "session"), false);
+
+	const incoming = storedSession("https://ceal.example.test");
+	const commit = await capability.commitEnrolled(incoming, false);
+	assert.equal(commit.ok, true);
+	assert.equal(await capability.load(), incoming);
+	assert.equal(lockEntries, 1, "commit must enter the canonical locked interval");
+});
+
+test("worker source exposes one semantic session capability and no raw session hooks", () => {
+	const source = workerSource();
+	assert.match(source, /createCealSessionCapability/u, "positive control must reach the canonical session owner");
+	for (const removedName of [
+		"load" + "Session",
+		"save" + "Session",
+		"remove" + "Session",
+		"with" + "SessionStateLock",
+		"create" + "CealCommandContext",
+	]) {
+		assert.doesNotMatch(source, new RegExp(`\\b${removedName}\\b`, "u"), `${removedName} must not return as a compatibility seam`);
 	}
-	const payload = await yamlRun(["guide"], 3, runtime);
-	assert.equal(payload.status, "unavailable");
-	assert.equal(reads, 0);
 });
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
@@ -1002,8 +1015,8 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 		let stored = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => null,
-			saveSession: async (session) => {
+			readStoredSession: async () => null,
+			writeStoredSession: async (session) => {
 				stored = session;
 			},
 		});
@@ -1020,8 +1033,8 @@ test("a first enrollment save failure revokes the issued session and asks for a 
 	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => null,
-			saveSession: async () => {
+			readStoredSession: async () => null,
+			writeStoredSession: async () => {
 				throw new Error("read-only store");
 			},
 		});
@@ -1037,9 +1050,9 @@ test("an enrollment lock failure revokes the issued session without blaming the 
 	await withEnrollmentGateway(async ({ endpoint, refreshToken, revoked }) => {
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => null,
-			saveSession: async () => assert.fail("the lock failure must happen before save"),
-			withSessionStateLock: async () => {
+			readStoredSession: async () => null,
+			writeStoredSession: async () => assert.fail("the lock failure must happen before save"),
+			runWithLockedSession: async () => {
 				throw new CealSessionStoreError("refresh_busy");
 			},
 		});
@@ -1056,8 +1069,8 @@ test("a replacement enrollment save failure reports both session dispositions", 
 		const outgoing = `ceal_refresh_${"O".repeat(43)}`;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 3, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
-			saveSession: async () => {
+			readStoredSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
+			writeStoredSession: async () => {
 				throw new Error("read-only store");
 			},
 		});
@@ -1089,8 +1102,8 @@ test("enrolling the identity this host already holds is the documented recovery,
 		});
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => previous,
-			saveSession: async (session) => {
+			readStoredSession: async () => previous,
+			writeStoredSession: async (session) => {
 				stored = session;
 			},
 			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
@@ -1119,8 +1132,8 @@ test("enrolling a different identity is refused by name, keeps the stored sessio
 		});
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => previous,
-			saveSession: async () => assert.fail("a refused enrollment must not write"),
+			readStoredSession: async () => previous,
+			writeStoredSession: async () => assert.fail("a refused enrollment must not write"),
 		});
 		assert.equal(payload.ok, false);
 		assert.equal(payload.status, "conflict");
@@ -1141,9 +1154,9 @@ test("an identity refusal distinguishes an already unusable incoming session fro
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
 				readSecret: async () => "E".repeat(48),
-				loadSession: async () =>
+				readStoredSession: async () =>
 					storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: `ceal_refresh_${"O".repeat(43)}` }),
-				saveSession: async () => assert.fail("a refused enrollment must not write"),
+				writeStoredSession: async () => assert.fail("a refused enrollment must not write"),
 			});
 			assert.equal(payload.error.kind, "session_identity_conflict");
 			assert.equal(payload.issued_session_revoked, "already_unusable");
@@ -1155,9 +1168,9 @@ test("an identity refusal distinguishes an already unusable incoming session fro
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 3, {
 				readSecret: async () => "E".repeat(48),
-				loadSession: async () =>
+				readStoredSession: async () =>
 					storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: `ceal_refresh_${"O".repeat(43)}` }),
-				saveSession: async () => assert.fail("a refused enrollment must not write"),
+				writeStoredSession: async () => assert.fail("a refused enrollment must not write"),
 			});
 			assert.equal(payload.issued_session_revoked, "unavailable");
 			assert.match(payload.error.next_action, /may remain usable at the Gateway until it expires/u);
@@ -1169,10 +1182,10 @@ test("an identity refusal distinguishes an already unusable incoming session fro
 
 test("enrollment preflight keeps an unspent code and reports only the local store recovery", async () => {
 	const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", "https://ceal.example.test"], 3, {
-		loadSession: async () => {
+		readStoredSession: async () => {
 			throw new CealSessionStoreError("refresh_busy");
 		},
-		saveSession: async () => assert.fail("preflight stops before save"),
+		writeStoredSession: async () => assert.fail("preflight stops before save"),
 		readSecret: async () => assert.fail("preflight stops before reading the one-time code"),
 	});
 	assert.equal(payload.error.kind, "refresh_busy");
@@ -1188,8 +1201,8 @@ test("--force replaces a different identity, revoking it first and clearing the 
 		const outgoing = `ceal_refresh_${"O".repeat(43)}`;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
-			saveSession: async (session) => {
+			readStoredSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else", refreshToken: outgoing }),
+			writeStoredSession: async (session) => {
 				stored = session;
 			},
 			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
@@ -1213,8 +1226,8 @@ test("a replacement reports advisory cleanup failure without undoing its stored 
 		let stored = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
 			readSecret: async () => "E".repeat(48),
-			loadSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else" }),
-			saveSession: async (session) => {
+			readStoredSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else" }),
+			writeStoredSession: async (session) => {
 				stored = session;
 			},
 			removeDiscoveryCache: async () => {
@@ -1252,13 +1265,13 @@ test("a replacement whose displaced credential the Gateway will not honor still 
 			// exactly the operator that text is speaking to.
 			const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
 				readSecret: async () => "E".repeat(48),
-				loadSession: async () =>
+				readStoredSession: async () =>
 					storedSession(endpoint, {
 						subjectRef: "subject:someone-else",
 						refreshToken: `ceal_refresh_${"O".repeat(43)}`,
 						renewalBlockedReason: "outcome_unknown",
 					}),
-				saveSession: async (session) => {
+				writeStoredSession: async (session) => {
 					stored = session;
 				},
 			});
@@ -1278,10 +1291,10 @@ test("an unreadable session store stops an enrollment before the one-time code i
 				codeRead = true;
 				return "E".repeat(48);
 			},
-			loadSession: async () => {
+			readStoredSession: async () => {
 				throw new Error("unreadable store");
 			},
-			saveSession: async () => assert.fail("must not save"),
+			writeStoredSession: async () => assert.fail("must not save"),
 		});
 		assert.equal(payload.error.kind, "session_load_failed");
 		assert.equal(codeRead, false, "a one-time code is not spent to discover the store cannot be read");
@@ -1295,7 +1308,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stored = null;
 		const result = await run(["session", "enroll", "--gateway", endpoint], {
 			isInteractiveTerminal: () => true,
-			loadSession: async () => null,
+			readStoredSession: async () => null,
 			promptEnrollmentCode: async () => {
 				prompted += 1;
 				return "E".repeat(48);
@@ -1304,7 +1317,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 				readStdin += 1;
 				return "must-not-be-read";
 			},
-			saveSession: async (session) => {
+			writeStoredSession: async (session) => {
 				stored = session;
 			},
 		});
@@ -1317,7 +1330,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let consumed = false;
 		const nonInteractive = await yamlRun(["session", "enroll", "--gateway", endpoint], 3, {
 			isInteractiveTerminal: () => false,
-			loadSession: async () => null,
+			readStoredSession: async () => null,
 			promptEnrollmentCode: async () => {
 				consumed = true;
 				return "E".repeat(48);
@@ -1326,7 +1339,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 				consumed = true;
 				return "E".repeat(48);
 			},
-			saveSession: async () => assert.fail("must not save"),
+			writeStoredSession: async () => assert.fail("must not save"),
 		});
 		assert.equal(nonInteractive.error.kind, "interactive_enrollment_required");
 		assert.equal(consumed, false);
@@ -1335,12 +1348,12 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		let stdinRead = false;
 		const ttyStdin = await yamlRun(["session", "enroll", "--gateway", endpoint, "--code-stdin"], 3, {
 			isInputTerminal: () => true,
-			loadSession: async () => null,
+			readStoredSession: async () => null,
 			readSecret: async () => {
 				stdinRead = true;
 				return "E".repeat(48);
 			},
-			saveSession: async () => assert.fail("must not save"),
+			writeStoredSession: async () => assert.fail("must not save"),
 		});
 		assert.equal(ttyStdin.error.kind, "stdin_enrollment_requires_pipe");
 		assert.equal(stdinRead, false);
@@ -1379,8 +1392,8 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 	try {
 		const payload = await yamlRun(["session", "enroll", "--gateway", `http://127.0.0.1:${address.port}/gateway/client`, "--code-stdin"], 3, {
 			readSecret: async () => code,
-			loadSession: async () => null,
-			saveSession: async () => {
+			readStoredSession: async () => null,
+			writeStoredSession: async () => {
 				saved = true;
 			},
 		});
@@ -1397,13 +1410,13 @@ test("session refresh explicitly rotates an expiring stored session once and per
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken }) => {
 		let saved = null;
 		const payload = await yamlRun(["session", "refresh"], 0, {
-			loadSession: async () =>
+			readStoredSession: async () =>
 				storedSession(endpoint, {
 					accessToken: `ceal_personal_${"O".repeat(43)}`,
 					expiresAt: "2020-01-01T00:00:00.000Z",
 					refreshToken: oldRefreshToken,
 				}),
-			saveSession: async (session) => {
+			writeStoredSession: async (session) => {
 				saved = session;
 			},
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
@@ -1419,12 +1432,12 @@ test("session refresh explicitly rotates an expiring stored session once and per
 test("capabilities and target selection never rotate a stored session", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
 		const runtime = {
-			loadSession: async () =>
+			readStoredSession: async () =>
 				storedSession(endpoint, {
 					expiresAt: "2020-01-01T00:00:00.000Z",
 					refreshToken: oldRefreshToken,
 				}),
-			saveSession: async () => assert.fail("read-only discovery must not rotate the stored session"),
+			writeStoredSession: async () => assert.fail("read-only discovery must not rotate the stored session"),
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		};
 		for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
@@ -1449,7 +1462,7 @@ test("capabilities authentication failure names the explicit session refresh act
 		await withRenewingGateway(
 			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
 				const payload = await yamlRun(args, 3, {
-					loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+					readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
 				});
 				assert.equal(payload.error.kind, "authentication_failed");
 				assert.equal(payload.status, "denied");
@@ -1474,12 +1487,12 @@ test("receipt and acceptance observation never retry auth or rotate a stale stor
 			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
 				const payload = await yamlRun(args, 3, {
 					...extra,
-					loadSession: async () =>
+					readStoredSession: async () =>
 						storedSession(endpoint, {
 							expiresAt: "2020-01-01T00:00:00.000Z",
 							refreshToken: oldRefreshToken,
 						}),
-					saveSession: async () => assert.fail(`${name} must not rotate a stored session`),
+					writeStoredSession: async () => assert.fail(`${name} must not rotate a stored session`),
 					now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 				});
 				assert.equal(payload.error.kind, "authentication_failed", name);
@@ -1499,12 +1512,12 @@ test("receipt and acceptance observation never retry auth or rotate a stale stor
 test("session refresh fails closed for malformed absolute refresh expiry before a refresh request", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls }) => {
 		const payload = await yamlRun(["session", "refresh"], 3, {
-			loadSession: async () =>
+			readStoredSession: async () =>
 				storedSession(endpoint, {
 					expiresAt: "2020-01-01T00:00:00.000Z",
 					refreshTokenAbsoluteExpiresAt: "not-a-date",
 				}),
-			saveSession: async () => {},
+			writeStoredSession: async () => {},
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		});
 		assert.equal(payload.schema_version, "ceal.session_refresh.v1");
@@ -1524,14 +1537,14 @@ test("an explicit session refresh still lets the Gateway answer past a host cloc
 	await withRenewingGateway(async ({ endpoint, refreshCalls, newAccessToken, oldRefreshToken }) => {
 		let saved = null;
 		const payload = await yamlRun(["session", "refresh"], 0, {
-			loadSession: async () =>
+			readStoredSession: async () =>
 				storedSession(endpoint, {
 					expiresAt: "2020-01-01T00:00:00.000Z",
 					refreshToken: oldRefreshToken,
 					// The Gateway renews it; only this host's clock says otherwise.
 					refreshTokenAbsoluteExpiresAt: "2026-07-01T00:00:00.000Z",
 				}),
-			saveSession: async (session) => {
+			writeStoredSession: async (session) => {
 				saved = session;
 			},
 			nextRequestId: () => "narnia:skewed:001",
@@ -1546,11 +1559,11 @@ test("an explicit session refresh still lets the Gateway answer past a host cloc
 test("bare and explicit local session status agree without presenting untested renewal as live", async () => {
 	let loads = 0;
 	const runtime = {
-		loadSession: async () => {
+		readStoredSession: async () => {
 			loads += 1;
 			return storedSession("https://gateway.example.test", { expiresAt: "2020-01-01T00:00:00.000Z" });
 		},
-		saveSession: () => assert.fail("session status is read-only"),
+		writeStoredSession: () => assert.fail("session status is read-only"),
 		now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 	};
 	const payload = await yamlRun(["session"], 0, runtime);
@@ -1566,7 +1579,7 @@ test("bare and explicit local session status agree without presenting untested r
 test("session status classifies an unreadable store as a local session failure", async () => {
 	for (const args of [["session"], ["session", "status"]]) {
 		const payload = await yamlRun(args, 3, {
-			loadSession: async () => {
+			readStoredSession: async () => {
 				throw new Error("unsafe session store");
 			},
 		});
@@ -1587,19 +1600,19 @@ test("generic no-session recovery presents both approved setup routes", async ()
 	assert.match(recovery, /ceal session adopt --help/u);
 	assert.ok(statusRecovery.startsWith(recovery));
 
-	const status = await yamlRun(["session", "status"], 0, { loadSession: async () => null });
+	const status = await yamlRun(["session", "status"], 0, { readStoredSession: async () => null });
 	const logout = await yamlRun(["session", "logout"], 0, {
-		loadSession: async () => null,
-		removeSession: async () => assert.fail("an absent session must not be removed"),
+		readStoredSession: async () => null,
+		deleteStoredSession: async () => assert.fail("an absent session must not be removed"),
 	});
-	const refresh = await yamlRun(["session", "refresh"], 3, { loadSession: async () => null });
-	const capabilities = await yamlRun(["capabilities"], 3, { loadSession: async () => null });
+	const refresh = await yamlRun(["session", "refresh"], 3, { readStoredSession: async () => null });
+	const capabilities = await yamlRun(["capabilities"], 3, { readStoredSession: async () => null });
 	const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-		loadSession: async () => null,
+		readStoredSession: async () => null,
 	});
-	const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, { loadSession: async () => null });
+	const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 3, { readStoredSession: async () => null });
 	const acceptance = await yamlRun(["acceptance", "emit"], 3, {
-		loadSession: async () => null,
+		readStoredSession: async () => null,
 		readInstalledReleaseFacts: installedReleaseReading,
 	});
 	assert.equal(status.next_action, recovery);
@@ -1617,8 +1630,8 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const runtime = {
-				loadSession: async () => current,
-				saveSession: async (session) => {
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
 					current = session;
 				},
 			};
@@ -1656,8 +1669,8 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 test("an observational acceptance read does not require a durable refresh quarantine", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 		const runtime = {
-			loadSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
-			saveSession: async () => {
+			readStoredSession: async () => storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken }),
+			writeStoredSession: async () => {
 				throw new Error("disk unavailable");
 			},
 		};
@@ -1684,8 +1697,8 @@ test("typed Gateway refresh denial requires reenrollment instead of retry", asyn
 		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const payload = await yamlRun(["session", "refresh"], 3, {
-				loadSession: async () => current,
-				saveSession: async (session) => {
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
 					current = session;
 				},
 			});
@@ -1697,8 +1710,8 @@ test("typed Gateway refresh denial requires reenrollment instead of retry", asyn
 			assert.equal(current.renewalBlockedReason, "refresh_invalid");
 			assert.equal(refreshCalls(), 1);
 			const blockedRetry = await yamlRun(["session", "refresh"], 3, {
-				loadSession: async () => current,
-				saveSession: async () => assert.fail("blocked refresh must not save"),
+				readStoredSession: async () => current,
+				writeStoredSession: async () => assert.fail("blocked refresh must not save"),
 			});
 			assert.equal(blockedRetry.schema_version, "ceal.session_refresh.v1");
 			assert.equal(blockedRetry.error.kind, "refresh_invalid");
@@ -1744,8 +1757,8 @@ test("logout retains local session when Gateway revocation transport is unavaila
 		async ({ endpoint, oldRefreshToken }) => {
 			let removed = false;
 			const payload = await yamlRun(["session", "logout"], 3, {
-				loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-				removeSession: async () => {
+				readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+				deleteStoredSession: async () => {
 					removed = true;
 				},
 			});
@@ -1769,10 +1782,10 @@ test("every logout precondition failure stays in the logout result contract", as
 	assert.doesNotMatch(unavailable.error.next_action, /Gateway URL|device-enrollment code/u);
 
 	const unsafe = await yamlRun(["session", "logout"], 3, {
-		loadSession: async () => {
+		readStoredSession: async () => {
 			throw new CealSessionStoreError("unsafe_store");
 		},
-		removeSession: async () => assert.fail("an unreadable session is not removed"),
+		deleteStoredSession: async () => assert.fail("an unreadable session is not removed"),
 	});
 	assert.equal(unsafe.schema_version, "ceal.session_logout.v1");
 	assert.equal(unsafe.error.kind, "unsafe_store");
@@ -1780,9 +1793,9 @@ test("every logout precondition failure stays in the logout result contract", as
 	assert.equal(unsafe.local_session_removed, false);
 
 	const lockedLoadFailure = await yamlRun(["session", "logout"], 3, {
-		loadSession: async () => assert.fail("the locked store owns loading"),
-		removeSession: async () => assert.fail("an unreadable session is not removed"),
-		withSessionStateLock: async (action) =>
+		readStoredSession: async () => assert.fail("the locked store owns loading"),
+		deleteStoredSession: async () => assert.fail("an unreadable session is not removed"),
+		runWithLockedSession: async (action) =>
 			action({
 				load: async () => {
 					throw new Error("unclassified local read failure");
@@ -1802,8 +1815,8 @@ test("logout removes local state when the Gateway says the refresh credential is
 			async ({ endpoint, refreshToken }) => {
 				let removed = false;
 				const payload = await yamlRun(["session", "logout"], 0, {
-					loadSession: async () => storedSession(endpoint, { refreshToken }),
-					removeSession: async () => {
+					readStoredSession: async () => storedSession(endpoint, { refreshToken }),
+					deleteStoredSession: async () => {
 						removed = true;
 					},
 					removeDiscoveryCache: async () => {},
@@ -1823,7 +1836,7 @@ test("capabilities does not retry an authentication rejection or rotate a still-
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
 			const payload = await yamlRun(["capabilities"], 3, {
-				loadSession: async () =>
+				readStoredSession: async () =>
 					storedSession(endpoint, { refreshToken: oldRefreshToken, refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z" }),
 				nextRequestId: () => "narnia:retry:001",
 			});
@@ -1843,8 +1856,8 @@ test("session logout revokes the server session before removing every session-de
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, revoked }) => {
 		const cleared = [];
 		const payload = await yamlRun(["session", "logout"], 0, {
-			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-			removeSession: async () => {
+			readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+			deleteStoredSession: async () => {
 				cleared.push("session");
 			},
 			removeDiscoveryCache: async () => {
@@ -1872,8 +1885,8 @@ test("session logout revokes the server session before removing every session-de
 	// send the operator to revoke something that no longer exists.
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken }) => {
 		const payload = await yamlRun(["session", "logout"], 0, {
-			loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-			removeSession: async () => {},
+			readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+			deleteStoredSession: async () => {},
 			removeReceiptSpool: async () => {
 				throw new Error("spool store is unsafe");
 			},
@@ -1892,9 +1905,9 @@ test("logout preserves completed Gateway revocation when locked local session re
 		const session = storedSession(endpoint, { refreshToken: oldRefreshToken });
 		let cleanupAttempted = false;
 		const payload = await yamlRun(["session", "logout"], 3, {
-			loadSession: async () => session,
-			removeSession: async () => assert.fail("the locked store owns removal"),
-			withSessionStateLock: async (action) =>
+			readStoredSession: async () => session,
+			deleteStoredSession: async () => assert.fail("the locked store owns removal"),
+			runWithLockedSession: async (action) =>
 				action({
 					load: async () => session,
 					save: async () => assert.fail("logout does not save"),
@@ -1927,7 +1940,7 @@ test("logout preserves completed Gateway revocation when locked local session re
 test("call invokes one granted capability and independently reads back its audit event", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch", "limit=3"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			nextRequestId: (() => {
 				let id = 0;
 				return () => `narnia:call:${++id}`;
@@ -1961,7 +1974,7 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 	await withGateway(async ({ endpoint }) => {
 		const spooled = [];
 		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			nextRequestId: (() => {
 				let id = 0;
 				return () => `narnia:spool:${++id}`;
@@ -1986,7 +1999,7 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 	});
 	await withGateway(async ({ endpoint }) => {
 		const broken = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			recordReceiptSpool: () => {
 				throw new Error("spool unavailable");
 			},
@@ -2003,7 +2016,7 @@ test("a pre-issue call failure is not spooled while an issued unknown-outcome fa
 	});
 	assert.deepEqual(spooled, []);
 	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-		loadSession: async () => storedSession("http://127.0.0.1:9"),
+		readStoredSession: async () => storedSession("http://127.0.0.1:9"),
 		recordReceiptSpool: (_identity, entry) => spooled.push(entry),
 		now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 	});
@@ -2024,7 +2037,7 @@ test("a pre-issue call failure is not spooled while an issued unknown-outcome fa
 test("receipt keeps audit metadata out of normal results and retrieves a safe projection on demand", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(["receipt", "show", "narnia:call:1:call"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			nextRequestId: () => "narnia:receipt:1",
 		});
 		assert.deepEqual(payload, {
@@ -2061,7 +2074,7 @@ test("a policy-denied receipt retains the error code, non-claims, and negotiated
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["receipt", "show", "narnia:denied:1:call"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:denied-receipt:1",
 			});
 			assert.deepEqual(payload, {
@@ -2095,7 +2108,7 @@ test("a legacy readback without negotiated timing omits the timing block instead
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["receipt", "show", "narnia:denied:2:call"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:denied-receipt:2",
 			});
 			assert.equal(payload.status, "verified");
@@ -2113,7 +2126,7 @@ test("a decoder-legal invalid call-detail timing is omitted, not rendered", asyn
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["receipt", "show", "narnia:call:3:call"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:receipt:3",
 			});
 			assert.equal(payload.status, "verified");
@@ -2131,7 +2144,7 @@ test("event-level Gateway timing stays authoritative over successful call-detail
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["receipt", "show", "narnia:call:2:call"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:receipt:2",
 			});
 			assert.deepEqual(payload.events[0].timing, { gateway_elapsed_ms: 57 });
@@ -2147,7 +2160,7 @@ test("event-level Gateway timing stays authoritative over successful call-detail
 test("stored client Session selects an assigned Profile per request without another login", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const runtime = {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			nextRequestId: (() => {
 				let index = 0;
 				return () => `narnia:profile:${++index}`;
@@ -2325,7 +2338,7 @@ test("every call result names the issuing instance and the profile it used", asy
 	// A failure path is where misattribution is most likely, so it carries the
 	// same stamp; with no session resolved there is nothing to claim.
 	const failure = await yamlRun(["call", "message.get", "--target", "target:t"], 3, {
-		loadSession: async () => session,
+		readStoredSession: async () => session,
 		nextRequestId: () => "ceal:test",
 	});
 	assert.deepEqual(failure.gateway, { instance_ref: "instance:ceal-prod", profile_ref: "profile:work" });
@@ -2466,7 +2479,7 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 			"format=compact",
 		],
 		3,
-		{ loadSession: async () => storedSession("http://127.0.0.1:9") },
+		{ readStoredSession: async () => storedSession("http://127.0.0.1:9") },
 	);
 	assert.equal(payload.error.kind, "request_failed");
 	assert.deepEqual(payload.receipt, {
@@ -2491,7 +2504,7 @@ test("call does not impose a legacy capability-specific operand allowlist", asyn
 test("an unknown outcome on a declared read does not warn about repeating a write", async () => {
 	const session = storedSession("http://127.0.0.1:9");
 	const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-		loadSession: async () => session,
+		readStoredSession: async () => session,
 		// A real cached entry: the effect lookup trusts the cache only under the
 		// same identity and freshness rules the catalog path uses.
 		loadDiscoveryCache: async () => cachedEntry(session.gatewayEndpoint, Date.now()),
@@ -2507,8 +2520,8 @@ test("a rejected call followed by failed pre-send refresh quarantine is known pr
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, requests }) => {
 			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-				loadSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
-				saveSession: async () => {
+				readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
+				writeStoredSession: async () => {
 					throw new Error("local store unavailable");
 				},
 				nextRequestId: () => "narnia:renewal-failed:001",
@@ -2541,7 +2554,7 @@ test("target-catalog failures keep their exact code through the capabilities tar
 		await withGateway(
 			async ({ endpoint, requests }) => {
 				const payload = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--match", "team"], 3, {
-					loadSession: async () => storedSession(endpoint),
+					readStoredSession: async () => storedSession(endpoint),
 					nextRequestId: () => `narnia:${expected.code}`,
 				});
 				assert.equal(payload.error.kind, expected.code);
@@ -2576,7 +2589,7 @@ test("an invalid Gateway call renders caller correction without connector restor
 	await withGateway(
 		async ({ endpoint, requests }) => {
 			const payload = await yamlRun(["call", "message.enumerate", "--target", "target:team-inbox", "limit=101"], 3, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:invalid-arguments:001",
 			});
 			assert.equal(payload.error.kind, "invalid_arguments");
@@ -2595,7 +2608,7 @@ test("an opaque resource denial classifies at the call surface and defers dispos
 	await withGateway(
 		async ({ endpoint }) => {
 			const runtime = {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: (() => {
 					let index = 0;
 					return () => `narnia:opaque:${++index}`;
@@ -2630,7 +2643,7 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 	await withGateway(
 		async ({ endpoint }) => {
 			const runtime = {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: (() => {
 					let index = 0;
 					return () => `narnia:failed:${++index}`;
@@ -2693,7 +2706,7 @@ async function renderFixtureCapabilities(caseName, args) {
 	await withGateway(
 		async ({ endpoint }) => {
 			payload = await yamlRun(args, 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:policy:001",
 			});
 		},
@@ -2879,7 +2892,7 @@ async function renderPartialGrantTargets(args) {
 	await withGateway(
 		async ({ endpoint }) => {
 			payload = await yamlRun(args, 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:access:001",
 			});
 		},
@@ -2959,7 +2972,7 @@ test("a throttled call renders the Gateway's wait in its error document", async 
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=x"], 3, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:throttle:001",
 			});
 			assert.equal(payload.ok, false);
@@ -3303,7 +3316,7 @@ test("a complete HTTP policy denial remains a blocked call", async () => {
 	await withGateway(
 		async ({ endpoint }) => {
 			const payload = await yamlRun(["call", "message.create", "--target", "target:team-inbox", "text=hello"], 3, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 			});
 			assert.equal(payload.status, "blocked");
 			assert.equal(payload.error.kind, "authorization_denied");
@@ -3337,7 +3350,7 @@ test("receipt projects safe connector route provenance without provider material
 	await withGateway(
 		async ({ endpoint }) => {
 			const receipt = await yamlRun(["receipt", "show", "narnia:route:1:call"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:route:receipt",
 			});
 			assert.deepEqual(receipt.events[0], {
@@ -3388,7 +3401,7 @@ test("a duplicate-write refusal preserves the Gateway-issued confirmation refere
 					"idempotency_key=retry-001",
 				],
 				3,
-				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:001" },
+				{ readStoredSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:001" },
 			);
 			assert.equal(payload.error.kind, "duplicate_write_refused");
 			assert.equal(payload.error.message, message);
@@ -3414,7 +3427,7 @@ test("a duplicate-write refusal keeps its safe message when the optional action 
 			const payload = await yamlRun(
 				["call", "message.create", "--target", "target:team-inbox", "text=Approved", "idempotency_key=retry-001"],
 				3,
-				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:optional-action" },
+				{ readStoredSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:duplicate-write:optional-action" },
 			);
 			assert.equal(payload.error.message, message);
 			assert.equal(payload.error.next_action, "Check Gateway status and audit readback before deciding whether to retry.");
@@ -3437,7 +3450,7 @@ test("a non-policy authorization refusal stays blocked on the call surface", asy
 			const payload = await yamlRun(
 				["call", "message.create", "--target", "target:team-inbox", "text=Approved", "idempotency_key=denied-001"],
 				3,
-				{ loadSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:target-denied:001" },
+				{ readStoredSession: async () => storedSession(endpoint), nextRequestId: () => "fixture:target-denied:001" },
 			);
 			assert.equal(payload.status, "blocked");
 			assert.equal(payload.error.kind, "authorization_denied");
@@ -3465,7 +3478,7 @@ test("compatibility link data passes through and unsafe input is left to the Gat
 		async ({ endpoint, requests }) => {
 			const url = `${sourceUrl}?thread_ts=1720000000.000100&channel=C0123456789&message_ts=1720000000.000100`;
 			const payload = await yamlRun(["call", "resource.resolve", "--target", "target:team-inbox", `url=${url}`], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:resolve:1",
 			});
 			assert.deepEqual(payload.data, {
@@ -3510,7 +3523,7 @@ test("compatibility link data passes through and unsafe input is left to the Gat
 			"url=https://workspace.slack.com/archives/C0123456789/p1720000000000100?token=forbidden",
 		],
 		3,
-		{ loadSession: async () => storedSession("http://127.0.0.1:9") },
+		{ readStoredSession: async () => storedSession("http://127.0.0.1:9") },
 	);
 	assert.equal(invalid.error.kind, "invalid_request");
 });
@@ -3520,12 +3533,12 @@ test("call preserves one request identity across authentication refresh and fina
 		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
 			let saved = null;
 			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
-				loadSession: async () =>
+				readStoredSession: async () =>
 					storedSession(endpoint, {
 						refreshToken: oldRefreshToken,
 						refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
 					}),
-				saveSession: async (session) => {
+				writeStoredSession: async (session) => {
 					saved = session;
 				},
 				nextRequestId: (() => {
@@ -3555,7 +3568,7 @@ test("call forwards a discovered provider-neutral capability without a CLI comma
 	await withGateway(
 		async ({ endpoint, requests }) => {
 			const payload = await yamlRun(["call", "file.search", "--target", "target:workspace", "query=roadmap", "kind=document"], 0, {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: (() => {
 					let id = 0;
 					return () => `narnia:generic:${++id}`;
@@ -3631,7 +3644,7 @@ test("capabilities uses an enrolled session without endpoint or token options", 
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"P".repeat(43)}`;
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => ({
+			readStoredSession: async () => ({
 				gatewayEndpoint: endpoint,
 				profileRef: "profile:narnia",
 				registrationRef: "registration:narnia",
@@ -3656,6 +3669,18 @@ test("capabilities uses an enrolled session without endpoint or token options", 
 	});
 });
 
+test("packaged bin exposes no partial session lifecycle when HOME is absent", async () => {
+	const status = await runBinWithoutHome(["session", "status"]);
+	assert.equal(status.code, 0);
+	assert.equal(parseAllDocuments(status.stdout)[0].toJS().status, "unconfigured");
+
+	const logout = await runBinWithoutHome(["session", "logout"]);
+	assert.equal(logout.code, 3);
+	const payload = parseAllDocuments(logout.stdout)[0].toJS();
+	assert.equal(payload.status, "unavailable");
+	assert.equal(payload.error.kind, "session_runtime_unavailable");
+});
+
 test("packaged bin persists an enrolled session with owner-only modes", async () => {
 	await withEnrollmentGateway(async ({ endpoint, token }) => {
 		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-home-"));
@@ -3675,8 +3700,8 @@ test("packaged bin persists an enrolled session with owner-only modes", async ()
 
 // The decision tests above drive the command through injected runtime seams,
 // which do not take the session state lock. The shipped binary always does
-// (`bin.ts` supplies `withSessionStateLock` under the same condition as
-// `saveSession`), so the refusal is proven once against the real locked store
+// (`bin.ts` supplies `runWithLockedSession` under the same condition as
+// `writeStoredSession`), so the refusal is proven once against the real locked store
 // and a real file rather than only against the fallback the suite exercises.
 test("packaged bin refuses a second enrollment for a different identity and leaves the stored session on disk", async () => {
 	await withEnrollmentGateway(
@@ -3859,7 +3884,7 @@ test("capabilities rejects duplicate special flags before session or Gateway wor
 		["capabilities", "targets", "--capability", "message.search", "--detail", "--detail"],
 	]) {
 		const payload = await yamlRun(args, 2, {
-			loadSession: () => assert.fail("duplicate flags must be refused before session access"),
+			readStoredSession: () => assert.fail("duplicate flags must be refused before session access"),
 		});
 		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
 		assert.match(payload.error.next_action, /--help/u);
@@ -4045,7 +4070,7 @@ test("capabilities identifies each target request kind without copying its selec
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
 		const runtime = {
-			loadSession: async () => storedSession(endpoint, { accessToken: token }),
+			readStoredSession: async () => storedSession(endpoint, { accessToken: token }),
 			nextRequestId: () => "narnia:target-catalog:001",
 		};
 		const payload = await yamlRun(
@@ -4122,7 +4147,7 @@ test("an empty target match is distinguished from an empty authorized catalog wi
 			["capabilities", "targets", "--capability", "notion.page.get", "--profile", "profile:narnia", "--match", selector],
 			0,
 			{
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:target-catalog:empty-match",
 			},
 		);
@@ -4154,7 +4179,7 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 					target_catalog: selectedCatalog,
 				});
 	await withGateway(async ({ endpoint }) => {
-		const runtime = { loadSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:target-recovery" };
+		const runtime = { readStoredSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:target-recovery" };
 		const args = ["capabilities", "targets", "--capability", "message.search", "--profile", "profile:narnia", "--match", "team"];
 		const continued = await yamlRun(args, 0, runtime);
 		assert.deepEqual(continued.target_selection, { capability_id: "message.search", request_kind: "match" });
@@ -4282,7 +4307,7 @@ test("every stored-session --profile consumer enforces the public Profile refere
 	];
 	for (const args of cases) {
 		const payload = await yamlRun(args, 2, {
-			loadSession: () => assert.fail(`${args.join(" ")} must reject before local session work`),
+			readStoredSession: () => assert.fail(`${args.join(" ")} must reject before local session work`),
 			readInstalledReleaseFacts: () => assert.fail(`${args.join(" ")} must reject before release inspection`),
 		});
 		assert.equal(payload.error.kind, "invalid_argument", args.join(" "));
@@ -4291,7 +4316,7 @@ test("every stored-session --profile consumer enforces the public Profile refere
 
 test("acceptance rejects an unsafe request reference before release or session work", async () => {
 	const payload = await yamlRun(["acceptance", "emit", "--request-ref", "free text with spaces"], 2, {
-		loadSession: () => assert.fail("unsafe acceptance request ref must reject before local session work"),
+		readStoredSession: () => assert.fail("unsafe acceptance request ref must reject before local session work"),
 		readInstalledReleaseFacts: () => assert.fail("unsafe acceptance request ref must reject before release inspection"),
 	});
 	assert.equal(payload.error.kind, "invalid_argument");
@@ -4338,7 +4363,7 @@ test("capabilities probes live and populates the discovery cache when cold", asy
 	await withGateway(async ({ endpoint, requests }) => {
 		const cache = inMemoryDiscoveryCache();
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
 			...cache.runtime,
 		});
@@ -4367,7 +4392,7 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 60_000));
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4395,7 +4420,7 @@ test("the default discovery-cache window is the operator-measured 30 minutes", a
 		// than a literal — shrink DEFAULT_DISCOVERY_CACHE_TTL_MS and this goes red.
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 20 * 60_000));
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4414,7 +4439,7 @@ test("an entry older than the default window still re-probes", async () => {
 		// 31 minutes: the widened window is still a window, not an unbounded cache.
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 31 * 60_000));
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4431,7 +4456,7 @@ test("capabilities re-probes when the cached entry is past its freshness window"
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 10_000));
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			discoveryCacheTtlMs: 5_000,
 			...cache.runtime,
@@ -4453,7 +4478,7 @@ test("capabilities re-probes when the cached key does not match the handshake id
 		foreign.key.profileRef = "profile:other";
 		const cache = inMemoryDiscoveryCache(foreign);
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4470,7 +4495,7 @@ test("capabilities --fresh bypasses a warm cache and probes live", async () => {
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now));
 		const payload = await yamlRun(["capabilities", "--fresh"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4486,7 +4511,7 @@ test("capabilities --fresh bypasses a warm cache and probes live", async () => {
 test("capabilities degrades to a live probe when the discovery cache read fails", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
 			loadDiscoveryCache: async () => {
 				throw new Error("cache read boom");
@@ -4509,7 +4534,7 @@ test("capabilities degrades to a live probe when a fresh cache entry has a malfo
 		malformed.discovery = { schema_version: "ceal.gateway_discovery.v2" };
 		const cache = inMemoryDiscoveryCache(malformed);
 		const payload = await yamlRun(["capabilities"], 0, {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4629,6 +4654,30 @@ async function runBin(args, stdin, env = {}, onStderr = () => {}) {
 	} finally {
 		if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
 	}
+}
+
+async function runBinWithoutHome(args) {
+	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
+	const { HOME: _omittedHome, ...environmentWithoutHome } = process.env;
+	const child = spawn(process.execPath, [bin, ...args], {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: environmentWithoutHome,
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	child.stdout.on("data", (chunk) => {
+		stdout += chunk;
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += chunk;
+	});
+	const code = await new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", resolve);
+	});
+	return { code, stdout, stderr };
 }
 
 async function withEnrollmentGateway(callback, options = {}) {
@@ -5187,7 +5236,7 @@ test("a receipt this client cannot project is counted, not passed over", async (
 		const spooled = [];
 		let drops = 0;
 		const runtime = {
-			loadSession: async () => storedSession(endpoint),
+			readStoredSession: async () => storedSession(endpoint),
 			// Not a safe-ref: spaces and a slash are outside the spool's grammar,
 			// so the receipt is real and the projection still refuses it.
 			nextRequestId: () => "narnia opaque/1",
@@ -5215,7 +5264,7 @@ test("a receipt this client cannot project is counted, not passed over", async (
 		async ({ endpoint }) => {
 			let drops = 0;
 			const runtime = {
-				loadSession: async () => storedSession(endpoint),
+				readStoredSession: async () => storedSession(endpoint),
 				recordReceiptSpool: () => {},
 				recordReceiptSpoolDrop: () => {
 					drops += 1;

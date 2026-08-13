@@ -1,6 +1,6 @@
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
-import type { CealCommandRuntime } from "./cli-runtime.js";
 import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
+import type { CealSessionCapabilityDependencies } from "./session-capability.js";
 import { changedSessionIdentityBindings } from "./session-identity.js";
 import { withCealTiming } from "./timing.js";
 
@@ -56,11 +56,6 @@ export type CealSessionCommit =
 			issuedSessionRevoked: CealRevokeDisposition;
 	  };
 
-interface CealSessionCommitStore {
-	load(): Promise<CealStoredSession | null>;
-	save(session: CealStoredSession): Promise<void>;
-}
-
 /**
  * Compare, dispose, then write. The comparison happens after the Gateway has
  * already issued `incoming` — an enrollment cannot know whose session a code
@@ -69,29 +64,34 @@ interface CealSessionCommitStore {
  */
 export async function commitEnrolledSession(
 	incoming: CealStoredSession,
-	runtime: CealCommandRuntime,
+	dependencies: CealSessionCapabilityDependencies,
 	force: boolean,
 ): Promise<CealSessionCommit> {
 	try {
-		return await withCommitStore(runtime, async (store) => {
+		return await dependencies.store.withStateLock(async (store) => {
 			const current = await store.load();
 			const changed = current ? changedSessionIdentityBindings(current, incoming) : [];
 			if (current && changed.length > 0 && !force) {
-				return { ok: false, reason: "identity_conflict", changedBindings: changed, issuedSessionRevoked: await revoke(incoming, runtime) };
+				return {
+					ok: false,
+					reason: "identity_conflict",
+					changedBindings: changed,
+					issuedSessionRevoked: await revoke(incoming, dependencies),
+				};
 			}
 			const replacing = current !== null && changed.length > 0;
 			// Whatever is displaced is ended first, renewal included: this home has
 			// one slot, so a credential the store no longer names is one no local
 			// command can ever revoke. It stays live at the Gateway until its TTL
 			// otherwise, which is half of what this issue reported.
-			const previousSessionRevoked = current ? await revoke(current, runtime) : "not_applicable";
+			const previousSessionRevoked = current ? await revoke(current, dependencies) : "not_applicable";
 			try {
 				await store.save(incoming);
 			} catch (error) {
 				// The incoming session is already issued even when this was a first
 				// session. It must not remain live and unnamed just because there was
 				// no displaced local credential to clean up.
-				const issuedSessionRevoked = await revoke(incoming, runtime);
+				const issuedSessionRevoked = await revoke(incoming, dependencies);
 				return {
 					ok: false,
 					reason: "store_failure",
@@ -105,7 +105,7 @@ export async function commitEnrolledSession(
 			// being stored — the receipt spool carries no discriminator to tell them
 			// apart — so it clears, first session included.
 			if (current && !replacing) return { ok: true, replacement: "same_identity", previousSessionRevoked, derivedStateCleared: false };
-			const derivedStateCleared = await clearSessionDerivedState(runtime);
+			const derivedStateCleared = await clearSessionDerivedState(dependencies);
 			return { ok: true, replacement: replacing ? "replaced" : "first_session", previousSessionRevoked, derivedStateCleared };
 		});
 	} catch (error) {
@@ -114,7 +114,7 @@ export async function commitEnrolledSession(
 			reason: "store_failure",
 			code: sessionStoreFailureCode(error),
 			previousSessionEnded: false,
-			issuedSessionRevoked: await revoke(incoming, runtime),
+			issuedSessionRevoked: await revoke(incoming, dependencies),
 		};
 	}
 }
@@ -206,20 +206,6 @@ export function sessionIdentityConflictFields(
 	};
 }
 
-async function withCommitStore<T>(runtime: CealCommandRuntime, action: (store: CealSessionCommitStore) => Promise<T>): Promise<T> {
-	// The lock makes compare-and-write one interval, so a second local process
-	// cannot slip a different identity in between the two. Hosts without it (the
-	// embedding seam the suite drives) still get the comparison, just not the
-	// mutual exclusion.
-	if (runtime.withSessionStateLock) return runtime.withSessionStateLock(action);
-	const load = runtime.loadSession;
-	const save = runtime.saveSession;
-	// Both commands refuse before spending a credential when either is absent, so
-	// this is the type system's copy of that guard rather than a second policy.
-	if (!load || !save) throw new CealSessionStoreError("home_unavailable");
-	return action({ load, save });
-}
-
 /**
  * One revocation request. Its two callers differ only in how they read the
  * answer, so the request lives once and each caller owns its own reading — the
@@ -227,11 +213,11 @@ async function withCommitStore<T>(runtime: CealCommandRuntime, action: (store: C
  */
 async function requestRevocation(
 	session: CealStoredSession,
-	runtime: CealCommandRuntime,
+	dependencies: CealSessionCapabilityDependencies,
 ): Promise<{ revoked: true } | { denied: string } | { transport: string }> {
-	const create = runtime.createClientSessionClient ?? createCealPersonalClientSessionClient;
+	const create = dependencies.createClientSessionClient ?? createCealPersonalClientSessionClient;
 	try {
-		const response = await withCealTiming(runtime.timing, "session_revoke", () =>
+		const response = await withCealTiming(dependencies.timing, "session_revoke", () =>
 			create({ endpoint: session.gatewayEndpoint }).revoke(session.refreshToken),
 		);
 		return response.ok ? { revoked: true } : { denied: response.error.code };
@@ -249,8 +235,8 @@ async function requestRevocation(
  * because its dead refresh token could not be revoked would strand exactly the
  * operator the recovery text is speaking to.
  */
-async function revoke(session: CealStoredSession, runtime: CealCommandRuntime): Promise<CealRevokeDisposition> {
-	const outcome = await requestRevocation(session, runtime);
+async function revoke(session: CealStoredSession, dependencies: CealSessionCapabilityDependencies): Promise<CealRevokeDisposition> {
+	const outcome = await requestRevocation(session, dependencies);
 	if ("revoked" in outcome) return "revoked";
 	if ("denied" in outcome) return RETIRED_REFRESH_CODES.has(outcome.denied) ? "already_unusable" : "unavailable";
 	return "unavailable";
@@ -265,8 +251,11 @@ const RETIRED_REFRESH_CODES: ReadonlySet<string> = new Set(["refresh_revoked", "
  */
 export type CealLogoutRevocation = { disposition: Extract<CealRevokeDisposition, "revoked" | "already_unusable"> } | { failure: string };
 
-export async function revokeClientSession(session: CealStoredSession, runtime: CealCommandRuntime): Promise<CealLogoutRevocation> {
-	const outcome = await requestRevocation(session, runtime);
+export async function revokeClientSession(
+	session: CealStoredSession,
+	dependencies: CealSessionCapabilityDependencies,
+): Promise<CealLogoutRevocation> {
+	const outcome = await requestRevocation(session, dependencies);
 	if ("revoked" in outcome) return { disposition: "revoked" };
 	if ("denied" in outcome)
 		return RETIRED_REFRESH_CODES.has(outcome.denied) ? { disposition: "already_unusable" } : { failure: outcome.denied };
@@ -284,9 +273,9 @@ export async function revokeClientSession(session: CealStoredSession, runtime: C
 // stores are advisory, so neither removal may block an operation that already
 // revoked — a logout that half-failed must still report the revocation it did
 // perform.
-export async function clearSessionDerivedState(runtime: CealCommandRuntime): Promise<boolean> {
-	const discoveryCleared = await clearAdvisoryStore(runtime.removeDiscoveryCache);
-	const receiptsCleared = await clearAdvisoryStore(runtime.removeReceiptSpool);
+export async function clearSessionDerivedState(dependencies: CealSessionCapabilityDependencies): Promise<boolean> {
+	const discoveryCleared = await clearAdvisoryStore(dependencies.removeDiscoveryCache);
+	const receiptsCleared = await clearAdvisoryStore(dependencies.removeReceiptSpool);
 	return discoveryCleared && receiptsCleared;
 }
 

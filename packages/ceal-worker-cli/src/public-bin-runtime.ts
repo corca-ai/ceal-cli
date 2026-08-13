@@ -5,8 +5,9 @@ import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readEmbeddedCealGuideBundle } from "./embedded-guide.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { runCealCommand } from "./index.js";
-import { createCealSessionStore } from "./profile-store.js";
+import { type CealSessionStore, createCealSessionStore } from "./profile-store.js";
 import { createCealReceiptSpoolStore } from "./receipt-spool.js";
+import { createCealSessionCapability } from "./session-capability.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { createCealStableUpdateRunner } from "./stable-update.js";
 import { type CealTimingRecorder, finishCealTiming, startCealTiming, withCealTiming, withCealTimingSync } from "./timing.js";
@@ -34,6 +35,24 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 		receiptSpool = undefined;
 	}
 
+	const timedSessionStore: CealSessionStore | undefined = sessionStore
+		? {
+				load: () => withCealTiming(timing, "session_load", () => sessionStore.load()),
+				save: (stored) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.save(stored, onAcquired)),
+				remove: () => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.remove(onAcquired)),
+				withStateLock: (action) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.withStateLock(action, onAcquired)),
+			}
+		: undefined;
+	const session = timedSessionStore
+		? createCealSessionCapability({
+				store: timedSessionStore,
+				timing,
+				now: Date.now,
+				removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
+				removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
+			})
+		: undefined;
+
 	const agentHostOverrides = { codex: process.env.CODEX_HOME, claude: process.env.CLAUDE_CONFIG_DIR };
 	const agentGuide = createCealAgentGuideStore(
 		process.execPath,
@@ -59,17 +78,9 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 			isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
 			isOutputTerminal: () => Boolean(process.stderr.isTTY),
 			isInputTerminal: () => Boolean(process.stdin.isTTY),
-			loadSession: sessionStore ? () => withCealTiming(timing, "session_load", () => sessionStore.load()) : undefined,
-			saveSession: sessionStore
-				? (session) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.save(session, onAcquired))
-				: undefined,
-			removeSession: sessionStore ? () => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.remove(onAcquired)) : undefined,
-			withSessionStateLock: sessionStore
-				? (action) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.withStateLock(action, onAcquired))
-				: undefined,
+			session,
 			loadDiscoveryCache: discoveryCache ? () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()) : undefined,
 			saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
-			removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
 			inspectAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_inspect", () => agentGuide.inspect(agent)) : undefined,
 			registerAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_register", () => agentGuide.register(agent)) : undefined,
 			// The append takes the spool's cross-process lock, so it is genuinely
@@ -103,7 +114,6 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 							return session ? withCealTiming(timing, "receipt_spool_load", () => receiptSpool.load(sessionIdentityDiscriminator(session))) : null;
 						}
 					: undefined,
-			removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
 			inspectAgentAudit: () =>
 				withCealTimingSync(timing, "observer_transcript_scan", () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now())),
 			inspectAgentSession: (runtimeName, sessionRef) =>
