@@ -3910,7 +3910,7 @@ test("capabilities omits eligible_profiles when the Gateway does not negotiate t
 	});
 });
 
-test("target queries keep their exact request shape while the pinned Protocol withholds future target metadata", async () => {
+test("target queries keep their exact request shape and render signed target metadata", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
 		const runtime = {
@@ -3919,19 +3919,22 @@ test("target queries keep their exact request shape while the pinned Protocol wi
 		};
 		const matched = await yamlRun(
 			["capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1"],
-			3,
+			0,
 			runtime,
 		);
-		assert.equal(matched.status, "unavailable");
-		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 3, runtime);
-		assert.equal(unfiltered.status, "unavailable");
+		assert.equal(matched.status, "available");
+		assert.equal(matched.targets[0].connector_kind, "slack");
+		assert.equal(matched.targets[0].target_kind, "conversation");
+		assert.deepEqual(matched.targets[0].capability_access[0], { ...matureCapabilityAccess(), effect: "read", writable: false });
+		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 0, runtime);
+		assert.equal(unfiltered.status, "available");
 		const cursor = `cursor:${"c".repeat(48)}`;
 		const continued = await yamlRun(
 			["capabilities", "targets", "--capability", "message.search", "--cursor", cursor, "--limit", "1"],
-			3,
+			0,
 			runtime,
 		);
-		assert.equal(continued.status, "unavailable");
+		assert.equal(continued.status, "available");
 		assert.doesNotMatch(JSON.stringify(continued), new RegExp(cursor, "u"));
 		const catalog = await yamlRun(["capabilities"], 0, runtime);
 		assert.equal(Object.hasOwn(catalog, "target_selection"), false);
@@ -4052,18 +4055,19 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {
 	let selectedCatalog = {
 		target_count: 1,
-		returned_count: 0,
+		returned_count: 1,
 		complete: false,
 		next_cursor: `cursor:${"a".repeat(48)}`,
 	};
-	const responseFactory = (request) =>
-		request.operation === "handshake"
-			? handshakeResponse(request)
-			: success(request, {
-					...discoveryResponse(request).value,
-					targets: [],
-					target_catalog: selectedCatalog,
-				});
+	const responseFactory = (request) => {
+		if (request.operation === "handshake") return handshakeResponse(request);
+		const discovery = discoveryResponse(request).value;
+		return success(request, {
+			...discovery,
+			targets: selectedCatalog.target_count === 0 ? [] : discovery.targets,
+			target_catalog: selectedCatalog,
+		});
+	};
 	await withGateway(async ({ endpoint }) => {
 		const runtime = { readStoredSession: async () => storedSession(endpoint), nextRequestId: () => "narnia:target-recovery" };
 		const args = ["capabilities", "targets", "--capability", "message.search", "--profile", "profile:narnia", "--match", "team"];
@@ -4879,6 +4883,8 @@ function discoveryResponse(request) {
 					{
 						target_ref: "target:team-inbox",
 						label: "Team inbox",
+						connector_kind: "slack",
+						target_kind: "conversation",
 						access: "granted",
 						capability_ids: ["message.search"],
 						capability_access: [matureCapabilityAccess()],

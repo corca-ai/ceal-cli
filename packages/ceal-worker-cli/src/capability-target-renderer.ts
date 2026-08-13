@@ -1,13 +1,6 @@
 import type { CealCapabilityAccessDescriptor, CealGatewayDiscoveryCapability, CealGatewayDiscoveryTarget } from "@corca-ai/ceal-protocol";
 import { isCealPublicSafeText } from "@corca-ai/ceal-protocol";
 
-/** The additive target identity facts supplied by the signed Gateway contract. */
-export interface CealDiscoveryTargetMetadata {
-	connector_kind: string;
-	target_kind: string;
-}
-
-type DiscoveryTargetWithMetadata = CealGatewayDiscoveryTarget & CealDiscoveryTargetMetadata;
 const CONNECTOR_KIND = /^[a-z][a-z0-9-]{0,63}$/u;
 const TARGET_KIND = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){0,7}$/u;
 
@@ -16,21 +9,19 @@ export type CealRenderedCapabilityAccess = CealCapabilityAccessDescriptor & {
 	writable: boolean;
 };
 
-export type CealRenderedDiscoveryTarget = Omit<CealGatewayDiscoveryTarget, "capability_access"> &
-	CealDiscoveryTargetMetadata & {
-		capability_access: CealRenderedCapabilityAccess[];
-	};
+export type CealRenderedDiscoveryTarget = Omit<CealGatewayDiscoveryTarget, "capability_access"> & {
+	capability_access: CealRenderedCapabilityAccess[];
+};
 
 /**
  * Join target-granted access with the catalog descriptor that owns the effect.
  *
- * The metadata intersection is intentional: the currently pinned Protocol
- * decoder removes these additive fields, so callers must fail closed until the
- * signed handoff that declares them is consumed. There is no guessed kind or
- * legacy target projection here.
+ * Signed Protocol owns connector_kind and target_kind. The local validation
+ * remains defensive at this exported renderer boundary; it never guesses a
+ * kind or widens target access.
  */
 export function renderCapabilityTargets(
-	targets: readonly DiscoveryTargetWithMetadata[],
+	targets: readonly CealGatewayDiscoveryTarget[],
 	capabilities: readonly CealGatewayDiscoveryCapability[],
 ): CealRenderedDiscoveryTarget[] {
 	const descriptorById = new Map<string, CealGatewayDiscoveryCapability>();
