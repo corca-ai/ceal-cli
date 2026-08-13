@@ -129,7 +129,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		let privateCarrierHandoff;
 		try {
 			privateCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
-			privateControlSessionContract = readControlSessionContract(path.join(repoRoot, PRIVATE_CONTROL_SESSION_CONTRACT_PATH), { repoRoot });
+			privateControlSessionContract = native.private_leased_consumer_control_session;
 			privateCarrierHandoff = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot });
 		} catch {
 			fail(
@@ -146,11 +146,10 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 				"private_carrier_contract_drift",
 				"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
 			);
-		if (
-			!native.private_leased_consumer_control_session ||
-			native.private_leased_consumer_control_session.sha256 !== privateControlSessionContract.sha256 ||
-			JSON.stringify(native.private_leased_consumer_control_session.contract) !== JSON.stringify(privateControlSessionContract.value)
-		)
+		const projectedControlSessionBytes = privateControlSessionContract?.contract
+			? Buffer.from(`${JSON.stringify(privateControlSessionContract.contract, null, "\t")}\n`)
+			: null;
+		if (!projectedControlSessionBytes || privateControlSessionContract.sha256 !== sha256(projectedControlSessionBytes))
 			fail(
 				"private_control_session_contract_drift",
 				"Worker release assets refuse a native binary whose embedded control-session contract differs from the source contract.",
@@ -179,7 +178,7 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 				contract_sha256: privateCarrierContract.sha256,
 			},
 			private_leased_consumer_control_session: {
-				contract_json: privateControlSessionContract.bytes.toString("utf8"),
+				contract_json: projectedControlSessionBytes.toString("utf8"),
 				contract_sha256: privateControlSessionContract.sha256,
 			},
 			private_leased_consumer_handoff: privateCarrierHandoff,

@@ -115,15 +115,17 @@ separately approved boundaries.
   workspace dist-lock deadline is monotonic, and a bounded npm/tsc process-group
   supervisor settles timed-out builds before the lock is released. These remain
   checkout tests, not installed or release proof.
-- Client behavior tests no longer consume checkout `dist`: all six execute the
-  current TypeScript source through one fail-closed direct/bare workspace
-  resolver, while declarations and public package shape are compiled and
-  inspected in an isolated temp Protocol+Client artifact workspace. Poisoned
-  `dist`, immediate source mutation, and orphan compiled-module mutations prove
-  the authority boundary. Worker Protocol/CLI behavior, binary assertions, and
-  existing release fixtures still use the shared checkout-dist builder and
-  mutex; migrate those before deleting that owner, without confusing this
-  local test cleanup with the signed Protocol handoff.
+- Protocol, client, and Worker CLI behavior tests no longer consume checkout
+  `dist`: they execute current TypeScript through one fail-closed direct/bare
+  workspace resolver, and Worker CLI subprocesses inherit the same resolver.
+  Emitted declarations, package exports, and the Worker executable are compiled
+  and inspected together in an isolated temp Protocol+Client+Worker artifact
+  workspace. Poisoned `dist`, immediate source mutation, orphan compiled-module
+  mutations, and an unchanged checkout-dist fingerprint prove the authority
+  boundary. Existing release package fixtures and the explicit root build still
+  use the shared checkout-dist builder and mutex; migrate those before deleting
+  that owner, without confusing this local test cleanup with the signed Protocol
+  handoff.
 
 ## Next Action
 

@@ -18,6 +18,11 @@ export class CealProtocolValidationError extends Error {
 
 export const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 export const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
+export function isSafeCode(value: unknown): value is string { return typeof value === "string" && SAFE_CODE.test(value); }
+const SAFE_CONNECTOR_KIND = /^[a-z][a-z0-9-]{0,63}$/u;
+const SAFE_TARGET_KIND = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){0,7}$/u;
+export function isSafeConnectorKind(value: unknown): value is string { return typeof value === "string" && SAFE_CONNECTOR_KIND.test(value); }
+export function isSafeTargetKind(value: unknown): value is string { return typeof value === "string" && value.length <= 64 && SAFE_TARGET_KIND.test(value); }
 export const RAW_PROVIDER_REF = /(?:\b[CDGUW][A-Z0-9]{8,}\b|(?:slack|github|notion|google-workspace):[^\s"']+|[0-9]{10}[.][0-9]{4,})/u;
 export const SECRET_MATERIAL = /(?:xox[baprs]-[A-Za-z0-9-]+|gh[opusr]_[A-Za-z0-9_-]+|ntn_[A-Za-z0-9_-]+|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|Bearer\s+\S+|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+)/iu;
 export const OPAQUE_TEXT_MATERIAL = /(?:\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b(?=[A-Za-z0-9_-]{24,}\b)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{24,}\b)/u;
@@ -166,6 +171,24 @@ export function requireSafeRef(value: unknown): asserts value is string {
 	if (typeof value !== "string" || !SAFE_REF.test(value) || SECRET_MATERIAL.test(value) || RAW_PROVIDER_REF.test(value)) invalidRequestOrResponse();
 }
 
+/**
+ * A capability result's schema name is DERIVED from its capability id, not
+ * chosen. This is the whole rule, in one place, because it has two halves and
+ * restating only the first is worse than not restating it at all: the safe-ref
+ * GRAMMAR (which also refuses secret and raw-provider material) and the derived
+ * PREFIX. A Gateway-side guard that checks the prefix alone accepts
+ * `ceal.resource_resolve_result.C0123456789` — well-formed, correctly prefixed,
+ * and carrying a raw Slack channel id that this decoder refuses.
+ */
+export function cealDerivedCapabilityResultSchemaPrefix(capabilityId: string): string {
+	return `ceal.${capabilityId.replaceAll(".", "_")}_result.`;
+}
+
+export function isCealDerivedCapabilityResultSchema(value: unknown, capabilityId: string): boolean {
+	return typeof value === "string" && SAFE_REF.test(value) && !SECRET_MATERIAL.test(value) && !RAW_PROVIDER_REF.test(value)
+		&& value.startsWith(cealDerivedCapabilityResultSchemaPrefix(capabilityId));
+}
+
 export function requirePrefixedRef(value: unknown, prefix: string): asserts value is string {
 	requireSafeRef(value);
 	if (!value.startsWith(prefix)) invalidRequestOrResponse();
@@ -178,6 +201,24 @@ export function requireSafeText(value: unknown, maxBytes: number): asserts value
 export function isCealPublicSafeText(value: unknown, maxBytes: number): value is string {
 	return typeof value === "string" && value.trim() !== "" && byteLength(value) <= maxBytes && !hasControlCharacter(value)
 		&& !SECRET_MATERIAL.test(value) && !RAW_PROVIDER_REF.test(value) && !OPAQUE_TEXT_MATERIAL.test(value);
+}
+
+/** Byte ceiling for one human-facing display name, shared by every boundary. */
+export const CEAL_PUBLIC_DISPLAY_NAME_MAX_BYTES = 512;
+
+/**
+ * The ONE rule for a human-facing name: the same public-safe-text rule message
+ * text uses, at the display-name ceiling.
+ *
+ * It exists as a named predicate rather than three copies of
+ * `isCealPublicSafeText(value, 512)` because three boundaries apply it — the
+ * protocol author decoder, the core message projection, and the leased result
+ * projector — and every one of them THROWS or refuses on failure. The last time
+ * these three carried their own copy of a display-name rule, one of them changed
+ * and the other two turned a lost field into a failed read.
+ */
+export function isCealPublicSafeDisplayName(value: unknown): value is string {
+	return isCealPublicSafeText(value, CEAL_PUBLIC_DISPLAY_NAME_MAX_BYTES);
 }
 
 export function redactCealPublicUnsafeText(value: string): string {

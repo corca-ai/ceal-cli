@@ -821,11 +821,23 @@
        "capability_id": "message.search",
        "effect": "read",
        "result_ref": "result:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-       "handles": [],
+       "handles": [
+        {
+         "kind": "message",
+         "ref": "message:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        {
+         "kind": "message",
+         "ref": "message:2222222222222222222222222222222222222222222222222222222222222222"
+        }
+       ],
        "data": {
-        "schema_version": "ceal.gateway_leased_agent_message_read_data.v2",
+        "schema_version": "ceal.gateway_leased_agent_resource_read_data.v2",
         "items": [
          {
+          "kind": "message",
+          "display_name": "2026-08-03T09:12:00.000Z",
+          "handle_index": 0,
           "text": "first bounded item",
           "author": {
            "author_ref": "author:1111111111111111111111111111111111111111111111111111111111111111",
@@ -834,6 +846,9 @@
           }
          },
          {
+          "kind": "message",
+          "display_name": "2026-08-03T09:13:00.000Z",
+          "handle_index": 1,
           "text": "second bounded item"
          }
         ]
@@ -847,8 +862,11 @@
     "operation": "call",
     "capability_id": "message.search",
     "effect": "read",
-    "handle_kinds": [],
-    "data_schema": "ceal.gateway_leased_agent_message_read_data.v2",
+    "handle_kinds": [
+     "message",
+     "message"
+    ],
+    "data_schema": "ceal.gateway_leased_agent_resource_read_data.v2",
     "item_count": 2
    },
    "proof_contract": {
@@ -978,58 +996,6 @@
     ],
     "non_claims": [
      "no provider call, Gateway transport, or audit was reached"
-    ],
-    "production_gateway_handshake_checked": false,
-    "production_gateway_audit_reached": false,
-    "live_provider_dispatch_checked": false,
-    "connector_completion_readback_checked": false
-   }
-  },
-  {
-   "id": "capability_result.survey-dispatch.zero-handle",
-   "kind": "capability_result",
-   "input": {
-    "response": {
-     "schema_version": "ceal.leased_consumer_capability_control_response.v4",
-     "operation": "call",
-     "result": {
-      "status": "result",
-      "result": {
-       "schema_version": "ceal.gateway_leased_agent_capability_result.v1",
-       "capability_id": "workflow.survey_dispatch.send",
-       "effect": "write",
-       "result_ref": "result:2222222222222222222222222222222222222222222222222222222222222222",
-       "handles": [],
-       "data": {
-        "schema_version": "ceal.gateway_leased_agent_survey_dispatch_data.v1",
-        "terminal": "ack_uncertain",
-        "sent_count": 2,
-        "replayed_count": 1,
-        "failed_count": 0,
-        "uncertain_count": 1
-       }
-      }
-     }
-    }
-   },
-   "expected": {
-    "decoded": true,
-    "operation": "call",
-    "capability_id": "workflow.survey_dispatch.send",
-    "effect": "write",
-    "handle_kinds": [],
-    "data_schema": "ceal.gateway_leased_agent_survey_dispatch_data.v1",
-    "terminal": "ack_uncertain"
-   },
-   "proof_contract": {
-    "requirement": "local_state",
-    "reached": "local_state",
-    "fixture": "local_projection_fixture",
-    "claims_allowed": [
-     "v4 survey dispatch result DTO decodes and projects exactly"
-    ],
-    "non_claims": [
-     "no survey connector route, provider call, Gateway transport, or response ingress was reached"
     ],
     "production_gateway_handshake_checked": false,
     "production_gateway_audit_reached": false,

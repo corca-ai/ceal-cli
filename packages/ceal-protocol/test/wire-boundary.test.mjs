@@ -48,6 +48,7 @@ test("Gateway request decoder accepts the four exact semantic operations", () =>
 		envelope("discover", { capability_id: "message.search", match: "Team inbox", limit: 1 }),
 		envelope("discover", { capability_ids: ["message.get", "message.search"], match: "Team inbox", limit: 1 }),
 		envelope("discover", { capability_id: "message.search", cursor: "cursor:continuation_001" }),
+		envelope("discover", { cursor: "cursor:bare-continuation_001" }),
 		envelope("call", {
 			capability_id: "message.search",
 			target_ref: "target:workspace",
@@ -151,6 +152,8 @@ test("discovery target catalogs make bounded selection and continuation explicit
 		complete: false,
 		next_cursor: "cursor:continuation_001",
 	};
+	paged.value.targets[0].connector_kind = "google-workspace";
+	paged.value.targets[0].target_kind = "drive.folder";
 	assert.deepEqual(decodeCealClientResponse(paged, request), paged);
 
 	for (const mutate of [
@@ -158,9 +161,93 @@ test("discovery target catalogs make bounded selection and continuation explicit
 		(value) => { value.value.target_catalog.complete = true; },
 		(value) => { value.value.target_catalog.next_cursor = "cursor:unsafe secret=material"; },
 		(value) => { value.value.targets[0].capability_ids = []; },
+		(value) => { value.value.targets[0].connector_kind = "provider:internal"; },
+		(value) => { value.value.targets[0].target_kind = "provider:scope"; },
 	]) {
 		const invalid = structuredClone(paged);
 		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+});
+
+test("bare discovery exposes callable target rows and rejects malformed paging", () => {
+	const request = envelope("discover", {});
+	const bare = discoveryResponse(request);
+	assert.deepEqual(decodeCealClientResponse(bare, request), bare);
+	assert.deepEqual(bare.value.targets[0], {
+		target_ref: "target:workspace", label: "Team inbox", connector_kind: "slack", target_kind: "conversation", access: "granted",
+		capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()],
+	});
+	const ungranted = structuredClone(bare);
+	ungranted.value.targets[0].access = "ungranted";
+	ungranted.value.targets[0].capability_ids = [];
+	ungranted.value.targets[0].capability_access = [];
+	assert.throws(() => decodeCealClientResponse(ungranted, request), hasCode("invalid_client_response"));
+	for (const mutate of [
+		(value) => { value.value.target_catalog.unknown_catalog_field = true; },
+		(value) => { value.value.target_catalog.returned_count = 0; },
+		(value) => { value.value.target_catalog.complete = false; },
+	]) {
+		const invalid = structuredClone(bare);
+		mutate(invalid);
+		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+	const continuationRequest = envelope("discover", { cursor: "cursor:bare-terminal" });
+	const terminal = discoveryResponse(continuationRequest);
+	terminal.value.target_catalog = { target_count: 65, returned_count: 1, complete: true };
+	assert.deepEqual(decodeCealClientResponse(terminal, continuationRequest), terminal);
+	const falseFirstPage = structuredClone(bare);
+	falseFirstPage.value.target_catalog = { target_count: 65, returned_count: 1, complete: true };
+	assert.throws(() => decodeCealClientResponse(falseFirstPage, request), hasCode("invalid_client_response"));
+});
+
+// corca-ai/ceal-cli#13: an empty complete page could not say whether a selector
+// produced it, so it read as "no authorization here".
+test("the selector disclosure is an optional boolean a Gateway may not fabricate", () => {
+	const narrowedRequest = envelope("discover", { capability_id: "message.search", match: "Team" });
+	const silent = discoveryResponse(narrowedRequest);
+	assert.deepEqual(decodeCealClientResponse(silent, narrowedRequest), silent, "absence stays valid: an installed client keeps today's exact shape");
+
+	const narrowed = discoveryResponse(narrowedRequest);
+	narrowed.value.target_catalog.match_applied = true;
+	assert.deepEqual(decodeCealClientResponse(narrowed, narrowedRequest), narrowed);
+
+	for (const fabricated of [true, false]) {
+		const continuation = envelope("discover", { capability_id: "message.search", cursor: "cursor:continuation_001" });
+		const continued = discoveryResponse(continuation);
+		continued.value.target_catalog.match_applied = fabricated;
+		assert.deepEqual(decodeCealClientResponse(continued, continuation), continued, "a continuation reports its snapshot's selector, carrying no match of its own");
+	}
+
+	for (const value of ["true", 1, null, {}]) {
+		const invalid = structuredClone(narrowed);
+		invalid.value.target_catalog.match_applied = value;
+		assert.throws(() => decodeCealClientResponse(invalid, narrowedRequest), hasCode("invalid_client_response"));
+	}
+
+	const unfilteredRequest = envelope("discover", { capability_id: "message.search" });
+	const unfiltered = discoveryResponse(unfilteredRequest);
+	unfiltered.value.target_catalog.match_applied = true;
+	assert.throws(() => decodeCealClientResponse(unfiltered, unfilteredRequest), hasCode("invalid_client_response"),
+		"a filter claimed for a request that carried no selector is a refused response, not guidance");
+	unfiltered.value.target_catalog.match_applied = false;
+	assert.deepEqual(decodeCealClientResponse(unfiltered, unfilteredRequest), unfiltered);
+});
+
+test("discovery retains provider-neutral capability navigation for a URL-refusal workflow", () => {
+	const request = envelope("discover", { capability_id: "message.search" });
+	const response = discoveryResponse(request);
+	response.value.capabilities[0].navigation = {
+		target_selector: "opaque_catalog_target", url_target_selector: "unsupported",
+		required_argument_source: { argument: "message_ref", handle_kind: "message", issued_by: ["message.search", "resource.resolve"] },
+	};
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+	for (const navigation of [
+		{ ...response.value.capabilities[0].navigation, url_target_selector: "supported" },
+		{ ...response.value.capabilities[0].navigation, required_argument_source: { argument: "unsafe argument", handle_kind: "message", issued_by: ["message.search"] } },
+		{ ...response.value.capabilities[0].navigation, required_argument_source: { argument: "message_ref", handle_kind: "message", issued_by: [] } },
+	]) {
+		const invalid = structuredClone(response); invalid.value.capabilities[0].navigation = navigation;
 		assert.throws(() => decodeCealClientResponse(invalid, request), hasCode("invalid_client_response"));
 	}
 });
@@ -216,6 +303,8 @@ test("discovery accepts an optional non-authorizing announcement policy and reje
 	const request = envelope("discover", {});
 	const response = discoveryResponse(request);
 	response.value.capabilities[0].capability_id = "github.repository.get";
+	response.value.targets = [];
+	response.value.target_catalog = { target_count: 0, returned_count: 0, complete: true };
 	response.value.capabilities[0].announcement_policy = announcementPolicy();
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 
@@ -242,6 +331,8 @@ test("discovery accepts an optional non-authorizing announcement policy and reje
 	assert.throws(() => decodeCealClientResponse(write, request), hasCode("invalid_client_response"));
 
 	const attestedWrite = discoveryResponse(request);
+	attestedWrite.value.targets = [];
+	attestedWrite.value.target_catalog = { target_count: 0, returned_count: 0, complete: true };
 	attestedWrite.value.capabilities[0] = {
 		...attestedWrite.value.capabilities[0],
 		capability_id: "sheets.values.update",
@@ -273,30 +364,24 @@ test("discovery accepts an optional non-authorizing announcement policy and reje
 	mismatchedCapability.value.capabilities[0].announcement_policy = announcementPolicy();
 	assert.throws(() => decodeCealClientResponse(mismatchedCapability, request), hasCode("invalid_client_response"));
 
-	const calendarHardDeny = structuredClone(attestedWrite);
-	calendarHardDeny.value.capabilities[0].capability_id = "calendar.event.create";
-	calendarHardDeny.value.capabilities[0].announcement_policy = {
-		...writeAnnouncementPolicy(),
-		scope_statement_kind: "google_workspace_ceal_drive_or_direct_share",
-		scope_statement: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
-		provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/calendar.readonly"] },
-	};
-	assert.throws(() => decodeCealClientResponse(calendarHardDeny, request), hasCode("invalid_client_response"));
 });
 
 test("announcement policy accepts each exact declared provider capability projection", () => {
 	const request = envelope("discover", {});
 	for (const { capabilityId, effect, writeContract, policy } of [
 		{ capabilityId: "github.repository.get", effect: "read", writeContract: undefined, policy: announcementPolicy() },
-		...(["github.repository.search", "github.issue.get", "github.pull_request.get", "github.workflow_run.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: announcementPolicy() }))),
-		...(["message.search", "message.enumerate", "message.get", "resource.resolve", "conversation.thread.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("slack_public_app_member_channels_only", "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" }) }))),
+		...(["collection.search", "github.issue.get", "github.pull_request.get", "github.workflow_run.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: announcementPolicy() }))),
+		...(["message.search", "message.get", "resource.resolve", "conversation.thread.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("slack_public_app_member_channels_only", "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.", { kind: "slack_app", oauth_scope_observation: "not_exposed_by_current_connector" }) }))),
 		...(["notion.search", "notion.page.get", "resource.resolve"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("notion_connected_logical_area", "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.", { kind: "notion_integration", sharing: "provider_enforced", descendant_inventory: "not_enumerable" }) }))),
 		...(["calendar.availability", "calendar.event.search", "calendar.event.get"].map((capabilityId) => ({ capabilityId, effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_calendar_read_only", "Approved Calendar availability and event reads only; Calendar mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/calendar.readonly"] }) }))),
-		{ capabilityId: "drive.file.search", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_metadata", "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.metadata.readonly"] }) },
+		{ capabilityId: "file.search", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_metadata", "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/drive.metadata.readonly"] }) },
 		{ capabilityId: "sheets.values.read", effect: "read", writeContract: undefined, policy: readAnnouncementPolicy("google_workspace_ceal_drive_or_direct_share_sheet_ranges", "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.", { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"] }) },
 		{ capabilityId: "sheets.values.update", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges", scope_statement: "Bounded values updates in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets"] } } },
+		{ capabilityId: "sheets.values.clear", effect: "write", writeContract: attestedWriteContract(), policy: { ...writeAnnouncementPolicy(), scope_statement_kind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_clear_ranges", scope_statement: "Bounded values clears in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.", provider_application_authority: { kind: "google_service_account", requested_api_scopes: ["https://www.googleapis.com/auth/spreadsheets"] } } },
 	]) {
 		const response = discoveryResponse(request);
+		response.value.targets = [];
+		response.value.target_catalog = { target_count: 0, returned_count: 0, complete: true };
 		response.value.capabilities[0] = { ...response.value.capabilities[0], capability_id: capabilityId, effect, ...(writeContract ? { write_contract: writeContract } : {}), announcement_policy: policy };
 		assert.deepEqual(decodeCealClientResponse(response, request), response);
 	}
@@ -395,9 +480,22 @@ test("client response decoder accepts exact operation-correlated Gateway results
 	assert.deepEqual(decodeCealClientResponse(wrongResourceKindFailure, readbackRequest), wrongResourceKindFailure);
 	wrongResourceKindFailure.value.events[0].non_claims.push("provider_execution_not_reached");
 	assert.throws(() => decodeCealClientResponse(wrongResourceKindFailure, readbackRequest), hasCode("invalid_client_response"));
+	// The provider-reach allowlist is closed, so a NEW client error code is
+	// pre-provider by default. `duplicate_write_refused` (the append-class
+	// cross-key duplicate guard) is refused before any connector data work, so
+	// dropping the honest non-claim under it must stay a decode failure exactly
+	// as it is for argument validation — this is the assertion that keeps the
+	// code out of the reached allowlist rather than trusting the omission.
+	for (const errorCode of ["invalid_arguments", "duplicate_write_refused"]) {
+		const preProviderOmission = structuredClone(ambiguousProviderFailure);
+		preProviderOmission.value.events[0].error_code = errorCode;
+		assert.throws(() => decodeCealClientResponse(preProviderOmission, readbackRequest), hasCode("invalid_client_response"), errorCode);
+		const preProviderHonest = structuredClone(preProviderOmission);
+		preProviderHonest.value.events[0].non_claims = ["provider_execution_not_reached", "production_audit_not_reached"];
+		assert.deepEqual(decodeCealClientResponse(preProviderHonest, readbackRequest), preProviderHonest, errorCode);
+	}
 	const preProviderFailure = structuredClone(ambiguousProviderFailure);
 	preProviderFailure.value.events[0].error_code = "invalid_arguments";
-	assert.throws(() => decodeCealClientResponse(preProviderFailure, readbackRequest), hasCode("invalid_client_response"));
 	const preRouteInvalid = structuredClone(preProviderFailure);
 	preRouteInvalid.value.events[0].policy_decision = "not_evaluated";
 	delete preRouteInvalid.value.events[0].grant_snapshot;
@@ -473,6 +571,35 @@ test("handshake decoder tolerates the optional negotiated eligible-Profile catal
 	}
 });
 
+test("handshake decoder exact-validates the freshness-bound scoped identity projection", () => {
+	const request = envelope("handshake", { client: { name: "ceal", version: "0.77.0" } });
+	const response = handshakeResponse(request);
+	response.value.identity_projection = scopedIdentityProjection(response.value);
+	assert.deepEqual(decodeCealClientResponse(response, request), response);
+
+	for (const mutate of [
+		(value) => { value.profile_ref = "profile:other"; },
+		(value) => { value.instance_ref = "instance:other"; },
+		(value) => { value.graph_revision = "not-a-digest"; },
+		(value) => { value.expires_at = "2026-08-12T00:20:00.000Z"; },
+		(value) => { value.people[0].actor_kind = "bot"; },
+		(value) => { value.people[0].providers = ["slack", "github"]; },
+		(value) => { value.people = [
+			{ subject_ref: "subject:z", display_name: "Zed", actor_kind: "human", providers: ["slack"] },
+			{ subject_ref: "subject:a", display_name: "Alice", actor_kind: "human", providers: ["slack"] },
+		]; },
+		(value) => { value.people = Array.from({ length: 129 }, (_, index) => ({
+			subject_ref: `subject:${index}`, display_name: `Person ${String(index).padStart(3, "0")}`,
+			actor_kind: "human", providers: ["slack"],
+		})); },
+		(value) => { value.people[0].provider_account_id = "U_PRIVATE"; },
+	]) {
+		const malformed = structuredClone(response);
+		mutate(malformed.value.identity_projection);
+		assert.throws(() => decodeCealClientResponse(malformed, request), hasCode("invalid_client_response"));
+	}
+});
+
 test("public capability evidence exposes policy and readiness without private backend or credential vocabulary", () => {
 	const discoveryRequest = envelope("discover", {});
 	const callRequest = envelope("call", {
@@ -489,7 +616,7 @@ test("public capability evidence exposes policy and readiness without private ba
 	]);
 	assert.match(rendered, /grant:workspace-message-search/u);
 	assert.match(rendered, /authoritative_index/u);
-	assert.doesNotMatch(rendered, /capability_backend|credential_identity|delegated|slack|mature_search|degraded_fallback|\bbot\b|provider_search|recent_channel_history|provider_ranked|provider_truncated/u);
+	assert.doesNotMatch(rendered, /capability_backend|credential_identity|delegated|mature_search|degraded_fallback|\bbot\b|provider_search|recent_channel_history|provider_ranked|provider_truncated/u);
 });
 
 test("public discovery, call, and audit envelopes admit provider-neutral capability extensions", () => {
@@ -657,6 +784,68 @@ test("legacy write fixtures keep only generic write-boundary validation in the p
 	delete discovery.value.capabilities.at(-1).write_contract;
 	assert.throws(() => decodeCealClientResponse(discovery, discoverRequest), hasCode("invalid_client_response"));
 });
+
+// `compensation` and `dry_run` crossed this boundary carried only by the write
+// contract's index signature: no type, no member check, no grammar. They are
+// split here on ownership rather than on taste — a connector names its own undo
+// mechanism, while a caller BRANCHES on whether it may preview a mutation, and a
+// value it cannot interpret is worse than a refusal.
+test("the write contract closes the Gateway-guaranteed vocabularies and leaves the connector-owned ones open", () => {
+	const accepted = [
+		{ dry_run: "unsupported" },
+		{ dry_run: "supported" },
+		{ compensation: "irreversible" },
+		{ compensation: "replace_with_new_text" },
+		{ compensation: "overwrite_not_reversible" },
+		{ compensation: "a_mechanism_no_connector_has_declared_yet" },
+		{ attribution: "subject" },
+		{ attribution: "connector_integration" },
+		{ attribution: "requester_event", provenance_binding: "gateway_attested_requester_event_v1" },
+	];
+	for (const overrides of accepted) {
+		const { request, response } = discoveryWithWriteContract(overrides);
+		assert.deepEqual(decodeCealClientResponse(response, request).value.capabilities.at(-1).write_contract, {
+			side_effect_class: "append_message", idempotency: "required", provider_readback: "required", ...overrides,
+		});
+	}
+	const refused = [
+		{ dry_run: "provider_simulated" },
+		{ dry_run: true },
+		{ attribution: "installed_app" },
+		{ idempotency: "recommended" },
+		{ provider_readback: "eventual" },
+		{ provenance_binding: "gateway_attested_requester_event_v2", attribution: "requester_event" },
+		// A provenance binding attests a requester EVENT; there is none to attest
+		// on a subject- or connector-attributed mutation.
+		{ provenance_binding: "gateway_attested_requester_event_v1", attribution: "subject" },
+		{ provenance_binding: "gateway_attested_requester_event_v1" },
+		// Open does not mean unvalidated: both connector-owned fields keep the
+		// safe-ref grammar, which also refuses raw provider and secret material.
+		{ compensation: "reverse via https://example.test/undo" },
+		{ compensation: 3 },
+		{ side_effect_class: "append message" },
+	];
+	for (const overrides of refused) {
+		const { request, response } = discoveryWithWriteContract(overrides);
+		assert.throws(() => decodeCealClientResponse(response, request), hasCode("invalid_client_response"), JSON.stringify(overrides));
+	}
+});
+
+function discoveryWithWriteContract(overrides) {
+	const request = envelope("discover", { capability_id: "message.search" });
+	const response = discoveryResponse(request);
+	response.value.capabilities.push({
+		capability_id: "message.create", label: "Send one governed message", effect: "write", target_requirement: "required",
+		input_contract: { schema_version: "ceal.message_create_input.v1", required: ["text"] },
+		evidence_requirement: "gateway_audit",
+		write_contract: { side_effect_class: "append_message", idempotency: "required", provider_readback: "required", ...overrides },
+	});
+	response.value.targets[0].capability_ids.push("message.create");
+	response.value.targets[0].capability_access.push({
+		...matureCapabilityAccess(), capability_id: "message.create", grant_ref: "grant:workspace-message-create",
+	});
+	return { request, response };
+}
 
 test("legacy search fixtures use the generic response envelope", () => {
 	const request = envelope("call", {
@@ -909,6 +1098,7 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 
 function discoveryResponse(request) {
 	const selected = request.body.capability_id === "message.search" || request.body.capability_ids?.includes("message.search") === true;
+	const bare = !selected && request.body.capability_id === undefined && request.body.capability_ids === undefined;
 	return responseEnvelope(request, {
 		ok: true,
 			value: {
@@ -928,12 +1118,12 @@ function discoveryResponse(request) {
 				},
 				evidence_requirement: "gateway_audit",
 			}],
-			targets: selected ? [
-					{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] },
+			targets: selected || bare ? [
+					{ target_ref: "target:workspace", label: "Team inbox", connector_kind: "slack", target_kind: "conversation", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] },
 			] : [],
-			target_catalog: selected
+			target_catalog: selected || bare
 				? { target_count: 1, returned_count: 1, complete: true }
-				: { target_count: 0, returned_count: 0, complete: true },
+				: { target_count: 1, returned_count: 0, complete: false },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -1045,6 +1235,22 @@ function handshakeResponse(request) {
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		},
 	});
+}
+
+function scopedIdentityProjection(handshake) {
+	return {
+		schema_version: "ceal.gateway_scoped_identity_projection.v1",
+		instance_ref: handshake.instance_ref,
+		profile_ref: handshake.profile_ref,
+		profile_audience_revision: 7,
+		graph_revision: "a".repeat(64),
+		subject_key_revision: "b".repeat(64),
+		projection_revision: "c".repeat(64),
+		issued_at: "2026-08-12T00:00:00.000Z",
+		expires_at: "2026-08-12T00:05:00.000Z",
+		people: [{ subject_ref: "subject:profile-person", display_name: "Alice", actor_kind: "human", providers: ["github", "slack"] }],
+		truncated: false,
+	};
 }
 
 function readbackResponse(request, targetRequestId) {

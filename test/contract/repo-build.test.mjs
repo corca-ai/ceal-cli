@@ -312,14 +312,11 @@ while :; do sleep 1; done
 	}
 });
 
-test("standalone package tests enter the dist owner", () => {
-	for (const [packageName, closure] of [
-		["ceal-client", "packages/ceal-protocol packages/ceal-client"],
-		["ceal-worker-cli", "packages/ceal-protocol packages/ceal-client packages/ceal-worker-cli"],
-	]) {
+test("standalone package behavior tests do not enter the checkout-dist owner", () => {
+	for (const packageName of ["ceal-client", "ceal-worker-cli"]) {
 		const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", packageName, "package.json"), "utf8"));
-		assert.equal(manifest.scripts.precoverage, `node ../../test/repo-build.mjs ${closure}`);
-		assert.equal(manifest.scripts.pretest, `node ../../test/repo-build.mjs ${closure}`);
+		assert.equal(manifest.scripts.precoverage, undefined);
+		assert.equal(manifest.scripts.pretest, undefined);
 	}
 });
 

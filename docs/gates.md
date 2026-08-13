@@ -26,6 +26,11 @@ There is no third suite any more. `test:legacy-compatibility` audited the frozen
 belongs to `test:contract` or `test:release`, and `repo-gates.test.mjs` fails if
 one belongs to neither.
 
+The signed Gateway Protocol source materializer is an explicit operator entry:
+`npm run materialize:gateway-protocol-source -- <tag> <commit> <protocol-tree> <output-directory>`.
+Declaring it in the root manifest keeps production reachability honest; a
+test-only import is not evidence that an operator path can reach the command.
+
 `lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
 style being introduced.
 
@@ -73,29 +78,31 @@ Formatting-only commits belong in `.git-blame-ignore-revs`, which
 
 ## The Release Tier Runs In Parallel, And What Pays For That
 
-### Source-authoritative client behavior and isolated client artifacts
+### Source-authoritative behavior and isolated package artifacts
 
-Client behavior tests execute `src/**/*.ts` through `test/source-loader.mjs`.
+Protocol, client, and Worker behavior tests execute `src/**/*.ts` through
+`test/source-loader.mjs`.
 The loader owns both direct workspace paths and bare workspace package names;
 it redirects either form to the editable TypeScript source and refuses a
-workspace `dist` resolution that has no source authority. The client `test` and
-`coverage` scripts therefore have no build lifecycle hook: a targeted behavior
-test observes the current source or fails closed, never succeeds against a
-previous checkout build.
+workspace `dist` resolution that has no source authority. `test/run-source-tests.mjs`
+also installs that loader through `NODE_OPTIONS`, so Worker CLI subprocesses
+inherit the same authority instead of silently returning to checkout `dist`.
+The client and Worker `test` and `coverage` scripts therefore have no build
+lifecycle hook: a targeted behavior test observes current source or fails
+closed, never succeeds against a previous checkout build.
 
-Emitted declarations, package exports, and executable JavaScript are a different
-proof purpose. `test/client-artifact.test.mjs` asks
+Emitted declarations, package exports, and executable JavaScript are a
+different proof purpose. `test/client-artifact.test.mjs` asks
 `test/artifact-workspace.mjs` to copy only source/config/manifest inputs into a
-fresh temporary workspace, emit Protocol and client packages there, and load
-the emitted client against the temporary Protocol package. The proof binds
-source and artifact digests and fingerprints checkout `dist` before and after;
-the artifact build neither consumes nor changes checkout `dist`.
+fresh temporary workspace, emit Protocol, client, and Worker packages there,
+and load their exact public exports and Worker executable against those
+temporary dependencies. The proof binds source and artifact digests and
+fingerprints checkout `dist` across the build; the artifact build neither
+consumes nor changes checkout `dist`.
 
-The worker behavior and release fixtures still use the shared checkout-dist
-owner described below. They are the remaining migration scope; the source
-loader already owns their direct and bare import resolution, but their suites
-must not switch until their emitted-code assertions are moved into the artifact
-lane.
+Release package fixtures and the explicit root build still use the shared
+checkout-dist owner described below. They are the remaining migration scope;
+package behavior tests no longer enter that owner.
 
 `test:release` was pinned to `--test-concurrency=1` from the commit that first
 needed it, with no recorded reason. The reason was real but undeclared: the
@@ -109,10 +116,10 @@ writer: `ensurePackageBuilt` in `test/repo-build.mjs`, an inter-process mutex â€
 `mkdir` as the atomic test-and-set â€” plus an in-process memo. A fixture that
 needs a current `dist` asks for it there rather than building its own.
 
-The same owner now serves the root build and package-local `pretest` /
-`precoverage` hooks. The root coverage command suppresses those lifecycle hooks
-only after `build:worker` has produced all three workspace trees, so the gate
-does not ask a second process to rebuild what it is about to read. The owner
+The same owner still serves the root build and release fixtures. The root
+coverage command suppresses package lifecycle hooks after `build:worker` has
+produced all three workspace trees, while standalone behavior coverage needs no
+checkout build at all. The owner
 passes an incremental build-info path under `node_modules/.cache` to each
 package's existing build command; it removes that record when `dist` is absent,
 so a clean cannot turn a stale compiler record into a missing release tree.
@@ -129,10 +136,9 @@ race that loses is silent:
   `npm run build` itself, because a new one that did would reintroduce exactly
   this race and pass its own tests.
 - `repo-gates.test.mjs` binds the root build and coverage routes, while
-  `repo-build.test.mjs` binds every owned package's standalone test and coverage
-  hooks to the writer. Keeping those assertions at the two consumer boundaries
-  caught the client test script that still built outside the owner during this
-  change's fresh-eye review.
+  `repo-build.test.mjs` proves standalone package behavior tests have no
+  checkout-dist hooks. Keeping those assertions at both consumer boundaries
+  prevents a behavior lane from silently reacquiring artifact authority.
 - The stale-lock break exists so a process killed while holding the lock costs
   the next run a warning rather than a hang.
 
@@ -562,6 +568,12 @@ It reports a module no entry reaches, and an export no production path reaches
 that its own module never calls either. That second condition is deliberate:
 without it every surplus `export` modifier would land here, which is `knip`'s
 question and would bury this one.
+
+The export verdict is deliberately limited to `scripts/`, the surface this gate
+owns. The graph may traverse a script's relative import into a package artifact,
+but package exports belong to the isolated emitted-ABI lane above; judging them
+here would make a script-wiring gate depend on whichever checkout `dist` another
+process last produced.
 
 Three properties are worth keeping when this is edited:
 

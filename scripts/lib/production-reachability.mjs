@@ -261,6 +261,12 @@ export function analyzeProductionReachability({
 
 	const findings = [];
 	for (const absolute of [...reachable].sort()) {
+		// This gate owns the production wiring of repo scripts. Package exports are
+		// a different public-ABI question, proved from an isolated emitted artifact.
+		// Following a script's relative import into checkout `dist` is still useful
+		// for graph traversal, but treating every export found there as script API
+		// makes this verdict depend on whichever build last mutated shared output.
+		if (!absolute.startsWith(`${path.join(repoRoot, "scripts")}${path.sep}`)) continue;
 		const module = load(absolute);
 		if (wholeModule.has(absolute)) continue;
 		const importedHere = consumed.get(absolute) ?? new Set();

@@ -116,17 +116,17 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	} catch {
 		throw new Error("invalid_control_session_contract");
 	}
-	const v4Routes = {
-		acquire: "/api/ceal/agent/v1/control/acquire",
-		projection: "/api/ceal/agent/v1/control/projection",
-		recheck: "/api/ceal/agent/v1/control/recheck",
-		call: "/api/ceal/agent/v1/call",
-		complete: "/api/ceal/agent/v1/control/complete",
-	};
-	const v5Routes = {
-		...v4Routes,
-		notification_receipt: "/api/ceal/agent/v1/control/notification-receipt",
-	};
+	const routeEntries = Object.entries(value?.gateway?.routes ?? {});
+	const fixedRoutes =
+		routeEntries.length >= 5 &&
+		routeEntries.every(
+			([operation, route]) =>
+				typeof operation === "string" &&
+				/^[a-z][a-z0-9_]*$/u.test(operation) &&
+				typeof route === "string" &&
+				/^\/api\/ceal\/agent\/v1\/[a-z0-9][a-z0-9_/-]*$/u.test(route),
+		) &&
+		new Set(routeEntries.map(([, route]) => route)).size === routeEntries.length;
 	let lock;
 	try {
 		lock = JSON.parse(readFileSync(path.join(repoRoot, "gateway-protocol-handoff-lock.json"), "utf8"));
@@ -138,9 +138,9 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v2" &&
 		value.agent_ipc?.request_schema_version === "ceal.leased_consumer_capability_control_request.v4" &&
 		value.agent_ipc?.response_schema_version === "ceal.leased_consumer_capability_control_response.v4" &&
-		exact(value.gateway?.routes, Object.keys(v4Routes)) &&
-		Object.entries(v4Routes).every(([operation, route]) => value.gateway.routes[operation] === route);
-	const v5 =
+		routeEntries.length === 5 &&
+		fixedRoutes;
+	const modern =
 		exact(value, [
 			"schema_version",
 			"argv",
@@ -157,13 +157,18 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 		value.notification_channel.schema_version === "ceal.leased_consumer_capability_notification.v5" &&
 		value.notification_channel.framing === "ndjson" &&
 		value.notification_channel.maximum_frame_bytes === 4 * 1024 &&
-		value.agent_ipc?.request_schema_version === "ceal.leased_consumer_capability_control_request.v5" &&
-		value.agent_ipc?.response_schema_version === "ceal.leased_consumer_capability_control_response.v5" &&
-		exact(value.gateway?.routes, Object.keys(v5Routes)) &&
-		Object.entries(v5Routes).every(([operation, route]) => value.gateway.routes[operation] === route) &&
+		["ceal.leased_consumer_capability_control_request.v5", "ceal.leased_consumer_capability_control_request.v6"].includes(
+			value.agent_ipc?.request_schema_version,
+		) &&
+		["ceal.leased_consumer_capability_control_response.v5", "ceal.leased_consumer_capability_control_response.v6"].includes(
+			value.agent_ipc?.response_schema_version,
+		) &&
+		value.agent_ipc.request_schema_version.slice(-2) === value.agent_ipc.response_schema_version.slice(-2) &&
+		routeEntries.length >= 6 &&
+		fixedRoutes &&
 		protocolVersionAtLeast(lock?.protocol?.version, [0, 72, 13]);
 	if (
-		(!v4 && !v5) ||
+		(!v4 && !modern) ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		value.argv[0] !== "--internal-leased-consumer-control-session" ||
@@ -196,6 +201,108 @@ export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
 	return Object.freeze({ bytes, value: Object.freeze(value), sha256: createHash("sha256").update(bytes).digest("hex") });
 }
 
+/**
+ * Projects the operation-to-route table from one control conformance sidecar
+ * whose bytes have already passed the reviewed Gateway archive consumer.  The
+ * sidecar remains the authority: this function owns no operation names, route
+ * literals, or capability semantics.  Canonical Protocol decoders supplied by
+ * the caller prove that every signed request/response vector names the same
+ * operation before its route can enter the worker contract.
+ */
+export function projectVerifiedControlConformanceRoutes(bytes, { decodeRequest, decodeResponse }) {
+	let value;
+	try {
+		value = JSON.parse(Buffer.from(bytes).toString("utf8"));
+	} catch {
+		throw new Error("invalid_control_conformance");
+	}
+	if (
+		!value ||
+		typeof value !== "object" ||
+		Array.isArray(value) ||
+		!Array.isArray(value.operations) ||
+		value.operations.length === 0 ||
+		typeof decodeRequest !== "function" ||
+		typeof decodeResponse !== "function"
+	)
+		throw new Error("invalid_control_conformance");
+	const routes = {};
+	for (const entry of value.operations) {
+		if (
+			!exact(entry, ["operation", "path", "request", "response"]) ||
+			typeof entry.operation !== "string" ||
+			!/^[a-z][a-z0-9_]*$/u.test(entry.operation) ||
+			typeof entry.path !== "string" ||
+			!/^\/api\/ceal\/agent\/v1\/[a-z0-9][a-z0-9_/-]*$/u.test(entry.path) ||
+			Object.hasOwn(routes, entry.operation)
+		)
+			throw new Error("invalid_control_conformance");
+		let request;
+		let response;
+		try {
+			request = decodeRequest(entry.request);
+			response = decodeResponse(entry.response);
+		} catch {
+			throw new Error("invalid_control_conformance");
+		}
+		if (request?.operation !== entry.operation || response?.operation !== entry.operation) throw new Error("invalid_control_conformance");
+		routes[entry.operation] = entry.path;
+	}
+	return Object.freeze(routes);
+}
+
+/**
+ * Produces (or verifies) the worker-owned projection only from the already
+ * authenticated sidecar.  A missing or drifted operation is therefore a hard
+ * refusal rather than a locally invented fallback route.
+ */
+export function controlSessionContractFromVerifiedConformance(contract, conformanceBytes, decoders, { materialize = false, handoff } = {}) {
+	const routes = projectVerifiedControlConformanceRoutes(conformanceBytes, decoders);
+	const projected = structuredClone(contract);
+	if (!projected?.gateway || typeof projected.gateway !== "object" || Array.isArray(projected.gateway))
+		throw new Error("invalid_control_session_contract");
+	if (materialize) projected.gateway.routes = { ...routes };
+	if (materialize) {
+		const conformance = JSON.parse(Buffer.from(conformanceBytes).toString("utf8"));
+		const requestSchemas = new Set(conformance.operations.map((entry) => entry.request.schema_version));
+		const responseSchemas = new Set(conformance.operations.map((entry) => entry.response.schema_version));
+		if (requestSchemas.size !== 1 || responseSchemas.size !== 1) throw new Error("invalid_control_session_contract");
+		projected.agent_ipc.request_schema_version = [...requestSchemas][0];
+		projected.agent_ipc.response_schema_version = [...responseSchemas][0];
+		if (
+			!handoff ||
+			typeof handoff.gateway_tag !== "string" ||
+			!/^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u.test(handoff.gateway_tag) ||
+			!/^[a-f0-9]{40}$/u.test(handoff.gateway_commit) ||
+			!/^[a-f0-9]{40}$/u.test(handoff.protocol_tree) ||
+			!/^[a-f0-9]{64}$/u.test(handoff.archive_sha256)
+		)
+			throw new Error("invalid_control_session_contract");
+		projected.gateway_protocol_handoff = {
+			lock_file: "gateway-protocol-handoff-lock.json",
+			gateway_tag: handoff.gateway_tag,
+			gateway_commit: handoff.gateway_commit,
+			protocol_tree: handoff.protocol_tree,
+			archive_sha256: handoff.archive_sha256,
+		};
+	}
+	if (!materialize && handoff) {
+		const expected = {
+			lock_file: "gateway-protocol-handoff-lock.json",
+			gateway_tag: handoff.gateway_tag,
+			gateway_commit: handoff.gateway_commit,
+			protocol_tree: handoff.protocol_tree,
+			archive_sha256: handoff.archive_sha256,
+		};
+		if (JSON.stringify(projected.gateway_protocol_handoff) !== JSON.stringify(expected)) throw new Error("invalid_control_session_contract");
+	}
+	if (!exact(projected.gateway.routes, Object.keys(routes))) throw new Error("invalid_control_session_contract");
+	for (const [operation, route] of Object.entries(routes)) {
+		if (projected.gateway.routes[operation] !== route) throw new Error("invalid_control_session_contract");
+	}
+	return Object.freeze(projected);
+}
+
 // Both contract readers assert exact key sets rather than "has at least these",
 // so an added field is a refusal instead of a silently ignored one. It was a
 // local closure in each of them, byte-identical; it captures nothing, so the
@@ -214,7 +321,7 @@ function exact(object, keys) {
 // constant prefix, and each was spelled out in full beside its own read-compare-
 // write. That is the pair the digest guard depends on: text and digest are
 // emitted together so a generated module whose halves disagree is refusable.
-function contractModule(description, constPrefix, contract) {
+export function contractModule(description, constPrefix, contract) {
 	return [
 		"// Generated by scripts/generate-leased-consumer-handoff-runtime.mjs; do not edit by hand.",
 		`// ${description}`,
@@ -349,6 +456,7 @@ export function verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot = RO
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	try {
+		if (process.argv.length !== 2) throw new Error("invalid_arguments");
 		console.log(JSON.stringify(generateLeasedConsumerHandoffRuntime()));
 	} catch {
 		console.error(JSON.stringify({ ok: false, error_code: "handoff_generation_failed" }));

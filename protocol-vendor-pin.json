@@ -4,8 +4,8 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "cd3f5f4b8fe1757ca97c12512f9f5066db989840",
-		"tree": "857545f9b5fc3eb76f84679f76080ca081902103"
+		"commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
+		"tree": "e20497d4ebe25a675012c676448e14eea4da891c"
 	},
 	"test_support": {
 		"source_path": "scripts/test-support/base64url.mjs",
@@ -14,18 +14,15 @@
 	},
 	"shipped": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
-		"status": "diverged",
-		"gateway_commit": "b644bdcc1883a12f30dec9f15a918eca3676b740",
-		"protocol_tree": "07c79e9626a1ef0be3c3a3092ebff48a4433d70d",
-		"reason": "B1 development retains the reviewed local Protocol 0.72.17 baseline while the Gateway prepares one final signed handoff after C1; the older 0.72.13 signed handoff keeps shipment quarantined.",
-		"disposition_owner": "corca-ai/ceal Gateway Protocol owner",
-		"disposition_request": "docs/protocol-quarantine.md"
+		"status": "agreed",
+		"gateway_commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
+		"protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",
 		"Only `source.tree` is checked locally, against `HEAD:packages/ceal-protocol`. `source.commit` is a recorded observation that no local check can confirm; confirming it needs an authenticated owner or public checkout (`git rev-parse <commit>:packages/ceal-protocol`).",
-		"`diverged` quarantines B1 development proof against the reviewed local 0.72.17 baseline, which the Gateway has superseded in content; it is not clearance to build, install, accept, or release a worker against either that unsigned tree or the 0.72.13 signed handoff.",
-		"`shipped.protocol_tree` remains bound by the signed gateway-protocol-handoff-v0.72.13 manifest and Protocol provenance in gateway-protocol-handoff-lock.json; the frozen source tree intentionally differs until a final signed handoff converges them.",
+		"The frozen source was materialized from the canonical HTTPS origin's exact signed tag after verifying its peeled commit and packages/ceal-protocol tree against gateway-protocol-handoff-lock.json; no sibling checkout supplied source bytes.",
+		"Agreement binds source and shipment identity; it is not by itself a Worker package, native artifact, installation, or live Gateway action proof.",
 		"The archive this pin ships against is published under the Gateway protocol-handoff origin that .github/workflows/ceal-release.yml downloads from and was verified against its Sigstore certificate before this pin was written. The release lane subsequently trusts the recorded archive digest, not an implicit source checkout.",
 		"The frozen Protocol test suite imports one owner test-support module outside the package subtree. `test_support.blob` binds the copied helper mechanically; it is not production or release input."
 	]

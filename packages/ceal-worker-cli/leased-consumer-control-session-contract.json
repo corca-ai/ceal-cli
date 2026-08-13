@@ -17,8 +17,8 @@
 	},
 	"agent_ipc": {
 		"transport": "stdin_stdout_ndjson",
-		"request_schema_version": "ceal.leased_consumer_capability_control_request.v5",
-		"response_schema_version": "ceal.leased_consumer_capability_control_response.v5",
+		"request_schema_version": "ceal.leased_consumer_capability_control_request.v6",
+		"response_schema_version": "ceal.leased_consumer_capability_control_response.v6",
 		"maximum_frame_bytes": 32768,
 		"serial": true
 	},
@@ -33,16 +33,17 @@
 			"projection": "/api/ceal/agent/v1/control/projection",
 			"recheck": "/api/ceal/agent/v1/control/recheck",
 			"call": "/api/ceal/agent/v1/call",
+			"materialization": "/api/ceal/agent/v1/control/materialization",
 			"complete": "/api/ceal/agent/v1/control/complete",
 			"notification_receipt": "/api/ceal/agent/v1/control/notification-receipt"
 		}
 	},
 	"gateway_protocol_handoff": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
-		"gateway_tag": "gateway-protocol-handoff-v0.72.13",
-		"gateway_commit": "b644bdcc1883a12f30dec9f15a918eca3676b740",
-		"protocol_tree": "07c79e9626a1ef0be3c3a3092ebff48a4433d70d",
-		"archive_sha256": "c7c410b48eb65c0a463d0e86090e8a86a67ab8a4ef3eb6a0d12ff7aee05ef7ec"
+		"gateway_tag": "gateway-protocol-handoff-v0.72.21",
+		"gateway_commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
+		"protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c",
+		"archive_sha256": "1312b7d439a3e7e17aab022a40383d7ed5f9bc3f9aa9d9cf44c21026bec079b7"
 	},
 	"non_claims": [
 		"This private contract is not a public ceal command or an Agent effect API.",

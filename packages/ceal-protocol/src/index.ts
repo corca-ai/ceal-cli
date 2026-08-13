@@ -1,8 +1,29 @@
 import { createHash } from "node:crypto";
+import { decodeCealCapabilityNavigation } from "./capability-navigation.js";
 import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
 import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
 import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
+import { validateCealGatewayAnnouncementWriteContract, validateCealGatewayWriteContract } from "./gateway-write-contract.js";
+export { CEAL_GATEWAY_WRITE_CONTRACT_CLOSED_VOCABULARIES } from "./gateway-write-contract.js";
+import { isValidCealGatewayWriteIdentitySeparation } from "./gateway-write-identity.js";
+import { validateCealGatewayScopedIdentityProjection } from "./gateway-scoped-identity-projection-validation.js";
+export {
+	CEAL_GATEWAY_WRITE_IDENTITY_FIELDS,
+	CEAL_GATEWAY_WRITE_IDENTITY_ROLES,
+	isValidCealGatewayWriteIdentitySeparation,
+} from "./gateway-write-identity.js";
+export type { CealGatewayWriteIdentityRole } from "./gateway-write-identity.js";
+import { isValidCealGatewayHostNonClaims } from "./gateway-proof-claims.js";
+export {
+	CEAL_GATEWAY_HOST_NON_CLAIM_ORDER,
+	CEAL_GATEWAY_MANDATORY_NON_CLAIM,
+	CEAL_GATEWAY_PROOF_AXES,
+	CEAL_GATEWAY_PROOF_AXIS_NON_CLAIMS,
+	cealGatewayProofAxisState,
+	isValidCealGatewayHostNonClaims,
+} from "./gateway-proof-claims.js";
+export type { CealGatewayProofAxis, CealGatewayProofAxisState, CealGatewayProviderReachDisposition } from "./gateway-proof-claims.js";
 export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
 import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayAnnouncementPolicy, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayAuditReadbackRequest, CealGatewayReadbackRequest, CealGatewayRequest, CealGatewayWriteReceiptRequest } from "./gateway-response-types.js";
@@ -11,7 +32,8 @@ import {
 	CealProtocolValidationError,
 	FORBIDDEN_AUDIT_DETAIL_KEY,
 	invalidRequest,
-	invalidResponse,
+	invalidResponse, isSafeConnectorKind, isSafeTargetKind,
+	isCealDerivedCapabilityResultSchema,
 	isCealPublicSafeText,
 	isOperation,
 	isSafeExternalHttpsUrl,
@@ -23,12 +45,14 @@ import {
 	requireSafeText, retainDeclaredResponseKeys,
 	SAFE_CODE, safeJsonNodeBudgetForBytes,
 } from "./gateway-validation-primitives.js";
-export { CealProtocolValidationError, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.js";
+export { CEAL_PUBLIC_DISPLAY_NAME_MAX_BYTES, CealProtocolValidationError, isCealDerivedCapabilityResultSchema, isCealPublicSafeDisplayName, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.js";
 export type { CealProtocolValidationErrorCode } from "./gateway-validation-primitives.js";
+export { decodeCealCapabilityNavigation } from "./capability-navigation.js";
+export type { CealCapabilityNavigation } from "./capability-navigation.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
-	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
+	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA,
 } from "./gateway-response-types.js";
 export {
 	CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
@@ -49,7 +73,7 @@ export type {
 	CealEnrollmentResult,
 } from "./enrollment.js";
 export * from "./device-enrollment.js";
-export * from "./leased-consumer-disposition-control.js";
+export * from "./leased-consumer-surfaces.js";
 export { PORTABLE_UNIX_SOCKET_PATH_MAX_BYTES, isSafeUnixSocketPath } from "./unix-socket-path-safety.js";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
@@ -90,6 +114,7 @@ export type {
 	CealGatewayTargetCatalog,
 	CealGatewayEligibleProfile,
 	CealGatewayHandshakeValue,
+	CealGatewayScopedIdentityProjection, CealGatewayScopedIdentityProjectionPerson,
 	CealGatewayHostNonClaim,
 	CealGatewayHostNonClaims,
 	CealGatewayWriteContract,
@@ -243,7 +268,7 @@ function validateDiscoverySelectorValues(selection: Readonly<{ capabilityId: unk
 
 function validateDiscoverySelectorDependencies(selection: Readonly<{ capabilityId: unknown; capabilityIds: unknown; cursor: unknown; match: unknown; limit: unknown }>): void {
 	if (selection.capabilityId !== undefined && selection.capabilityIds !== undefined) invalidRequest();
-	if (selection.cursor !== undefined || selection.match !== undefined || selection.limit !== undefined) {
+	if (selection.match !== undefined || selection.limit !== undefined) {
 		if (selection.capabilityId === undefined && selection.capabilityIds === undefined) invalidRequest();
 	}
 	if (selection.cursor !== undefined && selection.match !== undefined) invalidRequest();
@@ -307,10 +332,9 @@ function validateHostProofReference(response: Record<string, unknown>): void {
 function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGatewayHandshakeRequest>): void {
 	const handshake = requireRecord(value);
 	retainDeclaredResponseKeys(handshake, [
-		"client_ref", "eligible_profiles", "host_decision", "instance_ref", "membership_ref",
-		"negotiated_protocol_version", "non_claims", "profile_ref", "proof_level",
+		"client_ref", "eligible_profiles", "host_decision", "identity_projection", "instance_ref", "membership_ref", "negotiated_protocol_version", "non_claims", "profile_ref", "proof_level",
 		"registration_ref", "schema_version", "subject_ref", "supported_gateway_protocol_range",
-	], ["eligible_profiles"]);
+	], ["eligible_profiles", "identity_projection"]);
 	if (handshake.schema_version !== "ceal.gateway_handshake.v1"
 		|| handshake.negotiated_protocol_version !== CEAL_PROTOCOL_VERSION
 		|| handshake.profile_ref !== expectedRequest.profile_ref
@@ -321,6 +345,7 @@ function validateHandshakeValue(value: unknown, expectedRequest: Readonly<CealGa
 	requireExactKeys(range, ["maximum", "minimum"]);
 	if (!negotiateCealProtocol(range).ok) invalidResponse();
 	if ("eligible_profiles" in handshake) validateEligibleProfiles(handshake.eligible_profiles);
+	if ("identity_projection" in handshake) validateCealGatewayScopedIdentityProjection(handshake.identity_projection, handshake);
 	validateHostNonClaims(handshake.non_claims);
 }
 
@@ -353,28 +378,24 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 	validateHostNonClaims(discovery.non_claims);
 }
 
-function validateTargetCatalog(
-	value: unknown,
-	targets: unknown,
-	capabilityIds: ReadonlySet<string>,
-	request: Readonly<CealGatewayDiscoverBody>,
-): void {
+function validateTargetCatalog(value: unknown, targets: unknown, capabilityIds: ReadonlySet<string>, request: Readonly<CealGatewayDiscoverBody>): void {
 	validateGatewayTargetCatalog({ requireRecord, requireExactKeys, requirePrefixedRef, invalidResponse }, value, targets, capabilityIds, request);
 }
 
 function validateDiscoveryCapability(value: unknown, seen: Set<string>): void {
 	const capability = requireRecord(value);
-	retainDeclaredResponseKeys(capability, ["announcement_policy", "capability_id", "effect", "evidence_requirement", "input_contract", "label", "target_requirement", "write_contract"], ["announcement_policy", "write_contract"]);
+	retainDeclaredResponseKeys(capability, ["announcement_policy", "capability_id", "effect", "evidence_requirement", "input_contract", "label", "navigation", "target_requirement", "write_contract"], ["announcement_policy", "navigation", "write_contract"]);
 	requireSafeRef(capability.capability_id);
 	if (seen.has(String(capability.capability_id))
 		|| !["read", "write"].includes(String(capability.effect))
 		|| !["required", "optional", "none"].includes(String(capability.target_requirement))) invalidResponse();
-	if (capability.effect === "write") validateWriteContract(capability.write_contract);
+	if (capability.effect === "write") validateCealGatewayWriteContract(capability.write_contract);
 	else if (capability.write_contract !== undefined) invalidResponse();
 	seen.add(String(capability.capability_id));
 	requireSafeText(capability.label, 128);
 	requireSafeRef(capability.evidence_requirement);
 	validateGenericInputContract(capability.input_contract);
+	if (capability.navigation !== undefined) decodeCealCapabilityNavigation(capability.navigation);
 	if (capability.announcement_policy !== undefined) validateAnnouncementPolicy(capability.announcement_policy, String(capability.capability_id), String(capability.effect), capability.write_contract);
 }
 
@@ -390,12 +411,11 @@ const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly 
 	providerAuthorityKind: string;
 }>[]>> = Object.freeze({
 	"github.repository.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
-	"github.repository.search": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
+	"collection.search": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"github.issue.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"github.pull_request.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"github.workflow_run.get": [{ effect: "read", scopeStatementKind: "github_app_installation_repositories", providerAuthorityKind: "github_app" }],
 	"message.search": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
-	"message.enumerate": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
 	"message.get": [{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" }],
 	"resource.resolve": [
 		{ effect: "read", scopeStatementKind: "slack_public_app_member_channels_only", providerAuthorityKind: "slack_app" },
@@ -407,9 +427,10 @@ const ANNOUNCEMENT_POLICY_CAPABILITY_BINDINGS: Readonly<Record<string, readonly 
 	"calendar.availability": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
 	"calendar.event.search": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
 	"calendar.event.get": [{ effect: "read", scopeStatementKind: "google_workspace_calendar_read_only", providerAuthorityKind: "google_service_account" }],
-	"drive.file.search": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_metadata", providerAuthorityKind: "google_service_account" }],
+	"file.search": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_metadata", providerAuthorityKind: "google_service_account" }],
 	"sheets.values.read": [{ effect: "read", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_sheet_ranges", providerAuthorityKind: "google_service_account" }],
 	"sheets.values.update": [{ effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges", providerAuthorityKind: "google_service_account" }],
+	"sheets.values.clear": [{ effect: "write", scopeStatementKind: "google_workspace_ceal_drive_or_direct_share_editable_sheet_clear_ranges", providerAuthorityKind: "google_service_account" }],
 });
 
 function validateAnnouncementPolicy(value: unknown, capabilityId: string, effect: string, writeContract: unknown): void {
@@ -446,11 +467,11 @@ const ANNOUNCEMENT_SCOPE_STATEMENTS: Record<string, string> = Object.freeze({
 	github_app_installation_repositories: "Repositories in the installed GitHub App installation.",
 	slack_public_app_member_channels_only: "Public channels where the installed Slack app is a member; private channels, direct messages, multi-person direct messages, and requester membership are not declared by this connector.",
 	notion_connected_logical_area: "Connected Notion logical area under provider-enforced sharing; descendant inventory is not declared.",
-	google_workspace_ceal_drive_or_direct_share: "Files in the organization shared drive named Ceal Drive and files directly shared with the provider application.",
 	google_workspace_calendar_read_only: "Approved Calendar availability and event reads only; Calendar mutation is not declared.",
 	google_workspace_ceal_drive_or_direct_share_metadata: "Metadata search for files in the organization shared drive named Ceal Drive and files directly shared with the provider application; file-content read and mutation are not declared.",
 	google_workspace_ceal_drive_or_direct_share_sheet_ranges: "Bounded values reads from governed Google Sheets in the organization shared drive named Ceal Drive and directly shared files; file mutation is not declared.",
 	google_workspace_ceal_drive_or_direct_share_editable_sheet_ranges: "Bounded values updates in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.",
+	google_workspace_ceal_drive_or_direct_share_editable_sheet_clear_ranges: "Bounded values clears in governed editable Google Sheets in the organization shared drive named Ceal Drive and directly shared files; Docs, Slides, and other Drive file mutation are not declared.",
 });
 
 function validateAnnouncementPolicyCapabilityBinding(policy: Record<string, unknown>, capabilityId: string, effect: string): void {
@@ -464,13 +485,7 @@ function validateAnnouncementPolicyEffect(policy: Record<string, unknown>, effec
 		? { explicitRequestRequired: true, provenanceRequirement: "explicit_requester_event_gateway_receipt_audit_provider_readback" }
 		: { explicitRequestRequired: false, provenanceRequirement: "gateway_receipt_audit" };
 	if (policy.explicit_request_required !== expected.explicitRequestRequired || policy.provenance_requirement !== expected.provenanceRequirement) invalidResponse();
-	if (effect === "write") validateAnnouncementWriteContract(writeContract);
-}
-
-function validateAnnouncementWriteContract(value: unknown): void {
-	const contract = requireRecord(value);
-	if (contract.idempotency !== "required" || contract.provider_readback !== "required"
-		|| contract.attribution !== "requester_event" || contract.provenance_binding !== "gateway_attested_requester_event_v1") invalidResponse();
+	if (effect === "write") validateCealGatewayAnnouncementWriteContract(writeContract);
 }
 
 function validateAnnouncementPolicyNonClaims(value: unknown): void {
@@ -510,16 +525,6 @@ function validateAnnouncementAuthorityList(value: unknown, pattern: RegExp): voi
 		|| !value.every((item) => typeof item === "string" && pattern.test(item))) invalidResponse();
 }
 
-function validateWriteContract(value: unknown): void {
-	const contract = requireRecord(value);
-	assertSafeJsonValue(contract, { forbidAuthorityKeys: false });
-	if (!Object.hasOwn(contract, "side_effect_class") || !Object.hasOwn(contract, "idempotency")
-		|| !Object.hasOwn(contract, "provider_readback")) invalidResponse();
-	requireSafeRef(contract.side_effect_class);
-	if (!["required", "optional", "not_required"].includes(String(contract.idempotency))) invalidResponse();
-	if (!["required", "best_effort", "not_available"].includes(String(contract.provider_readback))) invalidResponse();
-}
-
 function validateGenericInputContract(value: unknown): void {
 	const contract = requireRecord(value);
 	requireSafeRef(contract.schema_version);
@@ -535,22 +540,21 @@ function validateDiscoveryTargets(value: unknown, capabilityIds: ReadonlySet<str
 
 function validateDiscoveryTarget(value: unknown, seen: Set<string>, availableCapabilities: ReadonlySet<string>): void {
 	const target = requireRecord(value);
-	retainDeclaredResponseKeys(target, ["access", "capability_access", "capability_ids", "label", "target_ref"]);
+	retainDeclaredResponseKeys(target, ["access", "capability_access", "capability_ids", "connector_kind", "label", "target_kind", "target_ref"]);
 	requirePrefixedRef(target.target_ref, "target:");
-	if (seen.has(target.target_ref)) invalidResponse();
-	seen.add(target.target_ref);
+	if (seen.has(target.target_ref)) invalidResponse(); seen.add(target.target_ref);
 	requireSafeText(target.label, 128);
-	if (target.access !== "granted" && target.access !== "request_required") invalidResponse();
+	if (!isSafeConnectorKind(target.connector_kind) || !isSafeTargetKind(target.target_kind)) invalidResponse();
+	if (target.access !== "granted") invalidResponse();
 	const expectedCapabilities = validateTargetCapabilityIds(target, availableCapabilities);
-	if (target.access === "granted") validateCapabilityAccess(target.capability_access, expectedCapabilities);
-	else if (!Array.isArray(target.capability_access) || target.capability_access.length !== 0) invalidResponse();
+	validateCapabilityAccess(target.capability_access, expectedCapabilities);
 }
 
 function validateTargetCapabilityIds(target: Record<string, unknown>, availableCapabilities: ReadonlySet<string>): string[] {
 	if (!Array.isArray(target.capability_ids) || target.capability_ids.length > availableCapabilities.size) invalidResponse();
 	const expected = target.capability_ids.map(String);
 	if (new Set(expected).size !== expected.length || expected.some((id) => !availableCapabilities.has(id))) invalidResponse();
-	if ((target.access === "granted") !== (expected.length > 0)) invalidResponse();
+	if (expected.length === 0) invalidResponse();
 	return expected;
 }
 
@@ -572,9 +576,7 @@ function validateCallValue(value: unknown, expectedRequest: Readonly<CealGateway
 
 function validateGenericCapabilityResult(value: unknown, capabilityId: unknown): void {
 	const result = requireRecord(value);
-	requireSafeRef(result.schema_version);
-	const expectedPrefix = `ceal.${String(capabilityId).replaceAll(".", "_")}_result.`;
-	if (!String(result.schema_version).startsWith(expectedPrefix)) invalidResponse();
+	if (!isCealDerivedCapabilityResultSchema(result.schema_version, String(capabilityId))) invalidResponse();
 }
 
 function validateCapabilityAccess(value: unknown, expectedCapabilities: readonly string[]): void {
@@ -696,6 +698,9 @@ function isValidWriteReceipt(receipt: Record<string, unknown>, writeRequestRef: 
 	if (!["outcome_unknown", "verified"].includes(String(receipt.provider_state))) return false;
 	if (!["outcome_unknown", "verified"].includes(String(receipt.provider_readback))) return false;
 	if ((receipt.provider_state === "verified") !== (receipt.provider_readback === "verified")) return false;
+	// The replay identity, the lookup handle, and the collision evidence are three
+	// roles, not three names for one digest; `gateway-write-identity.ts` owns why.
+	if (!isValidCealGatewayWriteIdentitySeparation(receipt)) return false;
 	return receipt.write_request_sha256 === sha256(writeRequestRef);
 }
 
@@ -805,15 +810,9 @@ function validateDeniedAuditEvent(event: Record<string, unknown>): void {
 	if (!authenticationDenied && !authenticatedDenial) invalidResponse();
 }
 
+/** The rules live in `gateway-proof-claims.ts`; this is only the refusal seam. */
 function validateHostNonClaims(value: unknown, providerMayBeReached = false, providerWasReached = false): void {
-	const fixture = ["provider_execution_not_reached", "production_audit_not_reached"];
-	const liveProvider = ["production_audit_not_reached"];
-	if (providerWasReached) {
-		if (!Array.isArray(value) || JSON.stringify(value) !== JSON.stringify(liveProvider)) invalidResponse();
-		return;
-	}
-	if (!Array.isArray(value) || (JSON.stringify(value) !== JSON.stringify(fixture)
-		&& (!providerMayBeReached || JSON.stringify(value) !== JSON.stringify(liveProvider)))) invalidResponse();
+	if (!isValidCealGatewayHostNonClaims(value, { mayBeReached: providerMayBeReached, wasReached: providerWasReached })) invalidResponse();
 }
 
 function validateFailureResponse(response: Record<string, unknown>, expectedRequest: Readonly<CealGatewayRequest>): void {

@@ -20,6 +20,7 @@ const WORKER_CONTRACT_TESTS = [
 	"packages/ceal-protocol/test/wire-boundary.test.mjs",
 	"test/contract/gateway-handoff-bootstrap.test.mjs",
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
+	"test/contract/leased-consumer-control-conformance-projection.test.mjs",
 	"test/contract/one-fact-one-home.test.mjs",
 	"test/contract/prewarm-offline-consumer-cache.test.mjs",
 	"test/contract/probe-surface.test.mjs",
@@ -49,6 +50,30 @@ function testFilesIn(script) {
 		.split(/\s+/u)
 		.filter((token) => token.endsWith(".test.mjs"))
 		.sort();
+}
+
+const CONTRACT_LANE_DELIMITER = " && node --test ";
+const PROJECTION_TEST = "test/contract/leased-consumer-control-conformance-projection.test.mjs";
+
+function assertSourceLaneTestOwnership(script, testFile) {
+	const segments = script.split(CONTRACT_LANE_DELIMITER);
+	assert.equal(segments.length, 2, "test:contract must have exactly one source/artifact lane delimiter");
+	const occurrences = testFilesIn(script).filter((file) => file === testFile);
+	assert.equal(occurrences.length, 1, `${testFile} must be registered exactly once`);
+	assert.ok(testFilesIn(segments[0]).includes(testFile), `${testFile} must execute through the source-test runner`);
+	assert.ok(!testFilesIn(segments[1]).includes(testFile), `${testFile} must not execute through plain node`);
+}
+
+function searchableWorktreeFiles(repoRoot) {
+	return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+		cwd: repoRoot,
+		encoding: "buffer",
+	})
+		.toString("utf8")
+		.split("\0")
+		.filter(Boolean)
+		.filter((file) => /\.(ts|mjs|cjs|js|json|md|ya?ml|sh)$/u.test(file))
+		.filter((file) => existsSync(path.join(repoRoot, file)));
 }
 
 function read(relative) {
@@ -251,18 +276,32 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.doesNotMatch(workerPackage.scripts.build, /\|\||;|--noEmit/u);
 });
 
-test("client behavior tests execute editable source while emitted ABI stays in the artifact lane", () => {
+test("Protocol, client, and worker behavior execute editable source while emitted surfaces stay in the artifact lane", () => {
 	const clientPackage = JSON.parse(read("packages/ceal-client/package.json"));
+	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
 	assert.match(clientPackage.scripts.test, /--import [.][.]\/[.][.]\/test\/source-loader[.]mjs/u);
 	assert.match(clientPackage.scripts.coverage, /--import [.][.]\/[.][.]\/test\/source-loader[.]mjs/u);
 	assert.equal(clientPackage.scripts.pretest, undefined);
 	assert.equal(clientPackage.scripts.precoverage, undefined);
+	assert.equal(workerPackage.scripts.test, "node ../../test/run-source-tests.mjs test/*.test.mjs");
+	assert.equal(workerPackage.scripts.coverage, "c8 node ../../test/run-source-tests.mjs test/*.test.mjs");
+	assert.equal(workerPackage.scripts.pretest, undefined);
+	assert.equal(workerPackage.scripts.precoverage, undefined);
+	assert.match(manifest.scripts["test:contract"], /^node test\/run-source-tests[.]mjs packages\/ceal-protocol\/test\//u);
+	assert.match(manifest.scripts["test:contract"], / && node --test test\/contract\//u);
 	for (const file of filesUnder("packages/ceal-client/test", (name) => name.endsWith(".test.mjs"))) {
 		assert.doesNotMatch(read(file), /["'][.][.]\/dist\//u, `${file} must import editable source, not checkout dist`);
 	}
 	const artifactBuilder = read("test/artifact-workspace.mjs");
 	assert.match(artifactBuilder, /mkdtempSync/u);
 	assert.doesNotMatch(artifactBuilder, /cpSync\([^\n]*["']dist["']/u, "isolated artifacts must not copy checkout dist as an input");
+	assert.match(artifactBuilder, /compile\("ceal-protocol"/u);
+	assert.match(artifactBuilder, /compile\("ceal-client"/u);
+	assert.match(artifactBuilder, /compile\("ceal-worker-cli"/u);
+	const artifactProof = read("test/client-artifact.test.mjs");
+	for (const publicSurface of ["Protocol", "client", "worker", "executable"]) {
+		assert.match(artifactProof, new RegExp(publicSurface, "iu"), `artifact lane must name the ${publicSurface} proof purpose`);
+	}
 	assert.ok(WORKER_RELEASE_TESTS.includes("test/client-artifact.test.mjs"));
 });
 
@@ -828,18 +867,23 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 // a row and an export was deleted that a suite needed; only running the suite
 // disagreed. The byte was never needed: `"\0"` is the same bytes at runtime and
 // leaves the file text. So the rule is enforced rather than remembered.
-test("no tracked source file is binary to a text search", () => {
-	const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "buffer" })
-		.toString("utf8")
-		.split("\0")
-		.filter(Boolean)
-		// Only the extensions a reader searches. A real binary fixture may exist
-		// later, and it should be excluded here deliberately rather than by an
-		// extension list that happens not to name it.
-		.filter((file) => /\.(ts|mjs|cjs|js|json|md|ya?ml|sh)$/u.test(file));
-	assert.ok(tracked.length > 100, `only ${tracked.length} searchable files found; this check would be near-vacuous`);
-	const binary = tracked.filter((file) => readFileSync(path.join(ROOT, file)).includes(0));
+test("no searchable worktree source file is binary to a text search", () => {
+	const searchable = searchableWorktreeFiles(ROOT);
+	assert.ok(searchable.length > 100, `only ${searchable.length} searchable files found; this check would be near-vacuous`);
+	const binary = searchable.filter((file) => readFileSync(path.join(ROOT, file)).includes(0));
 	assert.deepEqual(binary, [], 'a NUL byte hides this file from rg and grep; write it as "\\0" instead');
+});
+
+test("searchable inventory ignores deleted index paths and includes their untracked replacements", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-searchable-worktree-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	execFileSync("git", ["init", "--quiet", root], { stdio: "pipe" });
+	writeFileSync(path.join(root, "old-name.mjs"), "export const oldName = true;\n");
+	execFileSync("git", ["add", "old-name.mjs"], { cwd: root, stdio: "pipe" });
+	rmSync(path.join(root, "old-name.mjs"));
+	writeFileSync(path.join(root, "new-name.mjs"), Buffer.from("export const newName = '\0';\n"));
+	assert.deepEqual(searchableWorktreeFiles(root), ["new-name.mjs"]);
+	assert.equal(readFileSync(path.join(root, "new-name.mjs")).includes(0), true, "the untracked replacement must remain scannable");
 });
 
 // `@testOnly` is how a source file declares that an `export` exists for the
@@ -1424,10 +1468,16 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 		["test:contract", WORKER_CONTRACT_TESTS],
 		["test:release", WORKER_RELEASE_TESTS],
 	]) {
-		// The file set is the claim, but the runner still has to be `node --test`:
-		// swapping it, or appending a name filter, would run almost nothing while
-		// every file stayed listed.
-		assert.match(scripts[suite], /^node --test /u, `${suite} must run through the node test runner`);
+		// The file set is the claim, but both lanes still have to use the Node test
+		// runner. Contract behavior begins in the source-authoritative wrapper;
+		// release proofs execute immutable artifacts directly.
+		if (suite === "test:contract") {
+			assert.match(scripts[suite], /^node test\/run-source-tests[.]mjs /u);
+			assert.match(scripts[suite], / && node --test /u);
+			assertSourceLaneTestOwnership(scripts[suite], PROJECTION_TEST);
+		} else {
+			assert.match(scripts[suite], /^node --test /u, `${suite} must run through the node test runner`);
+		}
 		assert.doesNotMatch(scripts[suite], /--test-name-pattern|--test-skip-pattern/u);
 		assert.deepEqual(testFilesIn(scripts[suite]), [...declared].sort());
 	}
@@ -1484,6 +1534,15 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 		.filter((entry) => entry.isDirectory())
 		.map((entry) => entry.name);
 	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory needs an explicit suite inventory entry");
+});
+
+test("projection conformance cannot move or duplicate outside the source-test lane", () => {
+	const correct = `node test/run-source-tests.mjs protocol.test.mjs ${PROJECTION_TEST}${CONTRACT_LANE_DELIMITER}plain.test.mjs`;
+	assert.doesNotThrow(() => assertSourceLaneTestOwnership(correct, PROJECTION_TEST));
+	const moved = `node test/run-source-tests.mjs protocol.test.mjs${CONTRACT_LANE_DELIMITER}plain.test.mjs ${PROJECTION_TEST}`;
+	assert.throws(() => assertSourceLaneTestOwnership(moved, PROJECTION_TEST), /source-test runner/u);
+	const duplicated = `${correct} ${PROJECTION_TEST}`;
+	assert.throws(() => assertSourceLaneTestOwnership(duplicated, PROJECTION_TEST), /exactly once/u);
 });
 
 // A "the contract suite stays small enough to run on every push" test lived here

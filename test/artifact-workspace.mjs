@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,12 @@ function compile(packageName, artifactRoot, paths = undefined) {
 	cpSync(join(checkoutRoot, "src"), join(sourceRoot, "src"), { recursive: true });
 	for (const name of ["package.json", "tsconfig.json", "tsconfig.build.json"]) cpSync(join(checkoutRoot, name), join(sourceRoot, name));
 	cpSync(join(checkoutRoot, "package.json"), join(packageRoot, "package.json"));
+	for (const name of ["leased-consumer-carrier-contract.json", "leased-consumer-control-session-contract.json"]) {
+		const source = join(checkoutRoot, name);
+		if (!existsSync(source)) continue;
+		cpSync(source, join(sourceRoot, name));
+		cpSync(source, join(packageRoot, name));
+	}
 	const config = join(artifactRoot, `${packageName}.tsconfig.json`);
 	writeFileSync(
 		config,
@@ -42,20 +48,33 @@ function compile(packageName, artifactRoot, paths = undefined) {
 	return packageRoot;
 }
 
-export function buildIsolatedClientArtifact() {
+export function buildIsolatedWorkspaceArtifacts({ includeWorker = false } = {}) {
 	const root = mkdtempSync(join(tmpdir(), "ceal-cli-artifact-"));
 	try {
+		const dependencies = join(root, "output", "node_modules");
+		mkdirSync(dependencies, { recursive: true });
+		symlinkSync(join(REPO_ROOT, "node_modules", "yaml"), join(dependencies, "yaml"), "dir");
+		mkdirSync(join(root, "input", "node_modules"), { recursive: true });
+		symlinkSync(join(REPO_ROOT, "node_modules", "yaml"), join(root, "input", "node_modules", "yaml"), "dir");
 		const protocol = compile("ceal-protocol", root);
 		const client = compile("ceal-client", root, {
 			"@corca-ai/ceal-protocol": [join(protocol, "dist", "index.d.ts")],
 		});
+		const worker = includeWorker
+			? compile("ceal-worker-cli", root, {
+					"@corca-ai/ceal-protocol": [join(protocol, "dist", "index.d.ts")],
+					"@corca-ai/ceal": [join(client, "dist", "index.d.ts")],
+				})
+			: null;
 		const scope = join(root, "output", "node_modules", "@corca-ai");
 		mkdirSync(scope, { recursive: true });
 		symlinkSync(protocol, join(scope, "ceal-protocol"), "dir");
+		symlinkSync(client, join(scope, "ceal"), "dir");
 		return {
 			root,
 			client,
 			protocol,
+			worker,
 			provenance: {
 				client_source_sha256: sha256(readFileSync(join(REPO_ROOT, "packages", "ceal-client", "src", "index.ts"))),
 				client_artifact_sha256: sha256(readFileSync(join(client, "dist", "index.js"))),
@@ -66,6 +85,10 @@ export function buildIsolatedClientArtifact() {
 		rmSync(root, { recursive: true, force: true });
 		throw error;
 	}
+}
+
+export function buildIsolatedClientArtifact() {
+	return buildIsolatedWorkspaceArtifacts();
 }
 
 export function sha256(bytes) {

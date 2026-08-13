@@ -47,6 +47,17 @@ test("an export the production graph does not import but its own module calls is
 	assert.deepEqual(analyzeProductionReachability({ repoRoot: root, workflows: [] }).findings, []);
 });
 
+test("package artifact exports reached by a script are outside the script-surface verdict", (context) => {
+	const root = fixture(context, {
+		"package.json": MANIFEST,
+		"scripts/entry.mjs": 'import { used } from "../packages/example/dist/index.js";\nused();\n',
+		"packages/example/dist/index.js": "export function used() {}\nexport function publicButUnusedHere() {}\n",
+	});
+	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
+	assert.deepEqual(report.findings, []);
+	assert.ok(report.reachable.includes("packages/example/dist/index.js"), "the graph must still traverse the artifact edge");
+});
+
 test("a module no entry reaches is reported as a file rather than export by export", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,

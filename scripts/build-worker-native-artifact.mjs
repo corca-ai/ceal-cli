@@ -117,8 +117,10 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 						stage,
 						inputs,
 						protocolTarball: rawInputs.protocolTarball,
+						controlConformance: rawInputs.controlConformance,
 						dependencies,
 					});
+					if (packed.controlSessionContract) privateControlSessionContract = packed.controlSessionContract;
 					const version = resolveVersion(repoRoot, inputs);
 					const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
 					const artifact = await buildNativeArtifact({

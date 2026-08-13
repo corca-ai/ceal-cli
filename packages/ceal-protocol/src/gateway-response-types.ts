@@ -1,3 +1,5 @@
+import type { CealCapabilityNavigation } from "./capability-navigation.js";
+
 export const CEAL_PROTOCOL_VERSION = "1.3.0" as const;
 
 export interface CealProtocolRange { minimum: string; maximum: string }
@@ -63,9 +65,9 @@ interface CealGatewayRequestEnvelope<TOperation extends CealClientOperation, TBo
 
 export type CealGatewayHandshakeRequest = CealGatewayRequestEnvelope<"handshake", { client: { name: string; version: string } }>;
 /**
- * A target catalog is intentionally selected in the Gateway rather than
- * mirrored into a worker. Empty discovery returns only the small capability
- * catalog; a capability plus match selects a bounded target page.
+ * A target catalog is selected and paged in the Gateway rather than mirrored
+ * into a worker. Bare discovery returns a bounded page of current granted
+ * targets; a capability plus match narrows that same page by capability.
  */
 export interface CealGatewayDiscoverBody {
 	capability_id?: string;
@@ -101,6 +103,30 @@ export interface CealGatewayEligibleProfile {
 	membership_ref: string;
 }
 
+export const CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA = "ceal.gateway_scoped_identity_projection.v1" as const;
+
+export interface CealGatewayScopedIdentityProjectionPerson {
+	subject_ref: string;
+	display_name: string;
+	actor_kind: "human";
+	providers: readonly string[];
+}
+
+/** Freshness-bound, redacted addressability evidence. Never operation authority. */
+export interface CealGatewayScopedIdentityProjection {
+	schema_version: typeof CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA;
+	instance_ref: string;
+	profile_ref: string;
+	profile_audience_revision: number;
+	graph_revision: string;
+	subject_key_revision: string;
+	projection_revision: string;
+	issued_at: string;
+	expires_at: string;
+	people: readonly CealGatewayScopedIdentityProjectionPerson[];
+	truncated: boolean;
+}
+
 export interface CealGatewayHandshakeValue {
 	schema_version: "ceal.gateway_handshake.v1";
 	negotiated_protocol_version: typeof CEAL_PROTOCOL_VERSION;
@@ -120,6 +146,8 @@ export interface CealGatewayHandshakeValue {
 	 * emitted by an older Gateway or a non-negotiating client.
 	 */
 	eligible_profiles?: readonly CealGatewayEligibleProfile[];
+	/** Present only for an additive-generation client and current scoped owner view. */
+	identity_projection?: CealGatewayScopedIdentityProjection;
 }
 
 export interface CealGatewayDiscoveryValue {
@@ -127,7 +155,7 @@ export interface CealGatewayDiscoveryValue {
 	profile_ref: string;
 	membership_ref: string;
 	capabilities: CealGatewayDiscoveryCapability[];
-	targets: CealGatewayDiscoveryTarget[];
+	targets: CealGatewayGrantedDiscoveryTarget[];
 	target_catalog: CealGatewayTargetCatalog;
 	host_decision: "accepted";
 	proof_level: "host_decision";
@@ -140,6 +168,22 @@ export interface CealGatewayTargetCatalog {
 	returned_count: number;
 	complete: boolean;
 	next_cursor?: string;
+	/**
+	 * Whether a `match` selector narrowed this page (#ceal-cli 13).
+	 *
+	 * Additive, negotiated and non-authorizing: its absence means the Gateway did
+	 * not disclose it, never that no filter ran. When present, `true` with
+	 * `target_count: 0` says the selector excluded every granted target, and
+	 * `false` with `target_count: 0` says no granted target exists — a
+	 * distinction an empty complete page could not previously carry, so a client
+	 * read "no results" as "no authorization".
+	 *
+	 * It is a BOOLEAN rather than a matched-on vocabulary on purpose: a new key
+	 * is free under the additive decode generation forever, while a new member of
+	 * a closed value vocabulary would be a breaking change for every already
+	 * tolerant client. See `ADDITIVE_VALUE_VOCABULARY_WARNING`.
+	 */
+	match_applied?: boolean;
 }
 
 export interface CealGatewayDiscoveryCapability {
@@ -149,6 +193,8 @@ export interface CealGatewayDiscoveryCapability {
 	target_requirement: "required" | "optional" | "none";
 	input_contract: Record<string, unknown>;
 	evidence_requirement: string;
+	/** How an agent obtains a call argument when URL target selection is unsupported. */
+	navigation?: CealCapabilityNavigation;
 	/** Required for a discovered write capability; absent for a read capability. */
 	write_contract?: CealGatewayWriteContract;
 	/**
@@ -168,7 +214,6 @@ export type CealGatewayAnnouncementScopeStatementKind =
 	| "github_app_installation_repositories"
 	| "slack_public_app_member_channels_only"
 	| "notion_connected_logical_area"
-	| "google_workspace_ceal_drive_or_direct_share"
 	| "google_workspace_calendar_read_only"
 	| "google_workspace_ceal_drive_or_direct_share_metadata"
 	| "google_workspace_ceal_drive_or_direct_share_sheet_ranges"
@@ -196,13 +241,59 @@ export interface CealGatewayAnnouncementPolicy {
 	non_claims: readonly CealGatewayAnnouncementPolicyNonClaim[];
 }
 
-/** Provider-neutral declaration of a governed mutation's operational boundary. */
+/**
+ * Whether a caller may ask the Gateway to plan this mutation without performing
+ * it. A CLOSED posture, because a caller branches on it: an unrecognized value
+ * would leave "may I preview this?" unanswered, which is worse than a refusal.
+ *
+ * `supported` has no producer in this tree yet and is declared anyway. That is
+ * deliberate and is the cheaper half of the compatibility trade: this revision
+ * is the first to validate the field at all, so an installed peer built from it
+ * fixes the vocabulary it accepts. Shipping the one observed member now and the
+ * second later would make the second member a breaking change for every peer in
+ * between — exactly `ADDITIVE_VALUE_VOCABULARY_WARNING`.
+ */
+export type CealGatewayWriteDryRun = "supported" | "unsupported";
+
+/**
+ * Who the mutation is attributed to. CLOSED, because the announcement/provenance
+ * rules key on it: `requester_event` is the only value that may accompany a
+ * `provenance_binding`, and `connector_integration` states that the acting
+ * identity is the installed provider application rather than a person.
+ */
+export type CealGatewayWriteAttribution = "subject" | "requester_event" | "connector_integration";
+
+/**
+ * Provider-neutral declaration of a governed mutation's operational boundary.
+ *
+ * Two fields here are deliberately OPEN strings and the rest are closed
+ * vocabularies; the split is the design, not an omission.
+ *
+ * `side_effect_class` and `compensation` name what a CONNECTOR does, so the
+ * vocabulary belongs to the connector and grows with it — this tree already
+ * emits `irreversible`, `reversible`, `replace_with_new_text`, `archivable`, and
+ * `overwrite_not_reversible`, and a closed enum would turn the next connector's
+ * honest description into a decode failure. That is the failure class #700
+ * recorded: a decoder refusing a contract it does not own.
+ *
+ * `idempotency`, `provider_readback`, `dry_run`, `attribution`, and
+ * `provenance_binding` name what the GATEWAY guarantees, and a caller branches
+ * on each of them, so they stay closed and a new member stays a release event.
+ */
 export interface CealGatewayWriteContract {
+	/** Connector-declared mutation family. Open vocabulary; safe-ref grammar. */
 	side_effect_class: string;
 	idempotency: "required" | "optional" | "not_required";
 	provider_readback: "required" | "best_effort" | "not_available";
+	/**
+	 * Connector-declared undo posture or mechanism. Open vocabulary, because
+	 * `replace_with_new_text` and `overwrite_not_reversible` are already
+	 * mechanism names rather than a two-valued posture.
+	 */
+	compensation?: string;
+	dry_run?: CealGatewayWriteDryRun;
 	/** Present only when an announcement policy may describe this mutation. */
-	attribution?: "subject" | "requester_event";
+	attribution?: CealGatewayWriteAttribution;
 	/** Closed Gateway attestation of the requester/event provenance binding. */
 	provenance_binding?: "gateway_attested_requester_event_v1";
 	[key: string]: unknown;
@@ -242,21 +333,16 @@ export interface CealCapabilityAccessDescriptor {
 export interface CealGatewayGrantedDiscoveryTarget {
 	target_ref: string;
 	label: string;
+	connector_kind: string;
+	target_kind: string;
 	access: "granted";
 	capability_ids: string[];
 	capability_access: CealCapabilityAccessDescriptor[];
 }
 
-export interface CealGatewayRequestRequiredDiscoveryTarget {
-	target_ref: string;
-	label: string;
-	access: "request_required";
-	capability_ids: [];
-	capability_access: [];
-}
+export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget;
 
-export type CealGatewayDiscoveryTarget = CealGatewayGrantedDiscoveryTarget | CealGatewayRequestRequiredDiscoveryTarget;
-
+/** Connector kinds admitted by the current Gateway discovery ABI. */
 /**
  * Present only when a read result was served from the Gateway's profile-keyed
  * read cache (#606b) instead of a fresh provider call. It labels the served

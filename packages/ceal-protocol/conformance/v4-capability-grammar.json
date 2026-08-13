@@ -6,13 +6,16 @@
     "message.search",
     "message.get",
     "conversation.thread.get",
-    "message.enumerate",
     "resource.resolve",
     "directory.usergroups.list",
     "directory.usergroups.members.list",
     "directory.people.search",
     "identity.profile_image.get",
-    "conversation.direct.resolve"
+    "conversation.direct.resolve",
+    "file.search",
+    "notion.search",
+    "notion.page.get",
+    "sheets.values.read"
   ],
   "write_capability_ids": [
     "message.create",
@@ -21,19 +24,19 @@
     "presentation.activity.set",
     "message.reaction.add",
     "workflow.reply_intake.register",
-    "workflow.survey_dispatch.send",
     "artifact.stage",
-    "file.upload"
+    "file.upload",
+    "sheets.values.update",
+    "sheets.values.clear"
   ],
   "ingress_context_capability_ids": [
     "message.search",
     "message.get",
     "conversation.thread.get",
     "message.create",
-    "message.enumerate",
     "resource.resolve",
     "message.reaction.add",
-    "workflow.survey_dispatch.send"
+    "conversation.direct.resolve"
   ],
   "argument_schemas": {
     "message.search": "ceal.gateway_leased_agent_message_search_arguments.v1",
@@ -42,18 +45,22 @@
     "message.create": "ceal.gateway_leased_agent_message_create_arguments.v1",
     "message.update": "ceal.gateway_leased_agent_message_update_arguments.v1",
     "message.delete": "ceal.gateway_leased_agent_message_delete_arguments.v1",
-    "message.enumerate": "ceal.gateway_leased_agent_message_enumerate_arguments.v1",
     "resource.resolve": "ceal.gateway_leased_agent_resource_resolve_arguments.v1",
     "presentation.activity.set": "ceal.gateway_leased_agent_presentation_activity_arguments.v1",
     "message.reaction.add": "ceal.gateway_leased_agent_message_reaction_arguments.v1",
     "directory.usergroups.list": "ceal.gateway_leased_agent_usergroups_list_arguments.v1",
     "directory.usergroups.members.list": "ceal.gateway_leased_agent_usergroup_members_arguments.v1",
     "directory.people.search": "ceal.gateway_leased_agent_people_search_arguments.v1",
+    "file.search": "ceal.gateway_leased_agent_file_search_arguments.v1",
     "identity.profile_image.get": "ceal.gateway_leased_agent_profile_image_arguments.v1",
     "conversation.direct.resolve": "ceal.gateway_leased_agent_direct_resolve_arguments.v1",
     "workflow.reply_intake.register": "ceal.gateway_leased_agent_reply_intake_arguments.v1",
-    "workflow.survey_dispatch.send": "ceal.gateway_leased_agent_survey_dispatch_arguments.v1",
     "artifact.stage": "ceal.gateway_leased_agent_artifact_stage_arguments.v1",
-    "file.upload": "ceal.gateway_leased_agent_file_upload_arguments.v1"
+    "file.upload": "ceal.gateway_leased_agent_file_upload_arguments.v1",
+    "notion.search": "ceal.gateway_leased_agent_notion_search_arguments.v1",
+    "notion.page.get": "ceal.gateway_leased_agent_notion_page_get_arguments.v1",
+    "sheets.values.read": "ceal.gateway_leased_agent_sheets_values_read_arguments.v1",
+    "sheets.values.update": "ceal.gateway_leased_agent_sheets_values_update_arguments.v1",
+    "sheets.values.clear": "ceal.gateway_leased_agent_sheets_values_clear_arguments.v1"
   }
 }

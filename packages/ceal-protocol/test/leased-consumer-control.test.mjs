@@ -15,6 +15,7 @@ import {
 	CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_RESPONSE_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA,
+	CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA,
@@ -24,9 +25,16 @@ import {
 	CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA,
-	CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA,
-	CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_DATA_SCHEMA,
+	CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_DOCUMENT_READ_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_UPDATE_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_DATA_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_UPDATE_DATA_SCHEMA,
+	CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_DATA_SCHEMA,
 	decodeCealLeasedConsumerControlRequest,
 	decodeCealLeasedConsumerControlResponse,
 	decodeCealLeasedConsumerControlSession,
@@ -48,6 +56,22 @@ const notificationBinding = {
 	event_ref: "event:one", event_revision: 3,
 	runner_ref: "runner:agent", consumer_ref: "consumer:worker", consumer_generation: 7,
 	lease_ref: "lease:one", lease_fence: 5,
+};
+const capabilityCatalog = {
+	schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA,
+	capabilities: [{
+		capability_id: "message.search", label: "Search messages", effect: "read", target_requirement: "required",
+		input_contract: { type: "object" }, evidence_requirement: "provider_result",
+		targets: [{ target_ref: `target:${"8".repeat(64)}`, label: "Workspace", connector_kind: "slack", target_kind: "conversation", readiness: "ready" }],
+	}],
+};
+const notionCatalog = {
+	schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA,
+	capabilities: [{
+		capability_id: "notion.search", label: "Search Notion", effect: "read", target_requirement: "required",
+		input_contract: { type: "object", properties: { query: { type: "string" } } }, evidence_requirement: "provider_result",
+		targets: [{ target_ref: `target:${"9".repeat(64)}`, label: "Notion workspace", connector_kind: "notion", target_kind: "workspace", readiness: "ready" }],
+	}],
 };
 
 test("leased-consumer control decoders accept only the protected session and five exact operation shapes", () => {
@@ -159,7 +183,11 @@ test("capability control v4 carries generic read and write results through exact
 		},
 	};
 	for (const result of [
-		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"c".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
+		// The merged message read (2026-08-12) is a RESOLVE-family result: each row
+		// carries a handle_index into the message handles it just minted, which is
+		// what the retired `message.enumerate` was worth keeping for.
+		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "message", ref: `message:${"c".repeat(64)}` }], data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "2026-07-15T00:00:00.000Z", handle_index: 0, text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
+		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.get", effect: "read", result_ref: `result:${"9".repeat(64)}`, handles: [], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.update", effect: "write", result_ref: `result:${"d".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"e".repeat(64)}` }, { kind: "message", ref: `message:${"f".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA, terminal: "readback_confirmed", text: "updated" } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.delete", effect: "write", result_ref: `result:${"f".repeat(64)}`, handles: [], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA, terminal: "readback_confirmed" } },
 	]) {
@@ -295,12 +323,21 @@ test("capability control v4 carries generic read and write results through exact
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(wrongShapeForDeclared), TypeError);
 
 	const unsafeAuthorResult = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
-		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [],
+		// `message.get` carries the message-read data family; `message.search` moved
+		// to the resolve family when enumerate was folded into it (2026-08-12).
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.get", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [],
 		data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: "author:U0123456789", actor_kind: "human" } }] },
 	} } };
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
 	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice (U0123456789)", actor_kind: "human" };
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
+	// The addressable substitute crosses only in the opaque Gateway form; a
+	// provider-shaped one behind the prefix is a refused response, not a
+	// stripped key, because the author descriptor is exact-keyed.
+	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: "subject:U0123456789" };
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
+	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: `subject:${"2".repeat(64)}` };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult).operation, "call");
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 		operation: "call",
@@ -337,14 +374,17 @@ test("capability control v4 carries generic read and write results through exact
 		result: {
 			status: "available", event_ref: "event:one", event_revision: 1,
 			normalized_projection_ref: "projection:one", normalized_projection_revision: 1,
-			conversation_ref: `conversation:${"9".repeat(64)}`,
 			requester: { subject_ref: "subject:alice", display_name: "Alice", provider_identity: { provider: "slack", account_id: "U0ALICE0001" } },
 			attachments: { count: 0, set_ref: null },
 			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded" },
-			capability_contexts: [
-				{ capability_id: "message.search", target_ref: `target:${"3".repeat(64)}`, message_ref: `message:${"4".repeat(64)}`, thread_ref: `thread:${"5".repeat(64)}` },
-				{ capability_id: "message.create", target_ref: `target:${"5".repeat(64)}`, message_ref: `message:${"6".repeat(64)}`, thread_ref: `thread:${"7".repeat(64)}` },
-			],
+			capability_catalog: capabilityCatalog,
+			messenger_context: {
+				conversation_ref: `conversation:${"9".repeat(64)}`,
+				capability_contexts: [
+					{ capability_id: "message.search", target_ref: `target:${"3".repeat(64)}`, message_ref: `message:${"4".repeat(64)}`, thread_ref: `thread:${"5".repeat(64)}` },
+					{ capability_id: "message.create", target_ref: `target:${"5".repeat(64)}`, message_ref: `message:${"6".repeat(64)}`, thread_ref: `thread:${"7".repeat(64)}` },
+				],
+			},
 		},
 	};
 	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(projection).operation, "projection");
@@ -409,11 +449,11 @@ test("capability control v4 rejects provider-shaped handles and custody fields",
 		result: {
 			status: "available", event_ref: "event:one", event_revision: 1,
 			normalized_projection_ref: "projection:one", normalized_projection_revision: 1,
-			conversation_ref: `conversation:${"9".repeat(64)}`,
 			requester: { subject_ref: "subject:alice", display_name: "Alice" },
 			attachments: { count: 0, set_ref: null },
 			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded" },
-			capability_contexts: [{ capability_id: "message.search", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }],
+			capability_catalog: capabilityCatalog,
+			messenger_context: { conversation_ref: `conversation:${"9".repeat(64)}`, capability_contexts: [{ capability_id: "message.search", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }] },
 		},
 	};
 	for (const capability_contexts of [
@@ -429,7 +469,44 @@ test("capability control v4 rejects provider-shaped handles and custody fields",
 		// Update handles bootstrap only from a Gateway-owned create readback;
 		// the user-authored ingress projection must never grant one.
 		[{ capability_id: "message.update", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }],
-	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({ ...projection, result: { ...projection.result, capability_contexts } }), TypeError);
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({ ...projection, result: { ...projection.result, messenger_context: { ...projection.result.messenger_context, capability_contexts } } }), TypeError);
+});
+
+test("capability projection requires the catalog and rejects the retired top-level messenger fields", () => {
+	const notionOnly = {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "projection",
+		result: {
+			status: "available", event_ref: "event:notion", event_revision: 1,
+			normalized_projection_ref: "projection:notion", normalized_projection_revision: 1,
+			requester: { subject_ref: "subject:alice" }, attachments: { count: 0, set_ref: null },
+			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "Read the page" },
+			capability_catalog: notionCatalog,
+		},
+	};
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(notionOnly).operation, "projection");
+	for (const legacyField of [
+		{ conversation_ref: `conversation:${"a".repeat(64)}` },
+		{ capability_contexts: [] },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({
+		...notionOnly, result: { ...notionOnly.result, ...legacyField },
+	}), TypeError);
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse({
+		...notionOnly, result: { ...notionOnly.result, capability_catalog: { ...notionCatalog, capabilities: [] } },
+	}).operation, "projection");
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({
+		...notionOnly,
+		result: {
+			...notionOnly.result,
+			capability_catalog: {
+				...notionCatalog,
+				capabilities: [{ ...notionCatalog.capabilities[0], targets: [{ target_ref: "target:not-opaque", label: "Notion", connector_kind: "notion", target_kind: "workspace", readiness: "ready" }] }],
+			},
+		},
+	}), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({
+		...notionOnly, result: { ...notionOnly.result, messenger_context: { conversation_ref: `conversation:${"a".repeat(64)}`, capability_contexts: [] } },
+	}), TypeError);
 });
 
 test("projection context accepts the scheduled trigger marker and rejects any other trigger", () => {
@@ -443,11 +520,11 @@ test("projection context accepts the scheduled trigger marker and rejects any ot
 		result: {
 			status: "available", event_ref: "event:one", event_revision: 1,
 			normalized_projection_ref: "projection:one", normalized_projection_revision: 1,
-			conversation_ref: `conversation:${"9".repeat(64)}`,
 			requester: { subject_ref: "subject:alice" },
 			attachments: { count: 0, set_ref: null },
 			projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "bounded", context },
-			capability_contexts: [{ capability_id: "message.search", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }],
+			capability_catalog: capabilityCatalog,
+			messenger_context: { conversation_ref: `conversation:${"9".repeat(64)}`, capability_contexts: [{ capability_id: "message.search", target_ref: `target:${"1".repeat(64)}`, message_ref: `message:${"2".repeat(64)}`, thread_ref: `thread:${"3".repeat(64)}` }] },
 		},
 	});
 	const scheduled = { conversation_kind: "channel", is_thread_reply: true, trigger: "scheduled" };
@@ -548,9 +625,8 @@ test("capability control v5 alone accepts one exact typed Agent-control projecti
 	const result = {
 		status: "available", event_ref: "event:control", event_revision: 1,
 		normalized_projection_ref: "projection:control", normalized_projection_revision: 1,
-		conversation_ref: `conversation:${"b".repeat(64)}`,
 		requester: { subject_ref: "subject:alice" }, attachments: { count: 0, set_ref: null },
-		projection: controlProjection, capability_contexts: [],
+		projection: controlProjection, capability_catalog: capabilityCatalog,
 	};
 	const v5 = { schema_version: CEAL_LEASED_CONSUMER_NOTIFICATION_CONTROL_RESPONSE_SCHEMA, operation: "projection", result };
 	const v4 = { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "projection", result };
@@ -591,7 +667,11 @@ test("capability control v4 declares enumerate/resolve/presentation with display
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
 		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id, target_ref: `target:${"e".repeat(64)}`, purpose: "declared", arguments: arguments_, ...(idempotency_key ? { idempotency_key } : {}) },
 	});
-	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.enumerate", { schema_version: "ceal.gateway_leased_agent_message_enumerate_arguments.v1", limit: 20 })).operation, "call");
+	// `message.enumerate` was folded into `message.search` (2026-08-12). Every
+	// filter is optional, because the motivating question carries no query term.
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", limit: 20 })).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1" })).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", query: "launch", limit: 20, author_ref: `author:${"1".repeat(64)}`, since: "2026-08-01T00:00:00Z", until: "2026-08-08T00:00:00Z", include_replies: true })).operation, "call");
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("resource.resolve", { schema_version: "ceal.gateway_leased_agent_resource_resolve_arguments.v1", kind: "conversation", query: "release room" })).operation, "call");
 	// Permalink targeting (S1, Goal 2): the user-supplied provider link is a
 	// query, never a typed handle; Gateway resolves it privately.
@@ -605,7 +685,12 @@ test("capability control v4 declares enumerate/resolve/presentation with display
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: completedHistory }, "run:write:history")).operation, "call");
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("message.update", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, message_ref: `message:${"b".repeat(64)}`, text: "working", presentation: { ...completedHistory, phase: undefined, completed_phases: [] } }, "run:write:empty-history")).operation, "call");
 	for (const bad of [
-		call("message.enumerate", { schema_version: "ceal.gateway_leased_agent_message_enumerate_arguments.v1", limit: 129 }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", limit: 129 }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", author_ref: "author:U0123456789" }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", include_replies: "yes" }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", since: "2026-02-31T00:00:00Z" }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", since: "2026-08-12T00:00:00Z", until: "2026-08-01T00:00:00Z" }),
+		call("message.search", { schema_version: "ceal.gateway_leased_agent_message_search_arguments.v1", offset: 0 }),
 		call("resource.resolve", { schema_version: "ceal.gateway_leased_agent_resource_resolve_arguments.v1", kind: "channel", query: "x" }),
 		call("presentation.activity.set", { schema_version: "ceal.gateway_leased_agent_presentation_activity_arguments.v1", activity: "typing" }),
 		call("message.create", { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, reply_to: `message:${"b".repeat(64)}`, text: "working", presentation: { schema_version: "ceal.gateway_leased_agent_message_presentation.v1", intent: "progress", abortable: true, blocks: [] } }, "run:write:1"),
@@ -664,46 +749,126 @@ test("the internal v4 decoder and result-rule tables equal the exported ABI sets
 	}
 });
 
-test("survey dispatch capability accepts only opaque authority arguments and consistent zero-handle results", () => {
+test("Sheets leased calls require exact bounded ranges, rectangular preconditions, and terminal result schemas", () => {
+	const call = (capability_id, arguments_, effect = capability_id === "sheets.values.read" ? "read" : "write") => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
+		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id, target_ref: `target:${"a".repeat(64)}`, purpose: "bounded Sheets", arguments: arguments_, ...(effect === "write" ? { idempotency_key: `${capability_id}:outer` } : {}) },
+	});
+	const read = { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_ARGUMENTS_SCHEMA, range: "Sheet1!A1:B2" };
+	const expected = [["old", ""], ["same", 3]];
+	const update = { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_UPDATE_ARGUMENTS_SCHEMA, range: "Sheet1!A1:B2", values: [["new", "value"], ["next", 4]], expected_before_values: expected, idempotency_key: "sheets-update:one" };
+	const clear = { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_ARGUMENTS_SCHEMA, range: "Sheet1!A1:B2", expected_before_values: expected, idempotency_key: "sheets-clear:one" };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("sheets.values.read", read)).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("sheets.values.update", update)).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call("sheets.values.clear", clear)).operation, "call");
+	for (const [capability_id, bad] of [
+		["sheets.values.read", { ...read, range: "Sheet1!A:A" }], ["sheets.values.read", { ...read, range: "unsafe\u0000sheet!A1:B2" }], ["sheets.values.read", { ...read, extra: true }],
+		["sheets.values.update", { ...update, values: [["new"]] }], ["sheets.values.update", { ...update, require_empty: true }],
+		["sheets.values.clear", { ...clear, expected_before_values: [["old"]] }], ["sheets.values.clear", { ...clear, expected_before_values: [["old", "\u0000"], ["same", 3]] }],
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(call(capability_id, bad)), TypeError);
+
+	const response = (capability_id, effect, data, handles = []) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call",
+		result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id, effect, result_ref: `result:${"b".repeat(64)}`, handles, data } },
+	});
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response("sheets.values.read", "read", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_DATA_SCHEMA, range: "Sheet1!A1:B2", values: [["old", ""], ["same", 3]] })).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response("sheets.values.update", "write", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_UPDATE_DATA_SCHEMA, terminal: "readback_confirmed" })).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response("sheets.values.clear", "write", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_DATA_SCHEMA, terminal: "idempotency_replayed" })).operation, "call");
+	for (const bad of [
+		response("sheets.values.read", "write", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_DATA_SCHEMA, range: "Sheet1!A1:B2", values: [["old", ""], ["same", 3]] }),
+		response("sheets.values.clear", "write", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_DATA_SCHEMA, terminal: "readback_confirmed" }, [{ kind: "target", ref: `target:${"c".repeat(64)}` }]),
+		response("sheets.values.update", "write", { schema_version: CEAL_LEASED_CONSUMER_SHEETS_VALUES_UPDATE_DATA_SCHEMA, terminal: "readback_confirmed", extra: true }),
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(bad), TypeError);
+});
+
+test("Notion calls use strict provider-neutral document grammar and one outer result identity", () => {
+	const request = (capabilityId, arguments_) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
+		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id: capabilityId, target_ref: `target:${"1".repeat(64)}`, purpose: "read governed Notion", arguments: arguments_ },
+	});
+	for (const arguments_ of [
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "roadmap" },
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "roadmap", limit: 10, offset: 90 },
+	]) assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request("notion.search", arguments_)).operation, "call");
+	for (const arguments_ of [
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "", limit: 1 },
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "roadmap", limit: 11 },
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "roadmap", offset: 91 },
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, query: "roadmap", cursor: "provider-cursor" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(request("notion.search", arguments_)), TypeError);
+	const documentRef = `document:${"2".repeat(64)}`;
+	for (const arguments_ of [
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, ref: documentRef },
+	]) assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request("notion.page.get", arguments_)).operation, "call");
+	for (const arguments_ of [
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, ref: "notion-page:00000000-0000-0000-0000-000000000000" },
+		{ schema_version: CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, ref: documentRef, with_blocks: true },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(request("notion.page.get", arguments_)), TypeError);
+
+	const response = (data, extra = {}) => ({ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call", result: { status: "result", result: {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "notion.page.get", effect: "read", result_ref: `result:${"3".repeat(64)}`, handles: [], data, ...extra,
+	} } });
+	const data = { schema_version: CEAL_LEASED_CONSUMER_DOCUMENT_READ_DATA_SCHEMA, format: "enhanced_markdown", preview: "# Roadmap\n\nNext", complete: false, file_count: 2 };
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response(data)).operation, "call");
+	for (const invalid of [
+		{ ...data, materialization_ref: `result:${"4".repeat(64)}` },
+		{ ...data, format: "markdown" }, { ...data, file_count: 0 }, { ...data, file_count: 17 },
+		{ ...data, preview: "x".repeat(4097) }, { ...data, body: "full body" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(invalid)), TypeError);
+});
+
+test("capability result materialization pulls one strictly framed result chunk under the active lease", () => {
+	const resultRef = `result:${"5".repeat(64)}`;
 	const request = {
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+		operation: "materialization",
+		input: { ...leaseInput, result_ref: resultRef, frame_index: 1 },
+	};
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request).operation, "materialization");
+	for (const input of [
+		{ ...request.input, frame_index: -1 },
+		{ ...request.input, frame_index: 1.5 },
+		{ ...request.input, result_ref: "result:not-a-digest" },
+		{ ...request.input, capability_id: "notion.page.get" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest({ ...request, input }), TypeError);
+
+	const response = (result) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "materialization",
+		result,
+	});
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response({ status: "frame", frame: {
+		schema_version: "ceal.result_materialization_frame.v1", kind: "chunk", slot: 0,
+		chunk_index: 0, chunk_count: 1, bytes_base64: "ZG9jdW1lbnQ=",
+	} })).operation, "materialization");
+	for (const status of ["materialization_unavailable", "lease_lost", "lease_expired", "event_settled", "authentication_failed", "control_unavailable"]) {
+		assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response({ status })).operation, "materialization");
+	}
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response({ status: "frame", frame: {
+		schema_version: "ceal.result_materialization_frame.v1", kind: "chunk", slot: 0,
+		chunk_index: 1, chunk_count: 1, bytes_base64: "ZG9jdW1lbnQ=",
+	} })), TypeError);
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response({ status: "result_not_replayable" })), TypeError);
+});
+
+test("generic reply intake admits one optional safe correlation ref and rejects provider-shaped free text", () => {
+	const request = (correlationRef) => ({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 		operation: "call",
 		input: {
 			schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput,
-			capability_id: "workflow.survey_dispatch.send", target_ref: `target:${"d".repeat(64)}`,
-			purpose: "send approved survey", idempotency_key: "survey-dispatch:one",
-			arguments: { schema_version: CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_ARGUMENTS_SCHEMA, run_id: "survey-run:one", dispatch_fingerprint: "a".repeat(64) },
+			capability_id: "workflow.reply_intake.register", target_ref: `target:${"d".repeat(64)}`,
+			purpose: "register workflow response", idempotency_key: "reply-intake:one",
+			arguments: {
+				schema_version: "ceal.gateway_leased_agent_reply_intake_arguments.v1",
+				root_ref: `message:${"e".repeat(64)}`, workflow_name: "survey", skill_name: "survey",
+				routing: "skill", mode: "human_replies", ...(correlationRef === undefined ? {} : { correlation_ref: correlationRef }),
+			},
 		},
-	};
-	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request).operation, "call");
-	for (const mutate of [
-		(value) => { value.arguments.recipient_id = "U0123456789"; },
-		(value) => { value.arguments.run_id = "unsafe run"; },
-		(value) => { value.arguments.dispatch_fingerprint = "A".repeat(64); },
-		(value) => { delete value.idempotency_key; },
-	]) {
-		const bad = structuredClone(request); mutate(bad.input);
-		assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(bad), TypeError);
-	}
-
-	const response = (data, handles = []) => ({
-		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call",
-		result: { status: "result", result: { schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "workflow.survey_dispatch.send", effect: "write", result_ref: `result:${"e".repeat(64)}`, handles, data } },
 	});
-	const completed = { schema_version: CEAL_LEASED_CONSUMER_SURVEY_DISPATCH_DATA_SCHEMA, terminal: "completed", sent_count: 2, replayed_count: 1, failed_count: 1, uncertain_count: 0 };
-	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response(completed)).operation, "call");
-	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response({ ...completed, terminal: "ack_uncertain", uncertain_count: 1 })).operation, "call");
-	for (const [data, handles] of [
-		[{ ...completed, provider_message_id: "171234.0001" }, []],
-		[{ ...completed, terminal: "ack_uncertain" }, []],
-		[{ ...completed, uncertain_count: 1 }, []],
-		[{ ...completed, sent_count: -1 }, []],
-		[{ ...completed, sent_count: "1" }, []],
-		[{ ...completed, sent_count: 1.5 }, []],
-		[{ ...completed, sent_count: Number.NaN }, []],
-		[{ ...completed, failed_count: Number.MAX_SAFE_INTEGER + 1 }, []],
-		[completed, [{ kind: "message", ref: `message:${"f".repeat(64)}` }]],
-	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(data, handles)), TypeError);
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request("survey-reply:one")).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(request(undefined)).operation, "call");
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(request("unsafe correlation")), TypeError);
 });
 
 test("the people directory carries an addressable subject ref without ever carrying a provider identity", async () => {
@@ -745,4 +910,93 @@ test("the people directory carries an addressable subject ref without ever carry
 		[[{ kind: "identity", display_name: "Alice", subject_ref: "subject:alice", provider_user_id: "U0AAAAAAAAA" }], false],
 		[[{ kind: "identity", display_name: "Alice" }], "yes"],
 	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(items, truncated)), TypeError);
+});
+
+test("the file noun carries filename, mimetype and size, and only a file item may", async () => {
+	const { CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA } = await import("../dist/index.js");
+	const call = (arguments_) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, operation: "call",
+		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id: "file.search", target_ref: `target:${"e".repeat(64)}`, purpose: "declared", arguments: arguments_ },
+	});
+	const schema_version = CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA;
+	for (const good of [
+		{ schema_version, limit: 1 }, { schema_version, limit: 50 }, { schema_version, limit: 20, filetype: "pdf" },
+		{ schema_version, limit: 20, query: "quarterly" },
+		{ schema_version, limit: 20, since: "2026-08-01T00:00:00Z", until: "2026-08-12T00:00:00Z" },
+	]) assert.equal(decodeCealLeasedConsumerCapabilityControlRequest(call(good)).operation, "call");
+	for (const bad of [
+		// `limit` is required (an unbounded page is what the carrier ceiling
+		// exists to refuse), and the filter is a bounded lowercase family token
+		// rather than a mimetype, a glob, or a provider query fragment.
+		{ schema_version }, { schema_version, limit: 0 }, { schema_version, limit: 51 }, { schema_version, limit: 1.5 }, { schema_version, limit: "20" },
+		{ schema_version, limit: 20, filetype: "PDFS" }, { schema_version, limit: 20, filetype: "application/pdf" }, { schema_version, limit: 20, filetype: "*" },
+		{ schema_version, limit: 20, filetype: "" }, { schema_version, limit: 20, filetype: "p".repeat(33) }, { schema_version, limit: 20, channel: "C0AAAAAAAAA" },
+		{ schema_version, limit: 20, query: "" }, { schema_version, limit: 20, query: "   " }, { schema_version, limit: 20, query: "q".repeat(513) },
+		// A time bound crosses to the provider, so a value that only LOOKS like a
+		// date must not widen the read, and a reversed window is an empty read
+		// wearing a provider fault's clothes.
+		{ schema_version, limit: 20, since: "2026-02-31T00:00:00Z" }, { schema_version, limit: 20, until: "2026-08-01" },
+		{ schema_version, limit: 20, since: "2026-08-12T00:00:00Z", until: "2026-08-01T00:00:00Z" },
+		{ schema_version, limit: 20, since: "2026-08-01T00:00:00Z", until: "2026-08-01T00:00:00Z" },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlRequest(call(bad)), TypeError);
+
+	const response = (items, handles = []) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, operation: "call",
+		result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "file.search", effect: "read", result_ref: `result:${"a".repeat(64)}`,
+			handles, data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items },
+		} },
+	});
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "file", display_name: "Q3 report", filename: "q3.pdf", mimetype: "application/pdf", size_bytes: 91_233 }])).operation, "call");
+	// The three fields are each independently optional: a provider that reports
+	// only a name must still project a usable row.
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "file", display_name: "q3.pdf", filename: "q3.pdf" }])).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "file", display_name: "q3.pdf", size_bytes: 0 }])).operation, "call");
+	for (const items of [
+		// File detail is file-only: no other noun may smuggle it.
+		[{ kind: "message", display_name: "hello", filename: "q3.pdf" }],
+		[{ kind: "identity", display_name: "Alice", mimetype: "application/pdf" }],
+		[{ kind: "conversation", display_name: "ceal-dev", size_bytes: 12 }],
+		// A file item stays inside the identity/message field discipline too.
+		[{ kind: "file", display_name: "q3.pdf", subject_ref: "subject:alice" }],
+		[{ kind: "file", display_name: "q3.pdf", actor_kind: "human" }],
+		// The mimetype is a bare restricted type/subtype: no parameters, no
+		// wildcard, no raw provider URL smuggled through the field.
+		[{ kind: "file", display_name: "q3.pdf", mimetype: "application/pdf; charset=utf-8" }],
+		[{ kind: "file", display_name: "q3.pdf", mimetype: "*/*" }],
+		[{ kind: "file", display_name: "q3.pdf", mimetype: "application" }],
+		[{ kind: "file", display_name: "q3.pdf", mimetype: "https://files.slack.com/q3.pdf" }],
+		[{ kind: "file", display_name: "q3.pdf", size_bytes: -1 }],
+		[{ kind: "file", display_name: "q3.pdf", size_bytes: 1.5 }],
+		[{ kind: "file", display_name: "q3.pdf", size_bytes: "91233" }],
+		[{ kind: "file", display_name: "q3.pdf", filename: "" }],
+		[{ kind: "file", display_name: "q3.pdf", filename: "a".repeat(513) }],
+		[{ kind: "file", display_name: "q3.pdf", file_id: "F0AAAAAAAAA" }],
+		[{ kind: "attachment", display_name: "q3.pdf" }],
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(items)), TypeError);
+	// handle_index still has to index into the typed handles array, and the rule
+	// moved next to the item interface — so prove it from a file item too.
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response([{ kind: "file", display_name: "q3.pdf", handle_index: 0 }])), TypeError);
+});
+
+test("the shared search filter vocabulary is the one place a filter's rule lives", async () => {
+	const { CEAL_LEASED_CONSUMER_SEARCH_FILTERS, cealLeasedConsumerSearchArgumentsDecoder } = await import("../dist/index.js");
+	// The vocabulary is the whole admissible set. `message.search`'s merge adds
+	// its author filter and reply-coverage expansion HERE, as one row each.
+	assert.deepEqual([...CEAL_LEASED_CONSUMER_SEARCH_FILTERS], ["query", "limit", "since", "until", "filetype", "author_ref", "include_replies"]);
+	// A capability that names a filter this vocabulary does not own fails when
+	// the package is imported, not on the first call that happens to use it.
+	assert.throws(() => cealLeasedConsumerSearchArgumentsDecoder("ceal.test_arguments.v1", { optional: ["thread_ref"] }), TypeError);
+	// Admission is per-capability: a filter the vocabulary owns is still refused
+	// for a capability that did not declare it, which is what keeps one shared
+	// table from becoming one shared grammar every capability must accept.
+	const decode = cealLeasedConsumerSearchArgumentsDecoder("ceal.test_arguments.v1", { required: ["limit"], optional: ["since"] });
+	decode({ schema_version: "ceal.test_arguments.v1", limit: 3, since: "2026-08-01T00:00:00Z" });
+	for (const bad of [
+		{ schema_version: "ceal.test_arguments.v1", limit: 3, query: "pdf" },
+		{ schema_version: "ceal.test_arguments.v1", limit: 3, filetype: "pdf" },
+		{ schema_version: "ceal.test_arguments.v1", limit: 3, until: "2026-08-02T00:00:00Z" },
+		{ schema_version: "ceal.other_arguments.v1", limit: 3 },
+		{ schema_version: "ceal.test_arguments.v1" },
+	]) assert.throws(() => decode(bad), TypeError);
 });

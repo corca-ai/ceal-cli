@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { materializeSignedGatewayProtocolSource } from "../../scripts/materialize-signed-gateway-protocol-source.mjs";
 import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.mjs";
 import { scratchDir } from "../scratch-dir.mjs";
@@ -28,6 +29,67 @@ const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packa
 const MARKER_NAME = ".ceal-protocol-handoff-owner";
 const MARKER_CONTENTS = "ceal.gateway_protocol_handoff.v1\n";
 
+test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context) => {
+	const scratch = scratchDir(context, "ceal-signed-protocol-source-mutation-");
+	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
+	const expectedCommit = "a".repeat(40);
+	const expectedTree = "b".repeat(40);
+	const calls = [];
+	const git = (_command, args) => {
+		calls.push(args);
+		if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
+		if (args[0] === "rev-list") return `${"c".repeat(40)}\n`;
+		throw new Error(`unexpected_git_call:${args[0]}`);
+	};
+	assert.throws(
+		() =>
+			materializeSignedGatewayProtocolSource(
+				{
+					tag: "gateway-protocol-handoff-v0.72.21",
+					commit: expectedCommit,
+					protocolTree: expectedTree,
+					outputDirectory,
+				},
+				{ git },
+			),
+		/signed_protocol_source_commit_mismatch/u,
+	);
+	assert.equal(existsSync(outputDirectory), false);
+	assert.deepEqual(
+		calls.map(([operation]) => operation),
+		["init", "fetch", "rev-list"],
+		"tree lookup and archive materialization must not run after a commit mismatch",
+	);
+
+	calls.length = 0;
+	const treeMismatchGit = (_command, args) => {
+		calls.push(args);
+		if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
+		if (args[0] === "rev-list") return `${expectedCommit}\n`;
+		if (args[0] === "rev-parse") return `${"d".repeat(40)}\n`;
+		throw new Error(`unexpected_git_call:${args[0]}`);
+	};
+	assert.throws(
+		() =>
+			materializeSignedGatewayProtocolSource(
+				{
+					tag: "gateway-protocol-handoff-v0.72.21",
+					commit: expectedCommit,
+					protocolTree: expectedTree,
+					outputDirectory,
+				},
+				{ git: treeMismatchGit },
+			),
+		/signed_protocol_source_tree_mismatch/u,
+	);
+	assert.equal(existsSync(outputDirectory), false);
+	assert.deepEqual(
+		calls.map(([operation]) => operation),
+		["init", "fetch", "rev-list", "rev-parse"],
+		"inventory and archive materialization must not run after a tree mismatch",
+	);
+});
+
 test("worker release inventory accepts one exact complete Gateway protocol handoff", (context) => {
 	const fixture = handoffFixture(context);
 	const resolution = resolveContractInputs(fixture);
@@ -43,12 +105,13 @@ test("worker release inventory accepts one exact complete Gateway protocol hando
 	assert.equal(resolution.gateway_client, undefined);
 });
 
-test("worker release inventory accepts the v3 through v5 Gateway control conformances while still binding their producer", (context) => {
+test("worker release inventory accepts the v3 through v6 Gateway control conformances while still binding their producer", (context) => {
 	const fixture = handoffFixture(context);
 	for (const schemaVersion of [
 		"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
 		"ceal.gateway_leased_consumer_control_conformance_handoff.v4",
 		"ceal.gateway_leased_consumer_control_conformance_handoff.v5",
+		"ceal.gateway_leased_consumer_control_conformance_handoff.v6",
 	]) {
 		writeControlConformance(fixture, schemaVersion);
 		writeHandoffManifest(fixture);
@@ -57,6 +120,9 @@ test("worker release inventory accepts the v3 through v5 Gateway control conform
 	}
 
 	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v2");
+	writeHandoffManifest(fixture);
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
+	writeControlConformance(fixture, "ceal.gateway_leased_consumer_control_conformance_handoff.v7");
 	writeHandoffManifest(fixture);
 	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
 });

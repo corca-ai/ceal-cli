@@ -18,8 +18,8 @@
  * ## What `additive-v1` means, exactly
  *
  * A client sending it asserts: **unknown keys are ignored at every depth of a
- * non-authority response object** — not only at the top level. The five fields
- * below sit at four different depths, so a decoder that tolerates unknown keys
+ * non-authority response object** — not only at the top level. The registered
+ * fields below sit at several depths, so a decoder that tolerates unknown keys
  * on the envelope but still exact-keys the `error` object or an audit event
  * would send this header in good faith and then hard-fail on `error.recovery`.
  * The generation is the durable discriminator and cannot be retired the way the
@@ -39,7 +39,7 @@
  *   not stopped by this module; it is stopped by whoever reviews it.
  * - **Eligibility is about keys, never about values.** Changing what an
  *   EXISTING field may contain is not additive: an old client decodes the key
- *   and then misreads it, or refuses it outright. This applies to the five
+ *   and then misreads it, or refuses it outright. This applies to the
  *   eligible fields too, and that is the trap this module exists to flag —
  *   see `ADDITIVE_VALUE_VOCABULARY_WARNING`.
  */
@@ -57,10 +57,11 @@ export const CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION = "additive-v1";
  * The trap a later author is most likely to fall into, stated where they will
  * be reading.
  *
- * Three of the five eligible fields carry CLOSED value vocabularies, and the
+ * Several eligible fields carry CLOSED value vocabularies, and the
  * shipped decoder rejects the whole response on an unknown member rather than
  * degrading: `recovery.kind` against `CEAL_GATEWAY_RECOVERY_KINDS`,
- * `capability_access[].readiness`, and `connector_route_failure.phase`/`.cause`.
+ * `capability_access[].readiness`, `connector_route_failure.phase`/`.cause`,
+ * and the exact nested `identity_projection` v1 shape.
  * Adding a member to any of them breaks every installed tolerant client — the
  * same failure class as `announcement_policy` v2, which is excluded for it.
  *
@@ -79,7 +80,9 @@ export const ADDITIVE_VALUE_VOCABULARY_WARNING =
  * confused in a spec or a client implementation.
  *
  * `legacyAcceptHeader` stays honored so an installed client that only knows its
- * own opt-in keeps exactly what it has.
+ * own opt-in keeps exactly what it has. It is `null` for a field introduced
+ * AFTER the generation: the generation is the whole opt-in, and minting a
+ * seventh per-field header would re-pay the cost this module exists to end.
  */
 export const ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS = Object.freeze({
 	recovery: { legacyAcceptHeader: "x-ceal-recovery", wireField: "error.recovery" },
@@ -87,6 +90,15 @@ export const ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS = Object.freeze({
 	profiles: { legacyAcceptHeader: "x-ceal-profiles", wireField: "value.eligible_profiles" },
 	route_provenance: { legacyAcceptHeader: "x-ceal-route-provenance", wireField: "value.events[].connector_route_failure" },
 	audit_timing: { legacyAcceptHeader: "x-ceal-audit-timing", wireField: "value.events[].gateway_elapsed_ms" },
+	// The first field to ride the generation from birth: a boolean saying whether
+	// a `match` selector narrowed a target page, so an empty complete page stops
+	// being indistinguishable from "this Profile holds no target at all"
+	// (corca-ai/ceal-cli#13). A boolean, not a matched-on vocabulary, precisely
+	// because of ADDITIVE_VALUE_VOCABULARY_WARNING.
+	match_applied: { legacyAcceptHeader: null, wireField: "value.target_catalog.match_applied" },
+	// Descriptive, freshness-bound addressability evidence. The nested v1 shape
+	// is exact-decoded; changing that vocabulary requires a new projection key.
+	identity_projection: { legacyAcceptHeader: null, wireField: "value.identity_projection" },
 } as const);
 
 export type CealAdditiveResponseField = keyof typeof ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS;
@@ -97,7 +109,7 @@ export type CealAdditiveResponseField = keyof typeof ADDITIVE_NON_AUTHORITY_RESP
  *
  * These are wire field names. `announcement_policy` is excluded not because
  * emitting it would be key-breaking today — no installed client receives it at
- * all, so on the wire it currently looks as key-additive as the five above —
+ * all, so on the wire it currently looks as key-additive as the fields above —
  * but because its rows are a version-pinned projection a client must interpret
  * exactly, and generic unknown-key tolerance is no evidence of vocabulary
  * readiness. That distinction is the whole point of

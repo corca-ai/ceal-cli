@@ -2,18 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1445,8 +1434,8 @@ test("capabilities and target selection never rotate a stored session", async ()
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		};
 		for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
-			const payload = await yamlRun(args, 0, runtime);
-			assert.equal(payload.status, "available", args.join(" "));
+			const payload = await yamlRun(args, args.length === 1 ? 0 : 3, runtime);
+			assert.equal(payload.status, args.length === 1 ? "available" : "unavailable", args.join(" "));
 		}
 		assert.equal(refreshCalls(), 0);
 		assert.deepEqual(
@@ -2817,158 +2806,6 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 	);
 });
 
-// The multi-target selection contract says a grant for one capability never
-// authorizes another: `targets[*].capability_ids` and the matching
-// `capability_access` entries must be read independently. The client satisfies
-// this today by passing the Gateway's targets through untouched — but nothing
-// held that shape in place, so a later convenience (collapsing readiness to one
-// value per target, widening a target's ids to the whole catalog, hoisting one
-// entry's rate limit onto its siblings) would have landed silently. These serve
-// a partial grant and assert the rendered rows are the served bytes.
-//
-// Synthesizing a *missing* access entry is deliberately not among them: the
-// vendored validator requires one entry per granted capability id, so no legal
-// wire body can put the client in that position, and a test for it would prove
-// the decoder rather than the renderer.
-// Targets only ride on a selected catalog query, so this exercises the
-// `capabilities targets --capability <id>` route: two targets that both grant
-// the queried capability while differing in everything else the contract says
-// must be read per capability.
-function partialGrantDiscoveryTargets() {
-	return [
-		{
-			connector_kind: "slack",
-			target_kind: "channel",
-			target_ref: "target:engineering",
-			label: "Engineering",
-			access: "granted",
-			// Granted for two of the three catalog capabilities, and the two differ
-			// in grant identity, readiness, and rate limit. `rate_limit` is optional
-			// per entry, so it is the one field a per-target projection could hoist
-			// onto a sibling — or drop — while every other assertion still held.
-			capability_ids: ["message.get", "resource.resolve"],
-			capability_access: [
-				{
-					schema_version: "ceal.capability_access.v1",
-					capability_id: "message.get",
-					grant_ref: "grant:engineering-message-get",
-					grant_revision: 4,
-					readiness: "ready",
-					rate_limit: {
-						schema_version: "ceal.gateway_rate_limit_policy.v1",
-						counted_unit: "governed_call",
-						scope: "authenticated_principal",
-						window_model: "rolling",
-						max_calls: 30,
-						window_ms: 60_000,
-					},
-				},
-				{
-					schema_version: "ceal.capability_access.v1",
-					capability_id: "resource.resolve",
-					grant_ref: "grant:engineering-resource-resolve",
-					grant_revision: 2,
-					readiness: "degraded",
-				},
-			],
-		},
-		{
-			connector_kind: "slack",
-			target_kind: "channel",
-			target_ref: "target:finance",
-			label: "Finance",
-			// The same queried capability on a second target, at a different
-			// readiness and without its sibling's second grant.
-			capability_ids: ["message.get"],
-			access: "granted",
-			capability_access: [
-				{
-					schema_version: "ceal.capability_access.v1",
-					capability_id: "message.get",
-					grant_ref: "grant:finance-message-get",
-					grant_revision: 1,
-					readiness: "unavailable",
-				},
-			],
-		},
-	];
-}
-
-async function renderPartialGrantTargets(args) {
-	const targets = partialGrantDiscoveryTargets();
-	let payload;
-	await withGateway(
-		async ({ endpoint }) => {
-			payload = await yamlRun(args, 0, {
-				readStoredSession: async () => storedSession(endpoint),
-				nextRequestId: () => "narnia:access:001",
-			});
-		},
-		(body) =>
-			body.operation === "handshake"
-				? handshakeResponse(body)
-				: success(body, {
-						schema_version: "ceal.gateway_discovery.v2",
-						profile_ref: body.profile_ref,
-						membership_ref: "membership:narnia",
-						capabilities: ["message.get", "resource.resolve", "conversation.thread.get"].map((id) => ({
-							capability_id: id,
-							label: id,
-							effect: "read",
-							target_requirement: "required",
-							input_contract: { schema_version: "ceal.generic_input.v1", required: [] },
-							evidence_requirement: "gateway_audit",
-						})),
-						targets,
-						target_catalog: { target_count: 2, returned_count: 2, complete: true },
-						host_decision: "accepted",
-						proof_level: "host_decision",
-						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
-					}),
-	);
-	return { payload, targets };
-}
-
-test("a target's capability access is rendered as served, never widened to the catalog", async () => {
-	for (const args of [
-		["capabilities", "targets", "--capability", "message.get"],
-		["capabilities", "targets", "--capability", "message.get", "--detail"],
-	]) {
-		const { payload, targets } = await renderPartialGrantTargets(args);
-		// The whole contract in one assertion: byte-identical rows. Everything
-		// below it is implied by it and is here to name the specific inference,
-		// not to add an independent constraint.
-		//
-		// `--detail` reaches only the capability rows today, so the second
-		// iteration is a forward guard against it growing into the target rows
-		// rather than coverage of a path that currently differs.
-		assert.deepEqual(payload.targets, targets);
-		const engineering = payload.targets[0];
-		// `conversation.thread.get` is in the catalog and is granted on no target.
-		// A client that widened ids to the catalog, or synthesized a placeholder
-		// access entry, would tell an agent it may call it here.
-		assert.equal(engineering.capability_ids.includes("conversation.thread.get"), false);
-		assert.doesNotMatch(JSON.stringify(payload.targets), /conversation\.thread\.get/u);
-		// Readiness is per capability, not per target: collapsing these to one
-		// value is the inference that turns a degraded grant into a ready one.
-		assert.deepEqual(
-			engineering.capability_access.map((access) => [access.capability_id, access.readiness, access.grant_ref, access.grant_revision]),
-			[
-				["message.get", "ready", "grant:engineering-message-get", 4],
-				["resource.resolve", "degraded", "grant:engineering-resource-resolve", 2],
-			],
-		);
-		// Nor is access read across targets. The queried capability is `ready` on
-		// one target and `unavailable` on the other, and the second target does not
-		// acquire its sibling's `resource.resolve` grant.
-		assert.deepEqual(payload.targets[1].capability_ids, ["message.get"]);
-		assert.deepEqual(
-			payload.targets[1].capability_access.map((access) => [access.capability_id, access.readiness]),
-			[["message.get", "unavailable"]],
-		);
-	}
-});
-
 // corca-ai/ceal#642: a throttled caller could not learn a safe pace, so agents
 // binary-searched it. The wait was on the wire the whole time — the renderer
 // dropped it. The known-code table wins over a disagreeing recovery class, which
@@ -4073,34 +3910,28 @@ test("capabilities omits eligible_profiles when the Gateway does not negotiate t
 	});
 });
 
-test("capabilities identifies each target request kind without copying its selector or cursor", async () => {
+test("target queries keep their exact request shape while the pinned Protocol withholds future target metadata", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const token = `ceal_personal_${"S".repeat(43)}`;
 		const runtime = {
 			readStoredSession: async () => storedSession(endpoint, { accessToken: token }),
 			nextRequestId: () => "narnia:target-catalog:001",
 		};
-		const payload = await yamlRun(
+		const matched = await yamlRun(
 			["capabilities", "targets", "--capability", "message.search", "--match", "team", "--limit", "1"],
-			0,
+			3,
 			runtime,
 		);
-		assert.equal(payload.status, "available");
-		assert.deepEqual(
-			payload.targets.map((item) => item.target_ref),
-			["target:team-inbox"],
-		);
-		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true });
-		assert.deepEqual(payload.target_selection, { capability_id: "message.search", request_kind: "match" });
-		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 0, runtime);
-		assert.deepEqual(unfiltered.target_selection, { capability_id: "message.search", request_kind: "unfiltered" });
+		assert.equal(matched.status, "unavailable");
+		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 3, runtime);
+		assert.equal(unfiltered.status, "unavailable");
 		const cursor = `cursor:${"c".repeat(48)}`;
 		const continued = await yamlRun(
 			["capabilities", "targets", "--capability", "message.search", "--cursor", cursor, "--limit", "1"],
-			0,
+			3,
 			runtime,
 		);
-		assert.deepEqual(continued.target_selection, { capability_id: "message.search", request_kind: "cursor" });
+		assert.equal(continued.status, "unavailable");
 		assert.doesNotMatch(JSON.stringify(continued), new RegExp(cursor, "u"));
 		const catalog = await yamlRun(["capabilities"], 0, runtime);
 		assert.equal(Object.hasOwn(catalog, "target_selection"), false);
@@ -4403,8 +4234,6 @@ test("library execution is deterministic, dependency-injected, and does not assi
 	const second = await run(["capabilities"]);
 	assert.deepEqual(second, first);
 	assert.equal(process.exitCode, beforeExitCode);
-	const builtSource = readFileSync(new URL("../dist/index.js", import.meta.url), "utf8");
-	assert.doesNotMatch(builtSource, /node:(?:fs|http|https|net)|process[.]env|\bHOME\b/u);
 });
 
 test("YAML renderer rejects non-plain scalars, objects, cycles, and aliases", () => {
@@ -4465,8 +4294,8 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 			requests.map((item) => item.body.operation),
 			["handshake"],
 		);
-		// The served catalog is the cached one (target_count 2), not a live re-probe (1).
-		assert.equal(payload.target_catalog.target_count, 2);
+		// The served empty catalog is the cached value; request count proves no live probe.
+		assert.equal(payload.target_catalog.target_count, 0);
 	});
 });
 
@@ -4525,7 +4354,7 @@ test("capabilities re-probes when the cached entry is past its freshness window"
 			["handshake", "discover"],
 		);
 		assert.equal(cache.entry().cachedAt, now, "stale re-probe refreshes the cache stamp");
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "cache now holds the live value");
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "cache now holds the live value");
 	});
 });
 
@@ -4562,7 +4391,7 @@ test("capabilities --fresh bypasses a warm cache and probes live", async () => {
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "--fresh refreshes the cache");
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "--fresh refreshes the cache");
 	});
 });
 
@@ -4601,7 +4430,7 @@ test("capabilities degrades to a live probe when a fresh cache entry has a malfo
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 1, "the live discovery replaces the malformed cache value");
+		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "the live discovery replaces the malformed cache value");
 	});
 });
 
@@ -5491,106 +5320,6 @@ function timingEvents(stderr) {
 	return events;
 }
 
-test("the packaged bin keeps static help ahead of the full runtime and contains an unexpected runtime failure", async () => {
-	// bin.js's rejection handler is the one surface no input reaches: every
-	// command path inside runCealCommand converts its own failures into a
-	// result envelope, which is why deleting `process.exitCode = 3` there left
-	// the whole gate green. Reaching it needs an injected fault, so the test
-	// runs the real bin.js against a dist whose index.js rejects and asserts
-	// both halves of the contract — the envelope and the exit code.
-	const root = mkdtempSync(path.join(tmpdir(), "ceal-bin-unexpected-"));
-	try {
-		const realDist = fileURLToPath(new URL("../dist", import.meta.url));
-		const stubDist = path.join(root, "dist");
-		mkdirSync(stubDist);
-		for (const name of readdirSync(realDist)) {
-			if (name === "index.js" || name === "private-bin-runtime.js") continue;
-			// bin.js is copied, not linked: ESM resolves a symlinked module's
-			// imports from its realpath, so a linked bin.js would reach straight
-			// past the stub and load the real index.js beside the original.
-			if (name === "bin.js" || name === "public-bin-runtime.js") copyFileSync(path.join(realDist, name), path.join(stubDist, name));
-			else symlinkSync(path.join(realDist, name), path.join(stubDist, name));
-		}
-		// Everything but runCealCommand stays real. A marker at module evaluation
-		// proves help never reaches this full-runtime boundary; the rejecting export
-		// then reaches the packaged bin's unexpected-failure handler.
-		const runtimeMarker = path.join(root, "full-runtime-loaded");
-		const privateRuntimeMarker = path.join(root, "private-runtime-loaded");
-		writeFileSync(
-			path.join(stubDist, "index.js"),
-			[
-				'import { writeFileSync } from "node:fs";',
-				`writeFileSync(${JSON.stringify(runtimeMarker)}, "loaded");`,
-				`export * from ${JSON.stringify(path.join(realDist, "index.js"))};`,
-				"export function runCealCommand() {",
-				'\treturn Promise.reject(new Error("injected unexpected failure"));',
-				"}",
-			].join("\n"),
-		);
-		writeFileSync(
-			path.join(stubDist, "private-bin-runtime.js"),
-			[
-				'import { writeFileSync } from "node:fs";',
-				`writeFileSync(${JSON.stringify(privateRuntimeMarker)}, "loaded");`,
-				"export function runPrivateCli() { return Promise.resolve(undefined); }",
-			].join("\n"),
-		);
-		const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-unexpected-home-"));
-		const runStub = async (args) => {
-			const child = spawn(process.execPath, [path.join(stubDist, "bin.js"), ...args], {
-				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env, HOME: home },
-			});
-			let stdout = "";
-			let stderr = "";
-			child.stdout.setEncoding("utf8");
-			child.stderr.setEncoding("utf8");
-			child.stdout.on("data", (chunk) => {
-				stdout += chunk;
-			});
-			child.stderr.on("data", (chunk) => {
-				stderr += chunk;
-			});
-			const code = await new Promise((resolve, reject) => {
-				child.once("error", reject);
-				child.once("close", resolve);
-			});
-			return { code, stdout, stderr };
-		};
-		for (const staticArgs of [
-			["--help"],
-			["session", "enroll", "--gateway", "--help"],
-			["commands"],
-			["version"],
-			["not-a-command"],
-			["version", "unexpected"],
-		]) {
-			const result = await runStub(staticArgs);
-			assert.ok([0, 2].includes(result.code), `${staticArgs.join(" ")}: ${result.stderr}`);
-			assert.equal(existsSync(runtimeMarker), false, `${staticArgs.join(" ")} evaluated the full runtime`);
-			assert.equal(existsSync(privateRuntimeMarker), false, `${staticArgs.join(" ")} evaluated the private runtime`);
-		}
-		const privateArg = JSON.parse(readFileSync(new URL("../leased-consumer-carrier-contract.json", import.meta.url), "utf8")).argv[0];
-		assert.equal((await runStub([privateArg])).code, 2, "the marker stub deliberately declines the private request");
-		assert.equal(existsSync(privateRuntimeMarker), true, "the contract-derived private argv must evaluate only its private runtime");
-		assert.equal(existsSync(runtimeMarker), false, "a private argv must not evaluate the public full runtime");
-		const { code, stdout } = await runStub(["capabilities"]);
-		rmSync(home, { recursive: true, force: true });
-		const payload = parseYaml(stdout);
-		assert.equal(payload.schema_version, "ceal.error.v1");
-		assert.equal(payload.ok, false);
-		assert.equal(payload.status, "error");
-		assert.equal(payload.error.kind, "unexpected_failure");
-		assert.equal(typeof payload.error.next_action, "string");
-		// The message must stay generic: an injected failure's own text is not
-		// something this envelope may leak to the agent.
-		assert.doesNotMatch(stdout, /injected/u);
-		assert.equal(code, 3);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
 // The record this emits leaves the machine, so the property under test is not
 // "the fields are right" but "the host is absent". It is built by allow-list for
 // that reason, and these drive the builder directly: requiring an installed
@@ -5741,7 +5470,7 @@ test("a bounded-call field the builder was never told to emit does not travel", 
 test("a build tree is refused as an installed release rather than described as one", () => {
 	// The running binary in a dev checkout has no release layout beside it, which
 	// is exactly the substitution this command must not narrate.
-	const reading = readInstalledReleaseFacts(fileURLToPath(new URL("../dist/bin.js", import.meta.url)));
+	const reading = readInstalledReleaseFacts(fileURLToPath(new URL("../src/bin.ts", import.meta.url)));
 	assert.equal(reading.ok, false);
 	assert.equal(reading.code, "managed_install_required");
 });

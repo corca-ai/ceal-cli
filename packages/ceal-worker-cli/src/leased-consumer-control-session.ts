@@ -82,22 +82,12 @@ type DecodedControlFrame = Readonly<{ operation: string }> & Record<string, unkn
 type NotificationDecoder = (value: unknown) => Record<string, unknown>;
 type FrameEmitter = (frame: Uint8Array, signal?: AbortSignal) => void | Promise<void>;
 
-const V4_ROUTES = Object.freeze({
-	acquire: "/api/ceal/agent/v1/control/acquire",
-	projection: "/api/ceal/agent/v1/control/projection",
-	recheck: "/api/ceal/agent/v1/control/recheck",
-	call: "/api/ceal/agent/v1/call",
-	complete: "/api/ceal/agent/v1/control/complete",
-});
-const V5_ROUTES = Object.freeze({
-	...V4_ROUTES,
-	notification_receipt: "/api/ceal/agent/v1/control/notification-receipt",
-});
-
 type CandidateProtocol = Readonly<{
 	decodeCealLeasedConsumerCapabilityNotification?: NotificationDecoder;
 	decodeCealLeasedConsumerNotificationControlRequest?: (value: unknown) => DecodedControlFrame;
 	decodeCealLeasedConsumerNotificationControlResponse?: (value: unknown) => DecodedControlFrame;
+	decodeCealLeasedConsumerDispositionControlRequest?: (value: unknown) => DecodedControlFrame;
+	decodeCealLeasedConsumerDispositionControlResponse?: (value: unknown) => DecodedControlFrame;
 }>;
 const CANDIDATE_PROTOCOL = CealProtocol as unknown as CandidateProtocol;
 assertEmbeddedControlSessionContract(CONTROL_SESSION_CONTRACT);
@@ -210,6 +200,10 @@ export interface LeasedConsumerControlSessionRuntime {
 	readonly clearTimer?: (timer: unknown) => void;
 	/** Test seam only. The shipped carrier reads the launcher-injected deadline from process.env. */
 	readonly env?: Readonly<Record<string, string | undefined>>;
+	/** Test seam only. Production resolves the request decoder from the selected signed Protocol package. */
+	readonly decodeControlRequest?: (value: unknown) => DecodedControlFrame;
+	/** Test seam only. Production resolves the response decoder from the selected signed Protocol package. */
+	readonly decodeControlResponse?: (value: unknown) => DecodedControlFrame;
 }
 
 /**
@@ -481,7 +475,7 @@ async function dispatch(
 	operationDeadlineMs: number,
 	signal?: AbortSignal,
 ): Promise<Uint8Array> {
-	const request = decodeControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES));
+	const request = decodeControlRequest(parseStrictJson(frame, MAX_FRAME_BYTES), runtime);
 	const route = ROUTES[request.operation];
 	if (typeof route !== "string") throw new Error("operation_unavailable");
 	const body = JSON.stringify(request);
@@ -504,12 +498,18 @@ async function dispatch(
 	);
 	if (response.status !== 200 || !isJsonContentType(response.contentType) || response.bytes.byteLength > MAX_FRAME_BYTES)
 		throw new Error("control_unavailable");
-	const decoded = decodeControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES));
+	const decoded = decodeControlResponse(parseStrictJson(response.bytes, MAX_FRAME_BYTES), runtime);
 	if (decoded.operation !== request.operation) throw new Error("operation_mismatch");
 	return new TextEncoder().encode(`${JSON.stringify(decoded)}\n`);
 }
 
-function decodeControlRequest(value: unknown): DecodedControlFrame {
+function decodeControlRequest(value: unknown, runtime: LeasedConsumerControlSessionRuntime): DecodedControlFrame {
+	if (runtime.decodeControlRequest) return runtime.decodeControlRequest(value);
+	if (CONTROL_SESSION_CONTRACT.agent_ipc.request_schema_version.endsWith(".v6")) {
+		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlRequest;
+		if (!decode) throw new Error("disposition_protocol_unavailable");
+		return decode(value);
+	}
 	if (CONTROL_SESSION_CONTRACT.agent_ipc.request_schema_version.endsWith(".v5")) {
 		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest;
 		if (!decode) throw new Error("notification_protocol_unavailable");
@@ -518,7 +518,13 @@ function decodeControlRequest(value: unknown): DecodedControlFrame {
 	return decodeCealLeasedConsumerCapabilityControlRequest(value) as DecodedControlFrame;
 }
 
-function decodeControlResponse(value: unknown): DecodedControlFrame {
+function decodeControlResponse(value: unknown, runtime: LeasedConsumerControlSessionRuntime): DecodedControlFrame {
+	if (runtime.decodeControlResponse) return runtime.decodeControlResponse(value);
+	if (CONTROL_SESSION_CONTRACT.agent_ipc.response_schema_version.endsWith(".v6")) {
+		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlResponse;
+		if (!decode) throw new Error("disposition_protocol_unavailable");
+		return decode(value);
+	}
 	if (CONTROL_SESSION_CONTRACT.agent_ipc.response_schema_version.endsWith(".v5")) {
 		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse;
 		if (!decode) throw new Error("notification_protocol_unavailable");
@@ -589,30 +595,41 @@ function assertEmbeddedControlSessionContract(
 		}>;
 	}>,
 ): void {
-	const expectedRoutes = value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" ? V5_ROUTES : V4_ROUTES;
-	const exactRoutes =
-		Object.keys(value.gateway.routes).length === Object.keys(expectedRoutes).length &&
-		Object.entries(expectedRoutes).every(([operation, route]) => value.gateway.routes[operation] === route);
+	const routeEntries = Object.entries(value.gateway.routes);
+	const fixedRoutes =
+		routeEntries.length >= 5 &&
+		routeEntries.every(
+			([operation, route]) =>
+				/^[a-z][a-z0-9_]*$/u.test(operation) && typeof route === "string" && /^\/api\/ceal\/agent\/v1\/[a-z0-9][a-z0-9_/-]*$/u.test(route),
+		) &&
+		new Set(routeEntries.map(([, route]) => route)).size === routeEntries.length;
 	const v4 =
 		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v2" &&
 		value.notification_channel === undefined &&
 		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v4" &&
 		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v4" &&
-		exactRoutes;
-	const v5 =
+		routeEntries.length === 5 &&
+		fixedRoutes;
+	const modern =
 		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" &&
 		value.notification_channel?.child_fd === 5 &&
 		value.notification_channel.schema_version === "ceal.leased_consumer_capability_notification.v5" &&
 		value.notification_channel.framing === "ndjson" &&
 		value.notification_channel.maximum_frame_bytes === 4 * 1024 &&
-		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v5" &&
-		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v5" &&
-		exactRoutes &&
+		["ceal.leased_consumer_capability_control_request.v5", "ceal.leased_consumer_capability_control_request.v6"].includes(
+			value.agent_ipc.request_schema_version,
+		) &&
+		["ceal.leased_consumer_capability_control_response.v5", "ceal.leased_consumer_capability_control_response.v6"].includes(
+			value.agent_ipc.response_schema_version,
+		) &&
+		value.agent_ipc.request_schema_version.slice(-2) === value.agent_ipc.response_schema_version.slice(-2) &&
+		routeEntries.length >= 6 &&
+		fixedRoutes &&
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerCapabilityNotification === "function" &&
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest === "function" &&
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse === "function";
 	if (
-		(!v4 && !v5) ||
+		(!v4 && !modern) ||
 		value.argv[0] !== LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV ||
 		value.protected_session.child_fd !== 4 ||
 		value.protected_session.schema_version !== "ceal.leased_consumer_control_session.v1" ||

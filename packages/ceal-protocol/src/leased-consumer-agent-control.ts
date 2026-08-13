@@ -1,4 +1,5 @@
-import type { CealLeasedConsumerCapabilityProjectionResult, CealLeasedConsumerNormalizedProjection } from "./leased-consumer-control.js";
+import { decodeCealLeasedConsumerMessengerContext, type CealLeasedConsumerCapabilityProjectionResult, type CealLeasedConsumerNormalizedProjection } from "./leased-consumer-control.js";
+import { decodeCealLeasedConsumerCapabilityCatalog } from "./leased-consumer-capability-catalog.js";
 
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const TOKEN = /^ceal-control-v1[.][A-Za-z0-9_-]{43}$/u;
@@ -49,9 +50,18 @@ export function decodeCealLeasedConsumerControlEffectCompleteInput(value: unknow
 	return value as unknown as CealLeasedConsumerControlEffectCompleteInput;
 }
 
-function validResultEnvelope(value: unknown): value is Record<string, unknown> { return record(value) && exactKeys(value, ["attachments", "capability_contexts", "conversation_ref", "event_ref", "event_revision", "normalized_projection_ref", "normalized_projection_revision", "projection", "requester", "status"]) && value.status === "available"; }
-function validResultBinding(value: Record<string, unknown>): boolean { return safeRef(value.event_ref) && positive(value.event_revision) && safeRef(value.normalized_projection_ref) && positive(value.normalized_projection_revision) && typeof value.conversation_ref === "string" && /^conversation:[a-f0-9]{64}$/u.test(value.conversation_ref); }
-function validResultContext(value: Record<string, unknown>): boolean { return validRequester(value.requester) && validAttachments(value.attachments) && Array.isArray(value.capability_contexts) && value.capability_contexts.length === 0 && validProjection(value.projection); }
+function validResultEnvelope(value: unknown): value is Record<string, unknown> { return record(value) && exactKeysOptional(value, ["attachments", "capability_catalog", "event_ref", "event_revision", "normalized_projection_ref", "normalized_projection_revision", "projection", "requester", "status"], ["messenger_context"]) && value.status === "available"; }
+function validResultBinding(value: Record<string, unknown>): boolean { return safeRef(value.event_ref) && positive(value.event_revision) && safeRef(value.normalized_projection_ref) && positive(value.normalized_projection_revision); }
+function validResultContext(value: Record<string, unknown>): boolean {
+	return validRequester(value.requester) && validAttachments(value.attachments) && validCatalog(value.capability_catalog)
+		&& (value.messenger_context === undefined || validMessengerContext(value.messenger_context)) && validProjection(value.projection);
+}
+function validCatalog(value: unknown): boolean {
+	try { decodeCealLeasedConsumerCapabilityCatalog(value); return true; } catch { return false; }
+}
+function validMessengerContext(value: unknown): boolean {
+	try { decodeCealLeasedConsumerMessengerContext(value); return true; } catch { return false; }
+}
 function validProjection(value: unknown): boolean { return record(value) && exactKeys(value, ["control", "schema_version"]) && value.schema_version === "ceal.gateway_normalized_agent_control_projection.v1" && validControl(value.control); }
 function validControl(value: unknown): boolean { return record(value) && exactKeys(value, ["actor_subject_ref", "authority", "origin", "token"]) && TOKEN.test(String(value.token)) && ["original_requester", "instance_admin"].includes(value.authority as string) && subjectRef(value.actor_subject_ref) && validOrigin(value.origin); }
 function validOrigin(value: unknown): boolean { return record(value) && exactKeys(value, ["event_ref", "event_revision", "normalized_projection_ref", "normalized_projection_revision"]) && safeRef(value.event_ref) && positive(value.event_revision) && safeRef(value.normalized_projection_ref) && positive(value.normalized_projection_revision); }

@@ -5,6 +5,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { transformSync } from "esbuild";
 import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
 import { withLocalStoreLock } from "../dist/local-store-lock.js";
 
@@ -423,7 +424,7 @@ function successorBeforeCandidatePublish(directory) {
 		"}",
 	].join("\n");
 	const module = path.join(directory, "candidate-publish-lock.mjs");
-	writeFileSync(module, source.replace(anchor, `${injected}\n${anchor}`));
+	writeFileSync(module, emittedInjectedLock(source.replace(anchor, `${injected}\n${anchor}`)));
 	return module;
 }
 
@@ -439,7 +440,7 @@ function successorBeforeLateQuarantine(directory) {
 		"}",
 	].join("\n");
 	const module = path.join(directory, "late-quarantine-lock.mjs");
-	writeFileSync(module, source.replace(anchor, `${injected}\n${anchor}`));
+	writeFileSync(module, emittedInjectedLock(source.replace(anchor, `${injected}\n${anchor}`)));
 	return module;
 }
 
@@ -453,7 +454,7 @@ function parentSwapAfterCandidateMkdir(moduleDirectory, directory, moved) {
 		`mkdirSync(${JSON.stringify(directory)}, { mode: 0o700 });`,
 	].join("\n");
 	const module = path.join(moduleDirectory, "candidate-parent-swap-lock.mjs");
-	writeFileSync(module, source.replace(anchor, injected));
+	writeFileSync(module, emittedInjectedLock(source.replace(anchor, injected)));
 	return module;
 }
 
@@ -467,12 +468,12 @@ function parentSwapBeforeQuarantine(moduleDirectory, directory, moved) {
 		anchor,
 	].join("\n");
 	const module = path.join(moduleDirectory, "quarantine-parent-swap-lock.mjs");
-	writeFileSync(module, source.replace(anchor, injected));
+	writeFileSync(module, emittedInjectedLock(source.replace(anchor, injected)));
 	return module;
 }
 
 function injectableLockSource() {
-	const source = readFileSync(new URL("../dist/local-store-lock.js", import.meta.url), "utf8");
+	const source = readFileSync(new URL("../src/local-store-lock.ts", import.meta.url), "utf8");
 	const relativeImport = 'from "./local-store-anchor.js";';
 	const relativeClockImport = 'from "./monotonic-clock.js";';
 	const relativeModeImport = 'from "./filesystem-mode.js";';
@@ -486,6 +487,10 @@ function injectableLockSource() {
 		.replace(relativeImport, `from ${JSON.stringify(anchorUrl)};`)
 		.replace(relativeClockImport, `from ${JSON.stringify(clockUrl)};`)
 		.replace(relativeModeImport, `from ${JSON.stringify(modeUrl)};`);
+}
+
+function emittedInjectedLock(source) {
+	return transformSync(source, { format: "esm", loader: "ts", target: "node22" }).code;
 }
 
 function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {

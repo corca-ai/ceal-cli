@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-protocol",
-	"version": "0.72.17",
+	"version": "0.72.21",
 	"license": "MIT",
 	"description": "Gateway-owned Ceal protocol contracts and conformance corpus",
 	"repository": {

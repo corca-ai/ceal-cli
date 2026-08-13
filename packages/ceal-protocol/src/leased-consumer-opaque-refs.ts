@@ -21,4 +21,22 @@ export const opaqueTargetRef = opaqueRefMatcher("target");
 export const opaqueMessageRef = opaqueRefMatcher("message");
 export const opaqueThreadRef = opaqueRefMatcher("thread");
 export const opaqueArtifactRef = opaqueRefMatcher("artifact");
+export const opaqueDocumentRef = opaqueRefMatcher("document");
 export const safeReplyReceiptRef = opaqueRefMatcher("reply-receipt");
+
+export interface CealLeasedConsumerCapabilityHandle {
+	kind: "target" | "message" | "thread" | "artifact" | "document";
+	ref: string;
+}
+
+const CAPABILITY_HANDLE_DECODERS = new Map<string, (value: unknown) => boolean>([
+	["target", opaqueTargetRef], ["message", opaqueMessageRef], ["thread", opaqueThreadRef], ["artifact", opaqueArtifactRef], ["document", opaqueDocumentRef],
+]);
+
+export function validCealLeasedConsumerCapabilityHandle(value: unknown): value is CealLeasedConsumerCapabilityHandle {
+	if (!plainRecord(value) || !exactKeys(value, ["kind", "ref"])) return false;
+	return typeof value.kind === "string" && (CAPABILITY_HANDLE_DECODERS.get(value.kind)?.(value.ref) ?? false);
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null); }
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean { const keys = Object.keys(value).sort(); const ordered = [...expected].sort(); return keys.length === ordered.length && keys.every((key, index) => key === ordered[index]); }

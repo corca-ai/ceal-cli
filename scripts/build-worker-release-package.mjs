@@ -22,6 +22,7 @@ import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-dir
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 import { toolchainEnv } from "./lib/toolchain-env.mjs";
+import { PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH } from "./project-staged-worker-control-session.mjs";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,7 +62,14 @@ function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInput
 				let stage;
 				try {
 					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-"));
-					const packed = prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball: rawInputs.protocolTarball, dependencies });
+					const packed = prepareWorkerReleaseConsumer({
+						repoRoot,
+						stage,
+						inputs,
+						protocolTarball: rawInputs.protocolTarball,
+						controlConformance: rawInputs.controlConformance,
+						dependencies,
+					});
 					const version = resolveVersion(repoRoot, inputs);
 					materializeOutput({ output, repoRoot, inputs, version, packed });
 					return {
@@ -93,7 +101,7 @@ function buildWorkerReleasePackageWithInputs(options, dependencies, resolveInput
 	}
 }
 
-export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball, dependencies = {} }) {
+export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocolTarball, controlConformance, dependencies = {} }) {
 	const packageRoot = path.join(stage, "packages");
 	const clientStage = stageOwnedPackage(repoRoot, packageRoot, inputs.client.source_path);
 	const workerStage = stageOwnedPackage(repoRoot, packageRoot, inputs.worker.source_path);
@@ -105,6 +113,7 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 	if (packedClient.package !== inputs.client.package)
 		fail("worker_package_pack_failed", "Packed client identity does not match the worker release inventory.");
 	stagePackedPackage(packedClient.path, dependencyRoot, inputs.client.package);
+	projectWorkerControlSession({ workerStage, dependencyRoot, inputs, controlConformance, dependencies });
 	compilePackage(workerStage, dependencyRoot, dependencies);
 	const packedWorker = packPackage(workerStage, path.join(stage, "packed"), dependencies);
 	if (packedWorker.package !== inputs.worker.package)
@@ -117,6 +126,7 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 		inputs,
 	});
 	const consumerSmoke = smokeInstalledWorker({ consumer, dependencies });
+	const controlSessionBytes = readFileSync(path.join(workerStage, "leased-consumer-control-session-contract.json"));
 	return {
 		worker: { name: packedWorker.filename, bytes: packedWorker.bytes, sha256: packedWorker.sha256, path: packedWorker.path },
 		client: {
@@ -128,7 +138,34 @@ export function prepareWorkerReleaseConsumer({ repoRoot, stage, inputs, protocol
 		},
 		consumerSmoke,
 		consumer,
+		controlSessionContract: {
+			contract: JSON.parse(controlSessionBytes.toString("utf8")),
+			sha256: sha256(controlSessionBytes),
+		},
 	};
+}
+
+function projectWorkerControlSession({ workerStage, dependencyRoot, inputs, controlConformance, dependencies }) {
+	if (inputs.trust_anchor?.kind !== "reviewed_gateway_handoff_lock") return;
+	const protocolModule = path.join(dependencyRoot, ...inputs.protocol.package.split("/"), "dist/index.js");
+	const handoff = {
+		gateway_tag: inputs.trust_anchor.gateway_tag,
+		gateway_commit: inputs.trust_anchor.gateway_commit,
+		protocol_tree: inputs.protocol.producer.protocol_tree,
+		archive_sha256: inputs.trust_anchor.archive_sha256,
+	};
+	try {
+		(dependencies.projectControlSession ?? execFileSync)(
+			process.execPath,
+			[PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH, workerStage, protocolModule, controlConformance, JSON.stringify(handoff)],
+			{ stdio: "pipe" },
+		);
+	} catch {
+		fail(
+			"control_conformance_projection_failed",
+			"Worker control-session contract could not be projected from the reviewed Gateway archive.",
+		);
+	}
 }
 
 function stageOwnedPackage(repoRoot, packageRoot, relativePath) {

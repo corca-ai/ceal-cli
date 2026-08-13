@@ -1,9 +1,9 @@
 {
 	"$schema": "https://json.schemastore.org/c8rc.json",
 	"all": true,
-	"src": "dist",
+	"src": "src",
 	"extension": [
-		".js"
+		".ts"
 	],
 	"exclude": [
 		"**/generated/**",

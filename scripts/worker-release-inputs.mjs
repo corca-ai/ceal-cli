@@ -20,14 +20,15 @@ const SCHEMA_VERSION = "ceal.worker_release_inputs.v1";
 const HANDOFF_SCHEMA = "ceal.gateway_protocol_handoff.v1";
 // The Gateway owns the control conformance.  This consumer only binds its
 // declared producer identity and bytes; it must therefore accept every
-// published handoff schema whose identity envelope stays unchanged.  v3 adds
-// the reply-control vectors and v4 the capability-control vectors without
-// changing that envelope.
+// published handoff schema whose identity envelope stays unchanged. Later
+// schemas add control vectors and operations without changing that envelope;
+// the explicit set still makes an unknown schema a refusal.
 const CONTROL_CONFORMANCE_SCHEMAS = new Set([
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v1",
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v4",
 	"ceal.gateway_leased_consumer_control_conformance_handoff.v5",
+	"ceal.gateway_leased_consumer_control_conformance_handoff.v6",
 ]);
 const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";

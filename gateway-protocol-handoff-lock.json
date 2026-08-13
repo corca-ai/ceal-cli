@@ -4,29 +4,29 @@
   "gateway": {
     "repository": "corca-ai/ceal",
     "workflow_path": ".github/workflows/gateway-protocol-handoff-release.yml",
-    "commit": "b644bdcc1883a12f30dec9f15a918eca3676b740",
-    "tree": "0a6a30d6f3d76077eb4ade02c43a069120011169",
-    "protocol_tree": "07c79e9626a1ef0be3c3a3092ebff48a4433d70d",
-    "tag": "gateway-protocol-handoff-v0.72.13",
-    "actions_run_id": 31324956418,
+    "commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
+    "tree": "6c90c3159a4aa70c57179fa4e5dd333c26bd418e",
+    "protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c",
+    "tag": "gateway-protocol-handoff-v0.72.21",
+    "actions_run_id": 31707355521,
     "origin": "https://ceal.borca.ai/releases/gateway-protocol-handoff"
   },
   "protocol": {
     "package": "@corca-ai/ceal-protocol",
-    "version": "0.72.13",
-    "filename": "corca-ai-ceal-protocol-0.72.13.tgz",
-    "sha256": "cdcad0444df6a614b97be1ae4edf2a0b1de9cc04c82fe0888b0be43cde18f4e0"
+    "version": "0.72.21",
+    "filename": "corca-ai-ceal-protocol-0.72.21.tgz",
+    "sha256": "f87c4618800351e87744596e4e0f7af7b152501b5e45ebbb91cae0cb3d3b101d"
   },
   "archive": {
-    "filename": "ceal-gateway-protocol-handoff-0.72.13.tar.gz",
-    "sha256": "c7c410b48eb65c0a463d0e86090e8a86a67ab8a4ef3eb6a0d12ff7aee05ef7ec",
-    "handoff_manifest_sha256": "dccba7259eddc6d4dad2e8e7e65d51b958ed425aaa16ab06960ce84e2587ccdb"
+    "filename": "ceal-gateway-protocol-handoff-0.72.21.tar.gz",
+    "sha256": "1312b7d439a3e7e17aab022a40383d7ed5f9bc3f9aa9d9cf44c21026bec079b7",
+    "handoff_manifest_sha256": "1a2a6a12c755b21875d190f70cade7b43d37d8815d163759533b962fc9950901"
   },
   "reviewed_signature": {
-    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.13",
+    "certificate_identity": "https://github.com/corca-ai/ceal/.github/workflows/gateway-protocol-handoff-release.yml@refs/tags/gateway-protocol-handoff-v0.72.21",
     "oidc_issuer": "https://token.actions.githubusercontent.com",
-    "workflow_sha": "b644bdcc1883a12f30dec9f15a918eca3676b740",
-    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/31324956418/attempts/1"
+    "workflow_sha": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
+    "run_invocation_uri": "https://github.com/corca-ai/ceal/actions/runs/31707355521/attempts/1"
   },
   "non_claims": [
     "This lock records one public signed handoff and remote tag readback at consumption time; it does not promise that either surface remains available later.",
