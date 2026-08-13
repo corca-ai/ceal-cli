@@ -63,14 +63,7 @@ export function generateLeasedConsumerHandoffRuntime({ repoRoot = ROOT } = {}) {
 }
 
 export function readCarrierContract(file) {
-	let bytes;
-	let value;
-	try {
-		bytes = readFileSync(file);
-		value = JSON.parse(bytes.toString("utf8"));
-	} catch {
-		throw new Error("invalid_carrier_contract");
-	}
+	const { bytes, value } = readJsonContract(file, "invalid_carrier_contract");
 	const errors = ["invalid_request", "leased_consumer_call_unavailable", "service_call_failed", "service_channel_unavailable"];
 	if (
 		!exact(value, ["schema_version", "argv", "stdin", "service_channel", "service_call", "result", "non_claims"]) ||
@@ -108,14 +101,7 @@ export function readCarrierContract(file) {
 }
 
 export function readControlSessionContract(file, { repoRoot = ROOT } = {}) {
-	let bytes;
-	let value;
-	try {
-		bytes = readFileSync(file);
-		value = JSON.parse(bytes.toString("utf8"));
-	} catch {
-		throw new Error("invalid_control_session_contract");
-	}
+	const { bytes, value } = readJsonContract(file, "invalid_control_session_contract");
 	const routeEntries = Object.entries(value?.gateway?.routes ?? {});
 	const fixedRoutes =
 		routeEntries.length >= 5 &&
@@ -258,31 +244,10 @@ export function controlSessionContractFromVerifiedConformance(contract, conforma
 		if (requestSchemas.size !== 1 || responseSchemas.size !== 1) throw new Error("invalid_control_session_contract");
 		projected.agent_ipc.request_schema_version = [...requestSchemas][0];
 		projected.agent_ipc.response_schema_version = [...responseSchemas][0];
-		if (
-			!handoff ||
-			typeof handoff.gateway_tag !== "string" ||
-			!/^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u.test(handoff.gateway_tag) ||
-			!/^[a-f0-9]{40}$/u.test(handoff.gateway_commit) ||
-			!/^[a-f0-9]{40}$/u.test(handoff.protocol_tree) ||
-			!/^[a-f0-9]{64}$/u.test(handoff.archive_sha256)
-		)
-			throw new Error("invalid_control_session_contract");
-		projected.gateway_protocol_handoff = {
-			lock_file: "gateway-protocol-handoff-lock.json",
-			gateway_tag: handoff.gateway_tag,
-			gateway_commit: handoff.gateway_commit,
-			protocol_tree: handoff.protocol_tree,
-			archive_sha256: handoff.archive_sha256,
-		};
+		projected.gateway_protocol_handoff = controlSessionHandoff(handoff);
 	}
 	if (!materialize && handoff) {
-		const expected = {
-			lock_file: "gateway-protocol-handoff-lock.json",
-			gateway_tag: handoff.gateway_tag,
-			gateway_commit: handoff.gateway_commit,
-			protocol_tree: handoff.protocol_tree,
-			archive_sha256: handoff.archive_sha256,
-		};
+		const expected = controlSessionHandoff(handoff);
 		if (JSON.stringify(projected.gateway_protocol_handoff) !== JSON.stringify(expected)) throw new Error("invalid_control_session_contract");
 	}
 	if (!exact(projected.gateway.routes, Object.keys(routes))) throw new Error("invalid_control_session_contract");
@@ -308,6 +273,34 @@ function exact(object, keys) {
 
 function sha256ControlRoutes(routes) {
 	return createHash("sha256").update(JSON.stringify(routes)).digest("hex");
+}
+
+function readJsonContract(file, errorCode) {
+	try {
+		const bytes = readFileSync(file);
+		return { bytes, value: JSON.parse(bytes.toString("utf8")) };
+	} catch {
+		throw new Error(errorCode);
+	}
+}
+
+function controlSessionHandoff(handoff) {
+	if (
+		!handoff ||
+		typeof handoff.gateway_tag !== "string" ||
+		!/^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u.test(handoff.gateway_tag) ||
+		!/^[a-f0-9]{40}$/u.test(handoff.gateway_commit) ||
+		!/^[a-f0-9]{40}$/u.test(handoff.protocol_tree) ||
+		!/^[a-f0-9]{64}$/u.test(handoff.archive_sha256)
+	)
+		throw new Error("invalid_control_session_contract");
+	return {
+		lock_file: "gateway-protocol-handoff-lock.json",
+		gateway_tag: handoff.gateway_tag,
+		gateway_commit: handoff.gateway_commit,
+		protocol_tree: handoff.protocol_tree,
+		archive_sha256: handoff.archive_sha256,
+	};
 }
 
 // The two embedded contracts render the same module shape around a different
@@ -350,46 +343,41 @@ function writeIfChanged(file, rendered) {
  */
 export function verifyEmbeddedCarrierContractSource({ repoRoot = ROOT } = {}) {
 	const root = path.resolve(repoRoot);
-	const expected = readCarrierContract(path.join(root, CARRIER_CONTRACT_PATH));
-	let generated;
-	try {
-		generated = readFileSync(path.join(root, CARRIER_CONTRACT_OUTPUT_PATH), "utf8");
-	} catch {
-		throw new Error("embedded_carrier_contract_missing");
-	}
-	const json = /^export const LEASED_CONSUMER_CARRIER_CONTRACT_JSON = (.+) as const;$/mu.exec(generated)?.[1];
-	const sha256 = /^export const LEASED_CONSUMER_CARRIER_CONTRACT_SHA256 = "([a-f0-9]{64})" as const;$/mu.exec(generated)?.[1];
-	const argv = /^export const LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV = (.+) as const;$/mu.exec(generated)?.[1];
-	try {
-		if (
-			typeof json !== "string" ||
-			typeof sha256 !== "string" ||
-			typeof argv !== "string" ||
-			JSON.parse(json) !== expected.bytes.toString("utf8") ||
-			JSON.parse(argv) !== expected.value.argv[0] ||
-			sha256 !== expected.sha256
-		)
-			throw new Error("embedded_carrier_contract_drift");
-	} catch {
-		throw new Error("embedded_carrier_contract_drift");
-	}
-	return Object.freeze({ contract: expected.value, sha256: expected.sha256 });
+	return verifyEmbeddedContractSource({
+		expected: readCarrierContract(path.join(root, CARRIER_CONTRACT_PATH)),
+		generatedPath: path.join(root, CARRIER_CONTRACT_OUTPUT_PATH),
+		constPrefix: "LEASED_CONSUMER_CARRIER",
+		missingCode: "embedded_carrier_contract_missing",
+		driftCode: "embedded_carrier_contract_drift",
+	});
 }
 
 /** The native worker may bundle only the exact generated control-session contract. */
 export function verifyEmbeddedControlSessionContractSource({ repoRoot = ROOT } = {}) {
 	const root = path.resolve(repoRoot);
 	const expected = readControlSessionContract(path.join(root, CONTROL_SESSION_CONTRACT_PATH), { repoRoot: root });
+	return verifyEmbeddedContractSource({
+		expected,
+		generatedPath: path.join(root, CONTROL_SESSION_CONTRACT_OUTPUT_PATH),
+		constPrefix: "LEASED_CONSUMER_CONTROL_SESSION",
+		missingCode: "embedded_control_session_contract_missing",
+		driftCode: "embedded_control_session_contract_drift",
+		routesSha256: sha256ControlRoutes(expected.value.gateway.routes),
+	});
+}
+
+function verifyEmbeddedContractSource({ expected, generatedPath, constPrefix, missingCode, driftCode, routesSha256 }) {
 	let generated;
 	try {
-		generated = readFileSync(path.join(root, CONTROL_SESSION_CONTRACT_OUTPUT_PATH), "utf8");
+		generated = readFileSync(generatedPath, "utf8");
 	} catch {
-		throw new Error("embedded_control_session_contract_missing");
+		throw new Error(missingCode);
 	}
-	const json = /^export const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON = (.+) as const;$/mu.exec(generated)?.[1];
-	const sha256 = /^export const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256 = "([a-f0-9]{64})" as const;$/mu.exec(generated)?.[1];
-	const routesSha256 = /^export const LEASED_CONSUMER_CONTROL_SESSION_ROUTES_SHA256 = "([a-f0-9]{64})" as const;$/mu.exec(generated)?.[1];
-	const argv = /^export const LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV = (.+) as const;$/mu.exec(generated)?.[1];
+	const constant = (suffix) => new RegExp(`^export const ${constPrefix}_${suffix} = (.+) as const;$`, "mu").exec(generated)?.[1];
+	const json = constant("CONTRACT_JSON");
+	const sha256 = constant("CONTRACT_SHA256");
+	const argv = constant("ENTRYPOINT_ARGV");
+	const embeddedRoutesSha256 = routesSha256 === undefined ? undefined : constant("ROUTES_SHA256");
 	try {
 		if (
 			typeof json !== "string" ||
@@ -397,12 +385,12 @@ export function verifyEmbeddedControlSessionContractSource({ repoRoot = ROOT } =
 			typeof argv !== "string" ||
 			JSON.parse(json) !== expected.bytes.toString("utf8") ||
 			JSON.parse(argv) !== expected.value.argv[0] ||
-			sha256 !== expected.sha256 ||
-			routesSha256 !== sha256ControlRoutes(expected.value.gateway.routes)
+			JSON.parse(sha256) !== expected.sha256 ||
+			(routesSha256 !== undefined && JSON.parse(embeddedRoutesSha256) !== routesSha256)
 		)
-			throw new Error("embedded_control_session_contract_drift");
+			throw new Error(driftCode);
 	} catch {
-		throw new Error("embedded_control_session_contract_drift");
+		throw new Error(driftCode);
 	}
 	return Object.freeze({ contract: expected.value, sha256: expected.sha256 });
 }

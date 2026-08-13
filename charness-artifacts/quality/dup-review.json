@@ -2,6 +2,76 @@
 	"entries": [
 		{
 			"surface": "code",
+			"id": "2062194b2d2585d0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at a65fd5dcda4e5280, cfc87d95f6cb4b33, and 1d37623e5019a67e. Composition builds one platform candidate; merge reconciles independently composed platform handoffs. Their common safe publication owner is already scripts/lib/output-directory.mjs, and combining the remaining bodies would merge producer and reconciler trust decisions."
+		},
+		{
+			"surface": "code",
+			"id": "3940f3e87d964ea1",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Detector self-overlap inside readControlSessionContract: the two reported spans overlap at lines 176-177 and are consecutive portions of one exact contract validator, not two implementations. Splitting or extracting a helper cannot remove a second fact owner because no second owner exists."
+		},
+		{
+			"surface": "code",
+			"id": "44c2f8b60f3cb799",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Standalone generator and staged-projector CLI tails share the ordinary import.meta main guard and structured error exit. Their projection and generation functions remain separate owners; extracting executable-module boilerplate would create a dependency without centralizing release policy."
+		},
+		{
+			"surface": "code",
+			"id": "5baaad3925a2eaf4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Three-line record predicates live at independent runtime stores and independently runnable release boundaries. They carry no mutable domain policy; importing a worker runtime predicate into release scripts would add build-order coupling, while a callback helper would be larger than the predicate."
+		},
+		{
+			"surface": "code",
+			"id": "71110b17dd4f06b0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder family reviewed at 43301d525a461c33, 4e437a213994e8b8, and 56e6161f8a085070. One proves an isolated packed install; the other stages a hermetic release package. Sharing their orchestration would erase the proof distinction."
+		},
+		{
+			"surface": "code",
+			"id": "8edd2ddc6d995716",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "The conformance fixture's request and response decoder assertions intentionally mirror opposite wire directions. Their exact key sets, schemas, and payload members are the behavior proof; a parameterized assertion would hide which direction drifted without removing production duplication."
+		},
+		{
+			"surface": "code",
+			"id": "9e830e760362c0f2",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Detector self-overlap between the complete explicit test-lane ownership test and its opening setup lines. The shorter member is contained in the longer member in the same function, so there is no second implementation to extract."
+		},
+		{
+			"surface": "code",
+			"id": "a9d7976e3439226d",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Re-key of release-asset composition versus native-artifact construction reviewed at 07485297e1542615, 401c404aa5ef00fd, and 416cfcf08f3ed0ae. They publish different artifact schemas across different trust boundaries; common output publication is already shared."
+		},
+		{
+			"surface": "code",
+			"id": "aa51a81553945867",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "The SHA-256 expression is a three-line standard primitive repeated across independently runnable scripts, tests, and the Worker runtime. Cross-boundary sharing would introduce package/build-order dependencies and test-to-production coupling without centralizing mutable policy; runtime shape validation remains separately owned in sha256.ts."
+		},
+		{
+			"surface": "code",
+			"id": "d7a3c73cfca339dd",
+			"class": "intentional",
+			"reviewed_at": "2026-08-13",
+			"note": "Carrier and control-session readers validate different signed schemas, inventories, deadlines, and identity bindings. Their common byte-read/JSON-parse/error classification is now extracted into readJsonContract; the remaining boolean validators are the distinct public contracts and must stay visible rather than becoming callback parameters."
+		},
+		{
+			"surface": "code",
 			"id": "c34d1f043057c129",
 			"class": "intentional",
 			"reviewed_at": "2026-08-12",

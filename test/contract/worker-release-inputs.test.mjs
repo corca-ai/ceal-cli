@@ -34,60 +34,50 @@ test("signed Protocol source acquisition writes nothing before exact commit and 
 	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
 	const expectedCommit = "a".repeat(40);
 	const expectedTree = "b".repeat(40);
-	const calls = [];
-	const git = (_command, args) => {
-		calls.push(args);
-		if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
-		if (args[0] === "rev-list") return `${"c".repeat(40)}\n`;
-		throw new Error(`unexpected_git_call:${args[0]}`);
-	};
-	assert.throws(
-		() =>
-			materializeSignedGatewayProtocolSource(
-				{
-					tag: "gateway-protocol-handoff-v0.72.21",
-					commit: expectedCommit,
-					protocolTree: expectedTree,
-					outputDirectory,
-				},
-				{ git },
-			),
-		/signed_protocol_source_commit_mismatch/u,
-	);
-	assert.equal(existsSync(outputDirectory), false);
-	assert.deepEqual(
-		calls.map(([operation]) => operation),
-		["init", "fetch", "rev-list"],
-		"tree lookup and archive materialization must not run after a commit mismatch",
-	);
-
-	calls.length = 0;
-	const treeMismatchGit = (_command, args) => {
-		calls.push(args);
-		if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
-		if (args[0] === "rev-list") return `${expectedCommit}\n`;
-		if (args[0] === "rev-parse") return `${"d".repeat(40)}\n`;
-		throw new Error(`unexpected_git_call:${args[0]}`);
-	};
-	assert.throws(
-		() =>
-			materializeSignedGatewayProtocolSource(
-				{
-					tag: "gateway-protocol-handoff-v0.72.21",
-					commit: expectedCommit,
-					protocolTree: expectedTree,
-					outputDirectory,
-				},
-				{ git: treeMismatchGit },
-			),
-		/signed_protocol_source_tree_mismatch/u,
-	);
-	assert.equal(existsSync(outputDirectory), false);
-	assert.deepEqual(
-		calls.map(([operation]) => operation),
-		["init", "fetch", "rev-list", "rev-parse"],
-		"inventory and archive materialization must not run after a tree mismatch",
-	);
+	for (const mutation of [
+		{
+			commit: "c".repeat(40),
+			tree: null,
+			error: /signed_protocol_source_commit_mismatch/u,
+			operations: ["init", "fetch", "rev-list"],
+			message: "tree lookup and archive materialization must not run after a commit mismatch",
+		},
+		{
+			commit: expectedCommit,
+			tree: "d".repeat(40),
+			error: /signed_protocol_source_tree_mismatch/u,
+			operations: ["init", "fetch", "rev-list", "rev-parse"],
+			message: "inventory and archive materialization must not run after a tree mismatch",
+		},
+	]) {
+		const calls = [];
+		const git = (_command, args) => {
+			calls.push(args);
+			if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
+			if (args[0] === "rev-list") return `${mutation.commit}\n`;
+			if (args[0] === "rev-parse" && mutation.tree) return `${mutation.tree}\n`;
+			throw new Error(`unexpected_git_call:${args[0]}`);
+		};
+		assert.throws(
+			() =>
+				materializeSignedGatewayProtocolSource(
+					{
+						tag: "gateway-protocol-handoff-v0.72.21",
+						commit: expectedCommit,
+						protocolTree: expectedTree,
+						outputDirectory,
+					},
+					{ git },
+				),
+			mutation.error,
+		);
+		assert.equal(existsSync(outputDirectory), false);
+		assert.deepEqual(
+			calls.map(([operation]) => operation),
+			mutation.operations,
+			mutation.message,
+		);
+	}
 });
 
 test("worker release inventory accepts one exact complete Gateway protocol handoff", (context) => {
