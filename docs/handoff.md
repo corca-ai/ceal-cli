@@ -31,15 +31,18 @@ separately approved boundaries.
   already enforced by the renewal-mode and CLI tests; the stale sibling-goal
   claim must not cause a duplicate repair here.
 - The Worker-side half of `ceal-cli#13` is locally repaired. Target-selection
-  results now identify whether a request included a match, continued a cursor,
-  or requested an unfiltered page without copying a selector into that local
-  projection; a completed zero-count match response says it does not prove an
-  empty authorized catalog and points at a bounded unfiltered query. Help and
-  the checkout/next embedded guide no longer presents URLs, call inputs, or
-  opaque resource refs as universal target selectors. The installed `0.76.1`
-  guide still carries the reported wording until a successor is released and
-  registered. Capability-specific selector semantics and query provenance
-  remain Gateway/Protocol work and are not invented in this repository.
+  results identify match, cursor, and unfiltered requests without copying the
+  selector. URL-shaped `--match` now fails closed as `selector_not_supported`,
+  and its exact non-echoing recovery selects the capability's opaque target and
+  resolves the URL through `resource.resolve`. When navigation declares the
+  required opaque argument source, the Worker renders that argument and handle
+  kind without a provider-specific branch. Help and the checkout/next embedded
+  guide no longer present URLs, call inputs, or opaque resource refs as
+  universal target selectors. The installed `0.76.1` guide still carries the reported wording
+  until a successor is released and registered. The current pinned Protocol
+  strips the new `navigation` field, so consuming its richer argument/handle
+  detail remains gated on the signed handoff; the fail-closed typed outcome does
+  not depend on that field.
 - The Worker-owned part of `ceal-cli#14` is locally repaired without widening
   frozen Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
   audit readback from provider-state readback while retaining legacy tokens;
@@ -124,8 +127,9 @@ separately approved boundaries.
 - No final signed Protocol handoff has been received or reviewed.
 - No current source change is signed, released, installed, selected by a
   Gateway, or proved against a live provider.
-- No Gateway capability-specific selector declaration or wire-level distinction
-  between a selector miss and an empty authorized catalog has been received.
+- No signed Gateway capability-navigation handoff has been received or pinned;
+  current source proves the generic fail-closed URL refusal and a structural
+  consumer for the future metadata, not live metadata consumption.
 - D2 and bounded D3 are locally complete but remain unreleased.
 - Response-latency and concurrent notification/channel-loss proofs remain
   downstream of coherent signed selection and apply.

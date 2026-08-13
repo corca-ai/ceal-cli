@@ -53,7 +53,7 @@ export function commandRecovery(name: CealCommandDefinition["name"]): string {
 }
 
 export function writeCliError(
-	kind: "unknown_command" | "invalid_argument",
+	kind: "unknown_command" | "invalid_argument" | "selector_not_supported",
 	message: string,
 	io: CealCliIo,
 	nextAction = "Run 'ceal --help'.",

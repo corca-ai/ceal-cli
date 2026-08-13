@@ -27,6 +27,7 @@ import { classifyGatewayFailure, writeCallCompleted, writeCallGatewayFailure } f
 import {
 	CEAL_COMMANDS,
 	CEAL_SUBCOMMANDS,
+	classifyUnsupportedTargetSelector,
 	dispatchedRouteKeys,
 	renderPlainYamlDocument,
 	resolveSubcommandRoute,
@@ -412,6 +413,9 @@ test("target selection help states its unfiltered-page bound", async () => {
 	assert.match(stdout, /target_catalog\.next_cursor/u);
 	assert.match(stdout, /Target selectors are capability-specific/u);
 	assert.match(stdout, /input_contract describes\s+call arguments, not what --match accepts/u);
+	assert.match(stdout, /some capabilities do not support\s+--match at all/u);
+	assert.match(stdout, /selector_not_supported/u);
+	assert.match(stdout, /catalog navigation declares it/u);
 	assert.doesNotMatch(stdout, /--match <text-or-url>|target labels, or an approved source URL/u);
 	assert.match(parentHelp, /--match <selector>/u);
 	assert.doesNotMatch(parentHelp, /--match <text-or-url>/u);
@@ -4113,7 +4117,7 @@ test("capabilities identifies each target request kind without copying its selec
 	});
 });
 
-test("an empty target match is distinguished from an empty authorized catalog without echoing the selector", async () => {
+test("a URL target match without declared support returns selector_not_supported instead of an empty catalog", async () => {
 	const selector = `https://www.notion.so/${"a".repeat(32)}`;
 	const responseFactory = (request) =>
 		request.operation === "handshake"
@@ -4145,21 +4149,64 @@ test("an empty target match is distinguished from an empty authorized catalog wi
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(
 			["capabilities", "targets", "--capability", "notion.page.get", "--profile", "profile:narnia", "--match", selector],
-			0,
+			2,
 			{
 				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:target-catalog:empty-match",
 			},
 		);
-		assert.deepEqual(payload.target_catalog, { target_count: 0, returned_count: 0, complete: true, selection_required: false });
-		assert.deepEqual(payload.target_selection, { capability_id: "notion.page.get", request_kind: "match" });
-		assert.match(payload.next_action, /response alone does not prove the capability has no authorized targets/u);
-		assert.match(payload.next_action, /ceal capabilities targets --capability notion\.page\.get --profile profile:narnia --limit 64/u);
-		assert.doesNotMatch(payload.next_action, /<1-64>/u);
-		assert.match(payload.next_action, /call inputs, not target selectors/u);
+		assert.equal(payload.schema_version, "ceal.error.v1");
+		assert.equal(payload.error.kind, "selector_not_supported");
+		assert.equal(payload.error.message, "Capability 'notion.page.get' does not declare URL target selectors.");
+		assert.equal(
+			payload.error.next_action,
+			"Run 'ceal capabilities targets --capability notion.page.get --profile profile:narnia --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability resource.resolve --profile profile:narnia --limit 64' and use one returned target with 'ceal call resource.resolve --target <target-ref> url=<URL>'; use only the returned opaque ref as a call input declared by 'ceal capabilities --profile profile:narnia --detail'.",
+		);
+		assert.equal(Object.hasOwn(payload, "targets"), false, "a rejected selector must not look like a successful empty catalog");
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(selector, "u"));
 		assert.equal(requests[1].body.body.match, selector, "the test must exercise a real match request");
 	}, responseFactory);
+});
+
+test("catalog navigation refuses a URL selector with the exact provider-neutral resolver workflow", () => {
+	const capability = {
+		capability_id: "notion.page.get",
+		navigation: {
+			target_selector: "opaque_catalog_target",
+			url_target_selector: "unsupported",
+			required_argument_source: {
+				argument: "ref",
+				handle_kind: "document",
+				issued_by: ["resource.resolve", "notion.search"],
+			},
+		},
+	};
+	const selection = {
+		kind: "targets",
+		profileRef: "profile:narnia",
+		body: { capability_id: "notion.page.get", match: `https://www.notion.so/${"a".repeat(32)}` },
+	};
+	const refusal = classifyUnsupportedTargetSelector([capability], selection);
+	assert.deepEqual(refusal, {
+		message:
+			"Capability 'notion.page.get' does not accept a URL as a target selector; its catalog navigation requires a 'document' ref in 'ref'.",
+		nextAction:
+			"Run 'ceal capabilities targets --capability notion.page.get --profile profile:narnia --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability resource.resolve --profile profile:narnia --limit 64' and use one returned target with 'ceal call resource.resolve --target <target-ref> url=<URL>'; pass the returned document ref as 'ref=<document-ref>' when calling 'notion.page.get'.",
+	});
+	assert.equal(refusal.nextAction.includes(selection.body.match), false, "the rejected URL must not be echoed");
+	assert.equal(
+		classifyUnsupportedTargetSelector([capability], { ...selection, body: { ...selection.body, match: "shared workspace" } }),
+		null,
+		"the URL-specific declaration must not invent semantics for a text selector",
+	);
+	const unrelated = classifyUnsupportedTargetSelector([{ ...capability, capability_id: "other.page.get" }], selection);
+	assert.equal(unrelated.message, "Capability 'notion.page.get' does not declare URL target selectors.");
+	assert.doesNotMatch(unrelated.message, /document|ref/u, "navigation from another capability must not control this selection");
+	const missingResolver = structuredClone(capability);
+	missingResolver.navigation.required_argument_source.issued_by = ["notion.search"];
+	const malformed = classifyUnsupportedTargetSelector([missingResolver], selection);
+	assert.equal(malformed.message, "Capability 'notion.page.get' does not declare URL target selectors.");
+	assert.doesNotMatch(malformed.message, /document|ref/u, "metadata without the canonical resolver must use generic recovery");
 });
 
 test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {

@@ -23,6 +23,11 @@ Use these rules after the core guide selects a capability-oriented task.
   the capability. Follow its returned `next_action` to inspect a bounded
   unfiltered page. A resolver may return an opaque ref for another capability's
   call input without making that ref a valid target selector.
+- Treat `selector_not_supported` as navigation, not an empty authorization
+  result. Follow its exact `next_action`: select an opaque target without the
+  rejected URL selector, resolve the URL through the catalog-declared resolver
+  when present or the canonical `resource.resolve` fallback, and pass only the
+  returned opaque handle as a declared call argument.
 - Follow an opaque target `next_cursor` only for the same capability. Result
   paging is separate: use only the continuation field and bounds declared by
   that capability. If concise discovery omits them, run

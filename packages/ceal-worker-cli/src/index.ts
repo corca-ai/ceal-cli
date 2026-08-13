@@ -566,6 +566,10 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			}),
 		);
 		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io);
+		const selectorRefusal = unsupportedTargetSelector(discovery.value.capabilities, selection);
+		if (selectorRefusal) {
+			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction);
+		}
 		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
@@ -1016,6 +1020,87 @@ function targetSelectionProjection(
 		request_kind: selection.body.match ? "match" : selection.body.cursor ? "cursor" : "unfiltered",
 	};
 }
+
+interface CapabilityNavigation {
+	target_selector: "opaque_catalog_target";
+	url_target_selector: "unsupported";
+	required_argument_source: {
+		argument: string;
+		handle_kind: string;
+		issued_by: readonly string[];
+	};
+}
+
+interface SelectorRefusal {
+	message: string;
+	nextAction: string;
+}
+
+/**
+ * Consume the catalog's navigation declaration instead of guessing selector
+ * semantics from a capability id or its call-input grammar. The local
+ * structural read is temporary until the next Protocol handoff adds this
+ * additive field to `CealGatewayDiscoveryCapability`; an older decoder removes
+ * undeclared response fields, so absence here remains "not known" and URL
+ * selectors fail closed through the canonical resolver workflow.
+ */
+function unsupportedTargetSelector(
+	capabilities: readonly CealGatewayDiscoveryCapability[],
+	selection: Exclude<ParsedTargetCatalogOptions, null>,
+): SelectorRefusal | null {
+	if (selection.kind !== "targets" || !selection.body.match || !isAbsoluteWebUrl(selection.body.match)) return null;
+	const capability = capabilities.find((entry) => entry.capability_id === selection.body.capability_id);
+	const navigation = capabilityNavigation(capability);
+	const source = navigation?.required_argument_source ?? null;
+	const resolver = source?.issued_by.find((capabilityId) => capabilityId === "resource.resolve") ?? "resource.resolve";
+	const profile = selection.profileRef ? ` --profile ${selection.profileRef}` : "";
+	return {
+		message: source
+			? `Capability '${selection.body.capability_id}' does not accept a URL as a target selector; its catalog navigation requires a '${source.handle_kind}' ref in '${source.argument}'.`
+			: `Capability '${selection.body.capability_id}' does not declare URL target selectors.`,
+		nextAction: source
+			? `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability ${resolver}${profile} --limit 64' and use one returned target with 'ceal call ${resolver} --target <target-ref> url=<URL>'; pass the returned ${source.handle_kind} ref as '${source.argument}=<${source.handle_kind}-ref>' when calling '${selection.body.capability_id}'.`
+			: `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability ${resolver}${profile} --limit 64' and use one returned target with 'ceal call ${resolver} --target <target-ref> url=<URL>'; use only the returned opaque ref as a call input declared by 'ceal capabilities${profile} --detail'.`,
+	};
+}
+
+function capabilityNavigation(capability: CealGatewayDiscoveryCapability | undefined): CapabilityNavigation | null {
+	if (!capability) return null;
+	const navigation = (capability as CealGatewayDiscoveryCapability & { navigation?: unknown }).navigation;
+	if (!plainRecord(navigation) || navigation.url_target_selector !== "unsupported" || navigation.target_selector !== "opaque_catalog_target")
+		return null;
+	const source = navigation.required_argument_source;
+	if (
+		!plainRecord(source) ||
+		typeof source.argument !== "string" ||
+		typeof source.handle_kind !== "string" ||
+		!Array.isArray(source.issued_by)
+	)
+		return null;
+	// @separateGrammar: navigation argument names come from the Protocol-owned
+	// catalog. Their safe interpolation shape happens to equal the operator
+	// operand-key grammar, but neither surface owns the other's vocabulary.
+	if (!/^[a-z][a-z0-9_]{0,63}$/u.test(source.argument) || !/^[a-z][a-z0-9_-]{0,63}$/u.test(source.handle_kind)) return null;
+	if (!source.issued_by.every((value) => typeof value === "string" && validCapabilityId(value))) return null;
+	if (!source.issued_by.includes("resource.resolve")) return null;
+	return navigation as unknown as CapabilityNavigation;
+}
+
+function isAbsoluteWebUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol === "https:" || parsed.protocol === "http:";
+	} catch {
+		return false;
+	}
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** @testOnly Exercises the additive catalog-navigation seam before the signed Protocol handoff is pinned. */
+export const classifyUnsupportedTargetSelector = unsupportedTargetSelector;
 
 // Client-local selection code named by the Profile contract: a session with
 // more than one eligible Profile has not pinned a single one, so an agent is

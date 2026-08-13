@@ -102,7 +102,9 @@ selector and returns a bounded, current selection of opaque target references.
 The result names whether the request included a match selector, continued a
 cursor, or requested an unfiltered page;
 `input_contract` fields and opaque call refs are not target selectors unless
-current Gateway guidance explicitly says otherwise. Neither surface exposes
+catalog navigation or current Gateway guidance explicitly says otherwise. A
+URL-shaped match returns `selector_not_supported` with the resolver workflow
+instead of a successful empty target list. Neither surface exposes
 Slack, GitHub, Notion, another provider's credential kind, API mode, or
 internal connector binding. `ceal call
 <capability-id> --target <target-ref> [key=value ...]` forwards only that
