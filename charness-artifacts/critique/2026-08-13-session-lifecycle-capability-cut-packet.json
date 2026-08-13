@@ -1,0 +1,82 @@
+{
+  "kind": "charness.critique_prepare_packet",
+  "version": 1,
+  "repo": "ceal-cli",
+  "generated_at": "2026-08-13T02:07:06Z",
+  "prepared_for": "Slice 4h session lifecycle premortem",
+  "changed_ref": null,
+  "adapter_path": null,
+  "sections": [],
+  "section_count": 0,
+  "ok": true,
+  "reviewer_tier_evidence": {
+    "requested_tier": "high-leverage",
+    "requested_spawn_fields": {},
+    "host_exposure_state": "pending-parent-spawn",
+    "application_state": "unverified-by-packet",
+    "instruction": "Review artifacts must record requested_fields_sent, metadata-hidden, host-defaulted, unsupported, or applied only when host-confirmed."
+  },
+  "reviewed_input_identity": {
+    "algorithm": "sha256-v1",
+    "status": "captured",
+    "mode": "working-tree",
+    "changed_ref": null,
+    "resolved_changed_ref": [],
+    "base_head": "9fc2647d063e499dba13e4e231a0934fc6bfb5d2",
+    "base_head_role": "provenance-only",
+    "reviewed_paths": [
+      "charness-artifacts/spec/2026-08-13-session-lifecycle-capability-cut.md",
+      "packages/ceal-worker-cli/src/cli-runtime.ts",
+      "packages/ceal-worker-cli/src/client-session.ts",
+      "packages/ceal-worker-cli/src/command-context.ts",
+      "packages/ceal-worker-cli/src/device-adoption.ts",
+      "packages/ceal-worker-cli/src/profile-store.ts",
+      "packages/ceal-worker-cli/src/public-bin-runtime.ts",
+      "packages/ceal-worker-cli/src/session-replacement.ts"
+    ],
+    "reviewed_content": [
+      {
+        "path": "charness-artifacts/spec/2026-08-13-session-lifecycle-capability-cut.md",
+        "content_sha256": "c73a5d16b6a008a45c5cee31889a69170fd7687ba31550bb2e01c45113ffb510"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/cli-runtime.ts",
+        "content_sha256": "10996e1f67398a60baacb2e77b42203d2bae7fcba712ea04bf7858d3fa2151df"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/client-session.ts",
+        "content_sha256": "75c21c73766193644781386fb080e633636b71f2743eb72f7fee331a99c0422a"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/command-context.ts",
+        "content_sha256": "afcccb5800fe3bda1206a0cc4a08bda254ed68d8d1a289a9f4736cd38607d6d6"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/device-adoption.ts",
+        "content_sha256": "a8b9dd108e58daf3c09b89563cbd0a4de77fa1576bb5d98dbb98bc98ed8ce995"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/profile-store.ts",
+        "content_sha256": "ed0e9645eb80252440182e2fbb62a8fbcb3a6c0c1e69217519085ea3606c8621"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/public-bin-runtime.ts",
+        "content_sha256": "741fb520cc754519e72fe27e78ce49bdcbe42ba8ddb499a9ac7d02bd39479751"
+      },
+      {
+        "path": "packages/ceal-worker-cli/src/session-replacement.ts",
+        "content_sha256": "dd2b5088a0e4c0c566f27411c0c157296418b93196cd8c03eb39fcc7fa0951b9"
+      }
+    ],
+    "reviewed_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "staged_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unstaged_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_untracked": [
+      {
+        "path": "charness-artifacts/spec/2026-08-13-session-lifecycle-capability-cut.md",
+        "content_sha256": "c73a5d16b6a008a45c5cee31889a69170fd7687ba31550bb2e01c45113ffb510"
+      }
+    ],
+    "identity_sha256": "339651b54be4c200fc3ab7038915d309c2267beb5f701fa668494bfba0f85708"
+  }
+}
