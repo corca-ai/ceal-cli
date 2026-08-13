@@ -17,7 +17,9 @@ complete and receive terminal or match-qualified guidance.
 - The fixture declared one total target, zero returned targets, incomplete, and
   a cursor while sending `targets: []`.
 - Protocol rejects every empty incomplete page.
-- A sibling test still expected signed target identity metadata to be stripped.
+- Two sibling expectations survived the handoff: one expected signed target
+  identity metadata to be stripped, and the session non-rotation proof still
+  expected a granted target query to exit unavailable.
 
 ## Reproduction
 
@@ -36,7 +38,9 @@ complete and receive terminal or match-qualified guidance.
 
 ## Verification
 
-- Confirmed: Protocol paging proof passes and repaired Worker tests pass 2/2.
+- Confirmed: Protocol paging proof and the repaired recovery/metadata tests pass.
+- A subsequent full coverage run exposed the second stale unavailable-target
+  expectation; its exact source-authoritative subtest passes after repair.
 
 ## Root Cause
 
@@ -63,6 +67,8 @@ correctly exposed both stale assumptions.
 
 - Mental model: guidance is downstream of the signed paging invariant.
 - same file: selected/match/cursor queries | fixed now | Worker proof.
+- same file outside the focused name filter: session non-rotation target query |
+  fixed now | exact source-authoritative subtest.
 - abstraction up: Protocol validator | retained | mutation proof.
 - cross-file: obsolete renderer metadata cast | removed | type/source proof.
 

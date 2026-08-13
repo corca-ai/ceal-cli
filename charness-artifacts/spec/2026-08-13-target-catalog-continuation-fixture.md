@@ -15,7 +15,8 @@ the test never reaches the recovery guidance it claims to prove.
 - Make the shared selected-target fixture satisfy the signed metadata contract.
 - Model continuation with a non-empty returned page and a next cursor.
 - Replace the pre-handoff expectation that target queries are unavailable with
-  current source-authoritative success assertions.
+  current source-authoritative success assertions, including the session
+  non-rotation proof outside the focused recovery-name filter.
 
 ## Success Criteria
 
@@ -24,6 +25,7 @@ the test never reaches the recovery guidance it claims to prove.
 2. Empty complete match and unfiltered pages retain their distinct guidance.
 3. Selected target queries render signed connector/target/access metadata.
 4. Protocol's existing mutation still rejects an empty incomplete page.
+5. Full Worker coverage does not retain a second unavailable-target assertion.
 
 ## Constraints
 

@@ -1434,8 +1434,8 @@ test("capabilities and target selection never rotate a stored session", async ()
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		};
 		for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
-			const payload = await yamlRun(args, args.length === 1 ? 0 : 3, runtime);
-			assert.equal(payload.status, args.length === 1 ? "available" : "unavailable", args.join(" "));
+			const payload = await yamlRun(args, 0, runtime);
+			assert.equal(payload.status, "available", args.join(" "));
 		}
 		assert.equal(refreshCalls(), 0);
 		assert.deepEqual(
