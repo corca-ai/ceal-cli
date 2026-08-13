@@ -96,10 +96,14 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.locator("#period").selectOption("30");
 	assert.equal(await page.locator("#root .hero h2").textContent(), "35 outcomes recorded locally");
 	assert.equal(await page.locator("button[data-receipt]").count(), 20);
-	await page.locator("button[data-receipt]").first().click();
+	const firstReceipt = page.locator("button[data-receipt]").first();
+	await firstReceipt.focus();
+	await page.keyboard.press("Enter");
 	await page.getByRole("dialog").waitFor();
 	await page.getByText("Ceal call evidence").waitFor();
-	await page.getByRole("button", { name: "Close" }).click();
+	await page.keyboard.press("Escape");
+	await firstReceipt.waitFor();
+	assert.equal(await firstReceipt.evaluate((element) => element === document.activeElement), true);
 
 	await page.getByRole("button", { name: "Agent activity" }).click();
 	await page.getByText("4 visible sessions").waitFor();
@@ -109,10 +113,22 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	assert.equal(await page.getByText(/partial inventory/u).count(), 2);
 	assert.equal(await page.getByText(/Token accounting from different runtimes/u).count(), 1);
 
-	await page.locator("#theme").selectOption("editorial");
-	await page.getByRole("button", { name: "Dark" }).click();
+	for (const theme of ["developer", "editorial", "terminal"]) {
+		await page.locator("#theme").selectOption(theme);
+		for (const mode of ["Auto", "Light", "Dark"]) {
+			await page.getByRole("button", { name: mode }).click();
+			assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
+			assert.equal(await page.locator("html").getAttribute("data-mode"), mode === "Auto" ? null : mode.toLowerCase());
+			await page.getByText(/Token accounting from different runtimes/u).waitFor();
+			assert.equal(await page.getByText("4 visible sessions").count(), 1);
+		}
+	}
+	await page.getByRole("button", { name: "Overview" }).focus();
+	await page.keyboard.press("Enter");
+	await page.getByText("35 outcomes recorded locally").waitFor();
+	await page.getByText("Correlated work and monetary cost are unsupported").waitFor();
 	await page.setViewportSize({ width: 390, height: 844 });
-	assert.equal(await page.locator("html").getAttribute("data-theme"), "editorial");
+	assert.equal(await page.locator("html").getAttribute("data-theme"), "terminal");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), "dark");
 	assert.equal((await page.locator("body").boundingBox())?.width, 390);
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
