@@ -56,6 +56,10 @@ export function packedProtocolFixture(context) {
 			proof_level: "local_state",
 			writes_external: false,
 			source: { repository: producer.repository, commit: producer.commit, tree: producer.tree, protocol_tree: producer.protocol_tree },
+			operations: ["acquire", "projection", "recheck", "call", "materialization", "complete", "notification_receipt"].map((operation) => ({
+				operation,
+				path: operation === "call" ? "/api/ceal/agent/v1/call" : `/api/ceal/agent/v1/control/${operation.replaceAll("_", "-")}`,
+			})),
 		})}\n`,
 	);
 	const sidecar = readFileSync(protocolProvenance);

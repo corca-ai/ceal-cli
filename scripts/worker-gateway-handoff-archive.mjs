@@ -142,7 +142,8 @@ function validateLock(value) {
 		!isRecord(archive) ||
 		archive.filename !== `ceal-gateway-protocol-handoff-${version}.tar.gz` ||
 		!isSha256(archive.sha256) ||
-		!isSha256(archive.handoff_manifest_sha256)
+		!isSha256(archive.handoff_manifest_sha256) ||
+		(archive.control_routes_sha256 !== undefined && !isSha256(archive.control_routes_sha256))
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}

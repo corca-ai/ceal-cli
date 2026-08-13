@@ -73,6 +73,7 @@ export function bootstrapGatewayProtocolHandoff(options = {}, dependencies = {})
 			handoffManifest: manifest,
 			expectedHandoffSha256: handoffManifestSha256,
 		});
+		const controlRoutesSha256 = controlRoutesDigest(path.join(extraction, "gateway-leased-consumer-control-conformance.json"));
 		if (packet.producer.commit !== remoteCommit || packet.protocol.version !== version || packet.protocol.filename !== protocolName) {
 			fail("gateway_handoff_identity_mismatch", "Signed Gateway handoff bytes disagree with the remote tag or requested Protocol version.");
 		}
@@ -95,7 +96,12 @@ export function bootstrapGatewayProtocolHandoff(options = {}, dependencies = {})
 				filename: packet.protocol.filename,
 				sha256: packet.protocol.sha256,
 			},
-			archive: { filename: archiveName, sha256: archiveSha256, handoff_manifest_sha256: handoffManifestSha256 },
+			archive: {
+				filename: archiveName,
+				sha256: archiveSha256,
+				handoff_manifest_sha256: handoffManifestSha256,
+				control_routes_sha256: controlRoutesSha256,
+			},
 			reviewed_signature: {
 				certificate_identity: certificateIdentity,
 				oidc_issuer: OIDC_ISSUER,
@@ -279,6 +285,32 @@ function requireRegularFile(file, code) {
 
 function sha256(bytes) {
 	return createHash("sha256").update(bytes).digest("hex");
+}
+
+function controlRoutesDigest(file) {
+	let value;
+	try {
+		value = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance is invalid.");
+	}
+	if (!Array.isArray(value.operations) || value.operations.length !== 7) {
+		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has no exact route projection.");
+	}
+	const routes = {};
+	for (const entry of value.operations) {
+		if (
+			!entry ||
+			typeof entry !== "object" ||
+			typeof entry.operation !== "string" ||
+			typeof entry.path !== "string" ||
+			Object.hasOwn(routes, entry.operation)
+		) {
+			fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has an invalid route projection.");
+		}
+		routes[entry.operation] = entry.path;
+	}
+	return sha256(Buffer.from(JSON.stringify(routes)));
 }
 
 function fail(code, message) {

@@ -34,6 +34,7 @@ test("public bootstrap derives one lock candidate from exact signed packet ident
 	assert.equal(result.candidate_lock.gateway.protocol_tree, fixture.producer.protocol_tree);
 	assert.equal(result.candidate_lock.protocol.version, fixture.version);
 	assert.equal(result.candidate_lock.archive.sha256, fixture.archiveSha256);
+	assert.match(result.candidate_lock.archive.control_routes_sha256, /^[a-f0-9]{64}$/u);
 	assert.equal(result.candidate_lock.reviewed_signature.workflow_sha, fixture.producer.commit);
 	assert.equal(result.candidate_lock.reviewed_signature.actions_run_id, undefined);
 	assert.equal(result.candidate_lock.reviewed_signature.run_invocation_uri.endsWith("/runs/42/attempts/1"), true);

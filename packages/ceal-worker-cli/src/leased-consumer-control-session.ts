@@ -4,14 +4,13 @@ import * as CealProtocol from "@corca-ai/ceal-protocol";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
 	CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES,
-	decodeCealLeasedConsumerCapabilityControlRequest,
-	decodeCealLeasedConsumerCapabilityControlResponse,
 	decodeCealLeasedConsumerControlSession,
 } from "@corca-ai/ceal-protocol";
 import {
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
 	LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV,
+	LEASED_CONSUMER_CONTROL_SESSION_ROUTES_SHA256,
 } from "./generated/leased-consumer-control-session-contract.js";
 import {
 	closeReadable,
@@ -505,32 +504,16 @@ async function dispatch(
 
 function decodeControlRequest(value: unknown, runtime: LeasedConsumerControlSessionRuntime): DecodedControlFrame {
 	if (runtime.decodeControlRequest) return runtime.decodeControlRequest(value);
-	if (CONTROL_SESSION_CONTRACT.agent_ipc.request_schema_version.endsWith(".v6")) {
-		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlRequest;
-		if (!decode) throw new Error("disposition_protocol_unavailable");
-		return decode(value);
-	}
-	if (CONTROL_SESSION_CONTRACT.agent_ipc.request_schema_version.endsWith(".v5")) {
-		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest;
-		if (!decode) throw new Error("notification_protocol_unavailable");
-		return decode(value);
-	}
-	return decodeCealLeasedConsumerCapabilityControlRequest(value) as DecodedControlFrame;
+	const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlRequest;
+	if (!decode) throw new Error("disposition_protocol_unavailable");
+	return decode(value);
 }
 
 function decodeControlResponse(value: unknown, runtime: LeasedConsumerControlSessionRuntime): DecodedControlFrame {
 	if (runtime.decodeControlResponse) return runtime.decodeControlResponse(value);
-	if (CONTROL_SESSION_CONTRACT.agent_ipc.response_schema_version.endsWith(".v6")) {
-		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlResponse;
-		if (!decode) throw new Error("disposition_protocol_unavailable");
-		return decode(value);
-	}
-	if (CONTROL_SESSION_CONTRACT.agent_ipc.response_schema_version.endsWith(".v5")) {
-		const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse;
-		if (!decode) throw new Error("notification_protocol_unavailable");
-		return decode(value);
-	}
-	return decodeCealLeasedConsumerCapabilityControlResponse(value) as DecodedControlFrame;
+	const decode = CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlResponse;
+	if (!decode) throw new Error("disposition_protocol_unavailable");
+	return decode(value);
 }
 
 /**
@@ -603,33 +586,24 @@ function assertEmbeddedControlSessionContract(
 				/^[a-z][a-z0-9_]*$/u.test(operation) && typeof route === "string" && /^\/api\/ceal\/agent\/v1\/[a-z0-9][a-z0-9_/-]*$/u.test(route),
 		) &&
 		new Set(routeEntries.map(([, route]) => route)).size === routeEntries.length;
-	const v4 =
-		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v2" &&
-		value.notification_channel === undefined &&
-		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v4" &&
-		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v4" &&
-		routeEntries.length === 5 &&
-		fixedRoutes;
-	const modern =
+	const current =
 		value.schema_version === "ceal.worker_private_leased_consumer_control_session_contract.v3" &&
 		value.notification_channel?.child_fd === 5 &&
 		value.notification_channel.schema_version === "ceal.leased_consumer_capability_notification.v5" &&
 		value.notification_channel.framing === "ndjson" &&
 		value.notification_channel.maximum_frame_bytes === 4 * 1024 &&
-		["ceal.leased_consumer_capability_control_request.v5", "ceal.leased_consumer_capability_control_request.v6"].includes(
-			value.agent_ipc.request_schema_version,
-		) &&
-		["ceal.leased_consumer_capability_control_response.v5", "ceal.leased_consumer_capability_control_response.v6"].includes(
-			value.agent_ipc.response_schema_version,
-		) &&
-		value.agent_ipc.request_schema_version.slice(-2) === value.agent_ipc.response_schema_version.slice(-2) &&
-		routeEntries.length >= 6 &&
+		value.agent_ipc.request_schema_version === "ceal.leased_consumer_capability_control_request.v6" &&
+		value.agent_ipc.response_schema_version === "ceal.leased_consumer_capability_control_response.v6" &&
+		routeEntries.length === 7 &&
+		LEASED_CONSUMER_CONTROL_SESSION_ROUTES_SHA256 === createHash("sha256").update(JSON.stringify(value.gateway.routes)).digest("hex") &&
 		fixedRoutes &&
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerCapabilityNotification === "function" &&
 		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlRequest === "function" &&
-		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse === "function";
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerNotificationControlResponse === "function" &&
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlRequest === "function" &&
+		typeof CANDIDATE_PROTOCOL.decodeCealLeasedConsumerDispositionControlResponse === "function";
 	if (
-		(!v4 && !modern) ||
+		!current ||
 		value.argv[0] !== LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV ||
 		value.protected_session.child_fd !== 4 ||
 		value.protected_session.schema_version !== "ceal.leased_consumer_control_session.v1" ||
