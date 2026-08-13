@@ -68,7 +68,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				},
 			],
 			targets: [],
-			target_catalog: { target_count: 3, returned_count: 0, complete: false, selection_required: true },
+			target_catalog: { target_count: 0, returned_count: 0, complete: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -215,7 +215,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	]);
 	assert.equal(state.discovery_cache.within_ttl, true);
 	assert.equal(state.discovery_cache.age_ms, 60_000);
-	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
+	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 0, returned_count: 0, complete: true });
 	assert.equal(state.install.status, "unmanaged");
 	assert.equal(state.guide.status, "staged");
 	// The scalar projection names one host, so the per-host list is what a
@@ -419,7 +419,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 			membership_ref: "membership:privacy-fixture",
 			capabilities: [],
 			targets: [],
-			target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+			target_catalog: { target_count: 0, returned_count: 0, complete: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -871,7 +871,7 @@ test("the observer and the discovery cache agree on freshness, including a backw
 		membership_ref: key.membershipRef,
 		capabilities: [],
 		targets: [],
-		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+		target_catalog: { target_count: 0, returned_count: 0, complete: true },
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -924,7 +924,7 @@ test("the observer falls back to the SAME default window as the cli", async () =
 		membership_ref: key.membershipRef,
 		capabilities: [],
 		targets: [],
-		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+		target_catalog: { target_count: 0, returned_count: 0, complete: true },
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],

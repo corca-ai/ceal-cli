@@ -1172,7 +1172,6 @@ function capabilityCatalogNextAction(
 	catalog: CealGatewayDiscoveryValue["target_catalog"],
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 ): string | null {
-	const selectedCapability = selection.kind === "targets" ? selection.body.capability_id : "<capability-id>";
 	const profile = selection.kind === "targets" && selection.profileRef ? ` --profile ${selection.profileRef}` : "";
 	if (catalog.next_cursor && selection.kind === "targets") {
 		return `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --cursor ${catalog.next_cursor}'.`;
@@ -1180,12 +1179,10 @@ function capabilityCatalogNextAction(
 	if (selection.kind === "targets" && selection.body.match && catalog.complete && catalog.target_count === 0) {
 		return `This target-selection request included --match, and the Gateway response contained no current targets for '${selection.body.capability_id}'. This response alone does not prove the capability has no authorized targets. Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' to inspect a bounded unfiltered page; treat input_contract fields and opaque call refs as call inputs, not target selectors, unless current Gateway guidance explicitly says otherwise.`;
 	}
-	if (catalog.selection_required) {
-		const scope =
-			selection.kind === "targets"
-				? `Capability '${selectedCapability}'${profile ? ` with '${selection.profileRef}'` : ""}`
-				: "The current catalog";
-		return `${scope} requires a capability-specific target selector, but this response did not declare a selector form. Run 'ceal capabilities targets --help' and use only current Gateway guidance; if neither declares a selector form, stop and ask the Gateway operator to publish one.`;
+	if (catalog.complete && catalog.target_count === 0) {
+		return selection.kind === "targets"
+			? `The unfiltered target catalog is complete and contains zero currently authorized targets for '${selection.body.capability_id}'. This is terminal; do not invent a target ref or retry this page.`
+			: "The unfiltered target catalog is complete and contains zero currently authorized targets. This is terminal for target-bound calls; do not invent a target ref or retry this page.";
 	}
 	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
 }

@@ -139,7 +139,6 @@ export interface CealGatewayTargetCatalog {
 	target_count: number;
 	returned_count: number;
 	complete: boolean;
-	selection_required: boolean;
 	next_cursor?: string;
 }
 

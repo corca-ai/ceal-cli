@@ -16,11 +16,11 @@ export function validateGatewayTargetCatalog(context: GatewayTargetCatalogValida
 
 function requireTargetCatalog(context: GatewayTargetCatalogValidationContext, value: unknown): CealGatewayTargetCatalog {
 	const catalog = context.requireRecord(value);
-	context.requireExactKeys(catalog, ["complete", "next_cursor", "returned_count", "selection_required", "target_count"], ["next_cursor"]);
+	context.requireExactKeys(catalog, ["complete", "next_cursor", "returned_count", "target_count"], ["next_cursor"]);
 	const typed = catalog as unknown as CealGatewayTargetCatalog;
 	if (!Number.isSafeInteger(typed.target_count) || typed.target_count < 0) context.invalidResponse();
 	if (!Number.isSafeInteger(typed.returned_count) || typed.returned_count < 0) context.invalidResponse();
-	if (typeof typed.complete !== "boolean" || typeof typed.selection_required !== "boolean") context.invalidResponse();
+	if (typeof typed.complete !== "boolean") context.invalidResponse();
 	if (typed.next_cursor !== undefined) context.requirePrefixedRef(typed.next_cursor, "cursor:");
 	return typed;
 }
@@ -35,17 +35,12 @@ function validateTargetCatalogPaging(context: GatewayTargetCatalogValidationCont
 		if (catalog.returned_count !== catalog.target_count || catalog.next_cursor !== undefined) context.invalidResponse();
 		return;
 	}
-	if (catalog.selection_required) {
-		if (catalog.returned_count !== 0 || catalog.next_cursor !== undefined) context.invalidResponse();
-		return;
-	}
 	if (catalog.next_cursor === undefined) context.invalidResponse();
 }
 
 function validateTargetCatalogRequest(context: GatewayTargetCatalogValidationContext, catalog: CealGatewayTargetCatalog, targets: readonly Record<string, unknown>[], capabilityIds: ReadonlySet<string>, requestedIds: readonly string[], isPluralSelection: boolean): void {
 	if (requestedIds.length === 0) return validateUnselectedTargetCatalog(context, catalog, targets);
 	validateSelectedCapabilityProjection(context, capabilityIds, requestedIds, isPluralSelection);
-	if (catalog.selection_required) return;
 	for (const target of targets) {
 		if (!isValidSelectedTargetProjection(target.capability_ids, requestedIds, isPluralSelection)) context.invalidResponse();
 	}
@@ -71,8 +66,5 @@ function requestedCapabilityIds(request: Readonly<CealGatewayDiscoverBody>): rea
 }
 
 function validateUnselectedTargetCatalog(context: GatewayTargetCatalogValidationContext, catalog: CealGatewayTargetCatalog, targets: readonly unknown[]): void {
-	if (targets.length !== 0) context.invalidResponse();
-	if (catalog.selection_required !== (catalog.target_count > 0)) context.invalidResponse();
-	if (catalog.complete !== (catalog.target_count === 0)) context.invalidResponse();
-	if (catalog.next_cursor !== undefined) context.invalidResponse();
+	if (targets.length !== 0 || catalog.target_count !== 0 || catalog.returned_count !== 0 || !catalog.complete || catalog.next_cursor !== undefined) context.invalidResponse();
 }

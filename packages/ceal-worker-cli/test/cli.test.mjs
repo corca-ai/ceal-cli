@@ -409,7 +409,7 @@ test("target selection help states its unfiltered-page bound", async () => {
 	assert.equal(code, 0);
 	assert.match(stdout, /An unfiltered page is permitted/u);
 	assert.match(stdout, /--limit <1-64>/u);
-	assert.match(stdout, /target_catalog\.selection_required/u);
+	assert.match(stdout, /a complete page with zero targets is terminal/u);
 	assert.match(stdout, /target_catalog\.next_cursor/u);
 	assert.match(stdout, /Target selectors are capability-specific/u);
 	assert.match(stdout, /input_contract describes\s+call arguments, not what --match accepts/u);
@@ -2685,7 +2685,7 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 // The Gateway lane owns this contract and shipped it as an immutable fixture; the
 // bytes are pinned here so a silent edit to the copy cannot quietly relax what
 // these four tests prove. Verified against the digest the request named.
-const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "dfe985de0b0540c0bbf396e9e1e1221f81778ee5e924340417f368cbc577858d";
+const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "e5beac7823d5aebbb1b60a93df0cab493e35c313fe0f86e318a77b9e6dbe3554";
 const ANNOUNCEMENT_POLICY_ABSENT = "scope not declared by the Gateway";
 
 function announcementPolicyFixtureCase(name) {
@@ -2723,7 +2723,7 @@ async function renderFixtureCapabilities(caseName, args) {
 						membership_ref: "membership:narnia",
 						capabilities,
 						targets: [],
-						target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+						target_catalog: { target_count: 0, returned_count: 0, complete: true },
 						host_decision: "accepted",
 						proof_level: "host_decision",
 						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -2837,6 +2837,8 @@ test("retry_after_ms comes from a typed error recovery and never from an announc
 function partialGrantDiscoveryTargets() {
 	return [
 		{
+			connector_kind: "slack",
+			target_kind: "channel",
 			target_ref: "target:engineering",
 			label: "Engineering",
 			access: "granted",
@@ -2871,6 +2873,8 @@ function partialGrantDiscoveryTargets() {
 			],
 		},
 		{
+			connector_kind: "slack",
+			target_kind: "channel",
 			target_ref: "target:finance",
 			label: "Finance",
 			// The same queried capability on a second target, at a different
@@ -2916,7 +2920,7 @@ async function renderPartialGrantTargets(args) {
 							evidence_requirement: "gateway_audit",
 						})),
 						targets,
-						target_catalog: { target_count: 2, returned_count: 2, complete: true, selection_required: false },
+						target_catalog: { target_count: 2, returned_count: 2, complete: true },
 						host_decision: "accepted",
 						proof_level: "host_decision",
 						non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -3913,10 +3917,9 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 			["message.search"],
 		);
 		assert.deepEqual(payload.targets, []);
-		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 0, complete: false, selection_required: true });
-		assert.match(payload.next_action, /The current catalog requires a capability-specific target selector/u);
-		assert.match(payload.next_action, /Run 'ceal capabilities targets --help'/u);
-		assert.doesNotMatch(payload.next_action, /--match <selector>/u);
+		assert.deepEqual(payload.target_catalog, { target_count: 0, returned_count: 0, complete: true });
+		assert.match(payload.next_action, /zero currently authorized targets/u);
+		assert.match(payload.next_action, /terminal/u);
 		assert.deepEqual(
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
@@ -4087,7 +4090,7 @@ test("capabilities identifies each target request kind without copying its selec
 			payload.targets.map((item) => item.target_ref),
 			["target:team-inbox"],
 		);
-		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true, selection_required: false });
+		assert.deepEqual(payload.target_catalog, { target_count: 1, returned_count: 1, complete: true });
 		assert.deepEqual(payload.target_selection, { capability_id: "message.search", request_kind: "match" });
 		const unfiltered = await yamlRun(["capabilities", "targets", "--capability", "message.search", "--limit", "1"], 0, runtime);
 		assert.deepEqual(unfiltered.target_selection, { capability_id: "message.search", request_kind: "unfiltered" });
@@ -4141,7 +4144,7 @@ test("a URL target match without a navigation declaration preserves the Gateway 
 						},
 					],
 					targets: [],
-					target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+					target_catalog: { target_count: 0, returned_count: 0, complete: true },
 					host_decision: "accepted",
 					proof_level: "host_decision",
 					non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -4220,7 +4223,6 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 		target_count: 1,
 		returned_count: 0,
 		complete: false,
-		selection_required: false,
 		next_cursor: `cursor:${"a".repeat(48)}`,
 	};
 	const responseFactory = (request) =>
@@ -4241,18 +4243,21 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 			`Run 'ceal capabilities targets --capability message.search --profile profile:narnia --cursor ${selectedCatalog.next_cursor}'.`,
 		);
 
-		selectedCatalog = { target_count: 1, returned_count: 0, complete: false, selection_required: true };
-		const narrowed = await yamlRun(args, 0, runtime);
-		assert.match(narrowed.next_action, /Capability 'message\.search' with 'profile:narnia' requires a capability-specific target selector/u);
-		assert.match(narrowed.next_action, /Run 'ceal capabilities targets --help'/u);
-		assert.match(narrowed.next_action, /stop and ask the Gateway operator/u);
-		assert.doesNotMatch(narrowed.next_action, /--match <selector>/u);
+		selectedCatalog = { target_count: 0, returned_count: 0, complete: true };
+		const matchedEmpty = await yamlRun(args, 0, runtime);
+		assert.match(matchedEmpty.next_action, /response alone does not prove the capability has no authorized targets/u);
+		assert.match(matchedEmpty.next_action, /--profile profile:narnia --limit 64/u);
+		assert.doesNotMatch(matchedEmpty.next_action, /--match <selector>/u);
 
-		selectedCatalog = { target_count: 0, returned_count: 0, complete: true, selection_required: true };
-		const ambiguousEmpty = await yamlRun(args, 0, runtime);
-		assert.match(ambiguousEmpty.next_action, /response alone does not prove the capability has no authorized targets/u);
-		assert.match(ambiguousEmpty.next_action, /--profile profile:narnia --limit 64/u);
-		assert.doesNotMatch(ambiguousEmpty.next_action, /--match <selector>/u);
+		const unfilteredEmpty = await yamlRun(
+			["capabilities", "targets", "--capability", "message.search", "--profile", "profile:narnia"],
+			0,
+			runtime,
+		);
+		assert.equal(
+			unfilteredEmpty.next_action,
+			"The unfiltered target catalog is complete and contains zero currently authorized targets for 'message.search'. This is terminal; do not invent a target ref or retry this page.",
+		);
 	}, responseFactory);
 });
 
@@ -4635,8 +4640,10 @@ function cachedEntry(endpoint, cachedAt) {
 				},
 			],
 			targets: [],
-			// target_count 2 distinguishes this cached value from a live re-probe (1).
-			target_catalog: { target_count: 2, returned_count: 0, complete: false, selection_required: true },
+			// An empty complete catalog keeps this cache fixture valid under the
+			// current wire contract; the live re-probe is distinguished by its
+			// request count below.
+			target_catalog: { target_count: 0, returned_count: 0, complete: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -5050,8 +5057,8 @@ function discoveryResponse(request) {
 				]
 			: [],
 		target_catalog: selected
-			? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
-			: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
+			? { target_count: 1, returned_count: 1, complete: true }
+			: { target_count: 0, returned_count: 0, complete: true },
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],

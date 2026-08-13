@@ -22,7 +22,7 @@ function entry(overrides = {}) {
 			membership_ref: KEY.membershipRef,
 			capabilities: [],
 			targets: [],
-			target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+			target_catalog: { target_count: 0, returned_count: 0, complete: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],

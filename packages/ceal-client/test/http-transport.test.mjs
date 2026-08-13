@@ -534,8 +534,8 @@ function discoveryResponse(input) {
 				]
 			: [],
 		target_catalog: selected
-			? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
-			: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
+			? { target_count: 1, returned_count: 1, complete: true }
+			: { target_count: 0, returned_count: 0, complete: true },
 		host_decision: "accepted",
 		proof_level: "host_decision",
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],

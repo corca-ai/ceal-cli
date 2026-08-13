@@ -149,7 +149,6 @@ test("discovery target catalogs make bounded selection and continuation explicit
 		target_count: 333,
 		returned_count: 1,
 		complete: false,
-		selection_required: false,
 		next_cursor: "cursor:continuation_001",
 	};
 	assert.deepEqual(decodeCealClientResponse(paged, request), paged);
@@ -690,7 +689,7 @@ test("discovery admits an authenticated Profile with no active grants", () => {
 	const discovery = discoveryResponse(request);
 	discovery.value.capabilities = [];
 	discovery.value.targets = [];
-	discovery.value.target_catalog = { target_count: 0, returned_count: 0, complete: true, selection_required: false };
+	discovery.value.target_catalog = { target_count: 0, returned_count: 0, complete: true };
 	assert.deepEqual(decodeCealClientResponse(discovery, request), discovery);
 });
 
@@ -933,8 +932,8 @@ function discoveryResponse(request) {
 					{ target_ref: "target:workspace", label: "Team inbox", access: "granted", capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()] },
 			] : [],
 			target_catalog: selected
-				? { target_count: 1, returned_count: 1, complete: true, selection_required: false }
-				: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
+				? { target_count: 1, returned_count: 1, complete: true }
+				: { target_count: 0, returned_count: 0, complete: true },
 			host_decision: "accepted",
 			proof_level: "host_decision",
 			non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
@@ -1150,7 +1149,7 @@ test("a discovery response whose catalog exceeds 512 JSON nodes still decodes in
 		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
 		capabilities,
 		targets: [],
-		target_catalog: { target_count: 0, returned_count: 0, complete: true, selection_required: false },
+		target_catalog: { target_count: 0, returned_count: 0, complete: true },
 	};
 	const decoded = decodeCealClientResponse({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value, proof_ref_or_unavailable: "gateway-audit-request:request:node-budget:d" }, request);
 	assert.equal(decoded.value.capabilities.length, 40);
