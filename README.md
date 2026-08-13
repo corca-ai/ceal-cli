@@ -116,8 +116,12 @@ exact call-occurrence times; retention, dropped history, and local/advisory
 authority stay visible. Correlated Agent work and monetary cost remain
 explicitly unsupported because the current producers supply neither a
 work-to-call relationship nor monetary cost; the page never joins by timestamp
-or estimates currency from tokens. Agent activity, Ceal evidence, and
-**Setup & privacy** remain separate views. The latter declares the local
+or estimates currency from tokens. The Overview summarizes status and capability
+labels only over the newest detailed receipt rows and labels that narrower basis;
+the full retained timestamp projection remains the sole source for the activity
+count. The Agent activity view summarizes session, event, and token-evidence
+coverage per runtime without making a cross-runtime total or ranking. **Ceal
+evidence** and **Setup & privacy** remain separate views. The latter declares the local
 sources this client reads, the receipt-spool retention bounds, and the fixed
 no-forwarding boundary (`gateway_forwarding: none`, `provider_contact: none`).
 The state covers:
@@ -156,6 +160,19 @@ capability cache, repeated non-completed calls, unknown-outcome receipts),
 each linked to its observed evidence and never a model judgment.
 Neither adapter's coverage claim generalizes to the other, and nothing is
 forwarded to the Gateway in this stage.
+
+The real-browser proof is a maintainer-only verification surface. After normal
+dependency installation, install its pinned Chromium build once and run the
+proof:
+
+```sh
+npx playwright install chromium
+npm run test:browser
+```
+
+The proof uses throwaway Agent roots and checks first-load evidence wording,
+view switching, independent theme/color controls, and a narrow viewport. It is
+not part of the shipped worker dependency graph and reads no real Agent state.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread

@@ -311,6 +311,10 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /locally recorded outcomes are visible in this selected period of the retained window/u);
 	assert.match(html, /receipt record time, not exact call time/u);
 	assert.match(html, /Correlated work and monetary cost are unsupported/u);
+	assert.match(html, /Outcome and capability mix/u);
+	assert.match(html, /newest detailed receipt rows/u);
+	assert.match(html, /Runtime overview/u);
+	assert.match(html, /with token evidence/u);
 	assert.match(html, /Missing values are not zero/u);
 	assert.match(html, /All retained record times supplied by the bounded local spool are counted/u);
 	assert.match(html, /Activity received/u);
@@ -363,12 +367,62 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(renderedOverview, /visible in this selected period of the retained window/u);
 	assert.match(renderedOverview, /Activity received 1 retained record-time value;/u);
 	assert.match(renderedOverview, /role='img' aria-label=/u);
+	const mixedDetailState = structuredClone(state);
+	mixedDetailState.receipts = {
+		...mixedDetailState.receipts,
+		entry_count: 25,
+		activity_recorded_at: Array.from({ length: 25 }, (_, index) => `2026-07-23T12:${String(index).padStart(2, "0")}:00.000Z`),
+		entries: [
+			{ recorded_at: "2026-07-23T12:24:00.000Z", status: "completed", capability: "message.search" },
+			{ recorded_at: "2026-07-23T12:23:00.000Z", status: "completed", capability: "message.search" },
+			{ recorded_at: "2026-07-23T12:22:00.000Z", status: "failed", capability: "message.search" },
+			{ recorded_at: "2026-07-23T12:21:00.000Z", status: "failed", capability: "file.read" },
+		],
+	};
+	const mixedDetailOverview = renderOverview(mixedDetailState);
+	assert.match(mixedDetailOverview, /<em>25<\/em> locally recorded outcomes/u);
+	assert.match(mixedDetailOverview, /<h3>completed<\/h3><strong>2<\/strong>/u);
+	assert.match(mixedDetailOverview, /<h3>failed<\/h3><strong>2<\/strong>/u);
+	assert.match(mixedDetailOverview, /message[.]search · 3<br>file[.]read · 1/u);
+	assert.equal((mixedDetailOverview.match(/data-receipt=/gu) ?? []).length, 4);
+	const emptyDetailOverview = renderOverview({
+		...state,
+		receipts: { ...state.receipts, activity_recorded_at: [], entries: [], entry_count: 0 },
+	});
+	assert.match(emptyDetailOverview, /No outcome mix in the visible detail subset/u);
+	assert.doesNotMatch(emptyDetailOverview, /<div class='metric-strip'><\/div>/u);
 	const unreadableOverview = renderOverview({ ...state, receipts: { status: "unreadable", non_claim: state.receipts.non_claim } });
 	assert.match(unreadableOverview, /Receipt activity is unavailable/u);
 	assert.match(unreadableOverview, /No activity count is inferred/u);
 	assert.match(unreadableOverview, /Retained-entry coverage is unavailable/u);
 	assert.doesNotMatch(unreadableOverview, /<em>0<\/em>/u);
 	assert.doesNotMatch(unreadableOverview, /0 of 0/u);
+	const runtimeSummarySource = embeddedScript.slice(
+		embeddedScript.indexOf("  const runtimeSummary"),
+		embeddedScript.indexOf("  const privacy"),
+	);
+	const renderRuntimeSummary = (agentActivity) => {
+		const context = {
+			activity: agentActivity,
+			esc: (value) => String(value),
+			result: "",
+		};
+		vm.runInNewContext(`${runtimeSummarySource}; result = runtimeSummary;`, context);
+		return context.result;
+	};
+	const renderedRuntimeSummary = renderRuntimeSummary({
+		adapters: [
+			{
+				runtime: "claude",
+				health: "active",
+				coverage: "transcript-observed",
+				sessions: [{ events: { token_usage: { output_tokens: 4 } } }, { events: { event_count: 2 } }, { events: "unreadable" }, {}],
+			},
+		],
+	});
+	assert.match(renderedRuntimeSummary, /4 visible sessions/u);
+	assert.match(renderedRuntimeSummary, /2 with event evidence · 1 with token evidence/u);
+	assert.match(renderedRuntimeSummary, /active · transcript-observed/u);
 	const droppedOverview = renderOverview({
 		...state,
 		receipts: {

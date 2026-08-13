@@ -683,6 +683,8 @@ const OBSERVER_PAGE = `<!doctype html>
   .unsupported strong { display:block; margin-bottom:.3rem; }
   .unsupported p { color:var(--muted); margin:.25rem 0; }
   .outcome-list { margin-top:1rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.6rem; }
+  .metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:.55rem; margin:1rem 0; }
+  .metric-strip .card strong { font-size:1.3rem; }
   :root[data-theme="editorial"] .hero h2, :root[data-theme="editorial"] .section-head h2 { font-family:Georgia,"Times New Roman",serif; font-weight:400; }
   :root[data-theme="editorial"] { --selected:color-mix(in srgb,var(--warn) 12%,var(--panel)); }
   :root[data-theme="terminal"] body, :root[data-theme="terminal"] .hero h2, :root[data-theme="terminal"] .section-head h2 { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.025em; }
@@ -844,9 +846,22 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
     const retainedCoverage = historyReadable
       ? "Activity received " + activityTimes.length + " retained record-time value" + (activityTimes.length === 1 ? "" : "s") + "; detail shows at most " + entries.length + " of " + esc(String(s.receipts.entry_count ?? entries.length)) + " retained entries."
       : "Retained-entry coverage is unavailable with this source state.";
+    const outcomeCounts = new Map();
+    const capabilityCounts = new Map();
+    for (const entry of filteredEntries) {
+      outcomeCounts.set(entry.status, (outcomeCounts.get(entry.status) || 0) + 1);
+      const capability = entry.capability || "unlabeled capability";
+      capabilityCounts.set(capability, (capabilityCounts.get(capability) || 0) + 1);
+    }
+    const mixCards = [...outcomeCounts].map(([label, count]) => "<div class='card'><h3>" + esc(label) + "</h3><strong>" + count + "</strong></div>").join("");
+    const mixSummary = mixCards
+      ? "<div class='metric-strip'>" + mixCards + "</div>"
+      : "<div class='unsupported'><strong>No outcome mix in the visible detail subset</strong><p>No detailed receipt row matches this selected period.</p></div>";
+    const capabilitySummary = [...capabilityCounts].map(([label, count]) => esc(label) + " · " + count).join("<br>") || "No capability labels in the visible detail subset.";
     return "<section class='hero'><p class='eyebrow'>LOCAL RECEIPT EVIDENCE · " + esc(periodLabel) + "</p>" + heroClaim + "<div class='evidence-line'><span>Timestamp: receipt record time, not exact call time</span><span>Authority: local advisory</span><span>Source: " + esc(sourceState) + "</span></div></section>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · ACTIVITY</p><h2>When outcomes entered this local history</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div>" + calendar + "</section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div></section>";
   };
 
   const usageEntries = [];
@@ -862,6 +877,13 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       : "<div class=\\"card\\"><strong>No token evidence in the bounded session view</strong><p class=\\"muted\\">This may mean the runtime did not supply usage or the current scan did not include it.</p></div>")
     + "<p class=\\"warn\\">Token accounting from different runtimes may use different sources and completeness rules; this view does not rank or total them together.</p>";
 
+  const runtimeSummary = Array.isArray(activity.adapters) ? activity.adapters.map((adapter) => {
+    const sessions = Array.isArray(adapter.sessions) ? adapter.sessions : [];
+    const scanned = sessions.filter((entry) => entry.events && entry.events !== "unreadable").length;
+    const tokenSessions = sessions.filter((entry) => entry.events && entry.events.token_usage).length;
+    return "<div class=\\"card\\"><h3>" + esc(String(adapter.runtime)) + "</h3><strong>" + sessions.length + " visible session" + (sessions.length === 1 ? "" : "s") + "</strong><p class=\\"muted\\">" + scanned + " with event evidence · " + tokenSessions + " with token evidence</p><p class=\\"muted\\">" + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + "</p></div>";
+  }).join("") : "";
+
   const privacy = s.privacy ?? {};
   let privacyView = rows([["boundary", s.boundary],
     ["gateway_forwarding", privacy.gateway_forwarding], ["provider_contact", privacy.provider_contact],
@@ -873,7 +895,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   privacyView += list(s.non_claims, "warn");
   const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "Overview": activityOverview("365"), "Agent activity": workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
+  const bodies = { "Overview": activityOverview("365"), "Agent activity": section("Runtime overview", "<div class=\\"metric-strip\\">" + runtimeSummary + "</div>") + workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");
