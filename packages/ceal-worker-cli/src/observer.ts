@@ -667,12 +667,12 @@ const rows = (pairs) => "<table>" + pairs
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
-const VIEWS = ["My agent work", "Ceal", "Privacy & retention"];
+const VIEWS = ["Work", "Ceal activity", "Usage", "Setup & privacy"];
 const SUGGESTION_DESTINATIONS = {
-  stale_collector: ["My agent work", "Agent adapter"],
-  missing_cache_opportunity: ["Ceal", "Discovery cache"],
-  repeated_failed_work: ["Ceal", "Recent Ceal calls"],
-  unknown_outcome_receipt: ["Ceal", "Recent Ceal calls"]
+  stale_collector: ["Work", "Agent adapter"],
+  missing_cache_opportunity: ["Setup & privacy", "Discovery cache"],
+  repeated_failed_work: ["Ceal activity", "Recent Ceal calls"],
+  unknown_outcome_receipt: ["Ceal activity", "Recent Ceal calls"]
 };
 fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   const readinessView = "<div class=\\"grid\\">" + [
@@ -685,14 +685,13 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   let agentView = "";
   if (Array.isArray(activity.adapters)) {
     agentView += activity.adapters.map((adapter) => {
-      let body = rows(Object.entries(adapter).filter(([k]) => k !== "sessions"));
+      let body = "<div class=\\"muted\\">" + esc(String(adapter.runtime)) + " · " + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + "</div>";
       if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
-        body += "<h2 class=\\"muted\\">Recent sessions</h2>" + adapter.sessions
-          .map((sessionEntry) => "<div>" + rows(Object.entries(sessionEntry))
-            + (sessionEntry.events === undefined && typeof sessionEntry.session_ref === "string"
-              ? "<button class=\\"drill\\" data-runtime=\\"" + esc(String(adapter.runtime)) + "\\" data-ref=\\"" + esc(sessionEntry.session_ref) + "\\">Scan events</button><div class=\\"drill-result\\"></div>"
-              : "")
-            + "</div>").join("<hr>");
+        body += "<div class=\\"grid\\">" + adapter.sessions
+          .map((sessionEntry) => "<button class=\\"card attention session\\" data-runtime=\\"" + esc(String(adapter.runtime)) + "\\" data-ref=\\"" + esc(sessionEntry.session_ref) + "\\"><strong>" + esc(String(adapter.runtime)) + " session</strong><span>" + esc(sessionEntry.last_activity_at) + "</span><p class=\\"muted\\">" + esc(sessionEntry.events === undefined ? "Select to scan locally observed events" : fmt(sessionEntry.events)) + "</p></button>")
+          .join("") + "</div>";
+      } else {
+        body += "<p class=\\"muted\\">No locally observed sessions for this runtime.</p>";
       }
       return body;
     }).join("<hr>");
@@ -703,9 +702,9 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
     ? sugg.entries.map((entry, index) => "<button class=\\"card attention\\" data-attention=\\"" + index + "\\"><strong>" + esc(entry.suggestion) + "</strong><span class=\\"muted\\">Evidence: " + esc(fmt(entry.evidence)) + "</span><p class=\\"next\\">Next: " + esc(entry.next_action) + "</p></button>").join("")
     : "<div class=\\"card\\"><strong>No local-rule suggestions</strong><p class=\\"muted\\">This does not prove that the system is healthy or complete.</p></div>";
   if (typeof sugg.non_claim === "string") suggView += "<p class=\\"warn\\">" + esc(sugg.non_claim) + "</p>";
-  const agentBody = section("Local readiness", readinessView)
-    + section("Attention", suggView)
-    + section("Agent activity (" + activity.status + ")", agentView);
+  const workBody = "<p>Recent local Agent sessions. Select one to inspect its observable event and token shape.</p>"
+    + "<p class=\\"warn\\">This version cannot safely name the project, summarize the work, or prove which Ceal calls belong to a session.</p>"
+    + section("Recent work (" + activity.status + ")", agentView);
 
   const parts = [];
   parts.push(section("Session (" + s.session.status + ")", rows(Object.entries(s.session))));
@@ -741,7 +740,21 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   }
   receiptsBody += "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>";
   parts.push(section("Receipts (" + s.receipts.status + ")", receiptsBody));
-  const cealBody = parts.join("");
+  const setupBody = section("Local readiness", readinessView) + parts.slice(0, 4).join("");
+  const cealBody = section("Attention", suggView) + parts.slice(4).join("");
+
+  const usageEntries = [];
+  if (Array.isArray(activity.adapters)) for (const adapter of activity.adapters) {
+    if (!Array.isArray(adapter.sessions)) continue;
+    for (const sessionEntry of adapter.sessions) {
+      const tokenUsage = sessionEntry.events && sessionEntry.events.token_usage;
+      if (tokenUsage) usageEntries.push({ runtime: adapter.runtime, session_ref: sessionEntry.session_ref, ...tokenUsage });
+    }
+  }
+  const usageBody = "<p>Runtime-supplied token evidence for locally observed sessions. Missing values are unknown, not zero.</p>"
+    + (usageEntries.length ? usageEntries.map((entry) => "<div class=\\"card\\">" + rows(Object.entries(entry)) + "</div>").join("")
+      : "<div class=\\"card\\"><strong>No token evidence in the bounded session view</strong><p class=\\"muted\\">This may mean the runtime did not supply usage or the current scan did not include it.</p></div>")
+    + "<p class=\\"warn\\">Token accounting from different runtimes may use different sources and completeness rules; this view does not rank or total them together.</p>";
 
   const privacy = s.privacy ?? {};
   let privacyView = rows([["boundary", s.boundary],
@@ -752,9 +765,9 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   }
   if (typeof privacy.transcript_handling === "string") privacyView += "<p>" + esc(privacy.transcript_handling) + "</p>";
   privacyView += list(s.non_claims, "warn");
-  const privacyBody = section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
+  const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "My agent work": agentBody, "Ceal": cealBody, "Privacy & retention": privacyBody };
+  const bodies = { "Work": workBody, "Ceal activity": cealBody, "Usage": usageBody, "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");
@@ -808,13 +821,34 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
         + "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>");
       return;
     }
-    const drill = event.target.closest ? event.target.closest("button.drill") : null;
-    if (!drill) return;
-    drill.disabled = true;
-    fetch("/api/observer/v1/agent-session/" + drill.dataset.runtime + "/" + drill.dataset.ref)
+    const sessionButton = event.target.closest ? event.target.closest("button.session") : null;
+    if (!sessionButton) return;
+    const adapter = activity.adapters.find((candidate) => String(candidate.runtime) === sessionButton.dataset.runtime);
+    const sessionEntry = adapter && Array.isArray(adapter.sessions)
+      ? adapter.sessions.find((candidate) => candidate.session_ref === sessionButton.dataset.ref)
+      : null;
+    if (sessionEntry && sessionEntry.events !== undefined) {
+      openDetail(sessionButton, "Agent session evidence", rows([
+        ["runtime", adapter.runtime], ["session_ref", sessionEntry.session_ref],
+        ["last_activity_at", sessionEntry.last_activity_at], ["events", sessionEntry.events]
+      ]) + "<p class=\\"warn\\">Local fixed-vocabulary evidence only; no prompt or transcript content is rendered.</p>");
+      return;
+    }
+    sessionButton.disabled = true;
+    sessionButton.setAttribute("aria-busy", "true");
+    fetch("/api/observer/v1/agent-session/" + sessionButton.dataset.runtime + "/" + sessionButton.dataset.ref)
       .then((r) => r.json())
-      .then((detail) => { drill.nextElementSibling.innerHTML = rows(Object.entries(detail)); })
-      .catch(() => { drill.nextElementSibling.textContent = "Could not scan this session."; drill.disabled = false; });
+      .then((sessionDetail) => {
+        sessionButton.disabled = false;
+        sessionButton.removeAttribute("aria-busy");
+        openDetail(sessionButton, "Agent session evidence", rows(Object.entries(sessionDetail))
+          + "<p class=\\"warn\\">Local fixed-vocabulary evidence only; no prompt or transcript content is rendered.</p>");
+      })
+      .catch(() => {
+        sessionButton.disabled = false;
+        sessionButton.removeAttribute("aria-busy");
+        openDetail(sessionButton, "Session evidence unavailable", "<p>The bounded local scan could not read this session.</p>");
+      });
   });
   show(VIEWS[0]);
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });

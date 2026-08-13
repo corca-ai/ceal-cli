@@ -301,12 +301,14 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	// the JSON projection.
 	assert.match(html, /Agent hosts/u);
 	assert.match(html, /guide\.hosts/u);
-	assert.match(html, /My agent work/u);
-	assert.match(html, /Local readiness/u);
+	assert.match(html, /Recent local Agent sessions/u);
+	assert.match(html, /Setup & privacy/u);
 	assert.match(html, /Attention/u);
+	assert.match(html, /Ceal activity/u);
+	assert.match(html, /Usage/u);
 	assert.match(html, /<dialog id="detail"/u);
 	assert.match(html, /ceal receipt show/u);
-	assert.match(html, /Privacy & retention/u);
+	assert.match(html, /cannot safely name the project/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
 
 	const drill = await fetch(`${doc.url}api/observer/v1/agent-session/claude/11111111-2222-3333-4444-555555555555`);
