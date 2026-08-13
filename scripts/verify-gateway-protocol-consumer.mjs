@@ -232,9 +232,10 @@ function installAndExerciseWorker({ workspace, input, client, worker }) {
 	if (!B1_INSTALLED_CONSUMER_PROBE.includes("__CEAL_CLIENT_VERSION_JSON__") || b1ProbeSource.includes("__CEAL_CLIENT_VERSION_JSON__"))
 		throw new GatewayProtocolConsumerError("worker_smoke_failed", "Installed B1 behavior proof did not receive the packed client version.");
 	writeFileSync(b1Probe, b1ProbeSource);
+	const b1Output = run(consumer, process.execPath, [b1Probe], "b1_installed_behavior").stdout;
 	let b1;
 	try {
-		b1 = JSON.parse(run(consumer, process.execPath, [b1Probe], "b1_installed_behavior").stdout);
+		b1 = JSON.parse(b1Output);
 	} catch {
 		throw new GatewayProtocolConsumerError("worker_smoke_failed", "Installed B1 behavior proof did not return valid JSON.");
 	}
@@ -346,7 +347,7 @@ if (!(await refusesInvalidResponse(closedEnum))) throw new Error("closed_enum_ac
 
 const leaseInput = { event_ref: "event:packed", lease_ref: "lease:packed", lease_fence: 1 };
 const unknownFrame = {
-	schema_version: "ceal.leased_consumer_capability_control_request.v5",
+	schema_version: "ceal.leased_consumer_capability_control_request.v6",
 	operation: "call",
 	input: {
 		...leaseInput,
@@ -357,12 +358,14 @@ const unknownFrame = {
 		arguments: { schema_version: "ceal.calendar_event_list_input.v1", window: "week", event_ref: "event:" + "e".repeat(64) },
 	},
 };
-const knownFrame = { schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "acquire", input: {} };
+const knownFrame = { schema_version: "ceal.leased_consumer_capability_control_request.v6", operation: "acquire", input: {} };
 const unknownResponse = {
-	schema_version: "ceal.leased_consumer_capability_control_response.v5",
+	schema_version: "ceal.leased_consumer_capability_control_response.v6",
 	operation: "call",
 	result: {
 		status: "result",
+		provider_outcome: "verified",
+		result_delivery: "pending",
 		result: {
 			schema_version: "ceal.gateway_leased_agent_capability_result.v1",
 			capability_id: "calendar.event.list",
@@ -374,7 +377,7 @@ const unknownResponse = {
 	},
 };
 const knownResponse = {
-	schema_version: "ceal.leased_consumer_capability_control_response.v5",
+	schema_version: "ceal.leased_consumer_capability_control_response.v6",
 	operation: "acquire",
 	result: {
 		status: "leased",
