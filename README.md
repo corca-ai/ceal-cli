@@ -104,7 +104,10 @@ cursor, or requested an unfiltered page;
 `input_contract` fields and opaque call refs are not target selectors unless
 catalog navigation or current Gateway guidance explicitly says otherwise. A
 URL-shaped match returns `selector_not_supported` with the resolver workflow
-instead of a successful empty target list. Neither surface exposes
+when the signed capability contract declares URL selection unsupported. Without
+that declaration the Worker preserves the Gateway target result; it does not
+guess selector semantics or suppress a capability such as `resource.resolve`.
+Neither surface exposes
 Slack, GitHub, Notion, another provider's credential kind, API mode, or
 internal connector binding. `ceal call
 <capability-id> --target <target-ref> [key=value ...]` forwards only that

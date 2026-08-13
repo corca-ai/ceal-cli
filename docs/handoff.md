@@ -30,19 +30,22 @@ separately approved boundaries.
   points to the explicit `ceal session refresh` remote-write route. This is
   already enforced by the renewal-mode and CLI tests; the stale sibling-goal
   claim must not cause a duplicate repair here.
-- The Worker-side half of `ceal-cli#13` is locally repaired. Target-selection
+- The Worker-side half of `ceal-cli#13` is prepared but remains signed-handoff
+  dependent. Target-selection
   results identify match, cursor, and unfiltered requests without copying the
-  selector. URL-shaped `--match` now fails closed as `selector_not_supported`,
-  and its exact non-echoing recovery selects the capability's opaque target and
-  resolves the URL through `resource.resolve`. When navigation declares the
+  selector. When signed navigation declares URL selection unsupported, a
+  URL-shaped `--match` fails closed as `selector_not_supported`; its exact
+  non-echoing recovery selects the capability's opaque target and resolves the
+  URL through `resource.resolve`. When navigation declares the
   required opaque argument source, the Worker renders that argument and handle
   kind without a provider-specific branch. Help and the checkout/next embedded
   guide no longer present URLs, call inputs, or opaque resource refs as
   universal target selectors. The installed `0.76.1` guide still carries the reported wording
   until a successor is released and registered. The current pinned Protocol
-  strips the new `navigation` field, so consuming its richer argument/handle
-  detail remains gated on the signed handoff; the fail-closed typed outcome does
-  not depend on that field.
+  strips the new `navigation` field, so both the typed URL refusal and its
+  richer argument/handle recovery remain gated on the signed handoff. Without
+  navigation the Worker preserves the Gateway result instead of guessing that
+  every absolute URL is unsupported or hiding `resource.resolve`.
 - The Worker-owned part of `ceal-cli#14` is locally repaired without widening
   frozen Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
   audit readback from provider-state readback while retaining legacy tokens;
