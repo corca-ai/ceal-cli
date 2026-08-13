@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	decodeCealLeasedConsumerDispositionControlRequest,
 	decodeCealLeasedConsumerDispositionControlResponse,
 } from "../../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
+import { openLeasedConsumerControlSession } from "../../packages/ceal-worker-cli/src/leased-consumer-control-session.ts";
 import {
 	controlSessionContractFromVerifiedConformance,
 	projectVerifiedControlConformanceRoutes,
@@ -15,7 +13,6 @@ import {
 
 const REQUEST_SCHEMA = "ceal.leased_consumer_capability_control_request.v5";
 const RESPONSE_SCHEMA = "ceal.leased_consumer_capability_control_response.v5";
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const HANDOFF = {
 	gateway_tag: "gateway-protocol-handoff-v0.72.21",
 	gateway_commit: "a".repeat(40),
@@ -181,35 +178,7 @@ test("the signed v6 disposition decoders admit the exact materialization vector"
 	);
 });
 
-test("materialization forwarding keeps the protected session and signed fixed route", async (context) => {
-	// Keep the copied module under the workspace package so its bare Protocol
-	// import resolves through the same node_modules authority as the real build.
-	const scratch = mkdtempSync(path.join(ROOT, "packages/ceal-worker-cli/ceal-materialization-control-session-"));
-	context.after(() => rmSync(scratch, { recursive: true, force: true }));
-	const copiedDist = path.join(scratch, "dist");
-	cpSync(path.join(ROOT, "packages/ceal-worker-cli/dist"), copiedDist, { recursive: true });
-	const generated = path.join(copiedDist, "generated", "leased-consumer-control-session-contract.js");
-	const generatedSource = readFileSync(generated, "utf8");
-	const encodedContract = /CONTRACT_JSON = ("(?:[^"\\]|\\.)*")/u.exec(generatedSource)?.[1];
-	assert.ok(encodedContract, "the copied artifact must embed its control-session contract");
-	const baseContract = JSON.parse(JSON.parse(encodedContract));
-	const signedBytes = conformanceBytes([
-		...Object.entries(baseContract.gateway.routes).map(([name, route]) => operation(name, route)),
-		operation("materialization", "/api/ceal/agent/v1/control/materialization"),
-	]);
-	const projected = controlSessionContractFromVerifiedConformance(baseContract, signedBytes, decoders, {
-		materialize: true,
-		handoff: HANDOFF,
-	});
-	const contractJson = `${JSON.stringify(projected, null, "\t")}\n`;
-	const digest = createHash("sha256").update(Buffer.from(contractJson)).digest("hex");
-	const rewritten = generatedSource
-		.replace(/CONTRACT_JSON = "(?:[^"\\]|\\.)*"/u, `CONTRACT_JSON = ${JSON.stringify(contractJson)}`)
-		.replace(/CONTRACT_SHA256 = "[a-f0-9]{64}"/u, `CONTRACT_SHA256 = "${digest}"`);
-	assert.notEqual(rewritten, generatedSource);
-	writeFileSync(generated, rewritten);
-
-	const { openLeasedConsumerControlSession } = await import(pathToFileURL(path.join(copiedDist, "leased-consumer-control-session.js")));
+test("materialization forwarding keeps the protected session and signed fixed route", async () => {
 	const calls = [];
 	const session = await openLeasedConsumerControlSession({
 		readProtectedSession: async () =>

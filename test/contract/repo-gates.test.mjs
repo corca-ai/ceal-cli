@@ -1543,6 +1543,11 @@ test("projection conformance cannot move or duplicate outside the source-test la
 	assert.throws(() => assertSourceLaneTestOwnership(moved, PROJECTION_TEST), /source-test runner/u);
 	const duplicated = `${correct} ${PROJECTION_TEST}`;
 	assert.throws(() => assertSourceLaneTestOwnership(duplicated, PROJECTION_TEST), /exactly once/u);
+	assert.doesNotMatch(
+		read(PROJECTION_TEST),
+		/packages\/ceal-worker-cli\/dist|copiedDist/u,
+		"the source-authoritative projection test must not execute mutable checkout artifacts",
+	);
 });
 
 // A "the contract suite stays small enough to run on every push" test lived here
