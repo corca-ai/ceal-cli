@@ -356,6 +356,11 @@ async function observeReceiptSpool(runtime: CealObserverRuntime, session: CealSt
 		entry_count: spool.entries.length,
 		bounds: { max_entries: spool.bounds.maxEntries, retention_ms: spool.bounds.retentionMs },
 		...drops,
+		// Activity needs every still-retained record time, while detail remains
+		// deliberately smaller. Keeping this projection timestamp-only avoids
+		// widening the visible request/capability/target metadata surface merely
+		// to draw an honest retained-window count.
+		activity_recorded_at: ordered.map((entry) => new Date(entry.recordedAt).toISOString()),
 		entries: ordered
 			.slice(-RECEIPT_SPOOL_RENDER_LIMIT)
 			.reverse()
@@ -791,16 +796,17 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   };
   const activityOverview = (days) => {
     const entries = Array.isArray(s.receipts.entries) ? s.receipts.entries : [];
+    const activityTimes = Array.isArray(s.receipts.activity_recorded_at) ? s.receipts.activity_recorded_at : entries.map((entry) => entry.recorded_at);
     const historyReadable = s.receipts.status === "spooled" || s.receipts.status === "absent";
     const start = periodStart(days);
     const generatedAt = new Date(s.generated_at);
-    const filtered = entries.filter((entry) => {
-      const recordedAt = new Date(entry.recorded_at);
+    const filteredTimes = activityTimes.filter((value) => {
+      const recordedAt = new Date(value);
       return !Number.isNaN(recordedAt.getTime()) && (!start || recordedAt >= start) && recordedAt <= generatedAt;
     });
     const counts = new Map();
-    for (const entry of filtered) counts.set(localDateKey(entry.recorded_at), (counts.get(localDateKey(entry.recorded_at)) || 0) + 1);
-    const calendarStart = start || (filtered.length ? new Date(filtered[filtered.length - 1].recorded_at) : new Date(s.generated_at));
+    for (const value of filteredTimes) counts.set(localDateKey(value), (counts.get(localDateKey(value)) || 0) + 1);
+    const calendarStart = start || (filteredTimes.length ? new Date(Math.min(...filteredTimes.map((value) => new Date(value).getTime()))) : new Date(s.generated_at));
     calendarStart.setHours(0, 0, 0, 0);
     const end = new Date(s.generated_at);
     end.setHours(0, 0, 0, 0);
@@ -820,19 +826,23 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       : s.receipts.dropped_appends === undefined
       ? "No known dropped-append count is present; completeness is not implied."
       : s.receipts.dropped_appends_note;
+    const filteredEntries = entries.filter((entry) => {
+      const recordedAt = new Date(entry.recorded_at);
+      return !Number.isNaN(recordedAt.getTime()) && (!start || recordedAt >= start) && recordedAt <= generatedAt;
+    });
     const outcomeCards = !historyReadable
       ? "<div class='unsupported'><strong>Receipt activity could not be read</strong><p>The local receipt source is " + esc(s.receipts.status) + ". No activity count is inferred.</p></div>"
-      : filtered.length
-      ? filtered.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
+      : filteredEntries.length
+      ? filteredEntries.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
       : "<div class='unsupported'><strong>No locally recorded outcomes in this selected view</strong><p>" + esc(s.receipts.note || "The retained local window has no matching entries.") + "</p><p>This is not proof of no Gateway activity.</p></div>";
     const heroClaim = historyReadable
-      ? "<h2><em>" + filtered.length + "</em> locally recorded outcomes are visible in this bounded view.</h2>"
+      ? "<h2><em>" + filteredTimes.length + "</em> locally recorded outcomes are visible in this selected period of the retained window.</h2>"
       : "<h2>Receipt activity is unavailable.</h2>";
     const calendar = historyReadable
-      ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>Only the bounded rendered receipt window is counted</span></div>"
+      ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>All retained record times supplied by the bounded local spool are counted</span></div>"
       : "<div class='unsupported'><strong>Daily activity is unavailable</strong><p>The local source could not provide readable receipt history. Missing activity is not rendered as zero.</p></div>";
     const retainedCoverage = historyReadable
-      ? "Showing at most " + entries.length + " of " + esc(String(s.receipts.entry_count ?? entries.length)) + " retained entries; selected-period totals are unavailable."
+      ? "Activity received " + activityTimes.length + " retained record-time value" + (activityTimes.length === 1 ? "" : "s") + "; detail shows at most " + entries.length + " of " + esc(String(s.receipts.entry_count ?? entries.length)) + " retained entries."
       : "Retained-entry coverage is unavailable with this source state.";
     return "<section class='hero'><p class='eyebrow'>LOCAL RECEIPT EVIDENCE · " + esc(periodLabel) + "</p>" + heroClaim + "<div class='evidence-line'><span>Timestamp: receipt record time, not exact call time</span><span>Authority: local advisory</span><span>Source: " + esc(sourceState) + "</span></div></section>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · ACTIVITY</p><h2>When outcomes entered this local history</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div>" + calendar + "</section>"

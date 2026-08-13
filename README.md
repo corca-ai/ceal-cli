@@ -109,9 +109,9 @@ exit code alone.
 
 `ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
 read-only Workbench page and JSON endpoint over the client's cached local
-state. Its Overview leads with the bounded rendered subset of locally recorded
-receipt-bearing Ceal outcomes over a selected period; it does not claim a full
-period total. The timestamps are local receipt-record times, not
+state. Its Overview counts the timestamp-only projection of every outcome still
+present in the bounded local receipt spool while detailed receipt rows remain
+limited to the newest subset. The timestamps are local receipt-record times, not
 exact call-occurrence times; retention, dropped history, and local/advisory
 authority stay visible. Correlated Agent work and monetary cost remain
 explicitly unsupported because the current producers supply neither a

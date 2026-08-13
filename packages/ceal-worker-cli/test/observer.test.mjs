@@ -237,6 +237,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.receipts.status, "spooled");
 	assert.equal(state.receipts.coverage, "ceal-mediated");
 	assert.equal(state.receipts.entry_count, 1);
+	assert.deepEqual(state.receipts.activity_recorded_at, ["2026-07-24T00:00:30.000Z"]);
 	assert.deepEqual(state.receipts.entries, [
 		{
 			recorded_at: "2026-07-24T00:00:30.000Z",
@@ -307,12 +308,12 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /Attention/u);
 	assert.match(html, /Agent activity/u);
 	assert.match(html, /Ceal evidence/u);
-	assert.match(html, /locally recorded outcomes are visible in this bounded view/u);
+	assert.match(html, /locally recorded outcomes are visible in this selected period of the retained window/u);
 	assert.match(html, /receipt record time, not exact call time/u);
 	assert.match(html, /Correlated work and monetary cost are unsupported/u);
 	assert.match(html, /Missing values are not zero/u);
-	assert.match(html, /Only the bounded rendered receipt window is counted/u);
-	assert.match(html, /selected-period totals are unavailable/u);
+	assert.match(html, /All retained record times supplied by the bounded local spool are counted/u);
+	assert.match(html, /Activity received/u);
 	assert.match(html, /All shown/u);
 	assert.match(html, /365 days/u);
 	assert.match(html, /recordedAt <= generatedAt/u);
@@ -359,8 +360,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		return context.result;
 	};
 	const renderedOverview = renderOverview(state);
-	assert.match(renderedOverview, /visible in this bounded view/u);
-	assert.match(renderedOverview, /selected-period totals are unavailable/u);
+	assert.match(renderedOverview, /visible in this selected period of the retained window/u);
+	assert.match(renderedOverview, /Activity received 1 retained record-time value;/u);
 	assert.match(renderedOverview, /role='img' aria-label=/u);
 	const unreadableOverview = renderOverview({ ...state, receipts: { status: "unreadable", non_claim: state.receipts.non_claim } });
 	assert.match(unreadableOverview, /Receipt activity is unavailable/u);
@@ -385,6 +386,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		...futureState.receipts,
 		status: "spooled",
 		entry_count: 21,
+		activity_recorded_at: [new Date(Date.parse(state.generated_at) + 86_400_000).toISOString()],
 		entries: [
 			{
 				recorded_at: new Date(Date.parse(state.generated_at) + 86_400_000).toISOString(),
@@ -397,6 +399,22 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	const futureOverview = renderOverview(futureState);
 	assert.match(futureOverview, /<em>0<\/em>/u);
 	assert.doesNotMatch(futureOverview, /req_future/u);
+	const retainedOverviewState = structuredClone(state);
+	retainedOverviewState.receipts = {
+		...retainedOverviewState.receipts,
+		entry_count: 25,
+		activity_recorded_at: Array.from({ length: 25 }, (_, index) => new Date(Date.parse(state.generated_at) - index * 1_000).toISOString()),
+		entries: Array.from({ length: 20 }, (_, index) => ({
+			recorded_at: new Date(Date.parse(state.generated_at) - index * 1_000).toISOString(),
+			request_ref: `narnia:rendered:${index}:call`,
+			status: "completed",
+			evidence: "readback_verified",
+		})),
+	};
+	const retainedOverview = renderOverview(retainedOverviewState);
+	assert.match(retainedOverview, /<em>25<\/em>/u);
+	assert.match(retainedOverview, /Activity received 25 retained record-time values/u);
+	assert.equal((retainedOverview.match(/data-receipt=/gu) || []).length, 20);
 
 	const drill = await fetch(`${doc.url}api/observer/v1/agent-session/claude/11111111-2222-3333-4444-555555555555`);
 	assert.equal(drill.status, 200);
@@ -447,6 +465,31 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	await handle.close();
 	await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.equal(io.exitCode, 0);
+});
+
+test("observer activity covers the retained spool while detail stays capped", async () => {
+	const base = Date.parse("2026-07-24T00:00:00.000Z");
+	const retained = Array.from({ length: 25 }, (_, index) => ({
+		recordedAt: base + index * 1_000,
+		requestRef: `narnia:retained:${index}:call`,
+		status: "completed",
+		evidence: "readback_verified",
+		auditRefs: [],
+	}));
+	const state = await buildObserverState({
+		loadReceiptSpool: async () => ({
+			entries: retained,
+			bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
+			drops: { count: 0, atLeast: false },
+			spoolPresent: true,
+		}),
+		now: () => base + 60_000,
+	});
+	assert.equal(state.receipts.entry_count, 25);
+	assert.equal(state.receipts.activity_recorded_at.length, 25);
+	assert.equal(state.receipts.entries.length, 20);
+	assert.equal(state.receipts.activity_recorded_at[0], "2026-07-24T00:00:00.000Z");
+	assert.equal(state.receipts.activity_recorded_at.at(-1), "2026-07-24T00:00:24.000Z");
 });
 
 test("ceal observe renders a corrupt receipt spool as unreadable, not an empty history", async (context) => {
