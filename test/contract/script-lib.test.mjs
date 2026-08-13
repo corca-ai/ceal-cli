@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { codedErrorClass } from "../../scripts/lib/coded-error.mjs";
+import { npmPackArgs, parseNpmPackMetadata } from "../../scripts/lib/npm-pack-metadata.mjs";
 import { parseScriptArgs } from "../../scripts/lib/parse-script-args.mjs";
 
 function thrower() {
@@ -22,6 +23,23 @@ const SPEC = {
 function parse(argv, overrides = {}) {
 	return parseScriptArgs(argv, { fail: thrower(), ...SPEC, ...overrides });
 }
+
+test("npm pack metadata accepts supported npm output generations", () => {
+	const metadata = { name: "@corca-ai/ceal-protocol", filename: "ceal-protocol.tgz" };
+	assert.deepEqual(npmPackArgs("--ignore-scripts"), ["--json", "pack", "--ignore-scripts"]);
+	assert.deepEqual(parseNpmPackMetadata(JSON.stringify([metadata])), metadata);
+	assert.deepEqual(parseNpmPackMetadata(JSON.stringify({ [metadata.name]: metadata }), metadata.name), metadata);
+	assert.deepEqual(
+		parseNpmPackMetadata(JSON.stringify({ other: { name: "other", filename: "other.tgz" }, [metadata.name]: metadata }), metadata.name),
+		metadata,
+	);
+	assert.throws(
+		() => parseNpmPackMetadata(JSON.stringify({ other: { name: "other", filename: "other.tgz" } }), metadata.name),
+		/no package identity/u,
+	);
+	assert.throws(() => parseNpmPackMetadata(JSON.stringify([{ name: metadata.name, filename: 1 }])), /no package identity/u);
+	assert.throws(() => parseNpmPackMetadata("{}"), /no package identity/u);
+});
 
 test("help short-circuits and still reports the defaults", () => {
 	for (const flag of ["--help", "-h"]) {

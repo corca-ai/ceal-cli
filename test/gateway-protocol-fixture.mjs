@@ -5,6 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { npmPackArgs, parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.mjs";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
 import { withBuiltPackages } from "./repo-build.mjs";
 
@@ -33,12 +34,12 @@ export function makeGatewayProtocolFixture() {
 	manifest.homepage = "https://github.com/corca-ai/ceal#readme";
 	manifest.bugs = "https://github.com/corca-ai/ceal/issues";
 	writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
-	const packed = spawnSync("npm", ["pack", source, "--ignore-scripts", "--json", "--pack-destination", output], {
+	const packed = spawnSync("npm", npmPackArgs(source, "--ignore-scripts", "--pack-destination", output), {
 		encoding: "utf8",
 		env: toolchainEnv(),
 	});
 	assert.equal(packed.status, 0, packed.stderr);
-	const metadata = JSON.parse(packed.stdout)[0];
+	const metadata = parseNpmPackMetadata(packed.stdout, "@corca-ai/ceal-protocol");
 	const tarball = path.join(output, metadata.filename);
 	const proof = {
 		schema_version: "ceal.gateway_protocol_artifact.v1",

@@ -8,6 +8,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { npmPackArgs, parseNpmPackMetadata } from "./lib/npm-pack-metadata.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROTOCOL_NAME = "@corca-ai/ceal-protocol";
@@ -255,10 +256,10 @@ function pack(cwd, destination, expectedName, label) {
 		// npm owns the package archive; this directory contains only disposable proof output.
 		mkdirSync(destination, { recursive: true, mode: 0o755 });
 	}
-	const result = run(cwd, "npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", destination], label);
+	const result = run(cwd, "npm", npmPackArgs("--ignore-scripts", "--pack-destination", destination), label);
 	let metadata;
 	try {
-		metadata = JSON.parse(result.stdout)?.[0];
+		metadata = parseNpmPackMetadata(result.stdout, expectedName);
 	} catch {
 		throw new GatewayProtocolConsumerError("invalid_pack_metadata", "Consumer package pack metadata is invalid.");
 	}

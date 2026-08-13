@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -46,9 +57,32 @@ function withStagedRelease(run) {
 			copyFileSync(process.execPath, binary);
 			chmodSync(binary, 0o755);
 		}
+		stageNodeSharedLibrary(binary);
 		run((args, environment) => spawnSync(binary, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }));
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
+	}
+}
+
+function stageNodeSharedLibrary(binary) {
+	if (process.platform !== "darwin") return;
+	const executable = realpathSync(process.execPath);
+	const libraryDirectory = path.join(path.dirname(path.dirname(executable)), "lib");
+	let libraryName;
+	try {
+		libraryName = readdirSync(libraryDirectory).find((name) => /^libnode[.].+[.]dylib$/u.test(name));
+	} catch {
+		return;
+	}
+	if (!libraryName) return;
+	// Homebrew's Node uses @loader_path for @rpath/libnode, so the staged
+	// executable needs its sibling dylib beside it; static distributions do not.
+	const source = path.join(libraryDirectory, libraryName);
+	const target = path.join(path.dirname(binary), libraryName);
+	try {
+		linkSync(source, target);
+	} catch {
+		copyFileSync(source, target);
 	}
 }
 
@@ -140,7 +174,7 @@ test("the escape hatch is explicit and still isolated", () => {
 	withStagedRelease((run) => {
 		const allowed = run(["--allow-effect", "local_write", "ceal", "guide", "register", "codex"]);
 		assert.match(allowed.stderr, /effect: local_write.*throwaway HOME/u);
-		assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu);
+		assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu, JSON.stringify({ status: allowed.status, stderr: allowed.stderr }));
 		// The registration actually happened, so the path below is a real write
 		// target rather than the shape of a failure document.
 		assert.match(allowed.stdout, /^status: available$/mu);

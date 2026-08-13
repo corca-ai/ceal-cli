@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.mjs";
+import { npmPackArgs, parseNpmPackMetadata } from "./lib/npm-pack-metadata.mjs";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.mjs";
 import { toolchainEnv } from "./lib/toolchain-env.mjs";
@@ -241,9 +242,10 @@ function compilerDiagnosis(error) {
 
 function packPackage(packageDirectory, outputDirectory, dependencies) {
 	mkdirSync(outputDirectory, { recursive: true, mode: 0o755 });
+	const expectedName = JSON.parse(readFileSync(path.join(packageDirectory, "package.json"), "utf8")).name;
 	let output;
 	try {
-		output = (dependencies.pack ?? spawnSync)("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", outputDirectory], {
+		output = (dependencies.pack ?? spawnSync)("npm", npmPackArgs("--ignore-scripts", "--pack-destination", outputDirectory), {
 			cwd: packageDirectory,
 			encoding: "utf8",
 			maxBuffer: 1024 * 1024,
@@ -255,7 +257,7 @@ function packPackage(packageDirectory, outputDirectory, dependencies) {
 	if (output?.status !== 0) fail("worker_package_pack_failed", "Worker-owned package could not be packed.");
 	let metadata;
 	try {
-		metadata = JSON.parse(output.stdout)?.[0];
+		metadata = parseNpmPackMetadata(output.stdout, expectedName);
 	} catch {
 		fail("worker_package_pack_failed", "Worker package metadata is invalid.");
 	}

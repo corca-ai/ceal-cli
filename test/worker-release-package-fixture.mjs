@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { npmPackArgs, parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.mjs";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
 import { withBuiltPackages } from "./repo-build.mjs";
 
@@ -88,18 +89,20 @@ export function packedProtocolFixture(context) {
 
 function packPackage(root, sourcePath, declaredExports) {
 	const packageDirectory = path.join(ROOT, sourcePath);
+	const expectedName = JSON.parse(readFileSync(path.join(packageDirectory, "package.json"), "utf8")).name;
 	// Callers must already hold the workspace dist lock: this reads `dist`.
 	// `--ignore-scripts` is not optional here — this package's `prepack` is
 	// `rm -rf dist && tsc`, so without it a pack deletes the shared tree every
 	// other process is reading. `repo-build.test.mjs` gates that flag.
-	const packed = JSON.parse(
-		execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", root], {
+	const packed = parseNpmPackMetadata(
+		execFileSync("npm", npmPackArgs("--ignore-scripts", "--pack-destination", root), {
 			cwd: packageDirectory,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 			env: toolchainEnv(),
 		}),
-	)[0];
+		expectedName,
+	);
 	const tarball = path.join(root, packed.filename);
 	const bytes = readFileSync(tarball);
 	const manifestBytes = execFileSync("tar", ["-xOzf", tarball, "package/package.json"]);
