@@ -51,6 +51,33 @@ const RECEIPT_SPOOL_NON_CLAIM =
 // total entries and retention.
 const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 
+export type ObserverPresentationIntent = "neutral" | "positive" | "attention" | "unavailable" | "unknown";
+
+/**
+ * Maps only locally observed source values to presentation intent. This is a
+ * display decision, not a health or authorization verdict.
+ *
+ * @testOnly
+ */
+export function observerPresentationIntent(source: string, value: unknown): ObserverPresentationIntent {
+	if (value === "unavailable" || value === "unreadable") return "unavailable";
+	if (source === "session") return value === "present" ? "positive" : value === "absent" ? "attention" : "unknown";
+	if (source === "cache")
+		return value === "cached" ? "neutral" : value === "absent" || value === "not_current_session" ? "attention" : "unknown";
+	if (source === "install") return value === "managed" ? "positive" : value === "unmanaged" ? "attention" : "unknown";
+	if (source === "guide")
+		return value === "registered"
+			? "positive"
+			: value === "unregistered" || value === "conflict"
+				? "attention"
+				: value === "staged" || value === "mixed"
+					? "neutral"
+					: "unknown";
+	if (source === "adapter")
+		return value === "active" ? "positive" : value === "stale" ? "attention" : value === "inactive" ? "neutral" : "unknown";
+	return "unknown";
+}
+
 /**
  * Exported so the observer suite can build the page state directly instead of
  * asserting on rendered output, which would prove the renderer rather than what
@@ -599,24 +626,37 @@ const OBSERVER_PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ceal Workbench</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
-  h1 { font-size: 1.2rem; } h2 { font-size: 1rem; margin-top: 1.6rem; }
+  :root { color-scheme: light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --accent:#245b3c; --warn:#8a4b08; }
+  * { box-sizing: border-box; }
+  body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:72rem; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.65rem; letter-spacing:-.03em; margin:0; } h2 { font-size:1rem; margin:1.6rem 0 .75rem; }
   .badge { border: 1px solid currentColor; border-radius: 4px; padding: 0 .4rem; margin-left: .5rem; font-size: .8rem; }
   table { border-collapse: collapse; width: 100%; }
   td, th { text-align: left; padding: .15rem .8rem .15rem 0; vertical-align: top; word-break: break-all; }
-  .muted { opacity: .65; }
-  .warn { color: #b45309; }
+  .muted { color:var(--muted); }
+  .warn { color:var(--warn); }
+  .boundary { border-left:3px solid var(--accent); margin:.8rem 0 1.4rem; padding:.35rem .75rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:.65rem; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.9rem; }
+  .card h3 { font-size:.82rem; margin:0 0 .35rem; color:var(--muted); }
+  .attention { width:100%; color:inherit; text-align:left; font:inherit; cursor:pointer; margin-bottom:.6rem; }
+  .attention strong { display:block; margin-bottom:.35rem; }
+  .next { color:var(--accent); margin:.5rem 0 0; }
+  dialog { width:min(38rem,calc(100% - 2rem)); border:1px solid var(--line); border-radius:12px; padding:0; box-shadow:0 24px 70px #0003; }
+  dialog::backdrop { background:#17211b88; }
+  .detail-head { display:flex; justify-content:space-between; align-items:center; padding:1rem 1.1rem; border-bottom:1px solid var(--line); }
+  .detail-head h2 { margin:0; } .detail-body { padding:1rem 1.1rem 1.25rem; }
   nav { margin: 1rem 0; display: flex; gap: .5rem; }
   nav button { font: inherit; padding: .2rem .8rem; border: 1px solid currentColor; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: .65; }
   nav button[aria-current="true"] { opacity: 1; font-weight: 700; }
 </style>
 </head>
 <body>
-<h1>Ceal Workbench <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
-<p class="muted">No admin surface, no provider credentials, no live refresh. Reload the page after running a live command to see newer cached state.</p>
+<h1 tabindex="-1">Ceal Workbench <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
+<p class="boundary">Local evidence only. This read-only page never contacts the Gateway or a provider. Reload after running a live command to see newer cached state.</p>
 <nav id="nav"></nav>
 <div id="root">Loading local state…</div>
+<dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
 <script>
 const fmt = (v) => Array.isArray(v) ? v.map(fmt).join(", ")
   : (typeof v === "object" && v !== null) ? Object.entries(v).map(([k, x]) => k + ": " + fmt(x)).join(" \\u00b7 ")
@@ -628,7 +668,19 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
 const VIEWS = ["My agent work", "Ceal", "Privacy & retention"];
+const SUGGESTION_DESTINATIONS = {
+  stale_collector: ["My agent work", "Agent adapter"],
+  missing_cache_opportunity: ["Ceal", "Discovery cache"],
+  repeated_failed_work: ["Ceal", "Recent Ceal calls"],
+  unknown_outcome_receipt: ["Ceal", "Recent Ceal calls"]
+};
 fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
+  const readinessView = "<div class=\\"grid\\">" + [
+    ["Client session", s.session.status],
+    ["Capability cache", s.discovery_cache.status + (s.discovery_cache.status === "cached" ? (s.discovery_cache.within_ttl ? " · fresh" : " · stale") : "")],
+    ["Installed release", s.install.status],
+    ["Agent guide", s.guide.status]
+  ].map(([label, value]) => "<div class=\\"card\\"><h3>" + esc(label) + "</h3><strong>" + esc(String(value)) + "</strong></div>").join("") + "</div>";
   const activity = s.agent_activity;
   let agentView = "";
   if (Array.isArray(activity.adapters)) {
@@ -648,10 +700,11 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   if (Array.isArray(activity.non_claims)) agentView += list(activity.non_claims, "warn");
   const sugg = s.suggestions ?? {};
   let suggView = Array.isArray(sugg.entries) && sugg.entries.length
-    ? sugg.entries.map((entry) => rows(Object.entries(entry))).join("<hr>")
-    : "<p class=\\"muted\\">No suggestions from the local rules.</p>";
+    ? sugg.entries.map((entry, index) => "<button class=\\"card attention\\" data-attention=\\"" + index + "\\"><strong>" + esc(entry.suggestion) + "</strong><span class=\\"muted\\">Evidence: " + esc(fmt(entry.evidence)) + "</span><p class=\\"next\\">Next: " + esc(entry.next_action) + "</p></button>").join("")
+    : "<div class=\\"card\\"><strong>No local-rule suggestions</strong><p class=\\"muted\\">This does not prove that the system is healthy or complete.</p></div>";
   if (typeof sugg.non_claim === "string") suggView += "<p class=\\"warn\\">" + esc(sugg.non_claim) + "</p>";
-  const agentBody = section("Suggestions (" + (sugg.status ?? "unavailable") + ")", suggView)
+  const agentBody = section("Local readiness", readinessView)
+    + section("Attention", suggView)
     + section("Agent activity (" + activity.status + ")", agentView);
 
   const parts = [];
@@ -676,7 +729,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   if (Array.isArray(s.receipts.entries) && s.receipts.entries.length) {
     receiptsBody += rows(Object.entries(s.receipts).filter(([k]) => k !== "entries" && k !== "non_claim"));
     receiptsBody += "<h2 class=\\"muted\\">Recent call outcomes</h2>" + s.receipts.entries
-      .map((entry) => rows(Object.entries(entry))).join("<hr>");
+      .map((entry, index) => "<button class=\\"card attention\\" data-receipt=\\"" + index + "\\"><strong>" + esc(entry.capability || "Ceal call") + "</strong><span class=\\"muted\\">" + esc(entry.recorded_at + " · " + entry.status + " · " + entry.evidence) + "</span></button>").join("");
   } else if (s.receipts.note) {
     receiptsBody += "<p class=\\"muted\\">" + esc(s.receipts.note) + "</p>";
     // Without this the drop count reaches the JSON and never the human: the
@@ -704,6 +757,21 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   const bodies = { "My agent work": agentBody, "Ceal": cealBody, "Privacy & retention": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
+  const detail = document.getElementById("detail");
+  const detailBody = document.getElementById("detail-body");
+  let detailOrigin = null;
+  const openDetail = (origin, title, content) => {
+    detailOrigin = origin;
+    document.getElementById("detail-title").textContent = title;
+    detailBody.innerHTML = content;
+    detail.showModal();
+    document.getElementById("detail-close").focus();
+  };
+  document.getElementById("detail-close").addEventListener("click", () => detail.close());
+  detail.addEventListener("close", () => {
+    if (detailOrigin && document.contains(detailOrigin)) detailOrigin.focus();
+    else document.querySelector("h1").focus();
+  });
   const show = (view) => {
     root.innerHTML = bodies[view];
     for (const button of nav.querySelectorAll("button")) {
@@ -719,6 +787,27 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   // Per-session drill-down: an explicit owner click fetches the bounded scan
   // for one listed session; a view switch discards the result (no local copy).
   root.addEventListener("click", (event) => {
+    const attention = event.target.closest ? event.target.closest("button[data-attention]") : null;
+    if (attention) {
+      const entry = sugg.entries[Number(attention.dataset.attention)];
+      const destination = SUGGESTION_DESTINATIONS[entry.kind];
+      const source = destination ? "<p class=\\"muted\\">Source: " + esc(destination[1]) + " in " + esc(destination[0]) + "</p>" : "";
+      openDetail(attention, "Attention evidence", source + rows(Object.entries(entry.evidence || {}))
+        + "<h2>Next safe action</h2><p>" + esc(entry.next_action) + "</p><p class=\\"warn\\">" + esc(sugg.non_claim || "Local evidence only.") + "</p>");
+      return;
+    }
+    const receiptButton = event.target.closest ? event.target.closest("button[data-receipt]") : null;
+    if (receiptButton) {
+      const receipt = s.receipts.entries[Number(receiptButton.dataset.receipt)];
+      const needsReadback = ["not_read_back", "readback_unavailable", "outcome_unknown"].includes(receipt.evidence)
+        && typeof receipt.request_ref === "string";
+      const next = needsReadback
+        ? "<h2>Authoritative readback</h2><code>ceal receipt show " + esc(receipt.request_ref) + "</code>"
+        : "";
+      openDetail(receiptButton, "Ceal call evidence", rows(Object.entries(receipt)) + next
+        + "<p class=\\"warn\\">" + esc(s.receipts.non_claim) + "</p>");
+      return;
+    }
     const drill = event.target.closest ? event.target.closest("button.drill") : null;
     if (!drill) return;
     drill.disabled = true;

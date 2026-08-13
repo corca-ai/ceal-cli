@@ -7,13 +7,23 @@ import test from "node:test";
 import { parse } from "yaml";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
-import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
+import { buildObserverState, OBSERVER_DATA_SOURCES, observerPresentationIntent } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
 
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
 const TEST_SPOOL_IDENTITY = "a".repeat(64);
+
+test("observer presentation never implies positive state for gaps or unknown values", () => {
+	assert.equal(observerPresentationIntent("session", "present"), "positive");
+	assert.equal(observerPresentationIntent("session", "absent"), "attention");
+	assert.equal(observerPresentationIntent("cache", "cached"), "neutral");
+	assert.equal(observerPresentationIntent("cache", "unreadable"), "unavailable");
+	assert.equal(observerPresentationIntent("adapter", "stale"), "attention");
+	assert.equal(observerPresentationIntent("adapter", "future_value"), "unknown");
+	assert.equal(observerPresentationIntent("future_source", "present"), "unknown");
+});
 
 function createCealReceiptSpoolStore(home, now = Date.now) {
 	const store = createRawReceiptSpoolStore(home, now);
@@ -292,6 +302,10 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /Agent hosts/u);
 	assert.match(html, /guide\.hosts/u);
 	assert.match(html, /My agent work/u);
+	assert.match(html, /Local readiness/u);
+	assert.match(html, /Attention/u);
+	assert.match(html, /<dialog id="detail"/u);
+	assert.match(html, /ceal receipt show/u);
 	assert.match(html, /Privacy & retention/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
 
