@@ -51,7 +51,7 @@ const RECEIPT_SPOOL_NON_CLAIM =
 // total entries and retention.
 const RECEIPT_SPOOL_RENDER_LIMIT = 20;
 
-export type ObserverPresentationIntent = "neutral" | "positive" | "attention" | "unavailable" | "unknown";
+type ObserverPresentationIntent = "neutral" | "positive" | "attention" | "unavailable" | "unknown";
 
 /**
  * Maps only locally observed source values to presentation intent. This is a
@@ -615,10 +615,10 @@ function respondAgentSession(response: ServerResponse, runtime: CealObserverRunt
 	});
 }
 
-// Workbench shell: the masterplan's first navigation — "My agent work" and
-// "Ceal" stay deliberately separate views, and "Privacy & retention" makes the
-// local data boundary and (absent) forwarding state inspectable. One embedded
-// document over the one state endpoint; no router, no build step.
+// Workbench shell: bounded receipt evidence leads; Agent activity, Ceal
+// evidence, and setup/privacy stay separate so the composition cannot imply a
+// relationship the producers do not supply. One embedded document over the
+// one state endpoint; no router, no build step.
 const OBSERVER_PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -626,10 +626,19 @@ const OBSERVER_PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ceal Workbench</title>
 <style>
-  :root { color-scheme: light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --accent:#245b3c; --warn:#8a4b08; }
+  :root { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --soft:#e9eeea; --accent:#245b3c; --warn:#8a4b08; --selected:#e2ebff; }
+  @media (prefers-color-scheme:dark) { :root:not([data-mode]) { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; } }
+  :root[data-mode="dark"] { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; }
+  :root[data-mode="light"] { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --soft:#e9eeea; --accent:#245b3c; --warn:#8a4b08; --selected:#e2ebff; }
   * { box-sizing: border-box; }
-  body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:72rem; padding:2.5rem 1.25rem 5rem; }
-  h1 { font-size:1.65rem; letter-spacing:-.03em; margin:0; } h2 { font-size:1rem; margin:1.6rem 0 .75rem; }
+  body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:76rem; padding:1.5rem 1.25rem 5rem; }
+  h1 { font-size:1.15rem; letter-spacing:-.03em; margin:0; } h2 { font-size:1rem; margin:1.6rem 0 .75rem; }
+  .topbar { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:1rem; }
+  .topbar nav { margin:0 auto; } .controls { display:flex; align-items:center; gap:.45rem; flex-wrap:wrap; }
+  select { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:.38rem .55rem; font:inherit; font-size:.75rem; }
+  .mode { display:flex; background:var(--soft); border:1px solid var(--line); border-radius:7px; padding:2px; }
+  .mode button { border:0; background:none; color:var(--muted); border-radius:5px; padding:.28rem .45rem; font:inherit; font-size:.7rem; cursor:pointer; }
+  .mode button[aria-pressed="true"] { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px #0002; }
   .badge { border: 1px solid currentColor; border-radius: 4px; padding: 0 .4rem; margin-left: .5rem; font-size: .8rem; }
   table { border-collapse: collapse; width: 100%; }
   td, th { text-align: left; padding: .15rem .8rem .15rem 0; vertical-align: top; word-break: break-all; }
@@ -649,12 +658,37 @@ const OBSERVER_PAGE = `<!doctype html>
   nav { margin: 1rem 0; display: flex; gap: .5rem; }
   nav button { font: inherit; padding: .2rem .8rem; border: 1px solid currentColor; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: .65; }
   nav button[aria-current="true"] { opacity: 1; font-weight: 700; }
+  nav button:focus-visible, .mode button:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  .hero { padding:3.4rem 0 2.4rem; max-width:58rem; }
+  .eyebrow { color:var(--accent); font-size:.7rem; letter-spacing:.12em; font-weight:700; text-transform:uppercase; }
+  .hero h2 { font-size:clamp(2rem,5vw,4.2rem); line-height:1.04; letter-spacing:-.055em; margin:.7rem 0 1rem; }
+  .hero h2 em { color:var(--accent); font-style:normal; }
+  .evidence-line { color:var(--muted); display:flex; flex-wrap:wrap; gap:.4rem 1rem; }
+  .overview-section { border-top:1px solid var(--ink); padding-top:1rem; margin-top:1rem; }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+  .section-head h2 { margin:0; font-size:1.25rem; }
+  .activity-grid { display:grid; grid-template-rows:repeat(7,12px); grid-auto-flow:column; grid-auto-columns:12px; gap:4px; overflow:auto; padding:1.5rem 0 .7rem; }
+  .day { width:12px; height:12px; border-radius:2px; background:var(--soft); }
+  .day.level-1 { background:color-mix(in srgb,var(--accent) 35%,var(--soft)); }
+  .day.level-2 { background:color-mix(in srgb,var(--accent) 65%,var(--soft)); }
+  .day.level-3 { background:var(--accent); }
+  .legend { display:flex; gap:.5rem; align-items:center; color:var(--muted); font-size:.72rem; }
+  .support-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:2rem; }
+  .unsupported { border:1px dashed var(--line); background:color-mix(in srgb,var(--panel) 80%,var(--soft)); padding:1rem; border-radius:8px; }
+  .unsupported strong { display:block; margin-bottom:.3rem; }
+  .unsupported p { color:var(--muted); margin:.25rem 0; }
+  .outcome-list { margin-top:1rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.6rem; }
+  :root[data-theme="editorial"] .hero h2, :root[data-theme="editorial"] .section-head h2 { font-family:Georgia,"Times New Roman",serif; font-weight:400; }
+  :root[data-theme="editorial"] { --selected:color-mix(in srgb,var(--warn) 12%,var(--panel)); }
+  :root[data-theme="terminal"] body, :root[data-theme="terminal"] .hero h2, :root[data-theme="terminal"] .section-head h2 { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.025em; }
+  :root[data-theme="terminal"] .card, :root[data-theme="terminal"] .unsupported, :root[data-theme="terminal"] select, :root[data-theme="terminal"] button { border-radius:2px; }
+  :root[data-theme="terminal"] .day { border-radius:1px; }
+  @media (max-width:700px) { .topbar nav { order:3; width:100%; overflow:auto; } .support-grid { grid-template-columns:1fr; } .hero { padding-top:2.2rem; } }
 </style>
 </head>
 <body>
-<h1 tabindex="-1">Ceal Workbench <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
+<header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
 <p class="boundary">Local evidence only. This read-only page never contacts the Gateway or a provider. Reload after running a live command to see newer cached state.</p>
-<nav id="nav"></nav>
 <div id="root">Loading local state…</div>
 <dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
 <script>
@@ -667,12 +701,12 @@ const rows = (pairs) => "<table>" + pairs
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
-const VIEWS = ["Work", "Ceal activity", "Usage", "Setup & privacy"];
+const VIEWS = ["Overview", "Agent activity", "Ceal evidence", "Setup & privacy"];
 const SUGGESTION_DESTINATIONS = {
-  stale_collector: ["Work", "Agent adapter"],
+  stale_collector: ["Agent activity", "Agent adapter"],
   missing_cache_opportunity: ["Setup & privacy", "Discovery cache"],
-  repeated_failed_work: ["Ceal activity", "Recent Ceal calls"],
-  unknown_outcome_receipt: ["Ceal activity", "Recent Ceal calls"]
+  repeated_failed_work: ["Ceal evidence", "Recent Ceal calls"],
+  unknown_outcome_receipt: ["Ceal evidence", "Recent Ceal calls"]
 };
 fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   const readinessView = "<div class=\\"grid\\">" + [
@@ -743,6 +777,68 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   const setupBody = section("Local readiness", readinessView) + parts.slice(0, 4).join("");
   const cealBody = section("Attention", suggView) + parts.slice(4).join("");
 
+  const localDateKey = (value) => {
+    const date = new Date(value);
+    const pad = (part) => String(part).padStart(2, "0");
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+  };
+  const periodStart = (days) => {
+    if (days === "all") return null;
+    const start = new Date(s.generated_at);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - Number(days) + 1);
+    return start;
+  };
+  const activityOverview = (days) => {
+    const entries = Array.isArray(s.receipts.entries) ? s.receipts.entries : [];
+    const historyReadable = s.receipts.status === "spooled" || s.receipts.status === "absent";
+    const start = periodStart(days);
+    const generatedAt = new Date(s.generated_at);
+    const filtered = entries.filter((entry) => {
+      const recordedAt = new Date(entry.recorded_at);
+      return !Number.isNaN(recordedAt.getTime()) && (!start || recordedAt >= start) && recordedAt <= generatedAt;
+    });
+    const counts = new Map();
+    for (const entry of filtered) counts.set(localDateKey(entry.recorded_at), (counts.get(localDateKey(entry.recorded_at)) || 0) + 1);
+    const calendarStart = start || (filtered.length ? new Date(filtered[filtered.length - 1].recorded_at) : new Date(s.generated_at));
+    calendarStart.setHours(0, 0, 0, 0);
+    const end = new Date(s.generated_at);
+    end.setHours(0, 0, 0, 0);
+    let cells = "";
+    for (let offset = 0; offset < calendarStart.getDay(); offset += 1) cells += "<span class='day' aria-hidden='true'></span>";
+    for (let date = new Date(calendarStart); date <= end; date.setDate(date.getDate() + 1)) {
+      const key = localDateKey(date);
+      const count = counts.get(key) || 0;
+      const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : 3;
+      const dayLabel = key + " · " + count + " locally recorded outcome" + (count === 1 ? "" : "s");
+      cells += "<span class='day level-" + level + "' title='" + esc(dayLabel) + "' role='img' aria-label='" + esc(dayLabel) + "'></span>";
+    }
+    const periodLabel = days === "all" ? "all shown" : days + " days";
+    const sourceState = s.receipts.status === "spooled" ? "readable retained history" : s.receipts.status;
+    const dropCopy = !historyReadable
+      ? "Drop evidence is unavailable with this source state."
+      : s.receipts.dropped_appends === undefined
+      ? "No known dropped-append count is present; completeness is not implied."
+      : s.receipts.dropped_appends_note;
+    const outcomeCards = !historyReadable
+      ? "<div class='unsupported'><strong>Receipt activity could not be read</strong><p>The local receipt source is " + esc(s.receipts.status) + ". No activity count is inferred.</p></div>"
+      : filtered.length
+      ? filtered.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
+      : "<div class='unsupported'><strong>No locally recorded outcomes in this selected view</strong><p>" + esc(s.receipts.note || "The retained local window has no matching entries.") + "</p><p>This is not proof of no Gateway activity.</p></div>";
+    const heroClaim = historyReadable
+      ? "<h2><em>" + filtered.length + "</em> locally recorded outcomes are visible in this bounded view.</h2>"
+      : "<h2>Receipt activity is unavailable.</h2>";
+    const calendar = historyReadable
+      ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>Only the bounded rendered receipt window is counted</span></div>"
+      : "<div class='unsupported'><strong>Daily activity is unavailable</strong><p>The local source could not provide readable receipt history. Missing activity is not rendered as zero.</p></div>";
+    const retainedCoverage = historyReadable
+      ? "Showing at most " + entries.length + " of " + esc(String(s.receipts.entry_count ?? entries.length)) + " retained entries; selected-period totals are unavailable."
+      : "Retained-entry coverage is unavailable with this source state.";
+    return "<section class='hero'><p class='eyebrow'>LOCAL RECEIPT EVIDENCE · " + esc(periodLabel) + "</p>" + heroClaim + "<div class='evidence-line'><span>Timestamp: receipt record time, not exact call time</span><span>Authority: local advisory</span><span>Source: " + esc(sourceState) + "</span></div></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · ACTIVITY</p><h2>When outcomes entered this local history</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div>" + calendar + "</section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
+  };
+
   const usageEntries = [];
   if (Array.isArray(activity.adapters)) for (const adapter of activity.adapters) {
     if (!Array.isArray(adapter.sessions)) continue;
@@ -767,7 +863,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   privacyView += list(s.non_claims, "warn");
   const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "Work": workBody, "Ceal activity": cealBody, "Usage": usageBody, "Setup & privacy": privacyBody };
+  const bodies = { "Overview": activityOverview("365"), "Agent activity": workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");
@@ -850,6 +946,23 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
         openDetail(sessionButton, "Session evidence unavailable", "<p>The bounded local scan could not read this session.</p>");
       });
   });
+  root.addEventListener("change", (event) => {
+    if (event.target && event.target.id === "period") {
+      bodies.Overview = activityOverview(event.target.value);
+      show("Overview");
+    }
+  });
+  document.getElementById("theme").addEventListener("change", (event) => {
+    document.documentElement.dataset.theme = event.target.value;
+  });
+  for (const button of document.querySelectorAll(".mode [data-mode]")) button.addEventListener("click", () => {
+    if (button.dataset.mode === "system") delete document.documentElement.dataset.mode;
+    else document.documentElement.dataset.mode = button.dataset.mode;
+    for (const candidate of document.querySelectorAll(".mode [data-mode]")) {
+      candidate.setAttribute("aria-pressed", String(candidate === button));
+    }
+  });
+  document.documentElement.dataset.theme = "developer";
   show(VIEWS[0]);
 }).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });
 </script>

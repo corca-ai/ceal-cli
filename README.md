@@ -109,13 +109,18 @@ exit code alone.
 
 `ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
 read-only Workbench page and JSON endpoint over the client's cached local
-state. The page's first navigation keeps the masterplan's two views
-deliberately separate — **My agent work** (the agent-runtime activity below)
-and **Ceal** (session, capability cache, install, guide, receipts) — plus a
-**Privacy & retention** view that declares the local sources this client
-reads, the receipt-spool retention bounds, and the fixed no-forwarding
-boundary (`gateway_forwarding: none`, `provider_contact: none`). The state
-covers:
+state. Its Overview leads with the bounded rendered subset of locally recorded
+receipt-bearing Ceal outcomes over a selected period; it does not claim a full
+period total. The timestamps are local receipt-record times, not
+exact call-occurrence times; retention, dropped history, and local/advisory
+authority stay visible. Correlated Agent work and monetary cost remain
+explicitly unsupported because the current producers supply neither a
+work-to-call relationship nor monetary cost; the page never joins by timestamp
+or estimates currency from tokens. Agent activity, Ceal evidence, and
+**Setup & privacy** remain separate views. The latter declares the local
+sources this client reads, the receipt-spool retention bounds, and the fixed
+no-forwarding boundary (`gateway_forwarding: none`, `provider_contact: none`).
+The state covers:
 session identity with token material structurally redacted, the cached
 capability/target catalog with its age and TTL, the managed install
 generation, agent-guide registration, and the local receipt spool. It performs

@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 import { parse } from "yaml";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
@@ -304,12 +305,98 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /Recent local Agent sessions/u);
 	assert.match(html, /Setup & privacy/u);
 	assert.match(html, /Attention/u);
-	assert.match(html, /Ceal activity/u);
-	assert.match(html, /Usage/u);
+	assert.match(html, /Agent activity/u);
+	assert.match(html, /Ceal evidence/u);
+	assert.match(html, /locally recorded outcomes are visible in this bounded view/u);
+	assert.match(html, /receipt record time, not exact call time/u);
+	assert.match(html, /Correlated work and monetary cost are unsupported/u);
+	assert.match(html, /Missing values are not zero/u);
+	assert.match(html, /Only the bounded rendered receipt window is counted/u);
+	assert.match(html, /selected-period totals are unavailable/u);
+	assert.match(html, /All shown/u);
+	assert.match(html, /365 days/u);
+	assert.match(html, /recordedAt <= generatedAt/u);
+	assert.match(html, /calendarStart\.getDay/u);
+	assert.match(html, /role='img' aria-label=/u);
+	assert.match(html, /Receipt activity is unavailable/u);
+	assert.match(html, /Missing activity is not rendered as zero/u);
+	assert.match(html, /aria-label="Visual theme"/u);
+	assert.match(html, /aria-label="Color appearance"/u);
+	assert.match(html, /data-mode="system"/u);
+	assert.match(html, /data-mode="light"/u);
+	assert.match(html, /data-mode="dark"/u);
 	assert.match(html, /<dialog id="detail"/u);
 	assert.match(html, /ceal receipt show/u);
 	assert.match(html, /cannot safely name the project/u);
+	assert.doesNotMatch(html, /Ceal caused|Observed Agent cost|\$0/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
+	const embeddedScript = html.match(/<script>([\s\S]*)<\/script>/u)?.[1];
+	assert.ok(embeddedScript);
+	assert.doesNotThrow(() => new vm.Script(embeddedScript), "the browser-delivered observer script must parse");
+	const overviewSource = embeddedScript.slice(
+		embeddedScript.indexOf("  const localDateKey"),
+		embeddedScript.indexOf("  const usageEntries"),
+	);
+	const renderOverview = (observerState, period = "365") => {
+		const context = {
+			s: observerState,
+			esc: (value) =>
+				String(value).replace(
+					/[&<>"']/gu,
+					(character) =>
+						({
+							"&": "&amp;",
+							"<": "&lt;",
+							">": "&gt;",
+							'"': "&quot;",
+							"'": "&#39;",
+						})[character],
+				),
+			Intl,
+			result: "",
+		};
+		vm.runInNewContext(`${overviewSource}; result = activityOverview(${JSON.stringify(period)});`, context);
+		return context.result;
+	};
+	const renderedOverview = renderOverview(state);
+	assert.match(renderedOverview, /visible in this bounded view/u);
+	assert.match(renderedOverview, /selected-period totals are unavailable/u);
+	assert.match(renderedOverview, /role='img' aria-label=/u);
+	const unreadableOverview = renderOverview({ ...state, receipts: { status: "unreadable", non_claim: state.receipts.non_claim } });
+	assert.match(unreadableOverview, /Receipt activity is unavailable/u);
+	assert.match(unreadableOverview, /No activity count is inferred/u);
+	assert.match(unreadableOverview, /Retained-entry coverage is unavailable/u);
+	assert.doesNotMatch(unreadableOverview, /<em>0<\/em>/u);
+	assert.doesNotMatch(unreadableOverview, /0 of 0/u);
+	const droppedOverview = renderOverview({
+		...state,
+		receipts: {
+			status: "absent",
+			note: "No call outcome could be spooled.",
+			dropped_appends: 2,
+			dropped_appends_note: "At least 2 receipt appends were lost. This history is incomplete.",
+			non_claim: state.receipts.non_claim,
+		},
+	});
+	assert.match(droppedOverview, /At least 2 receipt appends were lost/u);
+	assert.match(droppedOverview, /not proof of no Gateway activity/u);
+	const futureState = structuredClone(state);
+	futureState.receipts = {
+		...futureState.receipts,
+		status: "spooled",
+		entry_count: 21,
+		entries: [
+			{
+				recorded_at: new Date(Date.parse(state.generated_at) + 86_400_000).toISOString(),
+				request_ref: "req_future",
+				status: "failed",
+				evidence: "not_read_back",
+			},
+		],
+	};
+	const futureOverview = renderOverview(futureState);
+	assert.match(futureOverview, /<em>0<\/em>/u);
+	assert.doesNotMatch(futureOverview, /req_future/u);
 
 	const drill = await fetch(`${doc.url}api/observer/v1/agent-session/claude/11111111-2222-3333-4444-555555555555`);
 	assert.equal(drill.status, 200);
