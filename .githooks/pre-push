@@ -36,6 +36,38 @@ set -eu
 TIMING_LOG=${CEAL_TIMING_LOG:-.charness/quality/command-timing.jsonl}
 TIMING_KEEP=200
 
+# Build and coverage outputs are repository-wide mutable state. Starting a
+# second pre-push while the first one is still proving them can corrupt both
+# runs, so refuse before either gate starts. Git has not updated the remote ref
+# while this hook is running; its absence is not evidence that the original push
+# stopped and must never be used as a reason to start another one.
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+case "$GIT_COMMON_DIR" in
+	/*) ;;
+	*) GIT_COMMON_DIR="$PWD/$GIT_COMMON_DIR" ;;
+esac
+PRE_PUSH_LOCK="$GIT_COMMON_DIR/ceal-pre-push.lock"
+PRE_PUSH_LOCK_OWNER="$PRE_PUSH_LOCK/owner"
+
+if ! mkdir "$PRE_PUSH_LOCK" 2>/dev/null; then
+	owner_pid="unknown"
+	if [ -r "$PRE_PUSH_LOCK_OWNER" ]; then
+		owner_pid=$(sed -n '1p' "$PRE_PUSH_LOCK_OWNER")
+	fi
+	echo "pre-push: refused because another pre-push gate is already running for this repository (owner pid: $owner_pid). Wait for the original git push to finish; do not start a second push. If that process is gone, remove the stale lock at $PRE_PUSH_LOCK." >&2
+	exit 2
+fi
+
+release_pre_push_lock() {
+	rm -f "$PRE_PUSH_LOCK_OWNER"
+	rmdir "$PRE_PUSH_LOCK" 2>/dev/null || true
+}
+trap release_pre_push_lock EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "$$" >"$PRE_PUSH_LOCK_OWNER"
+
 record_timing() {
 	timing_label="$1"
 	elapsed_ms="$2"

@@ -17,3 +17,10 @@ Everything else not listed is owned by the comment at the site and by
   only on `linux`/`x64`, so every installed-binary and installer proof self-skips
   on macOS. Do not "fix" this by flipping the flag — requiring it across all of
   `linux-*` is what burned `ceal-v0.67.0`.
+- **Tag pre-push takes roughly four minutes on the current ARM64 maintainer
+  host.** The two overlapping `ceal-v0.77.0` attempts recorded 263 seconds and
+  259 seconds for the full-gate phase. The concurrency repair prevents paying
+  that cost twice, but does not make one retained gate cheaper. Reopen after the
+  release completes: use `.charness/quality/command-timing.jsonl` and a fresh
+  proof run to attribute the slow phases, then improve retained-path scope or
+  fixtures without removing the full coverage/build/release proof.

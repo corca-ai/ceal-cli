@@ -22,6 +22,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 	"test/contract/leased-consumer-control-conformance-projection.test.mjs",
 	"test/contract/one-fact-one-home.test.mjs",
+	"test/contract/pre-push-lock.test.mjs",
 	"test/contract/prewarm-offline-consumer-cache.test.mjs",
 	"test/contract/probe-surface.test.mjs",
 	"test/contract/production-reachability.test.mjs",

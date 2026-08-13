@@ -108,6 +108,9 @@ gate; prose saying they may differ is not enforcement.
 - Speak to the operator in Korean unless asked otherwise. Every repo document is English.
 - Run state-changing commands unfiltered and read their direct exit code before
   retrying. Never read an exit code through a pipe; redirect output or run unpiped.
+- A missing remote ref while `git push` is still inside pre-push is expected,
+  not evidence that the push stopped. Keep the original process/session and wait
+  for its direct exit; never start a second push to resolve ambiguous output.
 - Regenerate `package-lock.json` only with `node_modules` absent in a clean
   manifest-only directory, or npm can erase other platforms' optional toolchains.
 - Search with `rg`, not `grep`; `-r` and `-E` mean different things in ripgrep.

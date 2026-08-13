@@ -389,6 +389,14 @@ and `test:release` must keep starting with `node --test` because
 `repo-gates.test.mjs` reads their file inventories, so the wrapper cannot sit in
 front of them.
 
+The pre-push hook admits only one gate per repository at a time. Build output,
+raw V8 profiles, and coverage reports are checkout-wide mutable state; two hooks
+cannot prove them independently. A second hook exits before spawning `npm` and
+names the recorded owner PID when its owner record is already published,
+instructing the caller to wait for the original push. Remote-ref absence while
+the first hook runs is expected because Git updates the remote only after the
+hook succeeds; it never authorizes a retry.
+
 **The floor alone cannot tell a pass from an empty measurement, so the runner
 also checks the inventory.** `c8` exits 0 when its file set is empty — verified,
 not assumed: point `include` at a glob matching nothing and it prints
