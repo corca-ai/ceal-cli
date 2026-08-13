@@ -99,6 +99,11 @@ effect, and target requirement per capability); pass `--detail` to include each
 capability's full `input_contract`. `ceal capabilities targets --capability
 <capability-id> --match <selector>` submits one capability-specific target
 selector and returns a bounded, current selection of opaque target references.
+The next signed target metadata contract will also identify each returned
+target's `connector_kind` and `target_kind`, and each served capability row's
+`effect`, `readiness`, and derived `writable` value (with any `rate_limit`);
+the current vendored Protocol strips those additive target keys, so this
+renderer is not a live claim until that handoff is consumed.
 The result names whether the request included a match selector, continued a
 cursor, or requested an unfiltered page;
 `input_contract` fields and opaque call refs are not target selectors unless

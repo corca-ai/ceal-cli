@@ -23,6 +23,7 @@ import {
 	writeCallUnavailable,
 } from "./call-result-output.js";
 import { validCapabilityId, validTargetRef } from "./capability-arguments.js";
+import { type CealDiscoveryTargetMetadata, renderCapabilityTargets } from "./capability-target-renderer.js";
 import type {
 	CealCliIo,
 	CealCommandContext,
@@ -63,6 +64,12 @@ import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION 
 // and this set to decide what must be neutralized before anything runs. Two
 // dist entry points for one guard is a seam that can drift.
 export { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "./agent-guide.js";
+export type {
+	CealDiscoveryTargetMetadata,
+	CealRenderedCapabilityAccess,
+	CealRenderedDiscoveryTarget,
+} from "./capability-target-renderer.js";
+export { renderCapabilityTargets } from "./capability-target-renderer.js";
 export type { CealCommandDefinition } from "./command-definitions.js";
 export { CEAL_COMMANDS } from "./command-definitions.js";
 export type { CealSubcommandDefinition, CealSubcommandHandlers, CealSubcommandRouteKey } from "./subcommands.js";
@@ -957,6 +964,10 @@ function writeCapabilitiesAvailable(
 	runtime: CealCommandContext,
 ): number {
 	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
+	const targets = renderCapabilityTargets(
+		discovery.value.targets as unknown as readonly (CealGatewayDiscoveryValue["targets"][number] & CealDiscoveryTargetMetadata)[],
+		discovery.value.capabilities,
+	);
 	const targetSelection = targetSelectionProjection(selection);
 	const nextAction = capabilityCatalogNextAction(discovery.value.target_catalog, selection);
 	return writeYaml(io.stdout, {
@@ -982,7 +993,7 @@ function writeCapabilitiesAvailable(
 			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
 		capabilities,
-		targets: discovery.value.targets,
+		targets,
 		// Tell an agent the concise rows omit the input grammar and how to get it,
 		// so a compact default never reads as "this capability has no contract".
 		...(detail ? {} : { capability_detail: "Re-run 'ceal capabilities --detail' for per-capability input_contract." }),

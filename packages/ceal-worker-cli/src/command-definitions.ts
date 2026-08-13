@@ -90,7 +90,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "capabilities",
-		description: "Discover Gateway-issued capabilities and select bounded targets with the stored access token.",
+		description: "Discover Gateway-issued capabilities and select bounded targets with connector/kind metadata and per-capability readiness.",
 		usage:
 			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <selector> | --cursor <opaque>] [--limit <1-64>]",
 		// Discovery is read-only at the capability boundary. A stale stored access

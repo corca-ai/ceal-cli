@@ -166,6 +166,7 @@ export const CEAL_SUBCOMMANDS = [
 		recovery:
 			"Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
 		notes: [
+			"Returned targets identify their connector_kind and target_kind. Each target's capability_access row is joined to the catalog descriptor with effect, readiness, and writable; --detail changes capability input contracts only.",
 			"The target query and its session handling are read-only. A stale access",
 			"token is reported; run 'ceal session refresh' to rotate it explicitly.",
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",

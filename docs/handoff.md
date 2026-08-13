@@ -46,6 +46,15 @@ separately approved boundaries.
   richer argument/handle recovery remain gated on the signed handoff. Without
   navigation the Worker preserves the Gateway result instead of guessing that
   every absolute URL is unsupported or hiding `resource.resolve`.
+- The source renderer for the next target-navigation handoff now requires each
+  target's public `connector_kind` and `target_kind`, and joins each served
+  `capability_access` row to its catalog descriptor for `effect`, `readiness`,
+  and derived `writable` (retaining an optional `rate_limit`). It never guesses
+  a kind or widens access to the catalog. The currently pinned Protocol still
+  strips those two additive target keys before the Worker sees them, so the
+  renderer is covered only by an exact extended-shape unit fixture until the
+  signed handoff is consumed; no live `ceal capabilities` target rendering is
+  claimed from this checkout yet.
 - The Worker-owned part of `ceal-cli#14` is locally repaired without widening
   frozen Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
   audit readback from provider-state readback while retaining legacy tokens;
