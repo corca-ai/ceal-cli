@@ -15,7 +15,7 @@ import {
 	CealHttpTransportError,
 	createCealClient,
 	createCealHttpTransport,
-} from "../dist/index.js";
+} from "../src/index.ts";
 
 test("HTTP transport gives bounded Gateway capability calls a thirty-second default budget", () => {
 	assert.equal(CEAL_DEFAULT_HTTP_TIMEOUT_MS, 30_000);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { acceptsJsonMediaType } from "../dist/request-bounds.js";
+import { acceptsJsonMediaType } from "../src/request-bounds.ts";
 
 test("JSON media types are exact, parameter-complete, and policy-scoped", () => {
 	for (const value of [

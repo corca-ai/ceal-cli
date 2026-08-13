@@ -73,6 +73,30 @@ Formatting-only commits belong in `.git-blame-ignore-revs`, which
 
 ## The Release Tier Runs In Parallel, And What Pays For That
 
+### Source-authoritative client behavior and isolated client artifacts
+
+Client behavior tests execute `src/**/*.ts` through `test/source-loader.mjs`.
+The loader owns both direct workspace paths and bare workspace package names;
+it redirects either form to the editable TypeScript source and refuses a
+workspace `dist` resolution that has no source authority. The client `test` and
+`coverage` scripts therefore have no build lifecycle hook: a targeted behavior
+test observes the current source or fails closed, never succeeds against a
+previous checkout build.
+
+Emitted declarations, package exports, and executable JavaScript are a different
+proof purpose. `test/client-artifact.test.mjs` asks
+`test/artifact-workspace.mjs` to copy only source/config/manifest inputs into a
+fresh temporary workspace, emit Protocol and client packages there, and load
+the emitted client against the temporary Protocol package. The proof binds
+source and artifact digests and fingerprints checkout `dist` before and after;
+the artifact build neither consumes nor changes checkout `dist`.
+
+The worker behavior and release fixtures still use the shared checkout-dist
+owner described below. They are the remaining migration scope; the source
+loader already owns their direct and bare import resolution, but their suites
+must not switch until their emitted-code assertions are moved into the artifact
+lane.
+
 `test:release` was pinned to `--test-concurrency=1` from the commit that first
 needed it, with no recorded reason. The reason was real but undeclared: the
 release fixtures shell out to `npm run build`, which emits into the checked-out

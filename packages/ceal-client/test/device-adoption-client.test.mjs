@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
-import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../dist/index.js";
+import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
 
 // Driven against a real loopback socket rather than an injected fetch, because
 // the failures worth catching here are transport failures: a redirect, a wrong

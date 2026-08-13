@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
-import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../dist/index.js";
+import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../src/index.ts";
 import {
 	abortingFetch,
 	brokenFetch,

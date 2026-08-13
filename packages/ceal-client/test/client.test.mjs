@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { URL } from "node:url";
-import { createCealClient } from "../dist/index.js";
+import { createCealClient } from "../src/index.ts";
 
 test("client adds the public protocol version without assuming a Gateway transport", async () => {
 	let observed;
@@ -43,16 +43,11 @@ test("client rejects request identifiers that are unsafe to correlate", async ()
 	await assert.rejects(client.request({ request_id: "contains whitespace", operation: "discover", body: {} }), /redaction-safe identifier/u);
 });
 
-test("wire DTO ownership stays in protocol while client re-exports the public types", async () => {
+test("wire DTO ownership stays in protocol source", async () => {
 	const source = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
-	const declarations = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
-	const transportDeclarations = await readFile(new URL("../dist/http-transport.d.ts", import.meta.url), "utf8");
 	assert.match(source, /export type \{[\s\S]*CealClientRequest[\s\S]*\} from "@corca-ai\/ceal-protocol";/u);
 	assert.match(source, /import \{ CEAL_PROTOCOL_VERSION \} from "@corca-ai\/ceal-protocol";/u);
 	assert.doesNotMatch(source, /export (?:interface|type) CealClient(?:Request|Response|Success|Failure|Operation)\b/u);
 	assert.doesNotMatch(source, /export (?:interface|type) CealProof(?:ReferenceOrUnavailable|Unavailable)\b/u);
 	assert.doesNotMatch(source, /(?:const|let|var)\s+\w*PROTOCOL_VERSION\s*=|["']1\.0\.0["']/u);
-	assert.match(declarations, /request<I extends CealGatewayRequestInput>\([\s\S]*CealGatewayResponseFor<CealGatewayRequestForInput<I>>/u);
-	assert.match(transportDeclarations, /send<R extends CealGatewayRequest>\([\s\S]*CealGatewayResponseFor<R>/u);
-	assert.doesNotMatch(declarations, /\bTValue\b/u);
 });

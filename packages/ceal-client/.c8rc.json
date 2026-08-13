@@ -1,8 +1,8 @@
 {
 	"$schema": "https://json.schemastore.org/c8rc.json",
 	"all": true,
-	"src": "dist",
-	"extension": [".js"],
+	"src": "src",
+	"extension": [".ts"],
 	"reporter": ["text", "json-summary"],
 	"reports-dir": "coverage",
 	"check-coverage": true,

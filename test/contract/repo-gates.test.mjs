@@ -29,6 +29,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/repo-gates.test.mjs",
 	"test/contract/safe-output-path.test.mjs",
 	"test/contract/script-lib.test.mjs",
+	"test/contract/source-loader.test.mjs",
 	"test/contract/worker-acceptance-packet.test.mjs",
 	"test/contract/worker-gateway-handoff-archive.test.mjs",
 	"test/contract/worker-guide-contract.test.mjs",
@@ -36,6 +37,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/worker-release-inputs.test.mjs",
 ];
 const WORKER_RELEASE_TESTS = [
+	"test/client-artifact.test.mjs",
 	"test/gateway-protocol-consumer.test.mjs",
 	"test/worker-native-artifact.test.mjs",
 	"test/worker-release-installer.test.mjs",
@@ -247,6 +249,21 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	// A trailing `|| true` would make every type error a green build, which is the
 	// one thing loosening this assertion off exact equality must not permit.
 	assert.doesNotMatch(workerPackage.scripts.build, /\|\||;|--noEmit/u);
+});
+
+test("client behavior tests execute editable source while emitted ABI stays in the artifact lane", () => {
+	const clientPackage = JSON.parse(read("packages/ceal-client/package.json"));
+	assert.match(clientPackage.scripts.test, /--import [.][.]\/[.][.]\/test\/source-loader[.]mjs/u);
+	assert.match(clientPackage.scripts.coverage, /--import [.][.]\/[.][.]\/test\/source-loader[.]mjs/u);
+	assert.equal(clientPackage.scripts.pretest, undefined);
+	assert.equal(clientPackage.scripts.precoverage, undefined);
+	for (const file of filesUnder("packages/ceal-client/test", (name) => name.endsWith(".test.mjs"))) {
+		assert.doesNotMatch(read(file), /["'][.][.]\/dist\//u, `${file} must import editable source, not checkout dist`);
+	}
+	const artifactBuilder = read("test/artifact-workspace.mjs");
+	assert.match(artifactBuilder, /mkdtempSync/u);
+	assert.doesNotMatch(artifactBuilder, /cpSync\([^\n]*["']dist["']/u, "isolated artifacts must not copy checkout dist as an input");
+	assert.ok(WORKER_RELEASE_TESTS.includes("test/client-artifact.test.mjs"));
 });
 
 // The third target. `scripts/` is the release lane's production code and was the
