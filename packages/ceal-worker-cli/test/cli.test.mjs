@@ -4117,7 +4117,7 @@ test("capabilities identifies each target request kind without copying its selec
 	});
 });
 
-test("a URL target match without declared support returns selector_not_supported instead of an empty catalog", async () => {
+test("a URL target match without a navigation declaration preserves the Gateway catalog result", async () => {
 	const selector = `https://www.notion.so/${"a".repeat(32)}`;
 	const responseFactory = (request) =>
 		request.operation === "handshake"
@@ -4149,21 +4149,14 @@ test("a URL target match without declared support returns selector_not_supported
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(
 			["capabilities", "targets", "--capability", "notion.page.get", "--profile", "profile:narnia", "--match", selector],
-			2,
+			0,
 			{
 				readStoredSession: async () => storedSession(endpoint),
 				nextRequestId: () => "narnia:target-catalog:empty-match",
 			},
 		);
-		assert.equal(payload.schema_version, "ceal.error.v1");
-		assert.equal(payload.error.kind, "selector_not_supported");
-		assert.equal(payload.error.message, "Capability 'notion.page.get' does not declare URL target selectors.");
-		assert.equal(
-			payload.error.next_action,
-			"Run 'ceal capabilities targets --capability notion.page.get --profile profile:narnia --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability resource.resolve --profile profile:narnia --limit 64' and use one returned target with 'ceal call resource.resolve --target <target-ref> url=<URL>'; use only the returned opaque ref as a call input declared by 'ceal capabilities --profile profile:narnia --detail'.",
-		);
-		assert.equal(Object.hasOwn(payload, "targets"), false, "a rejected selector must not look like a successful empty catalog");
-		assert.doesNotMatch(JSON.stringify(payload), new RegExp(selector, "u"));
+		assert.equal(payload.status, "available");
+		assert.deepEqual(payload.targets, []);
 		assert.equal(requests[1].body.body.match, selector, "the test must exercise a real match request");
 	}, responseFactory);
 });
@@ -4200,13 +4193,26 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 		"the URL-specific declaration must not invent semantics for a text selector",
 	);
 	const unrelated = classifyUnsupportedTargetSelector([{ ...capability, capability_id: "other.page.get" }], selection);
-	assert.equal(unrelated.message, "Capability 'notion.page.get' does not declare URL target selectors.");
-	assert.doesNotMatch(unrelated.message, /document|ref/u, "navigation from another capability must not control this selection");
+	assert.equal(unrelated, null, "navigation from another capability must not control this selection");
 	const missingResolver = structuredClone(capability);
 	missingResolver.navigation.required_argument_source.issued_by = ["notion.search"];
-	const malformed = classifyUnsupportedTargetSelector([missingResolver], selection);
-	assert.equal(malformed.message, "Capability 'notion.page.get' does not declare URL target selectors.");
-	assert.doesNotMatch(malformed.message, /document|ref/u, "metadata without the canonical resolver must use generic recovery");
+	assert.deepEqual(classifyUnsupportedTargetSelector([missingResolver], selection), {
+		message:
+			"Capability 'notion.page.get' does not accept a URL as a target selector; its catalog navigation requires a 'document' ref in 'ref'.",
+		nextAction:
+			"Run 'ceal capabilities targets --capability notion.search --profile profile:narnia --limit 64', call that capability with its declared arguments, and pass the returned document ref as 'ref=<document-ref>' when calling 'notion.page.get'.",
+	});
+	const malformed = structuredClone(capability);
+	malformed.navigation.required_argument_source.issued_by = [];
+	assert.equal(classifyUnsupportedTargetSelector([malformed], selection), null, "malformed metadata cannot invent a refusal");
+	assert.equal(
+		classifyUnsupportedTargetSelector([{ capability_id: "resource.resolve" }], {
+			...selection,
+			body: { ...selection.body, capability_id: "resource.resolve" },
+		}),
+		null,
+		"a URL-capable selector without a refusal declaration remains available",
+	);
 });
 
 test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {

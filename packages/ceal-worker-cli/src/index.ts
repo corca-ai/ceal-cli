@@ -1038,11 +1038,9 @@ interface SelectorRefusal {
 
 /**
  * Consume the catalog's navigation declaration instead of guessing selector
- * semantics from a capability id or its call-input grammar. The local
- * structural read is temporary until the next Protocol handoff adds this
- * additive field to `CealGatewayDiscoveryCapability`; an older decoder removes
- * undeclared response fields, so absence here remains "not known" and URL
- * selectors fail closed through the canonical resolver workflow.
+ * semantics from a capability id or its call-input grammar. Absence remains
+ * "not known": only an exact declaration may reject a selector that another
+ * capability could legitimately support.
  */
 function unsupportedTargetSelector(
 	capabilities: readonly CealGatewayDiscoveryCapability[],
@@ -1051,16 +1049,15 @@ function unsupportedTargetSelector(
 	if (selection.kind !== "targets" || !selection.body.match || !isAbsoluteWebUrl(selection.body.match)) return null;
 	const capability = capabilities.find((entry) => entry.capability_id === selection.body.capability_id);
 	const navigation = capabilityNavigation(capability);
-	const source = navigation?.required_argument_source ?? null;
-	const resolver = source?.issued_by.find((capabilityId) => capabilityId === "resource.resolve") ?? "resource.resolve";
+	if (!navigation) return null;
+	const source = navigation.required_argument_source;
+	const resolver = source.issued_by.find((capabilityId) => capabilityId === "resource.resolve") ?? null;
 	const profile = selection.profileRef ? ` --profile ${selection.profileRef}` : "";
 	return {
-		message: source
-			? `Capability '${selection.body.capability_id}' does not accept a URL as a target selector; its catalog navigation requires a '${source.handle_kind}' ref in '${source.argument}'.`
-			: `Capability '${selection.body.capability_id}' does not declare URL target selectors.`,
-		nextAction: source
+		message: `Capability '${selection.body.capability_id}' does not accept a URL as a target selector; its catalog navigation requires a '${source.handle_kind}' ref in '${source.argument}'.`,
+		nextAction: resolver
 			? `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability ${resolver}${profile} --limit 64' and use one returned target with 'ceal call ${resolver} --target <target-ref> url=<URL>'; pass the returned ${source.handle_kind} ref as '${source.argument}=<${source.handle_kind}-ref>' when calling '${selection.body.capability_id}'.`
-			: `Run 'ceal capabilities targets --capability ${selection.body.capability_id}${profile} --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability ${resolver}${profile} --limit 64' and use one returned target with 'ceal call ${resolver} --target <target-ref> url=<URL>'; use only the returned opaque ref as a call input declared by 'ceal capabilities${profile} --detail'.`,
+			: `Run 'ceal capabilities targets --capability ${source.issued_by[0]}${profile} --limit 64', call that capability with its declared arguments, and pass the returned ${source.handle_kind} ref as '${source.argument}=<${source.handle_kind}-ref>' when calling '${selection.body.capability_id}'.`,
 	};
 }
 
@@ -1081,8 +1078,8 @@ function capabilityNavigation(capability: CealGatewayDiscoveryCapability | undef
 	// catalog. Their safe interpolation shape happens to equal the operator
 	// operand-key grammar, but neither surface owns the other's vocabulary.
 	if (!/^[a-z][a-z0-9_]{0,63}$/u.test(source.argument) || !/^[a-z][a-z0-9_-]{0,63}$/u.test(source.handle_kind)) return null;
-	if (!source.issued_by.every((value) => typeof value === "string" && validCapabilityId(value))) return null;
-	if (!source.issued_by.includes("resource.resolve")) return null;
+	if (source.issued_by.length === 0 || !source.issued_by.every((value) => typeof value === "string" && validCapabilityId(value)))
+		return null;
 	return navigation as unknown as CapabilityNavigation;
 }
 
@@ -1099,7 +1096,7 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** @testOnly Exercises the additive catalog-navigation seam before the signed Protocol handoff is pinned. */
+/** @testOnly Exercises the catalog-navigation refusal seam. */
 export const classifyUnsupportedTargetSelector = unsupportedTargetSelector;
 
 // Client-local selection code named by the Profile contract: a session with
