@@ -5,9 +5,11 @@ output_dir: charness-artifacts/impl
 preset_id: portable-defaults
 customized_from: portable-defaults
 verification_tools:
-  - "npm run check"
-ui_verification_tools: []
-verification_install_proposals: []
+  - "cmd:npm"
+ui_verification_tools:
+  - "cmd:npx"
+verification_install_proposals:
+  - "Run `npx playwright install chromium` after dependency installation before the browser proof."
 truth_surfaces:
   - README.md
   - worker-release-inputs.json
