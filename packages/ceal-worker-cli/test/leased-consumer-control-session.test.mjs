@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
+import { CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
 import {
 	isInheritedNotificationChannelFd,
 	openLeasedConsumerControlSession,
@@ -65,6 +65,8 @@ test("the embedded control-session contract is refused when its digest does not 
 });
 
 const encoder = new TextEncoder();
+const REQUEST_SCHEMA = "ceal.leased_consumer_capability_control_request.v6";
+const RESPONSE_SCHEMA = "ceal.leased_consumer_capability_control_response.v6";
 const sessionPath = "/run/user/1001/ceal/leased-consumer-control-v1.sock";
 const session = sessionFor(sessionPath);
 
@@ -80,11 +82,11 @@ function sessionFor(socketPath) {
 }
 
 const frames = [
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "acquire", input: {} },
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "projection", input: leaseInput() },
-	{ schema_version: "ceal.leased_consumer_capability_control_request.v5", operation: "recheck", input: leaseInput() },
+	{ schema_version: REQUEST_SCHEMA, operation: "acquire", input: {} },
+	{ schema_version: REQUEST_SCHEMA, operation: "projection", input: leaseInput() },
+	{ schema_version: REQUEST_SCHEMA, operation: "recheck", input: leaseInput() },
 	{
-		schema_version: "ceal.leased_consumer_capability_control_request.v5",
+		schema_version: REQUEST_SCHEMA,
 		operation: "call",
 		input: {
 			...leaseInput(),
@@ -96,13 +98,23 @@ const frames = [
 		},
 	},
 	{
-		schema_version: "ceal.leased_consumer_capability_control_request.v5",
+		schema_version: REQUEST_SCHEMA,
+		operation: "materialization",
+		input: { ...leaseInput(), result_ref: `result:${"f".repeat(64)}`, frame_index: 0 },
+	},
+	{
+		schema_version: REQUEST_SCHEMA,
 		operation: "complete",
 		input: { ...leaseInput(), disposition: "completed", agent_run_ref: "run:fixture" },
 	},
+	{
+		schema_version: REQUEST_SCHEMA,
+		operation: "notification_receipt",
+		input: notificationReceiptInput(),
+	},
 ];
 
-test("private control session carries exactly the five canonical v5 capability operations over Gateway-issued UDS routes", async () => {
+test("private control session carries exactly the seven signed v6 operations over Gateway-issued UDS routes", async () => {
 	const calls = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
@@ -139,21 +151,31 @@ test("private control session carries exactly the five canonical v5 capability o
 			{ socketPath: sessionPath, path: "/api/ceal/agent/v1/call", credential: "private-service-credential" },
 			{
 				socketPath: sessionPath,
+				path: "/api/ceal/agent/v1/control/materialization",
+				credential: "private-service-credential",
+			},
+			{
+				socketPath: sessionPath,
 				path: "/api/ceal/agent/v1/control/complete",
+				credential: "private-service-credential",
+			},
+			{
+				socketPath: sessionPath,
+				path: "/api/ceal/agent/v1/control/notification-receipt",
 				credential: "private-service-credential",
 			},
 		],
 	);
 	assert.deepEqual(
 		output.map((value) => value.operation),
-		["acquire", "projection", "recheck", "call", "complete"],
+		["acquire", "projection", "recheck", "call", "materialization", "complete", "notification_receipt"],
 	);
 	assert.doesNotMatch(JSON.stringify(output), /credential|socket_path|private-service/u);
 });
 
 test("one control session relays an undeclared safe capability and then a declared frame", async () => {
 	const unknownFrame = {
-		schema_version: "ceal.leased_consumer_capability_control_request.v5",
+		schema_version: REQUEST_SCHEMA,
 		operation: "call",
 		input: {
 			...leaseInput(),
@@ -169,10 +191,12 @@ test("one control session relays an undeclared safe capability and then a declar
 		},
 	};
 	const unknownResponse = {
-		schema_version: "ceal.leased_consumer_capability_control_response.v5",
+		schema_version: RESPONSE_SCHEMA,
 		operation: "call",
 		result: {
 			status: "result",
+			provider_outcome: "verified",
+			result_delivery: "pending",
 			result: {
 				schema_version: "ceal.gateway_leased_agent_capability_result.v1",
 				capability_id: "calendar.event.list",
@@ -311,7 +335,7 @@ test("FD5 notification forwarding does not consume or wait for the pending seria
 	assert.equal(await running, true);
 	assert.deepEqual(
 		output.map((frame) => frame.schema_version),
-		["ceal.leased_consumer_capability_notification.v5", "ceal.leased_consumer_capability_control_response.v5"],
+		["ceal.leased_consumer_capability_notification.v5", RESPONSE_SCHEMA],
 	);
 });
 
@@ -758,9 +782,7 @@ test("invalid protected session and malformed Agent frames make zero control req
 	});
 	const output = [];
 	async function* malformed() {
-		yield encoder.encode(
-			'{"bad":true}\n{"schema_version":"ceal.leased_consumer_capability_control_request.v5","operation":"acquire","input":{}}\n',
-		);
+		yield encoder.encode(`{"bad":true}\n{"schema_version":"${REQUEST_SCHEMA}","operation":"acquire","input":{}}\n`);
 	}
 	assert.equal(await runControlSessionForTest(malformed(), carrier, (frame) => output.push(frame)), false);
 	assert.equal(calls, 0);
@@ -928,15 +950,19 @@ test("an in-bounds injected operation deadline bounds every Gateway control oper
 		},
 		clearTimer: () => {},
 		requestUnixSocket: async (input) => {
+			const request = JSON.parse(input.body);
 			deadlines.push(input.deadlineMs);
-			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(responseFor("acquire"))) };
+			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(responseFor(request.operation))) };
 		},
 	});
 	async function* input() {
-		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
+		yield encoder.encode(`${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`);
 	}
 	assert.equal(await runControlSessionForTest(input(), carrier, () => {}), true);
-	assert.deepEqual(deadlines, [120_000]);
+	assert.deepEqual(
+		deadlines,
+		Array.from({ length: frames.length }, () => 120_000),
+	);
 	assert.ok(timers.includes(120_000));
 	assert.ok(!timers.includes(30_000));
 });
@@ -1047,8 +1073,12 @@ function notificationFixture() {
 		lease_fence: 1,
 	};
 }
+function notificationReceiptInput() {
+	const { schema_version: _schemaVersion, ...input } = notificationFixture();
+	return input;
+}
 function responseFor(operation) {
-	const base = { schema_version: "ceal.leased_consumer_capability_control_response.v5", operation };
+	const base = { schema_version: RESPONSE_SCHEMA, operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
 		return {
@@ -1059,18 +1089,21 @@ function responseFor(operation) {
 				event_revision: 1,
 				normalized_projection_ref: "projection:fixture",
 				normalized_projection_revision: 1,
-				conversation_ref: `conversation:${"c".repeat(64)}`,
 				requester: { subject_ref: "subject:fixture" },
 				attachments: { count: 0, set_ref: null },
 				projection: { schema_version: "ceal.gateway_normalized_projection.v1", text: "fixture projection" },
-				capability_contexts: [
-					{
-						capability_id: "message.search",
-						target_ref: `target:${"a".repeat(64)}`,
-						message_ref: `message:${"b".repeat(64)}`,
-						thread_ref: `thread:${"d".repeat(64)}`,
-					},
-				],
+				capability_catalog: { schema_version: "ceal.gateway_leased_agent_capability_catalog.v1", capabilities: [] },
+				messenger_context: {
+					conversation_ref: `conversation:${"c".repeat(64)}`,
+					capability_contexts: [
+						{
+							capability_id: "message.search",
+							target_ref: `target:${"a".repeat(64)}`,
+							message_ref: `message:${"b".repeat(64)}`,
+							thread_ref: `thread:${"d".repeat(64)}`,
+						},
+					],
+				},
 			},
 		};
 	if (operation === "recheck") return { ...base, result: { status: "active", lease: lease(), abort_requested: false } };
@@ -1079,16 +1112,37 @@ function responseFor(operation) {
 			...base,
 			result: {
 				status: "result",
+				provider_outcome: "verified",
+				result_delivery: "pending",
 				result: {
 					schema_version: "ceal.gateway_leased_agent_capability_result.v1",
 					capability_id: "message.search",
 					effect: "read",
 					result_ref: `result:${"a".repeat(64)}`,
 					handles: [{ kind: "message", ref: `message:${"b".repeat(64)}` }],
-					data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "fixture" }] },
+					data: {
+						schema_version: CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA,
+						items: [{ kind: "message", display_name: "fixture", handle_index: 0, text: "fixture" }],
+					},
 				},
 			},
 		};
+	if (operation === "materialization")
+		return {
+			...base,
+			result: {
+				status: "frame",
+				frame: {
+					schema_version: "ceal.result_materialization_frame.v1",
+					kind: "chunk",
+					slot: 0,
+					chunk_index: 0,
+					chunk_count: 1,
+					bytes_base64: "Zml4dHVyZQ==",
+				},
+			},
+		};
+	if (operation === "notification_receipt") return { ...base, result: { status: "control_unavailable" } };
 	return { ...base, result: { status: "completed", replayed: false } };
 }
 function lease() {
