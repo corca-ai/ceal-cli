@@ -12,93 +12,101 @@ import {
 	runCli,
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.mjs";
+import { availabilityProofTest } from "./platform-proof.mjs";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
-test("native worker artifact consumes a manifest-bound packed consumer and emits no operator material", async (context) => {
-	const fixture = packedProtocolFixture(context);
-	const output = path.join(fixture.root, "worker-native");
-	const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture });
-	assert.equal(result.ok, true);
-	const architecture = process.arch === "arm64" ? "arm64" : "amd64";
-	const platform = `${process.platform === "darwin" ? "darwin" : "linux"}-${architecture}`;
-	const otherPlatform = platform.endsWith("arm64") ? platform.replace("arm64", "amd64") : platform.replace("amd64", "arm64");
-	assert.equal(result.platform, platform);
-	assert.deepEqual(result.consumer_smoke, {
-		command: "ceal",
-		installed_from_packed_archives: true,
-		source_or_workspace_fallback_used: false,
-	});
-	assert.equal(result.native_smoke.command, "ceal");
-	assert.equal(result.native_smoke.operator_surface_absent, true);
-	assert.equal(result.client.package, "@corca-ai/ceal");
-	assert.equal(result.client.version, result.version);
-	assert.match(result.client.sha256, /^[a-f0-9]{64}$/u);
-	const files = readdirSync(output).sort();
-	assert.deepEqual(
-		files,
-		[
-			".ceal-worker-native-artifact",
-			"SHA256SUMS",
-			"THIRD_PARTY_NOTICES.txt",
-			"ceal-guide-SKILL.md",
-			"ceal-worker-native-artifact-manifest.json",
-			result.artifact.name,
-		].sort(),
-	);
-	assert.equal(
-		files.some((name) => name.includes("cealctl")),
-		false,
-	);
-	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
-	assert.equal(manifest.artifact.sha256, result.artifact.sha256);
-	assert.deepEqual(manifest.client, result.client);
-	assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
-	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
-	assert.equal(manifest.native_smoke.operator_surface_absent, true);
-	const outputCommands = execFileSync(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
-	assert.match(outputCommands, /command: ceal\n/u);
-	assert.match(outputCommands, /name: update\n/u);
-	assert.doesNotMatch(outputCommands, /cealctl/u);
-	const artifact = path.join(output, result.artifact.name);
-	const unknownHome = path.join(fixture.root, "unknown-home");
-	writeStoredSession(unknownHome, "http://127.0.0.1:1/gateway/client");
-	const unknown = await runArtifact(artifact, ["call", "message.post", "--target", "target:team-inbox", "text=retry-safe"], unknownHome);
-	assert.equal(unknown.code, 3);
-	assert.equal(unknown.stderr, "");
-	const unknownPayload = parse(unknown.stdout);
-	assert.equal(unknownPayload.receipt.evidence, "outcome_unknown");
-	assert.match(unknownPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
-	assert.match(unknownPayload.error.next_action, /Do not repeat this call yet/u);
-	assert.doesNotMatch(unknown.stdout, /ceal_personal_|ceal_refresh_/u);
-	await withFailureGateway(async (endpoint) => {
-		const failedHome = path.join(fixture.root, "failed-home");
-		writeStoredSession(failedHome, endpoint);
-		const failed = await runArtifact(artifact, ["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], failedHome);
-		assert.equal(failed.code, 3);
-		assert.equal(failed.stderr, "");
-		const failedPayload = parse(failed.stdout);
-		assert.equal(failedPayload.receipt.evidence, "not_read_back");
-		assert.match(failedPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
-		assert.equal(failedPayload.error.kind, "continuation_not_available");
-		assert.doesNotMatch(failed.stdout, /ceal_personal_|ceal_refresh_|server-controlled/u);
-	});
-	const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
-	for (const name of files.filter((name) => !name.startsWith(".") && name !== "SHA256SUMS")) {
-		assert.equal(
-			sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)),
-			true,
+availabilityProofTest(
+	"real native worker SEA",
+	"native worker artifact consumes a manifest-bound packed consumer and emits no operator material",
+	process.config.variables.node_shared
+		? "real SEA proof requires a self-contained Node executable; this host Node links libnode dynamically"
+		: false,
+	async (context) => {
+		const fixture = packedProtocolFixture(context);
+		const output = path.join(fixture.root, "worker-native");
+		const result = await buildWorkerNativeArtifactFromDevelopmentInputs({ outputDirectory: output, ...fixture });
+		assert.equal(result.ok, true);
+		const architecture = process.arch === "arm64" ? "arm64" : "amd64";
+		const platform = `${process.platform === "darwin" ? "darwin" : "linux"}-${architecture}`;
+		const otherPlatform = platform.endsWith("arm64") ? platform.replace("arm64", "amd64") : platform.replace("amd64", "arm64");
+		assert.equal(result.platform, platform);
+		assert.deepEqual(result.consumer_smoke, {
+			command: "ceal",
+			installed_from_packed_archives: true,
+			source_or_workspace_fallback_used: false,
+		});
+		assert.equal(result.native_smoke.command, "ceal");
+		assert.equal(result.native_smoke.operator_surface_absent, true);
+		assert.equal(result.client.package, "@corca-ai/ceal");
+		assert.equal(result.client.version, result.version);
+		assert.match(result.client.sha256, /^[a-f0-9]{64}$/u);
+		const files = readdirSync(output).sort();
+		assert.deepEqual(
+			files,
+			[
+				".ceal-worker-native-artifact",
+				"SHA256SUMS",
+				"THIRD_PARTY_NOTICES.txt",
+				"ceal-guide-SKILL.md",
+				"ceal-worker-native-artifact-manifest.json",
+				result.artifact.name,
+			].sort(),
 		);
-	}
-	await assert.rejects(
-		() =>
-			buildWorkerNativeArtifactFromDevelopmentInputs({
-				outputDirectory: path.join(fixture.root, "cross-platform"),
-				platform: otherPlatform,
-				...fixture,
-			}),
-		hasCode("platform_mismatch"),
-	);
-});
+		assert.equal(
+			files.some((name) => name.includes("cealctl")),
+			false,
+		);
+		const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
+		assert.equal(manifest.artifact.sha256, result.artifact.sha256);
+		assert.deepEqual(manifest.client, result.client);
+		assert.equal(manifest.protocol.sha256, fixture.provenance.artifact.sha256);
+		assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
+		assert.equal(manifest.native_smoke.operator_surface_absent, true);
+		const outputCommands = execFileSync(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
+		assert.match(outputCommands, /command: ceal\n/u);
+		assert.match(outputCommands, /name: update\n/u);
+		assert.doesNotMatch(outputCommands, /cealctl/u);
+		const artifact = path.join(output, result.artifact.name);
+		const unknownHome = path.join(fixture.root, "unknown-home");
+		writeStoredSession(unknownHome, "http://127.0.0.1:1/gateway/client");
+		const unknown = await runArtifact(artifact, ["call", "message.post", "--target", "target:team-inbox", "text=retry-safe"], unknownHome);
+		assert.equal(unknown.code, 3);
+		assert.equal(unknown.stderr, "");
+		const unknownPayload = parse(unknown.stdout);
+		assert.equal(unknownPayload.receipt.evidence, "outcome_unknown");
+		assert.match(unknownPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
+		assert.match(unknownPayload.error.next_action, /Do not repeat this call yet/u);
+		assert.doesNotMatch(unknown.stdout, /ceal_personal_|ceal_refresh_/u);
+		await withFailureGateway(async (endpoint) => {
+			const failedHome = path.join(fixture.root, "failed-home");
+			writeStoredSession(failedHome, endpoint);
+			const failed = await runArtifact(artifact, ["call", "message.get", "--target", "target:team-inbox", "ref=message:expired"], failedHome);
+			assert.equal(failed.code, 3);
+			assert.equal(failed.stderr, "");
+			const failedPayload = parse(failed.stdout);
+			assert.equal(failedPayload.receipt.evidence, "not_read_back");
+			assert.match(failedPayload.receipt.request_ref, /^ceal:[a-f0-9-]+:call$/u);
+			assert.equal(failedPayload.error.kind, "continuation_not_available");
+			assert.doesNotMatch(failed.stdout, /ceal_personal_|ceal_refresh_|server-controlled/u);
+		});
+		const sums = readFileSync(path.join(output, "SHA256SUMS"), "utf8");
+		for (const name of files.filter((name) => !name.startsWith(".") && name !== "SHA256SUMS")) {
+			assert.equal(
+				sums.split("\n").some((line) => /^[a-f0-9]{64} {2}/u.test(line) && line.endsWith(`  ${name}`)),
+				true,
+			);
+		}
+		await assert.rejects(
+			() =>
+				buildWorkerNativeArtifactFromDevelopmentInputs({
+					outputDirectory: path.join(fixture.root, "cross-platform"),
+					platform: otherPlatform,
+					...fixture,
+				}),
+			hasCode("platform_mismatch"),
+		);
+	},
+);
 
 // The real postject macho-segment and codesign calls only run on a macOS
 // host; this fixture proves the darwin step order, platform propagation, and

@@ -26,9 +26,14 @@ export function platformProofSkip(proof) {
  */
 export function platformProofTest(proof, name, fn) {
 	const skip = platformProofSkip(proof);
+	availabilityProofTest(proof, name, skip, fn);
+}
+
+export function availabilityProofTest(proof, name, unavailable, fn) {
+	const skip = unavailable || false;
 	if (skip && process.env.CEAL_REQUIRE_PLATFORM_PROOFS === "1") {
 		test(name, () => {
-			throw new Error(`CEAL_REQUIRE_PLATFORM_PROOFS=1 but this proof cannot run here: ${skip}`);
+			throw new Error(`CEAL_REQUIRE_PLATFORM_PROOFS=1 but ${proof} cannot run here: ${skip}`);
 		});
 		return;
 	}

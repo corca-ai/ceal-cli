@@ -927,6 +927,11 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 		const source = read(path.join("test", suite));
 		const inline = /skip:\s*process\.(?:platform|arch)/u.test(source);
 		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.mjs`);
+		assert.doesNotMatch(
+			source,
+			/context[.]skip\([^)]*node_shared/u,
+			`test/${suite} skips a toolchain proof inline; use availabilityProofTest`,
+		);
 	}
 	// The helper is only load-bearing if the proofs that motivated it use it, and
 	// that is an anti-vacuity floor, not an inventory. Naming the suites here made
@@ -934,6 +939,7 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 	// dropped to one when the development-only release-artifact suite was deleted.
 	const declaring = suites.filter((suite) => /platformProofTest\(/u.test(read(path.join("test", suite))));
 	assert.ok(declaring.length >= 1, "no suite declares a platform-gated proof through the shared helper");
+	assert.match(read("test/worker-native-artifact.test.mjs"), /availabilityProofTest\(/u);
 });
 
 // Requirement 3 of the proof/ship divergence decision says worker release,
