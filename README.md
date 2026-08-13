@@ -170,9 +170,11 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The proof uses throwaway Agent roots and checks first-load evidence wording,
-view switching, independent theme/color controls, and a narrow viewport. It is
-not part of the shipped worker dependency graph and reads no real Agent state.
+The proof uses throwaway Agent roots plus a content-free synthetic populated
+fixture. It checks first-load evidence wording, bounded detail versus retained
+activity, mixed adapter coverage, view switching, independent theme/color
+controls, a narrow viewport, and loopback-only requests. It is not part of the
+shipped worker dependency graph and reads no real Agent state.
 
 Provider-specific richness belongs behind the customer Gateway adapter. For
 example, a Slack adapter may use indexed search, ranked results, and thread

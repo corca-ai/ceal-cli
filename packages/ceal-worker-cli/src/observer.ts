@@ -668,6 +668,7 @@ const OBSERVER_PAGE = `<!doctype html>
   .eyebrow { color:var(--accent); font-size:.7rem; letter-spacing:.12em; font-weight:700; text-transform:uppercase; }
   .hero h2 { font-size:clamp(2rem,5vw,4.2rem); line-height:1.04; letter-spacing:-.055em; margin:.7rem 0 1rem; }
   .hero h2 em { color:var(--accent); font-style:normal; }
+  .hero-summary { max-width:62ch; color:var(--muted); font-size:1rem; }
   .evidence-line { color:var(--muted); display:flex; flex-wrap:wrap; gap:.4rem 1rem; }
   .overview-section { border-top:1px solid var(--ink); padding-top:1rem; margin-top:1rem; }
   .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
@@ -708,6 +709,12 @@ const rows = (pairs) => "<table>" + pairs
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
+const sessionSummary = (events) => {
+  if (events === undefined) return "Select to scan locally observed events";
+  if (events === "unreadable") return "Event evidence unreadable · token evidence unavailable";
+  const token = events.token_usage ? "token evidence present" : "token evidence unavailable";
+  return "Scan " + fmt(events.scan) + " · " + fmt(events.event_count) + " events · " + token;
+};
 const VIEWS = ["Overview", "Agent activity", "Ceal evidence", "Setup & privacy"];
 const SUGGESTION_DESTINATIONS = {
   stale_collector: ["Agent activity", "Agent adapter"],
@@ -726,10 +733,10 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   let agentView = "";
   if (Array.isArray(activity.adapters)) {
     agentView += activity.adapters.map((adapter) => {
-      let body = "<div class=\\"muted\\">" + esc(String(adapter.runtime)) + " · " + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + "</div>";
+      let body = "<div class=\\"muted\\">" + esc(String(adapter.runtime)) + " · " + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + (adapter.inventory === "partial" ? " · partial inventory" : "") + "</div>";
       if (Array.isArray(adapter.sessions) && adapter.sessions.length) {
         body += "<div class=\\"grid\\">" + adapter.sessions
-          .map((sessionEntry) => "<button class=\\"card attention session\\" data-runtime=\\"" + esc(String(adapter.runtime)) + "\\" data-ref=\\"" + esc(sessionEntry.session_ref) + "\\"><strong>" + esc(String(adapter.runtime)) + " session</strong><span>" + esc(sessionEntry.last_activity_at) + "</span><p class=\\"muted\\">" + esc(sessionEntry.events === undefined ? "Select to scan locally observed events" : fmt(sessionEntry.events)) + "</p></button>")
+          .map((sessionEntry) => "<button class=\\"card attention session\\" data-runtime=\\"" + esc(String(adapter.runtime)) + "\\" data-ref=\\"" + esc(sessionEntry.session_ref) + "\\"><strong>" + esc(String(adapter.runtime)) + " session</strong><span>" + esc(sessionEntry.last_activity_at) + "</span><p class=\\"muted\\">" + esc(sessionSummary(sessionEntry.events)) + "</p></button>")
           .join("") + "</div>";
       } else {
         body += "<p class=\\"muted\\">No locally observed sessions for this runtime.</p>";
@@ -838,7 +845,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       ? filteredEntries.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
       : "<div class='unsupported'><strong>No locally recorded outcomes in this selected view</strong><p>" + esc(s.receipts.note || "The retained local window has no matching entries.") + "</p><p>This is not proof of no Gateway activity.</p></div>";
     const heroClaim = historyReadable
-      ? "<h2><em>" + filteredTimes.length + "</em> locally recorded outcomes are visible in this selected period of the retained window.</h2>"
+      ? "<h2><em>" + filteredTimes.length + "</em> outcomes recorded locally</h2><p class='hero-summary'>Visible in this selected period of the retained window; this is not a complete Gateway activity total.</p>"
       : "<h2>Receipt activity is unavailable.</h2>";
     const calendar = historyReadable
       ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>All retained record times supplied by the bounded local spool are counted</span></div>"
@@ -860,8 +867,8 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
     const capabilitySummary = [...capabilityCounts].map(([label, count]) => esc(label) + " · " + count).join("<br>") || "No capability labels in the visible detail subset.";
     return "<section class='hero'><p class='eyebrow'>LOCAL RECEIPT EVIDENCE · " + esc(periodLabel) + "</p>" + heroClaim + "<div class='evidence-line'><span>Timestamp: receipt record time, not exact call time</span><span>Authority: local advisory</span><span>Source: " + esc(sourceState) + "</span></div></section>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · ACTIVITY</p><h2>When outcomes entered this local history</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div>" + calendar + "</section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div></section>";
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
   };
 
   const usageEntries = [];
@@ -877,12 +884,15 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       : "<div class=\\"card\\"><strong>No token evidence in the bounded session view</strong><p class=\\"muted\\">This may mean the runtime did not supply usage or the current scan did not include it.</p></div>")
     + "<p class=\\"warn\\">Token accounting from different runtimes may use different sources and completeness rules; this view does not rank or total them together.</p>";
 
-  const runtimeSummary = Array.isArray(activity.adapters) ? activity.adapters.map((adapter) => {
+  const runtimeSummaryCards = Array.isArray(activity.adapters) ? activity.adapters.map((adapter) => {
     const sessions = Array.isArray(adapter.sessions) ? adapter.sessions : [];
     const scanned = sessions.filter((entry) => entry.events && entry.events !== "unreadable").length;
     const tokenSessions = sessions.filter((entry) => entry.events && entry.events.token_usage).length;
-    return "<div class=\\"card\\"><h3>" + esc(String(adapter.runtime)) + "</h3><strong>" + sessions.length + " visible session" + (sessions.length === 1 ? "" : "s") + "</strong><p class=\\"muted\\">" + scanned + " with event evidence · " + tokenSessions + " with token evidence</p><p class=\\"muted\\">" + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + "</p></div>";
+    return "<div class=\\"card\\"><h3>" + esc(String(adapter.runtime)) + "</h3><strong>" + sessions.length + " visible session" + (sessions.length === 1 ? "" : "s") + "</strong><p class=\\"muted\\">" + scanned + " with event evidence · " + tokenSessions + " with token evidence</p><p class=\\"muted\\">" + esc(String(adapter.health)) + " · " + esc(String(adapter.coverage)) + (adapter.inventory === "partial" ? " · partial inventory" : "") + "</p></div>";
   }).join("") : "";
+  const runtimeSummary = runtimeSummaryCards
+    ? "<div class=\\"metric-strip\\">" + runtimeSummaryCards + "</div>"
+    : "<div class=\\"unsupported\\"><strong>Runtime overview is unavailable</strong><p>No readable Agent adapter inventory was supplied. Missing sessions are not rendered as zero.</p></div>";
 
   const privacy = s.privacy ?? {};
   let privacyView = rows([["boundary", s.boundary],
@@ -895,7 +905,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   privacyView += list(s.non_claims, "warn");
   const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "Overview": activityOverview("365"), "Agent activity": section("Runtime overview", "<div class=\\"metric-strip\\">" + runtimeSummary + "</div>") + workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
+  const bodies = { "Overview": activityOverview("365"), "Agent activity": section("Runtime overview", runtimeSummary) + workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");

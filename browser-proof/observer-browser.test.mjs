@@ -32,15 +32,15 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	context.after(() => browser.close());
 	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 	const pageErrors = [];
+	const requests = [];
 	page.on("pageerror", (error) => pageErrors.push(error.message));
+	page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
 	assert.deepEqual(pageErrors, []);
-	assert.equal(
-		await page.locator("#root .hero h2").textContent(),
-		"0 locally recorded outcomes are visible in this selected period of the retained window.",
-	);
+	assert.equal(await page.locator("#root .hero h2").textContent(), "0 outcomes recorded locally");
+	await page.getByText(/not a complete Gateway activity total/u).waitFor();
 	await page.getByText("No locally recorded outcomes in this selected view").waitFor();
 	await page.getByText("Correlated work and monetary cost are unsupported").waitFor();
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "developer");
@@ -59,7 +59,94 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 
 	await page.setViewportSize({ width: 390, height: 844 });
 	assert.equal((await page.locator("body").boundingBox())?.width, 390);
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+	assert.ok(requests.length > 0);
+	assert.ok(requests.every(isLoopbackGet));
 });
+
+test("a populated review fixture preserves density and evidence boundaries", { timeout: 20_000 }, async (context) => {
+	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
+		env: { PATH: process.env.PATH ?? "", TMPDIR: process.env.TMPDIR ?? tmpdir(), LANG: "C.UTF-8" },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	context.after(async () => {
+		if (server.exitCode === null && server.signalCode === null) {
+			server.kill("SIGTERM");
+			await once(server, "exit");
+		}
+	});
+	const url = await observerUrl(server);
+	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
+	context.after(() => browser.close());
+	const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+	const pageErrors = [];
+	const requests = [];
+	page.on("pageerror", (error) => pageErrors.push(error.message));
+	page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
+
+	await page.goto(url);
+	await page.locator("#root .hero").waitFor();
+	assert.equal(await page.locator("#root .hero h2").textContent(), "35 outcomes recorded locally");
+	assert.equal(await page.locator("button[data-receipt]").count(), 20);
+	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 365);
+	await page.getByText("At least this many receipt appends were lost").waitFor();
+	const evidenceTop = await page.getByText("Correlated work and monetary cost are unsupported").boundingBox();
+	const firstDetailTop = await page.locator("button[data-receipt]").first().boundingBox();
+	assert.ok(evidenceTop && firstDetailTop && evidenceTop.y < firstDetailTop.y);
+	await page.locator("#period").selectOption("30");
+	assert.equal(await page.locator("#root .hero h2").textContent(), "35 outcomes recorded locally");
+	assert.equal(await page.locator("button[data-receipt]").count(), 20);
+	await page.locator("button[data-receipt]").first().click();
+	await page.getByRole("dialog").waitFor();
+	await page.getByText("Ceal call evidence").waitFor();
+	await page.getByRole("button", { name: "Close" }).click();
+
+	await page.getByRole("button", { name: "Agent activity" }).click();
+	await page.getByText("4 visible sessions").waitFor();
+	await page.getByText("3 visible sessions").waitFor();
+	await page.getByText("3 with event evidence · 2 with token evidence").waitFor();
+	await page.getByText("2 with event evidence · 1 with token evidence").waitFor();
+	assert.equal(await page.getByText(/partial inventory/u).count(), 2);
+	assert.equal(await page.getByText(/Token accounting from different runtimes/u).count(), 1);
+
+	await page.locator("#theme").selectOption("editorial");
+	await page.getByRole("button", { name: "Dark" }).click();
+	await page.setViewportSize({ width: 390, height: 844 });
+	assert.equal(await page.locator("html").getAttribute("data-theme"), "editorial");
+	assert.equal(await page.locator("html").getAttribute("data-mode"), "dark");
+	assert.equal((await page.locator("body").boundingBox())?.width, 390);
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+	assert.deepEqual(pageErrors, []);
+	assert.ok(requests.length > 0);
+	assert.ok(requests.every(isLoopbackGet));
+});
+
+test("the browser distinguishes unavailable Agent inventory from zero sessions", { timeout: 20_000 }, async (context) => {
+	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
+		env: { PATH: process.env.PATH ?? "", TMPDIR: process.env.TMPDIR ?? tmpdir(), LANG: "C.UTF-8", CEAL_REVIEW_AGENT_UNAVAILABLE: "1" },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	context.after(async () => {
+		if (server.exitCode === null && server.signalCode === null) {
+			server.kill("SIGTERM");
+			await once(server, "exit");
+		}
+	});
+	const url = await observerUrl(server);
+	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
+	context.after(() => browser.close());
+	const page = await browser.newPage();
+	await page.goto(url);
+	await page.getByRole("button", { name: "Agent activity" }).click();
+	await page.getByText("Runtime overview is unavailable").waitFor();
+	await page.getByText("Missing sessions are not rendered as zero").waitFor();
+	assert.equal(await page.getByText(/visible sessions/u).count(), 0);
+});
+
+function isLoopbackGet(request) {
+	const host = new URL(request.url).hostname;
+	return request.method === "GET" && (host === "127.0.0.1" || host === "localhost" || host === "[::1]");
+}
 
 function observerUrl(child) {
 	return new Promise((resolve, reject) => {

@@ -308,7 +308,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /Attention/u);
 	assert.match(html, /Agent activity/u);
 	assert.match(html, /Ceal evidence/u);
-	assert.match(html, /locally recorded outcomes are visible in this selected period of the retained window/u);
+	assert.match(html, /outcomes recorded locally/u);
+	assert.match(html, /not a complete Gateway activity total/u);
 	assert.match(html, /receipt record time, not exact call time/u);
 	assert.match(html, /Correlated work and monetary cost are unsupported/u);
 	assert.match(html, /Outcome and capability mix/u);
@@ -364,7 +365,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		return context.result;
 	};
 	const renderedOverview = renderOverview(state);
-	assert.match(renderedOverview, /visible in this selected period of the retained window/u);
+	assert.match(renderedOverview, /outcomes recorded locally/u);
+	assert.match(renderedOverview, /not a complete Gateway activity total/u);
 	assert.match(renderedOverview, /Activity received 1 retained record-time value;/u);
 	assert.match(renderedOverview, /role='img' aria-label=/u);
 	const mixedDetailState = structuredClone(state);
@@ -380,7 +382,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		],
 	};
 	const mixedDetailOverview = renderOverview(mixedDetailState);
-	assert.match(mixedDetailOverview, /<em>25<\/em> locally recorded outcomes/u);
+	assert.match(mixedDetailOverview, /<em>25<\/em> outcomes recorded locally/u);
 	assert.match(mixedDetailOverview, /<h3>completed<\/h3><strong>2<\/strong>/u);
 	assert.match(mixedDetailOverview, /<h3>failed<\/h3><strong>2<\/strong>/u);
 	assert.match(mixedDetailOverview, /message[.]search · 3<br>file[.]read · 1/u);
@@ -423,6 +425,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(renderedRuntimeSummary, /4 visible sessions/u);
 	assert.match(renderedRuntimeSummary, /2 with event evidence · 1 with token evidence/u);
 	assert.match(renderedRuntimeSummary, /active · transcript-observed/u);
+	assert.match(renderRuntimeSummary({ status: "unavailable" }), /Runtime overview is unavailable/u);
+	assert.match(renderRuntimeSummary({ status: "unavailable" }), /Missing sessions are not rendered as zero/u);
 	const droppedOverview = renderOverview({
 		...state,
 		receipts: {
