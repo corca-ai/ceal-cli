@@ -12,12 +12,30 @@ required argument. The Worker accepts the signed Notion search/page-document,
 Google Drive file upload, and Sheets read/update/clear contracts without adding
 provider-specific command grammar.
 
+First-contact guidance now starts from capability discovery instead of assuming
+a fixed route sequence. Unsupported or ambiguous target selectors return the
+nearest valid catalog/target recovery action, including typed target kinds and
+continuation guidance, rather than leaving agents to guess a provider URL or a
+retired selection mode.
+
+Session renewal is one explicit lifecycle capability shared by discovery,
+target, receipt, and call surfaces. Observational reads do not silently renew a
+session; write-capable calls may renew only through the declared mode. Gateway
+failure output preserves typed disposition, evidence state, and actionable
+recovery across the client and Worker instead of collapsing transport,
+authority, and provider failures into one fallback message.
+
 Rich results use the signed fixed materialization route. The released Worker
 derives that route and every sibling control route from the reviewed handoff
 sidecar, decodes the signed manifest/chunk/terminal frames under bounded file
 and byte limits, and exposes provider-neutral capability calls to the Agent.
 There is no caller-selected endpoint, local Notion capability table, or
 hardcoded route fallback.
+
+Receipt and result rendering now distinguish unavailable, pending, verified,
+refused, and outcome-unknown evidence. Retry guidance follows the signed
+provider outcome and delivery state so an uncertain write is reconciled rather
+than blindly repeated.
 
 Behavior tests now execute editable TypeScript source and fail closed if they
 would fall back to stale checkout `dist`. Package, binary, declaration, and
