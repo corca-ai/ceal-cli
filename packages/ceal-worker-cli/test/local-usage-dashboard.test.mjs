@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { composeCodexDashboardAdapterInput } from "../dist/local-usage-dashboard.js";
+import {
+	composeCanonicalLocalUsageDashboard,
+	composeCodexDashboardAdapterInput,
+	decodeProductionLocalUsageDashboard,
+	defaultLocalUsageWindow,
+} from "../dist/local-usage-dashboard.js";
 
 const GENERATED_AT = Date.parse("2026-08-14T00:00:00.000Z");
 
@@ -62,6 +67,141 @@ test("composes privacy-safe Codex session and token evidence without inventing c
 	assert.equal(JSON.stringify(dashboard).includes("~/.codex"), false);
 });
 
+test("composes a fail-closed canonical browser dataset with reconciling covered-subset totals", () => {
+	const adapter = composeCodexDashboardAdapterInput({
+		generatedAt: GENERATED_AT,
+		identity: { profileRef: "profile:developer", instanceRef: "instance:local" },
+		agentActivity: {
+			schemaVersion: "ceal.agent_activity.v1",
+			nonClaims: ["local bounded evidence"],
+			adapters: [
+				{
+					runtime: "codex",
+					root: "private",
+					health: "active",
+					coverage: "transcript-observed",
+					sessionCount: 2,
+					sessions: [
+						{
+							sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d4",
+							lastActivityAt: Date.parse("2026-08-13T10:00:00Z"),
+							transcriptBytes: 1,
+							events: {
+								scan: "complete",
+								eventCount: 2,
+								kinds: { tool_call: 2 },
+								unparsedLines: 0,
+								tokenUsage: {
+									source: "runtime_cumulative_last",
+									completeness: "full_transcript",
+									usageEvents: 1,
+									inputTokens: 10,
+									outputTokens: 5,
+								},
+							},
+						},
+						{ sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d5", lastActivityAt: Date.parse("2026-08-13T12:00:00Z"), transcriptBytes: 1 },
+					],
+				},
+			],
+		},
+	});
+	const dataset = composeCanonicalLocalUsageDashboard({
+		adapter,
+		timezone: "Asia/Seoul",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+	});
+	assert.equal(dataset.fixture_only, false);
+	assert.equal(dataset.production_provenance, "ceal_cli_owned_adapter");
+	assert.deepEqual(dataset.window, { start_date: "2026-08-01", end_date: "2026-08-15" });
+	assert.deepEqual(dataset.daily, [{ date: "2026-08-13", sessions: 2, agent_tool_calls: 2, tokens: 15, estimated_cost: null }]);
+	assert.deepEqual(dataset.totals, { sessions: 2, agent_tool_calls: 2, tokens: 15, estimated_cost: null });
+	assert.equal(dataset.metric_coverage.sessions.observation_state, "complete");
+	assert.equal(dataset.metric_coverage.agent_tool_calls.observation_state, "partial");
+	assert.equal(dataset.metric_coverage.tokens.observation_state, "partial");
+	assert.equal(dataset.metric_coverage.estimated_cost.observation_state, "unsupported");
+	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, fixture_only: true }), null);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, production_provenance: "synthetic" }), null);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, prompt: "private content" }), null);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, window: { start_date: "bad", end_date: "2026-08-15" } }), null);
+	const { identity: _identity, ...missingIdentity } = dataset;
+	assert.equal(decodeProductionLocalUsageDashboard(missingIdentity), null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			sessions: [{ ...dataset.sessions[0], transcript_path: "/Users/private/session.jsonl" }],
+		}),
+		null,
+	);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, totals: { ...dataset.totals, sessions: 999 } }), null);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, daily: [{ ...dataset.daily[0], date: "2025-01-01" }] }), null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			identity: { state: "available", profile_ref: "private prompt text", instance_ref: "bad ref" },
+		}),
+		null,
+	);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			metric_coverage: {
+				...dataset.metric_coverage,
+				tokens: { ...dataset.metric_coverage.tokens, comparability_group: "/Users/private/pricing" },
+			},
+		}),
+		null,
+	);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			session_detail_coverage: { returned: 999, eligible: 0, observation_state: "complete" },
+		}),
+		null,
+	);
+	assert.equal(JSON.stringify(dataset).includes("private"), false);
+});
+
+test("canonical window uses local calendar dates and excludes future or out-of-window sessions", () => {
+	assert.deepEqual(defaultLocalUsageWindow(Date.parse("2026-08-14T23:30:00Z"), "Asia/Seoul"), {
+		startDate: "2025-08-16",
+		endDate: "2026-08-16",
+	});
+	const adapter = composeCodexDashboardAdapterInput({
+		generatedAt: GENERATED_AT,
+		agentActivity: {
+			schemaVersion: "ceal.agent_activity.v1",
+			nonClaims: [],
+			adapters: [
+				{
+					runtime: "codex",
+					root: "private",
+					health: "active",
+					coverage: "transcript-observed",
+					sessionCount: 2,
+					sessions: [
+						{ sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d4", lastActivityAt: Date.parse("2026-07-31T14:59:59Z"), transcriptBytes: 1 },
+						{ sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d5", lastActivityAt: GENERATED_AT + 1, transcriptBytes: 1 },
+					],
+				},
+			],
+		},
+	});
+	const dataset = composeCanonicalLocalUsageDashboard({
+		adapter,
+		timezone: "Asia/Seoul",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+	});
+	assert.equal(dataset.sessions.length, 0);
+	assert.equal(dataset.session_detail_coverage.observation_state, "observed_empty");
+	assert.equal(dataset.totals.sessions, 0);
+	assert.throws(
+		() => composeCanonicalLocalUsageDashboard({ adapter, timezone: "UTC", window: { startDate: "2026-08-01", endDate: "2026-08-01" } }),
+		/non-empty/u,
+	);
+});
+
 test("keeps bounded inventory partial and unreadable distinct from empty", () => {
 	const partial = composeCodexDashboardAdapterInput({
 		generatedAt: GENERATED_AT,
@@ -82,7 +222,7 @@ test("keeps bounded inventory partial and unreadable distinct from empty", () =>
 		},
 	});
 	assert.equal(partial.sources[0].inventoryState, "partial");
-	assert.deepEqual(partial.sessionDetailCoverage, { returned: 0, eligible: 30, state: "partial" });
+	assert.deepEqual(partial.sessionDetailCoverage, { returned: 0, state: "partial" });
 
 	const unreadable = composeCodexDashboardAdapterInput({
 		generatedAt: GENERATED_AT,
@@ -105,6 +245,55 @@ test("keeps bounded inventory partial and unreadable distinct from empty", () =>
 	});
 	assert.equal(empty.sources[0].inventoryState, "observed_empty");
 	assert.deepEqual(empty.sessionDetailCoverage, { returned: 0, eligible: 0, state: "observed_empty" });
+});
+
+test("canonical decoder accepts complete evidence for returned rows inside a partial inventory", () => {
+	const adapter = composeCodexDashboardAdapterInput({
+		generatedAt: GENERATED_AT,
+		agentActivity: {
+			schemaVersion: "ceal.agent_activity.v1",
+			nonClaims: [],
+			adapters: [
+				{
+					runtime: "codex",
+					root: "private",
+					health: "active",
+					coverage: "transcript-observed",
+					inventory: "partial",
+					sessionCount: 4,
+					sessions: [
+						{
+							sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d4",
+							lastActivityAt: Date.parse("2026-08-13T10:00:00Z"),
+							transcriptBytes: 1,
+							events: {
+								scan: "complete",
+								eventCount: 1,
+								kinds: { tool_call: 1 },
+								unparsedLines: 0,
+								tokenUsage: { source: "runtime_cumulative_last", completeness: "full_transcript", usageEvents: 1, inputTokens: 2, outputTokens: 1 },
+							},
+						},
+					],
+				},
+			],
+		},
+	});
+	const dataset = composeCanonicalLocalUsageDashboard({
+		adapter,
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+	});
+	assert.equal(dataset.metric_coverage.sessions.observation_state, "partial");
+	assert.deepEqual(
+		{
+			state: dataset.metric_coverage.tokens.observation_state,
+			numerator: dataset.metric_coverage.tokens.numerator,
+			denominator: dataset.metric_coverage.tokens.denominator,
+		},
+		{ state: "partial", numerator: 1, denominator: 1 },
+	);
+	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
 });
 
 test("distinguishes unavailable adapter and per-session unreadable event evidence", () => {

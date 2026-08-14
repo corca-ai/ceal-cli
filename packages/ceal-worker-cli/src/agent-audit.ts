@@ -27,7 +27,6 @@ const MAX_ENTRIES_EXAMINED = 2000;
 // The entry cap cannot bound one large directory before its names are read.
 // A monotonic deadline closes that gap without depending on wall-clock changes.
 const MAX_WALK_DURATION_MS = 100;
-const RENDERED_SESSIONS = 10;
 // Exactly the UUID grammar Claude Code uses for transcript filenames, so a
 // human-meaningful filename can never surface as a rendered session_ref.
 const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.]jsonl$/iu;
@@ -313,11 +312,9 @@ function observeTranscriptAdapter(
 		return partial ? { ...base, ...partialFields } : { ...base, health: "inactive", sessionCount: 0, sessions: [] };
 	}
 	sessions.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-	const rendered = sessions
-		.slice(0, RENDERED_SESSIONS)
-		.map(({ transcriptPath, ...session }, index) =>
-			index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session,
-		);
+	const rendered = sessions.map(({ transcriptPath, ...session }, index) =>
+		index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session,
+	);
 	const scannedSessions = rendered.filter((session) => typeof session.events === "object").length;
 	return {
 		...base,

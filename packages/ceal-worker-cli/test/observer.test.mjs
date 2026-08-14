@@ -29,6 +29,7 @@ test("observer presentation never implies positive state for gaps or unknown val
 test("Ceal-backed summary is allowlisted and keeps live authority distinct", async () => {
 	const state = await buildObserverState({
 		now: () => Date.parse("2026-08-14T00:00:00.000Z"),
+		timezone: "Asia/Seoul",
 		loadCealOverview: async () => ({
 			status: "connected",
 			source: "ceal_gateway",
@@ -67,6 +68,13 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 	});
 	assert.equal(state.local_usage_dashboard_input.sources[0].inventoryState, "unavailable");
 	assert.equal(state.local_usage_dashboard_input.pricing.state, "unsupported");
+	assert.equal(state.local_usage_dashboard.schema_version, "ceal.local_usage_dashboard.v1");
+	assert.equal(state.local_usage_dashboard.fixture_only, false);
+	assert.equal(state.local_usage_dashboard.production_provenance, "ceal_cli_owned_adapter");
+	assert.deepEqual(state.local_usage_dashboard.window, { start_date: "2025-08-15", end_date: "2026-08-15" });
+	assert.equal(state.local_usage_dashboard.timezone, "Asia/Seoul");
+	assert.equal(state.local_usage_dashboard.access.capability_count, 3);
+	assert.equal(state.local_usage_dashboard.pricing.observation_state, "unsupported");
 	assert.doesNotMatch(JSON.stringify(state.ceal), /ceal_personal_|membership:/u);
 });
 

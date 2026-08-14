@@ -16,7 +16,12 @@ import {
 	discoveryCacheFreshness,
 	discoveryCacheKeyMatches,
 } from "./discovery-cache.js";
-import { composeCodexDashboardAdapterInput } from "./local-usage-dashboard.js";
+import {
+	composeCanonicalLocalUsageDashboard,
+	composeCodexDashboardAdapterInput,
+	decodeProductionLocalUsageDashboard,
+	defaultLocalUsageWindow,
+} from "./local-usage-dashboard.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
@@ -35,6 +40,7 @@ export interface CealObserverRuntime {
 	executablePath?: string;
 	discoveryCacheTtlMs?: number;
 	now?: () => number;
+	timezone?: string;
 	loadCealOverview?: () => Promise<CealGatewayOverview>;
 }
 
@@ -148,6 +154,15 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 				}
 			: {}),
 	});
+	const timezone = runtime.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+	const localUsageDashboard = decodeProductionLocalUsageDashboard(
+		composeCanonicalLocalUsageDashboard({
+			adapter: localUsageDashboardInput,
+			timezone,
+			window: defaultLocalUsageWindow(now, timezone),
+		}),
+	);
+	if (!localUsageDashboard) throw new Error("Internal local usage dashboard composition failed validation.");
 	return {
 		schema_version: "ceal.observer_state.v2",
 		command: "ceal",
@@ -162,6 +177,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		receipts,
 		agent_activity: agentActivity,
 		local_usage_dashboard_input: localUsageDashboardInput,
+		local_usage_dashboard: localUsageDashboard,
 		suggestions: buildLocalSuggestions(session, discoveryCache, receipts, agentActivity),
 		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],

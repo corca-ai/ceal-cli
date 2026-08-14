@@ -545,6 +545,27 @@ test("a configured Codex root is scanned and reported instead of the default", (
 	});
 });
 
+test("Codex inventory returns every bounded safe session while event scans stay capped", () => {
+	withHome((home) => {
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		for (let index = 0; index < 12; index += 1) {
+			const suffix = index.toString(16).padStart(12, "0");
+			writeSession(
+				day,
+				`rollout-2026-07-24T11-00-${index.toString().padStart(2, "0")}-019f9174-fec1-78d2-b4be-${suffix}.jsonl`,
+				NOW - index * 1000,
+				'{"type":"event_msg","payload":{"type":"task_started"}}\n',
+			);
+		}
+		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		assert.equal(codex.sessionCount, 12);
+		assert.equal(codex.sessions.length, 12);
+		assert.equal(codex.sessions.filter((session) => session.events !== undefined).length, 3);
+		assert.deepEqual(codex.eventScan, { scannedSessions: 3, sessionLimit: 3 });
+	});
+});
+
 // An override that cannot be joined safely is a refusal in the guide store, and
 // the audit must not quietly fall back to the default root instead.
 test("an unusable host override is refused rather than replaced by the default", () => {
