@@ -1,5 +1,5 @@
 import type { CealAgentAuditAdapterState, CealAgentAuditSession, CealAgentAuditState } from "./agent-audit.js";
-import { CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF } from "./safe-ref.js";
+import { CEAL_SAFE_MODEL_KEY, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF } from "./safe-ref.js";
 
 type LocalUsageObservationState = "complete" | "partial" | "observed_empty" | "unsupported" | "unavailable" | "unreadable";
 
@@ -34,6 +34,7 @@ interface CealLocalUsageDashboardSession {
 	eventEvidence: "complete" | "partial" | "unreadable" | "not_scanned";
 	unparsedLines?: number;
 	tokenEvidence: "available" | "unavailable";
+	modelKey?: string;
 	toolCallEvents?: number;
 	tokens?: {
 		source: "runtime_cumulative_last";
@@ -101,6 +102,7 @@ export interface CealLocalUsageDashboardV1 {
 		token_evidence: CealLocalUsageDashboardSession["tokenEvidence"];
 		agent_tool_calls: number | null;
 		tokens: number | null;
+		model_key: string | null;
 		comparability_group: "codex:runtime_cumulative_last:v1";
 	}>;
 	session_detail_coverage: { returned: number; eligible: number | null; observation_state: LocalUsageObservationState };
@@ -109,7 +111,7 @@ export interface CealLocalUsageDashboardV1 {
 		| {
 				observation_state: "unsupported";
 				authority: "local_pricing_snapshot";
-				reason: "model_identity_unavailable";
+				reason: "model_identity_unavailable" | "pricing_rate_unavailable" | "cost_derivation_unavailable";
 				currency: string;
 		  };
 	access: {
@@ -245,6 +247,10 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const tokenValues = sessions.filter((session) => sessionTokenTotal(session) !== null).length;
 	const effectiveWindow = { start_date: input.window.startDate, end_date: input.window.endDate };
 	const pricingSnapshot = decodeLocalPricingSnapshot(input.pricingSnapshot);
+	const pricedSessions = sessions.filter((session) => sessionTokenTotal(session) !== null);
+	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.modelKey !== undefined);
+	const completeRateCoverage =
+		completeModelCoverage && pricedSessions.every((session) => pricingSnapshot?.rates.some((rate) => rate.model_key === session.modelKey));
 	return {
 		schema_version: "ceal.local_usage_dashboard.v1",
 		fixture_only: false,
@@ -295,6 +301,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			token_evidence: session.tokenEvidence,
 			agent_tool_calls: session.eventEvidence === "complete" ? (session.toolCallEvents ?? 0) : null,
 			tokens: sessionTokenTotal(session),
+			model_key: session.modelKey ?? null,
 			comparability_group: "codex:runtime_cumulative_last:v1",
 		})),
 		session_detail_coverage: { returned: sessions.length, eligible, observation_state: sessionState },
@@ -302,7 +309,11 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			? {
 					observation_state: "unsupported",
 					authority: "local_pricing_snapshot",
-					reason: "model_identity_unavailable",
+					reason: !completeModelCoverage
+						? "model_identity_unavailable"
+						: completeRateCoverage
+							? "cost_derivation_unavailable"
+							: "pricing_rate_unavailable",
 					currency: pricingSnapshot.currency,
 				}
 			: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" },
@@ -602,6 +613,7 @@ function validSessions(value: unknown): boolean {
 					"token_evidence",
 					"agent_tool_calls",
 					"tokens",
+					"model_key",
 					"comparability_group",
 				]) &&
 				typeof entry.session_ref === "string" &&
@@ -613,6 +625,7 @@ function validSessions(value: unknown): boolean {
 				["available", "unavailable"].includes(String(entry.token_evidence)) &&
 				metricNumber(entry.agent_tool_calls) &&
 				metricNumber(entry.tokens) &&
+				(entry.model_key === null || (typeof entry.model_key === "string" && CEAL_SAFE_MODEL_KEY.test(entry.model_key))) &&
 				entry.comparability_group === "codex:runtime_cumulative_last:v1",
 		)
 	);
@@ -635,7 +648,7 @@ function validPricing(value: unknown): boolean {
 	return (
 		value.authority === "local_pricing_snapshot" &&
 		hasExactKeys(value, ["observation_state", "authority", "reason", "currency"]) &&
-		value.reason === "model_identity_unavailable" &&
+		["model_identity_unavailable", "pricing_rate_unavailable", "cost_derivation_unavailable"].includes(String(value.reason)) &&
 		typeof value.currency === "string" &&
 		/^[A-Z]{3}$/u.test(value.currency)
 	);
@@ -729,6 +742,7 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 	}
 	const generatedAt = Date.parse(dataset.generated_at);
 	for (const session of dataset.sessions) {
+		if (session.model_key !== null && session.event_evidence !== "complete") return false;
 		const instant = Date.parse(session.last_activity_at);
 		if (instant > generatedAt) return false;
 		const date = localDate(instant, dataset.timezone);
@@ -754,6 +768,14 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 		return false;
 	const completeTools = dataset.sessions.filter((session) => session.agent_tool_calls !== null).length;
 	const completeTokens = dataset.sessions.filter((session) => session.tokens !== null).length;
+	const pricedSessions = dataset.sessions.filter((session) => session.tokens !== null);
+	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.model_key !== null);
+	if (
+		dataset.pricing.authority === "local_pricing_snapshot" &&
+		((completeModelCoverage && dataset.pricing.reason === "model_identity_unavailable") ||
+			(!completeModelCoverage && dataset.pricing.reason !== "model_identity_unavailable"))
+	)
+		return false;
 	const enclosingPartial = coverage.sessions.observation_state === "partial";
 	if (
 		!validMetricCardinality(coverage.agent_tool_calls, completeTools, dataset.sessions.length, enclosingPartial) ||
@@ -838,6 +860,7 @@ function projectSession(session: CealAgentAuditSession): CealLocalUsageDashboard
 		...(events === undefined ? {} : { unparsedLines: events.unparsedLines }),
 		tokenEvidence: usage ? "available" : "unavailable",
 		...(events?.kinds.tool_call === undefined ? {} : { toolCallEvents: events.kinds.tool_call }),
+		...(events?.modelIdentity?.source === "turn_context" ? { modelKey: events.modelIdentity.modelKey } : {}),
 		...(usage?.source !== "runtime_cumulative_last"
 			? {}
 			: {

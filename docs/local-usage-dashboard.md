@@ -46,6 +46,11 @@ and summary while keeping the unowned request workflow disabled.
 - Inventory state is named separately from per-session event and token evidence;
   a complete inventory never implies complete tool-call or token coverage.
 - Returned session details and eligible inventory counts remain separate.
+- A Codex session exposes `model_key` only when a complete, fully parsed local
+  transcript scan contains exactly one safe `turn_context` model key. Partial,
+  ambiguous, invalid, and absent model evidence remains `null`. The producer
+  contract treats Codex's dedicated `turn_context.model` field as runtime-owned
+  metadata; arbitrary transcript fields never become model identity.
 - A local pricing snapshot is accepted only through the strict
   `ceal.local_pricing_snapshot.v1` decoder: namespaced snapshot/revision refs,
   one canonical UTC ISO instant, a three-letter uppercase currency-shaped code,
@@ -78,7 +83,9 @@ and summary while keeping the unowned request workflow disabled.
 
 ## Next Slice
 
-Probe a privacy-safe Codex model-identity observation. Until one exists, a valid
-pricing snapshot is reported with `model_identity_unavailable` and no currency
-amount is derived. The resource catalog and access-request workflow remain
-deferred until an Admin-owned contract exists.
+Define the owned local pricing-snapshot location and loader, then add decimal
+cost derivation only for sessions whose model key exactly matches one snapshot
+rate and whose token categories are supported. Until that contract lands,
+pricing distinguishes missing model evidence, a missing matching rate, and the
+not-yet-implemented derivation; no currency amount is derived. The resource catalog and access-request workflow
+remain deferred until an Admin-owned contract exists.

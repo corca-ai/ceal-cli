@@ -130,6 +130,8 @@ the local Profile/instance session, and the bounded Gateway capability catalog
 and counts. It keeps
 returned-versus-eligible session coverage explicit and reports pricing as
 unsupported; it does not copy transcript roots or estimate money from tokens.
+For Codex, a safe model key is retained only when one model is consistently
+observed in a complete, fully parsed local transcript scan.
 It is not the canonical browser dataset: daily totals and metric-specific
 coverage are added only by the separate fail-closed composer. The contract and next slice are documented in
 [`docs/local-usage-dashboard.md`](docs/local-usage-dashboard.md).
@@ -138,9 +140,10 @@ production document with an explicit production discriminator, local-calendar
 window, daily covered-subset values, reconciling totals, and metric-specific
 coverage. The Workbench renders this document as its Usage, Sessions, and Access
 source of truth. A strict local pricing-snapshot seam is accepted, but the
-observer does not yet load a production snapshot and local token observations
-do not carry a privacy-safe model identity. Monetary cost therefore remains
-explicitly unsupported; the page does not estimate currency from tokens.
+observer does not yet load a production snapshot or run the accepted decimal
+derivation. Complete Codex observations may carry a bounded model identity, but
+monetary cost therefore remains explicitly unsupported; the page does not
+estimate currency from tokens.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

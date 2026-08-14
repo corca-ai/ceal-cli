@@ -452,6 +452,7 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
 		mkdirSync(day, { recursive: true });
 		const lines = [
+			'{"timestamp":"2026-07-24T10:59:59.000Z","type":"turn_context","payload":{"model":"gpt-5.3-codex","private_prompt":"must-not-surface"}}',
 			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":80,"cache_write_input_tokens":0,"output_tokens":20}}}}',
 			// The last reading replaces the whole earlier reading as supplied:
 			// a field it no longer carries (cache_write) drops instead of
@@ -468,7 +469,37 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			outputTokens: 40,
 			cacheReadTokens: 150,
 		});
+		assert.deepEqual(codex.sessions[0].events.modelIdentity, { source: "turn_context", modelKey: "gpt-5.3-codex" });
+		assert.doesNotMatch(JSON.stringify(codex), /private_prompt|must-not-surface/u);
 	});
+	withHome((home) => {
+		const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(day, { recursive: true });
+		writeSession(
+			day,
+			"rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl",
+			NOW - 60_000,
+			'{"type":"turn_context","payload":{"model":"gpt-5.3-codex"}}\n{"type":"turn_context","payload":{"model":"gpt-5.4-codex"}}\n',
+		);
+		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		assert.equal("modelIdentity" in codex.sessions[0].events, false);
+	});
+	for (const secondContext of [
+		'{"type":"turn_context","payload":{"model":"../../private"}}',
+		'{"type":"turn_context","payload":{"reasoning_effort":"high"}}',
+	])
+		withHome((home) => {
+			const day = path.join(home, ".codex", "sessions", "2026", "07", "24");
+			mkdirSync(day, { recursive: true });
+			writeSession(
+				day,
+				"rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl",
+				NOW - 60_000,
+				`{"type":"turn_context","payload":{"model":"gpt-5.3-codex"}}\n${secondContext}\n`,
+			);
+			const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+			assert.equal("modelIdentity" in codex.sessions[0].events, false);
+		});
 	withHome((home) => {
 		// Omitted, not zero: a transcript whose runtime supplied no usage shows
 		// no token figures at all.

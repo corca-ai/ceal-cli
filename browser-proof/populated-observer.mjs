@@ -38,6 +38,7 @@ const sessions = (runtime, count, offset) =>
 							eventCount: 8 + index,
 							kinds: { user_message: 3, assistant_message: 3, tool_call: 2 },
 							unparsedLines: index === count - 2 ? 1 : 0,
+							...(runtime === "codex" && index === 0 ? { modelIdentity: { source: "turn_context", modelKey: "gpt-review-codex" } } : {}),
 							firstEventAt: NOW - (index + offset) * DAY - 60_000,
 							lastScannedEventAt: NOW - (index + offset) * DAY,
 							tokenUsage:

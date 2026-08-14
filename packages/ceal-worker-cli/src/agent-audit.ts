@@ -2,6 +2,7 @@ import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, open
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-guide.js";
+import { CEAL_SAFE_MODEL_KEY } from "./safe-ref.js";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
 // runtimes' native transcript roots, rendered by the observer Workbench
@@ -77,6 +78,7 @@ interface CealAgentAuditSessionEvents {
 	firstEventAt?: number;
 	lastScannedEventAt?: number;
 	tokenUsage?: CealAgentAuditTokenUsage;
+	modelIdentity?: { source: "turn_context"; modelKey: string };
 }
 
 export interface CealAgentAuditSession {
@@ -247,6 +249,7 @@ export const AGENT_AUDIT_NON_CLAIMS: readonly string[] = Object.freeze([
 	"Bounded event metadata only: fixed-vocabulary kind counts and re-serialized timestamps; transcript content, prompts, tool arguments, and raw payloads are never surfaced, copied, or forwarded.",
 	"Local recency evidence, not a surveillance or completeness claim; a stopped or unreadable collector is an explicit gap, and sessions beyond the newest scanned ones stay inventory-only until an explicit per-session drill-down runs.",
 	"Token figures are runtime-supplied transcript accounting surfaced as integers with explicit source and scan completeness; field semantics are runtime-defined, figures are not comparable across runtimes, and this is not a cost or billing claim. No latency figure is shown because neither runtime supplies one.",
+	"Codex model identity is surfaced only from one consistent turn_context model key in a complete, fully parsed transcript scan; ambiguous, partial, invalid, or absent model evidence is omitted.",
 ]);
 
 export function inspectAgentAudit(home: string | undefined, overrides: CealAgentHostOverrides, now: number): CealAgentAuditState {
@@ -338,6 +341,7 @@ interface TranscriptLineAdapter {
 	classify: (line: Record<string, unknown>) => CealAgentAuditEventKind;
 	readUsage: (line: Record<string, unknown>) => { reading: TokenUsageReading; dedupeKey?: string } | null;
 	usageSource: CealAgentAuditTokenUsage["source"];
+	readModel: (line: Record<string, unknown>) => { modelKey: string } | "invalid" | null;
 }
 
 type TokenUsageReading = Pick<CealAgentAuditTokenUsage, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">;
@@ -388,6 +392,8 @@ function summarizeEventLines(lines: string[], truncatedBytes: boolean, adapter: 
 	const seenUsageKeys = new Set<string>();
 	let usageEvents = 0;
 	let usageTotals: TokenUsageReading | undefined;
+	const modelKeys = new Set<string>();
+	let invalidModelEvidence = false;
 	for (const line of lines.slice(0, MAX_EVENT_LINES)) {
 		let parsed: unknown;
 		try {
@@ -410,6 +416,9 @@ function summarizeEventLines(lines: string[], truncatedBytes: boolean, adapter: 
 			usageEvents += 1;
 			usageTotals = adapter.usageSource === "runtime_cumulative_last" ? usage.reading : addUsageReadings(usageTotals, usage.reading);
 		}
+		const model = adapter.readModel(record);
+		if (model === "invalid") invalidModelEvidence = true;
+		else if (model) modelKeys.add(model.modelKey);
 		const timestamp = typeof record.timestamp === "string" && ISO_INSTANT.test(record.timestamp) ? Date.parse(record.timestamp) : Number.NaN;
 		if (Number.isFinite(timestamp)) {
 			firstEventAt = firstEventAt === undefined ? timestamp : Math.min(firstEventAt, timestamp);
@@ -436,6 +445,9 @@ function summarizeEventLines(lines: string[], truncatedBytes: boolean, adapter: 
 						...usageTotals,
 					},
 				}),
+		...(scan === "complete" && unparsedLines === 0 && !invalidModelEvidence && modelKeys.size === 1
+			? { modelIdentity: { source: "turn_context" as const, modelKey: [...modelKeys][0] } }
+			: {}),
 	};
 }
 
@@ -528,6 +540,7 @@ const CLAUDE_LINE_ADAPTER: TranscriptLineAdapter = {
 	classify: classifyClaudeLine,
 	readUsage: readClaudeUsage,
 	usageSource: "event_usage_sum",
+	readModel: () => null,
 };
 
 // Codex rollout grammar: response_item lines carry the conversation payload;
@@ -591,6 +604,12 @@ const CODEX_LINE_ADAPTER: TranscriptLineAdapter = {
 	classify: classifyCodexLine,
 	readUsage: readCodexUsage,
 	usageSource: "runtime_cumulative_last",
+	readModel: (line) => {
+		if (line.type !== "turn_context") return null;
+		if (!line.payload || typeof line.payload !== "object" || Array.isArray(line.payload)) return "invalid";
+		const model = (line.payload as Record<string, unknown>).model;
+		return typeof model === "string" && CEAL_SAFE_MODEL_KEY.test(model) ? { modelKey: model } : "invalid";
+	},
 };
 
 // Claude Code stores one JSONL transcript per session under

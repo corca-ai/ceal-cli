@@ -72,6 +72,7 @@ test("composes privacy-safe Codex session and token evidence without inventing c
 								eventCount: 2,
 								kinds: { tool_call: 1 },
 								unparsedLines: 0,
+								modelIdentity: { source: "turn_context", modelKey: "gpt-5.3-codex" },
 								tokenUsage: {
 									source: "runtime_cumulative_last",
 									completeness: "full_transcript",
@@ -91,6 +92,7 @@ test("composes privacy-safe Codex session and token evidence without inventing c
 	assert.equal(dashboard.sessions[0].toolCallEvents, 1);
 	assert.equal(dashboard.sessions[0].eventEvidence, "complete");
 	assert.equal(dashboard.sessions[0].tokenEvidence, "available");
+	assert.equal(dashboard.sessions[0].modelKey, "gpt-5.3-codex");
 	assert.deepEqual(dashboard.sessions[0].tokens, {
 		source: "runtime_cumulative_last",
 		completeness: "full_transcript",
@@ -212,6 +214,13 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 		[{ ...firstCapability, provider_payload: "private" }, ...dataset.access.capabilities.slice(1)],
 	])
 		assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, access: { ...dataset.access, capabilities } }), null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			sessions: [{ ...dataset.sessions[0], event_evidence: "partial", model_key: "gpt-5.3-codex" }, ...dataset.sessions.slice(1)],
+		}),
+		null,
+	);
 	assert.equal(JSON.stringify(dataset).includes("private"), false);
 });
 
@@ -270,6 +279,48 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 	assert.equal(JSON.stringify(dataset).includes(snapshot.revision), false);
 	assert.equal(dataset.totals.estimated_cost, null);
 	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({ ...dataset, pricing: { ...dataset.pricing, reason: "cost_derivation_unavailable" } }),
+		null,
+	);
+	const adapterWithModel = {
+		...adapter,
+		sources: [{ ...adapter.sources[0], inventoryState: "complete" }],
+		sessionDetailCoverage: { returned: 1, eligible: 1, state: "complete" },
+		sessions: [
+			{
+				sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d4",
+				runtime: "codex",
+				lastActivityAt: "2026-08-13T00:00:00.000Z",
+				eventEvidence: "complete",
+				tokenEvidence: "available",
+				modelKey: "gpt-5",
+				toolCallEvents: 0,
+				tokens: { source: "runtime_cumulative_last", completeness: "full_transcript", input: 10, output: 2 },
+			},
+		],
+	};
+	const withModel = composeCanonicalLocalUsageDashboard({
+		adapter: adapterWithModel,
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: snapshot,
+	});
+	assert.equal(withModel.pricing.reason, "cost_derivation_unavailable");
+	assert.equal(withModel.totals.estimated_cost, null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({ ...withModel, pricing: { ...withModel.pricing, reason: "model_identity_unavailable" } }),
+		null,
+	);
+	assert.equal(
+		composeCanonicalLocalUsageDashboard({
+			adapter: { ...adapterWithModel, sessions: [{ ...adapterWithModel.sessions[0], modelKey: "gpt-unpriced" }] },
+			timezone: "UTC",
+			window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+			pricingSnapshot: snapshot,
+		}).pricing.reason,
+		"pricing_rate_unavailable",
+	);
 });
 
 test("canonical window uses local calendar dates and excludes future or out-of-window sessions", () => {

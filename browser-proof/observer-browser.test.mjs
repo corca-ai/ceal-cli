@@ -98,6 +98,11 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 3);
+	await page.getByText(/Model gpt-review-codex/u).waitFor();
+	await page
+		.getByText(/Model unavailable/u)
+		.first()
+		.waitFor();
 	const firstSession = page.locator("button[data-session-ref]").first();
 	await firstSession.focus();
 	await page.keyboard.press("Enter");

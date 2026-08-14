@@ -55,6 +55,9 @@ export const CEAL_SAFE_PROFILE_REF = safeRef("profile:", 119);
 /** A pagination cursor. */
 export const CEAL_SAFE_CURSOR = safeRef("cursor:", 120);
 
+/** Privacy-safe runtime model keys projected into local usage evidence. */
+export const CEAL_SAFE_MODEL_KEY = safeRef("", 119);
+
 /**
  * A client-generated request id. Its budget is the tightest of the set because
  * the Gateway appends to it; the number is preserved from the literal this
