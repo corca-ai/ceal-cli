@@ -3,6 +3,7 @@ import type { CealInstalledReleaseReading } from "./acceptance-record.js";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
+import type { CealGatewayOverview } from "./observer.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 import type { CealTimingRecorder } from "./timing.js";
@@ -81,6 +82,8 @@ export interface CealCommandRuntime {
 	executablePath?: string;
 	/** Test/embedding hook: receives the live observer URL and a closer. */
 	onObserverListening?: (handle: { url: string; close: () => Promise<void> }) => void;
+	/** Test/embedding hook for the bounded live Ceal summary. */
+	loadObserverCealOverview?: () => Promise<CealGatewayOverview>;
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;

@@ -184,8 +184,8 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 	if (name === "observe")
 		return [
 			"  --port <0|1024-65535>  Loopback port to serve (default: 52897; 0 selects an ephemeral port).",
-			"                          Serves cached session/capability/install/guide state and spooled call-outcome metadata.",
-			"                          No admin surface, no provider credentials, no live refresh.",
+			"                          Loads a bounded personal Gateway handshake/discovery summary plus local evidence.",
+			"                          No admin surface, provider credentials, capability execution, or provider contact.",
 		];
 	return [];
 }

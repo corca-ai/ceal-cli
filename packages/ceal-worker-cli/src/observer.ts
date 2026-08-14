@@ -20,12 +20,9 @@ import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
 
-// Local client observer: one loopback page over the state this client already
-// holds. Boundary (fixed): no admin surface, no provider credential, and no
-// live refresh — the server never contacts the Gateway or any provider, and
-// session token material never enters a response (structural allowlist, not
-// string masking). Receipts render from the local receipt spool's allowlisted
-// call-outcome metadata; the Gateway audit ledger stays authoritative.
+// Personal Workbench: one loopback page over a bounded live Ceal summary and
+// local supporting evidence. The browser never receives session token material,
+// provider credentials, Admin data, or raw Gateway/provider payloads.
 
 export interface CealObserverRuntime {
 	loadSession?: () => Promise<CealStoredSession | null>;
@@ -37,11 +34,48 @@ export interface CealObserverRuntime {
 	executablePath?: string;
 	discoveryCacheTtlMs?: number;
 	now?: () => number;
+	loadCealOverview?: () => Promise<CealGatewayOverview>;
 }
 
+export type CealGatewayOverview =
+	| { status: "unavailable"; source: "ceal_gateway"; reason: "session_unavailable" }
+	| { status: "error"; source: "ceal_gateway"; error_kind: CealGatewayOverviewErrorKind }
+	| {
+			status: "connected";
+			source: "ceal_gateway";
+			authority: "gateway";
+			profile_ref: string;
+			instance_ref: string;
+			protocol_version: string;
+			capability_count: number;
+			read_capability_count: number;
+			write_capability_count: number;
+	  };
+
+export type CealGatewayOverviewErrorKind =
+	| "session_load_failed"
+	| "gateway_unreachable"
+	| "authentication_failed"
+	| "invalid_response"
+	| "request_timeout"
+	| "request_failed"
+	| "protocol_mismatch"
+	| "gateway_error";
+
+const CEAL_GATEWAY_OVERVIEW_ERROR_KINDS = new Set<CealGatewayOverviewErrorKind>([
+	"session_load_failed",
+	"gateway_unreachable",
+	"authentication_failed",
+	"invalid_response",
+	"request_timeout",
+	"request_failed",
+	"protocol_mismatch",
+	"gateway_error",
+]);
+
 const OBSERVER_NON_CLAIMS = [
-	"This view renders cached/local state only; it does not prove current Gateway, policy, connector, or provider behavior.",
-	"Absent or unverified Gateway data is unknown, not a denial or an availability claim.",
+	"The live Ceal summary proves only handshake and capability discovery for the current personal scope; it does not prove provider readiness or execution.",
+	"Local receipt and Agent evidence may have different retention and coverage from the live Ceal summary.",
 ] as const;
 
 const RECEIPT_SPOOL_NON_CLAIM =
@@ -94,12 +128,14 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	const session = sessionSnapshot.observed;
 	const discoveryCache = await observeDiscoveryCache(runtime, now, sessionSnapshot.stored);
 	const agentActivity = observeAgentAudit(runtime);
+	const ceal = await observeCeal(runtime);
 	return {
-		schema_version: "ceal.observer_state.v1",
+		schema_version: "ceal.observer_state.v2",
 		command: "ceal",
-		proof_level: "local_state",
+		proof_level: "mixed_gateway_and_local_evidence",
 		generated_at: new Date(now).toISOString(),
-		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
+		boundary: { admin_surface: false, provider_credentials: false, live_refresh: true },
+		ceal,
 		session,
 		discovery_cache: discoveryCache,
 		install: observeInstall(runtime),
@@ -110,6 +146,37 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],
 	};
+}
+
+async function observeCeal(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
+	if (!runtime.loadCealOverview) return { status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" };
+	try {
+		const overview = await runtime.loadCealOverview();
+		if (overview.status === "connected") {
+			return {
+				status: "connected",
+				source: "ceal_gateway",
+				authority: "gateway",
+				observed_at: new Date(runtime.now?.() ?? Date.now()).toISOString(),
+				profile_ref: overview.profile_ref,
+				instance_ref: overview.instance_ref,
+				protocol_version: overview.protocol_version,
+				capability_count: overview.capability_count,
+				read_capability_count: overview.read_capability_count,
+				write_capability_count: overview.write_capability_count,
+			};
+		}
+		if (overview.status === "error") {
+			return {
+				status: "error",
+				source: "ceal_gateway",
+				error_kind: CEAL_GATEWAY_OVERVIEW_ERROR_KINDS.has(overview.error_kind) ? overview.error_kind : "gateway_error",
+			};
+		}
+		return { status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" };
+	} catch {
+		return { status: "error", source: "ceal_gateway", error_kind: "gateway_unreachable" };
+	}
 }
 
 // Masterplan contract for initial Workbench suggestions: local, deterministic,
@@ -192,6 +259,7 @@ function buildLocalSuggestions(
 // drops counter reached one of them and not the other. `observer.test.mjs` gates
 // that every ~/.ceal file the stores name appears in both.
 export const OBSERVER_DATA_SOURCES = [
+	"live_gateway_handshake_and_discovery",
 	"client_session_redacted",
 	"client_discovery_cache",
 	"installed_release_generation",
@@ -215,7 +283,7 @@ function observePrivacy(receipts: Record<string, unknown>): Record<string, unkno
 	return {
 		status: "declared",
 		local_sources: [...PRIVACY_LOCAL_SOURCES],
-		gateway_forwarding: "none",
+		gateway_contact: "personal handshake and capability discovery",
 		provider_contact: "none",
 		transcript_handling:
 			"Agent transcripts are parsed locally under fixed byte/line budgets for kind counts, timestamps, and runtime-supplied token totals; their text is never stored, rendered, or forwarded.",
@@ -396,10 +464,6 @@ async function observeSession(
 			status: "present",
 			gateway_endpoint: session.gatewayEndpoint,
 			profile_ref: session.profileRef,
-			membership_ref: session.membershipRef,
-			registration_ref: session.registrationRef,
-			client_ref: session.clientRef,
-			subject_ref: session.subjectRef,
 			instance_ref: session.instanceRef,
 			expires_at: session.expiresAt,
 			refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
@@ -438,8 +502,6 @@ async function observeDiscoveryCache(
 	// `discoveryCacheFreshness`.
 	const { ageMs: age, withinTtl } = discoveryCacheFreshness(entry.cachedAt, now, ttl);
 	const capabilities = Array.isArray(entry.discovery.capabilities) ? entry.discovery.capabilities : [];
-	const targets = Array.isArray(entry.discovery.targets) ? entry.discovery.targets : [];
-	const targetCatalog = entry.discovery.target_catalog;
 	return {
 		status: "cached",
 		cached_at: new Date(entry.cachedAt).toISOString(),
@@ -448,12 +510,9 @@ async function observeDiscoveryCache(
 		within_ttl: withinTtl,
 		gateway_endpoint: entry.key.gatewayEndpoint,
 		profile_ref: entry.key.profileRef,
-		membership_ref: entry.key.membershipRef,
 		negotiated_protocol_version: entry.key.negotiatedProtocolVersion,
 		capability_count: capabilities.length,
 		capabilities: capabilities.map((capability) => scalarProjection(capability)),
-		cached_target_count: targets.length,
-		...(typeof targetCatalog === "object" && targetCatalog !== null ? { target_catalog: scalarProjection(targetCatalog) } : {}),
 		...(Array.isArray(entry.discovery.non_claims)
 			? { non_claims: entry.discovery.non_claims.filter((value) => typeof value === "string") }
 			: {}),
@@ -543,7 +602,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 		return;
 	}
 	const url = request.url?.split("?")[0];
-	if (url === "/api/observer/v1/state") {
+	if (url === "/api/observer/v2/state") {
 		const state = await buildObserverState(runtime);
 		response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
 		response.end(`${JSON.stringify(state, null, 2)}\n`);
@@ -652,6 +711,7 @@ const OBSERVER_PAGE = `<!doctype html>
   .boundary { border-left:3px solid var(--accent); margin:.8rem 0 1.4rem; padding:.35rem .75rem; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:.65rem; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.9rem; }
+  .card, .unsupported { min-width:0; overflow-wrap:anywhere; }
   .card h3 { font-size:.82rem; margin:0 0 .35rem; color:var(--muted); }
   .attention { width:100%; color:inherit; text-align:left; font:inherit; cursor:pointer; margin-bottom:.6rem; }
   .attention strong { display:block; margin-bottom:.35rem; }
@@ -696,8 +756,8 @@ const OBSERVER_PAGE = `<!doctype html>
 </head>
 <body>
 <header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
-<p class="boundary">Local evidence only. This read-only page never contacts the Gateway or a provider. Reload after running a live command to see newer cached state.</p>
-<div id="root">Loading local state…</div>
+<p class="boundary">Personal Ceal view. Loading this page reads the current Gateway handshake and capability catalog when a client session is available; it never calls a provider. Local evidence remains separately labeled.</p>
+<div id="root">Loading Ceal and local evidence…</div>
 <dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
 <script>
 const fmt = (v) => Array.isArray(v) ? v.map(fmt).join(", ")
@@ -722,7 +782,7 @@ const SUGGESTION_DESTINATIONS = {
   repeated_failed_work: ["Ceal evidence", "Recent Ceal calls"],
   unknown_outcome_receipt: ["Ceal evidence", "Recent Ceal calls"]
 };
-fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
+fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   const readinessView = "<div class=\\"grid\\">" + [
     ["Client session", s.session.status],
     ["Capability cache", s.discovery_cache.status + (s.discovery_cache.status === "cached" ? (s.discovery_cache.within_ttl ? " · fresh" : " · stale") : "")],
@@ -844,9 +904,6 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       : filteredEntries.length
       ? filteredEntries.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
       : "<div class='unsupported'><strong>No locally recorded outcomes in this selected view</strong><p>" + esc(s.receipts.note || "The retained local window has no matching entries.") + "</p><p>This is not proof of no Gateway activity.</p></div>";
-    const heroClaim = historyReadable
-      ? "<h2><em>" + filteredTimes.length + "</em> outcomes recorded locally</h2><p class='hero-summary'>Visible in this selected period of the retained window; this is not a complete Gateway activity total.</p>"
-      : "<h2>Receipt activity is unavailable.</h2>";
     const calendar = historyReadable
       ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>All retained record times supplied by the bounded local spool are counted</span></div>"
       : "<div class='unsupported'><strong>Daily activity is unavailable</strong><p>The local source could not provide readable receipt history. Missing activity is not rendered as zero.</p></div>";
@@ -865,10 +922,17 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
       ? "<div class='metric-strip'>" + mixCards + "</div>"
       : "<div class='unsupported'><strong>No outcome mix in the visible detail subset</strong><p>No detailed receipt row matches this selected period.</p></div>";
     const capabilitySummary = [...capabilityCounts].map(([label, count]) => esc(label) + " · " + count).join("<br>") || "No capability labels in the visible detail subset.";
-    return "<section class='hero'><p class='eyebrow'>LOCAL RECEIPT EVIDENCE · " + esc(periodLabel) + "</p>" + heroClaim + "<div class='evidence-line'><span>Timestamp: receipt record time, not exact call time</span><span>Authority: local advisory</span><span>Source: " + esc(sourceState) + "</span></div></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · ACTIVITY</p><h2>When outcomes entered this local history</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div>" + calendar + "</section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · EVIDENCE</p><h2>What is known about this activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='unsupported'><strong>Correlated work and monetary cost are unsupported</strong><p>This observer has no producer-owned work-to-call correlation and no runtime-supplied monetary cost.</p><p>Missing values are not zero. No timestamp join or token-price estimate is used.</p></div></div></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
+    const liveSummary = s.ceal.status === "connected"
+      ? "<div class='metric-strip'><div class='card'><h3>CEAL</h3><strong>Connected</strong><p class='muted'>Gateway authority · " + esc(s.ceal.observed_at) + "</p></div><div class='card'><h3>PERSONAL SCOPE</h3><strong>" + esc(s.ceal.profile_ref) + "</strong><p class='muted'>Instance " + esc(s.ceal.instance_ref) + "</p></div><div class='card'><h3>CAPABILITIES</h3><strong>" + esc(String(s.ceal.capability_count)) + " available</strong><p class='muted'>" + esc(String(s.ceal.read_capability_count)) + " read · " + esc(String(s.ceal.write_capability_count)) + " write</p></div></div>"
+      : s.ceal.status === "error"
+      ? "<div class='unsupported'><strong>Ceal could not be reached</strong><p>Gateway summary failed: " + esc(s.ceal.error_kind) + ". No live capability count is inferred.</p></div>"
+      : "<div class='unsupported'><strong>Ceal session is unavailable</strong><p>Enroll this client to load a personal Gateway summary. No live capability count is inferred.</p></div>";
+    const contractAvailability = "<div class='support-grid'><div class='card'><h3>AVAILABLE FROM CEAL NOW</h3><strong>Personal scope and capability discovery</strong><p class='muted'>Handshake and discovery only; no provider execution.</p></div><div class='unsupported'><strong>Activity history and monetary cost contracts are unavailable</strong><p>Ceal does not yet expose period call history, work correlation, or monetary observations to this Workbench.</p><p>Missing values are not zero.</p></div></div>";
+    return "<section class='hero'><p class='eyebrow'>CEAL-BACKED PERSONAL WORKBENCH</p><h2>Your Ceal activity, with its <em>evidence boundaries</em>.</h2><p class='hero-summary'>Live personal scope is separated from local runtime and receipt evidence. Cost appears only when Ceal can supply an owned source contract.</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · CEAL NOW</p><h2>Personal Gateway summary</h2></div></div>" + liveSummary + contractAvailability + "</section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · LOCAL ACTIVITY</p><h2>" + (historyReadable ? filteredTimes.length + " outcomes recorded locally" : "Local receipt activity is unavailable") + "</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div><p class='hero-summary'>" + (historyReadable ? "This is supporting local evidence, not the complete Gateway period total. Timestamp: receipt record time, not exact call time." : "No activity count is inferred.") + "</p>" + calendar + "</section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · EVIDENCE</p><h2>What is known about local activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='card'><h3>LOCAL ACTIVITY BASIS</h3><strong>Receipt record timestamps</strong><p class='muted'>Selected retained evidence only; not a complete Gateway activity total.</p></div></div></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>04 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows from local evidence in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
   };
 
   const usageEntries = [];
@@ -896,7 +960,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
 
   const privacy = s.privacy ?? {};
   let privacyView = rows([["boundary", s.boundary],
-    ["gateway_forwarding", privacy.gateway_forwarding], ["provider_contact", privacy.provider_contact],
+    ["gateway_contact", privacy.gateway_contact], ["provider_contact", privacy.provider_contact],
     ["receipt_spool_retention", privacy.receipt_spool_retention]]);
   if (Array.isArray(privacy.local_sources)) {
     privacyView += "<h2 class=\\"muted\\">Local sources read by this client</h2>" + list(privacy.local_sources, "muted");
@@ -1006,7 +1070,7 @@ fetch("/api/observer/v1/state").then((r) => r.json()).then((s) => {
   });
   document.documentElement.dataset.theme = "developer";
   show(VIEWS[0]);
-}).catch(() => { document.getElementById("root").textContent = "Could not read local observer state."; });
+}).catch(() => { document.getElementById("root").textContent = "Could not read Workbench state."; });
 </script>
 </body>
 </html>

@@ -40,7 +40,8 @@ import {
 import { commandRecovery, findCealCommand, runCealStaticCommand, writeCliError as writeError } from "./command-surface.js";
 import { type CealDiscoveryCacheKey, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "./discovery-cache.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
-import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
+import type { CealGatewayOverviewErrorKind } from "./observer.js";
+import { type CealGatewayOverview, createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
@@ -254,6 +255,8 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		inspectAgentAudit: runtime.inspectAgentAudit,
 		inspectAgentSession: runtime.inspectAgentSession,
 		inspectAgentGuide: runtime.inspectAgentGuide,
+		loadCealOverview:
+			runtime.loadObserverCealOverview ?? (runtime.onObserverListening ? undefined : () => loadWorkbenchCealOverview(runtime)),
 		executablePath: runtime.executablePath,
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
 		now: runtime.now,
@@ -298,11 +301,11 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		url,
 		bind_address: "127.0.0.1",
 		effect: "read_only",
-		boundary: { admin_surface: false, provider_credentials: false, live_refresh: false },
+		boundary: { admin_surface: false, provider_credentials: false, live_refresh: true },
 		data_sources: [...OBSERVER_DATA_SOURCES],
 		receipts: "local_spool_metadata",
 		non_claims: [
-			"Cached/local state only; the observer never contacts the Gateway or a provider.",
+			"The Workbench may contact the Gateway for handshake and capability discovery; it never calls a provider.",
 			"The observer serves until this command is interrupted.",
 		],
 	});
@@ -312,6 +315,66 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		close: () => new Promise<void>((resolveStop, rejectStop) => server.close((error) => (error ? rejectStop(error) : resolveStop()))),
 	});
 	return closed;
+}
+
+/** @testOnly Production Workbench Gateway projection, exported for transport-boundary proof. */
+export async function loadWorkbenchCealOverview(runtime: CealCommandRuntime): Promise<CealGatewayOverview> {
+	if (!runtime.loadSession) return { status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" };
+	let session: CealStoredSession | null;
+	try {
+		session = await runtime.loadSession();
+	} catch {
+		return { status: "error", source: "ceal_gateway", error_kind: "session_load_failed" };
+	}
+	if (!session) return { status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" };
+	try {
+		// Workbench loading is a read boundary: unlike ordinary capability routes,
+		// it does not rotate an expiring personal session as a side effect.
+		const access = {
+			endpoint: session.gatewayEndpoint,
+			profileRef: session.profileRef,
+			accessToken: session.accessToken,
+			storedSession: null,
+			requestId: runtime.nextRequestId?.() ?? "ceal:observe",
+		};
+		const { client, handshake } = await requestCapabilityHandshake(access, runtime);
+		if (!handshake.ok) {
+			return { status: "error", source: "ceal_gateway", error_kind: workbenchGatewayErrorKind(classifyGatewayFailure(handshake.error).code) };
+		}
+		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
+			client.request({
+				request_id: `${access.requestId}:discover`,
+				operation: "discover",
+				profile_ref: access.profileRef,
+				body: {},
+			}),
+		);
+		if (!discovery.ok) {
+			return { status: "error", source: "ceal_gateway", error_kind: workbenchGatewayErrorKind(classifyGatewayFailure(discovery.error).code) };
+		}
+		const readCapabilityCount = discovery.value.capabilities.filter((capability) => capability.effect === "read").length;
+		return {
+			status: "connected",
+			source: "ceal_gateway",
+			authority: "gateway",
+			profile_ref: handshake.value.profile_ref,
+			instance_ref: handshake.value.instance_ref,
+			protocol_version: handshake.value.negotiated_protocol_version,
+			capability_count: discovery.value.capabilities.length,
+			read_capability_count: readCapabilityCount,
+			write_capability_count: discovery.value.capabilities.length - readCapabilityCount,
+		};
+	} catch {
+		return { status: "error", source: "ceal_gateway", error_kind: "gateway_unreachable" };
+	}
+}
+
+function workbenchGatewayErrorKind(code: string): CealGatewayOverviewErrorKind {
+	if (code.includes("auth") || code.includes("session") || code.includes("token")) return "authentication_failed";
+	if (code.includes("timeout")) return "request_timeout";
+	if (code.includes("protocol") || code.includes("version")) return "protocol_mismatch";
+	if (code.includes("invalid") || code.includes("malformed")) return "invalid_response";
+	return "request_failed";
 }
 
 async function runUpdate(io: CealCliIo, runtime: CealCommandRuntime): Promise<number> {

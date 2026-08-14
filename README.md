@@ -108,8 +108,11 @@ audit evidence is read only on demand so agents do not infer completion from an
 exit code alone.
 
 `ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
-read-only Workbench page and JSON endpoint over the client's cached local
-state. Its Overview counts the timestamp-only projection of every outcome still
+Workbench page and JSON endpoint. When an enrolled personal session is
+available, loading state performs a bounded Gateway handshake and capability
+discovery; it never executes a capability or contacts a provider. The page
+combines that live personal summary with cached local state. Its Overview counts
+the timestamp-only projection of every outcome still
 present in the bounded local receipt spool while detailed receipt rows remain
 limited to the newest subset. The timestamps are local receipt-record times, not
 exact call-occurrence times; retention, dropped history, and local/advisory
@@ -123,12 +126,13 @@ count. The Agent activity view summarizes session, event, and token-evidence
 coverage per runtime without making a cross-runtime total or ranking. **Ceal
 evidence** and **Setup & privacy** remain separate views. The latter declares the local
 sources this client reads, the receipt-spool retention bounds, and the fixed
-no-forwarding boundary (`gateway_forwarding: none`, `provider_contact: none`).
+source boundary (`gateway_contact: personal handshake and capability discovery`,
+`provider_contact: none`).
 The state covers:
-session identity with token material structurally redacted, the cached
-capability/target catalog with its age and TTL, the managed install
-generation, agent-guide registration, and the local receipt spool. It performs
-no Gateway or provider contact. The receipt spool is an owner-only, size- and
+session scope with token and device identity material structurally redacted,
+the cached capability catalog with its age and TTL, the managed install
+generation, agent-guide registration, and the local receipt spool. The receipt
+spool is an owner-only, size- and
 retention-bounded record of each receipt-bearing `ceal call` outcome as an
 allowlisted metadata projection (request/audit references, capability, target,
 status, evidence, safe error kind) — never call arguments, purpose text,

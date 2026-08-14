@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 import { parse } from "yaml";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
-import { runCealCommand } from "../dist/index.js";
+import { loadWorkbenchCealOverview, runCealCommand } from "../dist/index.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES, observerPresentationIntent } from "../dist/observer.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
@@ -25,6 +25,191 @@ test("observer presentation never implies positive state for gaps or unknown val
 	assert.equal(observerPresentationIntent("adapter", "future_value"), "unknown");
 	assert.equal(observerPresentationIntent("future_source", "present"), "unknown");
 });
+
+test("Ceal-backed summary is allowlisted and keeps live authority distinct", async () => {
+	const state = await buildObserverState({
+		now: () => Date.parse("2026-08-14T00:00:00.000Z"),
+		loadCealOverview: async () => ({
+			status: "connected",
+			source: "ceal_gateway",
+			authority: "gateway",
+			profile_ref: "profile:personal",
+			instance_ref: "instance:ceal",
+			protocol_version: "1.3.0",
+			capability_count: 3,
+			read_capability_count: 2,
+			write_capability_count: 1,
+			access_token: ACCESS_TOKEN,
+			membership_ref: "membership:must-not-surface",
+		}),
+	});
+	assert.deepEqual(state.ceal, {
+		status: "connected",
+		source: "ceal_gateway",
+		authority: "gateway",
+		observed_at: "2026-08-14T00:00:00.000Z",
+		profile_ref: "profile:personal",
+		instance_ref: "instance:ceal",
+		protocol_version: "1.3.0",
+		capability_count: 3,
+		read_capability_count: 2,
+		write_capability_count: 1,
+	});
+	assert.doesNotMatch(JSON.stringify(state.ceal), /ceal_personal_|membership:/u);
+});
+
+test("Ceal summary stamps completion time and bounds injected error vocabulary", async () => {
+	const times = [Date.parse("2026-08-14T00:00:00.000Z"), Date.parse("2026-08-14T00:00:02.000Z")];
+	const connected = await buildObserverState({
+		now: () => times.shift(),
+		loadCealOverview: async () => ({
+			status: "connected",
+			source: "ceal_gateway",
+			authority: "gateway",
+			profile_ref: "profile:personal",
+			instance_ref: "instance:personal",
+			protocol_version: "1.3.0",
+			capability_count: 0,
+			read_capability_count: 0,
+			write_capability_count: 0,
+		}),
+	});
+	assert.equal(connected.generated_at, "2026-08-14T00:00:00.000Z");
+	assert.equal(connected.ceal.observed_at, "2026-08-14T00:00:02.000Z");
+
+	const errored = await buildObserverState({
+		loadCealOverview: async () => ({ status: "error", source: "ceal_gateway", error_kind: "secret_backend_detail" }),
+	});
+	assert.deepEqual(errored.ceal, { status: "error", source: "ceal_gateway", error_kind: "gateway_error" });
+});
+
+test("production Workbench projection performs only handshake then discovery and never refreshes", async (context) => {
+	const operations = [];
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		operations.push(body.operation);
+		const value = body.operation === "handshake" ? observerHandshakeResponse(body) : observerDiscoveryResponse(body);
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify(value));
+	});
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	context.after(() => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))));
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+	let sessionReads = 0;
+	const overview = await loadWorkbenchCealOverview({
+		loadSession: async () => {
+			sessionReads += 1;
+			return observerStoredSession(`http://127.0.0.1:${address.port}/gateway/client`);
+		},
+		nextRequestId: () => "observer:proof",
+	});
+	assert.deepEqual(operations, ["handshake", "discover"]);
+	assert.equal(sessionReads, 1);
+	assert.deepEqual(overview, {
+		status: "connected",
+		source: "ceal_gateway",
+		authority: "gateway",
+		profile_ref: "profile:personal",
+		instance_ref: "instance:personal",
+		protocol_version: "1.3.0",
+		capability_count: 1,
+		read_capability_count: 1,
+		write_capability_count: 0,
+	});
+});
+
+test("production Workbench projection makes no request without a session", async () => {
+	let requestIds = 0;
+	assert.deepEqual(
+		await loadWorkbenchCealOverview({
+			loadSession: async () => null,
+			nextRequestId: () => {
+				requestIds += 1;
+				return "must-not-run";
+			},
+		}),
+		{ status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" },
+	);
+	assert.equal(requestIds, 0);
+});
+
+function observerStoredSession(gatewayEndpoint) {
+	return {
+		gatewayEndpoint,
+		profileRef: "profile:personal",
+		membershipRef: "membership:personal",
+		registrationRef: "registration:personal",
+		clientRef: "client:personal",
+		subjectRef: "subject:personal",
+		instanceRef: "instance:personal",
+		accessToken: ACCESS_TOKEN,
+		expiresAt: "2099-08-14T00:00:00.000Z",
+		refreshToken: REFRESH_TOKEN,
+		refreshTokenIdleExpiresAt: "2099-09-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	};
+}
+
+function observerSuccess(request, value) {
+	return {
+		ok: true,
+		request_id: request.request_id,
+		protocol_version: "1.3.0",
+		proof_ref_or_unavailable: `audit:${request.request_id}`,
+		value,
+	};
+}
+
+function observerHandshakeResponse(request) {
+	return observerSuccess(request, {
+		schema_version: "ceal.gateway_handshake.v1",
+		negotiated_protocol_version: "1.3.0",
+		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:personal",
+		registration_ref: "registration:personal",
+		client_ref: "client:personal",
+		subject_ref: "subject:personal",
+		instance_ref: "instance:personal",
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
+
+function observerDiscoveryResponse(request) {
+	return observerSuccess(request, {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:personal",
+		capabilities: [
+			{
+				capability_id: "message.search",
+				label: "Search messages",
+				effect: "read",
+				target_requirement: "required",
+				input_contract: {
+					schema_version: "ceal.message_search_input.v1",
+					required: ["query"],
+					query: { type: "string", max_bytes: 512 },
+					limit: { type: "integer", minimum: 1, maximum: 10, default: 5 },
+				},
+				evidence_requirement: "gateway_audit",
+			},
+		],
+		targets: [],
+		target_catalog: { target_count: 1, returned_count: 0, complete: false, selection_required: true },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
 
 function createCealReceiptSpoolStore(home, now = Date.now) {
 	const store = createRawReceiptSpoolStore(home, now);
@@ -199,15 +384,18 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(doc.schema_version, "ceal.observe.v1");
 	assert.equal(doc.status, "serving");
 	assert.match(doc.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u);
-	assert.deepEqual(doc.boundary, { admin_surface: false, provider_credentials: false, live_refresh: false });
+	assert.deepEqual(doc.boundary, { admin_surface: false, provider_credentials: false, live_refresh: true });
 
-	const stateResponse = await fetch(`${doc.url}api/observer/v1/state`);
+	const stateResponse = await fetch(`${doc.url}api/observer/v2/state`);
 	assert.equal(stateResponse.status, 200);
 	assert.equal(stateResponse.headers.get("cache-control"), "no-store");
 	const stateBody = await stateResponse.text();
-	assert.doesNotMatch(stateBody, /ceal_personal_|ceal_refresh_/u);
+	assert.doesNotMatch(
+		stateBody,
+		/ceal_personal_|ceal_refresh_|membership_ref|registration_ref|client_ref|subject_ref|target_catalog|cached_target_count/u,
+	);
 	const state = JSON.parse(stateBody);
-	assert.equal(state.schema_version, "ceal.observer_state.v1");
+	assert.equal(state.schema_version, "ceal.observer_state.v2");
 	assert.equal(state.session.status, "present");
 	assert.equal(state.session.secrets, "redacted");
 	assert.equal(state.session.access_token, undefined);
@@ -225,7 +413,6 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	]);
 	assert.equal(state.discovery_cache.within_ttl, true);
 	assert.equal(state.discovery_cache.age_ms, 60_000);
-	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 3, returned_count: 0, complete: false, selection_required: true });
 	assert.equal(state.install.status, "unmanaged");
 	assert.equal(state.guide.status, "staged");
 	// The scalar projection names one host, so the per-host list is what a
@@ -285,7 +472,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.deepEqual(state.suggestions.entries, []);
 	assert.match(state.suggestions.non_claim, /not model judgment/u);
 	assert.equal(state.privacy.status, "declared");
-	assert.equal(state.privacy.gateway_forwarding, "none");
+	assert.equal(state.privacy.gateway_contact, "personal handshake and capability discovery");
 	assert.equal(state.privacy.provider_contact, "none");
 	assert.deepEqual(state.privacy.receipt_spool_retention, { max_entries: 200, retention_ms: 30 * 24 * 60 * 60 * 1000 });
 	assert.ok(state.privacy.local_sources.some((source) => source.includes("client-session.json")));
@@ -311,7 +498,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /outcomes recorded locally/u);
 	assert.match(html, /not a complete Gateway activity total/u);
 	assert.match(html, /receipt record time, not exact call time/u);
-	assert.match(html, /Correlated work and monetary cost are unsupported/u);
+	assert.match(html, /Activity history and monetary cost contracts are unavailable/u);
 	assert.match(html, /Outcome and capability mix/u);
 	assert.match(html, /newest detailed receipt rows/u);
 	assert.match(html, /Runtime overview/u);
@@ -324,7 +511,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /recordedAt <= generatedAt/u);
 	assert.match(html, /calendarStart\.getDay/u);
 	assert.match(html, /role='img' aria-label=/u);
-	assert.match(html, /Receipt activity is unavailable/u);
+	assert.match(html, /Local receipt activity is unavailable/u);
 	assert.match(html, /Missing activity is not rendered as zero/u);
 	assert.match(html, /aria-label="Visual theme"/u);
 	assert.match(html, /aria-label="Color appearance"/u);
@@ -382,7 +569,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		],
 	};
 	const mixedDetailOverview = renderOverview(mixedDetailState);
-	assert.match(mixedDetailOverview, /<em>25<\/em> outcomes recorded locally/u);
+	assert.match(mixedDetailOverview, /<h2>25 outcomes recorded locally<\/h2>/u);
 	assert.match(mixedDetailOverview, /<h3>completed<\/h3><strong>2<\/strong>/u);
 	assert.match(mixedDetailOverview, /<h3>failed<\/h3><strong>2<\/strong>/u);
 	assert.match(mixedDetailOverview, /message[.]search · 3<br>file[.]read · 1/u);
@@ -394,7 +581,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(emptyDetailOverview, /No outcome mix in the visible detail subset/u);
 	assert.doesNotMatch(emptyDetailOverview, /<div class='metric-strip'><\/div>/u);
 	const unreadableOverview = renderOverview({ ...state, receipts: { status: "unreadable", non_claim: state.receipts.non_claim } });
-	assert.match(unreadableOverview, /Receipt activity is unavailable/u);
+	assert.match(unreadableOverview, /Local receipt activity is unavailable/u);
 	assert.match(unreadableOverview, /No activity count is inferred/u);
 	assert.match(unreadableOverview, /Retained-entry coverage is unavailable/u);
 	assert.doesNotMatch(unreadableOverview, /<em>0<\/em>/u);
@@ -455,7 +642,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		],
 	};
 	const futureOverview = renderOverview(futureState);
-	assert.match(futureOverview, /<em>0<\/em>/u);
+	assert.match(futureOverview, /<h2>0 outcomes recorded locally<\/h2>/u);
 	assert.doesNotMatch(futureOverview, /req_future/u);
 	const retainedOverviewState = structuredClone(state);
 	retainedOverviewState.receipts = {
@@ -470,7 +657,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		})),
 	};
 	const retainedOverview = renderOverview(retainedOverviewState);
-	assert.match(retainedOverview, /<em>25<\/em>/u);
+	assert.match(retainedOverview, /<h2>25 outcomes recorded locally<\/h2>/u);
 	assert.match(retainedOverview, /Activity received 25 retained record-time values/u);
 	assert.equal((retainedOverview.match(/data-receipt=/gu) || []).length, 20);
 
@@ -511,9 +698,9 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(drillBad.status, 404);
 	assert.equal((await drillBad.json()).error, "unknown_observer_path");
 
-	const rebound = await rawRequest(doc.url, "/api/observer/v1/state", { host: "evil.example:80" });
+	const rebound = await rawRequest(doc.url, "/api/observer/v2/state", { host: "evil.example:80" });
 	assert.equal(rebound.status, 403);
-	const forwarded = await fetch(`${doc.url}api/observer/v1/state`, { headers: { "x-forwarded-for": "203.0.113.7" } });
+	const forwarded = await fetch(`${doc.url}api/observer/v2/state`, { headers: { "x-forwarded-for": "203.0.113.7" } });
 	assert.equal(forwarded.status, 403);
 	const write = await fetch(doc.url, { method: "POST", body: "{}" });
 	assert.equal(write.status, 405);
@@ -576,7 +763,7 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(state.receipts.status, "unreadable");
 	assert.equal("entries" in state.receipts, false);
 	await handle.close();
@@ -688,7 +875,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const declared = (await (await fetch(`${doc.url}api/observer/v1/state`)).json()).privacy.local_sources.join("\n");
+	const declared = (await (await fetch(`${doc.url}api/observer/v2/state`)).json()).privacy.local_sources.join("\n");
 	assert.deepEqual(
 		[...stateFiles].filter((name) => !declared.includes(name)),
 		[],
@@ -734,7 +921,7 @@ test("an empty retention window is not reported as every receipt having been los
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(state.receipts.status, "absent");
 	assert.equal(state.receipts.dropped_appends, 2);
 	assert.match(state.receipts.note, /within the retention window/u);
@@ -790,7 +977,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const absent = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const absent = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(absent.receipts.status, "absent");
 	assert.equal(absent.receipts.dropped_appends, 2);
 	assert.equal(absent.receipts.dropped_appends_capped, false);
@@ -807,7 +994,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 		evidence: "readback_verified",
 		auditRefs: [],
 	});
-	const spooled = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const spooled = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(spooled.receipts.status, "spooled");
 	assert.equal(spooled.receipts.entry_count, 1);
 	assert.equal(spooled.receipts.dropped_appends, 2);
@@ -822,7 +1009,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 		evidence: "readback_verified",
 		auditRefs: [],
 	});
-	const clean = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const clean = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(clean.receipts.status, "spooled");
 	assert.equal("dropped_appends" in clean.receipts, false);
 	await handle.close();
@@ -840,7 +1027,7 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 		});
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await (await fetch(`${doc.url}api/observer/v2/state`)).json();
 	assert.equal(state.session.status, "unavailable");
 	assert.equal(state.discovery_cache.status, "unavailable");
 	assert.equal(state.install.status, "unavailable");

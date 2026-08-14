@@ -39,10 +39,11 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
 	assert.deepEqual(pageErrors, []);
-	assert.equal(await page.locator("#root .hero h2").textContent(), "0 outcomes recorded locally");
-	await page.getByText(/not a complete Gateway activity total/u).waitFor();
+	assert.equal(await page.locator("#root .hero h2").textContent(), "Your Ceal activity, with its evidence boundaries.");
+	await page.getByText("Ceal session is unavailable").waitFor();
+	await page.getByText(/supporting local evidence/u).waitFor();
 	await page.getByText("No locally recorded outcomes in this selected view").waitFor();
-	await page.getByText("Correlated work and monetary cost are unsupported").waitFor();
+	await page.getByText("Activity history and monetary cost contracts are unavailable").waitFor();
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "developer");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), null);
 
@@ -86,15 +87,19 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
-	assert.equal(await page.locator("#root .hero h2").textContent(), "35 outcomes recorded locally");
+	assert.equal(await page.locator("#root .hero h2").textContent(), "Your Ceal activity, with its evidence boundaries.");
+	await page.getByText("profile:review-personal").waitFor();
+	await page.getByText("9 available").waitFor();
+	await page.getByText("6 read · 3 write").waitFor();
+	await page.getByText("35 outcomes recorded locally").waitFor();
 	assert.equal(await page.locator("button[data-receipt]").count(), 20);
 	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 365);
 	await page.getByText("At least this many receipt appends were lost").waitFor();
-	const evidenceTop = await page.getByText("Correlated work and monetary cost are unsupported").boundingBox();
+	const evidenceTop = await page.getByText("Activity history and monetary cost contracts are unavailable").boundingBox();
 	const firstDetailTop = await page.locator("button[data-receipt]").first().boundingBox();
 	assert.ok(evidenceTop && firstDetailTop && evidenceTop.y < firstDetailTop.y);
 	await page.locator("#period").selectOption("30");
-	assert.equal(await page.locator("#root .hero h2").textContent(), "35 outcomes recorded locally");
+	await page.getByText("35 outcomes recorded locally").waitFor();
 	assert.equal(await page.locator("button[data-receipt]").count(), 20);
 	const firstReceipt = page.locator("button[data-receipt]").first();
 	await firstReceipt.focus();
@@ -126,7 +131,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByRole("button", { name: "Overview" }).focus();
 	await page.keyboard.press("Enter");
 	await page.getByText("35 outcomes recorded locally").waitFor();
-	await page.getByText("Correlated work and monetary cost are unsupported").waitFor();
+	await page.getByText("Activity history and monetary cost contracts are unavailable").waitFor();
 	await page.setViewportSize({ width: 390, height: 844 });
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "terminal");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), "dark");

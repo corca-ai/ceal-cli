@@ -124,7 +124,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "observe",
-		description: "Serve a loopback-only read-only page over this client's cached local state.",
+		description: "Serve a loopback-only Workbench over a bounded personal Gateway summary and local evidence.",
 		usage: "ceal observe [--port <0|1024-65535>]",
 		effect: "read_only",
 		evidence: "surface",

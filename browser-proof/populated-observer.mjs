@@ -44,6 +44,17 @@ const sessions = (runtime, count, offset) =>
 	}));
 
 const server = createCealObserverServer({
+	loadCealOverview: async () => ({
+		status: "connected",
+		source: "ceal_gateway",
+		authority: "gateway",
+		profile_ref: "profile:review-personal",
+		instance_ref: "instance:review",
+		protocol_version: "1.3.0",
+		capability_count: 9,
+		read_capability_count: 6,
+		write_capability_count: 3,
+	}),
 	loadReceiptSpool: async () => ({
 		entries: receipts,
 		bounds: { maxEntries: 200, retentionMs: 30 * DAY },
