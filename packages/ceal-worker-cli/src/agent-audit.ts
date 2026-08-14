@@ -88,7 +88,7 @@ export interface CealAgentAuditSession {
 	events?: CealAgentAuditSessionEvents | "unreadable";
 }
 
-interface CealAgentAuditAdapterState {
+export interface CealAgentAuditAdapterState {
 	runtime: "claude" | "codex";
 	root: string;
 	health: "active" | "stale" | "inactive" | "unknown";

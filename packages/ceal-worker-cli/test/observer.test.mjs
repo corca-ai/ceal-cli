@@ -55,6 +55,18 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 		read_capability_count: 2,
 		write_capability_count: 1,
 	});
+	assert.equal(state.local_usage_dashboard_input.schemaVersion, "ceal.local_usage_dashboard.codex_input.v1");
+	assert.deepEqual(state.local_usage_dashboard_input.identity, { state: "unavailable" });
+	assert.deepEqual(state.local_usage_dashboard_input.access, {
+		state: "available",
+		authority: "gateway",
+		observedAt: "2026-08-14T00:00:00.000Z",
+		capabilityCount: 3,
+		readCapabilityCount: 2,
+		writeCapabilityCount: 1,
+	});
+	assert.equal(state.local_usage_dashboard_input.sources[0].inventoryState, "unavailable");
+	assert.equal(state.local_usage_dashboard_input.pricing.state, "unsupported");
 	assert.doesNotMatch(JSON.stringify(state.ceal), /ceal_personal_|membership:/u);
 });
 
@@ -81,6 +93,19 @@ test("Ceal summary stamps completion time and bounds injected error vocabulary",
 		loadCealOverview: async () => ({ status: "error", source: "ceal_gateway", error_kind: "secret_backend_detail" }),
 	});
 	assert.deepEqual(errored.ceal, { status: "error", source: "ceal_gateway", error_kind: "gateway_error" });
+});
+
+test("a failed Agent inspection remains unreadable rather than adapter-unavailable", async () => {
+	const state = await buildObserverState({
+		now: () => Date.parse("2026-08-14T00:00:00.000Z"),
+		inspectAgentAudit: () => {
+			throw new Error("private read failure");
+		},
+	});
+	assert.equal(state.agent_activity.status, "inventoried");
+	assert.equal(state.agent_activity.adapters[0].health, "unknown");
+	assert.equal(state.local_usage_dashboard_input.sources[0].inventoryState, "unreadable");
+	assert.doesNotMatch(JSON.stringify(state), /private read failure/u);
 });
 
 test("production Workbench projection performs only handshake then discovery and never refreshes", async (context) => {

@@ -16,6 +16,7 @@ import {
 	discoveryCacheFreshness,
 	discoveryCacheKeyMatches,
 } from "./discovery-cache.js";
+import { composeCodexDashboardAdapterInput } from "./local-usage-dashboard.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
 import { inspectInstalledWorkerRelease } from "./stable-update.js";
@@ -127,8 +128,26 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	const receipts = await observeReceiptSpool(runtime, sessionSnapshot.stored);
 	const session = sessionSnapshot.observed;
 	const discoveryCache = await observeDiscoveryCache(runtime, now, sessionSnapshot.stored);
-	const agentActivity = observeAgentAudit(runtime);
+	const agentAuditSource = observeAgentAuditSource(runtime);
+	const agentActivity = projectAgentAudit(agentAuditSource);
 	const ceal = await observeCeal(runtime);
+	const localUsageDashboardInput = composeCodexDashboardAdapterInput({
+		generatedAt: now,
+		agentActivity: agentAuditSource ?? { schemaVersion: "ceal.agent_activity.v1", adapters: [], nonClaims: [...AGENT_AUDIT_NON_CLAIMS] },
+		...(sessionSnapshot.stored
+			? { identity: { profileRef: sessionSnapshot.stored.profileRef, instanceRef: sessionSnapshot.stored.instanceRef } }
+			: {}),
+		...(ceal.status === "connected"
+			? {
+					access: {
+						observedAt: String(ceal.observed_at),
+						capabilityCount: Number(ceal.capability_count),
+						readCapabilityCount: Number(ceal.read_capability_count),
+						writeCapabilityCount: Number(ceal.write_capability_count),
+					},
+				}
+			: {}),
+	});
 	return {
 		schema_version: "ceal.observer_state.v2",
 		command: "ceal",
@@ -142,6 +161,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		guide: observeGuide(runtime),
 		receipts,
 		agent_activity: agentActivity,
+		local_usage_dashboard_input: localUsageDashboardInput,
 		suggestions: buildLocalSuggestions(session, discoveryCache, receipts, agentActivity),
 		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],
@@ -291,14 +311,21 @@ function observePrivacy(receipts: Record<string, unknown>): Record<string, unkno
 	};
 }
 
-function observeAgentAudit(runtime: CealObserverRuntime): Record<string, unknown> {
-	if (!runtime.inspectAgentAudit) return { status: "unavailable" };
-	let state: CealAgentAuditState;
+function observeAgentAuditSource(runtime: CealObserverRuntime): CealAgentAuditState | null {
+	if (!runtime.inspectAgentAudit) return null;
 	try {
-		state = runtime.inspectAgentAudit();
+		return runtime.inspectAgentAudit();
 	} catch {
-		return { status: "unavailable" };
+		return {
+			schemaVersion: "ceal.agent_activity.v1",
+			adapters: [{ runtime: "codex", root: "Codex sessions", health: "unknown", coverage: "transcript-observed" }],
+			nonClaims: [...AGENT_AUDIT_NON_CLAIMS],
+		};
 	}
+}
+
+function projectAgentAudit(state: CealAgentAuditState | null): Record<string, unknown> {
+	if (!state) return { status: "unavailable" };
 	return {
 		status: "inventoried",
 		schema_version: state.schemaVersion,

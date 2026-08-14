@@ -128,6 +128,14 @@ evidence** and **Setup & privacy** remain separate views. The latter declares th
 sources this client reads, the receipt-spool retention bounds, and the fixed
 source boundary (`gateway_contact: personal handshake and capability discovery`,
 `provider_contact: none`).
+The JSON state also exposes `ceal.local_usage_dashboard.codex_input.v1`, a
+Codex-first adapter input composed from that same redacted Agent evidence,
+the local Profile/instance session, and Gateway capability counts. It keeps
+returned-versus-eligible session coverage explicit and reports pricing as
+unsupported; it does not copy transcript roots or estimate money from tokens.
+It is not the canonical browser dataset: daily totals and metric-specific
+coverage are added only by the next fail-closed composer. The contract and next migration slice are documented in
+[`docs/local-usage-dashboard.md`](docs/local-usage-dashboard.md).
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install
