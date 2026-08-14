@@ -117,15 +117,17 @@ Agent tool calls, Tokens, and Estimated cost. Every axis renders its own source,
 effective window, and coverage; unsupported or unreadable evidence is never
 shown as zero. **Sessions** lists every bounded, privacy-safe local session in
 the selected window with twenty rows per page and an inert structural-evidence
-detail. **Access** renders only the Gateway-owned capability summary; its future
-resource search and access-request workflow remain visibly unavailable. **Evidence**
+detail. **Access** renders the bounded Gateway-owned capability catalog and its
+summary; it does not claim a resource inventory, and its future resource search
+and access-request workflow remain visibly unavailable. **Evidence**
 keeps advisory receipt metadata separate, and **Setup & privacy** declares the local
 sources this client reads, the receipt-spool retention bounds, and the fixed
 source boundary (`gateway_contact: personal handshake and capability discovery`,
 `provider_contact: none`).
 The JSON state also exposes `ceal.local_usage_dashboard.codex_input.v1`, a
 Codex-first adapter input composed from that same redacted Agent evidence,
-the local Profile/instance session, and Gateway capability counts. It keeps
+the local Profile/instance session, and the bounded Gateway capability catalog
+and counts. It keeps
 returned-versus-eligible session coverage explicit and reports pricing as
 unsupported; it does not copy transcript roots or estimate money from tokens.
 It is not the canonical browser dataset: daily totals and metric-specific

@@ -8,12 +8,48 @@ import {
 } from "../dist/local-usage-dashboard.js";
 
 const GENERATED_AT = Date.parse("2026-08-14T00:00:00.000Z");
+const CAPABILITIES = [
+	{
+		capabilityId: "message.search",
+		label: "Search messages",
+		effect: "read",
+		targetRequirement: "required",
+		evidenceRequirement: "gateway_audit",
+	},
+	{
+		capabilityId: "document.read",
+		label: "Read documents",
+		effect: "read",
+		targetRequirement: "required",
+		evidenceRequirement: "gateway_audit",
+	},
+	{
+		capabilityId: "calendar.read",
+		label: "Read calendar",
+		effect: "read",
+		targetRequirement: "optional",
+		evidenceRequirement: "gateway_audit",
+	},
+	{
+		capabilityId: "message.send",
+		label: "Send messages",
+		effect: "write",
+		targetRequirement: "required",
+		evidenceRequirement: "gateway_audit",
+	},
+];
 
 test("composes privacy-safe Codex session and token evidence without inventing cost", () => {
 	const dashboard = composeCodexDashboardAdapterInput({
 		generatedAt: GENERATED_AT,
 		identity: { profileRef: "profile:developer", instanceRef: "instance:local" },
-		access: { observedAt: "2026-08-14T00:00:00.000Z", capabilityCount: 4, readCapabilityCount: 3, writeCapabilityCount: 1 },
+		access: {
+			observedAt: "2026-08-14T00:00:00.000Z",
+			capabilityCount: 4,
+			readCapabilityCount: 3,
+			writeCapabilityCount: 1,
+			capabilities: CAPABILITIES,
+		},
 		agentActivity: {
 			schemaVersion: "ceal.agent_activity.v1",
 			nonClaims: ["runtime-specific accounting"],
@@ -71,6 +107,13 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 	const adapter = composeCodexDashboardAdapterInput({
 		generatedAt: GENERATED_AT,
 		identity: { profileRef: "profile:developer", instanceRef: "instance:local" },
+		access: {
+			observedAt: "2026-08-14T00:00:00.000Z",
+			capabilityCount: 4,
+			readCapabilityCount: 3,
+			writeCapabilityCount: 1,
+			capabilities: CAPABILITIES,
+		},
 		agentActivity: {
 			schemaVersion: "ceal.agent_activity.v1",
 			nonClaims: ["local bounded evidence"],
@@ -160,6 +203,15 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 		}),
 		null,
 	);
+	const firstCapability = dataset.access.capabilities[0];
+	for (const capabilities of [
+		[firstCapability, firstCapability, ...dataset.access.capabilities.slice(2)],
+		[{ ...firstCapability, target_requirement: "sometimes" }, ...dataset.access.capabilities.slice(1)],
+		[{ ...firstCapability, effect: "execute" }, ...dataset.access.capabilities.slice(1)],
+		[{ ...firstCapability, label: "x".repeat(129) }, ...dataset.access.capabilities.slice(1)],
+		[{ ...firstCapability, provider_payload: "private" }, ...dataset.access.capabilities.slice(1)],
+	])
+		assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, access: { ...dataset.access, capabilities } }), null);
 	assert.equal(JSON.stringify(dataset).includes("private"), false);
 });
 

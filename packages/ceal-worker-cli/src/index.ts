@@ -363,6 +363,13 @@ export async function loadWorkbenchCealOverview(runtime: CealCommandRuntime): Pr
 			capability_count: discovery.value.capabilities.length,
 			read_capability_count: readCapabilityCount,
 			write_capability_count: discovery.value.capabilities.length - readCapabilityCount,
+			capabilities: discovery.value.capabilities.map((capability) => ({
+				capability_id: capability.capability_id,
+				label: capability.label,
+				effect: capability.effect,
+				target_requirement: capability.target_requirement,
+				evidence_requirement: capability.evidence_requirement,
+			})),
 		};
 	} catch {
 		return { status: "error", source: "ceal_gateway", error_kind: "gateway_unreachable" };

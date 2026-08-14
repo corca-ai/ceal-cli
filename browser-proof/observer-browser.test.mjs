@@ -108,6 +108,10 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	assert.equal(await firstSession.evaluate((element) => element === document.activeElement), true);
 	await page.getByRole("button", { name: "Access", exact: true }).click();
 	await page.getByText("9", { exact: true }).first().waitFor();
+	await page.getByRole("heading", { name: "Review capability 1" }).waitFor();
+	await page.getByText("message.search.1", { exact: true }).waitFor();
+	await page.getByText("Resource target: required · Audit evidence: gateway_audit", { exact: true }).first().waitFor();
+	assert.equal(await page.getByText("Review capability 9", { exact: true }).count(), 1);
 	await page.getByText("Request access").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Request access" }).isDisabled(), true);
 

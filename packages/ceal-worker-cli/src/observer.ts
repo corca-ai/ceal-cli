@@ -57,6 +57,13 @@ export type CealGatewayOverview =
 			capability_count: number;
 			read_capability_count: number;
 			write_capability_count: number;
+			capabilities: Array<{
+				capability_id: string;
+				label: string;
+				effect: "read" | "write";
+				target_requirement: "required" | "optional" | "none";
+				evidence_requirement: string;
+			}>;
 	  };
 
 export type CealGatewayOverviewErrorKind =
@@ -137,19 +144,27 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	const agentAuditSource = observeAgentAuditSource(runtime);
 	const agentActivity = projectAgentAudit(agentAuditSource);
 	const ceal = await observeCeal(runtime);
+	const accessCapabilities = Array.isArray(ceal.capabilities) && ceal.capabilities.every(isObservedCapability) ? ceal.capabilities : null;
 	const localUsageDashboardInput = composeCodexDashboardAdapterInput({
 		generatedAt: now,
 		agentActivity: agentAuditSource ?? { schemaVersion: "ceal.agent_activity.v1", adapters: [], nonClaims: [...AGENT_AUDIT_NON_CLAIMS] },
 		...(sessionSnapshot.stored
 			? { identity: { profileRef: sessionSnapshot.stored.profileRef, instanceRef: sessionSnapshot.stored.instanceRef } }
 			: {}),
-		...(ceal.status === "connected"
+		...(ceal.status === "connected" && accessCapabilities
 			? {
 					access: {
 						observedAt: String(ceal.observed_at),
 						capabilityCount: Number(ceal.capability_count),
 						readCapabilityCount: Number(ceal.read_capability_count),
 						writeCapabilityCount: Number(ceal.write_capability_count),
+						capabilities: accessCapabilities.map((capability) => ({
+							capabilityId: String(capability.capability_id),
+							label: String(capability.label),
+							effect: capability.effect,
+							targetRequirement: capability.target_requirement,
+							evidenceRequirement: String(capability.evidence_requirement),
+						})),
 					},
 				}
 			: {}),
@@ -184,11 +199,39 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	};
 }
 
+function isObservedCapability(value: unknown): value is {
+	capability_id: string;
+	label: string;
+	effect: "read" | "write";
+	target_requirement: "required" | "optional" | "none";
+	evidence_requirement: string;
+} {
+	if (!value || typeof value !== "object") return false;
+	const capability = value as Record<string, unknown>;
+	return (
+		typeof capability.capability_id === "string" &&
+		typeof capability.label === "string" &&
+		(capability.effect === "read" || capability.effect === "write") &&
+		(capability.target_requirement === "required" ||
+			capability.target_requirement === "optional" ||
+			capability.target_requirement === "none") &&
+		typeof capability.evidence_requirement === "string"
+	);
+}
+
 async function observeCeal(runtime: CealObserverRuntime): Promise<Record<string, unknown>> {
 	if (!runtime.loadCealOverview) return { status: "unavailable", source: "ceal_gateway", reason: "session_unavailable" };
 	try {
 		const overview = await runtime.loadCealOverview();
 		if (overview.status === "connected") {
+			if (
+				!Array.isArray(overview.capabilities) ||
+				!overview.capabilities.every(isObservedCapability) ||
+				overview.capability_count !== overview.capabilities.length ||
+				overview.read_capability_count !== overview.capabilities.filter((capability) => capability.effect === "read").length ||
+				overview.write_capability_count !== overview.capabilities.filter((capability) => capability.effect === "write").length
+			)
+				return { status: "error", source: "ceal_gateway", error_kind: "invalid_response" };
 			return {
 				status: "connected",
 				source: "ceal_gateway",
@@ -200,6 +243,7 @@ async function observeCeal(runtime: CealObserverRuntime): Promise<Record<string,
 				capability_count: overview.capability_count,
 				read_capability_count: overview.read_capability_count,
 				write_capability_count: overview.write_capability_count,
+				capabilities: overview.capabilities.map((capability) => ({ ...capability })),
 			};
 		}
 		if (overview.status === "error") {
@@ -963,11 +1007,16 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   };
   const accessView = () => {
     const access = dashboard.access;
+    const capabilityCards = access.observation_state === "available" && access.capabilities.length
+      ? "<section><p class='eyebrow'>CAPABILITY CATALOG</p><div class='session-list'>" + access.capabilities.map((capability) => "<article class='card'><span class='pill'>" + esc(capability.effect) + "</span><h3>" + esc(capability.label) + "</h3><p class='mono'>" + esc(capability.capability_id) + "</p><p class='muted'>Resource target: " + esc(capability.target_requirement) + " · Audit evidence: " + esc(capability.evidence_requirement) + "</p></article>").join("") + "</div></section>"
+      : access.observation_state === "available"
+        ? "<div class='unsupported'><strong>No capabilities returned</strong><p>The Gateway returned an observed-empty capability catalog.</p></div>"
+        : "";
     const summary = access.observation_state === "available"
       ? "<div class='metric-strip'><div class='card'><h3>AVAILABLE CAPABILITIES</h3><strong>" + access.capability_count + "</strong></div><div class='card'><h3>READ</h3><strong>" + access.read_capability_count + "</strong></div><div class='card'><h3>WRITE</h3><strong>" + access.write_capability_count + "</strong></div></div><p class='evidence-line'>Gateway authority · observed " + esc(access.observed_at) + "</p>"
       : "<div class='unsupported'><strong>Capability access unavailable</strong><p>No access count is inferred.</p></div>";
     const accessTitle = dashboard.identity.state === "available" ? "Gateway-observed access for this local Profile." : "Gateway-observed capability summary.";
-    return "<section class='hero compact'><p class='eyebrow'>ACCESS</p><h2>" + accessTitle + "</h2><p class='hero-summary'>Gateway authority is independent from local Profile observation. Resource search and access requests are not implemented yet.</p></section>" + summary + "<div class='unsupported'><strong>Need access to something else?</strong><p>The request workflow and discoverable resource catalog still need an Admin-owned contract.</p><button type='button' disabled aria-describedby='access-reason'>Request access</button><span id='access-reason' class='muted'> Unavailable in this version</span></div>";
+    return "<section class='hero compact'><p class='eyebrow'>ACCESS</p><h2>" + accessTitle + "</h2><p class='hero-summary'>Gateway authority is independent from local Profile observation. This catalog describes capabilities, not a complete resource inventory.</p></section>" + summary + capabilityCards + "<div class='unsupported'><strong>Need access to something else?</strong><p>The resource catalog and request workflow still need an Admin-owned contract.</p><button type='button' disabled aria-describedby='access-reason'>Request access</button><span id='access-reason' class='muted'> Unavailable in this version</span></div>";
   };
 
   const usageEntries = [];

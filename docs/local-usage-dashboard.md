@@ -29,14 +29,17 @@ The Workbench now renders that canonical dataset through separate Usage,
 Sessions, and Access tabs. Usage switches among Sessions, Agent tool calls,
 Tokens, and Estimated cost without changing evidence semantics. Sessions uses
 twenty-row pagination so a history over one hundred rows does not turn into one
-unbounded scroll. Access renders only the Gateway-owned summary and keeps the
-unowned request workflow disabled.
+unbounded scroll. Access renders the bounded Gateway-owned capability catalog
+and summary while keeping the unowned request workflow disabled.
 
 ## Fixed Decisions
 
 - Codex is the first production converter; Claude remains a separate runtime
   accounting group and is not silently normalized into Codex semantics.
 - Local session identity and Gateway capability access are independent inputs.
+- Access projects only the allowlisted capability ID, display label, effect,
+  target requirement, and evidence requirement returned by Gateway discovery.
+  It is not a resource inventory or a copy of provider/policy payloads.
 - The browser receives the fixed display label `Codex sessions`, never the
   expanded transcript root.
 - `complete`, `partial`, `observed_empty`, and `unreadable` remain distinct.
@@ -77,6 +80,5 @@ unowned request workflow disabled.
 
 Probe a privacy-safe Codex model-identity observation. Until one exists, a valid
 pricing snapshot is reported with `model_identity_unavailable` and no currency
-amount is derived. Then enrich the Access tab with the bounded capability
-catalog already projected by the observer, without inventing a resource
-inventory or access-request workflow.
+amount is derived. The resource catalog and access-request workflow remain
+deferred until an Admin-owned contract exists.

@@ -16,6 +16,15 @@ interface CealLocalUsageDashboardAccess {
 	capabilityCount?: number;
 	readCapabilityCount?: number;
 	writeCapabilityCount?: number;
+	capabilities?: CealLocalUsageCapability[];
+}
+
+interface CealLocalUsageCapability {
+	capabilityId: string;
+	label: string;
+	effect: "read" | "write";
+	targetRequirement: "required" | "optional" | "none";
+	evidenceRequirement: string;
 }
 
 interface CealLocalUsageDashboardSession {
@@ -63,6 +72,7 @@ export interface ComposeLocalUsageDashboardInput {
 		capabilityCount: number;
 		readCapabilityCount: number;
 		writeCapabilityCount: number;
+		capabilities: CealLocalUsageCapability[];
 	};
 }
 
@@ -109,6 +119,13 @@ export interface CealLocalUsageDashboardV1 {
 		capability_count?: number;
 		read_capability_count?: number;
 		write_capability_count?: number;
+		capabilities?: Array<{
+			capability_id: string;
+			label: string;
+			effect: "read" | "write";
+			target_requirement: "required" | "optional" | "none";
+			evidence_requirement: string;
+		}>;
 	};
 	suggestions: [];
 	non_claims: string[];
@@ -298,6 +315,13 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 						capability_count: input.adapter.access.capabilityCount,
 						read_capability_count: input.adapter.access.readCapabilityCount,
 						write_capability_count: input.adapter.access.writeCapabilityCount,
+						capabilities: (input.adapter.access.capabilities ?? []).map((capability) => ({
+							capability_id: capability.capabilityId,
+							label: capability.label,
+							effect: capability.effect,
+							target_requirement: capability.targetRequirement,
+							evidence_requirement: capability.evidenceRequirement,
+						})),
 					}
 				: { observation_state: "unavailable", authority: "gateway" },
 		suggestions: [],
@@ -620,6 +644,11 @@ function validPricing(value: unknown): boolean {
 function validAccess(value: unknown): boolean {
 	if (!isRecord(value) || value.authority !== "gateway") return false;
 	if (value.observation_state === "unavailable") return hasExactKeys(value, ["observation_state", "authority"]);
+	if (!Array.isArray(value.capabilities)) return false;
+	const capabilityIds = value.capabilities
+		.filter(isRecord)
+		.map((capability) => capability.capability_id)
+		.filter((capabilityId): capabilityId is string => typeof capabilityId === "string");
 	return (
 		value.observation_state === "available" &&
 		hasExactKeys(value, [
@@ -629,12 +658,36 @@ function validAccess(value: unknown): boolean {
 			"capability_count",
 			"read_capability_count",
 			"write_capability_count",
+			"capabilities",
 		]) &&
 		typeof value.observed_at === "string" &&
 		Number.isFinite(Date.parse(value.observed_at)) &&
 		nonNegativeInteger(value.capability_count) &&
 		nonNegativeInteger(value.read_capability_count) &&
-		nonNegativeInteger(value.write_capability_count)
+		nonNegativeInteger(value.write_capability_count) &&
+		value.capabilities.length === value.capability_count &&
+		value.capabilities.length <= 128 &&
+		value.capabilities.every(validCapability) &&
+		new Set(capabilityIds).size === value.capabilities.length &&
+		value.read_capability_count + value.write_capability_count === value.capability_count &&
+		value.capabilities.filter((entry) => isRecord(entry) && entry.effect === "read").length === value.read_capability_count
+	);
+}
+
+function validCapability(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		hasExactKeys(value, ["capability_id", "label", "effect", "target_requirement", "evidence_requirement"]) &&
+		typeof value.capability_id === "string" &&
+		CEAL_SAFE_REF.test(value.capability_id) &&
+		typeof value.label === "string" &&
+		value.label.length >= 1 &&
+		value.label.length <= 128 &&
+		!looksLikeAbsolutePath(value.label) &&
+		(value.effect === "read" || value.effect === "write") &&
+		(value.target_requirement === "required" || value.target_requirement === "optional" || value.target_requirement === "none") &&
+		typeof value.evidence_requirement === "string" &&
+		CEAL_SAFE_REF.test(value.evidence_requirement)
 	);
 }
 

@@ -5,6 +5,13 @@ const DAY = 86_400_000;
 const statuses = ["completed", "completed", "blocked", "error"];
 const evidence = ["readback_verified", "readback_verified", "not_read_back", "outcome_unknown"];
 const capabilities = ["message.search", "file.read", "calendar.list", "message.send"];
+const accessCapabilities = Array.from({ length: 9 }, (_, index) => ({
+	capability_id: `${capabilities[index % capabilities.length]}.${index + 1}`,
+	label: `Review capability ${index + 1}`,
+	effect: index < 6 ? "read" : "write",
+	target_requirement: "required",
+	evidence_requirement: "gateway_audit",
+}));
 const codexSessionCount = process.env.CEAL_REVIEW_MANY_SESSIONS === "1" ? 105 : 3;
 const receipts = Array.from({ length: 35 }, (_, index) => ({
 	recordedAt: NOW - (29 - (index % 30)) * DAY - Math.floor(index / 30) * 3_600_000,
@@ -57,6 +64,7 @@ const server = createCealObserverServer({
 		capability_count: 9,
 		read_capability_count: 6,
 		write_capability_count: 3,
+		capabilities: accessCapabilities,
 	}),
 	loadReceiptSpool: async () => ({
 		entries: receipts,

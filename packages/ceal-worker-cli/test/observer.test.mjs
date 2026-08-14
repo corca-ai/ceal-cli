@@ -15,6 +15,29 @@ import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../di
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
 const TEST_SPOOL_IDENTITY = "a".repeat(64);
+const OBSERVED_CAPABILITIES = [
+	{
+		capability_id: "message.search",
+		label: "Search messages",
+		effect: "read",
+		target_requirement: "required",
+		evidence_requirement: "gateway_audit",
+	},
+	{
+		capability_id: "document.read",
+		label: "Read documents",
+		effect: "read",
+		target_requirement: "required",
+		evidence_requirement: "gateway_audit",
+	},
+	{
+		capability_id: "message.send",
+		label: "Send messages",
+		effect: "write",
+		target_requirement: "required",
+		evidence_requirement: "gateway_audit",
+	},
+];
 
 test("observer presentation never implies positive state for gaps or unknown values", () => {
 	assert.equal(observerPresentationIntent("session", "present"), "positive");
@@ -40,6 +63,7 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 			capability_count: 3,
 			read_capability_count: 2,
 			write_capability_count: 1,
+			capabilities: OBSERVED_CAPABILITIES,
 			access_token: ACCESS_TOKEN,
 			membership_ref: "membership:must-not-surface",
 		}),
@@ -55,6 +79,7 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 		capability_count: 3,
 		read_capability_count: 2,
 		write_capability_count: 1,
+		capabilities: OBSERVED_CAPABILITIES,
 	});
 	assert.equal(state.local_usage_dashboard_input.schemaVersion, "ceal.local_usage_dashboard.codex_input.v1");
 	assert.deepEqual(state.local_usage_dashboard_input.identity, { state: "unavailable" });
@@ -65,6 +90,13 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 		capabilityCount: 3,
 		readCapabilityCount: 2,
 		writeCapabilityCount: 1,
+		capabilities: OBSERVED_CAPABILITIES.map((capability) => ({
+			capabilityId: capability.capability_id,
+			label: capability.label,
+			effect: capability.effect,
+			targetRequirement: capability.target_requirement,
+			evidenceRequirement: capability.evidence_requirement,
+		})),
 	});
 	assert.equal(state.local_usage_dashboard_input.sources[0].inventoryState, "unavailable");
 	assert.equal(state.local_usage_dashboard_input.pricing.state, "unsupported");
@@ -74,6 +106,7 @@ test("Ceal-backed summary is allowlisted and keeps live authority distinct", asy
 	assert.deepEqual(state.local_usage_dashboard.window, { start_date: "2025-08-15", end_date: "2026-08-15" });
 	assert.equal(state.local_usage_dashboard.timezone, "Asia/Seoul");
 	assert.equal(state.local_usage_dashboard.access.capability_count, 3);
+	assert.deepEqual(state.local_usage_dashboard.access.capabilities, OBSERVED_CAPABILITIES);
 	assert.equal(state.local_usage_dashboard.pricing.observation_state, "unsupported");
 	assert.doesNotMatch(JSON.stringify(state.ceal), /ceal_personal_|membership:/u);
 });
@@ -92,15 +125,44 @@ test("Ceal summary stamps completion time and bounds injected error vocabulary",
 			capability_count: 0,
 			read_capability_count: 0,
 			write_capability_count: 0,
+			capabilities: [],
 		}),
 	});
 	assert.equal(connected.generated_at, "2026-08-14T00:00:00.000Z");
 	assert.equal(connected.ceal.observed_at, "2026-08-14T00:00:02.000Z");
+	assert.deepEqual(connected.local_usage_dashboard.access, {
+		observation_state: "available",
+		authority: "gateway",
+		observed_at: "2026-08-14T00:00:02.000Z",
+		capability_count: 0,
+		read_capability_count: 0,
+		write_capability_count: 0,
+		capabilities: [],
+	});
 
 	const errored = await buildObserverState({
 		loadCealOverview: async () => ({ status: "error", source: "ceal_gateway", error_kind: "secret_backend_detail" }),
 	});
 	assert.deepEqual(errored.ceal, { status: "error", source: "ceal_gateway", error_kind: "gateway_error" });
+});
+
+test("Ceal capability projection rejects an unknown effect instead of classifying it as read", async () => {
+	const state = await buildObserverState({
+		loadCealOverview: async () => ({
+			status: "connected",
+			source: "ceal_gateway",
+			authority: "gateway",
+			profile_ref: "profile:personal",
+			instance_ref: "instance:personal",
+			protocol_version: "1.3.0",
+			capability_count: 1,
+			read_capability_count: 1,
+			write_capability_count: 0,
+			capabilities: [{ ...OBSERVED_CAPABILITIES[0], effect: "execute" }],
+		}),
+	});
+	assert.deepEqual(state.ceal, { status: "error", source: "ceal_gateway", error_kind: "invalid_response" });
+	assert.deepEqual(state.local_usage_dashboard.access, { observation_state: "unavailable", authority: "gateway" });
 });
 
 test("a failed Agent inspection remains unreadable rather than adapter-unavailable", async () => {
@@ -154,6 +216,7 @@ test("production Workbench projection performs only handshake then discovery and
 		capability_count: 1,
 		read_capability_count: 1,
 		write_capability_count: 0,
+		capabilities: [OBSERVED_CAPABILITIES[0]],
 	});
 });
 
