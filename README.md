@@ -111,20 +111,15 @@ exit code alone.
 Workbench page and JSON endpoint. When an enrolled personal session is
 available, loading state performs a bounded Gateway handshake and capability
 discovery; it never executes a capability or contacts a provider. The page
-combines that live personal summary with cached local state. Its Overview counts
-the timestamp-only projection of every outcome still
-present in the bounded local receipt spool while detailed receipt rows remain
-limited to the newest subset. The timestamps are local receipt-record times, not
-exact call-occurrence times; retention, dropped history, and local/advisory
-authority stay visible. Correlated Agent work and monetary cost remain
-explicitly unsupported because the current producers supply neither a
-work-to-call relationship nor monetary cost; the page never joins by timestamp
-or estimates currency from tokens. The Overview summarizes status and capability
-labels only over the newest detailed receipt rows and labels that narrower basis;
-the full retained timestamp projection remains the sole source for the activity
-count. The Agent activity view summarizes session, event, and token-evidence
-coverage per runtime without making a cross-runtime total or ranking. **Ceal
-evidence** and **Setup & privacy** remain separate views. The latter declares the local
+combines that live personal summary with cached local state. **Usage** renders
+the canonical local Codex dataset and switches independently among Sessions,
+Agent tool calls, Tokens, and Estimated cost. Every axis renders its own source,
+effective window, and coverage; unsupported or unreadable evidence is never
+shown as zero. **Sessions** lists every bounded, privacy-safe local session in
+the selected window with twenty rows per page and an inert structural-evidence
+detail. **Access** renders only the Gateway-owned capability summary; its future
+resource search and access-request workflow remain visibly unavailable. **Evidence**
+keeps advisory receipt metadata separate, and **Setup & privacy** declares the local
 sources this client reads, the receipt-spool retention bounds, and the fixed
 source boundary (`gateway_contact: personal handshake and capability discovery`,
 `provider_contact: none`).
@@ -134,12 +129,15 @@ the local Profile/instance session, and Gateway capability counts. It keeps
 returned-versus-eligible session coverage explicit and reports pricing as
 unsupported; it does not copy transcript roots or estimate money from tokens.
 It is not the canonical browser dataset: daily totals and metric-specific
-coverage are added only by the separate fail-closed composer. The contract and next migration slice are documented in
+coverage are added only by the separate fail-closed composer. The contract and next slice are documented in
 [`docs/local-usage-dashboard.md`](docs/local-usage-dashboard.md).
 The same state now includes the composed `ceal.local_usage_dashboard.v1`
 production document with an explicit production discriminator, local-calendar
 window, daily covered-subset values, reconciling totals, and metric-specific
-coverage. The existing page has not yet migrated to render this document.
+coverage. The Workbench renders this document as its Usage, Sessions, and Access
+source of truth. Monetary cost remains explicitly unsupported because no
+accepted pricing snapshot exists; the page does not estimate currency from
+tokens.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

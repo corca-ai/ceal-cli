@@ -1,6 +1,6 @@
 # Local Usage Dashboard Production Contract
 
-Status: Codex adapter input and canonical production composition implemented; browser rendering pending
+Status: Codex adapter input, canonical production composition, and browser rendering implemented
 
 ## Capability
 
@@ -11,13 +11,12 @@ cost explicit.
 
 ## Current Slice
 
-`local-usage-dashboard.ts` composes the existing worker-owned
+`local-usage-dashboard.ts` first composes the existing worker-owned
 `ceal.agent_activity.v1` projection into the intermediate
 `ceal.local_usage_dashboard.codex_input.v1` envelope.
 It consumes only structural metadata already allowlisted by `agent-audit.ts`.
-The observer state exposes this input beside the predecessor projections. It is
-not the canonical browser dataset and must not drive period totals or a heatmap
-until the next composer adds window, daily, totals, and metric-specific coverage.
+The observer state exposes this input beside the predecessor projections, but
+the browser never consumes it directly.
 
 `composeCanonicalLocalUsageDashboard` now owns that second boundary. It emits a
 fail-closed production discriminator, half-open local-calendar window and IANA
@@ -25,6 +24,13 @@ timezone, daily covered-subset values, reconciling totals, per-metric coverage,
 comparability groups, identity/access projections, and unsupported pricing.
 The observer exposes the result as `local_usage_dashboard`; consumers reject
 fixture provenance or a missing production discriminator.
+
+The Workbench now renders that canonical dataset through separate Usage,
+Sessions, and Access tabs. Usage switches among Sessions, Agent tool calls,
+Tokens, and Estimated cost without changing evidence semantics. Sessions uses
+twenty-row pagination so a history over one hundred rows does not turn into one
+unbounded scroll. Access renders only the Gateway-owned summary and keeps the
+unowned request workflow disabled.
 
 ## Fixed Decisions
 
@@ -54,10 +60,12 @@ fixture provenance or a missing production discriminator.
   evidence prevents a complete claim, future/out-of-window sessions are omitted,
   and fixture provenance is rejected by the production decoder.
 - `npm run check:unit` remains the repository iteration gate.
+- `browser`: metric switching, unsupported cost, session detail, disabled access
+  request, theme/mode invariance, narrow layout, and 105-session pagination.
 
 ## Next Slice
 
-Render the canonical production dataset in the Workbench and migrate the
-Usage/Sessions composition without deriving unsupported values from the bounded
-session detail subset. Then add a fail-closed local pricing-snapshot decoder; the
-renderer continues to show cost unsupported when no accepted snapshot exists.
+Add a fail-closed local pricing-snapshot decoder. The renderer continues to show
+cost unsupported when no accepted snapshot exists. Then enrich the Access tab
+with the bounded capability catalog already projected by the observer, without
+inventing a resource inventory or access-request workflow.

@@ -523,29 +523,20 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	// the JSON projection.
 	assert.match(html, /Agent hosts/u);
 	assert.match(html, /guide\.hosts/u);
-	assert.match(html, /Recent local Agent sessions/u);
+	assert.match(html, /Sessions observed in the selected local window/u);
 	assert.match(html, /Setup & privacy/u);
 	assert.match(html, /Attention/u);
-	assert.match(html, /Agent activity/u);
-	assert.match(html, /Ceal evidence/u);
-	assert.match(html, /outcomes recorded locally/u);
-	assert.match(html, /not a complete Gateway activity total/u);
-	assert.match(html, /receipt record time, not exact call time/u);
-	assert.match(html, /Activity history and monetary cost contracts are unavailable/u);
-	assert.match(html, /Outcome and capability mix/u);
-	assert.match(html, /newest detailed receipt rows/u);
-	assert.match(html, /Runtime overview/u);
-	assert.match(html, /with token evidence/u);
-	assert.match(html, /Missing values are not zero/u);
-	assert.match(html, /All retained record times supplied by the bounded local spool are counted/u);
-	assert.match(html, /Activity received/u);
-	assert.match(html, /All shown/u);
-	assert.match(html, /365 days/u);
-	assert.match(html, /recordedAt <= generatedAt/u);
-	assert.match(html, /calendarStart\.getDay/u);
+	assert.match(html, /Usage.*Sessions.*Access.*Evidence/su);
+	assert.match(html, /Local runtime evidence/u);
+	assert.match(html, /Each metric keeps its own coverage/u);
+	assert.match(html, /estimated_cost/u);
+	assert.match(html, /Missing evidence is not rendered as zero/u);
+	assert.match(html, /Twenty rows per page/u);
+	assert.match(html, /data-page/u);
+	assert.match(html, /Gateway-observed capability summary/u);
+	assert.match(html, /Request access/u);
+	assert.match(html, /Unavailable in this version/u);
 	assert.match(html, /role='img' aria-label=/u);
-	assert.match(html, /Local receipt activity is unavailable/u);
-	assert.match(html, /Missing activity is not rendered as zero/u);
 	assert.match(html, /aria-label="Visual theme"/u);
 	assert.match(html, /aria-label="Color appearance"/u);
 	assert.match(html, /data-mode="system"/u);
@@ -553,146 +544,11 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /data-mode="dark"/u);
 	assert.match(html, /<dialog id="detail"/u);
 	assert.match(html, /ceal receipt show/u);
-	assert.match(html, /cannot safely name the project/u);
 	assert.doesNotMatch(html, /Ceal caused|Observed Agent cost|\$0/u);
 	assert.doesNotMatch(html, /ceal_personal_|ceal_refresh_/u);
 	const embeddedScript = html.match(/<script>([\s\S]*)<\/script>/u)?.[1];
 	assert.ok(embeddedScript);
 	assert.doesNotThrow(() => new vm.Script(embeddedScript), "the browser-delivered observer script must parse");
-	const overviewSource = embeddedScript.slice(
-		embeddedScript.indexOf("  const localDateKey"),
-		embeddedScript.indexOf("  const usageEntries"),
-	);
-	const renderOverview = (observerState, period = "365") => {
-		const context = {
-			s: observerState,
-			esc: (value) =>
-				String(value).replace(
-					/[&<>"']/gu,
-					(character) =>
-						({
-							"&": "&amp;",
-							"<": "&lt;",
-							">": "&gt;",
-							'"': "&quot;",
-							"'": "&#39;",
-						})[character],
-				),
-			Intl,
-			result: "",
-		};
-		vm.runInNewContext(`${overviewSource}; result = activityOverview(${JSON.stringify(period)});`, context);
-		return context.result;
-	};
-	const renderedOverview = renderOverview(state);
-	assert.match(renderedOverview, /outcomes recorded locally/u);
-	assert.match(renderedOverview, /not a complete Gateway activity total/u);
-	assert.match(renderedOverview, /Activity received 1 retained record-time value;/u);
-	assert.match(renderedOverview, /role='img' aria-label=/u);
-	const mixedDetailState = structuredClone(state);
-	mixedDetailState.receipts = {
-		...mixedDetailState.receipts,
-		entry_count: 25,
-		activity_recorded_at: Array.from({ length: 25 }, (_, index) => `2026-07-23T12:${String(index).padStart(2, "0")}:00.000Z`),
-		entries: [
-			{ recorded_at: "2026-07-23T12:24:00.000Z", status: "completed", capability: "message.search" },
-			{ recorded_at: "2026-07-23T12:23:00.000Z", status: "completed", capability: "message.search" },
-			{ recorded_at: "2026-07-23T12:22:00.000Z", status: "failed", capability: "message.search" },
-			{ recorded_at: "2026-07-23T12:21:00.000Z", status: "failed", capability: "file.read" },
-		],
-	};
-	const mixedDetailOverview = renderOverview(mixedDetailState);
-	assert.match(mixedDetailOverview, /<h2>25 outcomes recorded locally<\/h2>/u);
-	assert.match(mixedDetailOverview, /<h3>completed<\/h3><strong>2<\/strong>/u);
-	assert.match(mixedDetailOverview, /<h3>failed<\/h3><strong>2<\/strong>/u);
-	assert.match(mixedDetailOverview, /message[.]search · 3<br>file[.]read · 1/u);
-	assert.equal((mixedDetailOverview.match(/data-receipt=/gu) ?? []).length, 4);
-	const emptyDetailOverview = renderOverview({
-		...state,
-		receipts: { ...state.receipts, activity_recorded_at: [], entries: [], entry_count: 0 },
-	});
-	assert.match(emptyDetailOverview, /No outcome mix in the visible detail subset/u);
-	assert.doesNotMatch(emptyDetailOverview, /<div class='metric-strip'><\/div>/u);
-	const unreadableOverview = renderOverview({ ...state, receipts: { status: "unreadable", non_claim: state.receipts.non_claim } });
-	assert.match(unreadableOverview, /Local receipt activity is unavailable/u);
-	assert.match(unreadableOverview, /No activity count is inferred/u);
-	assert.match(unreadableOverview, /Retained-entry coverage is unavailable/u);
-	assert.doesNotMatch(unreadableOverview, /<em>0<\/em>/u);
-	assert.doesNotMatch(unreadableOverview, /0 of 0/u);
-	const runtimeSummarySource = embeddedScript.slice(
-		embeddedScript.indexOf("  const runtimeSummary"),
-		embeddedScript.indexOf("  const privacy"),
-	);
-	const renderRuntimeSummary = (agentActivity) => {
-		const context = {
-			activity: agentActivity,
-			esc: (value) => String(value),
-			result: "",
-		};
-		vm.runInNewContext(`${runtimeSummarySource}; result = runtimeSummary;`, context);
-		return context.result;
-	};
-	const renderedRuntimeSummary = renderRuntimeSummary({
-		adapters: [
-			{
-				runtime: "claude",
-				health: "active",
-				coverage: "transcript-observed",
-				sessions: [{ events: { token_usage: { output_tokens: 4 } } }, { events: { event_count: 2 } }, { events: "unreadable" }, {}],
-			},
-		],
-	});
-	assert.match(renderedRuntimeSummary, /4 visible sessions/u);
-	assert.match(renderedRuntimeSummary, /2 with event evidence · 1 with token evidence/u);
-	assert.match(renderedRuntimeSummary, /active · transcript-observed/u);
-	assert.match(renderRuntimeSummary({ status: "unavailable" }), /Runtime overview is unavailable/u);
-	assert.match(renderRuntimeSummary({ status: "unavailable" }), /Missing sessions are not rendered as zero/u);
-	const droppedOverview = renderOverview({
-		...state,
-		receipts: {
-			status: "absent",
-			note: "No call outcome could be spooled.",
-			dropped_appends: 2,
-			dropped_appends_note: "At least 2 receipt appends were lost. This history is incomplete.",
-			non_claim: state.receipts.non_claim,
-		},
-	});
-	assert.match(droppedOverview, /At least 2 receipt appends were lost/u);
-	assert.match(droppedOverview, /not proof of no Gateway activity/u);
-	const futureState = structuredClone(state);
-	futureState.receipts = {
-		...futureState.receipts,
-		status: "spooled",
-		entry_count: 21,
-		activity_recorded_at: [new Date(Date.parse(state.generated_at) + 86_400_000).toISOString()],
-		entries: [
-			{
-				recorded_at: new Date(Date.parse(state.generated_at) + 86_400_000).toISOString(),
-				request_ref: "req_future",
-				status: "failed",
-				evidence: "not_read_back",
-			},
-		],
-	};
-	const futureOverview = renderOverview(futureState);
-	assert.match(futureOverview, /<h2>0 outcomes recorded locally<\/h2>/u);
-	assert.doesNotMatch(futureOverview, /req_future/u);
-	const retainedOverviewState = structuredClone(state);
-	retainedOverviewState.receipts = {
-		...retainedOverviewState.receipts,
-		entry_count: 25,
-		activity_recorded_at: Array.from({ length: 25 }, (_, index) => new Date(Date.parse(state.generated_at) - index * 1_000).toISOString()),
-		entries: Array.from({ length: 20 }, (_, index) => ({
-			recorded_at: new Date(Date.parse(state.generated_at) - index * 1_000).toISOString(),
-			request_ref: `narnia:rendered:${index}:call`,
-			status: "completed",
-			evidence: "readback_verified",
-		})),
-	};
-	const retainedOverview = renderOverview(retainedOverviewState);
-	assert.match(retainedOverview, /<h2>25 outcomes recorded locally<\/h2>/u);
-	assert.match(retainedOverview, /Activity received 25 retained record-time values/u);
-	assert.equal((retainedOverview.match(/data-receipt=/gu) || []).length, 20);
 
 	const drill = await fetch(`${doc.url}api/observer/v1/agent-session/claude/11111111-2222-3333-4444-555555555555`);
 	assert.equal(drill.status, 200);

@@ -5,6 +5,7 @@ const DAY = 86_400_000;
 const statuses = ["completed", "completed", "blocked", "error"];
 const evidence = ["readback_verified", "readback_verified", "not_read_back", "outcome_unknown"];
 const capabilities = ["message.search", "file.read", "calendar.list", "message.send"];
+const codexSessionCount = process.env.CEAL_REVIEW_MANY_SESSIONS === "1" ? 105 : 3;
 const receipts = Array.from({ length: 35 }, (_, index) => ({
 	recordedAt: NOW - (29 - (index % 30)) * DAY - Math.floor(index / 30) * 3_600_000,
 	requestRef: `review:receipt:${String(index).padStart(2, "0")}`,
@@ -21,26 +22,28 @@ const sessions = (runtime, count, offset) =>
 		lastActivityAt: NOW - (index + offset) * DAY,
 		transcriptBytes: 2_048 + index * 512,
 		events:
-			index === count - 1
-				? "unreadable"
-				: {
-						scan: index === count - 2 ? "truncated" : "complete",
-						eventCount: 8 + index,
-						kinds: { user_message: 3, assistant_message: 3, tool_call: 2 },
-						unparsedLines: index === count - 2 ? 1 : 0,
-						firstEventAt: NOW - (index + offset) * DAY - 60_000,
-						lastScannedEventAt: NOW - (index + offset) * DAY,
-						tokenUsage:
-							index % 2 === 0
-								? {
-										source: runtime === "claude" ? "event_usage_sum" : "runtime_cumulative_last",
-										completeness: index === count - 2 ? "scanned_prefix" : "full_transcript",
-										usageEvents: 2,
-										inputTokens: 1_200 + index * 100,
-										outputTokens: 320 + index * 40,
-									}
-								: undefined,
-					},
+			count > 3 && index >= 3
+				? undefined
+				: index === count - 1
+					? "unreadable"
+					: {
+							scan: index === count - 2 ? "truncated" : "complete",
+							eventCount: 8 + index,
+							kinds: { user_message: 3, assistant_message: 3, tool_call: 2 },
+							unparsedLines: index === count - 2 ? 1 : 0,
+							firstEventAt: NOW - (index + offset) * DAY - 60_000,
+							lastScannedEventAt: NOW - (index + offset) * DAY,
+							tokenUsage:
+								index % 2 === 0
+									? {
+											source: runtime === "claude" ? "event_usage_sum" : "runtime_cumulative_last",
+											completeness: index === count - 2 ? "scanned_prefix" : "full_transcript",
+											usageEvents: 2,
+											inputTokens: 1_200 + index * 100,
+											outputTokens: 320 + index * 40,
+										}
+									: undefined,
+						},
 	}));
 
 const server = createCealObserverServer({
@@ -84,9 +87,9 @@ const server = createCealObserverServer({
 							health: "stale",
 							coverage: "transcript-observed",
 							depth: "session_events",
-							sessionCount: 3,
-							sessions: sessions("codex", 3, 10),
-							eventScan: { scannedSessions: 3, sessionLimit: 3 },
+							sessionCount: codexSessionCount,
+							sessions: sessions("codex", codexSessionCount, 10),
+							eventScan: { scannedSessions: Math.min(3, codexSessionCount), sessionLimit: 3 },
 						},
 					],
 					nonClaims: ["Synthetic fixed-vocabulary review evidence; no prompt or transcript content exists in this fixture."],

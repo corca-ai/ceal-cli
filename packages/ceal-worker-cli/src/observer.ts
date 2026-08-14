@@ -789,12 +789,25 @@ const OBSERVER_PAGE = `<!doctype html>
   .outcome-list { margin-top:1rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.6rem; }
   .metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:.55rem; margin:1rem 0; }
   .metric-strip .card strong { font-size:1.3rem; }
+  .identity { display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:1rem 0; border-bottom:1px solid var(--line); }
+  .identity strong, .identity span { display:block; }
+  .metric-tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin-bottom:2rem; }
+  .metric-tabs button { min-width:0; padding:.8rem; text-align:left; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:8px; cursor:pointer; }
+  .metric-tabs button span, .metric-tabs button strong { display:block; }
+  .metric-tabs button span { color:var(--muted); font-size:.72rem; }
+  .metric-tabs button strong { font-size:1.15rem; margin-top:.25rem; overflow-wrap:anywhere; }
+  .metric-tabs button[aria-pressed="true"] { border-color:var(--accent); box-shadow:inset 0 -3px var(--accent); }
+  .session-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem; }
+  .pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin:1.5rem 0; }
+  .pagination button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px; padding:.45rem .7rem; }
+  .pagination button:disabled { opacity:.45; }
+  .hero.compact { padding-bottom:1.4rem; }
   :root[data-theme="editorial"] .hero h2, :root[data-theme="editorial"] .section-head h2 { font-family:Georgia,"Times New Roman",serif; font-weight:400; }
   :root[data-theme="editorial"] { --selected:color-mix(in srgb,var(--warn) 12%,var(--panel)); }
   :root[data-theme="terminal"] body, :root[data-theme="terminal"] .hero h2, :root[data-theme="terminal"] .section-head h2 { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.025em; }
   :root[data-theme="terminal"] .card, :root[data-theme="terminal"] .unsupported, :root[data-theme="terminal"] select, :root[data-theme="terminal"] button { border-radius:2px; }
   :root[data-theme="terminal"] .day { border-radius:1px; }
-  @media (max-width:700px) { .topbar nav { order:3; width:100%; overflow:auto; } .support-grid { grid-template-columns:1fr; } .hero { padding-top:2.2rem; } }
+  @media (max-width:700px) { .topbar nav { order:3; width:100%; overflow:auto; } .support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .hero { padding-top:2.2rem; } }
 </style>
 </head>
 <body>
@@ -813,17 +826,16 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
 const sessionSummary = (events) => {
-  if (events === undefined) return "Select to scan locally observed events";
-  if (events === "unreadable") return "Event evidence unreadable · token evidence unavailable";
-  const token = events.token_usage ? "token evidence present" : "token evidence unavailable";
-  return "Scan " + fmt(events.scan) + " · " + fmt(events.event_count) + " events · " + token;
+  if (events === undefined) return "Event evidence not scanned";
+  if (events === "unreadable") return "Event evidence unreadable";
+  return "Scan " + fmt(events.scan) + " · " + fmt(events.event_count) + " events";
 };
-const VIEWS = ["Overview", "Agent activity", "Ceal evidence", "Setup & privacy"];
+const VIEWS = ["Usage", "Sessions", "Access", "Evidence", "Setup & privacy"];
 const SUGGESTION_DESTINATIONS = {
-  stale_collector: ["Agent activity", "Agent adapter"],
+  stale_collector: ["Evidence", "Agent adapter"],
   missing_cache_opportunity: ["Setup & privacy", "Discovery cache"],
-  repeated_failed_work: ["Ceal evidence", "Recent Ceal calls"],
-  unknown_outcome_receipt: ["Ceal evidence", "Recent Ceal calls"]
+  repeated_failed_work: ["Evidence", "Recent Ceal calls"],
+  unknown_outcome_receipt: ["Evidence", "Recent Ceal calls"]
 };
 fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   const readinessView = "<div class=\\"grid\\">" + [
@@ -894,88 +906,68 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   const setupBody = section("Local readiness", readinessView) + parts.slice(0, 4).join("");
   const cealBody = section("Attention", suggView) + parts.slice(4).join("");
 
-  const localDateKey = (value) => {
-    const date = new Date(value);
-    const pad = (part) => String(part).padStart(2, "0");
-    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+  const dashboard = s.local_usage_dashboard;
+  const metricLabels = { sessions: "Sessions", agent_tool_calls: "Agent tool calls", tokens: "Tokens", estimated_cost: "Estimated cost" };
+  const metricUnits = { sessions: "sessions", agent_tool_calls: "tool-call events", tokens: "tokens", estimated_cost: "estimated cost" };
+  let selectedMetric = "sessions";
+  let sessionPage = 1;
+  const sessionPageSize = 20;
+  const coverageCopy = (metric) => {
+    const coverage = dashboard.metric_coverage[metric];
+    const denominator = coverage.denominator === null ? "unknown eligible population" : coverage.denominator + " eligible sessions";
+    return coverage.observation_state + " · " + coverage.numerator + " observed of " + denominator + " · " + coverage.comparability_group;
   };
-  const periodStart = (days) => {
-    if (days === "all") return null;
-    const start = new Date(s.generated_at);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - Number(days) + 1);
-    return start;
+  const metricValue = (metric) => {
+    const value = dashboard.totals[metric];
+    if (value === null) return "Unavailable";
+    return new Intl.NumberFormat().format(value);
   };
-  const activityOverview = (days) => {
-    const entries = Array.isArray(s.receipts.entries) ? s.receipts.entries : [];
-    const activityTimes = Array.isArray(s.receipts.activity_recorded_at) ? s.receipts.activity_recorded_at : entries.map((entry) => entry.recorded_at);
-    const historyReadable = s.receipts.status === "spooled" || s.receipts.status === "absent";
-    const start = periodStart(days);
-    const generatedAt = new Date(s.generated_at);
-    const filteredTimes = activityTimes.filter((value) => {
-      const recordedAt = new Date(value);
-      return !Number.isNaN(recordedAt.getTime()) && (!start || recordedAt >= start) && recordedAt <= generatedAt;
-    });
-    const counts = new Map();
-    for (const value of filteredTimes) counts.set(localDateKey(value), (counts.get(localDateKey(value)) || 0) + 1);
-    const calendarStart = start || (filteredTimes.length ? new Date(Math.min(...filteredTimes.map((value) => new Date(value).getTime()))) : new Date(s.generated_at));
-    calendarStart.setHours(0, 0, 0, 0);
-    const end = new Date(s.generated_at);
-    end.setHours(0, 0, 0, 0);
-    let cells = "";
-    for (let offset = 0; offset < calendarStart.getDay(); offset += 1) cells += "<span class='day' aria-hidden='true'></span>";
-    for (let date = new Date(calendarStart); date <= end; date.setDate(date.getDate() + 1)) {
-      const key = localDateKey(date);
-      const count = counts.get(key) || 0;
-      const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : 3;
-      const dayLabel = key + " · " + count + " locally recorded outcome" + (count === 1 ? "" : "s");
-      cells += "<span class='day level-" + level + "' title='" + esc(dayLabel) + "' role='img' aria-label='" + esc(dayLabel) + "'></span>";
-    }
-    const periodLabel = days === "all" ? "all shown" : days + " days";
-    const sourceState = s.receipts.status === "spooled" ? "readable retained history" : s.receipts.status;
-    const dropCopy = !historyReadable
-      ? "Drop evidence is unavailable with this source state."
-      : s.receipts.dropped_appends === undefined
-      ? "No known dropped-append count is present; completeness is not implied."
-      : s.receipts.dropped_appends_note;
-    const filteredEntries = entries.filter((entry) => {
-      const recordedAt = new Date(entry.recorded_at);
-      return !Number.isNaN(recordedAt.getTime()) && (!start || recordedAt >= start) && recordedAt <= generatedAt;
-    });
-    const outcomeCards = !historyReadable
-      ? "<div class='unsupported'><strong>Receipt activity could not be read</strong><p>The local receipt source is " + esc(s.receipts.status) + ". No activity count is inferred.</p></div>"
-      : filteredEntries.length
-      ? filteredEntries.map((entry) => "<button class='card attention' data-receipt='" + entries.indexOf(entry) + "'><strong>" + esc(entry.capability || "Ceal outcome") + "</strong><span class='muted'>Recorded " + esc(entry.recorded_at) + " · " + esc(entry.status) + "</span></button>").join("")
-      : "<div class='unsupported'><strong>No locally recorded outcomes in this selected view</strong><p>" + esc(s.receipts.note || "The retained local window has no matching entries.") + "</p><p>This is not proof of no Gateway activity.</p></div>";
-    const calendar = historyReadable
-      ? "<div class='activity-grid' aria-label='Daily locally recorded Ceal outcomes'>" + cells + "</div><div class='legend'><span>Timezone: " + esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + "</span><span>·</span><span>All retained record times supplied by the bounded local spool are counted</span></div>"
-      : "<div class='unsupported'><strong>Daily activity is unavailable</strong><p>The local source could not provide readable receipt history. Missing activity is not rendered as zero.</p></div>";
-    const retainedCoverage = historyReadable
-      ? "Activity received " + activityTimes.length + " retained record-time value" + (activityTimes.length === 1 ? "" : "s") + "; detail shows at most " + entries.length + " of " + esc(String(s.receipts.entry_count ?? entries.length)) + " retained entries."
-      : "Retained-entry coverage is unavailable with this source state.";
-    const outcomeCounts = new Map();
-    const capabilityCounts = new Map();
-    for (const entry of filteredEntries) {
-      outcomeCounts.set(entry.status, (outcomeCounts.get(entry.status) || 0) + 1);
-      const capability = entry.capability || "unlabeled capability";
-      capabilityCounts.set(capability, (capabilityCounts.get(capability) || 0) + 1);
-    }
-    const mixCards = [...outcomeCounts].map(([label, count]) => "<div class='card'><h3>" + esc(label) + "</h3><strong>" + count + "</strong></div>").join("");
-    const mixSummary = mixCards
-      ? "<div class='metric-strip'>" + mixCards + "</div>"
-      : "<div class='unsupported'><strong>No outcome mix in the visible detail subset</strong><p>No detailed receipt row matches this selected period.</p></div>";
-    const capabilitySummary = [...capabilityCounts].map(([label, count]) => esc(label) + " · " + count).join("<br>") || "No capability labels in the visible detail subset.";
-    const liveSummary = s.ceal.status === "connected"
-      ? "<div class='metric-strip'><div class='card'><h3>CEAL</h3><strong>Connected</strong><p class='muted'>Gateway authority · " + esc(s.ceal.observed_at) + "</p></div><div class='card'><h3>PERSONAL SCOPE</h3><strong>" + esc(s.ceal.profile_ref) + "</strong><p class='muted'>Instance " + esc(s.ceal.instance_ref) + "</p></div><div class='card'><h3>CAPABILITIES</h3><strong>" + esc(String(s.ceal.capability_count)) + " available</strong><p class='muted'>" + esc(String(s.ceal.read_capability_count)) + " read · " + esc(String(s.ceal.write_capability_count)) + " write</p></div></div>"
-      : s.ceal.status === "error"
-      ? "<div class='unsupported'><strong>Ceal could not be reached</strong><p>Gateway summary failed: " + esc(s.ceal.error_kind) + ". No live capability count is inferred.</p></div>"
-      : "<div class='unsupported'><strong>Ceal session is unavailable</strong><p>Enroll this client to load a personal Gateway summary. No live capability count is inferred.</p></div>";
-    const contractAvailability = "<div class='support-grid'><div class='card'><h3>AVAILABLE FROM CEAL NOW</h3><strong>Personal scope and capability discovery</strong><p class='muted'>Handshake and discovery only; no provider execution.</p></div><div class='unsupported'><strong>Activity history and monetary cost contracts are unavailable</strong><p>Ceal does not yet expose period call history, work correlation, or monetary observations to this Workbench.</p><p>Missing values are not zero.</p></div></div>";
-    return "<section class='hero'><p class='eyebrow'>CEAL-BACKED PERSONAL WORKBENCH</p><h2>Your Ceal activity, with its <em>evidence boundaries</em>.</h2><p class='hero-summary'>Live personal scope is separated from local runtime and receipt evidence. Cost appears only when Ceal can supply an owned source contract.</p></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>01 · CEAL NOW</p><h2>Personal Gateway summary</h2></div></div>" + liveSummary + contractAvailability + "</section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>02 · LOCAL ACTIVITY</p><h2>" + (historyReadable ? filteredTimes.length + " outcomes recorded locally" : "Local receipt activity is unavailable") + "</h2></div><select id='period' aria-label='Activity period'><option value='30'" + (days === "30" ? " selected" : "") + ">30 days</option><option value='90'" + (days === "90" ? " selected" : "") + ">90 days</option><option value='365'" + (days === "365" ? " selected" : "") + ">365 days</option><option value='all'" + (days === "all" ? " selected" : "") + ">All shown</option></select></div><p class='hero-summary'>" + (historyReadable ? "This is supporting local evidence, not the complete Gateway period total. Timestamp: receipt record time, not exact call time." : "No activity count is inferred.") + "</p>" + calendar + "</section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>03 · EVIDENCE</p><h2>What is known about local activity</h2></div></div><div class='support-grid'><div class='card'><h3>LOCAL COVERAGE</h3><strong>" + esc(sourceState) + "</strong><p class='muted'>" + retainedCoverage + "</p><p class='muted'>" + esc(dropCopy || "History may be incomplete.") + "</p><p class='muted'>" + esc(s.receipts.non_claim) + "</p></div><div class='card'><h3>LOCAL ACTIVITY BASIS</h3><strong>Receipt record timestamps</strong><p class='muted'>Selected retained evidence only; not a complete Gateway activity total.</p></div></div></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>04 · VISIBLE DETAIL</p><h2>Outcome and capability mix</h2></div></div><p class='muted'>These summaries use only the newest detailed receipt rows from local evidence in the selected period, not the full activity projection.</p>" + mixSummary + "<div class='card'><h3>CAPABILITIES IN VISIBLE DETAIL</h3><p>" + capabilitySummary + "</p></div><div class='outcome-list'>" + outcomeCards + "</div></section>";
+  const usageOverview = () => {
+    const metric = selectedMetric;
+    const coverage = dashboard.metric_coverage[metric];
+    const max = Math.max(1, ...dashboard.daily.map((day) => day[metric] ?? 0));
+    const cells = dashboard.daily.map((day) => {
+      const value = day[metric];
+      const level = value === null || value === 0 ? 0 : value / max < .34 ? 1 : value / max < .67 ? 2 : 3;
+      const label = day.date + " · " + (value === null ? "unavailable" : value + " " + metricUnits[metric]);
+      return "<span class='day level-" + level + "' title='" + esc(label) + "' role='img' aria-label='" + esc(label) + "'></span>";
+    }).join("");
+    const identity = dashboard.identity.state === "available"
+      ? "<div class='identity'><div><p class='eyebrow'>LOCAL PROFILE</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>Instance " + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>Local profile</span></div>"
+      : "<div class='unsupported'><strong>Local Profile unavailable</strong><p>No identity is inferred.</p></div>";
+    const axes = Object.keys(metricLabels).map((key) => "<button type='button' data-metric='" + key + "' aria-pressed='" + String(key === metric) + "'><span>" + esc(metricLabels[key]) + "</span><strong>" + esc(metricValue(key)) + "</strong></button>").join("");
+    const availability = coverage.observation_state === "unsupported" || coverage.observation_state === "unavailable" || coverage.observation_state === "unreadable"
+      ? "<div class='unsupported'><strong>" + esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "</strong><p>Missing evidence is not rendered as zero.</p></div>"
+      : "<div class='activity-grid' aria-label='Daily " + esc(metricLabels[metric]) + "'>" + cells + "</div>";
+    const headline = dashboard.totals[metric] === null
+      ? esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "."
+      : "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnits[metric]) + " observed.";
+    return identity
+      + "<section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Each metric keeps its own coverage; missing values are never treated as zero.</p></section>"
+      + "<div class='metric-tabs' role='group' aria-label='Usage metric'>" + axes + "</div>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + suggView + "</section>";
+  };
+  const sessionsView = () => {
+    const total = dashboard.sessions.length;
+    const coverage = dashboard.session_detail_coverage;
+    const pageCount = Math.max(1, Math.ceil(total / sessionPageSize));
+    sessionPage = Math.min(sessionPage, pageCount);
+    const start = (sessionPage - 1) * sessionPageSize;
+    const visible = dashboard.sessions.slice(start, start + sessionPageSize);
+    const cards = visible.length ? visible.map((entry) => "<button class='card attention canonical-session' data-session-ref='" + esc(entry.session_ref) + "'><strong>" + esc(entry.runtime) + " session</strong><span>" + esc(entry.last_activity_at) + "</span><p class='muted'>" + (entry.agent_tool_calls === null ? "Tool calls unavailable" : entry.agent_tool_calls + " tool calls") + " · " + (entry.tokens === null ? "Tokens unavailable" : new Intl.NumberFormat().format(entry.tokens) + " tokens") + "</p></button>").join("") : coverage.observation_state === "observed_empty" ? "<div class='unsupported'><strong>No sessions observed in the selected window</strong><p>The bounded source was readable and observed empty.</p></div>" : "<div class='unsupported'><strong>Session inventory is " + esc(coverage.observation_state) + "</strong><p>No zero-session claim is made.</p></div>";
+    const population = coverage.eligible === null ? total + " returned sessions; eligible total unknown" : total + " of " + coverage.eligible + " eligible sessions returned";
+    const pagination = pageCount > 1 ? "<div class='pagination' aria-label='Session pages'><button type='button' data-page='" + (sessionPage - 1) + "'" + (sessionPage === 1 ? " disabled" : "") + ">Previous</button><span role='status' aria-live='polite'>Page " + sessionPage + " of " + pageCount + " · " + population + "</span><button type='button' data-page='" + (sessionPage + 1) + "'" + (sessionPage === pageCount ? " disabled" : "") + ">Next</button></div>" : "<p class='evidence-line' role='status'>" + population + " · " + esc(coverageCopy("sessions")) + "</p>";
+    const title = coverage.observation_state === "complete" || coverage.observation_state === "observed_empty" ? "Sessions observed in the selected local window." : "Returned sessions from " + coverage.observation_state + " local evidence.";
+    return "<section class='hero compact'><p class='eyebrow'>SESSIONS</p><h2>" + esc(title) + "</h2><p class='hero-summary'>Twenty rows per page keeps the returned list usable when local history grows beyond one hundred sessions.</p></section><div class='session-list'>" + cards + "</div>" + pagination;
+  };
+  const accessView = () => {
+    const access = dashboard.access;
+    const summary = access.observation_state === "available"
+      ? "<div class='metric-strip'><div class='card'><h3>AVAILABLE CAPABILITIES</h3><strong>" + access.capability_count + "</strong></div><div class='card'><h3>READ</h3><strong>" + access.read_capability_count + "</strong></div><div class='card'><h3>WRITE</h3><strong>" + access.write_capability_count + "</strong></div></div><p class='evidence-line'>Gateway authority · observed " + esc(access.observed_at) + "</p>"
+      : "<div class='unsupported'><strong>Capability access unavailable</strong><p>No access count is inferred.</p></div>";
+    const accessTitle = dashboard.identity.state === "available" ? "Gateway-observed access for this local Profile." : "Gateway-observed capability summary.";
+    return "<section class='hero compact'><p class='eyebrow'>ACCESS</p><h2>" + accessTitle + "</h2><p class='hero-summary'>Gateway authority is independent from local Profile observation. Resource search and access requests are not implemented yet.</p></section>" + summary + "<div class='unsupported'><strong>Need access to something else?</strong><p>The request workflow and discoverable resource catalog still need an Admin-owned contract.</p><button type='button' disabled aria-describedby='access-reason'>Request access</button><span id='access-reason' class='muted'> Unavailable in this version</span></div>";
   };
 
   const usageEntries = [];
@@ -1012,7 +1004,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   privacyView += list(s.non_claims, "warn");
   const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "Overview": activityOverview("365"), "Agent activity": section("Runtime overview", runtimeSummary) + workBody + section("Runtime-partitioned token evidence", usageBody), "Ceal evidence": cealBody, "Setup & privacy": privacyBody };
+  const bodies = { "Evidence": cealBody, "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");
@@ -1030,11 +1022,14 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     if (detailOrigin && document.contains(detailOrigin)) detailOrigin.focus();
     else document.querySelector("h1").focus();
   });
-  const show = (view) => {
-    root.innerHTML = bodies[view];
+  let currentView = VIEWS[0];
+  const show = (view, focusSelector) => {
+    currentView = view;
+    root.innerHTML = view === "Usage" ? usageOverview() : view === "Sessions" ? sessionsView() : view === "Access" ? accessView() : bodies[view];
     for (const button of nav.querySelectorAll("button")) {
       button.setAttribute("aria-current", String(button.textContent === view));
     }
+    if (focusSelector) root.querySelector(focusSelector)?.focus();
   };
   for (const view of VIEWS) {
     const button = document.createElement("button");
@@ -1045,6 +1040,27 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   // Per-session drill-down: an explicit owner click fetches the bounded scan
   // for one listed session; a view switch discards the result (no local copy).
   root.addEventListener("click", (event) => {
+    const metricButton = event.target.closest ? event.target.closest("button[data-metric]") : null;
+    if (metricButton) {
+      selectedMetric = metricButton.dataset.metric;
+      show("Usage", "button[data-metric='" + selectedMetric + "']");
+      return;
+    }
+    const pageButton = event.target.closest ? event.target.closest("button[data-page]") : null;
+    if (pageButton && !pageButton.disabled) {
+      const direction = pageButton.textContent;
+      sessionPage = Number(pageButton.dataset.page);
+      const lastPage = Math.max(1, Math.ceil(dashboard.sessions.length / sessionPageSize));
+      const focusSelector = direction === "Previous" || sessionPage === lastPage ? ".pagination button:first-child" : ".pagination button:last-child";
+      show("Sessions", focusSelector);
+      return;
+    }
+    const canonicalSession = event.target.closest ? event.target.closest("button[data-session-ref]") : null;
+    if (canonicalSession) {
+      const entry = dashboard.sessions.find((candidate) => candidate.session_ref === canonicalSession.dataset.sessionRef);
+      if (entry) openDetail(canonicalSession, "Agent session evidence", rows(Object.entries(entry)) + "<p class='warn'>Local structural evidence only; no prompt or transcript content is rendered.</p>");
+      return;
+    }
     const attention = event.target.closest ? event.target.closest("button[data-attention]") : null;
     if (attention) {
       const entry = sugg.entries[Number(attention.dataset.attention)];
@@ -1094,12 +1110,6 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
         sessionButton.removeAttribute("aria-busy");
         openDetail(sessionButton, "Session evidence unavailable", "<p>The bounded local scan could not read this session.</p>");
       });
-  });
-  root.addEventListener("change", (event) => {
-    if (event.target && event.target.id === "period") {
-      bodies.Overview = activityOverview(event.target.value);
-      show("Overview");
-    }
   });
   document.getElementById("theme").addEventListener("change", (event) => {
     document.documentElement.dataset.theme = event.target.value;

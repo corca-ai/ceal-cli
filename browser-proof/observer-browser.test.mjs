@@ -39,19 +39,20 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
 	assert.deepEqual(pageErrors, []);
-	assert.equal(await page.locator("#root .hero h2").textContent(), "Your Ceal activity, with its evidence boundaries.");
-	await page.getByText("Ceal session is unavailable").waitFor();
-	await page.getByText(/supporting local evidence/u).waitFor();
-	await page.getByText("No locally recorded outcomes in this selected view").waitFor();
-	await page.getByText("Activity history and monetary cost contracts are unavailable").waitFor();
+	assert.equal(await page.locator("#root .hero h2").textContent(), "0 sessions observed.");
+	await page.getByText("Local Profile unavailable").waitFor();
+	await page.getByText(/Local runtime evidence/u).waitFor();
+	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
+	await page.getByRole("heading", { name: "Estimated cost is unsupported." }).waitFor();
+	assert.equal(await page.locator("button[data-metric='estimated_cost']").evaluate((element) => element === document.activeElement), true);
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "developer");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), null);
 
-	await page.getByRole("button", { name: "Agent activity" }).click();
-	await page.getByText("Runtime overview").waitFor();
-	assert.equal(await page.getByText("0 visible sessions").count(), 2);
-	await page.getByText("No token evidence in the bounded session view").waitFor();
-	await page.getByRole("button", { name: "Overview" }).click();
+	await page.getByRole("button", { name: "Sessions", exact: true }).click();
+	await page.getByText("No sessions observed in the selected window").waitFor();
+	await page.getByRole("button", { name: "Access", exact: true }).click();
+	await page.getByText("Capability access unavailable").waitFor();
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
 
 	await page.locator("#theme").selectOption("terminal");
 	await page.getByRole("button", { name: "Dark" }).click();
@@ -87,36 +88,28 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
-	assert.equal(await page.locator("#root .hero h2").textContent(), "Your Ceal activity, with its evidence boundaries.");
-	await page.getByText("profile:review-personal").waitFor();
-	await page.getByText("9 available").waitFor();
-	await page.getByText("6 read · 3 write").waitFor();
-	await page.getByText("35 outcomes recorded locally").waitFor();
-	assert.equal(await page.locator("button[data-receipt]").count(), 20);
-	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 365);
-	await page.getByText("At least this many receipt appends were lost").waitFor();
-	const evidenceTop = await page.getByText("Activity history and monetary cost contracts are unavailable").boundingBox();
-	const firstDetailTop = await page.locator("button[data-receipt]").first().boundingBox();
-	assert.ok(evidenceTop && firstDetailTop && evidenceTop.y < firstDetailTop.y);
-	await page.locator("#period").selectOption("30");
-	await page.getByText("35 outcomes recorded locally").waitFor();
-	assert.equal(await page.locator("button[data-receipt]").count(), 20);
-	const firstReceipt = page.locator("button[data-receipt]").first();
-	await firstReceipt.focus();
+	assert.equal(await page.locator("#root .hero h2").textContent(), "3 sessions observed.");
+	await page.getByText("Local Profile unavailable").waitFor();
+	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 3);
+	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
+	await page.getByRole("heading", { name: "Estimated cost is unsupported." }).waitFor();
+	await page.getByRole("button", { name: /Tokens/u }).click();
+	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
+
+	await page.getByRole("button", { name: "Sessions", exact: true }).click();
+	assert.equal(await page.locator("button[data-session-ref]").count(), 3);
+	const firstSession = page.locator("button[data-session-ref]").first();
+	await firstSession.focus();
 	await page.keyboard.press("Enter");
 	await page.getByRole("dialog").waitFor();
-	await page.getByText("Ceal call evidence").waitFor();
+	await page.getByText("Agent session evidence").waitFor();
 	await page.keyboard.press("Escape");
-	await firstReceipt.waitFor();
-	assert.equal(await firstReceipt.evaluate((element) => element === document.activeElement), true);
-
-	await page.getByRole("button", { name: "Agent activity" }).click();
-	await page.getByText("4 visible sessions").waitFor();
-	await page.getByText("3 visible sessions").waitFor();
-	await page.getByText("3 with event evidence · 2 with token evidence").waitFor();
-	await page.getByText("2 with event evidence · 1 with token evidence").waitFor();
-	assert.equal(await page.getByText(/partial inventory/u).count(), 2);
-	assert.equal(await page.getByText(/Token accounting from different runtimes/u).count(), 1);
+	await firstSession.waitFor();
+	assert.equal(await firstSession.evaluate((element) => element === document.activeElement), true);
+	await page.getByRole("button", { name: "Access", exact: true }).click();
+	await page.getByText("9", { exact: true }).first().waitFor();
+	await page.getByText("Request access").waitFor();
+	assert.equal(await page.getByRole("button", { name: "Request access" }).isDisabled(), true);
 
 	for (const theme of ["developer", "editorial", "terminal"]) {
 		await page.locator("#theme").selectOption(theme);
@@ -124,14 +117,12 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 			await page.getByRole("button", { name: mode }).click();
 			assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
 			assert.equal(await page.locator("html").getAttribute("data-mode"), mode === "Auto" ? null : mode.toLowerCase());
-			await page.getByText(/Token accounting from different runtimes/u).waitFor();
-			assert.equal(await page.getByText("4 visible sessions").count(), 1);
+			await page.getByText("Gateway-observed capability summary.").waitFor();
 		}
 	}
-	await page.getByRole("button", { name: "Overview" }).focus();
+	await page.getByRole("button", { name: "Usage", exact: true }).focus();
 	await page.keyboard.press("Enter");
-	await page.getByText("35 outcomes recorded locally").waitFor();
-	await page.getByText("Activity history and monetary cost contracts are unavailable").waitFor();
+	await page.getByText(/tokens observed[.]/u).waitFor();
 	await page.setViewportSize({ width: 390, height: 844 });
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "terminal");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), "dark");
@@ -158,10 +149,45 @@ test("the browser distinguishes unavailable Agent inventory from zero sessions",
 	context.after(() => browser.close());
 	const page = await browser.newPage();
 	await page.goto(url);
-	await page.getByRole("button", { name: "Agent activity" }).click();
-	await page.getByText("Runtime overview is unavailable").waitFor();
-	await page.getByText("Missing sessions are not rendered as zero").waitFor();
-	assert.equal(await page.getByText(/visible sessions/u).count(), 0);
+	await page.getByRole("heading", { name: "Sessions is unavailable." }).waitFor();
+	await page.getByText("Missing evidence is not rendered as zero").waitFor();
+	await page.getByRole("button", { name: "Sessions", exact: true }).click();
+	await page.getByText("Session inventory is unavailable").waitFor();
+	await page.getByText("No zero-session claim is made.").waitFor();
+});
+
+test("more than one hundred sessions use bounded pagination", { timeout: 20_000 }, async (context) => {
+	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			TMPDIR: process.env.TMPDIR ?? tmpdir(),
+			LANG: "C.UTF-8",
+			CEAL_REVIEW_MANY_SESSIONS: "1",
+		},
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	context.after(async () => {
+		if (server.exitCode === null && server.signalCode === null) {
+			server.kill("SIGTERM");
+			await once(server, "exit");
+		}
+	});
+	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
+	context.after(() => browser.close());
+	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+	await page.goto(await observerUrl(server));
+	await page.getByRole("button", { name: "Sessions", exact: true }).click();
+	await page.getByText("Page 1 of 6 · 105 of 105 eligible sessions returned").waitFor();
+	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
+	await page.getByRole("button", { name: "Next" }).click();
+	await page.getByText("Page 2 of 6 · 105 of 105 eligible sessions returned").waitFor();
+	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
+	assert.equal(await page.getByRole("button", { name: "Next" }).evaluate((element) => element === document.activeElement), true);
+	for (let pageNumber = 3; pageNumber <= 6; pageNumber += 1) await page.getByRole("button", { name: "Next" }).click();
+	await page.getByText("Page 6 of 6 · 105 of 105 eligible sessions returned").waitFor();
+	assert.equal(await page.locator("button[data-session-ref]").count(), 5);
+	assert.equal(await page.getByRole("button", { name: "Next" }).isDisabled(), true);
+	assert.equal(await page.getByRole("button", { name: "Previous" }).evaluate((element) => element === document.activeElement), true);
 });
 
 function isLoopbackGet(request) {
