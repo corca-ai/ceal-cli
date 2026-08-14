@@ -135,9 +135,10 @@ The same state now includes the composed `ceal.local_usage_dashboard.v1`
 production document with an explicit production discriminator, local-calendar
 window, daily covered-subset values, reconciling totals, and metric-specific
 coverage. The Workbench renders this document as its Usage, Sessions, and Access
-source of truth. Monetary cost remains explicitly unsupported because no
-accepted pricing snapshot exists; the page does not estimate currency from
-tokens.
+source of truth. A strict local pricing-snapshot seam is accepted, but the
+observer does not yet load a production snapshot and local token observations
+do not carry a privacy-safe model identity. Monetary cost therefore remains
+explicitly unsupported; the page does not estimate currency from tokens.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

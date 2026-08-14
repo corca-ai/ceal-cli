@@ -163,6 +163,63 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 	assert.equal(JSON.stringify(dataset).includes("private"), false);
 });
 
+test("accepts a strict pricing snapshot but keeps cost unsupported without local model identity", () => {
+	const snapshot = {
+		schema_version: "ceal.local_pricing_snapshot.v1",
+		snapshot_ref: "pricing:codex:2026-08-14",
+		revision: "pricing-rev-1",
+		observed_at: "2026-08-14T00:00:00.000Z",
+		currency: "USD",
+		rates: [
+			{
+				model_key: "gpt-5",
+				input_per_million: "1.25",
+				output_per_million: "10",
+				cache_read_per_million: "0.125",
+				cache_write_per_million: "0",
+			},
+		],
+	};
+	const adapter = composeCodexDashboardAdapterInput({
+		generatedAt: GENERATED_AT,
+		agentActivity: { schemaVersion: "ceal.agent_activity.v1", adapters: [], nonClaims: [] },
+	});
+	const composeWithPricing = (pricingSnapshot) =>
+		composeCanonicalLocalUsageDashboard({
+			adapter,
+			timezone: "UTC",
+			window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+			pricingSnapshot,
+		});
+	for (const invalid of [
+		{ ...snapshot, currency: "usd" },
+		{ ...snapshot, currency: "ZZZZ" },
+		{ ...snapshot, observed_at: "2026-08-14" },
+		{ ...snapshot, snapshot_ref: "AKIAIOSFODNN7EXAMPLE" },
+		{ ...snapshot, revision: "credential-shaped-value" },
+		{ ...snapshot, rates: [{ ...snapshot.rates[0], input_per_million: -1 }] },
+		{ ...snapshot, rates: [snapshot.rates[0], snapshot.rates[0]] },
+		{ ...snapshot, credential: "secret" },
+		{ ...snapshot, snapshot_ref: "/Users/private/pricing.json" },
+	])
+		assert.deepEqual(composeWithPricing(invalid).pricing, {
+			observation_state: "unsupported",
+			authority: "unknown",
+			reason: "pricing_snapshot_unavailable",
+		});
+	const dataset = composeWithPricing(snapshot);
+	assert.deepEqual(dataset.pricing, {
+		observation_state: "unsupported",
+		authority: "local_pricing_snapshot",
+		reason: "model_identity_unavailable",
+		currency: "USD",
+	});
+	assert.equal(JSON.stringify(dataset).includes(snapshot.snapshot_ref), false);
+	assert.equal(JSON.stringify(dataset).includes(snapshot.revision), false);
+	assert.equal(dataset.totals.estimated_cost, null);
+	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
+});
+
 test("canonical window uses local calendar dates and excludes future or out-of-window sessions", () => {
 	assert.deepEqual(defaultLocalUsageWindow(Date.parse("2026-08-14T23:30:00Z"), "Asia/Seoul"), {
 		startDate: "2025-08-16",

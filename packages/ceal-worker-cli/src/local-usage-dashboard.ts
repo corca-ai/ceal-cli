@@ -94,7 +94,14 @@ export interface CealLocalUsageDashboardV1 {
 		comparability_group: "codex:runtime_cumulative_last:v1";
 	}>;
 	session_detail_coverage: { returned: number; eligible: number | null; observation_state: LocalUsageObservationState };
-	pricing: { observation_state: "unsupported"; authority: "unknown" };
+	pricing:
+		| { observation_state: "unsupported"; authority: "unknown"; reason: "pricing_snapshot_unavailable" }
+		| {
+				observation_state: "unsupported";
+				authority: "local_pricing_snapshot";
+				reason: "model_identity_unavailable";
+				currency: string;
+		  };
 	access: {
 		observation_state: "available" | "unavailable";
 		authority: "gateway";
@@ -128,6 +135,22 @@ export interface ComposeCanonicalDashboardInput {
 	adapter: CealCodexDashboardAdapterInputV1;
 	timezone: string;
 	window: { startDate: string; endDate: string };
+	pricingSnapshot?: unknown;
+}
+
+interface CealLocalPricingSnapshotV1 {
+	schema_version: "ceal.local_pricing_snapshot.v1";
+	snapshot_ref: string;
+	revision: string;
+	observed_at: string;
+	currency: string;
+	rates: Array<{
+		model_key: string;
+		input_per_million: string;
+		output_per_million: string;
+		cache_read_per_million: string;
+		cache_write_per_million: string;
+	}>;
 }
 
 const COST_NON_CLAIM = "Monetary cost is unsupported until a versioned pricing snapshot contract is accepted; missing cost is not zero.";
@@ -204,6 +227,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const toolValues = sessions.filter((session) => session.eventEvidence === "complete").length;
 	const tokenValues = sessions.filter((session) => sessionTokenTotal(session) !== null).length;
 	const effectiveWindow = { start_date: input.window.startDate, end_date: input.window.endDate };
+	const pricingSnapshot = decodeLocalPricingSnapshot(input.pricingSnapshot);
 	return {
 		schema_version: "ceal.local_usage_dashboard.v1",
 		fixture_only: false,
@@ -257,7 +281,14 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			comparability_group: "codex:runtime_cumulative_last:v1",
 		})),
 		session_detail_coverage: { returned: sessions.length, eligible, observation_state: sessionState },
-		pricing: { observation_state: "unsupported", authority: "unknown" },
+		pricing: pricingSnapshot
+			? {
+					observation_state: "unsupported",
+					authority: "local_pricing_snapshot",
+					reason: "model_identity_unavailable",
+					currency: pricingSnapshot.currency,
+				}
+			: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" },
 		access:
 			input.adapter.access.state === "available"
 				? {
@@ -272,6 +303,40 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 		suggestions: [],
 		non_claims: [...input.adapter.nonClaims],
 	};
+}
+
+function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnapshotV1 | null {
+	if (
+		!isRecord(value) ||
+		!hasExactKeys(value, ["schema_version", "snapshot_ref", "revision", "observed_at", "currency", "rates"]) ||
+		value.schema_version !== "ceal.local_pricing_snapshot.v1" ||
+		typeof value.snapshot_ref !== "string" ||
+		!/^pricing:[A-Za-z0-9._:-]{1,120}$/u.test(value.snapshot_ref) ||
+		typeof value.revision !== "string" ||
+		!/^pricing-rev-[A-Za-z0-9._:-]{1,112}$/u.test(value.revision) ||
+		typeof value.observed_at !== "string" ||
+		!validCanonicalInstant(value.observed_at) ||
+		typeof value.currency !== "string" ||
+		!/^[A-Z]{3}$/u.test(value.currency) ||
+		!Array.isArray(value.rates) ||
+		value.rates.length === 0 ||
+		value.rates.length > 256
+	)
+		return null;
+	const seen = new Set<string>();
+	for (const rate of value.rates) {
+		if (
+			!isRecord(rate) ||
+			!hasExactKeys(rate, ["model_key", "input_per_million", "output_per_million", "cache_read_per_million", "cache_write_per_million"]) ||
+			typeof rate.model_key !== "string" ||
+			!CEAL_SAFE_REF.test(rate.model_key) ||
+			seen.has(rate.model_key) ||
+			![rate.input_per_million, rate.output_per_million, rate.cache_read_per_million, rate.cache_write_per_million].every(validDecimalRate)
+		)
+			return null;
+		seen.add(rate.model_key);
+	}
+	return JSON.parse(JSON.stringify(value)) as CealLocalPricingSnapshotV1;
 }
 
 export function decodeProductionLocalUsageDashboard(value: unknown): CealLocalUsageDashboardV1 | null {
@@ -540,11 +605,15 @@ function validSessionDetailCoverage(value: unknown): boolean {
 }
 
 function validPricing(value: unknown): boolean {
+	if (!isRecord(value) || value.observation_state !== "unsupported") return false;
+	if (value.authority === "unknown")
+		return hasExactKeys(value, ["observation_state", "authority", "reason"]) && value.reason === "pricing_snapshot_unavailable";
 	return (
-		isRecord(value) &&
-		hasExactKeys(value, ["observation_state", "authority"]) &&
-		value.observation_state === "unsupported" &&
-		value.authority === "unknown"
+		value.authority === "local_pricing_snapshot" &&
+		hasExactKeys(value, ["observation_state", "authority", "reason", "currency"]) &&
+		value.reason === "model_identity_unavailable" &&
+		typeof value.currency === "string" &&
+		/^[A-Z]{3}$/u.test(value.currency)
 	);
 }
 
@@ -579,6 +648,16 @@ function nonNegativeInteger(value: unknown): value is number {
 
 function metricNumber(value: unknown): boolean {
 	return value === null || nonNegativeInteger(value);
+}
+
+function validDecimalRate(value: unknown): boolean {
+	return typeof value === "string" && /^(?:0|[1-9][0-9]{0,5})(?:[.][0-9]{1,9})?$/u.test(value);
+}
+
+function validCanonicalInstant(value: string): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.]\d{3}Z$/u.test(value)) return false;
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
 function looksLikeAbsolutePath(value: string): boolean {

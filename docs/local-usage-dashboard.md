@@ -43,7 +43,17 @@ unowned request workflow disabled.
 - Inventory state is named separately from per-session event and token evidence;
   a complete inventory never implies complete tool-call or token coverage.
 - Returned session details and eligible inventory counts remain separate.
-- Cost is `unsupported` until an accepted versioned pricing snapshot exists;
+- A local pricing snapshot is accepted only through the strict
+  `ceal.local_pricing_snapshot.v1` decoder: namespaced snapshot/revision refs,
+  one canonical UTC ISO instant, a three-letter uppercase currency-shaped code,
+  unique model keys, and bounded decimal-string per-million token-category
+  rates. Unknown keys, paths, unnamespaced refs, duplicate models, and
+  non-decimal rates fail closed. A real monetary source must further constrain
+  supported currencies and arithmetic before any estimate is enabled.
+- Snapshot and revision references remain producer-private and are not projected
+  into the browser dataset while monetary derivation is unsupported.
+- Cost remains `unsupported` even with a valid snapshot until the runtime
+  supplies a privacy-safe model identity for each priced token observation;
   missing cost is never zero.
 - Runtime transcript content, prompts, tool arguments, credentials, raw provider
   payloads, and absolute paths remain outside the dataset.
@@ -65,7 +75,8 @@ unowned request workflow disabled.
 
 ## Next Slice
 
-Add a fail-closed local pricing-snapshot decoder. The renderer continues to show
-cost unsupported when no accepted snapshot exists. Then enrich the Access tab
-with the bounded capability catalog already projected by the observer, without
-inventing a resource inventory or access-request workflow.
+Probe a privacy-safe Codex model-identity observation. Until one exists, a valid
+pricing snapshot is reported with `model_identity_unavailable` and no currency
+amount is derived. Then enrich the Access tab with the bounded capability
+catalog already projected by the observer, without inventing a resource
+inventory or access-request workflow.
