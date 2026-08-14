@@ -491,6 +491,23 @@ Both skip loudly rather than failing when their tool is absent. A gate that
 no-ops silently while counted as part of the gate is the failure being avoided;
 saying "skipped, and here is what went unchecked" is not.
 
+## The Docs Graph Gate, And Why It Is Standalone
+
+`npm run lint:docs-graph` is `awiki lint -root docs`. It fails on three things:
+a doc no resolved link reaches (orphan), a cluster of docs that link only to
+each other (island), and a line holding nothing but a link, which gives a `rg`
+hit no local context. The `-root docs` scope is deliberate — `charness-artifacts/`
+is session evidence, not a wiki, and its records are reached from these docs
+rather than from each other.
+
+It is neither in `npm run check` nor in the hook. `awiki` is a `cargo`-installed
+binary that GitHub runners do not have, which is the same reason `lint:shell`
+and the duplicate ratchet stay out of `check`; unlike those two it has no
+loud-skip wrapper, so putting it in the hook would fail a push on a machine that
+simply never installed it. A maintainer runs it after editing `docs/`. The
+sibling `corca-ai/ceal` repository carries the same script under the same name
+for the same reason.
+
 ## `knip`, And What Its Zero Means
 
 `npm run lint:unused` is `knip`, configured by `knip.json`, and it runs inside

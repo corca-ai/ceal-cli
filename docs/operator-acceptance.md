@@ -11,6 +11,11 @@ lane**, a different operator on a different machine. `AGENTS.md` declares this
 checkout's lane directly; every step below that says "the Gateway lane" means a
 request to that operator, not a command you can run here.
 
+This file says what a maintainer can prove and with which access. The reasons
+behind the gates those proofs run through are in [gates.md](gates.md): which
+lint rules are off on purpose, and which gates live in the pre-push hook rather
+than in `npm run check`.
+
 Re-verify rather than quote. Every fact below was read from the repository or
 from GitHub on 2026-07-27 and each one carries the command that re-reads it. A
 figure copied out of this file into a claim is exactly the failure this file

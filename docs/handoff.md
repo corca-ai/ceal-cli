@@ -2,8 +2,8 @@
 
 ## Workflow Trigger
 
-Continue only the worker lane in the sibling
-[release execution plan](../../ceal/docs/next-release-execution-plan.md#corca-aiceal-cli--worker-lane).
+Continue only the worker lane in the sibling repository's release execution
+plan: [`corca-ai/ceal-cli` — worker lane](../../ceal/docs/next-release-execution-plan.md#corca-aiceal-cli--worker-lane).
 The older roadmap ledger is stale against the 2026-08-12 reframe. Do not redo
 the Worker shutdown, conditional PATH, read-only discovery, or invariant guide-method
 repairs. Push, tag, release, publication, Gateway selection, and apply remain
@@ -159,9 +159,19 @@ separately approved boundaries.
 
 ## References
 
-- [update and embedded-guide independence closeout](../charness-artifacts/impl/2026-08-12-update-guide-independence.md)
-- [target-selection ambiguity closeout](../charness-artifacts/impl/2026-08-12-target-selection-ambiguity.md)
-- [pre-handoff Worker contract](../charness-artifacts/spec/2026-08-11-pre-handoff-worker-closeout.md)
-- [Protocol quarantine](protocol-quarantine.md)
-- [current cross-repo release execution plan](../../ceal/docs/next-release-execution-plan.md)
-- [release and enrollment procedure](release-and-enrollment.md)
+- See the [update and embedded-guide independence closeout](../charness-artifacts/impl/2026-08-12-update-guide-independence.md)
+  for why `ceal update` moves only the signed worker generation and leaves guide
+  registration to an explicit follow-up command.
+- See the [target-selection ambiguity closeout](../charness-artifacts/impl/2026-08-12-target-selection-ambiguity.md)
+  for why `capabilities targets --match` is a capability-specific selector, and
+  what a zero-count match may not conclude.
+- See the [pre-handoff Worker contract](../charness-artifacts/spec/2026-08-11-pre-handoff-worker-closeout.md)
+  for the scope of every `ceal-cli`-owned task that does not need the Gateway's
+  final signed Protocol handoff.
+- See [Protocol quarantine](protocol-quarantine.md) for why the vendored
+  `packages/ceal-protocol` copy is a reviewed development baseline and not a
+  release input.
+- See the [cross-repo release execution plan](../../ceal/docs/next-release-execution-plan.md)
+  for who does what, in which repository, and in what order.
+- See [release and enrollment](release-and-enrollment.md) for the standing
+  procedures this baton deliberately does not restate each session.

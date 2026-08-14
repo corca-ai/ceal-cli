@@ -33,6 +33,7 @@
 		"probe": "node scripts/probe-surface.mjs",
 		"check:duplication": "node scripts/check-dup-ratchet.mjs",
 		"lint:shell": "node scripts/lint-shell.mjs",
+		"lint:docs-graph": "awiki lint -root docs",
 		"lint:unused": "knip",
 		"preaccept:worker": "npm run build:worker",
 		"accept:worker": "node scripts/worker-acceptance-packet.mjs",
