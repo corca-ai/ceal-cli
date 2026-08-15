@@ -32,6 +32,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/safe-output-path.test.mjs",
 	"test/contract/script-lib.test.mjs",
 	"test/contract/source-loader.test.mjs",
+	"test/contract/typecheck-source-gate.test.mjs",
 	"test/contract/worker-acceptance-packet.test.mjs",
 	"test/contract/worker-gateway-handoff-archive.test.mjs",
 	"test/contract/worker-guide-contract.test.mjs",

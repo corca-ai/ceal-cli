@@ -11,6 +11,13 @@ paragraph, and that a future session will otherwise re-derive or undo.
 is `check` rather than `lint` deliberately, so an unformatted commit fails rather
 than merely drifting. `npm run lint:fix` applies every safe fix.
 
+`npm run lint:types` is the terminating source-only TypeScript gate. Its root
+NodeNext program covers every tracked `packages/*/src/**/*.ts` file and maps
+workspace package names to their editable source entrypoints, so it does not
+need checkout `dist` or invoke `test/repo-build.mjs`. `lint:types:watch` uses a
+separate `node_modules/.cache` build-info path; never run the terminating and
+watch modes with one cache writer.
+
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
 
