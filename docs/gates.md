@@ -504,10 +504,12 @@ saying "skipped, and here is what went unchecked" is not.
 
 ## The Docs Graph Gate, And Why It Is Standalone
 
-`npm run lint:docs-graph` is `awiki lint -root docs`. It fails on three things:
+`npm run lint:docs-graph` runs the repo-owned TypeScript wrapper around
+`awiki lint -root docs`. Its graph verdict fails on two things:
 a doc no resolved link reaches (orphan), a cluster of docs that link only to
-each other (island), and a line holding nothing but a link, which gives a `rg`
-hit no local context. The `-root docs` scope is deliberate — `charness-artifacts/`
+each other (island). A line holding nothing but a link is reported separately
+as a style finding because it gives an `rg` hit no local context; it does not
+override a connected graph. The `-root docs` scope is deliberate — `charness-artifacts/`
 is session evidence, not a wiki, and its records are reached from these docs
 rather than from each other.
 
@@ -516,8 +518,13 @@ binary that GitHub runners do not have, which is the same reason `lint:shell`
 and the duplicate ratchet stay out of `check`; unlike those two it has no
 loud-skip wrapper, so putting it in the hook would fail a push on a machine that
 simply never installed it. A maintainer runs it after editing `docs/`. The
-sibling `corca-ai/ceal` repository carries the same script under the same name
-for the same reason.
+wrapper fails closed when the binary or summary is missing, and reports the
+exact pinned bootstrap command:
+`cargo install --git https://github.com/corca-ai/awiki --rev
+f65f8c43dbf0300609bdfdf823c09cba370222c6 --locked awiki`. A non-zero `awiki`
+status is accepted only when it is awiki's documented lint-finding status, the
+parsed graph is connected, and link-only style findings remain; fatal, signaled,
+or contradictory subprocess results fail closed.
 
 ## `knip`, And What Its Zero Means
 

@@ -17,5 +17,5 @@
 	"tags": ["-testOnly"],
 	"ignoreWorkspaces": ["packages/ceal-protocol"],
 	"ignoreDependencies": ["postject"],
-	"ignoreBinaries": ["nose", "shellcheck", "mkfifo", "cosign", "openssl"]
+	"ignoreBinaries": ["nose", "shellcheck", "mkfifo", "cosign", "openssl", "awiki"]
 }
