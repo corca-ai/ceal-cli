@@ -22,6 +22,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/gateway-handoff-bootstrap.test.mjs",
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 	"test/contract/leased-consumer-control-conformance-projection.test.mjs",
+	"test/contract/no-legacy-mjs.test.ts",
 	"test/contract/one-fact-one-home.test.mjs",
 	"test/contract/pre-push-lock.test.mjs",
 	"test/contract/prewarm-offline-consumer-cache.test.mjs",
@@ -81,7 +82,7 @@ function assertContractGateScriptShape(scripts) {
 	assert.deepEqual(testFilesIn(built), [...WORKER_CONTRACT_TESTS].sort(), "the built lane must own the complete contract inventory once");
 	assert.equal(
 		scripts["check:unit"],
-		"npm run lint && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm run test:unit && npm run test:contract:built",
+		"npm run lint && npm run lint:no-legacy-mjs && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm run test:unit && npm run test:contract:built",
 		"check:unit must reuse its one build through the internal contract lane",
 	);
 	assert.equal((scripts["check:unit"].match(/\bnpm run build\b/gu) ?? []).length, 1, "check:unit must build exactly once");

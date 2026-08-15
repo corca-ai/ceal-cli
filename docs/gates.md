@@ -22,6 +22,16 @@ incremental cache. `lint:types:watch` watches package sources and
 `lint:types:tools:watch` watches tools; they are intentionally separate watchers,
 each with its own `node_modules/.cache` build-info path.
 
+`npm run lint:no-legacy-mjs` is an exact-list ratchet over tracked and staged
+`.mjs` paths. Its policy is `config/no-legacy-mjs.json`; regenerate it only
+intentionally with `npm run write:no-legacy-mjs-baseline`, then review the full
+list. Both `check:unit` and `check` run the ratchet before slower gates, so a
+new or removed legacy file fails without rebuilding or running a suite twice.
+The inventory observes tracked files and staged additions; an untracked or
+unstaged new `.mjs` is not part of the checked state until it is staged or
+tracked, while staged additions are already included by the tracked index
+query.
+
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
 
