@@ -55,6 +55,22 @@ const sessions = (runtime, count, offset) =>
 	}));
 
 const server = createCealObserverServer({
+	loadPricingSnapshot: () => ({
+		schema_version: "ceal.local_pricing_snapshot.v1",
+		snapshot_ref: "pricing:review:2026-08-13",
+		revision: "pricing-rev-review-1",
+		observed_at: "2026-08-13T00:00:00.000Z",
+		currency: "USD",
+		rates: [
+			{
+				model_key: "gpt-review-codex",
+				input_per_million: "1.25",
+				output_per_million: "10",
+				cache_read_per_million: "0",
+				cache_write_per_million: "0",
+			},
+		],
+	}),
 	loadCealOverview: async () => ({
 		status: "connected",
 		source: "ceal_gateway",

@@ -272,7 +272,7 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 				input_per_million: "1.25",
 				output_per_million: "10",
 				cache_read_per_million: "0.125",
-				cache_write_per_million: "0",
+				cache_write_per_million: "2",
 			},
 		],
 	};
@@ -289,6 +289,7 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 		});
 	for (const invalid of [
 		{ ...snapshot, currency: "usd" },
+		{ ...snapshot, currency: "ZZZ" },
 		{ ...snapshot, currency: "ZZZZ" },
 		{ ...snapshot, observed_at: "2026-08-14" },
 		{ ...snapshot, snapshot_ref: "AKIAIOSFODNN7EXAMPLE" },
@@ -331,7 +332,14 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 				tokenEvidence: "available",
 				modelKey: "gpt-5",
 				toolCallEvents: 0,
-				tokens: { source: "runtime_cumulative_last", completeness: "full_transcript", input: 10, output: 2 },
+				tokens: {
+					source: "runtime_cumulative_last",
+					completeness: "full_transcript",
+					input: 10,
+					output: 2,
+					cacheRead: 4,
+					cacheWrite: 3,
+				},
 			},
 		],
 	};
@@ -341,11 +349,93 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
 		pricingSnapshot: snapshot,
 	});
-	assert.equal(withModel.pricing.reason, "cost_derivation_unavailable");
-	assert.match(
-		withModel.suggestions.find((entry) => entry.suggestion_id === "cost_unavailable").rationale,
-		/derivation is not implemented/u,
+	assert.equal(withModel.pricing.reason, "estimated_not_billed");
+	assert.equal(withModel.pricing.observation_state, "complete");
+	assert.equal(withModel.sessions[0].estimated_cost, "0.000034");
+	assert.equal(withModel.daily[0].estimated_cost, "0.000034");
+	assert.equal(withModel.totals.estimated_cost, "0.000034");
+	assert.match(withModel.metric_coverage.estimated_cost.comparability_group, /^pricing:USD:[a-f0-9]{16}:per_session_half_up_6dp$/u);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...withModel, pricing: { ...withModel.pricing, currency: "ZZZ" } }), null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...withModel,
+			metric_coverage: {
+				...withModel.metric_coverage,
+				estimated_cost: {
+					...withModel.metric_coverage.estimated_cost,
+					comparability_group: withModel.metric_coverage.estimated_cost.comparability_group.replace("pricing:USD:", "pricing:ZZZ:"),
+				},
+			},
+		}),
+		null,
 	);
+	assert.equal(
+		withModel.suggestions.some((entry) => entry.suggestion_id === "cost_unavailable"),
+		false,
+	);
+	assert.equal(decodeProductionLocalUsageDashboard({ ...withModel, sessions: [{ ...withModel.sessions[0], tokens: null }] }), null);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...withModel,
+			daily: [
+				{ date: "2026-08-12", sessions: 0, agent_tool_calls: 0, tokens: 0, estimated_cost: "0.000034" },
+				{ ...withModel.daily[0], estimated_cost: null },
+			],
+		}),
+		null,
+	);
+	const roundedHalfUp = composeCanonicalLocalUsageDashboard({
+		adapter: {
+			...adapterWithModel,
+			sessions: [
+				{
+					...adapterWithModel.sessions[0],
+					tokens: { ...adapterWithModel.sessions[0].tokens, input: 10, output: 0, cacheRead: 0, cacheWrite: 0 },
+				},
+			],
+		},
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: {
+			...snapshot,
+			rates: [
+				{
+					...snapshot.rates[0],
+					input_per_million: "0.05",
+					output_per_million: "0",
+					cache_read_per_million: "0",
+					cache_write_per_million: "0",
+				},
+			],
+		},
+	});
+	assert.equal(roundedHalfUp.totals.estimated_cost, "0.000001");
+	const invalidCacheSubset = composeCanonicalLocalUsageDashboard({
+		adapter: {
+			...adapterWithModel,
+			sessions: [{ ...adapterWithModel.sessions[0], tokens: { ...adapterWithModel.sessions[0].tokens, input: 1, cacheRead: 2 } }],
+		},
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: snapshot,
+	});
+	assert.equal(invalidCacheSubset.totals.estimated_cost, null);
+	const partialRates = composeCanonicalLocalUsageDashboard({
+		adapter: {
+			...adapterWithModel,
+			sessionDetailCoverage: { returned: 2, eligible: 2, state: "complete" },
+			sessions: [
+				adapterWithModel.sessions[0],
+				{ ...adapterWithModel.sessions[0], sessionRef: "019f9174-fec1-78d2-b4be-91402cdc66d5", modelKey: "gpt-unpriced" },
+			],
+		},
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: snapshot,
+	});
+	assert.equal(partialRates.pricing.observation_state, "partial");
+	assert.equal(partialRates.metric_coverage.estimated_cost.numerator, 1);
+	assert.equal(partialRates.metric_coverage.estimated_cost.denominator, 2);
 	const concentrated = composeCanonicalLocalUsageDashboard({
 		adapter: {
 			...adapterWithModel,
@@ -362,7 +452,6 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 	});
 	assert.equal(concentrated.suggestions[0].suggestion_id, "token_concentration");
 	assert.match(concentrated.suggestions[0].rationale, /One of 4 fully covered sessions/u);
-	assert.equal(withModel.totals.estimated_cost, null);
 	assert.equal(
 		decodeProductionLocalUsageDashboard({ ...withModel, pricing: { ...withModel.pricing, reason: "model_identity_unavailable" } }),
 		null,

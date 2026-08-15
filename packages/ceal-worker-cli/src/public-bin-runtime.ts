@@ -4,6 +4,7 @@ import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-gui
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { runCealCommand } from "./index.js";
+import { loadLocalPricingSnapshot } from "./pricing-snapshot.js";
 import { createCealSessionStore } from "./profile-store.js";
 import { createCealReceiptSpoolStore } from "./receipt-spool.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
@@ -66,6 +67,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 				? (action) => withSessionStoreLockTiming(timing, (onAcquired) => sessionStore.withStateLock(action, onAcquired))
 				: undefined,
 			loadDiscoveryCache: discoveryCache ? () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()) : undefined,
+			loadPricingSnapshot: process.env.HOME ? (now) => loadLocalPricingSnapshot(process.env.HOME as string, now) : undefined,
 			saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
 			removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
 			inspectAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_inspect", () => agentGuide.inspect(agent)) : undefined,

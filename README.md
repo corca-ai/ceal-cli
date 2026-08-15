@@ -130,8 +130,8 @@ The JSON state also exposes `ceal.local_usage_dashboard.codex_input.v1`, a
 Codex-first adapter input composed from that same redacted Agent evidence,
 the local Profile/instance session, and the bounded Gateway capability catalog
 and counts. It keeps
-returned-versus-eligible session coverage explicit and reports pricing as
-unsupported; it does not copy transcript roots or estimate money from tokens.
+returned-versus-eligible session coverage explicit. It does not copy transcript
+roots; pricing is resolved only at canonical composition.
 For Codex, a safe model key is retained only when one model is consistently
 observed in a complete, fully parsed local transcript scan.
 It is not the canonical browser dataset: daily totals and metric-specific
@@ -141,11 +141,12 @@ The same state now includes the composed `ceal.local_usage_dashboard.v1`
 production document with an explicit production discriminator, local-calendar
 window, daily covered-subset values, reconciling totals, and metric-specific
 coverage. The Workbench renders this document as its Usage, Sessions, and Access
-source of truth. A strict local pricing-snapshot seam is accepted, but the
-observer does not yet load a production snapshot or run the accepted decimal
-derivation. Complete Codex observations may carry a bounded model identity, but
-monetary cost therefore remains explicitly unsupported; the page does not
-estimate currency from tokens.
+source of truth. The observer optionally loads an owner-only
+`~/.ceal/pricing-snapshot.json`. When a strict snapshot, complete Codex token
+observation, safe model identity, and matching rate exist, it derives
+six-decimal local estimates with exact integer arithmetic and labels them as
+estimated rather than billed cost. Missing or unsafe inputs remain unsupported,
+never zero.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

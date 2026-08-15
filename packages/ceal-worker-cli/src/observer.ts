@@ -42,6 +42,7 @@ export interface CealObserverRuntime {
 	now?: () => number;
 	timezone?: string;
 	loadCealOverview?: () => Promise<CealGatewayOverview>;
+	loadPricingSnapshot?: (now: number) => unknown;
 }
 
 export type CealGatewayOverview =
@@ -175,6 +176,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 			adapter: localUsageDashboardInput,
 			timezone,
 			window: defaultLocalUsageWindow(now, timezone),
+			pricingSnapshot: runtime.loadPricingSnapshot?.(now),
 		}),
 	);
 	if (!localUsageDashboard) throw new Error("Internal local usage dashboard composition failed validation.");
@@ -346,6 +348,7 @@ export const OBSERVER_DATA_SOURCES = [
 	"agent_guide_registration",
 	"receipt_spool_metadata",
 	"agent_runtime_transcript_inventory",
+	"local_pricing_snapshot",
 ] as const;
 
 const PRIVACY_LOCAL_SOURCES = [
@@ -353,6 +356,7 @@ const PRIVACY_LOCAL_SOURCES = [
 	"~/.ceal/client-discovery-cache.json (cached capability/target catalog)",
 	"~/.ceal/receipt-spool.json (allowlisted call-outcome metadata)",
 	"~/.ceal/receipt-spool-drops (count only, of receipts this client failed to spool; no per-call data)",
+	"~/.ceal/pricing-snapshot.json (optional versioned model rates; no credential or billing history)",
 	"managed worker install layout (generation manifest metadata and staged guide asset presence)",
 	"~/.codex/skills/ceal-guide and ~/.claude/skills/ceal-guide, or the directories CODEX_HOME/CLAUDE_CONFIG_DIR configure (guide registration link inspection; no skill content read)",
 	"~/.claude/projects and ~/.codex/sessions, or the same subdirectories under the roots CLAUDE_CONFIG_DIR/CODEX_HOME configure (bounded local transcript scan; fixed-vocabulary metadata only)",
@@ -964,6 +968,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   const metricValue = (metric) => {
     const value = dashboard.totals[metric];
     if (value === null) return "Unavailable";
+    if (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed") return dashboard.pricing.currency + " " + value;
     return new Intl.NumberFormat().format(value);
   };
   const usageOverview = () => {
@@ -995,7 +1000,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     return identity
       + "<section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Each metric keeps its own coverage; missing values are never treated as zero.</p></section>"
       + "<div class='metric-tabs' role='group' aria-label='Usage metric'>" + axes + "</div>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed" ? " <span>·</span> Estimated locally; not billed cost" : "") + "</p></section>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + usageSuggestions + "<p class='warn'>Deterministic local rules over the canonical dataset; not model judgment or a productivity score.</p></section>";
   };
   const sessionsView = () => {

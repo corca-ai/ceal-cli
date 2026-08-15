@@ -257,6 +257,7 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		inspectAgentGuide: runtime.inspectAgentGuide,
 		loadCealOverview:
 			runtime.loadObserverCealOverview ?? (runtime.onObserverListening ? undefined : () => loadWorkbenchCealOverview(runtime)),
+		loadPricingSnapshot: runtime.loadPricingSnapshot,
 		executablePath: runtime.executablePath,
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
 		now: runtime.now,

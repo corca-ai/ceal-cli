@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { CealAgentAuditAdapterState, CealAgentAuditSession, CealAgentAuditState } from "./agent-audit.js";
 import { CEAL_SAFE_MODEL_KEY, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REF } from "./safe-ref.js";
 
@@ -93,7 +94,7 @@ export interface CealLocalUsageDashboardV1 {
 	}>;
 	metric_coverage: Record<"sessions" | "agent_tool_calls" | "tokens" | "estimated_cost", DashboardMetricCoverage>;
 	daily: DashboardDailyRow[];
-	totals: { sessions: number | null; agent_tool_calls: number | null; tokens: number | null; estimated_cost: null };
+	totals: { sessions: number | null; agent_tool_calls: number | null; tokens: number | null; estimated_cost: string | null };
 	sessions: Array<{
 		session_ref: string;
 		runtime: "codex";
@@ -102,6 +103,7 @@ export interface CealLocalUsageDashboardV1 {
 		token_evidence: CealLocalUsageDashboardSession["tokenEvidence"];
 		agent_tool_calls: number | null;
 		tokens: number | null;
+		estimated_cost: string | null;
 		model_key: string | null;
 		comparability_group: "codex:runtime_cumulative_last:v1";
 	}>;
@@ -113,6 +115,13 @@ export interface CealLocalUsageDashboardV1 {
 				authority: "local_pricing_snapshot";
 				reason: "model_identity_unavailable" | "pricing_rate_unavailable" | "cost_derivation_unavailable";
 				currency: string;
+		  }
+		| {
+				observation_state: "complete" | "partial";
+				authority: "local_pricing_snapshot";
+				reason: "estimated_not_billed";
+				currency: string;
+				derivation: "per_session_half_up_6dp";
 		  };
 	access: {
 		observation_state: "available" | "unavailable";
@@ -147,7 +156,7 @@ interface DashboardDailyRow {
 	sessions: number | null;
 	agent_tool_calls: number | null;
 	tokens: number | null;
-	estimated_cost: null;
+	estimated_cost: string | null;
 }
 
 interface DashboardSuggestion {
@@ -166,7 +175,7 @@ export interface ComposeCanonicalDashboardInput {
 	pricingSnapshot?: unknown;
 }
 
-interface CealLocalPricingSnapshotV1 {
+export interface CealLocalPricingSnapshotV1 {
 	schema_version: "ceal.local_pricing_snapshot.v1";
 	snapshot_ref: string;
 	revision: string;
@@ -180,6 +189,8 @@ interface CealLocalPricingSnapshotV1 {
 		cache_write_per_million: string;
 	}>;
 }
+
+const SUPPORTED_PRICING_CURRENCIES = new Set(["USD"]);
 
 const COST_NON_CLAIM = "Monetary cost is unsupported until a versioned pricing snapshot contract is accepted; missing cost is not zero.";
 
@@ -254,28 +265,54 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const sessionState = effectiveCoverageState(sourceState, sessions.length, eligible);
 	const toolValues = sessions.filter((session) => session.eventEvidence === "complete").length;
 	const tokenValues = sessions.filter((session) => sessionTokenTotal(session) !== null).length;
+	const tokenState = metricState(sessionState, tokenValues, sessions.length);
 	const effectiveWindow = { start_date: input.window.startDate, end_date: input.window.endDate };
 	const pricingSnapshot = decodeLocalPricingSnapshot(input.pricingSnapshot);
 	const pricedSessions = sessions.filter((session) => sessionTokenTotal(session) !== null);
 	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.modelKey !== undefined);
 	const completeRateCoverage =
 		completeModelCoverage && pricedSessions.every((session) => pricingSnapshot?.rates.some((rate) => rate.model_key === session.modelKey));
+	const sessionCosts = new Map<string, string>();
+	if (pricingSnapshot) {
+		for (const session of pricedSessions) {
+			const rate = pricingSnapshot.rates.find((candidate) => candidate.model_key === session.modelKey);
+			const amount = rate ? deriveSessionCost(session, rate) : null;
+			if (amount !== null) sessionCosts.set(session.sessionRef, amount);
+		}
+	}
+	for (const row of daily) {
+		const costs = sessions
+			.filter((session) => localDate(Date.parse(session.lastActivityAt), input.timezone) === row.date)
+			.map((session) => sessionCosts.get(session.sessionRef))
+			.filter((amount): amount is string => amount !== undefined);
+		row.estimated_cost = costs.length > 0 ? sumDecimalAmounts(costs) : null;
+	}
+	const costState: LocalUsageObservationState =
+		sessionCosts.size === 0 ? "unsupported" : tokenState === "complete" && sessionCosts.size === sessions.length ? "complete" : "partial";
 	const pricing: CealLocalUsageDashboardV1["pricing"] = pricingSnapshot
-		? {
-				observation_state: "unsupported",
-				authority: "local_pricing_snapshot",
-				reason: !completeModelCoverage
-					? "model_identity_unavailable"
-					: completeRateCoverage
-						? "cost_derivation_unavailable"
-						: "pricing_rate_unavailable",
-				currency: pricingSnapshot.currency,
-			}
+		? sessionCosts.size > 0
+			? {
+					observation_state: costState as "complete" | "partial",
+					authority: "local_pricing_snapshot",
+					reason: "estimated_not_billed",
+					currency: pricingSnapshot.currency,
+					derivation: "per_session_half_up_6dp",
+				}
+			: {
+					observation_state: "unsupported",
+					authority: "local_pricing_snapshot",
+					reason: !completeModelCoverage
+						? "model_identity_unavailable"
+						: completeRateCoverage
+							? "cost_derivation_unavailable"
+							: "pricing_rate_unavailable",
+					currency: pricingSnapshot.currency,
+				}
 		: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" };
 	const suggestions = buildUsageSuggestions(
 		sessions.map((session) => ({ sessionRef: session.sessionRef, tokens: sessionTokenTotal(session) })),
 		toolValues,
-		metricState(sessionState, tokenValues, sessions.length),
+		tokenState,
 		pricing,
 	);
 	return {
@@ -304,21 +341,23 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 				effectiveWindow,
 				"codex:tool_events:v1",
 			),
-			tokens: metricCoverage(
-				metricState(sessionState, tokenValues, sessions.length),
-				tokenValues,
+			tokens: metricCoverage(tokenState, tokenValues, sessions.length, effectiveWindow, "codex:runtime_cumulative_last:v1"),
+			estimated_cost: metricCoverage(
+				costState,
+				sessionCosts.size,
 				sessions.length,
 				effectiveWindow,
-				"codex:runtime_cumulative_last:v1",
+				pricingSnapshot
+					? `pricing:${pricingSnapshot.currency}:${createHash("sha256").update(pricingSnapshot.revision).digest("hex").slice(0, 16)}:per_session_half_up_6dp`
+					: "unsupported",
 			),
-			estimated_cost: metricCoverage("unsupported", 0, sessions.length, effectiveWindow, "unsupported"),
 		},
 		daily,
 		totals: {
 			sessions: coveredTotal(daily, "sessions", sessionState, sessions.length),
 			agent_tool_calls: coveredTotal(daily, "agent_tool_calls", metricState(sessionState, toolValues, sessions.length), toolValues),
-			tokens: coveredTotal(daily, "tokens", metricState(sessionState, tokenValues, sessions.length), tokenValues),
-			estimated_cost: null,
+			tokens: coveredTotal(daily, "tokens", tokenState, tokenValues),
+			estimated_cost: sessionCosts.size > 0 ? sumDecimalAmounts([...sessionCosts.values()]) : null,
 		},
 		sessions: sessions.map((session) => ({
 			session_ref: session.sessionRef,
@@ -328,6 +367,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			token_evidence: session.tokenEvidence,
 			agent_tool_calls: session.eventEvidence === "complete" ? (session.toolCallEvents ?? 0) : null,
 			tokens: sessionTokenTotal(session),
+			estimated_cost: sessionCosts.get(session.sessionRef) ?? null,
 			model_key: session.modelKey ?? null,
 			comparability_group: "codex:runtime_cumulative_last:v1",
 		})),
@@ -356,7 +396,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	};
 }
 
-function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnapshotV1 | null {
+export function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnapshotV1 | null {
 	if (
 		!isRecord(value) ||
 		!hasExactKeys(value, ["schema_version", "snapshot_ref", "revision", "observed_at", "currency", "rates"]) ||
@@ -368,7 +408,7 @@ function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnapshotV1 
 		typeof value.observed_at !== "string" ||
 		!validCanonicalInstant(value.observed_at) ||
 		typeof value.currency !== "string" ||
-		!/^[A-Z]{3}$/u.test(value.currency) ||
+		!SUPPORTED_PRICING_CURRENCIES.has(value.currency) ||
 		!Array.isArray(value.rates) ||
 		value.rates.length === 0 ||
 		value.rates.length > 256
@@ -434,7 +474,7 @@ function buildUsageSuggestions(
 			evidence: { metric: "agent_tool_calls", source_refs: ["agent_activity:codex"], session_refs: [] },
 			next_action: { kind: "review_evidence", label: "Review tool-call coverage" },
 		});
-	if (tokenValues > 0)
+	if (tokenValues > 0 && pricing.observation_state === "unsupported")
 		suggestions.push({
 			suggestion_id: "cost_unavailable",
 			analyzer,
@@ -446,7 +486,7 @@ function buildUsageSuggestions(
 	return suggestions.slice(0, 4);
 }
 
-function pricingRationale(reason: CealLocalUsageDashboardV1["pricing"]["reason"]): string {
+function pricingRationale(reason: Exclude<CealLocalUsageDashboardV1["pricing"]["reason"], "estimated_not_billed">): string {
 	if (reason === "pricing_snapshot_unavailable") return "No production pricing snapshot was supplied; missing cost is not zero.";
 	if (reason === "model_identity_unavailable")
 		return "Covered token observations do not all carry complete model identity; missing cost is not zero.";
@@ -664,7 +704,7 @@ function validDaily(value: unknown): boolean {
 				metricNumber(entry.sessions) &&
 				metricNumber(entry.agent_tool_calls) &&
 				metricNumber(entry.tokens) &&
-				entry.estimated_cost === null,
+				decimalAmount(entry.estimated_cost),
 		)
 	);
 }
@@ -676,7 +716,7 @@ function validTotals(value: unknown): boolean {
 		metricNumber(value.sessions) &&
 		metricNumber(value.agent_tool_calls) &&
 		metricNumber(value.tokens) &&
-		value.estimated_cost === null
+		decimalAmount(value.estimated_cost)
 	);
 }
 
@@ -694,6 +734,7 @@ function validSessions(value: unknown): boolean {
 					"token_evidence",
 					"agent_tool_calls",
 					"tokens",
+					"estimated_cost",
 					"model_key",
 					"comparability_group",
 				]) &&
@@ -706,6 +747,7 @@ function validSessions(value: unknown): boolean {
 				["available", "unavailable"].includes(String(entry.token_evidence)) &&
 				metricNumber(entry.agent_tool_calls) &&
 				metricNumber(entry.tokens) &&
+				decimalAmount(entry.estimated_cost) &&
 				(entry.model_key === null || (typeof entry.model_key === "string" && CEAL_SAFE_MODEL_KEY.test(entry.model_key))) &&
 				entry.comparability_group === "codex:runtime_cumulative_last:v1",
 		)
@@ -723,7 +765,17 @@ function validSessionDetailCoverage(value: unknown): boolean {
 }
 
 function validPricing(value: unknown): boolean {
-	if (!isRecord(value) || value.observation_state !== "unsupported") return false;
+	if (!isRecord(value)) return false;
+	if (value.reason === "estimated_not_billed")
+		return (
+			(value.observation_state === "complete" || value.observation_state === "partial") &&
+			value.authority === "local_pricing_snapshot" &&
+			hasExactKeys(value, ["observation_state", "authority", "reason", "currency", "derivation"]) &&
+			typeof value.currency === "string" &&
+			SUPPORTED_PRICING_CURRENCIES.has(value.currency) &&
+			value.derivation === "per_session_half_up_6dp"
+		);
+	if (value.observation_state !== "unsupported") return false;
 	if (value.authority === "unknown")
 		return hasExactKeys(value, ["observation_state", "authority", "reason"]) && value.reason === "pricing_snapshot_unavailable";
 	return (
@@ -731,7 +783,7 @@ function validPricing(value: unknown): boolean {
 		hasExactKeys(value, ["observation_state", "authority", "reason", "currency"]) &&
 		["model_identity_unavailable", "pricing_rate_unavailable", "cost_derivation_unavailable"].includes(String(value.reason)) &&
 		typeof value.currency === "string" &&
-		/^[A-Z]{3}$/u.test(value.currency)
+		SUPPORTED_PRICING_CURRENCIES.has(value.currency)
 	);
 }
 
@@ -834,8 +886,50 @@ function metricNumber(value: unknown): boolean {
 	return value === null || nonNegativeInteger(value);
 }
 
+function decimalAmount(value: unknown): boolean {
+	return value === null || (typeof value === "string" && /^(?:0|[1-9][0-9]{0,15})(?:[.][0-9]{1,6})?$/u.test(value));
+}
+
 function validDecimalRate(value: unknown): boolean {
 	return typeof value === "string" && /^(?:0|[1-9][0-9]{0,5})(?:[.][0-9]{1,9})?$/u.test(value);
+}
+
+function deriveSessionCost(session: CealLocalUsageDashboardSession, rate: CealLocalPricingSnapshotV1["rates"][number]): string | null {
+	if (!session.tokens) return null;
+	const input = session.tokens.input ?? 0;
+	const cacheRead = session.tokens.cacheRead ?? 0;
+	if (cacheRead > input) return null;
+	const categories: Array<[number, string]> = [
+		[input - cacheRead, rate.input_per_million],
+		[session.tokens.output ?? 0, rate.output_per_million],
+		[cacheRead, rate.cache_read_per_million],
+		[session.tokens.cacheWrite ?? 0, rate.cache_write_per_million],
+	];
+	let scaled = 0n;
+	for (const [tokens, decimal] of categories) scaled += BigInt(tokens) * decimalToScale9(decimal);
+	const micros = (scaled + 500_000_000n) / 1_000_000_000n;
+	if (micros > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+	return microsToDecimal(micros);
+}
+
+function decimalToScale9(value: string): bigint {
+	const [whole, fraction = ""] = value.split(".");
+	return BigInt(whole) * 1_000_000_000n + BigInt(fraction.padEnd(9, "0"));
+}
+
+function decimalToMicros(value: string): bigint {
+	const [whole, fraction = ""] = value.split(".");
+	return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+}
+
+function microsToDecimal(value: bigint): string {
+	const whole = value / 1_000_000n;
+	const fraction = (value % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
+	return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+function sumDecimalAmounts(values: string[]): string {
+	return microsToDecimal(values.reduce((sum, value) => sum + decimalToMicros(value), 0n));
 }
 
 function validCanonicalInstant(value: string): boolean {
@@ -861,6 +955,14 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 	const generatedAt = Date.parse(dataset.generated_at);
 	for (const session of dataset.sessions) {
 		if (session.model_key !== null && session.event_evidence !== "complete") return false;
+		if (
+			session.estimated_cost !== null &&
+			(session.tokens === null ||
+				session.model_key === null ||
+				session.event_evidence !== "complete" ||
+				session.token_evidence !== "available")
+		)
+			return false;
 		const instant = Date.parse(session.last_activity_at);
 		if (instant > generatedAt) return false;
 		const date = localDate(instant, dataset.timezone);
@@ -891,6 +993,7 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.model_key !== null);
 	if (
 		dataset.pricing.authority === "local_pricing_snapshot" &&
+		dataset.pricing.reason !== "estimated_not_billed" &&
 		((completeModelCoverage && dataset.pricing.reason === "model_identity_unavailable") ||
 			(!completeModelCoverage && dataset.pricing.reason !== "model_identity_unavailable"))
 	)
@@ -901,13 +1004,39 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 		!validMetricCardinality(coverage.tokens, completeTokens, dataset.sessions.length, enclosingPartial)
 	)
 		return false;
-	if (coverage.estimated_cost.observation_state !== "unsupported" || coverage.estimated_cost.numerator !== 0) return false;
+	const pricedCount = dataset.sessions.filter((session) => session.estimated_cost !== null).length;
+	if (coverage.estimated_cost.numerator !== pricedCount || coverage.estimated_cost.denominator !== dataset.sessions.length) return false;
+	if (dataset.pricing.reason === "estimated_not_billed") {
+		if (pricedCount === 0) return false;
+		const groupParts = coverage.estimated_cost.comparability_group.split(":");
+		if (
+			groupParts.length !== 4 ||
+			groupParts[0] !== "pricing" ||
+			groupParts[1] !== dataset.pricing.currency ||
+			!/^[a-f0-9]{16}$/u.test(groupParts[2]) ||
+			groupParts[3] !== "per_session_half_up_6dp"
+		)
+			return false;
+		if (!validMetricCardinality(coverage.estimated_cost, pricedCount, dataset.sessions.length, enclosingPartial)) return false;
+		if (dataset.pricing.observation_state !== coverage.estimated_cost.observation_state) return false;
+	} else if (coverage.estimated_cost.observation_state !== "unsupported" || pricedCount !== 0) return false;
 	if (
 		dataset.totals.sessions !== expectedTotal(dataset.daily, "sessions", coverage.sessions) ||
 		dataset.totals.agent_tool_calls !== expectedTotal(dataset.daily, "agent_tool_calls", coverage.agent_tool_calls) ||
 		dataset.totals.tokens !== expectedTotal(dataset.daily, "tokens", coverage.tokens)
 	)
 		return false;
+	const sessionCostTotal = pricedCount > 0 ? sumDecimalAmounts(dataset.sessions.flatMap((session) => session.estimated_cost ?? [])) : null;
+	const dailyCostTotal = dataset.daily.some((row) => row.estimated_cost !== null)
+		? sumDecimalAmounts(dataset.daily.flatMap((row) => row.estimated_cost ?? []))
+		: null;
+	if (dataset.totals.estimated_cost !== sessionCostTotal || dataset.totals.estimated_cost !== dailyCostTotal) return false;
+	for (const row of dataset.daily) {
+		const costs = dataset.sessions
+			.filter((session) => localDate(Date.parse(session.last_activity_at), dataset.timezone) === row.date)
+			.flatMap((session) => session.estimated_cost ?? []);
+		if (row.estimated_cost !== (costs.length > 0 ? sumDecimalAmounts(costs) : null)) return false;
+	}
 	return sumNonNull(dataset.daily, "sessions") === dataset.sessions.length;
 }
 
