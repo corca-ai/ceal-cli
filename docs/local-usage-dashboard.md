@@ -179,6 +179,10 @@ and summary while keeping the unowned request workflow disabled.
   session for inspection and never infers repetition, waste, or productivity.
 - The first two suggestions are shown directly. Additional suggestions remain
   available in a compact disclosure so the usage field stays primary.
+- A session-inspection suggestion navigates to the referenced session's
+  paginated row and opens its existing structural-evidence dialog. An
+  evidence-review suggestion navigates to the Evidence view. These are local UI
+  transitions, not analyzer-controlled commands or capability execution.
 - Pricing installation is an explicit local-write operation. `--dry-run` makes
   no filesystem change; status and help are read-only.
 - The input must be a non-symlink regular file within the existing 256 KiB

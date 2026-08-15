@@ -94,6 +94,14 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByText(/not model judgment or a productivity score/u).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
 	await page.getByText(/claude:session_inventory:v1/u).waitFor();
+	await page.getByRole("button", { name: "Review token coverage" }).focus();
+	await page.keyboard.press("Enter");
+	assert.equal(await page.getByRole("button", { name: "Evidence", exact: true }).getAttribute("aria-current"), "true");
+	assert.equal(
+		await page.getByRole("button", { name: "Evidence", exact: true }).evaluate((element) => element === document.activeElement),
+		true,
+	);
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	await page.getByRole("button", { name: /Tokens/u }).click();
 	await page.getByText(/claude:event_usage_sum:v1/u).waitFor();
 	assert.equal(await page.locator("button[data-metric='tokens']").getAttribute("aria-pressed"), "true");
@@ -207,16 +215,31 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
 	context.after(() => browser.close());
 	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+	const requests = [];
+	page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 	await page.goto(await observerUrl(server));
 	await page.getByText(/Synthetic demo data/u).waitFor();
 	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
 	await page.getByRole("button", { name: /Agent tool calls 508/u }).waitFor();
 	await page.getByText(/highest tool-call concentration/u).waitFor();
+	await page.getByRole("button", { name: "Inspect the referenced session" }).first().focus();
+	await page.keyboard.press("Enter");
+	await page.getByRole("dialog").waitFor();
+	await page.getByText("Agent session evidence").waitFor();
+	assert.equal(await page.getByRole("button", { name: "Sessions", exact: true }).getAttribute("aria-current"), "true");
+	await page.getByText("Page 3 of 6 · 105 of 105 eligible sessions returned").waitFor();
+	const referencedSession = page.locator("button[data-session-ref='22222222-2222-3333-4444-000000000050']");
+	assert.equal(await referencedSession.count(), 1);
+	await page.keyboard.press("Escape");
+	assert.equal(await referencedSession.evaluate((element) => element === document.activeElement), true);
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	await page.getByRole("button", { name: /Tokens 924,000/u }).waitFor();
 	await page.getByRole("button", { name: /Estimated cost USD 3[.]36/u }).click();
 	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
 	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 61);
 	await page.getByText("profile:review-personal", { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Claude", exact: true }).click();
+	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await page.getByText("Page 1 of 6 · 105 of 105 eligible sessions returned").waitFor();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
@@ -231,6 +254,8 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 	assert.equal(await page.getByRole("button", { name: "Previous" }).evaluate((element) => element === document.activeElement), true);
 	await page.setViewportSize({ width: 390, height: 844 });
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+	assert.ok(requests.length > 0);
+	assert.ok(requests.every(isLoopbackGet));
 });
 
 function isLoopbackGet(request) {

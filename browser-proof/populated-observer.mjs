@@ -36,8 +36,8 @@ const sessions = (runtime, count, offset) =>
 					? "unreadable"
 					: {
 							scan: !demoMode && index === count - 2 ? "truncated" : "complete",
-							eventCount: demoMode && runtime === "codex" && index === 0 ? 306 : 8 + index,
-							kinds: { user_message: 3, assistant_message: 3, tool_call: demoMode && runtime === "codex" && index === 0 ? 300 : 2 },
+							eventCount: demoMode && runtime === "codex" && index === 40 ? 306 : 8 + index,
+							kinds: { user_message: 3, assistant_message: 3, tool_call: demoMode && runtime === "codex" && index === 40 ? 300 : 2 },
 							unparsedLines: !demoMode && index === count - 2 ? 1 : 0,
 							...(runtime === "codex" && (demoMode || index === 0)
 								? { modelIdentity: { source: "turn_context", modelKey: "gpt-review-codex" } }

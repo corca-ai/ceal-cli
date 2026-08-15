@@ -826,6 +826,7 @@ const OBSERVER_PAGE = `<!doctype html>
   .attention { width:100%; color:inherit; text-align:left; font:inherit; cursor:pointer; margin-bottom:.6rem; }
   .attention strong { display:block; margin-bottom:.35rem; }
   .next { color:var(--accent); margin:.5rem 0 0; }
+  .next-action { margin-top:.65rem; border:1px solid var(--accent); background:transparent; color:var(--accent); border-radius:7px; padding:.48rem .65rem; font:inherit; font-weight:650; cursor:pointer; }
   dialog { width:min(38rem,calc(100% - 2rem)); border:1px solid var(--line); border-radius:12px; padding:0; box-shadow:0 24px 70px #0003; }
   dialog::backdrop { background:#17211b88; }
   .detail-head { display:flex; justify-content:space-between; align-items:center; padding:1rem 1.1rem; border-bottom:1px solid var(--line); }
@@ -833,7 +834,7 @@ const OBSERVER_PAGE = `<!doctype html>
   nav { margin: 1rem 0; display: flex; gap: .5rem; }
   nav button { font: inherit; padding:.48rem .75rem; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; }
   nav button[aria-current="true"] { color:var(--ink); background:var(--panel); box-shadow:0 1px 4px #0001; font-weight:700; }
-  nav button:focus-visible, .mode button:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  nav button:focus-visible, .mode button:focus-visible, .next-action:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
   .hero { padding:2.3rem 0 1.7rem; max-width:64rem; }
   .eyebrow { color:var(--accent); font-size:.7rem; letter-spacing:.12em; font-weight:700; text-transform:uppercase; }
   .hero h2 { font-size:clamp(2.1rem,4.4vw,4rem); line-height:1.02; letter-spacing:-.06em; margin:.55rem 0 .8rem; }
@@ -1019,11 +1020,11 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const headline = dashboard.totals[metric] === null
       ? esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "."
       : "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnits[metric]) + " observed.";
-    const suggestionCard = (entry) => "<article class='card'><span class='pill'>" + esc(entry.analyzer.analyzer_id + " v" + entry.analyzer.version) + "</span><h3>" + esc(entry.recommendation) + "</h3><p>" + esc(entry.rationale) + "</p><p class='muted'>Evidence: " + esc(entry.evidence.metric) + (entry.evidence.session_refs.length ? " · " + entry.evidence.session_refs.length + " referenced session" : " · aggregate coverage") + "</p><p class='next'>Suggested next step: " + esc(entry.next_action.label) + "</p></article>";
+    const suggestionCard = (entry, index) => "<article class='card'><span class='pill'>" + esc(entry.analyzer.analyzer_id + " v" + entry.analyzer.version) + "</span><h3>" + esc(entry.recommendation) + "</h3><p>" + esc(entry.rationale) + "</p><p class='muted'>Evidence: " + esc(entry.evidence.metric) + (entry.evidence.session_refs.length ? " · " + entry.evidence.session_refs.length + " referenced session" : " · aggregate coverage") + "</p><button type='button' class='next-action' data-suggestion-action='" + index + "'>" + esc(entry.next_action.label) + "</button></article>";
     const primarySuggestions = dashboard.suggestions.slice(0, 2).map(suggestionCard).join("");
     const remainingSuggestions = dashboard.suggestions.slice(2);
     const usageSuggestions = dashboard.suggestions.length
-      ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + " more suggestions</summary>" + remainingSuggestions.map(suggestionCard).join("") + "</details>" : "")
+      ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + " more suggestions</summary>" + remainingSuggestions.map((entry, index) => suggestionCard(entry, index + 2)).join("") + "</details>" : "")
       : "<div class='card'><strong>No deterministic usage suggestions</strong><p class='muted'>This is not a completeness or productivity claim.</p></div>";
     return identity
       + "<div class='metric-tabs runtime-tabs' role='group' aria-label='Runtime partition'>" + runtimeAxes + "</div><section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Runtime accounting stays partitioned; missing values are never treated as zero.</p></section>"
@@ -1125,6 +1126,12 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     button.addEventListener("click", () => show(view));
     nav.appendChild(button);
   }
+  const openCanonicalSession = (origin) => {
+    const entry = dashboard.sessions.find((candidate) => candidate.session_ref === origin.dataset.sessionRef);
+    if (!entry) return false;
+    openDetail(origin, "Agent session evidence", rows(Object.entries(entry)) + "<p class='warn'>Local structural evidence only; no prompt or transcript content is rendered.</p>");
+    return true;
+  };
   // Per-session drill-down: an explicit owner click fetches the bounded scan
   // for one listed session; a view switch discards the result (no local copy).
   root.addEventListener("click", (event) => {
@@ -1152,10 +1159,29 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       show("Sessions", focusSelector);
       return;
     }
+    const suggestionAction = event.target.closest ? event.target.closest("button[data-suggestion-action]") : null;
+    if (suggestionAction) {
+      const entry = dashboard.suggestions[Number(suggestionAction.dataset.suggestionAction)];
+      if (!entry) return;
+      if (entry.next_action.kind === "inspect_sessions" && entry.evidence.session_refs.length) {
+        const sessionRef = entry.evidence.session_refs[0];
+        const sessionIndex = dashboard.sessions.findIndex((candidate) => candidate.session_ref === sessionRef);
+        if (sessionIndex < 0) return;
+        sessionPage = Math.floor(sessionIndex / sessionPageSize) + 1;
+        show("Sessions", "button[data-session-ref='" + sessionRef + "']");
+        const sessionButton = root.querySelector("button[data-session-ref='" + sessionRef + "']");
+        if (sessionButton) openCanonicalSession(sessionButton);
+        return;
+      }
+      if (entry.next_action.kind === "review_evidence") {
+        show("Evidence");
+        Array.from(nav.querySelectorAll("button")).find((button) => button.textContent === "Evidence")?.focus();
+      }
+      return;
+    }
     const canonicalSession = event.target.closest ? event.target.closest("button[data-session-ref]") : null;
     if (canonicalSession) {
-      const entry = dashboard.sessions.find((candidate) => candidate.session_ref === canonicalSession.dataset.sessionRef);
-      if (entry) openDetail(canonicalSession, "Agent session evidence", rows(Object.entries(entry)) + "<p class='warn'>Local structural evidence only; no prompt or transcript content is rendered.</p>");
+      openCanonicalSession(canonicalSession);
       return;
     }
     const attention = event.target.closest ? event.target.closest("button[data-attention]") : null;
