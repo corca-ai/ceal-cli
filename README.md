@@ -120,7 +120,7 @@ adds, ranks, or compares their session, tool-call, or token observations. Token
 totals are the runtime-reported input plus output observations; cache fields
 remain separate because their accounting semantics are runtime-defined. Usage
 also renders versioned deterministic local suggestions for
-token concentration, evidence gaps, and unavailable cost; these are not model
+token and tool-call concentration, evidence gaps, and unavailable cost; these are not model
 judgments or productivity scores. **Sessions** lists every bounded, privacy-safe
 local session in the selected window with twenty rows per page and an inert
 structural-evidence detail. **Access** renders the bounded Gateway-owned capability catalog and its

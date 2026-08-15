@@ -124,7 +124,7 @@ and summary while keeping the unowned request workflow disabled.
 - Access projects only the allowlisted capability ID, display label, effect,
   target requirement, and evidence requirement returned by Gateway discovery.
   It is not a resource inventory or a copy of provider/policy payloads.
-- Usage suggestions are deterministic `ceal.local_usage_rules` v1 projections
+- Usage suggestions are deterministic `ceal.local_usage_rules` v2 projections
   over the canonical dataset. They identify covered-token concentration,
   token/tool evidence gaps, and unavailable cost with bounded metric/session
   evidence; they are not model judgment, productivity scoring, or actions.
@@ -168,6 +168,9 @@ and summary while keeping the unowned request workflow disabled.
   time. Token concentration is emitted only with complete token coverage over
   at least four returned sessions and a single-session share of at least 50%;
   it describes concentration only and never infers repeated or similar work.
+- Tool-call concentration uses the same complete-coverage, four-session, and
+  50% threshold over structural tool-event counts. It links the highest covered
+  session for inspection and never infers repetition, waste, or productivity.
 - The first two suggestions are shown directly. Additional suggestions remain
   available in a compact disclosure so the usage field stays primary.
 - Pricing installation is an explicit local-write operation. `--dry-run` makes

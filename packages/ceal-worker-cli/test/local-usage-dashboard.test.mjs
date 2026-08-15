@@ -559,6 +559,7 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 				...adapterWithModel.sessions[0],
 				sessionRef: `019f9174-fec1-78d2-b4be-91402cdc66d${index + 4}`,
 				tokens: { ...adapterWithModel.sessions[0].tokens, input, output: 0 },
+				toolCallEvents: index === 0 ? 10 : 1,
 			})),
 		},
 		timezone: "UTC",
@@ -567,6 +568,26 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 	});
 	assert.equal(concentrated.suggestions[0].suggestion_id, "token_concentration");
 	assert.match(concentrated.suggestions[0].rationale, /One of 4 fully covered sessions/u);
+	assert.equal(concentrated.suggestions[1].suggestion_id, "tool_concentration");
+	assert.match(concentrated.suggestions[1].rationale, /not a productivity or repetition judgment/u);
+	const partialConcentration = composeCanonicalLocalUsageDashboard({
+		adapter: {
+			...adapterWithModel,
+			sources: adapterWithModel.sources.map((source) => ({ ...source, inventoryState: "partial" })),
+			sessionDetailCoverage: { returned: 4, state: "partial" },
+			sessions: concentrated.sessions.map((session) => ({
+				...adapterWithModel.sessions[0],
+				sessionRef: session.session_ref,
+				toolCallEvents: session.agent_tool_calls,
+			})),
+		},
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+	});
+	assert.equal(
+		partialConcentration.suggestions.some((entry) => entry.suggestion_id === "tool_concentration"),
+		false,
+	);
 	assert.equal(
 		decodeProductionLocalUsageDashboard({ ...withModel, pricing: { ...withModel.pricing, reason: "model_identity_unavailable" } }),
 		null,

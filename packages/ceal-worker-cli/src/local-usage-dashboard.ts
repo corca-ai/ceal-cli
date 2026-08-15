@@ -160,8 +160,8 @@ interface DashboardDailyRow {
 }
 
 interface DashboardSuggestion {
-	suggestion_id: "token_concentration" | "token_coverage_gap" | "tool_coverage_gap" | "cost_unavailable";
-	analyzer: { analyzer_id: "ceal.local_usage_rules"; version: "1" };
+	suggestion_id: "token_concentration" | "tool_concentration" | "token_coverage_gap" | "tool_coverage_gap" | "cost_unavailable";
+	analyzer: { analyzer_id: "ceal.local_usage_rules"; version: "2" };
 	recommendation: string;
 	rationale: string;
 	evidence: { metric: "tokens" | "agent_tool_calls" | "estimated_cost"; source_refs: string[]; session_refs: string[] };
@@ -281,6 +281,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const eligible = sourceState === "complete" || sourceState === "observed_empty" ? sessions.length : null;
 	const sessionState = effectiveCoverageState(sourceState, sessions.length, eligible);
 	const toolValues = sessions.filter((session) => session.eventEvidence === "complete").length;
+	const toolState = metricState(sessionState, toolValues, sessions.length);
 	const tokenValues = sessions.filter((session) => sessionTokenTotal(session) !== null).length;
 	const tokenState = metricState(sessionState, tokenValues, sessions.length);
 	const effectiveWindow = { start_date: input.window.startDate, end_date: input.window.endDate };
@@ -327,8 +328,13 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 				}
 		: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" };
 	const suggestions = buildUsageSuggestions(
-		sessions.map((session) => ({ sessionRef: session.sessionRef, tokens: sessionTokenTotal(session) })),
+		sessions.map((session) => ({
+			sessionRef: session.sessionRef,
+			tokens: sessionTokenTotal(session),
+			toolCalls: session.eventEvidence === "complete" ? (session.toolCallEvents ?? 0) : null,
+		})),
 		toolValues,
+		toolState,
 		tokenState,
 		pricing,
 		sourceRef,
@@ -352,14 +358,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 		})),
 		metric_coverage: {
 			sessions: metricCoverage(sessionState, sessions.length, eligible, effectiveWindow, sessionGroup, sourceRef),
-			agent_tool_calls: metricCoverage(
-				metricState(sessionState, toolValues, sessions.length),
-				toolValues,
-				sessions.length,
-				effectiveWindow,
-				toolGroup,
-				sourceRef,
-			),
+			agent_tool_calls: metricCoverage(toolState, toolValues, sessions.length, effectiveWindow, toolGroup, sourceRef),
 			tokens: metricCoverage(tokenState, tokenValues, sessions.length, effectiveWindow, tokenGroup, sourceRef),
 			estimated_cost: metricCoverage(
 				costState,
@@ -375,7 +374,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 		daily,
 		totals: {
 			sessions: coveredTotal(daily, "sessions", sessionState, sessions.length),
-			agent_tool_calls: coveredTotal(daily, "agent_tool_calls", metricState(sessionState, toolValues, sessions.length), toolValues),
+			agent_tool_calls: coveredTotal(daily, "agent_tool_calls", toolState, toolValues),
 			tokens: coveredTotal(daily, "tokens", tokenState, tokenValues),
 			estimated_cost: sessionCosts.size > 0 ? sumDecimalAmounts([...sessionCosts.values()]) : null,
 		},
@@ -451,15 +450,18 @@ export function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnap
 }
 
 function buildUsageSuggestions(
-	sessions: Array<{ sessionRef: string; tokens: number | null }>,
+	sessions: Array<{ sessionRef: string; tokens: number | null; toolCalls: number | null }>,
 	toolValues: number,
+	toolState: LocalUsageObservationState,
 	tokenState: LocalUsageObservationState,
 	pricing: CealLocalUsageDashboardV1["pricing"],
 	sourceRef: "agent_activity:codex" | "agent_activity:claude",
 ): DashboardSuggestion[] {
-	const analyzer = { analyzer_id: "ceal.local_usage_rules" as const, version: "1" as const };
+	const analyzer = { analyzer_id: "ceal.local_usage_rules" as const, version: "2" as const };
 	const suggestions: DashboardSuggestion[] = [];
-	const tokenSessions = sessions.filter((entry): entry is { sessionRef: string; tokens: number } => entry.tokens !== null);
+	const tokenSessions = sessions.filter(
+		(entry): entry is { sessionRef: string; tokens: number; toolCalls: number | null } => entry.tokens !== null,
+	);
 	const tokenValues = tokenSessions.length;
 	const tokenTotal = tokenSessions.reduce((sum, entry) => sum + entry.tokens, 0);
 	const highest = tokenSessions.reduce<(typeof tokenSessions)[number] | null>(
@@ -474,6 +476,32 @@ function buildUsageSuggestions(
 			recommendation: "Inspect the highest-token session in this fully covered set.",
 			rationale: `One of ${tokenSessions.length} fully covered sessions accounts for ${share}% of their token total; this is concentration, not a productivity judgment.`,
 			evidence: { metric: "tokens", source_refs: [sourceRef], session_refs: [highest.sessionRef] },
+			next_action: { kind: "inspect_sessions", label: "Inspect the referenced session" },
+		});
+	}
+	const toolSessions = sessions.filter(
+		(entry): entry is { sessionRef: string; tokens: number | null; toolCalls: number } => entry.toolCalls !== null,
+	);
+	const toolTotal = toolSessions.reduce((sum, entry) => sum + entry.toolCalls, 0);
+	const highestTool = toolSessions.reduce<(typeof toolSessions)[number] | null>(
+		(current, entry) => (current === null || entry.toolCalls > current.toolCalls ? entry : current),
+		null,
+	);
+	if (
+		toolState === "complete" &&
+		toolSessions.length === sessions.length &&
+		toolSessions.length >= 4 &&
+		highestTool &&
+		toolTotal > 0 &&
+		highestTool.toolCalls * 2 >= toolTotal
+	) {
+		const share = Math.round((highestTool.toolCalls / toolTotal) * 100);
+		suggestions.push({
+			suggestion_id: "tool_concentration",
+			analyzer,
+			recommendation: "Inspect the session with the highest tool-call concentration.",
+			rationale: `One of ${toolSessions.length} fully covered sessions accounts for ${share}% of observed tool calls; this is concentration, not a productivity or repetition judgment.`,
+			evidence: { metric: "agent_tool_calls", source_refs: [sourceRef], session_refs: [highestTool.sessionRef] },
 			next_action: { kind: "inspect_sessions", label: "Inspect the referenced session" },
 		});
 	}
@@ -848,12 +876,14 @@ function validSuggestions(value: unknown): boolean {
 		if (
 			!isRecord(entry) ||
 			!hasExactKeys(entry, ["suggestion_id", "analyzer", "recommendation", "rationale", "evidence", "next_action"]) ||
-			!["token_concentration", "token_coverage_gap", "tool_coverage_gap", "cost_unavailable"].includes(String(entry.suggestion_id)) ||
+			!["token_concentration", "tool_concentration", "token_coverage_gap", "tool_coverage_gap", "cost_unavailable"].includes(
+				String(entry.suggestion_id),
+			) ||
 			ids.has(String(entry.suggestion_id)) ||
 			!isRecord(entry.analyzer) ||
 			!hasExactKeys(entry.analyzer, ["analyzer_id", "version"]) ||
 			entry.analyzer.analyzer_id !== "ceal.local_usage_rules" ||
-			entry.analyzer.version !== "1" ||
+			entry.analyzer.version !== "2" ||
 			!boundedDisplayText(entry.recommendation, 240) ||
 			!boundedDisplayText(entry.rationale, 320) ||
 			!isRecord(entry.evidence) ||
@@ -1086,8 +1116,9 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 
 function validSuggestionSemantics(dataset: CealLocalUsageDashboardV1, completeTools: number, completeTokens: number): boolean {
 	const expected = buildUsageSuggestions(
-		dataset.sessions.map((session) => ({ sessionRef: session.session_ref, tokens: session.tokens })),
+		dataset.sessions.map((session) => ({ sessionRef: session.session_ref, tokens: session.tokens, toolCalls: session.agent_tool_calls })),
 		completeTools,
+		dataset.metric_coverage.agent_tool_calls.observation_state,
 		dataset.metric_coverage.tokens.observation_state,
 		dataset.pricing,
 		dataset.sources[0]?.source_ref ?? "agent_activity:codex",
