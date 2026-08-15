@@ -75,10 +75,16 @@ export function inspectLocalPricingSnapshot(home: string, now = Date.now()): Cea
 	}
 
 	let handle: number | undefined;
+	let openAnchor: string;
 	try {
-		const openAnchor = resolveAnchoredDirectory(directoryHandle, directory, directoryStat, 0o700, () => {
+		openAnchor = resolveAnchoredDirectory(directoryHandle, directory, directoryStat, 0o700, () => {
 			throw new Error("unsafe_pricing_store");
 		});
+	} catch {
+		safeClose(directoryHandle);
+		return { status: "unsafe", reason: "unsafe_store" };
+	}
+	try {
 		handle = openSync(path.join(openAnchor, PRICING_SNAPSHOT_FILE), constants.O_RDONLY | constants.O_NOFOLLOW);
 		const held = fstatSync(handle);
 		if (held.dev !== pathStat.dev || held.ino !== pathStat.ino) return { status: "unreadable", reason: "snapshot_unreadable" };
