@@ -48,7 +48,7 @@ export function resolveRepoRoot(requestedRoot: string, runGit: GitRunner = gitBy
 	return requested;
 }
 
-function readPolicy(policyPath: string): string[] {
+export function readPolicy(policyPath: string): string[] {
 	if (!existsSync(policyPath)) throw new Error(`missing policy: ${policyPath}`);
 	let parsed: unknown;
 	try {
