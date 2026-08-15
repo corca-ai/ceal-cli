@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
@@ -293,7 +294,7 @@ function packPackage(packageDirectory, outputDirectory, dependencies) {
 	if (output?.status !== 0) fail("worker_package_pack_failed", "Worker-owned package could not be packed.");
 	let metadata;
 	try {
-		metadata = JSON.parse(output.stdout)?.[0];
+		metadata = parseNpmPackMetadata(JSON.parse(output.stdout));
 	} catch {
 		fail("worker_package_pack_failed", "Worker package metadata is invalid.");
 	}

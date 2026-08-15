@@ -19,6 +19,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -517,11 +518,11 @@ function pack(cwd, destination, expectedName, label) {
 	const result = run(cwd, "npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", destination], label);
 	let metadata;
 	try {
-		metadata = JSON.parse(result.stdout)?.[0];
+		metadata = parseNpmPackMetadata(JSON.parse(result.stdout));
 	} catch {
 		throw new GatewayProtocolConsumerError("invalid_pack_metadata", "Consumer package pack metadata is invalid.");
 	}
-	if (metadata?.name !== expectedName || typeof metadata.filename !== "string")
+	if (metadata.name !== expectedName)
 		throw new GatewayProtocolConsumerError("invalid_pack_metadata", "Consumer package pack identity is invalid.");
 	const artifact = path.join(destination, metadata.filename);
 	return { path: artifact, sha256: sha256(readRegularFile(artifact, "invalid_pack_artifact")) };

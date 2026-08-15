@@ -18,6 +18,7 @@ const WORKER_CONTRACT_TESTS = [
 	"packages/ceal-protocol/test/personal-client-session.test.mjs",
 	"packages/ceal-protocol/test/protocol-negotiation.test.mjs",
 	"packages/ceal-protocol/test/wire-boundary.test.mjs",
+	"test/check-docs-graph.test.ts",
 	"test/contract/gateway-handoff-bootstrap.test.mjs",
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 	"test/contract/leased-consumer-control-conformance-projection.test.mjs",
@@ -42,6 +43,8 @@ const WORKER_CONTRACT_TESTS = [
 const WORKER_RELEASE_TESTS = [
 	"test/client-artifact.test.mjs",
 	"test/gateway-protocol-consumer.test.mjs",
+	"test/npm-pack-metadata.test.ts",
+	"test/release-process-supervisor.test.ts",
 	"test/worker-native-artifact.test.mjs",
 	"test/worker-release-installer.test.mjs",
 	"test/worker-release-package.test.mjs",
@@ -50,7 +53,7 @@ const WORKER_RELEASE_TESTS = [
 function testFilesIn(script) {
 	return (script ?? "")
 		.split(/\s+/u)
-		.filter((token) => token.endsWith(".test.mjs"))
+		.filter((token) => token.endsWith(".test.mjs") || token.endsWith(".test.ts"))
 		.sort();
 }
 
@@ -64,6 +67,10 @@ function assertSourceLaneTestOwnership(script, testFile) {
 	assert.equal(occurrences.length, 1, `${testFile} must be registered exactly once`);
 	assert.ok(testFilesIn(segments[0]).includes(testFile), `${testFile} must execute through the source-test runner`);
 	assert.ok(!testFilesIn(segments[1]).includes(testFile), `${testFile} must not execute through plain node`);
+}
+
+function assertTestInventoryCoverage(declared, actual) {
+	assert.deepEqual([...declared].sort(), [...actual].sort());
 }
 
 function searchableWorktreeFiles(repoRoot) {
@@ -1523,13 +1530,17 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS].filter((file) => file.startsWith("test/")).sort();
 	const actual = [
 		...readdirSync(path.join(ROOT, "test", "contract"))
-			.filter((name) => name.endsWith(".test.mjs"))
+			.filter((name) => name.endsWith(".test.mjs") || name.endsWith(".test.ts"))
 			.map((name) => `test/contract/${name}`),
 		...readdirSync(path.join(ROOT, "test"))
-			.filter((name) => name.endsWith(".test.mjs"))
+			.filter((name) => name.endsWith(".test.mjs") || name.endsWith(".test.ts"))
 			.map((name) => `test/${name}`),
 	].sort();
-	assert.deepEqual(declared, actual);
+	assertTestInventoryCoverage(declared, actual);
+	// Mutation proof: a newly added TypeScript suite must fail the same ownership
+	// contract as a newly added MJS suite, rather than relying on a human to notice
+	// that the explicit inventory was not updated.
+	assert.throws(() => assertTestInventoryCoverage(declared, [...actual, "test/unregistered.test.ts"]));
 
 	// Any other directory under test/ would be declared by neither inventory.
 	const directories = readdirSync(path.join(ROOT, "test"), { withFileTypes: true })

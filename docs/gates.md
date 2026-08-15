@@ -156,6 +156,17 @@ race that loses is silent:
 Do not re-add `--test-concurrency=1` to buy safety for a new fixture. Give the
 shared thing an owner, as `dist` has one.
 
+The release-process bounds and supervisor helpers are source-backed test
+infrastructure. `test/release-process-bounds.ts` imports the editable
+`packages/ceal-worker-cli/src/bounded-process.ts`, and its supervisor invokes
+that same source module; these tests therefore provide fresh source feedback,
+not direct proof of an emitted `dist/bounded-process.js`. Emitted/package proof
+lives in `test/client-artifact.test.mjs` and the release package/native suites
+(`test/worker-release-package.test.mjs`, `test/worker-native-artifact.test.mjs`)
+through their isolated build and artifact checks. On Darwin, platform-gated
+Linux-only checks report their unproved Linux scope; a green Darwin release run
+does not claim that the Linux executable lane was exercised.
+
 ## The Vendored Protocol Copy Has A Recorded Source
 
 `packages/ceal-protocol` is a frozen copy of a tree `corca-ai/ceal` owns. Its

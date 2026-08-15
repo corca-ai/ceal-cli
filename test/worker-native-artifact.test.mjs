@@ -18,7 +18,7 @@ import {
 	processIsAlive,
 	runAsyncReleaseProcess,
 	runSyncReleaseProcess,
-} from "./release-process-bounds.mjs";
+} from "./release-process-bounds.ts";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 let packedFixture;

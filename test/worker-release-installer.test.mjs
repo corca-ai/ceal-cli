@@ -24,7 +24,7 @@ import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
 import { requireHostTools } from "./host-tools.mjs";
 import { platformProofTest } from "./platform-proof.mjs";
-import { execReleaseTestProcess, processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.mjs";
+import { execReleaseTestProcess, processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

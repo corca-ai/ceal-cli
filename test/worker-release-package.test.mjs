@@ -9,7 +9,7 @@ import {
 	runCli,
 	WorkerReleasePackageError,
 } from "../scripts/build-worker-release-package.mjs";
-import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.mjs";
+import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.mjs";
 
 let packedFixture;

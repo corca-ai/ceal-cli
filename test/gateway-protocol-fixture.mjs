@@ -5,6 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { withBuiltPackages } from "./repo-build.mjs";
 
@@ -38,7 +39,7 @@ export function makeGatewayProtocolFixture() {
 		env: toolchainEnv(),
 	});
 	assert.equal(packed.status, 0, packed.stderr);
-	const metadata = JSON.parse(packed.stdout)[0];
+	const metadata = parseNpmPackMetadata(JSON.parse(packed.stdout));
 	const tarball = path.join(output, metadata.filename);
 	const proof = {
 		schema_version: "ceal.gateway_protocol_artifact.v1",
