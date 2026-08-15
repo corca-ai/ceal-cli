@@ -128,6 +128,12 @@ and summary while keeping the unowned request workflow disabled.
   over the canonical dataset. They identify covered-token concentration,
   token/tool evidence gaps, and unavailable cost with bounded metric/session
   evidence; they are not model judgment, productivity scoring, or actions.
+- The v2 analyzer runs through an internal
+  `ceal.local_usage_analysis_input.v1` projection containing only runtime,
+  allowlisted source/session refs, per-metric coverage, structural tool-call and
+  token counts, and pricing state. It emits coded findings with numeric basis;
+  `ceal-cli` recomputes those findings exactly and owns all visible copy and
+  next actions. Neither the analysis input nor raw findings reach the browser.
 - The browser receives only the fixed display labels `Codex sessions` and
   `Claude sessions`, never expanded transcript roots.
 - `complete`, `partial`, `observed_empty`, and `unreadable` remain distinct.

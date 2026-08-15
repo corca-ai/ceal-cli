@@ -6,6 +6,7 @@ import {
 	composeCodexDashboardAdapterInput,
 	decodeProductionLocalUsageDashboard,
 	defaultLocalUsageWindow,
+	inspectLocalUsageAnalysisBoundaryForTest,
 } from "../dist/local-usage-dashboard.js";
 
 const GENERATED_AT = Date.parse("2026-08-14T00:00:00.000Z");
@@ -570,6 +571,63 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 	assert.match(concentrated.suggestions[0].rationale, /One of 4 fully covered sessions/u);
 	assert.equal(concentrated.suggestions[1].suggestion_id, "tool_concentration");
 	assert.match(concentrated.suggestions[1].rationale, /not a productivity or repetition judgment/u);
+	const analysis = inspectLocalUsageAnalysisBoundaryForTest(concentrated);
+	assert.ok(analysis);
+	assert.equal(analysis.accepted, true);
+	assert.deepEqual(analysis.suggestions, concentrated.suggestions);
+	assert.deepEqual(Object.keys(analysis.input).sort(), ["coverage", "pricing", "runtime", "schema_version", "sessions", "source_ref"]);
+	assert.doesNotMatch(
+		JSON.stringify(analysis.input),
+		/(?:prompt|tool_argument|provider_payload|credential|secret|\/Users\/|\/home\/|[A-Za-z]:\\)/iu,
+	);
+	const tokenFinding = analysis.findings.find((finding) => finding.finding_id === "token_concentration");
+	assert.ok(tokenFinding);
+	for (const findings of [
+		[...analysis.findings, analysis.findings[0]],
+		[...analysis.findings].reverse(),
+		analysis.findings.map((finding) =>
+			finding.finding_id === "token_concentration" ? { ...finding, session_ref: "11111111-2222-3333-4444-555555555555" } : finding,
+		),
+		analysis.findings.map((finding) => ("source_ref" in finding ? { ...finding, source_ref: "agent_activity:foreign" } : finding)),
+		analysis.findings.map((finding) =>
+			finding.finding_id === "token_concentration" ? { ...finding, share_percent: finding.share_percent - 1 } : finding,
+		),
+		analysis.findings.map((finding) => (finding.finding_id === "token_concentration" ? { ...finding, metric: "agent_tool_calls" } : finding)),
+		[{ finding_id: "unknown", metric: "tokens" }],
+	]) {
+		const rejected = inspectLocalUsageAnalysisBoundaryForTest(concentrated, findings);
+		assert.equal(rejected?.accepted, false);
+		assert.deepEqual(rejected?.suggestions, []);
+	}
+	const concentrationAt = (values) =>
+		composeCanonicalLocalUsageDashboard({
+			adapter: {
+				...adapterWithModel,
+				sessionDetailCoverage: { returned: values.length, eligible: values.length, state: "complete" },
+				sessions: values.map((value, index) => ({
+					...adapterWithModel.sessions[0],
+					sessionRef: `019f9174-fec1-78d2-b4be-91402cdc67${String(index).padStart(2, "0")}`,
+					tokens: { ...adapterWithModel.sessions[0].tokens, input: value, output: 0 },
+					toolCallEvents: value,
+				})),
+			},
+			timezone: "UTC",
+			window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		});
+	assert.deepEqual(
+		concentrationAt([2, 1, 1, 0])
+			.suggestions.slice(0, 2)
+			.map((entry) => entry.suggestion_id),
+		["token_concentration", "tool_concentration"],
+	);
+	assert.equal(
+		concentrationAt([2, 1, 1, 1]).suggestions.some((entry) => entry.suggestion_id.endsWith("_concentration")),
+		false,
+	);
+	assert.equal(
+		concentrationAt([10, 1, 1]).suggestions.some((entry) => entry.suggestion_id.endsWith("_concentration")),
+		false,
+	);
 	const partialConcentration = composeCanonicalLocalUsageDashboard({
 		adapter: {
 			...adapterWithModel,

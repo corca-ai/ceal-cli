@@ -191,10 +191,14 @@ event summary adds per-session token figures that name their source and scan
 completeness; an unsupplied field or session is omitted, never rendered as
 zero, figures are not comparable across runtimes, and no latency figure is
 derived because neither runtime supplies one.
-**My agent work** also lists local suggestions:
-deterministic rules over the rendered sections (stale collector, missing
+**My agent work** also lists local suggestions: deterministic rules over the
+rendered sections (stale collector, missing
 capability cache, repeated non-completed calls, unknown-outcome receipts),
 each linked to its observed evidence and never a model judgment.
+The current v2 usage rules consume a bounded structural analysis projection and
+emit coded findings. `ceal-cli` owns the visible recommendation copy;
+transcript text, prompts, tool arguments, analysis inputs, and raw findings are
+not sent to the browser or an external skill.
 Neither adapter's coverage claim generalizes to the other, and nothing is
 forwarded to the Gateway in this stage.
 
