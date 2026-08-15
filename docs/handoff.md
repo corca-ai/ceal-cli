@@ -94,12 +94,14 @@ separately approved boundaries.
   fallback to legacy repository-level values. GitHub configuration is still a
   release blocker until that Environment has protection rules and owns those
   values; a tag alone is not approval.
-- `npm run check:unit` is the aggregate development iteration gate. Contract
-  behavior runs through a real converged scratch repository, while separate
-  reachability tests prove the production ship guards refuse divergence before
-  reading release inputs or an installed binary. `npm run check:protocol-dev`
-  remains the narrower Protocol/client proof. The full gate, release builders,
-  packing, and acceptance stay blocked on the live diverged pin.
+- `npm run check:unit` is the aggregate development iteration gate. Its one
+  checkout build is followed by the internal `test:contract:built` lane, while
+  package behavior tests and `npm run check:protocol-dev` provide no-build
+  source feedback. Separate reachability tests prove the production ship guards
+  refuse divergence before reading release inputs or an installed binary. None
+  of these local source/emitted checks is installed-worker, release, or live-
+  serving proof; the full gate, release builders, packing, and acceptance stay
+  blocked on the live diverged pin.
 - Final-gate quality work made audit deadlines deterministic in tests without
   changing the production bound, removed discarded V8 coverage from receipt
   process-gate children, separated their exact exclusion oracle from production

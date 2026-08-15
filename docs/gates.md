@@ -102,6 +102,14 @@ The client and Worker `test` and `coverage` scripts therefore have no build
 lifecycle hook: a targeted behavior test observes current source or fails
 closed, never succeeds against a previous checkout build.
 
+That no-build source feedback is distinct from the root contract gate. The
+public `npm run test:contract` entry builds once, then delegates to
+`test:contract:built`, whose explicit source/artifact-delimited inventory runs
+against the emitted checkout surfaces. `npm run check:unit` already owns one
+build for its unit lane and calls `test:contract:built` directly, so it does not
+pay for a second build. A green contract lane is local emitted-surface proof;
+it is not installed-worker, release, or live-serving proof.
+
 Emitted declarations, package exports, and executable JavaScript are a
 different proof purpose. `test/client-artifact.test.mjs` asks
 `test/artifact-workspace.mjs` to copy only source/config/manifest inputs into a

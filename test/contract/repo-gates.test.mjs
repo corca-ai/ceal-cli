@@ -69,6 +69,24 @@ function assertSourceLaneTestOwnership(script, testFile) {
 	assert.ok(!testFilesIn(segments[1]).includes(testFile), `${testFile} must not execute through plain node`);
 }
 
+function assertContractGateScriptShape(scripts) {
+	assert.equal(
+		scripts["test:contract"],
+		"npm run build && npm run test:contract:built",
+		"public contract feedback must build once before the built lane",
+	);
+	const built = scripts["test:contract:built"];
+	assert.equal((built.match(/\bnpm run build\b/gu) ?? []).length, 0, "the internal contract lane must not build");
+	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
+	assert.deepEqual(testFilesIn(built), [...WORKER_CONTRACT_TESTS].sort(), "the built lane must own the complete contract inventory once");
+	assert.equal(
+		scripts["check:unit"],
+		"npm run lint && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm run test:unit && npm run test:contract:built",
+		"check:unit must reuse its one build through the internal contract lane",
+	);
+	assert.equal((scripts["check:unit"].match(/\bnpm run build\b/gu) ?? []).length, 1, "check:unit must build exactly once");
+}
+
 function assertTestInventoryCoverage(declared, actual) {
 	assert.deepEqual([...declared].sort(), [...actual].sort());
 }
@@ -296,8 +314,7 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	assert.equal(workerPackage.scripts.coverage, "c8 node ../../test/run-source-tests.mjs test/*.test.mjs");
 	assert.equal(workerPackage.scripts.pretest, undefined);
 	assert.equal(workerPackage.scripts.precoverage, undefined);
-	assert.match(manifest.scripts["test:contract"], /^node test\/run-source-tests[.]mjs packages\/ceal-protocol\/test\//u);
-	assert.match(manifest.scripts["test:contract"], / && node --test test\/contract\//u);
+	assertContractGateScriptShape(manifest.scripts);
 	for (const file of filesUnder("packages/ceal-client/test", (name) => name.endsWith(".test.mjs"))) {
 		assert.doesNotMatch(read(file), /["'][.][.]\/dist\//u, `${file} must import editable source, not checkout dist`);
 	}
@@ -1470,6 +1487,7 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 // added under test/ has to be placed deliberately rather than swept in.
 test("every test file under test/ belongs to one explicit worker suite", () => {
 	const scripts = manifest.scripts;
+	assertContractGateScriptShape(scripts);
 	// Which files each suite runs is the claim; the argument order and spacing of
 	// the `node --test` line are not. Exact equality made a reporter flag or a
 	// reordering fail as if a suite had lost coverage.
@@ -1477,20 +1495,21 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 		["test:contract", WORKER_CONTRACT_TESTS],
 		["test:release", WORKER_RELEASE_TESTS],
 	]) {
+		const suiteScript = suite === "test:contract" ? scripts["test:contract:built"] : scripts[suite];
 		// The file set is the claim, but both lanes still have to use the Node test
 		// runner. Contract behavior begins in the source-authoritative wrapper;
 		// release proofs execute immutable artifacts directly.
 		if (suite === "test:contract") {
-			assert.match(scripts[suite], /^node test\/run-source-tests[.]mjs /u);
-			assert.match(scripts[suite], / && node --test /u);
-			assertSourceLaneTestOwnership(scripts[suite], PROJECTION_TEST);
+			assert.match(suiteScript, /^node test\/run-source-tests[.]mjs /u);
+			assert.match(suiteScript, / && node --test /u);
+			assertSourceLaneTestOwnership(suiteScript, PROJECTION_TEST);
 		} else {
-			assert.match(scripts[suite], /^node --test /u, `${suite} must run through the node test runner`);
+			assert.match(suiteScript, /^node --test /u, `${suite} must run through the node test runner`);
 		}
-		assert.doesNotMatch(scripts[suite], /--test-name-pattern|--test-skip-pattern/u);
-		assert.deepEqual(testFilesIn(scripts[suite]), [...declared].sort());
+		assert.doesNotMatch(suiteScript, /--test-name-pattern|--test-skip-pattern/u);
+		assert.deepEqual(testFilesIn(suiteScript), [...declared].sort());
 	}
-	assert.match(scripts["check:unit"], /npm run test:contract/u);
+	assert.match(scripts["check:unit"], /npm run test:contract:built/u);
 	// `npm test` no longer names the two tiers itself: it goes through
 	// `coverage:scripts`, whose runner wraps them in c8 so scripts/ is measured
 	// once rather than run plainly and then again under coverage. The claim is
@@ -1561,6 +1580,20 @@ test("projection conformance cannot move or duplicate outside the source-test la
 		/packages\/ceal-worker-cli\/dist|copiedDist/u,
 		"the source-authoritative projection test must not execute mutable checkout artifacts",
 	);
+});
+
+test("contract gate ownership rejects build and inventory mutations", () => {
+	const scripts = { ...manifest.scripts };
+	assert.doesNotThrow(() => assertContractGateScriptShape(scripts));
+
+	const publicBuildMoved = { ...scripts, "test:contract": "npm run test:contract:built" };
+	assert.throws(() => assertContractGateScriptShape(publicBuildMoved), /public contract feedback/u);
+	const internalBuildAdded = { ...scripts, "test:contract:built": `npm run build && ${scripts["test:contract:built"]}` };
+	assert.throws(() => assertContractGateScriptShape(internalBuildAdded), /internal contract lane must not build/u);
+	const duplicateBuild = { ...scripts, "check:unit": `${scripts["check:unit"]} && npm run build` };
+	assert.throws(() => assertContractGateScriptShape(duplicateBuild), /check:unit must reuse/u);
+	const omittedTest = { ...scripts, "test:contract:built": scripts["test:contract:built"].replace(` ${PROJECTION_TEST}`, "") };
+	assert.throws(() => assertContractGateScriptShape(omittedTest), /exactly once|complete contract inventory/u);
 });
 
 // A "the contract suite stays small enough to run on every push" test lived here
