@@ -5,6 +5,7 @@ import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
 import type { CealDiscoveryCacheEntry } from "./discovery-cache.js";
 import type { CealLocalPricingSnapshotV1 } from "./local-usage-dashboard.js";
 import type { CealGatewayOverview } from "./observer.js";
+import type { CealPricingSnapshotInspection } from "./pricing-snapshot.js";
 import type { CealLockedSessionStore, CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 import type { CealTimingRecorder } from "./timing.js";
@@ -87,6 +88,7 @@ export interface CealCommandRuntime {
 	loadObserverCealOverview?: () => Promise<CealGatewayOverview>;
 	/** Optional owner-only local pricing input for Workbench estimates. */
 	loadPricingSnapshot?: (now: number) => CealLocalPricingSnapshotV1 | null;
+	inspectPricingSnapshot?: (now: number) => CealPricingSnapshotInspection;
 	/** Freshness window for a served discovery-cache entry. */
 	discoveryCacheTtlMs?: number;
 	nextRequestId?: () => string;

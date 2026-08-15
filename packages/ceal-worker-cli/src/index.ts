@@ -99,6 +99,7 @@ async function runKnownCommand(
 	if (command === "call") return runCall(options, io, runtime);
 	if (command === "receipt") return runReceipt(options, io, runtime);
 	if (command === "observe") return runObserve(options, io, runtime);
+	if (command === "pricing") return runPricing(options, io, runtime);
 	if (command === "acceptance") return runAcceptance(options, io, runtime);
 	return runCapabilities(options, io, runtime);
 }
@@ -482,6 +483,11 @@ const GUIDE_ROUTES: CealSubcommandHandlers<"guide", GuideRouteHandler> = {
 	"register claude": runGuideRegister,
 };
 
+type PricingRouteHandler = (rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime) => number;
+const PRICING_ROUTES: CealSubcommandHandlers<"pricing", PricingRouteHandler> = {
+	status: (rest, io, runtime) => runPricingStatus(rest, io, runtime),
+};
+
 /**
  * The route keys every runner's dispatch table actually handles, by parent.
  *
@@ -503,9 +509,60 @@ export function dispatchedRouteKeys(): Readonly<Record<string, readonly string[]
 		acceptance: Object.keys(ACCEPTANCE_ROUTES),
 		capabilities: Object.keys(CAPABILITIES_ROUTES),
 		guide: Object.keys(GUIDE_ROUTES),
+		pricing: Object.keys(PRICING_ROUTES),
 		receipt: Object.keys(RECEIPT_ROUTES),
 		session: Object.keys(SESSION_ROUTES),
 	};
+}
+
+function runPricing(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
+	const resolved = resolveSubcommandRoute("pricing", options, PRICING_ROUTES);
+	if (!resolved)
+		return options.length === 0
+			? runPricingStatus([], io, runtime)
+			: writeError("invalid_argument", "Invalid pricing action.", io, "Run 'ceal pricing --help'.");
+	return resolved.handler(resolved.rest, io, runtime);
+}
+
+function runPricingStatus(rest: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {
+	if (rest.length !== 0) return writeError("invalid_argument", "Invalid pricing status options.", io, "Run 'ceal pricing status --help'.");
+	const inspection = runtime.inspectPricingSnapshot?.(runtime.now?.() ?? Date.now()) ?? {
+		status: "unreadable",
+		reason: "snapshot_unreadable",
+	};
+	const nextAction: Record<string, string> = {
+		ready: "Run 'ceal observe' to inspect evidence-bounded local estimates.",
+		store_absent: "Use the approved local provisioning process to place a strict snapshot, then run 'ceal pricing status' again.",
+		snapshot_absent: "Use the approved local provisioning process to place a strict snapshot, then run 'ceal pricing status' again.",
+		unsafe_store: "Inspect ~/.ceal, replace any symlink, and set the owner-only directory mode to 0700 before retrying.",
+		unsafe_snapshot: "Inspect pricing-snapshot.json, replace any symlink or non-regular file, and set its mode to 0600 before retrying.",
+		snapshot_unreadable: "Check owner access to the local pricing store, then retry without changing unknown state.",
+		snapshot_too_large: "Replace the snapshot with an approved file no larger than 256 KiB.",
+		snapshot_invalid: "Replace the snapshot with a strict ceal.local_pricing_snapshot.v1 document.",
+		snapshot_future: "Replace the snapshot with one whose observed_at is not in the future.",
+	};
+	writeYaml(io.stdout, {
+		schema_version: "ceal.pricing_snapshot.v1",
+		command: "ceal",
+		ok: true,
+		action: "status",
+		effect: "read_only",
+		status: inspection.status,
+		reason: inspection.reason,
+		authority: "operator_supplied_local",
+		commercial_accuracy: "not_verified",
+		network_contact: "none",
+		...(inspection.status === "ready"
+			? {
+					observed_at: inspection.observedAt,
+					currency: inspection.currency,
+					rate_count: inspection.rateCount,
+					revision_fingerprint: inspection.revisionFingerprint,
+				}
+			: {}),
+		next_action: nextAction[inspection.reason],
+	});
+	return 0;
 }
 
 function runGuide(options: readonly string[], io: CealCliIo, runtime: CealCommandRuntime): number {

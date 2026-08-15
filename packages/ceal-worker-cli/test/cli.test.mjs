@@ -119,6 +119,34 @@ async function yamlRun(args, expectedCode = 0, runtime = {}) {
 	return documents[0].toJS();
 }
 
+test("pricing status classifies local operator input without exposing its contents", async () => {
+	const ready = await yamlRun(["pricing", "status"], 0, {
+		now: () => Date.parse("2026-08-15T00:00:00.000Z"),
+		inspectPricingSnapshot: () => ({
+			status: "ready",
+			reason: "ready",
+			observedAt: "2026-08-14T00:00:00.000Z",
+			currency: "USD",
+			rateCount: 2,
+			revisionFingerprint: "0123456789abcdef",
+			snapshot: { private: "must-not-render" },
+		}),
+	});
+	assert.equal(ready.ok, true);
+	assert.equal(ready.effect, "read_only");
+	assert.equal(ready.authority, "operator_supplied_local");
+	assert.equal(ready.commercial_accuracy, "not_verified");
+	assert.equal(ready.network_contact, "none");
+	assert.equal(ready.revision_fingerprint, "0123456789abcdef");
+	assert.equal(JSON.stringify(ready).includes("must-not-render"), false);
+
+	const absent = await yamlRun(["pricing"], 0, {
+		inspectPricingSnapshot: () => ({ status: "absent", reason: "store_absent" }),
+	});
+	assert.equal(absent.status, "absent");
+	assert.match(absent.next_action, /approved local provisioning process/u);
+});
+
 test("canonical registry is reachable through stable, read-only help", async () => {
 	for (const args of [[], ["help"], ["-h"], ["--help"]]) {
 		const result = await run(args);
@@ -507,7 +535,7 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 	assert.equal(payload.schema_version, "ceal.commands.v1");
 	assert.deepEqual(
 		payload.commands.map((command) => command.name),
-		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe", "acceptance"],
+		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "pricing", "observe", "acceptance"],
 	);
 	// An agent that parses this document instead of prose help must see the same
 	// route depth the help surface advertises.

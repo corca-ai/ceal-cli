@@ -1,5 +1,5 @@
 export interface CealCommandDefinition {
-	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe" | "acceptance";
+	name: "version" | "commands" | "update" | "guide" | "capabilities" | "session" | "call" | "receipt" | "observe" | "pricing" | "acceptance";
 	description: string;
 	usage: string;
 	/**
@@ -121,6 +121,15 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		result_schema: "ceal.receipt.v1",
 		recovery:
 			"Use the 'receipt.request_ref' a call returned; a reference with no audited outcome answers 'audit_event_not_found' until the Gateway records one.",
+	},
+	{
+		name: "pricing",
+		description: "Inspect the operator-supplied local pricing snapshot used for Workbench estimates.",
+		usage: "ceal pricing [status]",
+		effect: "read_only",
+		evidence: "surface",
+		result_schema: "ceal.pricing_snapshot.v1",
+		recovery: "Run 'ceal pricing status' to inspect the local pricing state before changing it.",
 	},
 	{
 		name: "observe",

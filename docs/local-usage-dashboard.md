@@ -11,6 +11,52 @@ unsupported monetary cost explicit.
 
 ## Current Slice
 
+The next implementation slice adds an explicit local provisioning journey:
+`ceal pricing status` reads the installed snapshot state, and
+`ceal pricing install --file <path> [--dry-run]` validates and atomically
+installs one operator-supplied snapshot. The CLI is a transport and validator,
+not a pricing authority: it does not download rates, assert their commercial
+accuracy, or contact Ceal, a provider, or a billing system.
+
+Implementation is sequenced without advertising dead routes: the first slice
+ships `pricing status` and its diagnostic inspector; the immediately following
+slice adds the declared `install` leaf only when dry-run and mutation handling
+are executable together.
+
+Both leaves emit one `ceal.pricing_snapshot.v1` YAML document. Shared safe
+fields are `schema_version`, `command`, `ok`, `action`, `effect`, `status`, `reason`,
+`authority: operator_supplied_local`, `commercial_accuracy: not_verified`,
+`network_contact: none`, and `next_action`. A ready/planned/installed value may
+also include `observed_at`, `currency`, `rate_count`, and a non-reversible
+revision fingerprint. `command` is always `ceal`; `action` is `status` or
+`install`; `effect` is `read_only` for status and `local_write` for install.
+Status classification records use `ok: true` and the ordered status/reason pair
+below, with a fixed recovery-specific `next_action`. `status` exits zero whenever it successfully classifies
+the store, including absent or unhealthy states. Invalid arguments exit 2;
+install validation/store refusals exit 3; an install whose rename may have
+succeeded but whose fresh readback cannot be proved exits 4 with
+`status: outcome_unknown`.
+
+Pricing status uses a separate diagnostic inspector; the observer loader keeps
+its existing fail-closed `snapshot | null` contract. Classification is ordered:
+
+1. missing `.ceal` directory → `absent/store_absent`;
+2. unsafe parent type, symlink, ownership, or mode → `unsafe/unsafe_store`;
+3. missing snapshot → `absent/snapshot_absent`;
+4. symlink, non-regular, multiply-linked, wrong-owner, or wrong-mode snapshot →
+   `unsafe/unsafe_snapshot`;
+5. descriptor open/read instability → `unreadable/snapshot_unreadable`;
+6. more than 256 KiB → `invalid/snapshot_too_large`;
+7. malformed JSON or rejected schema → `invalid/snapshot_invalid`;
+8. future `observed_at` → `invalid/snapshot_future`;
+9. otherwise → `ready`.
+
+Every non-ready state carries fixed recovery text. Unsafe parents are repaired
+manually to a real owner-owned `0700` directory; unsafe destination paths must
+be removed or replaced manually after inspection. A regular file with invalid
+content may be replaced by install. An unreadable current file is refused
+because revision reuse cannot be checked safely.
+
 The current slice adds Claude as a second canonical runtime partition. Claude
 `event_usage_sum` observations remain separate from Codex
 `runtime_cumulative_last`; the Workbench never produces a cross-runtime token
@@ -113,6 +159,53 @@ and summary while keeping the unowned request workflow disabled.
   it describes concentration only and never infers repeated or similar work.
 - The first two suggestions are shown directly. Additional suggestions remain
   available in a compact disclosure so the usage field stays primary.
+- Pricing installation is an explicit local-write operation. `--dry-run` makes
+  no filesystem change; status and help are read-only.
+- The input must be a non-symlink regular file within the existing 256 KiB
+  bound and must decode as the strict snapshot contract with no future
+  `observed_at`. Its source permissions do not become trust evidence.
+- The destination remains `~/.ceal/pricing-snapshot.json` under the existing
+  owner-only `0700` directory and `0600` file contract. Replacement is written
+  and synced through a same-directory temporary file before atomic rename.
+- Reinstalling byte-equivalent canonical content is `unchanged`. Reusing one
+  revision for different pricing semantics is refused because it would break
+  the comparability-group invariant. A different valid revision may replace
+  the prior snapshot.
+- Canonical serialization uses the schema key order and rates sorted by
+  `model_key`; JSON whitespace, source key order, and source rate order are not
+  semantic. Full canonical equality is `unchanged`. Revision reuse compares
+  currency plus the sorted model/rate table: changed `snapshot_ref` or
+  `observed_at` with identical pricing semantics may install, while the same
+  revision with changed currency or any rate is refused.
+- Install holds one store lock across current-state inspection, revision
+  comparison, same-directory `wx`/`0600` temporary creation, bounded write,
+  file `fsync`, close, anchored rename, directory `fsync`, and fresh descriptor
+  readback. Two installers therefore serialize instead of silently
+  last-writer-winning. Only a temporary created by this invocation is removed.
+- The source is opened once with `O_NOFOLLOW`, checked with `fstat`, and read
+  from that descriptor up to 256 KiB + 1 byte. It is never reopened by path.
+- Dry-run performs the same source, destination, and revision checks but creates
+  no directory, lock, or temporary file. It reports `ok: true`, `planned` or
+  `unchanged`, and `reason: validation_passed` or `already_installed`. This is a
+  non-binding point-in-time plan; the real install repeats every check under the
+  lock. A completed install reports `ok: true`, `status: installed`, and
+  `reason: installed_and_verified`. Refusals report `ok: false`,
+  `status: refused`, and a bounded reason/next action. Any failure after rename
+  that prevents directory durability or fresh readback proof reports
+  `ok: false`, `status: outcome_unknown`, and `reason:
+  installed_readback_unproven`.
+- Command output may show state, observed time, currency, rate count, and a
+  non-reversible revision fingerprint. It never emits the input path, raw
+  snapshot/revision refs, model keys, rates, or snapshot bytes.
+- Automatic fetching, signature verification, freshness expiry, background
+  updates, rollback history, and snapshot removal remain deferred until an
+  owning producer contract exists.
+- `pricing` is a declared top-level command; each slice declares its
+  corresponding `status` or `install` leaf only when executable, so command discovery, parent/leaf help, effect metadata,
+  recovery, and dispatch totality come from the existing command tables.
+  `--file` is required exactly once and flag-order independent; `--dry-run` is
+  unique and valueless. Help anywhere is side-effect free, and a flag-looking
+  file value is rejected before any read or write.
 
 ## Acceptance
 
@@ -133,12 +226,23 @@ and summary while keeping the unowned request workflow disabled.
   partial model/rate coverage, and daily/period reconciliation.
 - `browser`: a valid snapshot renders estimated currency with explicit covered-
   subset evidence, while no snapshot retains the unsupported state.
+- `unit`: pricing status distinguishes absent, ready, unsafe, unreadable, and
+  invalid without exposing snapshot contents.
+- `unit`: every status reason obeys precedence and maps to exit zero, `ok: true`,
+  fixed effect/action, and bounded recovery.
+- `unit`: install help and dry-run perform no write; invalid, oversized,
+  symlinked, future, and revision-reuse inputs preserve the installed file.
+- `integration`: a valid new revision installs with `0700`/`0600` permissions,
+  atomic readback, concise YAML output, and no network contact.
+- `unit`: canonical ordering ignores JSON/rate order; a metadata-only update may
+  reuse a revision, changed pricing semantics may not; concurrent installers
+  serialize, and a post-rename proof failure returns `outcome_unknown`.
 
 ## Next Slice
 
-Define how a trusted maintainer or future Ceal-owned sync flow provisions and
-updates the snapshot without turning the public CLI into a pricing authority.
-Run both runtime partitions against bounded local histories and review whether
+Implement and prove the explicit local pricing status/install lifecycle without
+turning the public CLI into a pricing authority. Then run both runtime
+partitions against bounded local histories and review whether
 the selector, coverage language, and runtime-specific suggestions remain useful
 without recording user content. The resource catalog and access-request
 workflow remain deferred until an Admin-owned contract exists.

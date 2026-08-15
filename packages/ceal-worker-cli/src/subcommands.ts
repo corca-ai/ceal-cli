@@ -27,6 +27,16 @@ export interface CealSubcommandDefinition {
 // them a table-only row type-checks and misroutes in the shipped binary.
 export const CEAL_SUBCOMMANDS = [
 	{
+		parent: "pricing",
+		route: ["status"],
+		description: "Inspect the operator-supplied local pricing snapshot without contacting any network.",
+		usage: "ceal pricing status",
+		effect: "read_only",
+		evidence: "surface",
+		result_schema: "ceal.pricing_snapshot.v1",
+		recovery: "Correct the bounded local state named by next_action, then run 'ceal pricing status' again.",
+	},
+	{
 		parent: "guide",
 		route: ["status"],
 		description: "Inspect the signed guide and its registration in every supported agent host.",

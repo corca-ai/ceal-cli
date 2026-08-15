@@ -82,6 +82,7 @@ function commandAcceptsOptions(command: CealCommandDefinition["name"], options: 
 		command === "call" ||
 		command === "receipt" ||
 		command === "observe" ||
+		command === "pricing" ||
 		command === "acceptance"
 	);
 }
