@@ -20,7 +20,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.mjs";
+import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.ts";
 
 /** A file is production-reachable if some entry reaches it through static imports. */
 function parse(file, text) {
