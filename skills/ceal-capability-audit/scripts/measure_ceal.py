@@ -19,6 +19,7 @@ import time
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_OUTPUT_BYTES = 1_048_576
 DEFAULT_MAX_FILE_ARG_BYTES = 262_144
+TERMINATION_WAIT_SECONDS = 1.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -108,7 +109,21 @@ def terminate_group(process: subprocess.Popen[bytes]) -> None:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    process.wait()
+    except PermissionError:
+        # A macOS group can become unsignalable while its leader is still a
+        # useful direct target. Preserve bounded custody by falling back to
+        # the leader; if that also fails, surface the failure instead of
+        # pretending the process was settled.
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as direct_error:
+            raise RuntimeError("process-group and direct leader termination failed") from direct_error
+    try:
+        process.wait(timeout=TERMINATION_WAIT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("process did not settle after termination") from error
 
 
 def run_bounded(command: list[str], timeout_seconds: float, max_output_bytes: int) -> tuple[int, bytes, bytes, str, int | None]:

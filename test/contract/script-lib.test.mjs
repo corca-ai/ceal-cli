@@ -178,6 +178,52 @@ test("capability audit measurement bounds settlement and does not echo operands"
 	assert.match(inherited.stderr, /"settlement": "timeout"/u);
 });
 
+test("capability audit settles actual children when process-group termination is denied", () => {
+	const helper = path.resolve("skills/ceal-capability-audit/scripts/measure_ceal.py");
+	const injected = spawnSync(
+		"python3",
+		[
+			"-c",
+			[
+				"import importlib.util",
+				"spec = importlib.util.spec_from_file_location('measure', __import__('sys').argv[1])",
+				"measure = importlib.util.module_from_spec(spec)",
+				"spec.loader.exec_module(measure)",
+				"def denied_group(_pid, _signal): raise PermissionError('injected EPERM')",
+				"measure.os.killpg = denied_group",
+				"import subprocess",
+				"class FakeProcess:",
+				"    pid = 12345",
+				"    killed = False",
+				"    wait_timeout = None",
+				"    def kill(self): self.killed = True",
+				"    def wait(self, timeout=None):",
+				"        self.wait_timeout = timeout",
+				"        raise subprocess.TimeoutExpired(['fake-process'], timeout)",
+				"fake = FakeProcess()",
+				"try: measure.terminate_group(fake)",
+				"except RuntimeError as error: assert str(error) == 'process did not settle after termination'",
+				"else: raise AssertionError('terminate_group accepted an unsettled process')",
+				"assert fake.killed and fake.wait_timeout == measure.TERMINATION_WAIT_SECONDS == 1.0",
+				"import time",
+				"started = time.monotonic()",
+				"timeout_result = measure.run_bounded(['python3', '-c', 'import time; time.sleep(30)'], 0.05, 1024)",
+				"assert timeout_result[0] == 124 and timeout_result[3] == 'timeout'",
+				"assert timeout_result[4] is not None",
+				"assert time.monotonic() - started < 2",
+				"started = time.monotonic()",
+				"output_result = measure.run_bounded(['python3', '-c', \"import os\\nwhile True: os.write(1, b'x' * 65536)\"], 5, 1024)",
+				"assert output_result[0] == 125 and output_result[3] == 'output_limit'",
+				"assert output_result[4] is not None and len(output_result[1]) == 1024",
+				"assert time.monotonic() - started < 2",
+			].join("\n"),
+			helper,
+		],
+		{ encoding: "utf8", timeout: 3000 },
+	);
+	assert.equal(injected.status, 0, injected.stderr || injected.stdout);
+});
+
 test("capability audit cold start resolves its installed helper without an inherited shell variable", () => {
 	const skill = readFileSync("skills/ceal-capability-audit/SKILL.md", "utf8");
 	assert.match(skill, /Do not assume the shell already exports it/u);
