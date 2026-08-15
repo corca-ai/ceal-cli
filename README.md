@@ -115,9 +115,11 @@ combines that live personal summary with cached local state. **Usage** renders
 the canonical local Codex dataset and switches independently among Sessions,
 Agent tool calls, Tokens, and Estimated cost. Every axis renders its own source,
 effective window, and coverage; unsupported or unreadable evidence is never
-shown as zero. **Sessions** lists every bounded, privacy-safe local session in
-the selected window with twenty rows per page and an inert structural-evidence
-detail. **Access** renders the bounded Gateway-owned capability catalog and its
+shown as zero. Usage also renders versioned deterministic local suggestions for
+token concentration, evidence gaps, and unavailable cost; these are not model
+judgments or productivity scores. **Sessions** lists every bounded, privacy-safe
+local session in the selected window with twenty rows per page and an inert
+structural-evidence detail. **Access** renders the bounded Gateway-owned capability catalog and its
 summary; it does not claim a resource inventory, and its future resource search
 and access-request workflow remain visibly unavailable. **Evidence**
 keeps advisory receipt metadata separate, and **Setup & privacy** declares the local

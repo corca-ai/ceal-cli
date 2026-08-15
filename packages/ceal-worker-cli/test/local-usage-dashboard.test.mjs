@@ -165,6 +165,11 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 	assert.equal(dataset.metric_coverage.agent_tool_calls.observation_state, "partial");
 	assert.equal(dataset.metric_coverage.tokens.observation_state, "partial");
 	assert.equal(dataset.metric_coverage.estimated_cost.observation_state, "unsupported");
+	assert.deepEqual(
+		dataset.suggestions.map((entry) => entry.suggestion_id),
+		["token_coverage_gap", "tool_coverage_gap", "cost_unavailable"],
+	);
+	assert.deepEqual(dataset.suggestions[0].evidence.session_refs, []);
 	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
 	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, fixture_only: true }), null);
 	assert.equal(decodeProductionLocalUsageDashboard({ ...dataset, production_provenance: "synthetic" }), null);
@@ -176,6 +181,36 @@ test("composes a fail-closed canonical browser dataset with reconciling covered-
 		decodeProductionLocalUsageDashboard({
 			...dataset,
 			sessions: [{ ...dataset.sessions[0], transcript_path: "/Users/private/session.jsonl" }],
+		}),
+		null,
+	);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			suggestions: [
+				{
+					...dataset.suggestions[0],
+					evidence: { ...dataset.suggestions[0].evidence, session_refs: ["11111111-2222-3333-4444-555555555555"] },
+				},
+				...dataset.suggestions.slice(1),
+			],
+		}),
+		null,
+	);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			suggestions: [{ ...dataset.suggestions[0], recommendation: "PRIVATE PROMPT CONTENT" }, ...dataset.suggestions.slice(1)],
+		}),
+		null,
+	);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			suggestions: [
+				{ ...dataset.suggestions[0], evidence: { ...dataset.suggestions[0].evidence, source_refs: ["invented:source"] } },
+				...dataset.suggestions.slice(1),
+			],
 		}),
 		null,
 	);
@@ -307,6 +342,26 @@ test("accepts a strict pricing snapshot but keeps cost unsupported without local
 		pricingSnapshot: snapshot,
 	});
 	assert.equal(withModel.pricing.reason, "cost_derivation_unavailable");
+	assert.match(
+		withModel.suggestions.find((entry) => entry.suggestion_id === "cost_unavailable").rationale,
+		/derivation is not implemented/u,
+	);
+	const concentrated = composeCanonicalLocalUsageDashboard({
+		adapter: {
+			...adapterWithModel,
+			sessionDetailCoverage: { returned: 4, eligible: 4, state: "complete" },
+			sessions: [10, 1, 1, 1].map((input, index) => ({
+				...adapterWithModel.sessions[0],
+				sessionRef: `019f9174-fec1-78d2-b4be-91402cdc66d${index + 4}`,
+				tokens: { ...adapterWithModel.sessions[0].tokens, input, output: 0 },
+			})),
+		},
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: snapshot,
+	});
+	assert.equal(concentrated.suggestions[0].suggestion_id, "token_concentration");
+	assert.match(concentrated.suggestions[0].rationale, /One of 4 fully covered sessions/u);
 	assert.equal(withModel.totals.estimated_cost, null);
 	assert.equal(
 		decodeProductionLocalUsageDashboard({ ...withModel, pricing: { ...withModel.pricing, reason: "model_identity_unavailable" } }),

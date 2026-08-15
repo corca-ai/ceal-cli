@@ -986,11 +986,17 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const headline = dashboard.totals[metric] === null
       ? esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "."
       : "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnits[metric]) + " observed.";
+    const suggestionCard = (entry) => "<article class='card'><span class='pill'>" + esc(entry.analyzer.analyzer_id + " v" + entry.analyzer.version) + "</span><h3>" + esc(entry.recommendation) + "</h3><p>" + esc(entry.rationale) + "</p><p class='muted'>Evidence: " + esc(entry.evidence.metric) + (entry.evidence.session_refs.length ? " · " + entry.evidence.session_refs.length + " referenced session" : " · aggregate coverage") + "</p><p class='next'>Suggested next step: " + esc(entry.next_action.label) + "</p></article>";
+    const primarySuggestions = dashboard.suggestions.slice(0, 2).map(suggestionCard).join("");
+    const remainingSuggestions = dashboard.suggestions.slice(2);
+    const usageSuggestions = dashboard.suggestions.length
+      ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + " more suggestions</summary>" + remainingSuggestions.map(suggestionCard).join("") + "</details>" : "")
+      : "<div class='card'><strong>No deterministic usage suggestions</strong><p class='muted'>This is not a completeness or productivity claim.</p></div>";
     return identity
       + "<section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Each metric keeps its own coverage; missing values are never treated as zero.</p></section>"
       + "<div class='metric-tabs' role='group' aria-label='Usage metric'>" + axes + "</div>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + "</p></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + suggView + "</section>";
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + usageSuggestions + "<p class='warn'>Deterministic local rules over the canonical dataset; not model judgment or a productivity score.</p></section>";
   };
   const sessionsView = () => {
     const total = dashboard.sessions.length;

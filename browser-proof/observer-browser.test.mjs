@@ -90,6 +90,12 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.locator("#root .hero").waitFor();
 	assert.equal(await page.locator("#root .hero h2").textContent(), "3 sessions observed.");
 	await page.getByText("Local Profile unavailable").waitFor();
+	await page.getByText("ceal.local_usage_rules v1").first().waitFor();
+	await page.getByText("1 more suggestions").click();
+	await page.getByText("Use token evidence until monetary cost can be derived from owned inputs.").waitFor();
+	await page.getByText(/No production pricing snapshot was supplied/u).waitFor();
+	await page.getByText(/Suggested next step: Review pricing status/u).waitFor();
+	await page.getByText(/not model judgment or a productivity score/u).waitFor();
 	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 3);
 	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
 	await page.getByRole("heading", { name: "Estimated cost is unsupported." }).waitFor();

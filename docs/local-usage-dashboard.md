@@ -40,6 +40,10 @@ and summary while keeping the unowned request workflow disabled.
 - Access projects only the allowlisted capability ID, display label, effect,
   target requirement, and evidence requirement returned by Gateway discovery.
   It is not a resource inventory or a copy of provider/policy payloads.
+- Usage suggestions are deterministic `ceal.local_usage_rules` v1 projections
+  over the canonical dataset. They identify covered-token concentration,
+  token/tool evidence gaps, and unavailable cost with bounded metric/session
+  evidence; they are not model judgment, productivity scoring, or actions.
 - The browser receives the fixed display label `Codex sessions`, never the
   expanded transcript root.
 - `complete`, `partial`, `observed_empty`, and `unreadable` remain distinct.
@@ -60,11 +64,17 @@ and summary while keeping the unowned request workflow disabled.
   supported currencies and arithmetic before any estimate is enabled.
 - Snapshot and revision references remain producer-private and are not projected
   into the browser dataset while monetary derivation is unsupported.
-- Cost remains `unsupported` even with a valid snapshot until the runtime
-  supplies a privacy-safe model identity for each priced token observation;
-  missing cost is never zero.
+- Cost remains `unsupported` until an owned production snapshot loader and
+  decimal derivation exist. Missing model identity and matching rates remain
+  distinct reasons; missing cost is never zero.
 - Runtime transcript content, prompts, tool arguments, credentials, raw provider
   payloads, and absolute paths remain outside the dataset.
+- Deterministic suggestions are regenerated from canonical evidence at decode
+  time. Token concentration is emitted only with complete token coverage over
+  at least four returned sessions and a single-session share of at least 50%;
+  it describes concentration only and never infers repeated or similar work.
+- The first two suggestions are shown directly. Additional suggestions remain
+  available in a compact disclosure so the usage field stays primary.
 
 ## Acceptance
 
@@ -83,7 +93,8 @@ and summary while keeping the unowned request workflow disabled.
 
 ## Next Slice
 
-Define the owned local pricing-snapshot location and loader, then add decimal
+Continue human usefulness review of the deterministic rules, then define the
+owned local pricing-snapshot location and loader and add decimal
 cost derivation only for sessions whose model key exactly matches one snapshot
 rate and whose token categories are supported. Until that contract lands,
 pricing distinguishes missing model evidence, a missing matching rate, and the

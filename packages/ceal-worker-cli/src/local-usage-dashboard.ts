@@ -129,7 +129,7 @@ export interface CealLocalUsageDashboardV1 {
 			evidence_requirement: string;
 		}>;
 	};
-	suggestions: [];
+	suggestions: DashboardSuggestion[];
 	non_claims: string[];
 }
 
@@ -148,6 +148,15 @@ interface DashboardDailyRow {
 	agent_tool_calls: number | null;
 	tokens: number | null;
 	estimated_cost: null;
+}
+
+interface DashboardSuggestion {
+	suggestion_id: "token_concentration" | "token_coverage_gap" | "tool_coverage_gap" | "cost_unavailable";
+	analyzer: { analyzer_id: "ceal.local_usage_rules"; version: "1" };
+	recommendation: string;
+	rationale: string;
+	evidence: { metric: "tokens" | "agent_tool_calls" | "estimated_cost"; source_refs: string[]; session_refs: string[] };
+	next_action: { kind: "inspect_sessions" | "review_evidence"; label: string };
 }
 
 export interface ComposeCanonicalDashboardInput {
@@ -251,6 +260,24 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.modelKey !== undefined);
 	const completeRateCoverage =
 		completeModelCoverage && pricedSessions.every((session) => pricingSnapshot?.rates.some((rate) => rate.model_key === session.modelKey));
+	const pricing: CealLocalUsageDashboardV1["pricing"] = pricingSnapshot
+		? {
+				observation_state: "unsupported",
+				authority: "local_pricing_snapshot",
+				reason: !completeModelCoverage
+					? "model_identity_unavailable"
+					: completeRateCoverage
+						? "cost_derivation_unavailable"
+						: "pricing_rate_unavailable",
+				currency: pricingSnapshot.currency,
+			}
+		: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" };
+	const suggestions = buildUsageSuggestions(
+		sessions.map((session) => ({ sessionRef: session.sessionRef, tokens: sessionTokenTotal(session) })),
+		toolValues,
+		metricState(sessionState, tokenValues, sessions.length),
+		pricing,
+	);
 	return {
 		schema_version: "ceal.local_usage_dashboard.v1",
 		fixture_only: false,
@@ -305,18 +332,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			comparability_group: "codex:runtime_cumulative_last:v1",
 		})),
 		session_detail_coverage: { returned: sessions.length, eligible, observation_state: sessionState },
-		pricing: pricingSnapshot
-			? {
-					observation_state: "unsupported",
-					authority: "local_pricing_snapshot",
-					reason: !completeModelCoverage
-						? "model_identity_unavailable"
-						: completeRateCoverage
-							? "cost_derivation_unavailable"
-							: "pricing_rate_unavailable",
-					currency: pricingSnapshot.currency,
-				}
-			: { observation_state: "unsupported", authority: "unknown", reason: "pricing_snapshot_unavailable" },
+		pricing,
 		access:
 			input.adapter.access.state === "available"
 				? {
@@ -335,7 +351,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 						})),
 					}
 				: { observation_state: "unavailable", authority: "gateway" },
-		suggestions: [],
+		suggestions,
 		non_claims: [...input.adapter.nonClaims],
 	};
 }
@@ -374,6 +390,71 @@ function decodeLocalPricingSnapshot(value: unknown): CealLocalPricingSnapshotV1 
 	return JSON.parse(JSON.stringify(value)) as CealLocalPricingSnapshotV1;
 }
 
+function buildUsageSuggestions(
+	sessions: Array<{ sessionRef: string; tokens: number | null }>,
+	toolValues: number,
+	tokenState: LocalUsageObservationState,
+	pricing: CealLocalUsageDashboardV1["pricing"],
+): DashboardSuggestion[] {
+	const analyzer = { analyzer_id: "ceal.local_usage_rules" as const, version: "1" as const };
+	const suggestions: DashboardSuggestion[] = [];
+	const tokenSessions = sessions.filter((entry): entry is { sessionRef: string; tokens: number } => entry.tokens !== null);
+	const tokenValues = tokenSessions.length;
+	const tokenTotal = tokenSessions.reduce((sum, entry) => sum + entry.tokens, 0);
+	const highest = tokenSessions.reduce<(typeof tokenSessions)[number] | null>(
+		(current, entry) => (current === null || entry.tokens > current.tokens ? entry : current),
+		null,
+	);
+	if (tokenState === "complete" && tokenSessions.length >= 4 && highest && tokenTotal > 0 && highest.tokens * 2 >= tokenTotal) {
+		const share = Math.round((highest.tokens / tokenTotal) * 100);
+		suggestions.push({
+			suggestion_id: "token_concentration",
+			analyzer,
+			recommendation: "Inspect the highest-token session in this fully covered set.",
+			rationale: `One of ${tokenSessions.length} fully covered sessions accounts for ${share}% of their token total; this is concentration, not a productivity judgment.`,
+			evidence: { metric: "tokens", source_refs: ["agent_activity:codex"], session_refs: [highest.sessionRef] },
+			next_action: { kind: "inspect_sessions", label: "Inspect the referenced session" },
+		});
+	}
+	if (tokenValues < sessions.length)
+		suggestions.push({
+			suggestion_id: "token_coverage_gap",
+			analyzer,
+			recommendation: "Treat token totals as a covered subset until more sessions expose token evidence.",
+			rationale: `${tokenValues} of ${sessions.length} returned sessions carry comparable Codex token evidence.`,
+			evidence: { metric: "tokens", source_refs: ["agent_activity:codex"], session_refs: [] },
+			next_action: { kind: "review_evidence", label: "Review token coverage" },
+		});
+	if (toolValues < sessions.length)
+		suggestions.push({
+			suggestion_id: "tool_coverage_gap",
+			analyzer,
+			recommendation: "Do not optimize tool usage from the current total alone.",
+			rationale: `${toolValues} of ${sessions.length} returned sessions have complete tool-event evidence.`,
+			evidence: { metric: "agent_tool_calls", source_refs: ["agent_activity:codex"], session_refs: [] },
+			next_action: { kind: "review_evidence", label: "Review tool-call coverage" },
+		});
+	if (tokenValues > 0)
+		suggestions.push({
+			suggestion_id: "cost_unavailable",
+			analyzer,
+			recommendation: "Use token evidence until monetary cost can be derived from owned inputs.",
+			rationale: pricingRationale(pricing.reason),
+			evidence: { metric: "estimated_cost", source_refs: [], session_refs: [] },
+			next_action: { kind: "review_evidence", label: "Review pricing status" },
+		});
+	return suggestions.slice(0, 4);
+}
+
+function pricingRationale(reason: CealLocalUsageDashboardV1["pricing"]["reason"]): string {
+	if (reason === "pricing_snapshot_unavailable") return "No production pricing snapshot was supplied; missing cost is not zero.";
+	if (reason === "model_identity_unavailable")
+		return "Covered token observations do not all carry complete model identity; missing cost is not zero.";
+	if (reason === "pricing_rate_unavailable")
+		return "The accepted pricing snapshot lacks a matching rate for at least one covered model; missing cost is not zero.";
+	return "Pricing, model, and rate evidence are present, but decimal cost derivation is not implemented; missing cost is not zero.";
+}
+
 export function decodeProductionLocalUsageDashboard(value: unknown): CealLocalUsageDashboardV1 | null {
 	if (!isRecord(value)) return null;
 	const record = value;
@@ -407,7 +488,7 @@ export function decodeProductionLocalUsageDashboard(value: unknown): CealLocalUs
 	if (!validDaily(record.daily) || !validTotals(record.totals) || !validSessions(record.sessions)) return null;
 	if (!validSessionDetailCoverage(record.session_detail_coverage) || !validPricing(record.pricing) || !validAccess(record.access))
 		return null;
-	if (!Array.isArray(record.suggestions) || record.suggestions.length !== 0) return null;
+	if (!validSuggestions(record.suggestions)) return null;
 	if (
 		!Array.isArray(record.non_claims) ||
 		!record.non_claims.every((entry) => typeof entry === "string" && entry.length <= 1000 && !looksLikeAbsolutePath(entry))
@@ -687,6 +768,43 @@ function validAccess(value: unknown): boolean {
 	);
 }
 
+function validSuggestions(value: unknown): boolean {
+	if (!Array.isArray(value) || value.length > 4) return false;
+	const ids = new Set<string>();
+	for (const entry of value) {
+		if (
+			!isRecord(entry) ||
+			!hasExactKeys(entry, ["suggestion_id", "analyzer", "recommendation", "rationale", "evidence", "next_action"]) ||
+			!["token_concentration", "token_coverage_gap", "tool_coverage_gap", "cost_unavailable"].includes(String(entry.suggestion_id)) ||
+			ids.has(String(entry.suggestion_id)) ||
+			!isRecord(entry.analyzer) ||
+			!hasExactKeys(entry.analyzer, ["analyzer_id", "version"]) ||
+			entry.analyzer.analyzer_id !== "ceal.local_usage_rules" ||
+			entry.analyzer.version !== "1" ||
+			!boundedDisplayText(entry.recommendation, 240) ||
+			!boundedDisplayText(entry.rationale, 320) ||
+			!isRecord(entry.evidence) ||
+			!hasExactKeys(entry.evidence, ["metric", "source_refs", "session_refs"]) ||
+			!["tokens", "agent_tool_calls", "estimated_cost"].includes(String(entry.evidence.metric)) ||
+			!Array.isArray(entry.evidence.source_refs) ||
+			!entry.evidence.source_refs.every((ref) => typeof ref === "string" && CEAL_SAFE_REF.test(ref)) ||
+			!Array.isArray(entry.evidence.session_refs) ||
+			!entry.evidence.session_refs.every((ref) => typeof ref === "string" && /^[0-9a-f-]{36}$/u.test(ref)) ||
+			!isRecord(entry.next_action) ||
+			!hasExactKeys(entry.next_action, ["kind", "label"]) ||
+			!(["inspect_sessions", "review_evidence"] as unknown[]).includes(entry.next_action.kind) ||
+			!boundedDisplayText(entry.next_action.label, 120)
+		)
+			return false;
+		ids.add(String(entry.suggestion_id));
+	}
+	return true;
+}
+
+function boundedDisplayText(value: unknown, maxLength: number): value is string {
+	return typeof value === "string" && value.length >= 1 && value.length <= maxLength && !looksLikeAbsolutePath(value);
+}
+
 function validCapability(value: unknown): boolean {
 	return (
 		isRecord(value) &&
@@ -768,6 +886,7 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 		return false;
 	const completeTools = dataset.sessions.filter((session) => session.agent_tool_calls !== null).length;
 	const completeTokens = dataset.sessions.filter((session) => session.tokens !== null).length;
+	if (!validSuggestionSemantics(dataset, completeTools, completeTokens)) return false;
 	const pricedSessions = dataset.sessions.filter((session) => session.tokens !== null);
 	const completeModelCoverage = pricedSessions.length > 0 && pricedSessions.every((session) => session.model_key !== null);
 	if (
@@ -790,6 +909,19 @@ function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
 	)
 		return false;
 	return sumNonNull(dataset.daily, "sessions") === dataset.sessions.length;
+}
+
+function validSuggestionSemantics(dataset: CealLocalUsageDashboardV1, completeTools: number, completeTokens: number): boolean {
+	const expected = buildUsageSuggestions(
+		dataset.sessions.map((session) => ({ sessionRef: session.session_ref, tokens: session.tokens })),
+		completeTools,
+		dataset.metric_coverage.tokens.observation_state,
+		dataset.pricing,
+	);
+	return (
+		JSON.stringify(dataset.suggestions) === JSON.stringify(expected) &&
+		completeTokens === dataset.sessions.filter((session) => session.tokens !== null).length
+	);
 }
 
 function sameWindow(left: { start_date: string; end_date: string }, right: { start_date: string; end_date: string }): boolean {
