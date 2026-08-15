@@ -1,15 +1,23 @@
 # Local Usage Dashboard Production Contract
 
-Status: local pricing snapshot loading and exact estimated-cost derivation implemented
+Status: implemented through the separate Codex and Claude runtime partitions
 
 ## Capability
 
-The local Workbench can consume one normalized, privacy-safe dataset for a
-Codex user's locally observed sessions, tool-call metadata, and runtime-supplied
-token evidence while keeping identity/access authority and unsupported monetary
-cost explicit.
+The local Workbench consumes normalized, privacy-safe datasets for a user's
+locally observed Codex and Claude sessions, tool-call metadata, and
+runtime-supplied token evidence while keeping identity/access authority and
+unsupported monetary cost explicit.
 
 ## Current Slice
+
+The current slice adds Claude as a second canonical runtime partition. Claude
+`event_usage_sum` observations remain separate from Codex
+`runtime_cumulative_last`; the Workbench never produces a cross-runtime token
+total, ranking, or cost. The browser selects one runtime partition at a time and
+preserves the selected metric inside that partition. Claude cost remains
+unsupported because the local transcript adapter does not expose an accepted
+model identity.
 
 The current slice adds one optional owner-only local input at
 `~/.ceal/pricing-snapshot.json`. The observer reads it only when both the
@@ -28,18 +36,21 @@ priced-session numerator and returned-session denominator. A partial estimate is
 always labeled as the covered subset and is never billed cost.
 
 `local-usage-dashboard.ts` first composes the existing worker-owned
-`ceal.agent_activity.v1` projection into the intermediate
-`ceal.local_usage_dashboard.codex_input.v1` envelope.
+`ceal.agent_activity.v1` projection into runtime-specific intermediate
+`ceal.local_usage_dashboard.codex_input.v1` and
+`ceal.local_usage_dashboard.claude_input.v1` envelopes.
 It consumes only structural metadata already allowlisted by `agent-audit.ts`.
-The observer state exposes this input beside the predecessor projections, but
-the browser never consumes it directly.
+The observer retains only the Codex intermediate input in its compatibility
+field beside the predecessor projections; it does not expose the Claude
+intermediate. The browser consumes neither intermediate directly.
 
 `composeCanonicalLocalUsageDashboard` now owns that second boundary. It emits a
 fail-closed production discriminator, half-open local-calendar window and IANA
 timezone, daily covered-subset values, reconciling totals, per-metric coverage,
 comparability groups, identity/access projections, and evidence-bounded pricing.
-The observer exposes the result as `local_usage_dashboard`; consumers reject
-fixture provenance or a missing production discriminator.
+The observer exposes the results as `local_usage_dashboards`, with the Codex
+partition retained at `local_usage_dashboard` for compatibility. Consumers
+reject fixture provenance or a missing production discriminator.
 
 The Workbench now renders that canonical dataset through separate Usage,
 Sessions, and Access tabs. Usage switches among Sessions, Agent tool calls,
@@ -50,8 +61,8 @@ and summary while keeping the unowned request workflow disabled.
 
 ## Fixed Decisions
 
-- Codex is the first production converter; Claude remains a separate runtime
-  accounting group and is not silently normalized into Codex semantics.
+- Codex and Claude have separate production converters and comparability
+  groups. Neither runtime is silently normalized into the other's semantics.
 - Local session identity and Gateway capability access are independent inputs.
 - Access projects only the allowlisted capability ID, display label, effect,
   target requirement, and evidence requirement returned by Gateway discovery.
@@ -60,12 +71,15 @@ and summary while keeping the unowned request workflow disabled.
   over the canonical dataset. They identify covered-token concentration,
   token/tool evidence gaps, and unavailable cost with bounded metric/session
   evidence; they are not model judgment, productivity scoring, or actions.
-- The browser receives the fixed display label `Codex sessions`, never the
-  expanded transcript root.
+- The browser receives only the fixed display labels `Codex sessions` and
+  `Claude sessions`, never expanded transcript roots.
 - `complete`, `partial`, `observed_empty`, and `unreadable` remain distinct.
 - Inventory state is named separately from per-session event and token evidence;
   a complete inventory never implies complete tool-call or token coverage.
 - Returned session details and eligible inventory counts remain separate.
+- The displayed token total is the runtime-reported input plus output
+  observation. Cache fields remain separate because their accounting relation
+  to input is runtime-defined; the UI does not silently add them.
 - A Codex session exposes `model_key` only when a complete, fully parsed local
   transcript scan contains exactly one safe `turn_context` model key. Partial,
   ambiguous, invalid, and absent model evidence remains `null`. The producer
@@ -124,6 +138,7 @@ and summary while keeping the unowned request workflow disabled.
 
 Define how a trusted maintainer or future Ceal-owned sync flow provisions and
 updates the snapshot without turning the public CLI into a pricing authority.
-Then add the Claude converter as a separate comparability group. The resource
-catalog and access-request workflow remain deferred until an Admin-owned
-contract exists.
+Run both runtime partitions against bounded local histories and review whether
+the selector, coverage language, and runtime-specific suggestions remain useful
+without recording user content. The resource catalog and access-request
+workflow remain deferred until an Admin-owned contract exists.

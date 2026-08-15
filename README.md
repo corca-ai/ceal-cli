@@ -112,10 +112,14 @@ Workbench page and JSON endpoint. When an enrolled personal session is
 available, loading state performs a bounded Gateway handshake and capability
 discovery; it never executes a capability or contacts a provider. The page
 combines that live personal summary with cached local state. **Usage** renders
-the canonical local Codex dataset and switches independently among Sessions,
+the selected canonical local runtime dataset and switches independently among Sessions,
 Agent tool calls, Tokens, and Estimated cost. Every axis renders its own source,
 effective window, and coverage; unsupported or unreadable evidence is never
-shown as zero. Usage also renders versioned deterministic local suggestions for
+shown as zero. Codex and Claude remain separate runtime partitions: the UI never
+adds, ranks, or compares their session, tool-call, or token observations. Token
+totals are the runtime-reported input plus output observations; cache fields
+remain separate because their accounting semantics are runtime-defined. Usage
+also renders versioned deterministic local suggestions for
 token concentration, evidence gaps, and unavailable cost; these are not model
 judgments or productivity scores. **Sessions** lists every bounded, privacy-safe
 local session in the selected window with twenty rows per page and an inert
@@ -126,8 +130,8 @@ keeps advisory receipt metadata separate, and **Setup & privacy** declares the l
 sources this client reads, the receipt-spool retention bounds, and the fixed
 source boundary (`gateway_contact: personal handshake and capability discovery`,
 `provider_contact: none`).
-The JSON state also exposes `ceal.local_usage_dashboard.codex_input.v1`, a
-Codex-first adapter input composed from that same redacted Agent evidence,
+The JSON compatibility field exposes the Codex adapter input
+(`ceal.local_usage_dashboard.codex_input.v1`) composed from that same redacted Agent evidence,
 the local Profile/instance session, and the bounded Gateway capability catalog
 and counts. It keeps
 returned-versus-eligible session coverage explicit. It does not copy transcript
@@ -137,16 +141,18 @@ observed in a complete, fully parsed local transcript scan.
 It is not the canonical browser dataset: daily totals and metric-specific
 coverage are added only by the separate fail-closed composer. The contract and next slice are documented in
 [`docs/local-usage-dashboard.md`](docs/local-usage-dashboard.md).
-The same state now includes the composed `ceal.local_usage_dashboard.v1`
-production document with an explicit production discriminator, local-calendar
-window, daily covered-subset values, reconciling totals, and metric-specific
-coverage. The Workbench renders this document as its Usage, Sessions, and Access
+The same state now includes separate composed `ceal.local_usage_dashboard.v1`
+production documents for Codex and Claude under `local_usage_dashboards`, each
+with an explicit production discriminator, local-calendar window, daily
+covered-subset values, reconciling totals, and metric-specific coverage. The
+Workbench renders the selected document as its Usage, Sessions, and Access
 source of truth. The observer optionally loads an owner-only
 `~/.ceal/pricing-snapshot.json`. When a strict snapshot, complete Codex token
 observation, safe model identity, and matching rate exist, it derives
 six-decimal local estimates with exact integer arithmetic and labels them as
 estimated rather than billed cost. Missing or unsafe inputs remain unsupported,
-never zero.
+never zero. Claude cost remains unsupported because the current local Claude
+evidence does not provide the accepted model identity needed for a matching rate.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

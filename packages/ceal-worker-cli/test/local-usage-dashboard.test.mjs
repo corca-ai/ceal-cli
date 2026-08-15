@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	composeCanonicalLocalUsageDashboard,
+	composeClaudeDashboardAdapterInput,
 	composeCodexDashboardAdapterInput,
 	decodeProductionLocalUsageDashboard,
 	defaultLocalUsageWindow,
@@ -38,6 +39,120 @@ const CAPABILITIES = [
 		evidenceRequirement: "gateway_audit",
 	},
 ];
+
+test("keeps Claude event-usage accounting in its own canonical partition", () => {
+	const adapter = composeClaudeDashboardAdapterInput({
+		generatedAt: GENERATED_AT,
+		agentActivity: {
+			schemaVersion: "ceal.agent_activity.v1",
+			nonClaims: ["runtime-specific accounting"],
+			adapters: [
+				{
+					runtime: "claude",
+					root: "private",
+					health: "active",
+					coverage: "transcript-observed",
+					sessionCount: 2,
+					sessions: [
+						{
+							sessionRef: "11111111-2222-3333-4444-555555555555",
+							lastActivityAt: Date.parse("2026-08-13T10:00:00Z"),
+							transcriptBytes: 1,
+							events: {
+								scan: "complete",
+								eventCount: 2,
+								kinds: { tool_call: 1 },
+								unparsedLines: 0,
+								tokenUsage: {
+									source: "event_usage_sum",
+									completeness: "full_transcript",
+									usageEvents: 1,
+									inputTokens: 20,
+									outputTokens: 5,
+								},
+							},
+						},
+						{
+							sessionRef: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+							lastActivityAt: Date.parse("2026-08-12T10:00:00Z"),
+							transcriptBytes: 1,
+							events: {
+								scan: "complete",
+								eventCount: 1,
+								kinds: {},
+								unparsedLines: 0,
+							},
+						},
+					],
+				},
+			],
+		},
+	});
+	assert.equal(adapter.schemaVersion, "ceal.local_usage_dashboard.claude_input.v1");
+	const dataset = composeCanonicalLocalUsageDashboard({
+		adapter,
+		timezone: "UTC",
+		window: { startDate: "2026-08-01", endDate: "2026-08-15" },
+		pricingSnapshot: {
+			schema_version: "ceal.local_pricing_snapshot.v1",
+			snapshot_ref: "pricing:claude-review",
+			revision: "pricing-rev-claude-review",
+			observed_at: "2026-08-13T00:00:00.000Z",
+			currency: "USD",
+			rates: [
+				{
+					model_key: "claude-review-model",
+					input_per_million: "1",
+					output_per_million: "2",
+					cache_read_per_million: "0",
+					cache_write_per_million: "0",
+				},
+			],
+		},
+	});
+	assert.equal(dataset.sources[0].source_ref, "agent_activity:claude");
+	assert.equal(dataset.totals.tokens, 25);
+	assert.equal(dataset.metric_coverage.tokens.comparability_group, "claude:event_usage_sum:v1");
+	assert.equal(dataset.sessions[0].runtime, "claude");
+	assert.equal(dataset.sessions[0].model_key, null);
+	assert.equal(dataset.totals.estimated_cost, null);
+	assert.equal(dataset.pricing.authority, "local_pricing_snapshot");
+	assert.equal(dataset.pricing.currency, "USD");
+	assert.equal(dataset.pricing.reason, "model_identity_unavailable");
+	assert.equal(dataset.metric_coverage.estimated_cost.comparability_group, "unsupported");
+	assert.match(dataset.suggestions.find((entry) => entry.suggestion_id === "token_coverage_gap")?.rationale ?? "", /Claude token evidence/u);
+	assert.deepEqual(decodeProductionLocalUsageDashboard(dataset), dataset);
+	assert.equal(
+		decodeProductionLocalUsageDashboard({
+			...dataset,
+			sessions: [{ ...dataset.sessions[0], runtime: "codex", comparability_group: "codex:runtime_cumulative_last:v1" }],
+		}),
+		null,
+	);
+	for (const mutation of [
+		{ ...dataset, sources: [{ ...dataset.sources[0], runtime: "codex" }] },
+		{ ...dataset, sessions: [{ ...dataset.sessions[0], runtime: "codex" }, ...dataset.sessions.slice(1)] },
+		{
+			...dataset,
+			sessions: [{ ...dataset.sessions[0], comparability_group: "codex:runtime_cumulative_last:v1" }, ...dataset.sessions.slice(1)],
+		},
+		{
+			...dataset,
+			metric_coverage: {
+				...dataset.metric_coverage,
+				tokens: { ...dataset.metric_coverage.tokens, source_refs: ["agent_activity:codex"] },
+			},
+		},
+		{
+			...dataset,
+			metric_coverage: {
+				...dataset.metric_coverage,
+				tokens: { ...dataset.metric_coverage.tokens, comparability_group: "codex:runtime_cumulative_last:v1" },
+			},
+		},
+	])
+		assert.equal(decodeProductionLocalUsageDashboard(mutation), null);
+});
 
 test("composes privacy-safe Codex session and token evidence without inventing cost", () => {
 	const dashboard = composeCodexDashboardAdapterInput({

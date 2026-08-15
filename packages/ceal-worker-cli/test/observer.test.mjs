@@ -591,7 +591,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /Attention/u);
 	assert.match(html, /Usage.*Sessions.*Access.*Evidence/su);
 	assert.match(html, /Local runtime evidence/u);
-	assert.match(html, /Each metric keeps its own coverage/u);
+	assert.match(html, /Runtime accounting stays partitioned/u);
 	assert.match(html, /estimated_cost/u);
 	assert.match(html, /Missing evidence is not rendered as zero/u);
 	assert.match(html, /Twenty rows per page/u);

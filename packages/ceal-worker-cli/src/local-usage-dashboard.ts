@@ -30,7 +30,7 @@ interface CealLocalUsageCapability {
 
 interface CealLocalUsageDashboardSession {
 	sessionRef: string;
-	runtime: "codex";
+	runtime: "claude" | "codex";
 	lastActivityAt: string;
 	eventEvidence: "complete" | "partial" | "unreadable" | "not_scanned";
 	unparsedLines?: number;
@@ -38,7 +38,7 @@ interface CealLocalUsageDashboardSession {
 	modelKey?: string;
 	toolCallEvents?: number;
 	tokens?: {
-		source: "runtime_cumulative_last";
+		source: "event_usage_sum" | "runtime_cumulative_last";
 		completeness: "full_transcript" | "scanned_prefix";
 		input?: number;
 		output?: number;
@@ -47,14 +47,14 @@ interface CealLocalUsageDashboardSession {
 	};
 }
 
-export interface CealCodexDashboardAdapterInputV1 {
-	schemaVersion: "ceal.local_usage_dashboard.codex_input.v1";
+export interface CealRuntimeDashboardAdapterInputV1 {
+	schemaVersion: "ceal.local_usage_dashboard.codex_input.v1" | "ceal.local_usage_dashboard.claude_input.v1";
 	generatedAt: string;
 	identity: CealLocalUsageDashboardIdentity;
 	sources: Array<{
-		ref: "agent_activity:codex";
-		runtime: "codex";
-		rootDisplay: "Codex sessions";
+		ref: "agent_activity:codex" | "agent_activity:claude";
+		runtime: "codex" | "claude";
+		rootDisplay: "Codex sessions" | "Claude sessions";
 		inventoryState: LocalUsageObservationState;
 		nonClaims: string[];
 	}>;
@@ -87,9 +87,9 @@ export interface CealLocalUsageDashboardV1 {
 	timezone: string;
 	identity: { state: "available" | "unavailable"; profile_ref?: string; instance_ref?: string };
 	sources: Array<{
-		source_ref: "agent_activity:codex";
-		runtime: "codex";
-		root_display: "Codex sessions";
+		source_ref: "agent_activity:codex" | "agent_activity:claude";
+		runtime: "codex" | "claude";
+		root_display: "Codex sessions" | "Claude sessions";
 		observation_state: LocalUsageObservationState;
 	}>;
 	metric_coverage: Record<"sessions" | "agent_tool_calls" | "tokens" | "estimated_cost", DashboardMetricCoverage>;
@@ -97,7 +97,7 @@ export interface CealLocalUsageDashboardV1 {
 	totals: { sessions: number | null; agent_tool_calls: number | null; tokens: number | null; estimated_cost: string | null };
 	sessions: Array<{
 		session_ref: string;
-		runtime: "codex";
+		runtime: "codex" | "claude";
 		last_activity_at: string;
 		event_evidence: CealLocalUsageDashboardSession["eventEvidence"];
 		token_evidence: CealLocalUsageDashboardSession["tokenEvidence"];
@@ -105,7 +105,7 @@ export interface CealLocalUsageDashboardV1 {
 		tokens: number | null;
 		estimated_cost: string | null;
 		model_key: string | null;
-		comparability_group: "codex:runtime_cumulative_last:v1";
+		comparability_group: "codex:runtime_cumulative_last:v1" | "claude:event_usage_sum:v1";
 	}>;
 	session_detail_coverage: { returned: number; eligible: number | null; observation_state: LocalUsageObservationState };
 	pricing:
@@ -169,7 +169,7 @@ interface DashboardSuggestion {
 }
 
 export interface ComposeCanonicalDashboardInput {
-	adapter: CealCodexDashboardAdapterInputV1;
+	adapter: CealRuntimeDashboardAdapterInputV1;
 	timezone: string;
 	window: { startDate: string; endDate: string };
 	pricingSnapshot?: unknown;
@@ -192,21 +192,33 @@ export interface CealLocalPricingSnapshotV1 {
 
 const SUPPORTED_PRICING_CURRENCIES = new Set(["USD"]);
 
-const COST_NON_CLAIM = "Monetary cost is unsupported until a versioned pricing snapshot contract is accepted; missing cost is not zero.";
+const COST_NON_CLAIM =
+	"Monetary cost requires an accepted local pricing snapshot, complete model identity, and a matching rate; missing cost is not zero.";
 
-export function composeCodexDashboardAdapterInput(input: ComposeLocalUsageDashboardInput): CealCodexDashboardAdapterInputV1 {
-	const adapter = input.agentActivity.adapters.find((entry) => entry.runtime === "codex");
+export function composeCodexDashboardAdapterInput(input: ComposeLocalUsageDashboardInput): CealRuntimeDashboardAdapterInputV1 {
+	return composeRuntimeDashboardAdapterInput(input, "codex");
+}
+
+export function composeClaudeDashboardAdapterInput(input: ComposeLocalUsageDashboardInput): CealRuntimeDashboardAdapterInputV1 {
+	return composeRuntimeDashboardAdapterInput(input, "claude");
+}
+
+function composeRuntimeDashboardAdapterInput(
+	input: ComposeLocalUsageDashboardInput,
+	runtime: "claude" | "codex",
+): CealRuntimeDashboardAdapterInputV1 {
+	const adapter = input.agentActivity.adapters.find((entry) => entry.runtime === runtime);
 	const state = observationState(adapter);
-	const sessions = adapter?.sessions?.map(projectSession) ?? [];
+	const sessions = adapter?.sessions?.map((session) => projectSession(session, runtime)) ?? [];
 	return {
-		schemaVersion: "ceal.local_usage_dashboard.codex_input.v1",
+		schemaVersion: runtime === "codex" ? "ceal.local_usage_dashboard.codex_input.v1" : "ceal.local_usage_dashboard.claude_input.v1",
 		generatedAt: new Date(input.generatedAt).toISOString(),
 		identity: input.identity ? { ...input.identity, state: "available" } : { state: "unavailable" },
 		sources: [
 			{
-				ref: "agent_activity:codex",
-				runtime: "codex",
-				rootDisplay: "Codex sessions",
+				ref: runtime === "codex" ? "agent_activity:codex" : "agent_activity:claude",
+				runtime,
+				rootDisplay: runtime === "codex" ? "Codex sessions" : "Claude sessions",
 				inventoryState: state,
 				nonClaims: [...input.agentActivity.nonClaims],
 			},
@@ -230,6 +242,11 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 		throw new Error("Local usage dashboard window must be a non-empty half-open date range.");
 	const generatedAt = Date.parse(input.adapter.generatedAt);
 	if (!Number.isFinite(generatedAt)) throw new Error("Local usage dashboard generated_at is invalid.");
+	const runtime = input.adapter.sources[0]?.runtime ?? "codex";
+	const sourceRef = runtime === "codex" ? "agent_activity:codex" : "agent_activity:claude";
+	const sessionGroup = `${runtime}:session_inventory:v1`;
+	const toolGroup = `${runtime}:tool_events:v1`;
+	const tokenGroup = runtime === "codex" ? "codex:runtime_cumulative_last:v1" : "claude:event_usage_sum:v1";
 	const sessions = input.adapter.sessions.filter((session) => {
 		const instant = Date.parse(session.lastActivityAt);
 		if (!Number.isFinite(instant) || instant > generatedAt) return false;
@@ -273,7 +290,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 	const completeRateCoverage =
 		completeModelCoverage && pricedSessions.every((session) => pricingSnapshot?.rates.some((rate) => rate.model_key === session.modelKey));
 	const sessionCosts = new Map<string, string>();
-	if (pricingSnapshot) {
+	if (pricingSnapshot && runtime === "codex") {
 		for (const session of pricedSessions) {
 			const rate = pricingSnapshot.rates.find((candidate) => candidate.model_key === session.modelKey);
 			const amount = rate ? deriveSessionCost(session, rate) : null;
@@ -314,6 +331,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 		toolValues,
 		tokenState,
 		pricing,
+		sourceRef,
 	);
 	return {
 		schema_version: "ceal.local_usage_dashboard.v1",
@@ -333,23 +351,25 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			observation_state: source.inventoryState,
 		})),
 		metric_coverage: {
-			sessions: metricCoverage(sessionState, sessions.length, eligible, effectiveWindow, "codex:session_inventory:v1"),
+			sessions: metricCoverage(sessionState, sessions.length, eligible, effectiveWindow, sessionGroup, sourceRef),
 			agent_tool_calls: metricCoverage(
 				metricState(sessionState, toolValues, sessions.length),
 				toolValues,
 				sessions.length,
 				effectiveWindow,
-				"codex:tool_events:v1",
+				toolGroup,
+				sourceRef,
 			),
-			tokens: metricCoverage(tokenState, tokenValues, sessions.length, effectiveWindow, "codex:runtime_cumulative_last:v1"),
+			tokens: metricCoverage(tokenState, tokenValues, sessions.length, effectiveWindow, tokenGroup, sourceRef),
 			estimated_cost: metricCoverage(
 				costState,
 				sessionCosts.size,
 				sessions.length,
 				effectiveWindow,
-				pricingSnapshot
+				pricingSnapshot && runtime === "codex"
 					? `pricing:${pricingSnapshot.currency}:${createHash("sha256").update(pricingSnapshot.revision).digest("hex").slice(0, 16)}:per_session_half_up_6dp`
 					: "unsupported",
+				sourceRef,
 			),
 		},
 		daily,
@@ -369,7 +389,7 @@ export function composeCanonicalLocalUsageDashboard(input: ComposeCanonicalDashb
 			tokens: sessionTokenTotal(session),
 			estimated_cost: sessionCosts.get(session.sessionRef) ?? null,
 			model_key: session.modelKey ?? null,
-			comparability_group: "codex:runtime_cumulative_last:v1",
+			comparability_group: tokenGroup,
 		})),
 		session_detail_coverage: { returned: sessions.length, eligible, observation_state: sessionState },
 		pricing,
@@ -435,6 +455,7 @@ function buildUsageSuggestions(
 	toolValues: number,
 	tokenState: LocalUsageObservationState,
 	pricing: CealLocalUsageDashboardV1["pricing"],
+	sourceRef: "agent_activity:codex" | "agent_activity:claude",
 ): DashboardSuggestion[] {
 	const analyzer = { analyzer_id: "ceal.local_usage_rules" as const, version: "1" as const };
 	const suggestions: DashboardSuggestion[] = [];
@@ -452,7 +473,7 @@ function buildUsageSuggestions(
 			analyzer,
 			recommendation: "Inspect the highest-token session in this fully covered set.",
 			rationale: `One of ${tokenSessions.length} fully covered sessions accounts for ${share}% of their token total; this is concentration, not a productivity judgment.`,
-			evidence: { metric: "tokens", source_refs: ["agent_activity:codex"], session_refs: [highest.sessionRef] },
+			evidence: { metric: "tokens", source_refs: [sourceRef], session_refs: [highest.sessionRef] },
 			next_action: { kind: "inspect_sessions", label: "Inspect the referenced session" },
 		});
 	}
@@ -461,8 +482,8 @@ function buildUsageSuggestions(
 			suggestion_id: "token_coverage_gap",
 			analyzer,
 			recommendation: "Treat token totals as a covered subset until more sessions expose token evidence.",
-			rationale: `${tokenValues} of ${sessions.length} returned sessions carry comparable Codex token evidence.`,
-			evidence: { metric: "tokens", source_refs: ["agent_activity:codex"], session_refs: [] },
+			rationale: `${tokenValues} of ${sessions.length} returned sessions carry comparable ${sourceRef === "agent_activity:codex" ? "Codex" : "Claude"} token evidence.`,
+			evidence: { metric: "tokens", source_refs: [sourceRef], session_refs: [] },
 			next_action: { kind: "review_evidence", label: "Review token coverage" },
 		});
 	if (toolValues < sessions.length)
@@ -471,7 +492,7 @@ function buildUsageSuggestions(
 			analyzer,
 			recommendation: "Do not optimize tool usage from the current total alone.",
 			rationale: `${toolValues} of ${sessions.length} returned sessions have complete tool-event evidence.`,
-			evidence: { metric: "agent_tool_calls", source_refs: ["agent_activity:codex"], session_refs: [] },
+			evidence: { metric: "agent_tool_calls", source_refs: [sourceRef], session_refs: [] },
 			next_action: { kind: "review_evidence", label: "Review tool-call coverage" },
 		});
 	if (tokenValues > 0 && pricing.observation_state === "unsupported")
@@ -586,10 +607,11 @@ function metricCoverage(
 	denominator: number | null,
 	effectiveWindow: { start_date: string; end_date: string },
 	comparabilityGroup: string,
+	sourceRef: "agent_activity:codex" | "agent_activity:claude",
 ): DashboardMetricCoverage {
 	return {
 		observation_state: observationState,
-		source_refs: ["agent_activity:codex"],
+		source_refs: [sourceRef],
 		effective_window: effectiveWindow,
 		numerator,
 		denominator,
@@ -666,9 +688,8 @@ function validSources(value: unknown): boolean {
 			(entry) =>
 				isRecord(entry) &&
 				hasExactKeys(entry, ["source_ref", "runtime", "root_display", "observation_state"]) &&
-				entry.source_ref === "agent_activity:codex" &&
-				entry.runtime === "codex" &&
-				entry.root_display === "Codex sessions" &&
+				((entry.source_ref === "agent_activity:codex" && entry.runtime === "codex" && entry.root_display === "Codex sessions") ||
+					(entry.source_ref === "agent_activity:claude" && entry.runtime === "claude" && entry.root_display === "Claude sessions")) &&
 				validState(entry.observation_state),
 		)
 	);
@@ -683,7 +704,7 @@ function validMetricCoverage(value: unknown): boolean {
 			validState(entry.observation_state) &&
 			Array.isArray(entry.source_refs) &&
 			entry.source_refs.length === 1 &&
-			entry.source_refs[0] === "agent_activity:codex" &&
+			(entry.source_refs[0] === "agent_activity:codex" || entry.source_refs[0] === "agent_activity:claude") &&
 			validWireWindow(entry.effective_window) &&
 			nonNegativeInteger(entry.numerator) &&
 			(entry.denominator === null || nonNegativeInteger(entry.denominator)) &&
@@ -740,7 +761,7 @@ function validSessions(value: unknown): boolean {
 				]) &&
 				typeof entry.session_ref === "string" &&
 				/^[0-9a-f-]{36}$/u.test(entry.session_ref) &&
-				entry.runtime === "codex" &&
+				(entry.runtime === "codex" || entry.runtime === "claude") &&
 				typeof entry.last_activity_at === "string" &&
 				Number.isFinite(Date.parse(entry.last_activity_at)) &&
 				["complete", "partial", "unreadable", "not_scanned"].includes(String(entry.event_evidence)) &&
@@ -749,7 +770,7 @@ function validSessions(value: unknown): boolean {
 				metricNumber(entry.tokens) &&
 				decimalAmount(entry.estimated_cost) &&
 				(entry.model_key === null || (typeof entry.model_key === "string" && CEAL_SAFE_MODEL_KEY.test(entry.model_key))) &&
-				entry.comparability_group === "codex:runtime_cumulative_last:v1",
+				(entry.comparability_group === "codex:runtime_cumulative_last:v1" || entry.comparability_group === "claude:event_usage_sum:v1"),
 		)
 	);
 }
@@ -943,6 +964,29 @@ function looksLikeAbsolutePath(value: string): boolean {
 }
 
 function validDatasetSemantics(dataset: CealLocalUsageDashboardV1): boolean {
+	const source = dataset.sources[0];
+	if (!source) return false;
+	const runtime = source.runtime;
+	const sourceRef = runtime === "codex" ? "agent_activity:codex" : "agent_activity:claude";
+	const tokenGroup = runtime === "codex" ? "codex:runtime_cumulative_last:v1" : "claude:event_usage_sum:v1";
+	if (
+		source.source_ref !== sourceRef ||
+		dataset.sessions.some((session) => session.runtime !== runtime || session.comparability_group !== tokenGroup)
+	)
+		return false;
+	if (Object.values(dataset.metric_coverage).some((entry) => entry.source_refs.length !== 1 || entry.source_refs[0] !== sourceRef))
+		return false;
+	if (
+		dataset.metric_coverage.sessions.comparability_group !== `${runtime}:session_inventory:v1` ||
+		dataset.metric_coverage.agent_tool_calls.comparability_group !== `${runtime}:tool_events:v1` ||
+		dataset.metric_coverage.tokens.comparability_group !== tokenGroup
+	)
+		return false;
+	if (
+		runtime === "claude" &&
+		(dataset.pricing.reason === "estimated_not_billed" || dataset.sessions.some((session) => session.model_key !== null))
+	)
+		return false;
 	const { start_date: startDate, end_date: endDate } = dataset.window;
 	let previousDate = "";
 	const seenDates = new Set<string>();
@@ -1046,6 +1090,7 @@ function validSuggestionSemantics(dataset: CealLocalUsageDashboardV1, completeTo
 		completeTools,
 		dataset.metric_coverage.tokens.observation_state,
 		dataset.pricing,
+		dataset.sources[0]?.source_ref ?? "agent_activity:codex",
 	);
 	return (
 		JSON.stringify(dataset.suggestions) === JSON.stringify(expected) &&
@@ -1103,12 +1148,12 @@ function coverageState(adapter: CealAgentAuditAdapterState | undefined, returned
 	return adapter?.sessionCount === returned ? "complete" : "partial";
 }
 
-function projectSession(session: CealAgentAuditSession): CealLocalUsageDashboardSession {
+function projectSession(session: CealAgentAuditSession, runtime: "claude" | "codex"): CealLocalUsageDashboardSession {
 	const events = typeof session.events === "object" ? session.events : undefined;
 	const usage = events?.tokenUsage;
 	return {
 		sessionRef: session.sessionRef,
-		runtime: "codex",
+		runtime,
 		lastActivityAt: new Date(session.lastActivityAt).toISOString(),
 		eventEvidence:
 			session.events === "unreadable"
@@ -1122,7 +1167,7 @@ function projectSession(session: CealAgentAuditSession): CealLocalUsageDashboard
 		tokenEvidence: usage ? "available" : "unavailable",
 		...(events?.kinds.tool_call === undefined ? {} : { toolCallEvents: events.kinds.tool_call }),
 		...(events?.modelIdentity?.source === "turn_context" ? { modelKey: events.modelIdentity.modelKey } : {}),
-		...(usage?.source !== "runtime_cumulative_last"
+		...(!usage || (runtime === "codex" ? usage.source !== "runtime_cumulative_last" : usage.source !== "event_usage_sum")
 			? {}
 			: {
 					tokens: {

@@ -18,6 +18,7 @@ import {
 } from "./discovery-cache.js";
 import {
 	composeCanonicalLocalUsageDashboard,
+	composeClaudeDashboardAdapterInput,
 	composeCodexDashboardAdapterInput,
 	decodeProductionLocalUsageDashboard,
 	defaultLocalUsageWindow,
@@ -170,16 +171,33 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 				}
 			: {}),
 	});
+	const claudeUsageDashboardInput = composeClaudeDashboardAdapterInput({
+		generatedAt: now,
+		agentActivity: agentAuditSource ?? { schemaVersion: "ceal.agent_activity.v1", adapters: [], nonClaims: [...AGENT_AUDIT_NON_CLAIMS] },
+		...(sessionSnapshot.stored
+			? { identity: { profileRef: sessionSnapshot.stored.profileRef, instanceRef: sessionSnapshot.stored.instanceRef } }
+			: {}),
+	});
 	const timezone = runtime.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+	const pricingSnapshot = runtime.loadPricingSnapshot?.(now);
 	const localUsageDashboard = decodeProductionLocalUsageDashboard(
 		composeCanonicalLocalUsageDashboard({
 			adapter: localUsageDashboardInput,
 			timezone,
 			window: defaultLocalUsageWindow(now, timezone),
-			pricingSnapshot: runtime.loadPricingSnapshot?.(now),
+			pricingSnapshot,
 		}),
 	);
 	if (!localUsageDashboard) throw new Error("Internal local usage dashboard composition failed validation.");
+	const claudeUsageDashboard = decodeProductionLocalUsageDashboard(
+		composeCanonicalLocalUsageDashboard({
+			adapter: claudeUsageDashboardInput,
+			timezone,
+			window: defaultLocalUsageWindow(now, timezone),
+			pricingSnapshot,
+		}),
+	);
+	if (!claudeUsageDashboard) throw new Error("Internal Claude usage dashboard composition failed validation.");
 	return {
 		schema_version: "ceal.observer_state.v2",
 		command: "ceal",
@@ -195,6 +213,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 		agent_activity: agentActivity,
 		local_usage_dashboard_input: localUsageDashboardInput,
 		local_usage_dashboard: localUsageDashboard,
+		local_usage_dashboards: [localUsageDashboard, claudeUsageDashboard],
 		suggestions: buildLocalSuggestions(session, discoveryCache, receipts, agentActivity),
 		privacy: observePrivacy(receipts),
 		non_claims: [...OBSERVER_NON_CLAIMS],
@@ -954,7 +973,8 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   const setupBody = section("Local readiness", readinessView) + parts.slice(0, 4).join("");
   const cealBody = section("Attention", suggView) + parts.slice(4).join("");
 
-  const dashboard = s.local_usage_dashboard;
+  const dashboards = Array.isArray(s.local_usage_dashboards) ? s.local_usage_dashboards : [s.local_usage_dashboard];
+  let dashboard = dashboards.find((entry) => entry.sources[0]?.runtime === "codex") || dashboards[0];
   const metricLabels = { sessions: "Sessions", agent_tool_calls: "Agent tool calls", tokens: "Tokens", estimated_cost: "Estimated cost" };
   const metricUnits = { sessions: "sessions", agent_tool_calls: "tool-call events", tokens: "tokens", estimated_cost: "estimated cost" };
   let selectedMetric = "sessions";
@@ -985,6 +1005,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       ? "<div class='identity'><div><p class='eyebrow'>LOCAL PROFILE</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>Instance " + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>Local profile</span></div>"
       : "<div class='unsupported'><strong>Local Profile unavailable</strong><p>No identity is inferred.</p></div>";
     const axes = Object.keys(metricLabels).map((key) => "<button type='button' data-metric='" + key + "' aria-pressed='" + String(key === metric) + "'><span>" + esc(metricLabels[key]) + "</span><strong>" + esc(metricValue(key)) + "</strong></button>").join("");
+    const runtimeAxes = dashboards.map((entry) => { const runtime = entry.sources[0]?.runtime || "unknown"; return "<button type='button' data-runtime='" + esc(runtime) + "' aria-pressed='" + String(entry === dashboard) + "'>" + esc(runtime === "codex" ? "Codex" : "Claude") + "</button>"; }).join("");
     const availability = coverage.observation_state === "unsupported" || coverage.observation_state === "unavailable" || coverage.observation_state === "unreadable"
       ? "<div class='unsupported'><strong>" + esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "</strong><p>Missing evidence is not rendered as zero.</p></div>"
       : "<div class='activity-grid' aria-label='Daily " + esc(metricLabels[metric]) + "'>" + cells + "</div>";
@@ -998,7 +1019,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + " more suggestions</summary>" + remainingSuggestions.map(suggestionCard).join("") + "</details>" : "")
       : "<div class='card'><strong>No deterministic usage suggestions</strong><p class='muted'>This is not a completeness or productivity claim.</p></div>";
     return identity
-      + "<section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Each metric keeps its own coverage; missing values are never treated as zero.</p></section>"
+      + "<div class='metric-tabs runtime-tabs' role='group' aria-label='Runtime partition'>" + runtimeAxes + "</div><section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Runtime accounting stays partitioned; missing values are never treated as zero.</p></section>"
       + "<div class='metric-tabs' role='group' aria-label='Usage metric'>" + axes + "</div>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed" ? " <span>·</span> Estimated locally; not billed cost" : "") + "</p></section>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + usageSuggestions + "<p class='warn'>Deterministic local rules over the canonical dataset; not model judgment or a productivity score.</p></section>";
@@ -1100,6 +1121,15 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   // Per-session drill-down: an explicit owner click fetches the bounded scan
   // for one listed session; a view switch discards the result (no local copy).
   root.addEventListener("click", (event) => {
+    const runtimeButton = event.target.closest ? event.target.closest("button[data-runtime]") : null;
+    if (runtimeButton) {
+      const next = dashboards.find((entry) => entry.sources[0]?.runtime === runtimeButton.dataset.runtime);
+      if (!next) return;
+      dashboard = next;
+      sessionPage = 1;
+      show(currentView, "button[data-runtime='" + runtimeButton.dataset.runtime + "']");
+      return;
+    }
     const metricButton = event.target.closest ? event.target.closest("button[data-metric]") : null;
     if (metricButton) {
       selectedMetric = metricButton.dataset.metric;
