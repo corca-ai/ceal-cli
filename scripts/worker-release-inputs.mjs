@@ -5,8 +5,8 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codedErrorClass } from "./lib/coded-error.mjs";
-import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
+import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 import {
 	consumeLockedGatewayHandoffArchive,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { assertNoSymlinkComponents } from "../../scripts/lib/safe-output-path.mjs";
+import { assertNoSymlinkComponents } from "../../scripts/lib/safe-output-path.ts";
 import { scratchDir } from "../scratch-dir.mjs";
 
 class GuardError extends Error {

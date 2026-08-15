@@ -4,9 +4,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { codedErrorClass } from "../../scripts/lib/coded-error.mjs";
-import { parseScriptArgs } from "../../scripts/lib/parse-script-args.mjs";
+import { codedErrorClass } from "../../scripts/lib/coded-error.ts";
+import { parseScriptArgs } from "../../scripts/lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.mjs";
+import { GatewayProtocolConsumerError } from "../../scripts/verify-gateway-protocol-consumer.mjs";
 
 function thrower() {
 	return (code, message) => {
@@ -108,6 +109,12 @@ test("declared extra fields are assigned and default to null", () => {
 	const WithWorkspace = codedErrorClass("WorkspaceError", ["workspace"]);
 	assert.equal(new WithWorkspace("command_failed", "boom", "/tmp/ws").workspace, "/tmp/ws");
 	assert.equal(new WithWorkspace("command_failed", "boom").workspace, null);
+});
+
+test("consumer error workspace remains writable for the keep-workspace fallback", () => {
+	const error = new GatewayProtocolConsumerError("worker_smoke_failed", "boom");
+	error.workspace ??= "/tmp/kept-consumer-workspace";
+	assert.equal(error.workspace, "/tmp/kept-consumer-workspace");
 });
 
 test("skill directory bundles are deterministic, complete, and refuse unsafe entries", (context) => {

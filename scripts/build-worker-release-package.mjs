@@ -17,11 +17,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
-import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
-import { toolchainEnv } from "./lib/toolchain-env.mjs";
+import { toolchainEnv } from "./lib/toolchain-env.ts";
 import { PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH } from "./project-staged-worker-control-session.mjs";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.mjs";
 

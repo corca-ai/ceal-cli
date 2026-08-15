@@ -7,7 +7,7 @@
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.mjs";
+import { exitWith } from "./lib/exit-with.ts";
 import { analyzeProductionReachability } from "./lib/production-reachability.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

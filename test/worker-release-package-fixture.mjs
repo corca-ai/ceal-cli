@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.mjs";
 import { withBuiltPackages } from "./repo-build.mjs";
 

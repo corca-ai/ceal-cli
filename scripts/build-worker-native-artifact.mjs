@@ -26,9 +26,9 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
-import { parseScriptArgs } from "./lib/parse-script-args.mjs";
+import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";
 import {
 	WorkerReleaseInputError,

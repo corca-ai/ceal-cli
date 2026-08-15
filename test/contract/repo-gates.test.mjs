@@ -344,8 +344,8 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	// this tree: without it a run that also loaded `packages/*/dist` would fold
 	// that coverage into the same ratios.
 	assert.equal(config.src, "scripts");
-	assert.deepEqual(config.include, ["scripts/**/*.mjs"]);
-	assert.deepEqual(config.extension, [".mjs"]);
+	assert.deepEqual(config.include, ["scripts/**/*.mjs", "scripts/**/*.ts"]);
+	assert.deepEqual(config.extension, [".mjs", ".ts"]);
 	// One exclusion, by name and with a reason, matching the discipline the two
 	// packages already follow. The runner spawns c8 and so is never inside the
 	// coverage it produces; nothing else may be excluded, because an exclusion here
@@ -362,13 +362,13 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	assert.match(runnerSource(), /^\s*assertReportIsNotEmpty\(\);/mu, "the emptiness check must be called, not merely declared");
 
 	// `extension` is the other half of that inventory, and it is why this must not
-	// silently widen: a `.js` or `.sh` helper dropped into scripts/ matches neither
-	// the glob nor the runner's inventory, so it would be unmeasured rather than
-	// zero and nothing would say so.
+	// silently widen: a `.js`, `.cjs`, `.mts`, or `.sh` helper dropped into scripts/
+	// matches neither the glob nor the runner's inventory, so it would be unmeasured
+	// rather than zero and nothing would say so.
 	const foreign = readdirSync(path.join(ROOT, "scripts"), { recursive: true })
 		.map((name) => `scripts/${name}`.replaceAll(path.sep, "/"))
-		.filter((name) => /[.](?:js|cjs|mts|ts|sh)$/u.test(name));
-	assert.deepEqual(foreign, [], "scripts/ carries a file the .mjs-only coverage inventory cannot see; measure it or move it");
+		.filter((name) => /[.](?:js|cjs|mts|sh)$/u.test(name));
+	assert.deepEqual(foreign, [], "scripts/ carries a file the coverage inventory cannot see; measure it or move it");
 
 	// The floor must be enforced where the full proof set runs. `platformProofTest`
 	// correctly skips the installed-binary proofs elsewhere, so a floor applied

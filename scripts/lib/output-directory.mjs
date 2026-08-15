@@ -18,7 +18,7 @@
 
 import { existsSync, lstatSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
-import { assertNoSymlinkComponents } from "./safe-output-path.mjs";
+import { assertNoSymlinkComponents } from "./safe-output-path.ts";
 
 /**
  * Resolve and vet a composer's output directory.

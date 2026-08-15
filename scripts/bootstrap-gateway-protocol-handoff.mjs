@@ -6,7 +6,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 import { assertGatewayHandoffArchiveInventory, extractGatewayHandoffArchive } from "./worker-gateway-handoff-archive.mjs";
 import { validateGatewayHandoffPacketFiles } from "./worker-release-inputs.mjs";
 

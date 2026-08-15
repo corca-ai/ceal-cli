@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { projectAcceptanceReceipt } from "../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
 import { resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.mjs";
 

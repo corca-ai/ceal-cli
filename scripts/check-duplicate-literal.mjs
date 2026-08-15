@@ -13,7 +13,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { analyzeDuplicateLiterals } from "./lib/duplicate-literal.mjs";
-import { exitWith } from "./lib/exit-with.mjs";
+import { exitWith } from "./lib/exit-with.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const report = analyzeDuplicateLiterals({ repoRoot: ROOT });

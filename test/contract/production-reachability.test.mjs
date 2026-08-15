@@ -250,5 +250,5 @@ test("the manifest is what declares an entry, so an undeclared script is not one
 	// Sampled rather than listed in full: the point is that the manifest is read,
 	// not that this file keeps a second copy of it.
 	assert.ok(entries.includes("scripts/probe-surface.mjs"), "a declared npm-script entry must resolve");
-	assert.ok(!entries.includes("scripts/lib/exit-with.mjs"), "a library reached only by import is not an entry");
+	assert.ok(!entries.includes("scripts/lib/exit-with.ts"), "a library reached only by import is not an entry");
 });

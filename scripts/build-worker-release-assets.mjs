@@ -14,7 +14,7 @@ import {
 	readControlSessionContract,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.mjs";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.mjs";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.mjs";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.mjs";

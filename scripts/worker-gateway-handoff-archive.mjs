@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const LOCK_SCHEMA_V1 = "ceal.worker_gateway_protocol_handoff_lock.v1";

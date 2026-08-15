@@ -14,14 +14,21 @@
  * @param extraFields ordered names of additional constructor parameters, each
  *   assigned to the instance; used by the consumer verifier's `workspace`
  */
-export function codedErrorClass(name, extraFields = []) {
+export function codedErrorClass(name: string, extraFields: readonly string[] = []) {
 	class CodedError extends Error {
-		constructor(code, message, ...rest) {
+		code: string;
+
+		constructor(code: string, message: string, ...rest: unknown[]) {
 			super(message);
 			this.name = name;
 			this.code = code;
 			for (const [index, field] of extraFields.entries()) {
-				this[field] = rest[index] ?? null;
+				Object.defineProperty(this, field, {
+					value: rest[index] ?? null,
+					enumerable: true,
+					configurable: true,
+					writable: true,
+				});
 			}
 		}
 	}

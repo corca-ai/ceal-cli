@@ -15,7 +15,7 @@
  *   should carry on, and anything else means it should not.
  * @returns {never}
  */
-export function exitWith(prefix, message, code) {
+export function exitWith(prefix: string, message: string, code: number): never {
 	process.stderr.write(`${prefix}: ${message}\n`);
 	process.exit(code);
 }

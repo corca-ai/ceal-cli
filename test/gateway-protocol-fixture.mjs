@@ -5,7 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { withBuiltPackages } from "./repo-build.mjs";
 
 // `URL.pathname` is percent-encoded, so a checkout under a path containing a

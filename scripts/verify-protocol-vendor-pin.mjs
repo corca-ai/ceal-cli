@@ -37,7 +37,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codedErrorClass } from "./lib/coded-error.mjs";
+import { codedErrorClass } from "./lib/coded-error.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PIN_PATH = "protocol-vendor-pin.json";

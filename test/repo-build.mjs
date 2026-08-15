@@ -5,7 +5,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.mjs";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 

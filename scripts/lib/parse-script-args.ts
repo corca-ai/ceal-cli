@@ -21,7 +21,24 @@
  * @param spec.unknownMessage refusal for an unrecognized argument
  * @returns `{ help, json, options }`
  */
-export function parseScriptArgs(argv, spec) {
+export type ScriptFail = (code: "invalid_argument", message: string) => never;
+
+export interface ScriptArgSpec {
+	fail: ScriptFail;
+	values?: Record<string, string>;
+	flags?: Record<string, string>;
+	defaults?: Record<string, unknown>;
+	valueMessage: string;
+	unknownMessage: string;
+}
+
+export interface ScriptArgs {
+	help: boolean;
+	json: boolean;
+	options: Record<string, unknown>;
+}
+
+export function parseScriptArgs(argv: readonly string[], spec: ScriptArgSpec): ScriptArgs {
 	const { fail, values = {}, flags = {}, defaults = {}, valueMessage, unknownMessage } = spec;
 	const options = { ...defaults };
 	let json = false;

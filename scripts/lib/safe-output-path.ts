@@ -23,18 +23,20 @@ import path from "node:path";
  * @param fail called as `fail("unsafe_output", message)`; must throw
  * @param subject names the path in the caller's own error vocabulary
  */
-export function assertNoSymlinkComponents(target, fail, subject) {
+export type SafetyFailure = (code: "unsafe_output", message: string) => never;
+
+export function assertNoSymlinkComponents(target: string, fail: SafetyFailure, subject: string): void {
 	const root = path.parse(target).root;
 	let current = root;
 	for (const component of target.slice(root.length).split(path.sep).filter(Boolean)) {
 		current = path.join(current, component);
-		let stat;
+		let stat: ReturnType<typeof lstatSync>;
 		try {
 			stat = lstatSync(current);
-		} catch (error) {
+		} catch (error: unknown) {
 			// A component that does not exist cannot redirect a write, and neither
 			// can anything below it, so the walk is finished rather than failed.
-			if (error?.code === "ENOENT") return;
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
 			fail("unsafe_output", `Could not safely inspect ${subject}.`);
 			return;
 		}

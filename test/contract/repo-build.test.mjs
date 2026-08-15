@@ -410,8 +410,8 @@ function injectedRepoBuild(root, anchor, replacement) {
 	mkdirSync(directory, { recursive: true });
 	let source = readFileSync(HELPER, "utf8");
 	if (anchor) assert.ok(source.includes(anchor), `repo-build injection anchor missing: ${anchor}`);
-	const toolchainImport = new URL("../../scripts/lib/toolchain-env.mjs", import.meta.url).href;
-	source = source.replace('from "../scripts/lib/toolchain-env.mjs"', `from ${JSON.stringify(toolchainImport)}`);
+	const toolchainImport = new URL("../../scripts/lib/toolchain-env.ts", import.meta.url).href;
+	source = source.replace('from "../scripts/lib/toolchain-env.ts"', `from ${JSON.stringify(toolchainImport)}`);
 	source = source.replace("const WAIT_TIMEOUT_MS = 600_000;", "const WAIT_TIMEOUT_MS = 20;");
 	source = source.replace("const BUILD_TIMEOUT_MS = 600_000;", "const BUILD_TIMEOUT_MS = 500;");
 	source = source.replace("const BUILD_TERMINATION_GRACE_MS = 2_000;", "const BUILD_TERMINATION_GRACE_MS = 80;");

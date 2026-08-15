@@ -20,7 +20,7 @@
  * not inherit its caller's coverage collector, because the artifact it produces
  * is supposed to be a function of its inputs and nothing else.
  */
-export function toolchainEnv(base = process.env) {
+export function toolchainEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 	const { NODE_V8_COVERAGE: _collector, ...rest } = base;
 	return rest;
 }

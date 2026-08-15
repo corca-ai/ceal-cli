@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"strict": true,
+		"erasableSyntaxOnly": true,
+		"types": ["node"],
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"incremental": true,
+		"tsBuildInfoFile": "./node_modules/.cache/ceal-tools-typecheck.tsbuildinfo"
+	},
+	"include": ["scripts/**/*.ts", "test/**/*.ts"],
+	"exclude": ["dist", "node_modules"]
+}

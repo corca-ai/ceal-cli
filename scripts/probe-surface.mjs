@@ -32,7 +32,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.mjs";
+import { exitWith } from "./lib/exit-with.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // `cealctl` was a second entry here until its source left this repository. The
