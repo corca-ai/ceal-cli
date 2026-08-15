@@ -14,8 +14,16 @@ import ts from "typescript";
 /** The packages this lane owns. `packages/ceal-protocol` is frozen and is not one. */
 const OWNED_PACKAGE_SOURCE_ROOTS = ["packages/ceal-worker-cli/src", "packages/ceal-client/src"];
 
-function filesUnder(directory, skipFile) {
-	const found = [];
+type OwnedPackageSourceOptions = {
+	repoRoot: string;
+	roots?: readonly string[];
+	skipFile?: (name: string) => boolean;
+};
+
+type OwnedSourceVisitor = (relative: string, source: ts.SourceFile) => void;
+
+function filesUnder(directory: string, skipFile: (name: string) => boolean): string[] {
+	const found: string[] = [];
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
 		const absolute = path.join(directory, entry.name);
 		if (entry.isDirectory()) {
@@ -36,8 +44,8 @@ function filesUnder(directory, skipFile) {
  * A root that does not exist is skipped rather than thrown on, because both
  * callers are also run against scratch fixtures that hold only one package.
  */
-function ownedPackageSources({ repoRoot, roots, skipFile = () => false }) {
-	const found = [];
+function ownedPackageSources({ repoRoot, roots, skipFile = () => false }: OwnedPackageSourceOptions): string[] {
+	const found: string[] = [];
 	for (const relative of roots ?? OWNED_PACKAGE_SOURCE_ROOTS) {
 		const directory = path.join(repoRoot, relative);
 		if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) continue;
@@ -60,7 +68,7 @@ function ownedPackageSources({ repoRoot, roots, skipFile = () => false }) {
  *
  * @param {(relative: string, source: import("typescript").SourceFile) => void} visit
  */
-export function forEachOwnedSource({ repoRoot, roots, skipFile }, visit) {
+export function forEachOwnedSource({ repoRoot, roots, skipFile }: OwnedPackageSourceOptions, visit: OwnedSourceVisitor): string[] {
 	const files = ownedPackageSources({ repoRoot, roots, skipFile });
 	for (const absolute of files) {
 		const relative = path.relative(repoRoot, absolute);

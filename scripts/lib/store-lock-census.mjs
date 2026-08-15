@@ -20,7 +20,7 @@
 // reason `production-reachability.mjs` states: a regex that quietly stops
 // matching leaves a gate green while claiming to have walked the tree.
 import ts from "typescript";
-import { forEachOwnedSource } from "./owned-package-sources.mjs";
+import { forEachOwnedSource } from "./owned-package-sources.ts";
 
 /**
  * A call to one of these mutates the store on disk. `openSync` is conditional —

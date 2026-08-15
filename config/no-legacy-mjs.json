@@ -57,7 +57,6 @@
 		"scripts/install-git-hooks.mjs",
 		"scripts/lib/duplicate-literal.mjs",
 		"scripts/lib/output-directory.mjs",
-		"scripts/lib/owned-package-sources.mjs",
 		"scripts/lib/production-reachability.mjs",
 		"scripts/lib/protocol-provenance.mjs",
 		"scripts/lib/skill-directory-bundle.mjs",
