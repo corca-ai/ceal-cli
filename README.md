@@ -156,6 +156,11 @@ evidence does not provide the accepted model identity needed for a matching rate
 `ceal pricing status` classifies that local store without network contact and
 reports only bounded metadata plus a non-reversible revision fingerprint. The
 snapshot remains operator-supplied and its commercial accuracy is not verified.
+
+For a presentation-safe populated shell, run `npm run demo:dashboard` and open
+the printed loopback URL. It uses fixed synthetic Profile, runtime, usage,
+pricing, suggestion, session, and capability evidence; it reads no personal
+transcripts and is not a production-data claim.
 The state covers:
 session scope with token and device identity material structurally redacted,
 the cached capability catalog with its age and TTL, the managed install

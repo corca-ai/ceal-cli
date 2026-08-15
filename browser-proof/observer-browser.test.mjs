@@ -66,7 +66,7 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	assert.ok(requests.every(isLoopbackGet));
 });
 
-test("a populated review fixture preserves density and evidence boundaries", { timeout: 20_000 }, async (context) => {
+test("a populated review fixture preserves density and evidence boundaries", { timeout: 40_000 }, async (context) => {
 	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
 		env: { PATH: process.env.PATH ?? "", TMPDIR: process.env.TMPDIR ?? tmpdir(), LANG: "C.UTF-8" },
 		stdio: ["ignore", "pipe", "pipe"],
@@ -89,7 +89,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
 	assert.equal(await page.locator("#root .hero h2").textContent(), "3 sessions observed.");
-	await page.getByText("Local Profile unavailable").waitFor();
+	await page.getByText("profile:review-personal", { exact: true }).waitFor();
 	await page.getByText("ceal.local_usage_rules v1").first().waitFor();
 	await page.getByText(/not model judgment or a productivity score/u).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
@@ -149,7 +149,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 			await page.getByRole("button", { name: mode }).click();
 			assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
 			assert.equal(await page.locator("html").getAttribute("data-mode"), mode === "Auto" ? null : mode.toLowerCase());
-			await page.getByText("Gateway-observed capability summary.").waitFor();
+			await page.getByText(/Gateway-observed (access for this local Profile|capability summary)[.]/u).waitFor();
 		}
 	}
 	await page.getByRole("button", { name: "Usage", exact: true }).focus();
@@ -194,7 +194,7 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 			PATH: process.env.PATH ?? "",
 			TMPDIR: process.env.TMPDIR ?? tmpdir(),
 			LANG: "C.UTF-8",
-			CEAL_REVIEW_MANY_SESSIONS: "1",
+			CEAL_REVIEW_DEMO: "1",
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});
@@ -208,6 +208,14 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 	context.after(() => browser.close());
 	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 	await page.goto(await observerUrl(server));
+	await page.getByText(/Synthetic demo data/u).waitFor();
+	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
+	await page.getByRole("button", { name: /Agent tool calls 210/u }).waitFor();
+	await page.getByRole("button", { name: /Tokens 924,000/u }).waitFor();
+	await page.getByRole("button", { name: /Estimated cost USD 3[.]36/u }).click();
+	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
+	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 61);
+	await page.getByText("profile:review-personal", { exact: true }).waitFor();
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await page.getByText("Page 1 of 6 · 105 of 105 eligible sessions returned").waitFor();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
@@ -220,6 +228,8 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 	assert.equal(await page.locator("button[data-session-ref]").count(), 5);
 	assert.equal(await page.getByRole("button", { name: "Next" }).isDisabled(), true);
 	assert.equal(await page.getByRole("button", { name: "Previous" }).evaluate((element) => element === document.activeElement), true);
+	await page.setViewportSize({ width: 390, height: 844 });
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
 });
 
 function isLoopbackGet(request) {

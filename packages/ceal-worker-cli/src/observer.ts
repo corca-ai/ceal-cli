@@ -800,14 +800,14 @@ const OBSERVER_PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ceal Workbench</title>
 <style>
-  :root { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --soft:#e9eeea; --accent:#245b3c; --warn:#8a4b08; --selected:#e2ebff; }
+  :root { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f4f6f3; --panel:#fff; --soft:#e9eeea; --accent:#167a4c; --accent-strong:#0d5936; --warn:#8a4b08; --selected:#e2ebff; --shadow:0 12px 32px #17211b0b; }
   @media (prefers-color-scheme:dark) { :root:not([data-mode]) { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; } }
   :root[data-mode="dark"] { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; }
   :root[data-mode="light"] { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --soft:#e9eeea; --accent:#245b3c; --warn:#8a4b08; --selected:#e2ebff; }
   * { box-sizing: border-box; }
-  body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:76rem; padding:1.5rem 1.25rem 5rem; }
+  body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:86rem; padding:0 2rem 5rem; }
   h1 { font-size:1.15rem; letter-spacing:-.03em; margin:0; } h2 { font-size:1rem; margin:1.6rem 0 .75rem; }
-  .topbar { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:1rem; }
+  .topbar { min-height:4.5rem; display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; background:color-mix(in srgb,var(--paper) 92%,transparent); backdrop-filter:blur(14px); }
   .topbar nav { margin:0 auto; } .controls { display:flex; align-items:center; gap:.45rem; flex-wrap:wrap; }
   select { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:.38rem .55rem; font:inherit; font-size:.75rem; }
   .mode { display:flex; background:var(--soft); border:1px solid var(--line); border-radius:7px; padding:2px; }
@@ -818,9 +818,9 @@ const OBSERVER_PAGE = `<!doctype html>
   td, th { text-align: left; padding: .15rem .8rem .15rem 0; vertical-align: top; word-break: break-all; }
   .muted { color:var(--muted); }
   .warn { color:var(--warn); }
-  .boundary { border-left:3px solid var(--accent); margin:.8rem 0 1.4rem; padding:.35rem .75rem; }
+  .boundary { border:1px solid var(--line); background:var(--panel); border-radius:10px; margin:1.1rem 0 1.4rem; padding:.7rem .9rem; color:var(--muted); box-shadow:var(--shadow); }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:.65rem; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.9rem; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1rem; box-shadow:var(--shadow); }
   .card, .unsupported { min-width:0; overflow-wrap:anywhere; }
   .card h3 { font-size:.82rem; margin:0 0 .35rem; color:var(--muted); }
   .attention { width:100%; color:inherit; text-align:left; font:inherit; cursor:pointer; margin-bottom:.6rem; }
@@ -831,20 +831,20 @@ const OBSERVER_PAGE = `<!doctype html>
   .detail-head { display:flex; justify-content:space-between; align-items:center; padding:1rem 1.1rem; border-bottom:1px solid var(--line); }
   .detail-head h2 { margin:0; } .detail-body { padding:1rem 1.1rem 1.25rem; }
   nav { margin: 1rem 0; display: flex; gap: .5rem; }
-  nav button { font: inherit; padding: .2rem .8rem; border: 1px solid currentColor; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: .65; }
-  nav button[aria-current="true"] { opacity: 1; font-weight: 700; }
+  nav button { font: inherit; padding:.48rem .75rem; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; }
+  nav button[aria-current="true"] { color:var(--ink); background:var(--panel); box-shadow:0 1px 4px #0001; font-weight:700; }
   nav button:focus-visible, .mode button:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-  .hero { padding:3.4rem 0 2.4rem; max-width:58rem; }
+  .hero { padding:2.3rem 0 1.7rem; max-width:64rem; }
   .eyebrow { color:var(--accent); font-size:.7rem; letter-spacing:.12em; font-weight:700; text-transform:uppercase; }
-  .hero h2 { font-size:clamp(2rem,5vw,4.2rem); line-height:1.04; letter-spacing:-.055em; margin:.7rem 0 1rem; }
+  .hero h2 { font-size:clamp(2.1rem,4.4vw,4rem); line-height:1.02; letter-spacing:-.06em; margin:.55rem 0 .8rem; }
   .hero h2 em { color:var(--accent); font-style:normal; }
   .hero-summary { max-width:62ch; color:var(--muted); font-size:1rem; }
   .evidence-line { color:var(--muted); display:flex; flex-wrap:wrap; gap:.4rem 1rem; }
-  .overview-section { border-top:1px solid var(--ink); padding-top:1rem; margin-top:1rem; }
+  .overview-section { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:1.25rem; margin-top:1rem; box-shadow:var(--shadow); }
   .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
   .section-head h2 { margin:0; font-size:1.25rem; }
-  .activity-grid { display:grid; grid-template-rows:repeat(7,12px); grid-auto-flow:column; grid-auto-columns:12px; gap:4px; overflow:auto; padding:1.5rem 0 .7rem; }
-  .day { width:12px; height:12px; border-radius:2px; background:var(--soft); }
+  .activity-grid { display:grid; grid-template-rows:repeat(7,13px); grid-auto-flow:column; grid-auto-columns:13px; gap:4px; overflow:auto; padding:1.2rem 0 .8rem; scrollbar-width:thin; }
+  .day { width:13px; height:13px; border-radius:3px; background:var(--soft); }
   .day.level-1 { background:color-mix(in srgb,var(--accent) 35%,var(--soft)); }
   .day.level-2 { background:color-mix(in srgb,var(--accent) 65%,var(--soft)); }
   .day.level-3 { background:var(--accent); }
@@ -858,12 +858,14 @@ const OBSERVER_PAGE = `<!doctype html>
   .metric-strip .card strong { font-size:1.3rem; }
   .identity { display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:1rem 0; border-bottom:1px solid var(--line); }
   .identity strong, .identity span { display:block; }
-  .metric-tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin-bottom:2rem; }
-  .metric-tabs button { min-width:0; padding:.8rem; text-align:left; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:8px; cursor:pointer; }
+  .metric-tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:.7rem; margin-bottom:1rem; }
+  .metric-tabs button { min-width:0; padding:1rem; text-align:left; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:12px; cursor:pointer; box-shadow:var(--shadow); }
   .metric-tabs button span, .metric-tabs button strong { display:block; }
   .metric-tabs button span { color:var(--muted); font-size:.72rem; }
-  .metric-tabs button strong { font-size:1.15rem; margin-top:.25rem; overflow-wrap:anywhere; }
-  .metric-tabs button[aria-pressed="true"] { border-color:var(--accent); box-shadow:inset 0 -3px var(--accent); }
+  .metric-tabs button strong { font-size:1.35rem; margin-top:.25rem; overflow-wrap:anywhere; letter-spacing:-.035em; }
+  .metric-tabs button[aria-pressed="true"] { border-color:var(--accent); box-shadow:inset 0 -4px var(--accent),var(--shadow); }
+  .runtime-tabs { display:flex; max-width:34rem; margin:0; }
+  .runtime-tabs button { flex:1; padding:.7rem 1rem; box-shadow:none; }
   .session-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem; }
   .pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin:1.5rem 0; }
   .pagination button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px; padding:.45rem .7rem; }
@@ -874,12 +876,12 @@ const OBSERVER_PAGE = `<!doctype html>
   :root[data-theme="terminal"] body, :root[data-theme="terminal"] .hero h2, :root[data-theme="terminal"] .section-head h2 { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.025em; }
   :root[data-theme="terminal"] .card, :root[data-theme="terminal"] .unsupported, :root[data-theme="terminal"] select, :root[data-theme="terminal"] button { border-radius:2px; }
   :root[data-theme="terminal"] .day { border-radius:1px; }
-  @media (max-width:700px) { .topbar nav { order:3; width:100%; overflow:auto; } .support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .hero { padding-top:2.2rem; } }
+  @media (max-width:700px) { body{padding:0 1rem 4rem}.topbar{padding:.7rem 0}.topbar nav { order:3; width:100%; overflow:auto; margin:0; } .controls{margin-left:auto}.support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .runtime-tabs{display:flex}.hero { padding-top:1.6rem; } .boundary{font-size:.78rem} }
 </style>
 </head>
 <body>
 <header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
-<p class="boundary">Personal Ceal view. Loading this page reads the current Gateway handshake and capability catalog when a client session is available; it never calls a provider. Local evidence remains separately labeled.</p>
+<p class="boundary" id="boundary">Personal Ceal view. Loading this page reads the current Gateway handshake and capability catalog when a client session is available; it never calls a provider. Local evidence remains separately labeled.</p>
 <div id="root">Loading Ceal and local evidence…</div>
 <dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
 <script>
@@ -905,6 +907,11 @@ const SUGGESTION_DESTINATIONS = {
   unknown_outcome_receipt: ["Evidence", "Recent Ceal calls"]
 };
 fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
+  const isSyntheticDemo = Array.isArray(s.agent_activity?.non_claims) && s.agent_activity.non_claims.some((claim) => String(claim).startsWith("Synthetic fixed-vocabulary review evidence"));
+  if (isSyntheticDemo) {
+    document.title = "Ceal Workbench · Synthetic demo";
+    document.getElementById("boundary").innerHTML = "<strong>Synthetic demo data</strong> · Fixed presentation evidence only. No personal transcripts, credentials, provider payloads, or production usage are shown.";
+  }
   const readinessView = "<div class=\\"grid\\">" + [
     ["Client session", s.session.status],
     ["Capability cache", s.discovery_cache.status + (s.discovery_cache.status === "cached" ? (s.discovery_cache.within_ttl ? " · fresh" : " · stale") : "")],

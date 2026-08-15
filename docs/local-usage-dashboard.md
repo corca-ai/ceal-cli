@@ -11,17 +11,28 @@ unsupported monetary cost explicit.
 
 ## Current Slice
 
-The next implementation slice adds an explicit local provisioning journey:
-`ceal pricing status` reads the installed snapshot state, and
-`ceal pricing install --file <path> [--dry-run]` validates and atomically
-installs one operator-supplied snapshot. The CLI is a transport and validator,
-not a pricing authority: it does not download rates, assert their commercial
-accuracy, or contact Ceal, a provider, or a billing system.
+The current priority is a presentation-ready CLI Workbench shell before further
+producer plumbing. The shell must make the product legible with coherent
+synthetic evidence: local Profile context, one runtime at a time, usage axes,
+an activity field, evidence-bounded suggestions, all returned sessions through
+pagination, and a separate capability-access journey. `npm run demo:dashboard`
+is the maintained local demo entry point; its fixture is synthetic and cannot
+be consumed as production evidence.
 
-Implementation is sequenced without advertising dead routes: the first slice
-ships `pricing status` and its diagnostic inspector; the immediately following
-slice adds the declared `install` leaf only when dry-run and mutation handling
-are executable together.
+The shell is complete for this slice when a presenter can open one loopback URL
+and demonstrate the Usage, Sessions, and Access journeys, switch runtime,
+metric, theme, and color mode, inspect a session, and traverse a history above
+one hundred sessions without contradictory totals or unbounded scrolling.
+
+Pricing installation remains the next producer-facing CLI slice after the
+presentation shells. `ceal pricing status` is already implemented;
+`ceal pricing install --file <path> [--dry-run]` remains specified below but is
+not advertised until validation and atomic mutation handling ship together.
+The CLI remains a transport and validator, not a pricing authority.
+
+Pricing implementation remains sequenced without advertising dead routes: the
+implemented status leaf ships independently; install is declared only when
+dry-run and mutation handling are executable together.
 
 Both leaves emit one `ceal.pricing_snapshot.v1` YAML document. Shared safe
 fields are `schema_version`, `command`, `ok`, `action`, `effect`, `status`, `reason`,

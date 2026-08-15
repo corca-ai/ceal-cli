@@ -12,7 +12,8 @@ const accessCapabilities = Array.from({ length: 9 }, (_, index) => ({
 	target_requirement: "required",
 	evidence_requirement: "gateway_audit",
 }));
-const codexSessionCount = process.env.CEAL_REVIEW_MANY_SESSIONS === "1" ? 105 : 3;
+const demoMode = process.env.CEAL_REVIEW_DEMO === "1";
+const codexSessionCount = demoMode || process.env.CEAL_REVIEW_MANY_SESSIONS === "1" ? 105 : 3;
 const receipts = Array.from({ length: 35 }, (_, index) => ({
 	recordedAt: NOW - (29 - (index % 30)) * DAY - Math.floor(index / 30) * 3_600_000,
 	requestRef: `review:receipt:${String(index).padStart(2, "0")}`,
@@ -26,26 +27,28 @@ const receipts = Array.from({ length: 35 }, (_, index) => ({
 const sessions = (runtime, count, offset) =>
 	Array.from({ length: count }, (_, index) => ({
 		sessionRef: `${runtime === "claude" ? "11111111" : "22222222"}-2222-3333-4444-${String(offset + index).padStart(12, "0")}`,
-		lastActivityAt: NOW - (index + offset) * DAY,
+		lastActivityAt: NOW - (demoMode && runtime === "codex" ? Math.floor(index * 0.58) + offset : index + offset) * DAY,
 		transcriptBytes: 2_048 + index * 512,
 		events:
-			count > 3 && index >= 3
+			!demoMode && count > 3 && index >= 3
 				? undefined
-				: index === count - 1
+				: !demoMode && index === count - 1
 					? "unreadable"
 					: {
-							scan: index === count - 2 ? "truncated" : "complete",
+							scan: !demoMode && index === count - 2 ? "truncated" : "complete",
 							eventCount: 8 + index,
 							kinds: { user_message: 3, assistant_message: 3, tool_call: 2 },
-							unparsedLines: index === count - 2 ? 1 : 0,
-							...(runtime === "codex" && index === 0 ? { modelIdentity: { source: "turn_context", modelKey: "gpt-review-codex" } } : {}),
-							firstEventAt: NOW - (index + offset) * DAY - 60_000,
-							lastScannedEventAt: NOW - (index + offset) * DAY,
+							unparsedLines: !demoMode && index === count - 2 ? 1 : 0,
+							...(runtime === "codex" && (demoMode || index === 0)
+								? { modelIdentity: { source: "turn_context", modelKey: "gpt-review-codex" } }
+								: {}),
+							firstEventAt: NOW - (demoMode && runtime === "codex" ? Math.floor(index * 0.58) + offset : index + offset) * DAY - 60_000,
+							lastScannedEventAt: NOW - (demoMode && runtime === "codex" ? Math.floor(index * 0.58) + offset : index + offset) * DAY,
 							tokenUsage:
-								index % 2 === 0
+								demoMode || index % 2 === 0
 									? {
 											source: runtime === "claude" ? "event_usage_sum" : "runtime_cumulative_last",
-											completeness: index === count - 2 ? "scanned_prefix" : "full_transcript",
+											completeness: !demoMode && index === count - 2 ? "scanned_prefix" : "full_transcript",
 											usageEvents: 2,
 											inputTokens: 1_200 + index * 100,
 											outputTokens: 320 + index * 40,
@@ -55,6 +58,20 @@ const sessions = (runtime, count, offset) =>
 	}));
 
 const server = createCealObserverServer({
+	loadSession: async () => ({
+		gatewayEndpoint: "https://gateway.review.invalid/client",
+		profileRef: "profile:review-personal",
+		membershipRef: "membership:review-personal",
+		registrationRef: "registration:review-personal",
+		clientRef: "client:review-personal",
+		subjectRef: "subject:review-personal",
+		instanceRef: "instance:review",
+		accessToken: "fixture-access-token-not-rendered",
+		expiresAt: "2099-08-14T00:00:00.000Z",
+		refreshToken: "fixture-refresh-token-not-rendered",
+		refreshTokenIdleExpiresAt: "2099-09-14T00:00:00.000Z",
+		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
+	}),
 	loadPricingSnapshot: () => ({
 		schema_version: "ceal.local_pricing_snapshot.v1",
 		snapshot_ref: "pricing:review:2026-08-13",
@@ -114,7 +131,10 @@ const server = createCealObserverServer({
 							depth: "session_events",
 							sessionCount: codexSessionCount,
 							sessions: sessions("codex", codexSessionCount, 10),
-							eventScan: { scannedSessions: Math.min(3, codexSessionCount), sessionLimit: 3 },
+							eventScan: {
+								scannedSessions: demoMode ? codexSessionCount : Math.min(3, codexSessionCount),
+								sessionLimit: demoMode ? codexSessionCount : 3,
+							},
 						},
 					],
 					nonClaims: ["Synthetic fixed-vocabulary review evidence; no prompt or transcript content exists in this fixture."],
@@ -127,6 +147,7 @@ const server = createCealObserverServer({
 server.listen(0, "127.0.0.1", () => {
 	const address = server.address();
 	if (typeof address !== "object" || address === null) throw new Error("fixture observer did not expose a port");
+	process.stdout.write("mode: synthetic demo data; no personal transcript source is read\n");
 	process.stdout.write(`url: http://127.0.0.1:${address.port}/\n`);
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));
