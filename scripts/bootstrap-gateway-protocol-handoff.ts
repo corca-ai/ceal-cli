@@ -19,6 +19,63 @@ const TAG_PATTERN = /^gateway-protocol-handoff-v(\d+\.\d+\.\d+)$/u;
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 
+type JsonRecord = Record<string, unknown>;
+type BootstrapOptions = { repoRoot?: string; tag?: string };
+type SignatureInput = {
+	archive: string;
+	certificate: string;
+	signature: string;
+	certificateIdentity: string;
+	tag: string;
+	commit: string;
+	directory: string;
+};
+type SignatureResult = { actionsRunId: number; runInvocationUri: string };
+export type BootstrapDependencies = {
+	download?: (url: string, destination: string) => void;
+	resolveRemoteTag?: (tag: string) => string;
+	verifySignature?: (input: SignatureInput) => SignatureResult;
+	extract?: (archive: string, destination: string) => void;
+};
+type CandidateGateway = {
+	repository: string;
+	workflow_path: string;
+	commit: string;
+	tree: string;
+	protocol_tree: string;
+	tag: string;
+	actions_run_id: number;
+	origin: string;
+};
+type CandidateProtocol = { package: string; version: string; filename: string; sha256: string };
+type CandidateArchive = { filename: string; sha256: string; handoff_manifest_sha256: string; control_routes_sha256: string };
+type CandidateSignature = {
+	certificate_identity: string;
+	oidc_issuer: string;
+	workflow_sha: string;
+	run_invocation_uri: string;
+	actions_run_id?: never;
+};
+export type CandidateLock = {
+	schema_version: string;
+	status: string;
+	gateway: CandidateGateway;
+	protocol: CandidateProtocol;
+	archive: CandidateArchive;
+	reviewed_signature: CandidateSignature;
+	non_claims: string[];
+};
+export type BootstrapResult = {
+	schema_version: string;
+	ok: true;
+	proof_level: string;
+	writes_repository: false;
+	retained_download_directory: string;
+	archive_file: string;
+	candidate_lock: CandidateLock;
+	non_claims: string[];
+};
+
 export const GatewayProtocolHandoffBootstrapError = codedErrorClass("GatewayProtocolHandoffBootstrapError");
 
 /**
@@ -27,10 +84,12 @@ export const GatewayProtocolHandoffBootstrapError = codedErrorClass("GatewayProt
  * downloads remain in a private OS-temporary directory for the subsequent
  * locked consumption step; this function never writes below `repoRoot`.
  */
-export function bootstrapGatewayProtocolHandoff(options = {}, dependencies = {}) {
+export function bootstrapGatewayProtocolHandoff(options: BootstrapOptions = {}, dependencies: BootstrapDependencies = {}): BootstrapResult {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const tag = requireTag(options.tag);
-	const version = TAG_PATTERN.exec(tag)[1];
+	const tagMatch = TAG_PATTERN.exec(tag);
+	if (!tagMatch) fail("invalid_gateway_handoff_tag", "Gateway handoff tag is invalid.");
+	const version = tagMatch[1];
 	const archiveName = `ceal-gateway-protocol-handoff-${version}.tar.gz`;
 	const protocolName = `corca-ai-ceal-protocol-${version}.tgz`;
 	const assetNames = [archiveName, `${archiveName}.sig`, `${archiveName}.pem`, "SHA256SUMS"];
@@ -132,12 +191,12 @@ export function bootstrapGatewayProtocolHandoff(options = {}, dependencies = {})
 	}
 }
 
-function requireTag(value) {
+function requireTag(value: unknown): string {
 	if (typeof value !== "string" || !TAG_PATTERN.test(value)) fail("invalid_gateway_handoff_tag", "Gateway handoff tag is invalid.");
 	return value;
 }
 
-function downloadAsset(url, destination) {
+function downloadAsset(url: string, destination: string): void {
 	try {
 		execFileSync(
 			"curl",
@@ -172,10 +231,16 @@ function downloadAsset(url, destination) {
 /**
  * @testOnly
  */
-export function resolveRemoteTag(tag, run = execFileSync) {
-	let output;
+export type RemoteTagRunner = (
+	command: string,
+	argv: readonly string[],
+	options: { encoding: "utf8"; stdio: ["ignore", "pipe", "pipe"]; timeout: number },
+) => string;
+export function resolveRemoteTag(tag: string, run?: RemoteTagRunner): string {
+	let output: string | Buffer;
 	try {
-		output = run("git", ["ls-remote", "--tags", "https://github.com/corca-ai/ceal.git", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
+		const runner = run ?? ((command, argv, options) => String(execFileSync(command, argv, options)));
+		output = runner("git", ["ls-remote", "--tags", "https://github.com/corca-ai/ceal.git", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: 30_000,
@@ -183,7 +248,7 @@ export function resolveRemoteTag(tag, run = execFileSync) {
 	} catch {
 		fail("gateway_tag_unverified", "Gateway handoff remote tag could not be read.");
 	}
-	const lines = output.trim().split("\n").filter(Boolean);
+	const lines = String(output).trim().split("\n").filter(Boolean);
 	if (lines.length < 1 || lines.length > 2) fail("gateway_tag_unverified", "Gateway handoff tag did not resolve to one commit.");
 	const refs = new Map();
 	for (const line of lines) {
@@ -201,7 +266,15 @@ export function resolveRemoteTag(tag, run = execFileSync) {
 	return refs.get(peeledRef) ?? refs.get(directRef);
 }
 
-function verifySignature({ archive, certificate, signature, certificateIdentity, tag, commit, directory }) {
+function verifySignature({
+	archive,
+	certificate,
+	signature,
+	certificateIdentity,
+	tag,
+	commit,
+	directory,
+}: SignatureInput): SignatureResult {
 	try {
 		execFileSync(
 			"cosign",
@@ -235,7 +308,7 @@ function verifySignature({ archive, certificate, signature, certificateIdentity,
 	const certificatePem = decodedCertificate(readFileSync(certificate, "utf8"));
 	const decodedPath = path.join(directory, "verified-certificate.pem");
 	writeFileSync(decodedPath, certificatePem, { mode: 0o600, flag: "wx" });
-	let text;
+	let text: string;
 	try {
 		text = execFileSync("openssl", ["x509", "-in", decodedPath, "-noout", "-text"], {
 			encoding: "utf8",
@@ -250,7 +323,7 @@ function verifySignature({ archive, certificate, signature, certificateIdentity,
 	return { actionsRunId, runInvocationUri: matches[0][0] };
 }
 
-function decodedCertificate(value) {
+function decodedCertificate(value: string): string {
 	if (value.startsWith("-----BEGIN CERTIFICATE-----")) return value;
 	const compact = value.replaceAll(/\s/gu, "");
 	if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(compact)) fail("gateway_signature_invalid", "Gateway handoff certificate encoding is invalid.");
@@ -261,7 +334,7 @@ function decodedCertificate(value) {
 	return decoded;
 }
 
-function assertChecksumFile(file, archiveName, observed) {
+function assertChecksumFile(file: string, archiveName: string, observed: string): void {
 	const contents = readFileSync(file, "utf8");
 	const match = /^([a-f0-9]{64}) {2}([^\r\n]+)\n?$/u.exec(contents);
 	if (!match || match[2] !== archiveName || match[1] !== observed || !SHA256.test(match[1])) {
@@ -269,43 +342,37 @@ function assertChecksumFile(file, archiveName, observed) {
 	}
 }
 
-function assertOutsideRepository(repoRoot, target) {
+function assertOutsideRepository(repoRoot: string, target: string): void {
 	const relative = path.relative(repoRoot, target);
 	if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..")) {
 		fail("bootstrap_writes_repository", "Gateway handoff bootstrap staging must remain outside the repository.");
 	}
 }
 
-function requireRegularFile(file, code) {
+function requireRegularFile(file: string, code: string): string {
 	if (!existsSync(file)) fail(code, "Gateway handoff bootstrap input is missing.");
 	const stat = lstatSync(file);
 	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Gateway handoff bootstrap input must be a regular file.");
 	return file;
 }
 
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-function controlRoutesDigest(file) {
-	let value;
+function controlRoutesDigest(file: string): string {
+	let value: unknown;
 	try {
 		value = JSON.parse(readFileSync(file, "utf8"));
 	} catch {
 		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance is invalid.");
 	}
-	if (!Array.isArray(value.operations) || value.operations.length !== 7) {
+	if (!isRecord(value) || !Array.isArray(value.operations) || value.operations.length !== 7) {
 		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has no exact route projection.");
 	}
-	const routes = {};
+	const routes: Record<string, string> = {};
 	for (const entry of value.operations) {
-		if (
-			!entry ||
-			typeof entry !== "object" ||
-			typeof entry.operation !== "string" ||
-			typeof entry.path !== "string" ||
-			Object.hasOwn(routes, entry.operation)
-		) {
+		if (!isRecord(entry) || typeof entry.operation !== "string" || typeof entry.path !== "string" || Object.hasOwn(routes, entry.operation)) {
 			fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has an invalid route projection.");
 		}
 		routes[entry.operation] = entry.path;
@@ -313,11 +380,14 @@ function controlRoutesDigest(file) {
 	return sha256(Buffer.from(JSON.stringify(routes)));
 }
 
-function fail(code, message) {
+function fail(code: string, message: string): never {
 	throw new GatewayProtocolHandoffBootstrapError(code, message);
 }
+function isRecord(value: unknown): value is JsonRecord {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
-export function runCli(argv, io = console) {
+export function runCli(argv: readonly string[], io: Pick<Console, "log" | "error"> = console): number {
 	const tagIndex = argv.indexOf("--tag");
 	if (argv.length !== 2 || tagIndex !== 0) {
 		io.error(
@@ -330,11 +400,13 @@ export function runCli(argv, io = console) {
 		return 0;
 	} catch (error) {
 		const known = error instanceof GatewayProtocolHandoffBootstrapError;
+		const errorCode = known ? error.code : "gateway_handoff_bootstrap_failed";
+		const message = known ? error.message : "Gateway handoff bootstrap could not complete.";
 		io.error(
 			JSON.stringify({
 				ok: false,
-				error_code: known ? error.code : "gateway_handoff_bootstrap_failed",
-				message: known ? error.message : "Gateway handoff bootstrap could not complete.",
+				error_code: errorCode,
+				message,
 			}),
 		);
 		return 2;

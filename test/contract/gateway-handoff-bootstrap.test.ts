@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import {
 	bootstrapGatewayProtocolHandoff,
 	GatewayProtocolHandoffBootstrapError,
@@ -11,13 +11,13 @@ import {
 } from "../../scripts/bootstrap-gateway-protocol-handoff.ts";
 import { packedProtocolFixture, ROOT } from "../worker-release-package-fixture.ts";
 
-test("public bootstrap derives one lock candidate from exact signed packet identities without writing the repository", (context) => {
+test("public bootstrap derives one lock candidate from exact signed packet identities without writing the repository", (context: TestContext) => {
 	const fixture = publicFixture(context);
-	const downloads = [];
+	const downloads: string[] = [];
 	const result = bootstrapGatewayProtocolHandoff(
 		{ repoRoot: ROOT, tag: fixture.tag },
 		{
-			download: (url, destination) => {
+			download: (url: string, destination: string) => {
 				downloads.push(url);
 				assert.equal(path.relative(ROOT, destination).startsWith(".."), true);
 				copyFileSync(path.join(fixture.assets, path.basename(url)), destination);
@@ -44,10 +44,10 @@ test("public bootstrap derives one lock candidate from exact signed packet ident
 	);
 });
 
-test("public bootstrap refuses checksum or remote-tag drift before producing a candidate", (context) => {
+test("public bootstrap refuses checksum or remote-tag drift before producing a candidate", (context: TestContext) => {
 	const fixture = publicFixture(context);
 	const dependencies = {
-		download: (url, destination) => copyFileSync(path.join(fixture.assets, path.basename(url)), destination),
+		download: (url: string, destination: string) => copyFileSync(path.join(fixture.assets, path.basename(url)), destination),
 		resolveRemoteTag: () => fixture.producer.commit,
 		verifySignature: () => ({ actionsRunId: 42, runInvocationUri: "https://github.com/corca-ai/ceal/actions/runs/42/attempts/1" }),
 	};
@@ -83,18 +83,19 @@ test("remote tag resolution is bounded and peels annotated tags to their commit"
 	const tag = "gateway-protocol-handoff-v0.72.13";
 	const tagObject = "a".repeat(40);
 	const commit = "b".repeat(40);
-	let observed;
+	let observed: { command: string; argv: readonly string[]; options: { timeout: number } } | undefined;
 	const resolved = resolveRemoteTag(tag, (command, argv, options) => {
 		observed = { command, argv, options };
 		return `${tagObject}\trefs/tags/${tag}\n${commit}\trefs/tags/${tag}^{}\n`;
 	});
 	assert.equal(resolved, commit);
+	if (!observed) throw new Error("remote tag runner was not called");
 	assert.equal(observed.command, "git");
 	assert.equal(observed.options.timeout, 30_000);
 	assert.deepEqual(observed.argv.slice(-2), [`refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
 });
 
-function publicFixture(context) {
+function publicFixture(context: TestContext) {
 	const packet = packedProtocolFixture(context);
 	const manifest = JSON.parse(readFileSync(packet.handoffManifest, "utf8"));
 	const version = manifest.protocol.version;
@@ -130,6 +131,6 @@ function publicFixture(context) {
 	};
 }
 
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
