@@ -24,6 +24,19 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONSUMER_MANIFESTS = ["packages/ceal-client/package.json", "packages/ceal-worker-cli/package.json"];
 const OWNED_SCOPE = "@corca-ai/";
+type DependencyField = "dependencies" | "devDependencies" | "optionalDependencies" | "peerDependencies";
+const DEPENDENCY_FIELDS = [
+	"dependencies",
+	"devDependencies",
+	"optionalDependencies",
+	"peerDependencies",
+] satisfies readonly DependencyField[];
+
+type JsonRecord = Record<string, unknown>;
+type PackageRecord = JsonRecord & { version: string };
+type Lockfile = { packages: JsonRecord };
+type Manifest = JsonRecord;
+type PackageIndex = Map<string, Map<string, PackageRecord>>;
 
 // Every dependency field that can put a package into an install. `optional` is
 // included deliberately: npm installs a matching optional dependency rather than
@@ -31,14 +44,37 @@ const OWNED_SCOPE = "@corca-ai/";
 // `--offline` install exactly like a required one. No package in today's closure
 // declares one, which is precisely why omitting it would go unnoticed until a new
 // transitive arrived.
-const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+function isRecord(value: unknown): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-function dependencyNames(record, fields) {
-	const names = new Set();
-	for (const field of fields) {
-		for (const name of Object.keys(record?.[field] ?? {})) names.add(name);
+function isStringMap(value: unknown): value is Record<string, string> {
+	return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isPackageRecord(value: unknown): value is PackageRecord {
+	return isRecord(value) && typeof value.version === "string";
+}
+
+function isLockfile(value: unknown): value is Lockfile {
+	return isRecord(value) && isRecord(value.packages);
+}
+
+function validateDependencyFields(record: JsonRecord, context: string): void {
+	for (const field of DEPENDENCY_FIELDS) {
+		const value = record[field];
+		if (value !== undefined && !isStringMap(value)) throw new TypeError(`${context}.${field} must be an object of string ranges`);
 	}
-	return names;
+}
+
+function dependencyNames(record: JsonRecord): string[] {
+	validateDependencyFields(record, "dependency record");
+	const names = new Set<string>();
+	for (const field of DEPENDENCY_FIELDS) {
+		const dependencies = record[field];
+		if (isStringMap(dependencies)) for (const name of Object.keys(dependencies)) names.add(name);
+	}
+	return [...names];
 }
 
 /**
@@ -51,14 +87,18 @@ function dependencyNames(record, fields) {
  * no such collisions in the committed lockfile today; this keeps that from being
  * load-bearing.
  */
-export function lockPackages(lock) {
-	const byName = new Map();
-	for (const [location, record] of Object.entries(lock.packages ?? {})) {
+export function lockPackages(lock: Lockfile): PackageIndex {
+	if (!isRecord(lock) || !isRecord(lock.packages)) throw new TypeError("package-lock.json must contain a packages object");
+	const byName: PackageIndex = new Map();
+	for (const [location, value] of Object.entries(lock.packages)) {
 		const marker = location.lastIndexOf("node_modules/");
 		if (marker === -1) continue;
 		const name = location.slice(marker + "node_modules/".length);
+		if (name.startsWith(OWNED_SCOPE)) continue;
+		if (!isPackageRecord(value)) throw new TypeError(`package-lock entry ${location} must contain a version`);
+		validateDependencyFields(value, `package-lock entry ${location}`);
 		if (!byName.has(name)) byName.set(name, new Map());
-		if (record?.version) byName.get(name).set(record.version, record);
+		byName.get(name)?.set(value.version, value);
 	}
 	return byName;
 }
@@ -70,18 +110,32 @@ export function lockPackages(lock) {
  * @param manifests consumer manifests, as parsed objects
  * @returns array of `{ name, version }`, sorted for a stable log and diff
  */
-export function consumerDependencyClosure(byName, manifests) {
-	const queue = [];
+export class UnpinnedDependencyError extends Error {
+	readonly code: "unpinned_dependency" = "unpinned_dependency";
+	readonly missing: string[];
+
+	constructor(missing: string[]) {
+		const sorted = [...missing].sort();
+		super(`not pinned by package-lock.json: ${sorted.join(", ")}`);
+		this.name = "UnpinnedDependencyError";
+		this.missing = sorted;
+	}
+}
+
+export function consumerDependencyClosure(byName: PackageIndex, manifests: readonly Manifest[]) {
+	const queue: string[] = [];
 	for (const manifest of manifests) {
-		for (const name of dependencyNames(manifest, DEPENDENCY_FIELDS)) {
+		if (!isRecord(manifest)) throw new TypeError("consumer manifest must be an object");
+		for (const name of dependencyNames(manifest)) {
 			if (!name.startsWith(OWNED_SCOPE)) queue.push(name);
 		}
 	}
-	const visited = new Set();
-	const closure = [];
-	const missing = [];
+	const visited = new Set<string>();
+	const closure: Array<{ name: string; version: string }> = [];
+	const missing: string[] = [];
 	while (queue.length > 0) {
 		const name = queue.shift();
+		if (name === undefined) break;
 		if (visited.has(name)) continue;
 		visited.add(name);
 		const versions = byName.get(name);
@@ -93,41 +147,42 @@ export function consumerDependencyClosure(byName, manifests) {
 		// taking one version's edges for another's would miss packages entirely.
 		for (const [version, record] of versions) {
 			closure.push({ name, version });
-			for (const dependency of dependencyNames(record, DEPENDENCY_FIELDS)) {
+			for (const dependency of dependencyNames(record)) {
 				if (!dependency.startsWith(OWNED_SCOPE)) queue.push(dependency);
 			}
 		}
 	}
 	if (missing.length > 0) {
-		const error = new Error(`not pinned by package-lock.json: ${missing.sort().join(", ")}`);
-		error.code = "unpinned_dependency";
-		error.missing = missing.sort();
-		throw error;
+		throw new UnpinnedDependencyError(missing);
 	}
 	closure.sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
 	return closure;
 }
 
 export function readConsumerClosure(root = ROOT) {
-	const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
-	const manifests = CONSUMER_MANIFESTS.map((relative) => JSON.parse(readFileSync(path.join(root, relative), "utf8")));
-	return consumerDependencyClosure(lockPackages(lock), manifests);
+	const lockValue: unknown = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+	if (!isLockfile(lockValue)) throw new TypeError("package-lock.json must contain a packages object");
+	const manifests: Manifest[] = CONSUMER_MANIFESTS.map((relative) => {
+		const value: unknown = JSON.parse(readFileSync(path.join(root, relative), "utf8"));
+		if (!isRecord(value)) throw new TypeError(`${relative} must contain a manifest object`);
+		return value;
+	});
+	return consumerDependencyClosure(lockPackages(lockValue), manifests);
 }
 
 function main() {
-	let closure;
 	try {
-		closure = readConsumerClosure();
+		const closure = readConsumerClosure();
+		for (const { name, version } of closure) {
+			execFileSync("npm", ["cache", "add", `${name}@${version}`], { stdio: "inherit" });
+		}
+		console.log(`Prewarmed offline consumer cache: ${closure.map(({ name, version }) => `${name}@${version}`).join(", ")}`);
 	} catch (error) {
-		if (error?.code !== "unpinned_dependency") throw error;
+		if (!(error instanceof UnpinnedDependencyError)) throw error;
 		console.error(`prewarm: ${error.message}`);
 		process.exit(1);
 		return;
 	}
-	for (const { name, version } of closure) {
-		execFileSync("npm", ["cache", "add", `${name}@${version}`], { stdio: "inherit" });
-	}
-	console.log(`Prewarmed offline consumer cache: ${closure.map(({ name, version }) => `${name}@${version}`).join(", ")}`);
 }
 
 // Importing this module must not reach the network, so the walk only runs when

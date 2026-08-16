@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumerDependencyClosure, lockPackages, readConsumerClosure } from "../../scripts/prewarm-offline-consumer-cache.ts";
+import {
+	consumerDependencyClosure,
+	lockPackages,
+	readConsumerClosure,
+	UnpinnedDependencyError,
+} from "../../scripts/prewarm-offline-consumer-cache.ts";
 
-function lockOf(packages) {
+function lockOf(packages: Record<string, Record<string, unknown>>) {
 	return { packages };
 }
 
@@ -93,11 +98,22 @@ test("peer and dev edges are followed, and the owned scope never is", () => {
 test("an unpinned dependency fails loudly and names every missing package", () => {
 	assert.throws(
 		() => consumerDependencyClosure(lockPackages(lockOf({})), [{ dependencies: { ghost: "^1.0.0", other: "^2.0.0" } }]),
-		(error) => {
-			assert.equal(error.code, "unpinned_dependency");
+		(error: unknown) => {
+			assert.ok(error instanceof UnpinnedDependencyError);
 			assert.deepEqual(error.missing, ["ghost", "other"]);
 			return true;
 		},
+	);
+});
+
+test("malformed lock and manifest boundaries fail before traversal", () => {
+	assert.throws(
+		() => lockPackages({ packages: { "node_modules/broken": { dependencies: {} } } }),
+		(error: unknown) => error instanceof TypeError && error.message.includes("must contain a version"),
+	);
+	assert.throws(
+		() => consumerDependencyClosure(lockPackages(lockOf({})), [{ dependencies: ["not-a-map"] }]),
+		(error: unknown) => error instanceof TypeError && error.message.includes("must be an object of string ranges"),
 	);
 });
 
