@@ -5,6 +5,25 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+type JsonRecord = Record<string, unknown>;
+type HandoffErrorCode =
+	| "invalid_handoff_lock"
+	| "handoff_lock_unavailable"
+	| "handoff_unavailable"
+	| "handoff_digest_mismatch"
+	| "invalid_handoff"
+	| "handoff_source_mismatch"
+	| "handoff_vector_mismatch";
+type PinnedHandoff = {
+	path: string;
+	sha256: string;
+	source_repository: string;
+	source_commit: string;
+	source_tree: string;
+	vector_ids: readonly string[];
+};
+type HandoffVector = { id: string; request_body: unknown; external_response: unknown };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";
 const HANDOFF_SCHEMA = "ceal.gateway_leased_consumer_call_conformance_handoff.v1";
@@ -30,9 +49,11 @@ const EXPECTED_REQUESTS = Object.freeze({
 	"caller-provenance-field": { ...BASE_REQUEST, runner_ref: "runner:spoofed" },
 	"credential-bearing-arguments": { ...BASE_REQUEST, arguments: { authorization: "spoofed" } },
 });
+type ExpectedRequestId = keyof typeof EXPECTED_REQUESTS;
 
 export class GatewayLeasedConsumerCallHandoffError extends Error {
-	constructor(code, message) {
+	readonly code: HandoffErrorCode;
+	constructor(code: HandoffErrorCode, message: string) {
 		super(message);
 		this.name = "GatewayLeasedConsumerCallHandoffError";
 		this.code = code;
@@ -40,7 +61,7 @@ export class GatewayLeasedConsumerCallHandoffError extends Error {
 }
 
 /** Verifies the exact Gateway-owned, non-serving leased-call transport oracle. */
-export function verifyGatewayLeasedConsumerCallHandoff({ repoRoot = ROOT } = {}) {
+export function verifyGatewayLeasedConsumerCallHandoff({ repoRoot = ROOT }: { repoRoot?: string } = {}) {
 	const root = path.resolve(repoRoot);
 	const lock = parseJson(readRepositoryFile(root, LOCK_PATH), "invalid_handoff_lock");
 	const pinned = validateLock(lock);
@@ -67,7 +88,7 @@ export function verifyGatewayLeasedConsumerCallHandoff({ repoRoot = ROOT } = {})
 	});
 }
 
-function validateLock(value) {
+function validateLock(value: unknown): PinnedHandoff {
 	if (!record(value) || !exactKeys(value, ["schema_version", "handoff"]) || value.schema_version !== LOCK_SCHEMA || !record(value.handoff))
 		fail("invalid_handoff_lock", "Gateway leased-consumer handoff lock is invalid.");
 	const handoff = value.handoff;
@@ -82,10 +103,17 @@ function validateLock(value) {
 	) {
 		fail("invalid_handoff_lock", "Gateway leased-consumer handoff lock is invalid.");
 	}
-	return Object.freeze({ ...handoff, vector_ids: Object.freeze([...handoff.vector_ids]) });
+	return Object.freeze({
+		path: handoff.path,
+		sha256: handoff.sha256,
+		source_repository: handoff.source_repository,
+		source_commit: handoff.source_commit,
+		source_tree: handoff.source_tree,
+		vector_ids: Object.freeze([...handoff.vector_ids]),
+	});
 }
 
-function validateHandoff(value, pinned) {
+function validateHandoff(value: unknown, pinned: PinnedHandoff): void {
 	if (
 		!record(value) ||
 		!exactKeys(value, ["schema_version", "proof_level", "writes_external", "source", "transport", "vectors", "invariants", "non_claims"]) ||
@@ -107,7 +135,7 @@ function validateHandoff(value, pinned) {
 	}
 }
 
-function validateSource(value, pinned) {
+function validateSource(value: unknown, pinned: PinnedHandoff): void {
 	if (
 		!record(value) ||
 		!exactKeys(value, ["repository", "commit", "tree", "inputs"]) ||
@@ -135,7 +163,7 @@ function validateSource(value, pinned) {
 	}
 }
 
-function validateTransport(value) {
+function validateTransport(value: unknown): void {
 	if (
 		!record(value) ||
 		!exactKeys(value, ["method", "service_path", "required_headers"]) ||
@@ -150,12 +178,8 @@ function validateTransport(value) {
 	}
 }
 
-function validateVectors(value, expectedIds) {
-	if (
-		!Array.isArray(value) ||
-		value.length !== 1 + NEGATIVE_VECTORS.length ||
-		!value.every((item) => record(item) && exactKeys(item, ["id", "request_body", "external_response"]) && typeof item.id === "string")
-	) {
+function validateVectors(value: unknown, expectedIds: readonly string[]): void {
+	if (!Array.isArray(value) || value.length !== 1 + NEGATIVE_VECTORS.length || !value.every(isHandoffVector)) {
 		fail("invalid_handoff", "Gateway leased-consumer handoff vectors are invalid.");
 	}
 	const ids = value.map((item) => item.id).sort();
@@ -165,6 +189,7 @@ function validateVectors(value, expectedIds) {
 	)
 		fail("handoff_vector_mismatch", "Gateway leased-consumer handoff vector inventory does not match the lock.");
 	for (const vector of value) {
+		if (!isExpectedRequestId(vector.id)) fail("invalid_handoff", "Gateway leased-consumer handoff vector is invalid.");
 		if (
 			!sameJson(vector.request_body, EXPECTED_REQUESTS[vector.id]) ||
 			!validResponse(
@@ -178,7 +203,15 @@ function validateVectors(value, expectedIds) {
 	}
 }
 
-function validResponse(value, status, errorCode) {
+function isHandoffVector(value: unknown): value is HandoffVector {
+	return record(value) && exactKeys(value, ["id", "request_body", "external_response"]) && typeof value.id === "string";
+}
+
+function isExpectedRequestId(value: string): value is ExpectedRequestId {
+	return Object.hasOwn(EXPECTED_REQUESTS, value);
+}
+
+function validResponse(value: unknown, status: number, errorCode: string): boolean {
 	return (
 		record(value) &&
 		exactKeys(value, ["status", "body"]) &&
@@ -189,11 +222,11 @@ function validResponse(value, status, errorCode) {
 		value.body.error_code === errorCode
 	);
 }
-function readRepositoryFile(root, relativePath) {
+function readRepositoryFile(root: string, relativePath: string): Buffer {
 	const target = path.resolve(root, relativePath);
 	if (!target.startsWith(`${root}${path.sep}`)) fail("invalid_handoff_lock", "Gateway leased-consumer handoff path is invalid.");
 	const errorCode = relativePath === LOCK_PATH ? "handoff_lock_unavailable" : "handoff_unavailable";
-	let descriptor;
+	let descriptor: number | undefined;
 	try {
 		assertNoSymlinkPathComponents(root, target, errorCode);
 		const initial = lstatSync(target);
@@ -206,8 +239,9 @@ function readRepositoryFile(root, relativePath) {
 	} finally {
 		if (descriptor !== undefined) closeSync(descriptor);
 	}
+	fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
 }
-function assertNoSymlinkPathComponents(root, target, errorCode) {
+function assertNoSymlinkPathComponents(root: string, target: string, errorCode: HandoffErrorCode): void {
 	let current = root;
 	if (lstatSync(current).isSymbolicLink()) fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
 	for (const segment of path.relative(root, target).split(path.sep)) {
@@ -215,36 +249,36 @@ function assertNoSymlinkPathComponents(root, target, errorCode) {
 		if (lstatSync(current).isSymbolicLink()) fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
 	}
 }
-function parseJson(bytes, code) {
+function parseJson(bytes: Buffer, code: HandoffErrorCode): unknown {
 	try {
 		return JSON.parse(bytes.toString("utf8"));
 	} catch {
 		fail(code, "Gateway leased-consumer handoff JSON is invalid.");
 	}
 }
-function fail(code, message) {
+function fail(code: HandoffErrorCode, message: string): never {
 	throw new GatewayLeasedConsumerCallHandoffError(code, message);
 }
-function record(value) {
+function record(value: unknown): value is JsonRecord {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-function exactKeys(value, keys) {
+function exactKeys(value: JsonRecord, keys: readonly string[]): boolean {
 	const actual = Object.keys(value).sort();
 	return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
 }
-function sha256(bytes) {
+function sha256(bytes: Buffer): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function sha256Text(value) {
+function sha256Text(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
-function gitIdentity(value) {
+function gitIdentity(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
 }
-function sameJson(left, right) {
+function sameJson(left: unknown, right: unknown): boolean {
 	return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 }
-function canonicalJson(value) {
+function canonicalJson(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(canonicalJson);
 	if (!record(value)) return value;
 	return Object.fromEntries(
@@ -253,10 +287,10 @@ function canonicalJson(value) {
 			.map((key) => [key, canonicalJson(value[key])]),
 	);
 }
-function safeSourcePath(value) {
+function safeSourcePath(value: unknown): value is string {
 	return typeof value === "string" && value.startsWith("scripts/agent-runtime/") && !value.includes("..") && !value.includes("\0");
 }
-function orderedUniqueStrings(value) {
+function orderedUniqueStrings(value: unknown): value is string[] {
 	return (
 		Array.isArray(value) &&
 		value.length === 4 &&
@@ -265,7 +299,7 @@ function orderedUniqueStrings(value) {
 		new Set(value).size === value.length
 	);
 }
-function uniqueStrings(value) {
+function uniqueStrings(value: unknown): value is string[] {
 	return (
 		Array.isArray(value) &&
 		value.length > 0 &&
