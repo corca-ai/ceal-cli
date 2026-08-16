@@ -4,8 +4,8 @@
 	"writes_external": false,
 	"source": {
 		"repository": "corca-ai/ceal",
-					"commit": "070485c3e05c5213bd5fbf72c8dfba55d16ee858",
-					"tree": "49d65242f2d46958a673afb173fb21068b3d465d",
+					"commit": "1f57ed7e9fddcb13d8ddaa03c6fc6703f0170c37",
+					"tree": "82ec4cde99186c6e1923f7b7126d6b9bad448fb2",
 		"protocol_tree": "42f9c7920b2c72fceb5347d9279537fca7e057ad",
 		"inputs": [
 			{
