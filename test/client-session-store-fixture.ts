@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export function writeClientSessionStoreFixture(home, { gatewayEndpoint, label }) {
+export function writeClientSessionStoreFixture(home: string, { gatewayEndpoint, label }: { gatewayEndpoint: string; label: string }) {
 	const directory = path.join(home, ".ceal");
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	chmodSync(directory, 0o700);

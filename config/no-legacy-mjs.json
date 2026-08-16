@@ -75,7 +75,6 @@
 		"scripts/worker-release-inputs.mjs",
 		"test/artifact-workspace.mjs",
 		"test/client-artifact.test.mjs",
-		"test/client-session-store-fixture.mjs",
 		"test/contract/gateway-handoff-bootstrap.test.mjs",
 		"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
 		"test/contract/leased-consumer-control-conformance-projection.test.mjs",

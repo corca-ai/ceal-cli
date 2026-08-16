@@ -11,7 +11,7 @@ import {
 	runCli,
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.mjs";
-import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
+import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
 import {
 	assertReleaseManifestProvenance,
 	execReleaseTestProcess,
