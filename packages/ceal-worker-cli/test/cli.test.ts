@@ -27,6 +27,7 @@ import {
 import { CealSessionStoreError } from "../dist/profile-store.js";
 import { createCealSessionCapability } from "../dist/session-capability.js";
 import { CEAL_TIMING_STAGES, createCealTimingRecorder } from "../dist/timing.js";
+import { deferredVoid } from "./deferred-test-support.ts";
 
 // The version the worker introduces itself to the Gateway with is derived from
 // the manifest, so asserting a literal here would reintroduce the hand-bumped
@@ -2695,7 +2696,7 @@ function announcementPolicyFixtureCase(name) {
 // bytes rather than a locally invented policy shape.
 async function renderFixtureCapabilities(caseName, args) {
 	const capabilities = announcementPolicyFixtureCase(caseName).response.value.capabilities;
-	let payload;
+	let payload: Awaited<ReturnType<typeof yamlRun>>;
 	await withGateway(
 		async ({ endpoint }) => {
 			payload = await yamlRun(args, 0, {
@@ -3593,14 +3594,8 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
 	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
 	const refreshRequests = [];
-	let firstRefreshObserved;
-	const firstRefreshStarted = new Promise((resolve) => {
-		firstRefreshObserved = resolve;
-	});
-	let releaseFirstRefresh;
-	const firstRefreshRelease = new Promise((resolve) => {
-		releaseFirstRefresh = resolve;
-	});
+	const firstRefreshObserved = deferredVoid();
+	const firstRefreshRelease = deferredVoid();
 	let currentRefresh = firstRefresh;
 	const server = createServer(async (request, response) => {
 		const chunks = [];
@@ -3613,8 +3608,8 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 					JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }),
 				);
 			if (refreshRequests.length === 1) {
-				firstRefreshObserved();
-				await firstRefreshRelease;
+				firstRefreshObserved.resolve();
+				await firstRefreshRelease.promise;
 			}
 			currentRefresh = secondRefresh;
 			response.writeHead(200, { "content-type": "application/json" });
@@ -3649,16 +3644,14 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 			{ mode: 0o600 },
 		);
 		const firstRun = runBin(["session", "refresh"], "", { HOME: home });
-		await waitForTestSignal(firstRefreshStarted, "the first ceal process did not reach the Gateway refresh route");
-		let secondReachedLock;
-		const secondLockWaitStarted = new Promise((resolve) => {
-			secondReachedLock = resolve;
-		});
+		await waitForTestSignal(firstRefreshObserved.promise, "the first ceal process did not reach the Gateway refresh route");
+		const secondReachedLock = deferredVoid();
+		const secondLockWaitStarted = secondReachedLock.promise;
 		const secondRun = runBin(["--timing", "session", "refresh"], "", { HOME: home }, (output) => {
-			if (output.includes('"stage":"local_store_lock_wait"')) secondReachedLock();
+			if (output.includes('"stage":"local_store_lock_wait"')) secondReachedLock.resolve();
 		});
 		await waitForTestSignal(secondLockWaitStarted, "the second ceal process did not reach the session lock");
-		releaseFirstRefresh();
+		firstRefreshRelease.resolve();
 		const [first, second] = await Promise.all([firstRun, secondRun]);
 		assert.equal(first.code, 0, first.stderr);
 		assert.equal(second.code, 0, second.stderr);
@@ -3667,7 +3660,7 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		assert.deepEqual(refreshRequests, [firstRefresh]);
 		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
 	} finally {
-		releaseFirstRefresh();
+		firstRefreshRelease.resolve();
 		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -4816,7 +4809,7 @@ function rotatedClientSession(refreshToken) {
 }
 
 async function waitForTestSignal(signal, message) {
-	let timer;
+	let timer: NodeJS.Timeout | undefined;
 	try {
 		await Promise.race([
 			signal,

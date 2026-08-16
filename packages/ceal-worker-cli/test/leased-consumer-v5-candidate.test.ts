@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import * as protocol from "@corca-ai/ceal-protocol";
 import { openLeasedConsumerControlSession, runLeasedConsumerControlTransport } from "../dist/leased-consumer-control-session.js";
+import { deferredVoid } from "./deferred-test-support.ts";
 
 const fixturePath = process.env.CEAL_GATEWAY_V5_CONTROL_FIXTURE;
 const candidateAvailable =
@@ -30,16 +31,13 @@ test("Gateway-packed v5 drives FD5 forwarding and all six fixed worker routes", 
 			};
 		},
 	});
-	let closeNotifications;
-	const notificationsClosed = new Promise((resolve) => {
-		closeNotifications = resolve;
-	});
+	const notificationsClosed = deferredVoid();
 	async function* agentInput() {
 		yield encoder.encode(`${fixture.operations.map((entry) => JSON.stringify(entry.request)).join("\n")}\n`);
 	}
 	async function* notificationInput() {
 		yield encoder.encode(`${JSON.stringify(fixture.notification_transport.fixture)}\n`);
-		await notificationsClosed;
+		await notificationsClosed.promise;
 	}
 	const output = [];
 	assert.equal(
@@ -47,7 +45,7 @@ test("Gateway-packed v5 drives FD5 forwarding and all six fixed worker routes", 
 			agentInput(),
 			control,
 			(frame) => output.push(JSON.parse(decoder.decode(frame))),
-			{ stream: notificationInput(), close: async () => closeNotifications() },
+			{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 			async () => {},
 		),
 		true,
@@ -84,12 +82,9 @@ test("Gateway-packed v5 decoder rejects malformed notification authority fields 
 			yield new TextEncoder().encode(`${JSON.stringify(invalid)}\n`);
 		}
 		const output = [];
-		let closeAgent;
-		const agentClosed = new Promise((resolve) => {
-			closeAgent = resolve;
-		});
+		const agentClosed = deferredVoid();
 		async function* agentInput() {
-			await agentClosed;
+			await agentClosed.promise;
 			yield new Uint8Array();
 		}
 		assert.equal(
@@ -98,7 +93,7 @@ test("Gateway-packed v5 decoder rejects malformed notification authority fields 
 				{ dispatch: async () => assert.fail("no Agent frame expected") },
 				(frame) => output.push(frame),
 				{ stream: input(), close: async () => {} },
-				async () => closeAgent(),
+				async () => agentClosed.resolve(),
 			),
 			false,
 		);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -489,7 +489,7 @@ test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", a
 function runCarrierProcess(binary, input) {
 	return new Promise((resolve, reject) => {
 		const devNull = openSync("/dev/null", "r");
-		let child;
+		let child: ChildProcessWithoutNullStreams;
 		try {
 			child = spawn(process.execPath, [binary, LEASED_CONSUMER_CARRIER_ARGV], {
 				stdio: ["pipe", "pipe", "pipe", devNull, devNull],

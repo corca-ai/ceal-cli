@@ -15,6 +15,7 @@ import {
 	runLeasedConsumerControlTransport,
 	writeLeasedConsumerAgentFrame,
 } from "../dist/leased-consumer-control-session.js";
+import { deferred, deferredVoid } from "./deferred-test-support.ts";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const EMBEDDED_CONTRACT = path.join("generated", "leased-consumer-control-session-contract.js");
@@ -254,17 +255,14 @@ test("candidate notifications are protocol-decoded and forwarded as bounded cano
 
 test("notification input stops reading until the prior Agent stdout frame drains", async () => {
 	let decoded = 0;
-	let releaseFirst;
-	const firstDrained = new Promise((resolve) => {
-		releaseFirst = resolve;
-	});
+	const firstDrained = deferredVoid();
 	async function* input() {
 		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n${JSON.stringify(notificationFixture())}\n`);
 	}
 	const running = runNotificationStreamForTest(
 		input(),
 		async () => {
-			if (decoded === 1) await firstDrained;
+			if (decoded === 1) await firstDrained.promise;
 		},
 		{
 			decodeNotification: (value) => {
@@ -275,7 +273,7 @@ test("notification input stops reading until the prior Agent stdout frame drains
 	);
 	await new Promise((resolve) => setImmediate(resolve));
 	assert.equal(decoded, 1);
-	releaseFirst();
+	firstDrained.resolve();
 	assert.equal(await running, true);
 	assert.equal(decoded, 2);
 });
@@ -302,27 +300,21 @@ test("malformed, duplicate-key, oversized, and unterminated notification frames 
 });
 
 test("FD5 notification forwarding does not consume or wait for the pending serial Agent response", async () => {
-	let resolveDispatch;
-	const pendingDispatch = new Promise((resolve) => {
-		resolveDispatch = resolve;
-	});
-	let closeNotifications;
-	const notificationsClosed = new Promise((resolve) => {
-		closeNotifications = resolve;
-	});
+	const pendingDispatch = deferred<Uint8Array>();
+	const notificationsClosed = deferredVoid();
 	const output = [];
 	async function* agentInput() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
 	async function* notificationInput() {
 		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
-		await notificationsClosed;
+		await notificationsClosed.promise;
 	}
 	const running = runLeasedConsumerControlTransport(
 		agentInput(),
-		{ dispatch: () => pendingDispatch },
+		{ dispatch: () => pendingDispatch.promise },
 		(frame) => output.push(JSON.parse(new TextDecoder().decode(frame))),
-		{ stream: notificationInput(), close: async () => closeNotifications() },
+		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
 		{ decodeNotification: (value) => value },
 	);
@@ -331,7 +323,7 @@ test("FD5 notification forwarding does not consume or wait for the pending seria
 		output.map((frame) => frame.schema_version),
 		["ceal.leased_consumer_capability_notification.v5"],
 	);
-	resolveDispatch(encoder.encode(`${JSON.stringify(responseFor("acquire"))}\n`));
+	pendingDispatch.resolve(encoder.encode(`${JSON.stringify(responseFor("acquire"))}\n`));
 	assert.equal(await running, true);
 	assert.deepEqual(
 		output.map((frame) => frame.schema_version),
@@ -340,20 +332,14 @@ test("FD5 notification forwarding does not consume or wait for the pending seria
 });
 
 test("the shared emitter stays failed after its first output failure", async () => {
-	let rejectFirstWrite;
-	const firstWrite = new Promise((_resolve, reject) => {
-		rejectFirstWrite = reject;
-	});
-	let closeNotifications;
-	const notificationsClosed = new Promise((resolve) => {
-		closeNotifications = resolve;
-	});
+	const firstWrite = deferredVoid();
+	const notificationsClosed = deferredVoid();
 	async function* agentInput() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
 	async function* notificationInput() {
 		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
-		await notificationsClosed;
+		await notificationsClosed.promise;
 	}
 	let writes = 0;
 	const running = runLeasedConsumerControlTransport(
@@ -361,25 +347,22 @@ test("the shared emitter stays failed after its first output failure", async () 
 		{ dispatch: async () => encoder.encode(`${JSON.stringify(responseFor("acquire"))}\n`) },
 		() => {
 			writes += 1;
-			return firstWrite;
+			return firstWrite.promise;
 		},
-		{ stream: notificationInput(), close: async () => closeNotifications() },
+		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
 		{ decodeNotification: (value) => value },
 	);
 	await new Promise((resolve) => setImmediate(resolve));
-	rejectFirstWrite(new Error("stdout_failed"));
+	firstWrite.reject(new Error("stdout_failed"));
 	assert.equal(await running, false);
 	assert.equal(writes, 1);
 });
 
 test("FD5 ending before Agent stdin closes the pair and cannot be reported clean", async () => {
-	let closeAgent;
-	const agentClosed = new Promise((resolve) => {
-		closeAgent = resolve;
-	});
+	const agentClosed = deferredVoid();
 	async function* agentInput() {
-		await agentClosed;
+		await agentClosed.promise;
 		yield new Uint8Array();
 	}
 	async function* notificationInput() {
@@ -391,7 +374,7 @@ test("FD5 ending before Agent stdin closes the pair and cannot be reported clean
 			{ dispatch: async () => assert.fail("no Agent frame expected") },
 			() => {},
 			{ stream: notificationInput(), close: async () => {} },
-			async () => closeAgent(),
+			async () => agentClosed.resolve(),
 			{ decodeNotification: (value) => value },
 		),
 		false,
@@ -404,13 +387,10 @@ test("FD5 ending aborts an outstanding Gateway request before its operation dead
 		closeProtectedSession: async () => {},
 		requestUnixSocket: () => new Promise(() => {}),
 	});
-	let closeAgent;
-	const agentClosed = new Promise((resolve) => {
-		closeAgent = resolve;
-	});
+	const agentClosed = deferredVoid();
 	async function* agentInput() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
-		await agentClosed;
+		await agentClosed.promise;
 	}
 	async function* notificationInput() {
 		yield new Uint8Array();
@@ -421,7 +401,7 @@ test("FD5 ending aborts an outstanding Gateway request before its operation dead
 		carrier,
 		(frame) => output.push(frame),
 		{ stream: notificationInput(), close: async () => {} },
-		async () => closeAgent(),
+		async () => agentClosed.resolve(),
 		{ decodeNotification: (value) => value },
 	);
 	const result = await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("deadline_not_cancelled"), 100))]);
@@ -435,28 +415,22 @@ test("FD5 ending aborts an outstanding Gateway request before its operation dead
 // fakes agreeing with each other and would stay green with the writer's
 // rejection changed underneath it.
 test("Agent shutdown cleanly aborts a notification write stalled on stdout backpressure", async () => {
-	let markWriteStarted;
-	const writeStarted = new Promise((resolve) => {
-		markWriteStarted = resolve;
-	});
-	let closeNotifications;
-	const notificationsClosed = new Promise((resolve) => {
-		closeNotifications = resolve;
-	});
+	const writeStarted = deferredVoid();
+	const notificationsClosed = deferredVoid();
 	async function* agentInput() {
-		await writeStarted;
+		await writeStarted.promise;
 		yield new Uint8Array();
 	}
 	async function* notificationInput() {
 		yield encoder.encode(`${JSON.stringify(notificationFixture())}\n`);
-		await notificationsClosed;
+		await notificationsClosed.promise;
 	}
 	let destroyed = 0;
 	// Backpressure with no drain: `write` never invokes its callback, so the only
 	// way this frame settles is the abort path.
 	const stalledStdout = {
 		write: () => {
-			markWriteStarted();
+			writeStarted.resolve();
 			return false;
 		},
 		destroy: () => {
@@ -467,7 +441,7 @@ test("Agent shutdown cleanly aborts a notification write stalled on stdout backp
 		agentInput(),
 		{ dispatch: async () => assert.fail("no Agent frame expected") },
 		(frame, signal) => writeLeasedConsumerAgentFrame(stalledStdout, frame, signal),
-		{ stream: notificationInput(), close: async () => closeNotifications() },
+		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
 		{ decodeNotification: (value) => value },
 	);
@@ -525,17 +499,14 @@ test("the real inherited notification socket distinguishes owned shutdown from F
 });
 
 test("owned shutdown does not accept the premature-close message with another error code", async () => {
-	let releaseNotification;
-	const notificationReleased = new Promise((resolve) => {
-		releaseNotification = resolve;
-	});
+	const notificationReleased = deferredVoid();
 	async function* agentInput() {}
 	const notificationInput = {
 		[Symbol.asyncIterator]() {
 			return this;
 		},
 		async next() {
-			await notificationReleased;
+			await notificationReleased.promise;
 			// Human text is not the classifier. Broadening the production helper to
 			// accept every Error turns this test RED with `true !== false`; the exact
 			// Node error code is the guard this oracle falsifies.
@@ -549,7 +520,7 @@ test("owned shutdown does not accept the premature-close message with another er
 			agentInput(),
 			{ dispatch: async () => assert.fail("no Agent frame expected") },
 			() => assert.fail("no notification frame expected"),
-			{ stream: notificationInput, close: async () => releaseNotification() },
+			{ stream: notificationInput, close: async () => notificationReleased.resolve() },
 			async () => {},
 			{ decodeNotification: (value) => value },
 		),
@@ -558,7 +529,7 @@ test("owned shutdown does not accept the premature-close message with another er
 });
 
 test("the shipped Agent writer destroys a backpressured stdout stream and rejects exactly once on abort", async () => {
-	let callback;
+	let callback: ((error?: Error) => void) | undefined;
 	let destroys = 0;
 	const stream = {
 		write: (_frame, next) => {
@@ -600,7 +571,7 @@ test("the shipped Agent writer destroys a backpressured stdout stream and reject
 // teardown's error would turn every clean shutdown into exit 3 — and the stub
 // with the empty `destroy` above cannot tell the two orderings apart.
 test("the abort settles before teardown, so destroy's own error cannot become the rejection", async () => {
-	let callback;
+	let callback: ((error?: Error) => void) | undefined;
 	const stream = {
 		write: (_frame, next) => {
 			callback = next;
@@ -1018,41 +989,32 @@ function runControlSessionForTest(stream, control, emit) {
 }
 
 async function runNotificationStreamForTest(stream, emit, runtime) {
-	let finishAgent;
-	let closeNotifications;
-	let markSourceFinished;
-	const agentFinished = new Promise((resolve) => {
-		finishAgent = resolve;
-	});
-	const notificationsClosed = new Promise((resolve) => {
-		closeNotifications = resolve;
-	});
-	const sourceFinished = new Promise((resolve) => {
-		markSourceFinished = resolve;
-	});
+	const agentFinished = deferredVoid();
+	const notificationsClosed = deferredVoid();
+	const sourceFinished = deferredVoid();
 	async function* agentInput() {
-		await agentFinished;
+		await agentFinished.promise;
 		yield new Uint8Array();
 	}
 	async function* heldNotificationInput() {
 		try {
 			for await (const chunk of stream) yield chunk;
-			markSourceFinished();
-			await notificationsClosed;
+			sourceFinished.resolve();
+			await notificationsClosed.promise;
 		} finally {
-			markSourceFinished();
+			sourceFinished.resolve();
 		}
 	}
 	const running = runLeasedConsumerControlTransport(
 		agentInput(),
 		{ dispatch: async () => assert.fail("no Agent control frame expected") },
 		emit,
-		{ stream: heldNotificationInput(), close: async () => closeNotifications() },
-		async () => finishAgent(),
+		{ stream: heldNotificationInput(), close: async () => notificationsClosed.resolve() },
+		async () => agentFinished.resolve(),
 		runtime,
 	);
-	await Promise.race([running, sourceFinished]);
-	finishAgent();
+	await Promise.race([running, sourceFinished.promise]);
+	agentFinished.resolve();
 	return running;
 }
 

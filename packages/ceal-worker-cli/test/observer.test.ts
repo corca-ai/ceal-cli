@@ -15,6 +15,7 @@ import { createCealSessionCapability } from "../dist/session-capability.js";
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
 const TEST_SPOOL_IDENTITY = "a".repeat(64);
+type ObserverHandle = { url: string; close: () => Promise<void> };
 
 function createCealReceiptSpoolStore(home, now = Date.now) {
 	const store = createRawReceiptSpoolStore(home, now);
@@ -87,7 +88,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	});
 
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	const handleReady = new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			session: createCealSessionCapability({ store: sessionStore }),
@@ -355,7 +356,7 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	const spoolStore = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
 
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: () => spoolStore.load(),
@@ -466,7 +467,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 	);
 
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			onObserverListening: (value) => {
@@ -508,7 +509,7 @@ test("an empty retention window is not reported as every receipt having been los
 	// client tried to record was lost" there would swap the false claim this
 	// counter removed for an equally false one pointing the other way.
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: async () => ({
@@ -569,7 +570,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 	await spoolStore.recordDrop();
 
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: () => spoolStore.load(),
@@ -627,7 +628,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 
 test("ceal observe reports absent stores and rejects invalid ports without serving", async () => {
 	const io = collectingIo();
-	let handle;
+	let handle: ObserverHandle;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			onObserverListening: (value) => {
