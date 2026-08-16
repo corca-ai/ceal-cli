@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import test from "node:test";
+import type { CealGatewayRequestInput } from "@corca-ai/ceal-protocol";
 import {
 	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
 	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
@@ -16,12 +16,17 @@ import {
 	createCealClient,
 	createCealHttpTransport,
 } from "../src/index.ts";
+import { close, listen, parseJsonRecord, readBody, serverPort } from "./client-response-test-support.ts";
 
 test("HTTP transport gives bounded Gateway capability calls a thirty-second default budget", () => {
 	assert.equal(CEAL_DEFAULT_HTTP_TIMEOUT_MS, 30_000);
 });
 
-const request = {
+type HandshakeInput = Extract<CealGatewayRequestInput, { operation: "handshake" }>;
+type DiscoverInput = Extract<CealGatewayRequestInput, { operation: "discover" }>;
+type CallInput = Extract<CealGatewayRequestInput, { operation: "call" }>;
+
+const request: HandshakeInput = {
 	request_id: "request:handshake:001",
 	operation: "handshake",
 	profile_ref: "profile:test",
@@ -29,27 +34,21 @@ const request = {
 };
 
 test("HTTP transport posts a strict request to a loopback Gateway and decodes its correlated response", async () => {
-	let observed;
-	const server = createServer((incoming, outgoing) => {
-		const chunks = [];
-		incoming.on("data", (chunk) => chunks.push(chunk));
-		incoming.on("end", () => {
-			observed = {
-				method: incoming.method,
-				authorization: incoming.headers.authorization,
-				body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
-			};
-			outgoing.writeHead(200, { "content-type": "application/json" });
-			outgoing.end(JSON.stringify(handshakeResponse(request)));
-		});
+	let observed: { method: string | undefined; authorization: string | undefined; body: ReturnType<typeof parseJsonRecord> } | undefined;
+	const server = createServer(async (incoming, outgoing) => {
+		observed = {
+			method: incoming.method,
+			authorization: typeof incoming.headers.authorization === "string" ? incoming.headers.authorization : undefined,
+			body: parseJsonRecord(await readBody(incoming)),
+		};
+		outgoing.writeHead(200, { "content-type": "application/json" });
+		outgoing.end(JSON.stringify(handshakeResponse(request)));
 	});
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	await listen(server);
 	try {
-		const address = server.address();
-		assert.equal(typeof address, "object");
 		const client = createCealClient(
 			createCealHttpTransport({
-				endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
+				endpoint: `http://127.0.0.1:${serverPort(server)}/gateway/client`,
 				accessToken: "gateway-issued-token",
 			}),
 		);
@@ -61,7 +60,7 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 			body: { ...request, protocol_version: "1.3.0" },
 		});
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await close(server);
 	}
 });
 
@@ -73,14 +72,16 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 	assert.equal(CEAL_GATEWAY_ROUTE_PROVENANCE_ACCEPT_HEADER, "x-ceal-route-provenance");
 	assert.equal(CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER, "x-ceal-audit-timing");
 
-	const observedHeaders = new Map();
+	const observedHeaders = new Map<string, Record<string, string>>();
 	const client = createCealClient(
 		createCealHttpTransport({
 			endpoint: "https://gateway.example.test/client",
 			accessToken: "gateway-issued-token",
 			fetchFn: async (_endpoint, init) => {
-				const body = JSON.parse(init.body);
-				observedHeaders.set(body.operation, init.headers);
+				if (!init?.body || typeof init.body !== "string") throw new Error("missing JSON request body");
+				const body = parseJsonRecord(init.body);
+				const headers = Object.fromEntries(new Headers(init.headers).entries());
+				observedHeaders.set(String(body.operation), headers);
 				if (body.operation === "readback") {
 					return globalThis.Response.json(
 						{
@@ -93,9 +94,11 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 						{ status: 401 },
 					);
 				}
-				if (body.operation === "call") return globalThis.Response.json(allowedCallResponse(body));
-				if (body.operation === "discover") return globalThis.Response.json(discoveryResponse(body));
-				return globalThis.Response.json(handshakeResponse(body));
+				const captured = requestFromBody(body);
+				if (captured.operation === "call") return globalThis.Response.json(allowedCallResponse(captured));
+				if (captured.operation === "discover") return globalThis.Response.json(discoveryResponse(captured));
+				if (captured.operation === "handshake") return globalThis.Response.json(handshakeResponse(captured));
+				throw new Error("unsupported captured request");
 			},
 		}),
 	);
@@ -127,15 +130,15 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 		body: { request_id: "request:prior:001" },
 	});
 	assert.equal(readback.ok, false);
-	const handshakeHeaders = observedHeaders.get("handshake");
-	const discoveryHeaders = observedHeaders.get("discover");
-	const callHeaders = observedHeaders.get("call");
-	const readbackHeaders = observedHeaders.get("readback");
+	const handshakeHeaders = requireHeaders(observedHeaders, "handshake");
+	const discoveryHeaders = requireHeaders(observedHeaders, "discover");
+	const callHeaders = requireHeaders(observedHeaders, "call");
+	const readbackHeaders = requireHeaders(observedHeaders, "readback");
 	assert.equal(handshakeHeaders["x-ceal-recovery"], "accept");
 	for (const headers of [handshakeHeaders, discoveryHeaders, callHeaders, readbackHeaders]) {
 		assert.equal(headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER], CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION);
 	}
-	for (const field of ["recovery", "rate_limit_policy", "profiles", "route_provenance"]) {
+	for (const field of ["recovery", "rate_limit_policy", "profiles", "route_provenance"] as const) {
 		assert.equal(handshakeHeaders[ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS[field].legacyAcceptHeader], "accept");
 	}
 	assert.equal(handshakeHeaders[CEAL_GATEWAY_PROFILES_ACCEPT_HEADER], "accept");
@@ -146,9 +149,12 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 });
 
 test("HTTP transport removes additive keys but still refuses authority keys and closed-enum drift", async () => {
-	const benign = handshakeResponse(request);
-	benign.gateway_hint = "later envelope guidance";
-	benign.value.presentation_hint = "later handshake guidance";
+	const baseHandshake = handshakeResponse(request);
+	const benign = {
+		...baseHandshake,
+		gateway_hint: "later envelope guidance",
+		value: { ...baseHandshake.value, presentation_hint: "later handshake guidance" },
+	};
 	const accepted = createCealHttpTransport({
 		endpoint: "https://gateway.example.test/client",
 		accessToken: "safe-token",
@@ -156,7 +162,7 @@ test("HTTP transport removes additive keys but still refuses authority keys and 
 	});
 	const decoded = await createCealClient(accepted).request(request);
 	assert.equal(Object.hasOwn(decoded, "gateway_hint"), false);
-	assert.equal(Object.hasOwn(decoded.value, "presentation_hint"), false);
+	if (decoded.ok) assert.equal(Object.hasOwn(decoded.value, "presentation_hint"), false);
 
 	const authority = { ...handshakeResponse(request), grant_revision: 9 };
 	const authorityTransport = createCealHttpTransport({
@@ -191,31 +197,24 @@ test("HTTP transport refuses redirects before the request body can reach another
 		outgoing.writeHead(500, { "content-type": "application/json" });
 		outgoing.end("{}");
 	});
-	await new Promise((resolve) => target.listen(0, "127.0.0.1", resolve));
-	const targetAddress = target.address();
-	assert.equal(typeof targetAddress, "object");
+	await listen(target);
 
 	const redirect = createServer((_incoming, outgoing) => {
-		outgoing.writeHead(307, { location: `http://127.0.0.1:${targetAddress.port}/redirect-target` });
+		outgoing.writeHead(307, { location: `http://127.0.0.1:${serverPort(target)}/redirect-target` });
 		outgoing.end();
 	});
-	await new Promise((resolve) => redirect.listen(0, "127.0.0.1", resolve));
+	await listen(redirect);
 	try {
-		const address = redirect.address();
-		assert.equal(typeof address, "object");
 		const client = createCealClient(
 			createCealHttpTransport({
-				endpoint: `http://127.0.0.1:${address.port}/gateway/client`,
+				endpoint: `http://127.0.0.1:${serverPort(redirect)}/gateway/client`,
 				accessToken: "gateway-issued-token",
 			}),
 		);
 		await assert.rejects(client.request(request), hasTransportCode("request_failed"));
 		assert.equal(redirectedRequestReached, false);
 	} finally {
-		await Promise.all([
-			new Promise((resolve, reject) => redirect.close((error) => (error ? reject(error) : resolve()))),
-			new Promise((resolve, reject) => target.close((error) => (error ? reject(error) : resolve()))),
-		]);
+		await Promise.all([close(redirect), close(target)]);
 	}
 });
 
@@ -291,13 +290,13 @@ test("HTTP transport tells a malformed content-length from an oversized one", as
 });
 
 test("HTTP transport keeps discovery, allowed call, and policy denial responses correlated to their operations", async () => {
-	const discoveryRequest = {
+	const discoveryRequest: DiscoverInput = {
 		request_id: "request:discover:001",
 		operation: "discover",
 		profile_ref: "profile:test",
 		body: {},
 	};
-	const callRequest = {
+	const callRequest: CallInput = {
 		request_id: "request:call:001",
 		operation: "call",
 		profile_ref: "profile:test",
@@ -319,7 +318,8 @@ test("HTTP transport keeps discovery, allowed call, and policy denial responses 
 			accessToken: "safe-token",
 			fetchFn: async () => globalThis.Response.json(item.response, { status: item.status }),
 		});
-		assert.deepEqual(await createCealClient(transport).request(item.request), item.response);
+		if (item.request.operation === "discover") assert.deepEqual(await createCealClient(transport).request(item.request), item.response);
+		else assert.deepEqual(await createCealClient(transport).request(item.request), item.response);
 	}
 
 	const mismatchedTransport = createCealHttpTransport({
@@ -359,7 +359,7 @@ test("HTTP transport rejects unsafe endpoints and invalid outbound requests befo
 		}),
 	);
 	await assert.rejects(
-		client.request({ request_id: "request:discover:001", operation: "discover", body: {} }),
+		client.request({ request_id: "request:discover:001", operation: "discover", profile_ref: "profile:test", body: { capability_id: "" } }),
 		hasTransportCode("invalid_request"),
 	);
 	assert.equal(fetched, false);
@@ -411,7 +411,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 			}),
 		);
 		await assert.rejects(client.request(request), (error) => {
-			assert.equal(error instanceof CealHttpTransportError, true);
+			if (!(error instanceof CealHttpTransportError)) return false;
 			assert.equal(error.code, item.code);
 			assert.doesNotMatch(error.message, new RegExp(token, "u"));
 			assert.doesNotMatch(error.message, /provider echoed/u);
@@ -453,7 +453,7 @@ test("HTTP transport preserves timeout classification when injected fetch reject
 			timeoutMs: 5,
 			fetchFn: async (_url, init) =>
 				new Promise((_resolve, reject) => {
-					init.signal.addEventListener("abort", () => reject(new Error("aborted fetch")), { once: true });
+					requireSignal(init).addEventListener("abort", () => reject(new Error("aborted fetch")), { once: true });
 				}),
 		}),
 	);
@@ -470,7 +470,7 @@ test("HTTP transport preserves timeout classification when response body rejects
 				new globalThis.Response(
 					new globalThis.ReadableStream({
 						start(stream) {
-							init.signal.addEventListener("abort", () => stream.error(new Error("aborted body")), { once: true });
+							requireSignal(init).addEventListener("abort", () => stream.error(new Error("aborted body")), { once: true });
 						},
 					}),
 					{ status: 200, headers: { "content-type": "application/json" } },
@@ -480,11 +480,22 @@ test("HTTP transport preserves timeout classification when response body rejects
 	await assert.rejects(client.request(request), hasTransportCode("request_timeout"));
 });
 
-function hasTransportCode(code) {
-	return (error) => error instanceof CealHttpTransportError && error.code === code;
+function hasTransportCode(code: string) {
+	return (error: unknown): boolean => error instanceof CealHttpTransportError && error.code === code;
 }
 
-function handshakeResponse(input) {
+function requireHeaders(headers: Map<string, Record<string, string>>, key: string): Record<string, string> {
+	const value = headers.get(key);
+	if (!value) throw new Error(`missing captured headers: ${key}`);
+	return value;
+}
+
+function requireSignal(init: RequestInit | undefined): AbortSignal {
+	if (!init?.signal) throw new Error("missing abort signal");
+	return init.signal;
+}
+
+function handshakeResponse(input: HandshakeInput) {
 	return successResponse(input, {
 		schema_version: "ceal.gateway_handshake.v1",
 		negotiated_protocol_version: "1.3.0",
@@ -501,7 +512,7 @@ function handshakeResponse(input) {
 	});
 }
 
-function discoveryResponse(input) {
+function discoveryResponse(input: DiscoverInput) {
 	const selected = input.body.capability_id === "message.search";
 	return successResponse(input, {
 		schema_version: "ceal.gateway_discovery.v2",
@@ -542,7 +553,7 @@ function discoveryResponse(input) {
 	});
 }
 
-function allowedCallResponse(input) {
+function allowedCallResponse(input: CallInput) {
 	return successResponse(input, {
 		schema_version: "ceal.gateway_call_result.v1",
 		capability_id: input.body.capability_id,
@@ -579,7 +590,7 @@ function allowedCallResponse(input) {
 	});
 }
 
-function successResponse(input, value) {
+function successResponse(input: CealGatewayRequestInput, value: Record<string, unknown>) {
 	return {
 		ok: true,
 		request_id: input.request_id,
@@ -610,7 +621,7 @@ function matureSearchCoverage() {
 	};
 }
 
-function policyDenialResponse(input) {
+function policyDenialResponse(input: CallInput) {
 	return {
 		ok: false,
 		request_id: input.request_id,
@@ -630,4 +641,24 @@ function policyDenialResponse(input) {
 			},
 		},
 	};
+}
+
+function requestFromBody(body: Record<string, unknown>): CealGatewayRequestInput {
+	if (typeof body.request_id !== "string" || typeof body.profile_ref !== "string") throw new Error("invalid captured request");
+	if (body.operation === "handshake")
+		return {
+			request_id: body.request_id,
+			operation: "handshake",
+			profile_ref: body.profile_ref,
+			body: { client: { name: "ceal", version: "test" } },
+		};
+	if (body.operation === "discover") return { request_id: body.request_id, operation: "discover", profile_ref: body.profile_ref, body: {} };
+	if (body.operation === "call")
+		return {
+			request_id: body.request_id,
+			operation: "call",
+			profile_ref: body.profile_ref,
+			body: { capability_id: "message.search", target_ref: "target:workspace", arguments: {}, purpose: "test" },
+		};
+	throw new Error("unsupported captured request");
 }

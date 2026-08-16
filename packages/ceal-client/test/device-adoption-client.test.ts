@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import test from "node:test";
-import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
+	type CealDeviceEnrollmentPollRequest,
+	type CealDeviceEnrollmentStartRequest,
+} from "@corca-ai/ceal-protocol";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
+import { close, json, listen, readBody, serverPort } from "./client-response-test-support.ts";
 
 // Driven against a real loopback socket rather than an injected fetch, because
 // the failures worth catching here are transport failures: a redirect, a wrong
@@ -16,7 +22,13 @@ const RECIPIENT_KEY = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A";
 const SIGNATURE = "a".repeat(86);
 
 test("start and poll reach their own routes and return decoded Protocol values", async () => {
-	const seen = [];
+	const seen: Array<{
+		url: string | undefined;
+		method: string | undefined;
+		contentType: string | undefined;
+		decodeGeneration: string | undefined;
+		body: string;
+	}> = [];
 	await withServer(
 		(req, res) => {
 			readBody(req).then((body) => {
@@ -24,10 +36,13 @@ test("start and poll reach their own routes and return decoded Protocol values",
 					url: req.url,
 					method: req.method,
 					contentType: req.headers["content-type"],
-					decodeGeneration: req.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
+					decodeGeneration:
+						typeof req.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER] === "string"
+							? req.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER]
+							: undefined,
 					body,
 				});
-				json(res, req.url.endsWith("/adopt/start") ? startResult() : { schema_version: POLL_SCHEMA, status: "pending", retry_after_ms: 1000 });
+				json(res, req.url?.endsWith("/adopt/start") ? startResult() : { schema_version: POLL_SCHEMA, status: "pending", retry_after_ms: 1000 });
 			});
 		},
 		async (endpoint) => {
@@ -36,7 +51,7 @@ test("start and poll reach their own routes and return decoded Protocol values",
 			assert.equal(started.status, "pending");
 			assert.equal(started.transaction_ref, "adoption:1");
 			const polled = await client.poll({
-				schema_version: POLL_SCHEMA,
+				schema_version: POLL_REQUEST_SCHEMA,
 				registration_ref: "registration:1",
 				nonce_ref: "nonce:1",
 				signature: SIGNATURE,
@@ -79,15 +94,15 @@ test("a redirect is refused rather than followed", async () => {
 
 test("a non-JSON body, a wrong content type, and an off-Protocol shape are all invalid responses", async () => {
 	for (const responder of [
-		(res) => {
+		(res: ServerResponse) => {
 			res.writeHead(200, { "content-type": "text/html" });
 			res.end("<html>ok</html>");
 		},
-		(res) => {
+		(res: ServerResponse) => {
 			res.writeHead(200, { "content-type": "application/json" });
 			res.end("not json");
 		},
-		(res) => {
+		(res: ServerResponse) => {
 			res.writeHead(200, { "content-type": "application/json" });
 			res.end(JSON.stringify({ schema_version: "ceal.device_enrollment_start_result.v1", status: "approved" }));
 		},
@@ -112,7 +127,7 @@ test("start preserves only the Gateway's exact typed availability failures", asy
 		[404, "adoption_not_available"],
 		[503, "gateway_unavailable"],
 		[429, "rate_limited"],
-	]) {
+	] as const) {
 		await withServer(
 			(req, res) => {
 				req.resume();
@@ -143,7 +158,7 @@ test("poll rejects start-only typed failures as invalid responses", async () => 
 		[404, "adoption_not_available"],
 		[503, "gateway_unavailable"],
 		[429, "rate_limited"],
-	]) {
+	] as const) {
 		await withServer(
 			(req, res) => {
 				req.resume();
@@ -153,7 +168,7 @@ test("poll rejects start-only typed failures as invalid responses", async () => 
 				assert.rejects(
 					() =>
 						createCealDeviceAdoptionClient({ endpoint }).poll({
-							schema_version: POLL_SCHEMA,
+							schema_version: POLL_REQUEST_SCHEMA,
 							registration_ref: "registration:1",
 							nonce_ref: "nonce:1",
 							signature: SIGNATURE,
@@ -224,25 +239,26 @@ test("unusable endpoints and malformed requests never leave the process", async 
 		(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
 	);
 	await assert.rejects(
-		() => client.poll({ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "" }),
+		() => client.poll({ schema_version: POLL_REQUEST_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "" }),
 		(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
 	);
 	for (const request of [
-		{ schema_version: POLL_SCHEMA, registration_ref: "", nonce_ref: "nonce:1", signature: SIGNATURE },
-		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "", signature: SIGNATURE },
-		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "x" },
-		{ schema_version: POLL_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: SIGNATURE, extra: "leak" },
+		{ schema_version: POLL_REQUEST_SCHEMA, registration_ref: "", nonce_ref: "nonce:1", signature: SIGNATURE },
+		{ schema_version: POLL_REQUEST_SCHEMA, registration_ref: "registration:1", nonce_ref: "", signature: SIGNATURE },
+		{ schema_version: POLL_REQUEST_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: "x" },
+		{ schema_version: POLL_REQUEST_SCHEMA, registration_ref: "registration:1", nonce_ref: "nonce:1", signature: SIGNATURE, extra: "leak" },
 	]) {
 		await assert.rejects(
-			() => client.poll(request),
+			() => client.poll(request as CealDeviceEnrollmentPollRequest),
 			(error) => error instanceof CealDeviceAdoptionClientError && error.code === "invalid_configuration",
 		);
 	}
 });
 
 const POLL_SCHEMA = "ceal.device_enrollment_poll_result.v1";
+const POLL_REQUEST_SCHEMA = "ceal.device_enrollment_poll.v1";
 
-function startRequest() {
+function startRequest(): CealDeviceEnrollmentStartRequest {
 	return {
 		schema_version: "ceal.device_enrollment_start.v1",
 		email: "employee@example.test",
@@ -278,23 +294,15 @@ function startResult() {
 	};
 }
 
-function json(res, body, status = 200) {
-	res.writeHead(status, { "content-type": "application/json" });
-	res.end(JSON.stringify(body));
-}
-
-async function readBody(req) {
-	const chunks = [];
-	for await (const chunk of req) chunks.push(chunk);
-	return Buffer.concat(chunks).toString("utf8");
-}
-
-async function withServer(handler, action) {
+async function withServer(
+	handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>,
+	action: (endpoint: string) => Promise<void>,
+): Promise<void> {
 	const server = createServer(handler);
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	await listen(server);
 	try {
-		await action(`http://127.0.0.1:${server.address().port}/api/ceal/v1`);
+		await action(`http://127.0.0.1:${serverPort(server)}/api/ceal/v1`);
 	} finally {
-		await new Promise((resolve) => server.close(resolve));
+		await close(server);
 	}
 }

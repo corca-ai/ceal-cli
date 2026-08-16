@@ -1,13 +1,6 @@
 {
 	"schema_version": "ceal.no_legacy_mjs.v1",
 	"files": [
-		"packages/ceal-client/test/client-response-test-support.mjs",
-		"packages/ceal-client/test/client.test.mjs",
-		"packages/ceal-client/test/device-adoption-client.test.mjs",
-		"packages/ceal-client/test/enrollment-client.test.mjs",
-		"packages/ceal-client/test/http-transport.test.mjs",
-		"packages/ceal-client/test/personal-client-session-client.test.mjs",
-		"packages/ceal-client/test/request-bounds.test.mjs",
 		"packages/ceal-protocol/test/conformance.test.mjs",
 		"packages/ceal-protocol/test/device-enrollment.test.mjs",
 		"packages/ceal-protocol/test/enrollment.test.mjs",

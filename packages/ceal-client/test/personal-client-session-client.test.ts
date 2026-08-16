@@ -1,30 +1,36 @@
 import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../src/index.ts";
+import type { JsonRecord } from "./client-response-test-support.ts";
 import {
 	abortingFetch,
 	brokenFetch,
+	close,
+	listen,
 	mustNotFetch,
 	oversizedStreamFetch,
+	parseJsonRecord,
+	readBody,
 	responseFetch,
+	serverPort,
 	untrustedResponseCases,
-} from "./client-response-test-support.mjs";
+} from "./client-response-test-support.ts";
 
 const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
 
 test("personal-client session client rotates and revokes only through derived Gateway routes", async () => {
-	const requests = [];
+	const requests: Array<{ url: string | undefined; decodeGeneration: string | undefined; body: JsonRecord }> = [];
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
 		requests.push({
 			url: request.url,
-			decodeGeneration: request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
-			body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+			decodeGeneration:
+				typeof request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER] === "string"
+					? request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER]
+					: undefined,
+			body: parseJsonRecord(await readBody(request)),
 		});
 		response.writeHead(200, { "content-type": "application/json" });
 		if (request.url?.endsWith("/refresh")) {
@@ -33,14 +39,11 @@ test("personal-client session client rotates and revokes only through derived Ga
 			response.end(JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }));
 		}
 	});
-	await new Promise((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", resolve);
-	});
+	await listen(server);
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("missing address");
 	try {
-		const client = createCealPersonalClientSessionClient({ endpoint: `http://127.0.0.1:${address.port}/api/ceal/v1` });
+		const client = createCealPersonalClientSessionClient({ endpoint: `http://127.0.0.1:${serverPort(server)}/api/ceal/v1` });
 		const refreshed = await client.refresh(REFRESH);
 		assert.equal(refreshed.ok, true);
 		const revoked = await client.revoke(REFRESH);
@@ -57,7 +60,7 @@ test("personal-client session client rotates and revokes only through derived Ga
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await close(server);
 	}
 });
 
@@ -88,7 +91,7 @@ const SESSION_ENDPOINT = "https://gateway.example/api/ceal/v1";
 
 test("session client construction refuses an unusable transport or timeout", () => {
 	assert.throws(
-		() => createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: "not-a-function" }),
+		() => createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: "not-a-function" as never }),
 		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_configuration",
 	);
 	for (const timeoutMs of [0, -1, 2.5, 120_001, Number.NaN]) {
@@ -107,12 +110,12 @@ test("session client construction refuses an unusable transport or timeout", () 
 test("a session response this client cannot trust is invalid_response on both routes", async () => {
 	// Both routes share the request path, so both must refuse identically; a
 	// guard that only covered `refresh` would leave revocation trusting bytes.
-	for (const route of ["refresh", "revoke"]) {
+	for (const route of ["refresh", "revoke"] as const) {
 		const validResponse = route === "refresh" ? refreshResult() : { schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true };
 		for (const [options, why] of untrustedResponseCases(validResponse)) {
 			const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: responseFetch(options) });
 			await assert.rejects(
-				() => client[route](REFRESH),
+				() => invokeRoute(client, route),
 				(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
 				`${route}: ${why} must be invalid_response`,
 			);
@@ -124,7 +127,7 @@ test("session client preserves typed Protocol failures carried by non-2xx", asyn
 	for (const [route, schemaVersion] of [
 		["refresh", "ceal.client_refresh_result.v1"],
 		["revoke", "ceal.client_revoke_result.v1"],
-	]) {
+	] as const) {
 		const failure = {
 			schema_version: schemaVersion,
 			ok: false,
@@ -138,7 +141,7 @@ test("session client preserves typed Protocol failures carried by non-2xx", asyn
 			endpoint: SESSION_ENDPOINT,
 			fetchFn: async () => globalThis.Response.json(failure, { status: 401 }),
 		});
-		assert.deepEqual(await client[route](REFRESH), failure, route);
+		assert.deepEqual(await invokeRoute(client, route), failure, route);
 	}
 });
 
@@ -146,13 +149,13 @@ test("session client refuses non-2xx responses whose bodies claim success", asyn
 	for (const [route, success] of [
 		["refresh", refreshResult()],
 		["revoke", { schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }],
-	]) {
+	] as const) {
 		const client = createCealPersonalClientSessionClient({
 			endpoint: SESSION_ENDPOINT,
 			fetchFn: async () => globalThis.Response.json(success, { status: 500 }),
 		});
 		await assert.rejects(
-			() => client[route](REFRESH),
+			() => invokeRoute(client, route),
 			(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
 			route,
 		);
@@ -206,4 +209,11 @@ function refreshResult() {
 		refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
 		refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
 	};
+}
+
+type SessionRoute = "refresh" | "revoke";
+type SessionClient = ReturnType<typeof createCealPersonalClientSessionClient>;
+
+function invokeRoute(client: SessionClient, route: SessionRoute): ReturnType<SessionClient[SessionRoute]> {
+	return route === "refresh" ? client.refresh(REFRESH) : client.revoke(REFRESH);
 }

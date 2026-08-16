@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
@@ -8,23 +7,28 @@ import { CealEnrollmentClientError, createCealEnrollmentClient } from "../src/in
 import {
 	abortingFetch,
 	brokenFetch,
+	close,
 	ignoringAbortFetch,
+	listen,
 	mustNotFetch,
 	nonTerminatingBodyFetch,
 	oversizedStreamFetch,
+	parseJsonRecord,
+	readBody,
 	responseFetch,
 	untrustedResponseCases,
-} from "./client-response-test-support.mjs";
+} from "./client-response-test-support.ts";
 
 test("enrollment client exchanges one code over the derived loopback route", async () => {
-	const requests = [];
+	const requests: Array<{ url: string | undefined; decodeGeneration: string | undefined; body: ReturnType<typeof parseJsonRecord> }> = [];
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
 		requests.push({
 			url: request.url,
-			decodeGeneration: request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER],
-			body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+			decodeGeneration:
+				typeof request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER] === "string"
+					? request.headers[CEAL_GATEWAY_DECODE_GENERATION_HEADER]
+					: undefined,
+			body: parseJsonRecord(await readBody(request)),
 		});
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(enrollmentResult()));
@@ -32,6 +36,7 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 	await listen(server);
 	const address = server.address();
 	try {
+		if (address === null || typeof address === "string") throw new Error("server did not bind");
 		const client = createCealEnrollmentClient({ endpoint: `http://127.0.0.1:${address.port}/api/ceal/v1` });
 		const result = await client.exchange("A".repeat(43));
 		assert.equal(result.ok, true);
@@ -57,8 +62,14 @@ test("enrollment client rejects plaintext remote, malformed codes, and unsafe re
 		endpoint: "https://gateway.example.test/api/ceal/v1",
 		fetchFn: async () => globalThis.Response.json({ ok: true, access_token: "unsafe" }),
 	});
-	await assert.rejects(client.exchange("short"), (error) => error.code === "invalid_configuration");
-	await assert.rejects(client.exchange("A".repeat(43)), (error) => error.code === "invalid_response");
+	await assert.rejects(
+		client.exchange("short"),
+		(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_configuration",
+	);
+	await assert.rejects(
+		client.exchange("A".repeat(43)),
+		(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_response",
+	);
 });
 
 test("enrollment client preserves a typed Protocol failure carried by non-2xx", async () => {
@@ -93,17 +104,6 @@ test("enrollment client refuses a non-2xx response whose body claims success", a
 	);
 });
 
-function listen(server) {
-	return new Promise((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", resolve);
-	});
-}
-
-function close(server) {
-	return new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-}
-
 // The refusal paths carried no coverage, which meant the guards that make this
 // client safe to point at an arbitrary endpoint were unexercised. Each case
 // below is a distinct reason to refuse, asserted by its own error code rather
@@ -113,7 +113,7 @@ const ENDPOINT = "https://gateway.example/api/ceal/v1";
 
 test("construction refuses an unusable transport or timeout before any request", () => {
 	assert.throws(
-		() => createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: /** @type {never} */ ("not-a-function") }),
+		() => createCealEnrollmentClient({ endpoint: ENDPOINT, fetchFn: "not-a-function" as never }),
 		(error) => error instanceof CealEnrollmentClientError && error.code === "invalid_configuration",
 	);
 	// A timeout outside the bounded window is a configuration error, not a value
@@ -208,7 +208,7 @@ test("the lifecycle deadline wins when injected fetch or body ignores abort", as
 	for (const [why, fetchFn] of [
 		["fetch", ignoringAbortFetch],
 		["response body", nonTerminatingBodyFetch],
-	]) {
+	] as const) {
 		const client = createCealEnrollmentClient({ endpoint: ENDPOINT, timeoutMs: 5, fetchFn });
 		await assert.rejects(
 			() => client.exchange(VALID_CODE),

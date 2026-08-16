@@ -64,6 +64,23 @@ test("staged new files, staged deletions, and swaps fail closed", () => {
 	}
 });
 
+test("unstaged worktree deletions and untracked additions are current inventory", () => {
+	const deleted = fixture();
+	try {
+		rmSync(path.join(deleted.root, "old.mjs"));
+		assert.throws(() => checkNoLegacyMjs(deleted.root, deleted.policy), /removed: old[.]mjs/u);
+	} finally {
+		deleted.cleanup();
+	}
+	const added = fixture();
+	try {
+		added.put("new.mjs");
+		assert.throws(() => checkNoLegacyMjs(added.root, added.policy), /added: new[.]mjs/u);
+	} finally {
+		added.cleanup();
+	}
+});
+
 test("absent and malformed policies fail closed", () => {
 	const f = fixture();
 	try {

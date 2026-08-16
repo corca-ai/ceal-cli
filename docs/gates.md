@@ -11,9 +11,10 @@ paragraph, and that a future session will otherwise re-derive or undo.
 is `check` rather than `lint` deliberately, so an unformatted commit fails rather
 than merely drifting. `npm run lint:fix` applies every safe fix.
 
-`npm run lint:types` is the terminating source-only TypeScript gate. It runs the
-explicit package-source owner (`lint:types:packages`) and the strict tools owner
-(`lint:types:tools`). The package NodeNext program covers every tracked
+`npm run lint:types` is the terminating source-only TypeScript gate. It runs three
+explicit owners: package source (`lint:types:packages`), tools and contract tests
+(`lint:types:tools`), and client/package tests (`lint:types:tests`). The package
+NodeNext program covers every tracked
 `packages/*/src/**/*.ts` file and maps workspace package names to their editable
 source entrypoints, so it does not need checkout `dist` or invoke
 `test/repo-build.mjs`. The tools program covers tracked `scripts/**/*.ts` and
@@ -27,10 +28,9 @@ each with its own `node_modules/.cache` build-info path.
 intentionally with `npm run write:no-legacy-mjs-baseline`, then review the full
 list. Both `check:unit` and `check` run the ratchet before slower gates, so a
 new or removed legacy file fails without rebuilding or running a suite twice.
-The inventory observes tracked files and staged additions; an untracked or
-unstaged new `.mjs` is not part of the checked state until it is staged or
-tracked, while staged additions are already included by the tracked index
-query.
+The inventory includes files present in the current worktree when they are
+tracked or non-ignored untracked, plus staged additions, renames, and copies;
+it also excludes staged deletions and worktree paths that no longer exist.
 
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
