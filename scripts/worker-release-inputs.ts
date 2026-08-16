@@ -34,17 +34,154 @@ const PROTOCOL_PROVENANCE_SCHEMA = "ceal.gateway_protocol_artifact.v1";
 const HANDOFF_MARKER = ".ceal-protocol-handoff-owner";
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const PROTOCOL_PACKAGE = "@corca-ai/ceal-protocol";
-const RAW_HANDOFF_INPUT_KEYS = ["protocolTarball", "protocolProvenance", "controlConformance", "handoffManifest", "expectedHandoffSha256"];
+const RAW_HANDOFF_INPUT_KEYS = [
+	"protocolTarball",
+	"protocolProvenance",
+	"controlConformance",
+	"handoffManifest",
+	"expectedHandoffSha256",
+] as const;
 
 export const WorkerReleaseInputError = codedErrorClass("WorkerReleaseInputError");
 
 const GATEWAY_PROTOCOL_REQUIREMENT = Object.freeze({
 	package: PROTOCOL_PACKAGE,
 	source_repository: "corca-ai/ceal",
+	source_path: "packages/ceal-protocol",
+	provenance_schema: PROTOCOL_PROVENANCE_SCHEMA,
+	handoff_manifest_schema: HANDOFF_SCHEMA,
 	required_exports: Object.freeze([".", "./conformance"]),
 });
 
-export function resolveWorkerReleaseGuideInput(options = {}) {
+type JsonRecord = Record<string, unknown>;
+type PathInputOptions = {
+	repoRoot?: string;
+	inventoryPath?: string;
+	protocolTarball?: string;
+	protocolProvenance?: string;
+	controlConformance?: string;
+	handoffManifest?: string;
+	expectedHandoffSha256?: string;
+	gatewayHandoffArchive?: string;
+};
+type RawInputs = {
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	expectedHandoffSha256: string;
+};
+type SourceIdentity = { repository: string; commit: string; tree: string; protocol_tree: string };
+type ProvenanceSource = SourceIdentity & { package_path: string };
+type PackageIdentity = { package: string; source_path: string; command?: string };
+type GuideIdentity = {
+	compatibility_asset: string;
+	compatibility_source_path: string;
+	embedded_asset: string;
+	source_path: string;
+	format: string;
+};
+type ProtocolRequirement = {
+	package: string;
+	source_repository: string;
+	source_path: string;
+	provenance_schema: string;
+	handoff_manifest_schema: string;
+	required_exports: readonly string[];
+};
+type Inventory = {
+	schema_version: string;
+	status: string;
+	worker: PackageIdentity;
+	client: PackageIdentity;
+	guide: GuideIdentity;
+	required_gateway_protocol: ProtocolRequirement;
+	forbidden_release_inputs: string[];
+	non_claims: string[];
+};
+type ProtocolRecord = {
+	name: string;
+	package: string;
+	version: string;
+	filename: string;
+	sha256: string;
+	integrity: string;
+	bytes: number;
+	exports: string[];
+};
+type ProtocolResolution = {
+	package: string;
+	version: string;
+	filename: string;
+	sha256: string;
+	npm_integrity: string;
+	exports: string[];
+	producer: SourceIdentity;
+};
+type ControlConformanceRecord = { filename: string; sha256: string; bytes: number };
+type TrustAnchor =
+	| { kind: "caller_supplied_manifest_sha256"; value: string }
+	| {
+			kind: "reviewed_gateway_handoff_lock";
+			lock_filename: string;
+			gateway_repository: string;
+			gateway_commit: string;
+			gateway_tag: string;
+			actions_run_id: number;
+			origin: string;
+			archive_filename: string;
+			archive_sha256: string;
+	  };
+type Resolution = {
+	schema_version: string;
+	ok: true;
+	proof_level: "local_state";
+	writes_external: false;
+	worker: PackageIdentity;
+	client: PackageIdentity;
+	guide: GuideIdentity;
+	protocol: ProtocolResolution;
+	control_conformance: ControlConformanceRecord;
+	handoff: { filename: string; sha256: string };
+	trust_anchor: TrustAnchor;
+	forbidden_release_inputs: string[];
+	non_claims: string[];
+};
+type ArchiveLock = {
+	filename: string;
+	gateway_repository: string;
+	gateway_commit: string;
+	gateway_tag: string;
+	actions_run_id: number;
+	origin: string;
+	archive_filename: string;
+	archive_sha256: string;
+};
+type ArchiveResult = { resolution: Resolution; rawInputs: RawInputs; lock: ArchiveLock };
+type SyncInputValue = { inputs: Resolution; rawInputs: RawInputs };
+type AsyncInputValue = SyncInputValue;
+export type NonThenable<T> = T extends PromiseLike<unknown> ? never : T extends object ? T & { readonly then?: never } : T;
+export type SyncArchiveConsumer<T> = (value: SyncInputValue) => NonThenable<T>;
+export type AsyncArchiveConsumer<T> = (value: AsyncInputValue) => T | PromiseLike<T>;
+type ArchiveDependencies<T> = {
+	consumeArchive?: (
+		options: { repoRoot: string; archiveFile?: string },
+		dependencies: { resolveInputs: (raw: RawInputs) => Resolution; consume: (value: ArchiveResult) => NonThenable<T> },
+	) => NonThenable<T>;
+};
+type AsyncArchiveDependencies<T> = {
+	consumeArchive?: (
+		options: { repoRoot: string; archiveFile?: string },
+		dependencies: { resolveInputs: (raw: RawInputs) => Resolution; consume: (value: ArchiveResult) => T | PromiseLike<T> },
+	) => T | PromiseLike<T>;
+};
+type PacketOptions = PathInputOptions & { requirement?: ProtocolRequirement };
+type ProducerRecord = SourceIdentity & { readonly [key: string]: unknown };
+type Packet = { producer: ProducerRecord; protocol: ProtocolRecord; control_conformance: ControlConformanceRecord };
+type ConsoleLike = Pick<Console, "log" | "error">;
+
+export function resolveWorkerReleaseGuideInput(options: PathInputOptions = {}): GuideIdentity {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const inventory = readInventory(options.inventoryPath ?? path.join(repoRoot, INPUTS_FILENAME));
 	if (!isPlainObject(inventory) || inventory.schema_version !== SCHEMA_VERSION || inventory.status !== "local_candidate_not_published")
@@ -57,16 +194,16 @@ export function resolveWorkerReleaseGuideInput(options = {}) {
 // sees the refusal rather than an unrelated exception escaping the release lane.
 // The code is carried through unchanged: `proof_shipment_protocol_divergence` is
 // the stable name the Gateway owner decision asked for.
-function assertShippableProtocolVendorPinFor(repoRoot) {
+function assertShippableProtocolVendorPinFor(repoRoot: string): void {
 	try {
-		return assertShippableProtocolVendorPin({ repoRoot });
+		assertShippableProtocolVendorPin({ repoRoot });
 	} catch (error) {
 		if (error instanceof ProtocolVendorPinError) throw new WorkerReleaseInputError(error.code, error.message);
 		throw error;
 	}
 }
 
-export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
+export function resolveWorkerReleaseDevelopmentInputs(options: PathInputOptions = {}): Resolution {
 	assertDevelopmentRawInputs(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const inventory = readInventory(options.inventoryPath ?? path.join(repoRoot, INPUTS_FILENAME));
@@ -81,8 +218,8 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
 	// a release package is packing, not the development-only protocol proof the
 	// decision carves out.
 	assertShippableProtocolVendorPinFor(repoRoot);
-	const { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 } =
-		requireGatewayHandoffPacketPaths(options);
+	const rawInputs = rawInputOptions(repoRoot, options);
+	const { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 } = rawInputs;
 	const packet = validateGatewayHandoffPacketFiles({
 		controlConformance,
 		handoffManifest,
@@ -119,7 +256,7 @@ export function resolveWorkerReleaseDevelopmentInputs(options = {}) {
  * bootstrap and the locked release-input resolver therefore share one packet
  * grammar while keeping authentication separate from package consumption.
  */
-export function validateGatewayHandoffPacketFiles(options = {}) {
+export function validateGatewayHandoffPacketFiles(options: PacketOptions = {}): Packet {
 	const { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 } =
 		requireGatewayHandoffPacketPaths(options);
 	const provenance = readJson(protocolProvenance, "invalid_protocol_provenance");
@@ -138,33 +275,32 @@ export function validateGatewayHandoffPacketFiles(options = {}) {
 		provenance,
 	});
 	return {
-		producer: { ...handoff.producer },
+		producer: packet.producer,
 		protocol: packet.protocol,
 		control_conformance: packet.control_conformance,
 	};
 }
 
-function requireGatewayHandoffPacketPaths(options) {
-	const protocolTarball = requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball");
-	const protocolProvenance = requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance");
-	const controlConformance = requireRegularAbsoluteFile(options.controlConformance, "control_conformance");
-	const handoffManifest = requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest");
-	const expectedHandoffSha256 = requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256");
-	if (new Set([protocolTarball, protocolProvenance, controlConformance, handoffManifest].map(path.dirname)).size !== 1) {
-		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
-	}
-	return { protocolTarball, protocolProvenance, controlConformance, handoffManifest, expectedHandoffSha256 };
+function requireGatewayHandoffPacketPaths(options: PathInputOptions): RawInputs {
+	return rawInputOptions(path.resolve(options.repoRoot ?? ROOT), options);
 }
 
-export function resolveWorkerReleaseInputsFromLockedGatewayArchive(options = {}, dependencies = {}) {
+export function resolveWorkerReleaseInputsFromLockedGatewayArchive(
+	options: PathInputOptions = {},
+	dependencies: ArchiveDependencies<Resolution> = {},
+): Resolution {
 	return withWorkerReleaseInputs(options, ({ inputs }) => inputs, dependencies);
 }
 
-export function withWorkerReleaseInputs(options, consume, dependencies = {}) {
+export function withWorkerReleaseInputs<T>(
+	options: PathInputOptions,
+	consume: SyncArchiveConsumer<T>,
+	dependencies: ArchiveDependencies<T> = {},
+): T {
 	assertReleaseArchiveInput(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	try {
-		return (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchiveSync)(
+		const result = (dependencies.consumeArchive ?? consumeLockedGatewayHandoffArchiveSync)(
 			{
 				repoRoot,
 				archiveFile: options.gatewayHandoffArchive,
@@ -174,13 +310,18 @@ export function withWorkerReleaseInputs(options, consume, dependencies = {}) {
 				consume: ({ resolution, rawInputs, lock }) => consume({ inputs: lockBoundResolution(resolution, lock), rawInputs }),
 			},
 		);
+		return assertSyncResult(result);
 	} catch (error) {
 		if (error instanceof WorkerGatewayHandoffArchiveError) throw new WorkerReleaseInputError(error.code, error.message);
 		throw error;
 	}
 }
 
-export async function withWorkerReleaseInputsAsync(options, consume, dependencies = {}) {
+export async function withWorkerReleaseInputsAsync<T>(
+	options: PathInputOptions,
+	consume: AsyncArchiveConsumer<T>,
+	dependencies: AsyncArchiveDependencies<T> = {},
+): Promise<T> {
 	assertReleaseArchiveInput(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	try {
@@ -200,32 +341,51 @@ export async function withWorkerReleaseInputsAsync(options, consume, dependencie
 	}
 }
 
-export function withWorkerReleaseDevelopmentInputs(options, consume) {
+export function withWorkerReleaseDevelopmentInputs<T>(options: PathInputOptions, consume: SyncArchiveConsumer<T>): T {
 	assertDevelopmentRawInputs(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	assertShippableProtocolVendorPinFor(repoRoot);
 	const rawInputs = rawInputOptions(repoRoot, options);
-	return consume({ inputs: resolveWorkerReleaseDevelopmentInputs(rawInputs), rawInputs });
+	return assertSyncResult(consume({ inputs: resolveWorkerReleaseDevelopmentInputs(rawInputs), rawInputs }));
 }
 
-export async function withWorkerReleaseDevelopmentInputsAsync(options, consume) {
+export async function withWorkerReleaseDevelopmentInputsAsync<T>(options: PathInputOptions, consume: AsyncArchiveConsumer<T>): Promise<T> {
 	assertDevelopmentRawInputs(options);
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
+	assertShippableProtocolVendorPinFor(repoRoot);
 	const rawInputs = rawInputOptions(repoRoot, options);
 	return await consume({ inputs: resolveWorkerReleaseDevelopmentInputs(rawInputs), rawInputs });
 }
 
-function rawInputOptions(repoRoot, options) {
-	return {
-		repoRoot,
-		protocolTarball: options.protocolTarball,
-		protocolProvenance: options.protocolProvenance,
-		controlConformance: options.controlConformance,
-		handoffManifest: options.handoffManifest,
-		expectedHandoffSha256: options.expectedHandoffSha256,
-	};
+function assertSyncResult<T>(value: NonThenable<T>): T {
+	if (isPromiseLike(value))
+		fail("gateway_handoff_archive_async_consumer", "Synchronous Gateway handoff consumption cannot return a promise.");
+	return value;
 }
 
-function assertReleaseArchiveInput(options) {
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+	return value !== null && (typeof value === "object" || typeof value === "function") && "then" in value && typeof value.then === "function";
+}
+
+function rawInputOptions(repoRoot: string, options: PathInputOptions): RawInputs {
+	const rawInputs = {
+		repoRoot,
+		protocolTarball: requireRegularAbsoluteFile(options.protocolTarball, "protocol_tarball"),
+		protocolProvenance: requireRegularAbsoluteFile(options.protocolProvenance, "protocol_provenance"),
+		controlConformance: requireRegularAbsoluteFile(options.controlConformance, "control_conformance"),
+		handoffManifest: requireRegularAbsoluteFile(options.handoffManifest, "handoff_manifest"),
+		expectedHandoffSha256: requireSha256(options.expectedHandoffSha256, "expected_handoff_sha256"),
+	};
+	if (
+		new Set(
+			[rawInputs.protocolTarball, rawInputs.protocolProvenance, rawInputs.controlConformance, rawInputs.handoffManifest].map(path.dirname),
+		).size !== 1
+	)
+		fail("handoff_layout_mismatch", "Gateway handoff inputs must come from one complete handoff directory.");
+	return rawInputs;
+}
+
+function assertReleaseArchiveInput(options: PathInputOptions): asserts options is PathInputOptions & { gatewayHandoffArchive: string } {
 	if (!options.gatewayHandoffArchive)
 		fail("gateway_handoff_archive_required", "Worker release commands require one lock-bound Gateway handoff archive.");
 	if (RAW_HANDOFF_INPUT_KEYS.some((key) => options[key] !== undefined)) {
@@ -233,11 +393,11 @@ function assertReleaseArchiveInput(options) {
 	}
 }
 
-function assertDevelopmentRawInputs(options) {
+function assertDevelopmentRawInputs(options: PathInputOptions): void {
 	if (options.gatewayHandoffArchive) fail("development_input_mode", "Development input resolution accepts raw local handoff files only.");
 }
 
-function lockBoundResolution(resolution, lock) {
+function lockBoundResolution(resolution: Resolution, lock: ArchiveLock): Resolution {
 	return {
 		...resolution,
 		trust_anchor: {
@@ -258,17 +418,20 @@ function lockBoundResolution(resolution, lock) {
 	};
 }
 
-function readInventory(filePath) {
+function readInventory(filePath: string): unknown {
 	return readJson(requireRegularFile(path.resolve(filePath), "invalid_inventory"), "invalid_inventory");
 }
 
-function assertInventory(inventory, repoRoot) {
+function assertInventory(inventory: unknown, repoRoot: string): asserts inventory is Inventory {
 	if (!isPlainObject(inventory) || inventory.schema_version !== SCHEMA_VERSION || inventory.status !== "local_candidate_not_published") {
 		fail("invalid_inventory", "Worker release input inventory is invalid.");
 	}
-	assertWorker(inventory.worker, repoRoot);
-	assertClient(inventory.client, repoRoot);
-	assertGuide(inventory.guide, repoRoot);
+	const worker = inventory.worker;
+	const client = inventory.client;
+	const guide = inventory.guide;
+	assertWorker(worker, repoRoot);
+	assertClient(client, repoRoot);
+	assertGuide(guide, repoRoot);
 	assertProtocolRequirement(inventory.required_gateway_protocol);
 	if (
 		!Array.isArray(inventory.forbidden_release_inputs) ||
@@ -280,9 +443,7 @@ function assertInventory(inventory, repoRoot) {
 	}
 	if (
 		inventory.forbidden_release_inputs.some((entry) =>
-			[inventory.worker.source_path, inventory.client.source_path, inventory.guide.source_path].some(
-				(allowed) => allowed === entry || allowed.startsWith(`${entry}/`),
-			),
+			[worker.source_path, client.source_path, guide.source_path].some((allowed) => allowed === entry || allowed.startsWith(`${entry}/`)),
 		)
 	) {
 		fail("invalid_inventory", "Worker release inventory overlaps an owned input with a forbidden input.");
@@ -296,21 +457,26 @@ function assertInventory(inventory, repoRoot) {
 	}
 }
 
-function assertWorker(worker, repoRoot) {
+function assertWorker(worker: unknown, repoRoot: string): asserts worker is PackageIdentity {
 	if (!isPlainObject(worker) || worker.package !== "@corca-ai/ceal-worker-cli" || worker.command !== "ceal")
 		fail("invalid_inventory", "Worker release inventory has an invalid worker identity.");
-	assertPackageSource(repoRoot, worker.source_path, worker.package, worker.command);
+	assertPackageSource(repoRoot, worker.source_path, "@corca-ai/ceal-worker-cli", "ceal");
 }
 
-function assertClient(client, repoRoot) {
+function assertClient(client: unknown, repoRoot: string): asserts client is PackageIdentity {
 	if (!isPlainObject(client) || client.package !== "@corca-ai/ceal")
 		fail("invalid_inventory", "Worker release inventory has an invalid client identity.");
-	assertPackageSource(repoRoot, client.source_path, client.package);
+	assertPackageSource(repoRoot, client.source_path, "@corca-ai/ceal");
 }
 
-function assertGuide(guide, repoRoot) {
+function assertGuide(guide: unknown, repoRoot: string): asserts guide is GuideIdentity {
 	if (
 		!isPlainObject(guide) ||
+		typeof guide.compatibility_asset !== "string" ||
+		typeof guide.compatibility_source_path !== "string" ||
+		typeof guide.embedded_asset !== "string" ||
+		typeof guide.source_path !== "string" ||
+		typeof guide.format !== "string" ||
 		guide.compatibility_asset !== "ceal-guide-SKILL.md" ||
 		guide.compatibility_source_path !== "scripts/assets/ceal-guide-compatibility-SKILL.md" ||
 		guide.embedded_asset !== "ceal-guide.tar" ||
@@ -325,15 +491,17 @@ function assertGuide(guide, repoRoot) {
 	requireRegularFile(path.join(repoRoot, guide.compatibility_source_path), "invalid_inventory");
 }
 
-function assertPackageSource(repoRoot, sourcePath, expectedName, command) {
-	if (normalizeRelativePath(sourcePath) !== sourcePath) fail("invalid_inventory", "Worker release package path is invalid.");
-	const manifest = readJson(path.join(repoRoot, sourcePath, "package.json"), "invalid_inventory");
-	if (manifest?.name !== expectedName || (command && manifest?.bin?.[command] !== "./dist/bin.js")) {
+function assertPackageSource(repoRoot: string, sourcePath: unknown, expectedName: string, command?: string): asserts sourcePath is string {
+	const normalizedSourcePath = normalizeRelativePath(sourcePath);
+	const manifest = readJson(path.join(repoRoot, normalizedSourcePath, "package.json"), "invalid_inventory");
+	if (!isPlainObject(manifest)) fail("invalid_inventory", "Worker release package identity is invalid.");
+	const bin = manifest.bin;
+	if (manifest.name !== expectedName || (command && (!isPlainObject(bin) || bin[command] !== "./dist/bin.js"))) {
 		fail("invalid_inventory", "Worker release package identity is invalid.");
 	}
 }
 
-function assertProtocolRequirement(protocol) {
+function assertProtocolRequirement(protocol: unknown): asserts protocol is ProtocolRequirement {
 	if (
 		!isPlainObject(protocol) ||
 		protocol.package !== "@corca-ai/ceal-protocol" ||
@@ -347,7 +515,23 @@ function assertProtocolRequirement(protocol) {
 	}
 }
 
-function validateHandoffPacket({ requirement, control, controlConformance, handoff, protocolTarball, protocolProvenance, provenance }) {
+function validateHandoffPacket({
+	requirement,
+	control,
+	controlConformance,
+	handoff,
+	protocolTarball,
+	protocolProvenance,
+	provenance,
+}: {
+	requirement: ProtocolRequirement;
+	control: unknown;
+	controlConformance: string;
+	handoff: unknown;
+	protocolTarball: string;
+	protocolProvenance: string;
+	provenance: unknown;
+}): { producer: ProducerRecord; protocol: ProtocolRecord; control_conformance: ControlConformanceRecord } {
 	if (
 		!isPlainObject(handoff) ||
 		handoff.schema_version !== HANDOFF_SCHEMA ||
@@ -357,17 +541,18 @@ function validateHandoffPacket({ requirement, control, controlConformance, hando
 	) {
 		fail("invalid_handoff_manifest", "Gateway handoff manifest is not a self-consistent producer record.");
 	}
-	const producer = handoff.producer;
-	if (
-		!isPlainObject(producer) ||
-		producer.repository !== requirement.source_repository ||
-		!GIT_OBJECT_ID.test(producer.commit ?? "") ||
-		!GIT_OBJECT_ID.test(producer.tree ?? "") ||
-		!GIT_OBJECT_ID.test(producer.protocol_tree ?? "") ||
-		producer.scoped_paths_clean !== true
-	) {
+	const producer = requireProducerRecord(handoff.producer);
+	if (producer.scoped_paths_clean !== true) {
 		fail("invalid_handoff_manifest", "Gateway handoff producer identity is invalid.");
 	}
+	const verifiedProducer = requireSourceIdentity(producer);
+	if (
+		verifiedProducer.repository !== requirement.source_repository ||
+		!GIT_OBJECT_ID.test(verifiedProducer.commit) ||
+		!GIT_OBJECT_ID.test(verifiedProducer.tree) ||
+		!GIT_OBJECT_ID.test(verifiedProducer.protocol_tree)
+	)
+		fail("invalid_handoff_manifest", "Gateway handoff producer identity is invalid.");
 	const protocol = validateProtocolRecord(handoff.protocol);
 	assertHandoffMarker(path.dirname(protocolProvenance));
 	assertArtifactBytes({
@@ -382,9 +567,9 @@ function validateHandoffPacket({ requirement, control, controlConformance, hando
 		expectedName: requirement.package,
 		code: "protocol_artifact_mismatch",
 	});
-	const controlRecord = assertControlConformanceSidecar({ handoff, control, controlConformance, producer });
-	assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer, protocol });
-	return { protocol, control_conformance: controlRecord };
+	const controlRecord = assertControlConformanceSidecar({ handoff, control, controlConformance, producer: verifiedProducer });
+	assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer: verifiedProducer, protocol });
+	return { producer, protocol, control_conformance: controlRecord };
 }
 
 // One record, not a pair. The handoff used to carry this repository's own client
@@ -394,7 +579,7 @@ function validateHandoffPacket({ requirement, control, controlConformance, hando
 // and `validateProtocolArtifact` already asserts that the owned client and worker
 // manifests name the supplied Protocol version — so nothing that check covered
 // was lost with the second record, only the redundant external witness for it.
-function validateProtocolRecord(record) {
+function validateProtocolRecord(record: unknown): ProtocolRecord {
 	if (
 		!isPlainObject(record) ||
 		record.package !== PROTOCOL_PACKAGE ||
@@ -404,16 +589,36 @@ function validateProtocolRecord(record) {
 		!isSha256(record.sha256) ||
 		typeof record.integrity !== "string" ||
 		!record.integrity.startsWith("sha512-") ||
+		typeof record.bytes !== "number" ||
 		!Number.isSafeInteger(record.bytes) ||
 		record.bytes <= 0 ||
 		!sameSortedExports(record.exports)
 	) {
 		fail("invalid_handoff_manifest", "Gateway handoff Protocol record is invalid.");
 	}
-	return { name: record.package, ...record, exports: [...record.exports] };
+	return {
+		name: record.package,
+		package: record.package,
+		version: record.version,
+		filename: record.filename,
+		sha256: record.sha256,
+		integrity: record.integrity,
+		bytes: record.bytes,
+		exports: [...record.exports],
+	};
 }
 
-function assertArtifactBytes({ tarball, record, code, message }) {
+function assertArtifactBytes({
+	tarball,
+	record,
+	code,
+	message,
+}: {
+	tarball: string;
+	record: ProtocolRecord;
+	code: string;
+	message: string;
+}): void {
 	const bytes = readFileSync(tarball);
 	const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
 	if (
@@ -426,14 +631,25 @@ function assertArtifactBytes({ tarball, record, code, message }) {
 	}
 }
 
-function assertPackedPackage({ tarball, record, expectedName, code }) {
+function assertPackedPackage({
+	tarball,
+	record,
+	expectedName,
+	code,
+}: {
+	tarball: string;
+	record: ProtocolRecord;
+	expectedName: string;
+	code: string;
+}): JsonRecord {
 	const manifestBytes = readPackedManifestBytes(tarball, code);
-	let manifest;
+	let manifest: unknown;
 	try {
 		manifest = JSON.parse(manifestBytes);
 	} catch {
 		fail(code, "Gateway package tarball has an invalid package manifest.");
 	}
+	if (!isPlainObject(manifest)) fail(code, "Gateway package tarball has an invalid package manifest.");
 	if (
 		manifest?.name !== expectedName ||
 		manifest?.version !== record.version ||
@@ -444,7 +660,7 @@ function assertPackedPackage({ tarball, record, expectedName, code }) {
 	return manifest;
 }
 
-function assertHandoffMarker(directory) {
+function assertHandoffMarker(directory: string): void {
 	const marker = requireRegularFile(path.join(directory, HANDOFF_MARKER), "handoff_marker_missing");
 	if (readFileSync(marker, "utf8") !== `${HANDOFF_SCHEMA}\n`) {
 		fail("handoff_marker_mismatch", "Gateway handoff ownership marker is invalid.");
@@ -458,9 +674,20 @@ function assertHandoffMarker(directory) {
 // carries is the file the signed manifest names, and that it describes the same
 // Gateway commit as everything else in the packet. Reading it further belongs to
 // whoever implements the surface, not to the release-input resolver.
-function assertControlConformanceSidecar({ handoff, control, controlConformance, producer }) {
+function assertControlConformanceSidecar({
+	handoff,
+	control,
+	controlConformance,
+	producer,
+}: {
+	handoff: JsonRecord;
+	control: unknown;
+	controlConformance: string;
+	producer: SourceIdentity;
+}): ControlConformanceRecord {
 	const bytes = readFileSync(controlConformance);
 	const sidecar = handoff.control_conformance;
+	const controlSource = isPlainObject(control) ? requireSourceIdentity(control.source, "invalid_control_conformance") : null;
 	if (
 		!isPlainObject(sidecar) ||
 		sidecar.filename !== path.basename(controlConformance) ||
@@ -471,26 +698,42 @@ function assertControlConformanceSidecar({ handoff, control, controlConformance,
 	}
 	if (
 		!isPlainObject(control) ||
+		typeof control.schema_version !== "string" ||
 		!CONTROL_CONFORMANCE_SCHEMAS.has(control.schema_version) ||
 		control.proof_level !== "local_state" ||
 		control.writes_external !== false ||
-		!sameSourceIdentity(control.source, producer) ||
-		control.source.protocol_tree !== producer.protocol_tree
+		!controlSource ||
+		!sameSourceIdentity(controlSource, producer) ||
+		controlSource.protocol_tree !== producer.protocol_tree
 	) {
 		fail("invalid_control_conformance", "Gateway control conformance does not bind the handoff producer identity.");
 	}
 	return { filename: sidecar.filename, sha256: sidecar.sha256, bytes: sidecar.bytes };
 }
 
-function assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenance, producer, protocol }) {
+function assertProtocolProvenanceSidecar({
+	handoff,
+	provenance,
+	protocolProvenance,
+	producer,
+	protocol,
+}: {
+	handoff: JsonRecord;
+	provenance: unknown;
+	protocolProvenance: string;
+	producer: SourceIdentity;
+	protocol: ProtocolRecord;
+}): void {
+	const provenanceSource = isPlainObject(provenance) ? requireProvenanceSource(provenance.source, "invalid_protocol_provenance") : null;
 	if (
 		!isPlainObject(provenance) ||
 		provenance.schema_version !== PROTOCOL_PROVENANCE_SCHEMA ||
 		provenance.proof_level !== "local_state" ||
 		provenance.writes_external !== false ||
-		!sameSourceIdentity(provenance.source, producer) ||
-		provenance.source.protocol_tree !== producer.protocol_tree ||
-		provenance.source.package_path !== "packages/ceal-protocol"
+		!provenanceSource ||
+		!sameSourceIdentity(provenanceSource, producer) ||
+		provenanceSource.protocol_tree !== producer.protocol_tree ||
+		provenanceSource.package_path !== "packages/ceal-protocol"
 	) {
 		fail("invalid_protocol_provenance", "Gateway Protocol provenance is not a verified handoff record.");
 	}
@@ -518,10 +761,33 @@ function assertProtocolProvenanceSidecar({ handoff, provenance, protocolProvenan
 	}
 }
 
-function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, provenance, protocolRecord }) {
+function validateProtocolArtifact({
+	inventory,
+	repoRoot,
+	protocolTarball,
+	provenance,
+	protocolRecord,
+}: {
+	inventory: Inventory;
+	repoRoot: string;
+	protocolTarball: string;
+	provenance: unknown;
+	protocolRecord: ProtocolRecord;
+}): ProtocolResolution {
 	const requirement = inventory.required_gateway_protocol;
-	const source = provenance.source;
+	if (!isPlainObject(provenance) || !isPlainObject(provenance.artifact))
+		fail("invalid_protocol_provenance", "Gateway Protocol provenance is invalid.");
+	const source = requireProvenanceSource(provenance.source);
 	const artifact = provenance.artifact;
+	if (
+		typeof artifact.package !== "string" ||
+		typeof artifact.version !== "string" ||
+		typeof artifact.filename !== "string" ||
+		typeof artifact.sha256 !== "string" ||
+		typeof artifact.npm_integrity !== "string" ||
+		!sameSortedExports(artifact.exports)
+	)
+		fail("invalid_protocol_provenance", "Gateway Protocol provenance is invalid.");
 	if (
 		source.repository !== requirement.source_repository ||
 		source.package_path !== requirement.source_path ||
@@ -532,6 +798,8 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 		fail("protocol_artifact_mismatch", "Gateway Protocol tarball does not match its provenance record.");
 	}
 	const packageManifest = readPackedManifest(protocolTarball);
+	if (!isPlainObject(packageManifest))
+		fail("protocol_artifact_mismatch", "Gateway Protocol tarball does not expose the declared package surface.");
 	if (
 		packageManifest?.name !== requirement.package ||
 		packageManifest?.version !== artifact.version ||
@@ -541,7 +809,11 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 	}
 	for (const sourcePath of [inventory.client.source_path, inventory.worker.source_path]) {
 		const manifest = readJson(path.join(repoRoot, sourcePath, "package.json"), "invalid_inventory");
-		if (manifest?.dependencies?.[requirement.package] !== artifact.version) {
+		if (
+			!isPlainObject(manifest) ||
+			!isPlainObject(manifest.dependencies) ||
+			manifest.dependencies[requirement.package] !== artifact.version
+		) {
 			fail("protocol_version_mismatch", "Worker-owned package dependency does not match the supplied Gateway Protocol artifact.");
 		}
 	}
@@ -556,7 +828,7 @@ function validateProtocolArtifact({ inventory, repoRoot, protocolTarball, proven
 	};
 }
 
-function readPackedManifest(tarball) {
+function readPackedManifest(tarball: string): unknown {
 	const bytes = readPackedManifestBytes(tarball, "invalid_protocol_tarball");
 	try {
 		return JSON.parse(bytes);
@@ -565,7 +837,7 @@ function readPackedManifest(tarball) {
 	}
 }
 
-function readPackedManifestBytes(tarball, code) {
+function readPackedManifestBytes(tarball: string, code: string): string {
 	try {
 		return execFileSync("tar", ["-xOzf", tarball, "package/package.json"], {
 			encoding: "utf8",
@@ -577,25 +849,25 @@ function readPackedManifestBytes(tarball, code) {
 	}
 }
 
-function requireRegularAbsoluteFile(value, code) {
+function requireRegularAbsoluteFile(value: unknown, code: string): string {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail(code, "Worker release input must be an absolute regular file.");
 	return requireRegularFile(path.resolve(value), code);
 }
 
-function requireRegularFile(filePath, code) {
+function requireRegularFile(filePath: string, code: string): string {
 	if (!existsSync(filePath)) fail(code, "Worker release input is missing.");
 	const stat = lstatSync(filePath);
 	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Worker release input must be a regular non-symlink file.");
 	return filePath;
 }
 
-function requireSha256(value, code) {
+function requireSha256(value: unknown, code: string): string {
 	if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value))
 		fail(code, "Worker release trust anchor must be one lowercase SHA-256 value.");
 	return value;
 }
 
-function readJson(filePath, code) {
+function readJson(filePath: string, code: string): unknown {
 	try {
 		return JSON.parse(readFileSync(filePath, "utf8"));
 	} catch {
@@ -603,7 +875,7 @@ function readJson(filePath, code) {
 	}
 }
 
-function normalizeRelativePath(value) {
+function normalizeRelativePath(value: unknown): string {
 	if (
 		typeof value !== "string" ||
 		value.length === 0 ||
@@ -616,11 +888,11 @@ function normalizeRelativePath(value) {
 	return value;
 }
 
-function sameStrings(value, expected) {
+function sameStrings(value: unknown, expected: readonly string[]): value is string[] {
 	return Array.isArray(value) && value.length === expected.length && value.every((entry, index) => entry === expected[index]);
 }
 
-function sameSortedExports(value) {
+function sameSortedExports(value: unknown): value is string[] {
 	return (
 		Array.isArray(value) &&
 		value.length > 0 &&
@@ -630,7 +902,7 @@ function sameSortedExports(value) {
 	);
 }
 
-function exportKeys(exportsField) {
+function exportKeys(exportsField: unknown): string[] {
 	if (typeof exportsField === "string" || Array.isArray(exportsField)) return ["."];
 	if (!isPlainObject(exportsField)) return [];
 	return Object.keys(exportsField)
@@ -638,7 +910,7 @@ function exportKeys(exportsField) {
 		.sort();
 }
 
-function sameSourceIdentity(candidate, expected) {
+function sameSourceIdentity(candidate: unknown, expected: SourceIdentity): candidate is SourceIdentity {
 	return (
 		isPlainObject(candidate) &&
 		candidate.repository === expected.repository &&
@@ -647,21 +919,46 @@ function sameSourceIdentity(candidate, expected) {
 	);
 }
 
-function isSha256(value) {
+function requireSourceIdentity(value: unknown, code = "invalid_handoff_manifest"): SourceIdentity {
+	if (
+		!isPlainObject(value) ||
+		typeof value.repository !== "string" ||
+		typeof value.commit !== "string" ||
+		typeof value.tree !== "string" ||
+		typeof value.protocol_tree !== "string"
+	) {
+		fail(code, "Gateway handoff producer identity is invalid.");
+	}
+	return { repository: value.repository, commit: value.commit, tree: value.tree, protocol_tree: value.protocol_tree };
+}
+
+function requireProducerRecord(value: unknown, code = "invalid_handoff_manifest"): ProducerRecord {
+	if (!isPlainObject(value)) fail(code, "Gateway handoff producer identity is invalid.");
+	const source = requireSourceIdentity(value, code);
+	return { ...value, ...source };
+}
+
+function requireProvenanceSource(value: unknown, code = "invalid_protocol_provenance"): ProvenanceSource {
+	const source = requireSourceIdentity(value, code);
+	if (!isPlainObject(value) || typeof value.package_path !== "string") fail(code, "Gateway Protocol provenance source is invalid.");
+	return { ...source, package_path: value.package_path };
+}
+
+function isSha256(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
 
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is JsonRecord {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function fail(code, message) {
+function fail(code: string, message: string): never {
 	throw new WorkerReleaseInputError(code, message);
 }
 
-function parseArgs(argv) {
+function parseArgs(argv: readonly string[]): { help: boolean; json: boolean; options: PathInputOptions } {
 	const parsed = parseScriptArgs(argv, {
 		fail,
 		values: { "--gateway-handoff-archive": "gatewayHandoffArchive" },
@@ -672,7 +969,7 @@ function parseArgs(argv) {
 	return parsed;
 }
 
-export function runCli(argv, io = console) {
+export function runCli(argv: readonly string[], io: ConsoleLike = console): number {
 	const json = argv.includes("--json");
 	try {
 		const parsed = parseArgs(argv);

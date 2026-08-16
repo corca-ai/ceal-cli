@@ -4,10 +4,19 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { materializeSignedGatewayProtocolSource } from "../../scripts/materialize-signed-gateway-protocol-source.ts";
-import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.ts";
+import {
+	type AsyncArchiveConsumer,
+	resolveWorkerReleaseDevelopmentInputs,
+	runCli,
+	type SyncArchiveConsumer,
+	validateGatewayHandoffPacketFiles,
+	WorkerReleaseInputError,
+	withWorkerReleaseDevelopmentInputs,
+	withWorkerReleaseDevelopmentInputsAsync,
+} from "../../scripts/worker-release-inputs.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
 import { scratchDir } from "../scratch-dir.ts";
 
@@ -15,7 +24,59 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const CONTRACT_REPO = createProtocolRepoFixture();
 test.after(() => CONTRACT_REPO.cleanup());
 
-function resolveContractInputs(options) {
+type ContractInputOptions = Parameters<typeof resolveWorkerReleaseDevelopmentInputs>[0];
+type GitCall = string[];
+type Producer = { repository: string; commit: string; tree: string; protocol_tree: string; scoped_paths_clean: true };
+type PackedPackage = {
+	name: string;
+	version: string;
+	filename: string;
+	tarball: string;
+	sha256: string;
+	integrity: string;
+	bytes: number;
+	declared_exports: string[];
+};
+type ControlConformance = {
+	schema_version: string;
+	proof_level: "local_state";
+	writes_external: false;
+	source: Omit<Producer, "scoped_paths_clean">;
+};
+type HandoffFixture = {
+	root: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	protocol: PackedPackage;
+	producer: Producer;
+	provenance: {
+		schema_version: string;
+		proof_level: "local_state";
+		writes_external: false;
+		source: Omit<Producer, "scoped_paths_clean"> & { package_path: string };
+		artifact: { package: string; version: string; filename: string; sha256: string; npm_integrity: string; exports: string[] };
+	};
+	control: ControlConformance;
+	expectedHandoffSha256?: string;
+};
+type InventoryDocument = { worker: { source_path: string | null }; forbidden_release_inputs: string[] } & Record<string, unknown>;
+type SyncCallbackInput = Parameters<SyncArchiveConsumer<number>>[0];
+type SyncPromiseCallback = (value: SyncCallbackInput) => Promise<number>;
+type SyncPromiseIsRejected = SyncPromiseCallback extends SyncArchiveConsumer<number> ? false : true;
+type AsyncCallbackInput = Parameters<AsyncArchiveConsumer<number>>[0];
+type AsyncPromiseCallback = (value: AsyncCallbackInput) => Promise<number>;
+type AsyncPromiseIsAccepted = AsyncPromiseCallback extends AsyncArchiveConsumer<number> ? true : false;
+const syncPromiseIsRejected: SyncPromiseIsRejected = true;
+const asyncPromiseIsAccepted: AsyncPromiseIsAccepted = true;
+
+test("sync and async callback contracts distinguish promise returns", () => {
+	assert.equal(syncPromiseIsRejected, true);
+	assert.equal(asyncPromiseIsAccepted, true);
+});
+
+function resolveContractInputs(options: ContractInputOptions) {
 	return resolveWorkerReleaseDevelopmentInputs({ ...options, repoRoot: CONTRACT_REPO.root });
 }
 
@@ -29,7 +90,7 @@ const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packa
 const MARKER_NAME = ".ceal-protocol-handoff-owner";
 const MARKER_CONTENTS = "ceal.gateway_protocol_handoff.v1\n";
 
-test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context) => {
+test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context: TestContext) => {
 	const scratch = scratchDir(context, "ceal-signed-protocol-source-mutation-");
 	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
 	const expectedCommit = "a".repeat(40);
@@ -50,8 +111,8 @@ test("signed Protocol source acquisition writes nothing before exact commit and 
 			message: "inventory and archive materialization must not run after a tree mismatch",
 		},
 	]) {
-		const calls = [];
-		const git = (_command, args) => {
+		const calls: GitCall[] = [];
+		const git = (_command: string, args: string[]) => {
 			calls.push(args);
 			if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
 			if (args[0] === "rev-list") return `${mutation.commit}\n`;
@@ -80,22 +141,37 @@ test("signed Protocol source acquisition writes nothing before exact commit and 
 	}
 });
 
-test("worker release inventory accepts one exact complete Gateway protocol handoff", (context) => {
+test("omitted handoff options retain their coded refusals", () => {
+	assert.throws(() => resolveWorkerReleaseDevelopmentInputs(), WorkerReleaseInputError);
+	assert.throws(() => validateGatewayHandoffPacketFiles(), hasCode("protocol_tarball"));
+});
+
+test("worker release inventory accepts one exact complete Gateway protocol handoff", (context: TestContext) => {
 	const fixture = handoffFixture(context);
 	const resolution = resolveContractInputs(fixture);
+	const packet = validateGatewayHandoffPacketFiles(fixture);
 	assert.equal(resolution.ok, true);
 	assert.equal(resolution.protocol.package, "@corca-ai/ceal-protocol");
 	assert.equal(resolution.protocol.producer.repository, "corca-ai/ceal");
 	assert.equal(resolution.protocol.producer.protocol_tree, fixture.producer.protocol_tree);
+	assert.equal(packet.producer.scoped_paths_clean, true);
 	assert.deepEqual(resolution.protocol.exports, [".", "./conformance"]);
 	assert.equal(resolution.control_conformance.filename, "gateway-leased-consumer-control-conformance.json");
 	assert.equal(resolution.forbidden_release_inputs.includes("packages/ceal-protocol"), true);
 	// The packet carries no client tarball, so the resolution must not pretend to
 	// witness one. The client is packed from this repository's own source.
-	assert.equal(resolution.gateway_client, undefined);
+	assert.equal("gateway_client" in resolution, false);
 });
 
-test("worker release inventory accepts the v3 through v6 Gateway control conformances while still binding their producer", (context) => {
+test("async development input facade flattens a promise callback", async (context: TestContext) => {
+	const fixture = handoffFixture(context);
+	const output = await withWorkerReleaseDevelopmentInputsAsync({ ...fixture, repoRoot: CONTRACT_REPO.root }, ({ inputs }) =>
+		Promise.resolve(inputs.protocol.version.length).then((value) => value.toFixed()),
+	);
+	assert.equal(output, String(VENDORED_PROTOCOL_VERSION.length));
+});
+
+test("worker release inventory accepts the v3 through v6 Gateway control conformances while still binding their producer", (context: TestContext) => {
 	const fixture = handoffFixture(context);
 	for (const schemaVersion of [
 		"ceal.gateway_leased_consumer_control_conformance_handoff.v3",
@@ -117,7 +193,7 @@ test("worker release inventory accepts the v3 through v6 Gateway control conform
 	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
 });
 
-test("worker release inventory rejects stale sidecars, an unbound control conformance, and source fallback", (context) => {
+test("worker release inventory rejects stale sidecars, an unbound control conformance, and source fallback", (context: TestContext) => {
 	const fixture = handoffFixture(context);
 	const marker = path.join(fixture.root, MARKER_NAME);
 	writeFileSync(marker, "unexpected\n");
@@ -139,6 +215,11 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
 	writeControlConformance(fixture);
 	writeHandoffManifest(fixture);
+	writeFileSync(fixture.controlConformance, `${JSON.stringify({ ...fixture.control, source: null })}\n`);
+	writeHandoffManifest(fixture);
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_control_conformance"));
+	writeControlConformance(fixture);
+	writeHandoffManifest(fixture);
 
 	const stale = JSON.parse(JSON.stringify(fixture.provenance));
 	stale.artifact.sha256 = "0".repeat(64);
@@ -151,6 +232,11 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 	writeHandoffManifest(fixture);
 	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_provenance_mismatch"));
 	fixture.provenance.artifact.exports = [".", "./conformance"];
+	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
+	writeHandoffManifest(fixture);
+	writeFileSync(fixture.protocolProvenance, `${JSON.stringify({ ...fixture.provenance, source: null })}\n`);
+	writeHandoffManifest(fixture);
+	assert.throws(() => resolveContractInputs(fixture), hasCode("invalid_protocol_provenance"));
 	writeFileSync(fixture.protocolProvenance, `${JSON.stringify(fixture.provenance)}\n`);
 	writeHandoffManifest(fixture);
 
@@ -191,7 +277,7 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 // release-input resolution, packing, the native build, and the workflow's own
 // compose step -- left `repo-gates.test.mjs` green, because the regex still
 // matched the call inside the error-translating wrapper that nothing then called.
-test("the release chokepoint reaches the protocol pin guard before it reads any argument", (context) => {
+test("the release chokepoint reaches the protocol pin guard before it reads any argument", async (context: TestContext) => {
 	const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-pin-chokepoint-")));
 	context.after(() => rmSync(scratch, { recursive: true, force: true }));
 	for (const file of ["worker-release-inputs.json", "gateway-protocol-handoff-lock.json", "protocol-vendor-pin.json", "install-ceal.sh"]) {
@@ -221,9 +307,9 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 	try {
 		resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent });
 	} catch (error) {
-		code = error.code;
+		if (error instanceof WorkerReleaseInputError) code = error.code;
 	}
-	assert.notEqual(code, null, "the chokepoint must refuse this input, not resolve it");
+	if (code === null) throw new Error("the chokepoint must refuse this input, not resolve it");
 	assert.notEqual(
 		code,
 		"protocol_tarball",
@@ -240,10 +326,29 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 	// Re-raised as this module's error type, so a caller catching
 	// WorkerReleaseInputError sees the refusal instead of an escaping exception.
 	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent }), WorkerReleaseInputError);
+	assert.throws(
+		() => withWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent }, () => undefined),
+		(error) => error instanceof WorkerReleaseInputError && code !== "protocol_tarball" && error.code === code,
+	);
+	await assert.rejects(
+		() => withWorkerReleaseDevelopmentInputsAsync({ repoRoot: scratch, ...absent }, async () => undefined),
+		(error) => error instanceof WorkerReleaseInputError && code !== "protocol_tarball" && error.code === code,
+	);
 });
 
-test("worker release inventory rejects Gateway and legacy composite paths", (context) => {
-	const inventory = JSON.parse(readFileSync(path.join(ROOT, "worker-release-inputs.json"), "utf8"));
+test("malformed owned source paths preserve the normalized-path refusal", (context: TestContext) => {
+	const fixture = handoffFixture(context);
+	const inventory: InventoryDocument = JSON.parse(readFileSync(path.join(ROOT, "worker-release-inputs.json"), "utf8"));
+	const inventoryPath = path.join(fixture.root, "worker-release-inputs.json");
+	for (const malformedSourcePath of ["../packages/ceal-worker-cli", null]) {
+		inventory.worker.source_path = malformedSourcePath;
+		writeFileSync(inventoryPath, `${JSON.stringify(inventory)}\n`);
+		assert.throws(() => resolveContractInputs({ ...fixture, inventoryPath }), hasCode("invalid_release_input_path"));
+	}
+});
+
+test("worker release inventory rejects Gateway and legacy composite paths", (context: TestContext) => {
+	const inventory: InventoryDocument = JSON.parse(readFileSync(path.join(ROOT, "worker-release-inputs.json"), "utf8"));
 	// The loop below iterates whatever the file happens to contain, so on its own
 	// it would stay green if someone emptied the list. `verify-worker-release-inputs.mjs`
 	// used to pin the contents against a frozen constant; that script is gone, so
@@ -277,27 +382,27 @@ test("worker release inventory rejects Gateway and legacy composite paths", (con
 });
 
 test("release CLI rejects raw handoff arguments and requires the reviewed archive lane", () => {
-	const messages = [];
-	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	const messages: string[] = [];
+	const io = { log: (message: string) => messages.push(message), error: (message: string) => messages.push(message) };
 	assert.equal(runCli(["--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
+	assert.equal(JSON.parse(popMessage(messages)).error_code, "invalid_argument");
 	assert.equal(runCli(["--json"], io), 2);
-	assert.equal(JSON.parse(messages.pop()).error_code, "gateway_handoff_archive_required");
+	assert.equal(JSON.parse(popMessage(messages)).error_code, "gateway_handoff_archive_required");
 });
 
-function handoffFixture(context) {
+function handoffFixture(context: TestContext): HandoffFixture {
 	const root = scratchDir(context, "ceal-worker-release-inputs-");
 	const protocol = packedPackage(root, {
 		name: "@corca-ai/ceal-protocol",
 		exports: { ".": "./dist/index.js", "./conformance": "./dist/conformance.js" },
 		files: { "dist/index.js": "export const protocol = '1.3.0';\n", "dist/conformance.js": "export const conformance = true;\n" },
 	});
-	const producer = {
+	const producer: Producer = {
 		...CONTRACT_REPO.gateway,
 		scoped_paths_clean: true,
 	};
 	writeFileSync(path.join(root, MARKER_NAME), MARKER_CONTENTS);
-	const provenance = {
+	const provenance: HandoffFixture["provenance"] = {
 		schema_version: "ceal.gateway_protocol_artifact.v1",
 		proof_level: "local_state",
 		writes_external: false,
@@ -320,7 +425,7 @@ function handoffFixture(context) {
 	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
 	const controlConformance = path.join(root, "gateway-leased-consumer-control-conformance.json");
 	const handoffManifest = path.join(root, "gateway-protocol-handoff.json");
-	const fixture = {
+	const fixture: HandoffFixture = {
 		root,
 		protocolTarball: protocol.tarball,
 		protocolProvenance,
@@ -329,6 +434,17 @@ function handoffFixture(context) {
 		protocol,
 		producer,
 		provenance,
+		control: {
+			schema_version: "ceal.gateway_leased_consumer_control_conformance_handoff.v1",
+			proof_level: "local_state",
+			writes_external: false,
+			source: {
+				repository: producer.repository,
+				commit: producer.commit,
+				tree: producer.tree,
+				protocol_tree: producer.protocol_tree,
+			},
+		},
 	};
 	writeFileSync(protocolProvenance, `${JSON.stringify(provenance)}\n`);
 	writeControlConformance(fixture);
@@ -336,7 +452,15 @@ function handoffFixture(context) {
 	return fixture;
 }
 
-function packedPackage(root, { name, exports, dependencies = {}, files }) {
+function packedPackage(
+	root: string,
+	{
+		name,
+		exports,
+		dependencies = {},
+		files,
+	}: { name: string; exports: Record<string, string>; dependencies?: Record<string, string>; files: Record<string, string> },
+): PackedPackage {
 	const staging = path.join(root, `staging-${name.replaceAll("/", "-").replaceAll("@", "")}`, "package");
 	mkdirSync(path.join(staging, "dist"), { recursive: true });
 	const manifest = { name, version: VENDORED_PROTOCOL_VERSION, type: "module", exports, dependencies };
@@ -358,7 +482,10 @@ function packedPackage(root, { name, exports, dependencies = {}, files }) {
 	};
 }
 
-function writeControlConformance(fixture, schemaVersion = "ceal.gateway_leased_consumer_control_conformance_handoff.v1") {
+function writeControlConformance(
+	fixture: HandoffFixture,
+	schemaVersion = "ceal.gateway_leased_consumer_control_conformance_handoff.v1",
+): void {
 	fixture.control = {
 		schema_version: schemaVersion,
 		proof_level: "local_state",
@@ -373,7 +500,7 @@ function writeControlConformance(fixture, schemaVersion = "ceal.gateway_leased_c
 	writeFileSync(fixture.controlConformance, `${JSON.stringify(fixture.control)}\n`);
 }
 
-function writeHandoffManifest(fixture) {
+function writeHandoffManifest(fixture: HandoffFixture): void {
 	const sidecar = readFileSync(fixture.protocolProvenance);
 	const control = readFileSync(fixture.controlConformance);
 	const manifest = {
@@ -390,7 +517,7 @@ function writeHandoffManifest(fixture) {
 	fixture.expectedHandoffSha256 = sha256(readFileSync(fixture.handoffManifest));
 }
 
-function record(item) {
+function record(item: PackedPackage) {
 	return {
 		package: item.name,
 		version: item.version,
@@ -402,12 +529,17 @@ function record(item) {
 	};
 }
 
-function rest({ protocolTarball: _protocolTarball, ...fixture }) {
+function rest({ protocolTarball: _protocolTarball, ...fixture }: HandoffFixture): Omit<HandoffFixture, "protocolTarball"> {
 	return fixture;
 }
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function hasCode(code) {
-	return (error) => error instanceof WorkerReleaseInputError && error.code === code;
+function popMessage(messages: string[]): string {
+	const message = messages.pop();
+	if (message === undefined) throw new Error("expected CLI message");
+	return message;
+}
+function hasCode(code: string): (error: unknown) => boolean {
+	return (error: unknown) => error instanceof WorkerReleaseInputError && error.code === code;
 }
