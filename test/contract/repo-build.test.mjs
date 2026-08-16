@@ -17,7 +17,7 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { ensurePackageBuilt, processIsGone, REPO_ROOT, withDistLock } from "../repo-build.mjs";
-import { scratchDir } from "../scratch-dir.mjs";
+import { scratchDir } from "../scratch-dir.ts";
 
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const HELPER = path.join(REPO_ROOT, "test", "repo-build.mjs");

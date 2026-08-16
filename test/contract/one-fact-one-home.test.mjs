@@ -17,7 +17,7 @@ import {
 	DUPLICATE_LITERAL_MIN_BODY_LENGTH,
 } from "../../scripts/lib/duplicate-literal.mjs";
 import { analyzeStoreLockCensus } from "../../scripts/lib/store-lock-census.mjs";
-import { scratchTree } from "../scratch-dir.mjs";
+import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PACKAGE = "packages/ceal-worker-cli/src";

@@ -23,7 +23,7 @@ import {
 	WorkerAcceptanceError,
 } from "../../scripts/worker-acceptance-packet.mjs";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.mjs";
-import { scratchDir } from "../scratch-dir.mjs";
+import { scratchDir } from "../scratch-dir.ts";
 
 // Contract tier and offline by design: every refusal below is a decision this
 // command makes before it would contact anything, and the whole point of the

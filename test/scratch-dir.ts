@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { TestContext } from "node:test";
 
 // Almost every suite here needs a temporary directory that is removed when the
 // test ends, and each had written the same three lines: mkdtemp under tmpdir,
@@ -18,7 +19,7 @@ import path from "node:path";
 // back and compares it against the other. Several suites already learned that
 // one at a time and open-coded `realpathSync(mkdtempSync(...))`; the ones that
 // had not were green on Linux and red on the first macOS run that reached them.
-export function scratchDir(context, prefix) {
+export function scratchDir(context: TestContext, prefix: string): string {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	return root;
@@ -33,7 +34,7 @@ export function scratchDir(context, prefix) {
  * — a suite proving two one-fact-one-home detectors reproducing the defect in
  * its own fixtures, which is the pattern those detectors exist to find.
  */
-export function scratchTree(context, prefix, files) {
+export function scratchTree(context: TestContext, prefix: string, files: Record<string, string>): string {
 	const root = scratchDir(context, prefix);
 	for (const [relative, contents] of Object.entries(files)) {
 		const absolute = path.join(root, relative);

@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.mjs";
-import { scratchDir, scratchTree } from "../scratch-dir.mjs";
+import { scratchDir, scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { materializeSignedGatewayProtocolSource } from "../../scripts/materialize-signed-gateway-protocol-source.mjs";
 import { resolveWorkerReleaseDevelopmentInputs, runCli, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.mjs";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.mjs";
-import { scratchDir } from "../scratch-dir.mjs";
+import { scratchDir } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONTRACT_REPO = createProtocolRepoFixture();

@@ -101,7 +101,6 @@
 		"test/repo-build-supervisor.mjs",
 		"test/repo-build.mjs",
 		"test/run-source-tests.mjs",
-		"test/scratch-dir.mjs",
 		"test/source-loader.mjs",
 		"test/worker-native-artifact.test.mjs",
 		"test/worker-release-installer.test.mjs",

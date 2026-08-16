@@ -3,7 +3,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { assertNoSymlinkComponents } from "../../scripts/lib/safe-output-path.ts";
-import { scratchDir } from "../scratch-dir.mjs";
+import { scratchDir } from "../scratch-dir.ts";
 
 class GuardError extends Error {
 	constructor(code, message) {
