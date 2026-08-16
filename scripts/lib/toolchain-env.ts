@@ -2,11 +2,12 @@
  * Environment for a child that is a *toolchain* — a compiler, a package manager,
  * a packer — rather than repo-owned script code.
  *
- * `NODE_V8_COVERAGE` is inherited by every descendant, so running the release and
- * contract tiers under c8 put every `tsc` and every `npm` those tiers spawn under
- * the V8 collector too. None of that lands in the measured surface: the scripts
- * coverage run remaps onto `scripts/**` and discards the rest, so the profiles
- * were written, read, and thrown away. They were most of the bytes.
+ * `NODE_OPTIONS` and `NODE_V8_COVERAGE` are inherited by every descendant.
+ * The former can inject the caller's source loader into npm or tsc; the latter
+ * puts every toolchain child under the caller's V8 collector. Neither belongs
+ * to the toolchain contract. The scripts coverage run remaps onto `scripts/**`
+ * and discards those child profiles, so they were written, read, and thrown
+ * away. They were most of the bytes.
  *
  * Reproduce the waste with `NODE_V8_COVERAGE=/tmp/cc npm run test:release` and
  * read the first `file:` URL of each profile under `/tmp/cc`.
@@ -21,6 +22,6 @@
  * is supposed to be a function of its inputs and nothing else.
  */
 export function toolchainEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-	const { NODE_V8_COVERAGE: _collector, ...rest } = base;
+	const { NODE_OPTIONS: _nodeOptions, NODE_V8_COVERAGE: _collector, ...rest } = base;
 	return rest;
 }

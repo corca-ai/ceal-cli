@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { resolvePackageBin } from "./lib/package-bin.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { toolchainEnv } from "./lib/toolchain-env.ts";
@@ -378,28 +379,11 @@ function compilePackage(packageDirectory: string, dependencyRoot: string, depend
 }
 
 function resolveTypeScriptCompiler(dependencyRoot: string): string {
-	const packageDirectory = path.join(dependencyRoot, "typescript");
-	let packageJson: unknown;
 	try {
-		packageJson = JSON.parse(readFileSync(path.join(packageDirectory, "package.json"), "utf8"));
+		return resolvePackageBin(path.join(dependencyRoot, "typescript"));
 	} catch {
-		fail("missing_build_dependency", "Staged TypeScript dependency metadata is unavailable.");
+		fail("missing_build_dependency", "Staged TypeScript dependency does not declare a safe compiler entrypoint.");
 	}
-	const record = asRecord(packageJson);
-	if (!record) fail("missing_build_dependency", "Staged TypeScript dependency metadata is invalid.");
-	const entries: Array<{ name: string; path: string }> = [];
-	if (asRecord(record.bin)) {
-		for (const [name, value] of Object.entries(asRecord(record.bin) ?? {})) {
-			if (typeof value === "string") entries.push({ name, path: value });
-		}
-	}
-	const compiler = entries.find(({ name }) => /^tsc\d*$/u.test(name));
-	if (!compiler) fail("missing_build_dependency", "Staged TypeScript dependency does not declare a safe compiler entrypoint.");
-	if (compiler.path.includes("\\")) fail("missing_build_dependency", "Staged TypeScript compiler entrypoint is unsafe.");
-	const compilerPath = containedPath(packageDirectory, compiler.path, "missing_build_dependency");
-	if (!existsSync(compilerPath) || !lstatSync(compilerPath).isFile() || lstatSync(compilerPath).isSymbolicLink())
-		fail("missing_build_dependency", "Staged TypeScript compiler entrypoint is unavailable.");
-	return compilerPath;
 }
 
 function asRecord(value: unknown): JsonRecord | undefined {

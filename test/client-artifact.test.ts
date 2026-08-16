@@ -9,14 +9,14 @@ import { pathToFileURL } from "node:url";
 import { parse } from "yaml";
 import { buildIsolatedWorkspaceArtifacts, REPO_ROOT, sha256 } from "./artifact-workspace.ts";
 
-let artifact;
-let checkoutBeforeArtifactBuild;
+let artifact: ReturnType<typeof buildIsolatedWorkspaceArtifacts>;
+let checkoutBeforeArtifactBuild: string;
 test.before(() => {
 	checkoutBeforeArtifactBuild = checkoutDistFingerprint();
 	artifact = buildIsolatedWorkspaceArtifacts({ includeWorker: true });
 	assert.equal(checkoutDistFingerprint(), checkoutBeforeArtifactBuild, "isolated artifact build must not change checkout dist");
 });
-test.after(() => artifact.cleanup());
+test.after(() => artifact?.cleanup());
 
 function checkoutDistFingerprint() {
 	const roots = ["ceal-protocol", "ceal-client", "ceal-worker-cli"].map((name) => path.join(REPO_ROOT, "packages", name, "dist"));
@@ -24,7 +24,7 @@ function checkoutDistFingerprint() {
 	for (const root of roots) {
 		hash.update(`${root}:${existsSync(root)}\n`);
 		if (!existsSync(root)) continue;
-		const visit = (directory) => {
+		const visit = (directory: string) => {
 			for (const name of readdirSync(directory).sort()) {
 				const file = path.join(directory, name);
 				const metadata = statSync(file);
@@ -120,7 +120,7 @@ test("isolated worker executable keeps every static/private branch ahead of the 
 			].join("\n"),
 		);
 		const home = path.join(root, "home");
-		const runStub = (args) =>
+		const runStub = (args: string[]) =>
 			spawnSync(process.execPath, [path.join(stubDist, "bin.js"), ...args], {
 				encoding: "utf8",
 				env: { ...process.env, HOME: home },
@@ -134,7 +134,7 @@ test("isolated worker executable keeps every static/private branch ahead of the 
 			["version", "unexpected"],
 		]) {
 			const result = runStub(staticArgs);
-			assert.ok([0, 2].includes(result.status), `${staticArgs.join(" ")}: ${result.stderr}`);
+			assert.ok(result.status === 0 || result.status === 2, `${staticArgs.join(" ")}: ${result.stderr}`);
 			assert.equal(existsSync(runtimeMarker), false, `${staticArgs.join(" ")} evaluated the full runtime`);
 			assert.equal(existsSync(privateRuntimeMarker), false, `${staticArgs.join(" ")} evaluated the private runtime`);
 		}

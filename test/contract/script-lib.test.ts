@@ -7,6 +7,7 @@ import test from "node:test";
 import { codedErrorClass } from "../../scripts/lib/coded-error.ts";
 import { parseScriptArgs } from "../../scripts/lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
+import { toolchainEnv } from "../../scripts/lib/toolchain-env.ts";
 import { GatewayProtocolConsumerError } from "../../scripts/verify-gateway-protocol-consumer.ts";
 
 function thrower() {
@@ -115,6 +116,17 @@ test("consumer error workspace remains writable for the keep-workspace fallback"
 	const error = new GatewayProtocolConsumerError("worker_smoke_failed", "boom");
 	error.workspace ??= "/tmp/kept-consumer-workspace";
 	assert.equal(error.workspace, "/tmp/kept-consumer-workspace");
+});
+
+test("toolchain environments strip Node injection variables without mutating the base", () => {
+	const base = { NODE_OPTIONS: "--require=hook", NODE_V8_COVERAGE: "/tmp/coverage", NODE_PATH: "/tmp/modules", KEEP: "value" };
+	assert.deepEqual(toolchainEnv(base), { NODE_PATH: "/tmp/modules", KEEP: "value" });
+	assert.deepEqual(base, {
+		NODE_OPTIONS: "--require=hook",
+		NODE_V8_COVERAGE: "/tmp/coverage",
+		NODE_PATH: "/tmp/modules",
+		KEEP: "value",
+	});
 });
 
 test("skill directory bundles are deterministic, complete, and refuse unsafe entries", (context) => {
