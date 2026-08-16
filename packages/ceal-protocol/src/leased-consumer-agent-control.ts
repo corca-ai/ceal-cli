@@ -1,5 +1,5 @@
-import { decodeCealLeasedConsumerMessengerContext, type CealLeasedConsumerCapabilityProjectionResult, type CealLeasedConsumerNormalizedProjection } from "./leased-consumer-control.js";
-import { decodeCealLeasedConsumerCapabilityCatalog } from "./leased-consumer-capability-catalog.js";
+import { decodeCealLeasedConsumerMessengerContext, type CealLeasedConsumerCapabilityProjectionResult, type CealLeasedConsumerNormalizedProjection } from "./leased-consumer-control.ts";
+import { decodeCealLeasedConsumerCapabilityCatalog } from "./leased-consumer-capability-catalog.ts";
 
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const TOKEN = /^ceal-control-v1[.][A-Za-z0-9_-]{43}$/u;

@@ -7,12 +7,14 @@ import {
 	CEAL_GATEWAY_WRITE_IDENTITY_ROLES,
 	decodeCealClientResponse,
 	isValidCealGatewayWriteIdentitySeparation,
+	type CealGatewayWriteReceiptRequest,
 } from "../dist/index.js";
+import { isErrorWithCode } from "./protocol-test-support.ts";
 
-const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
+const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const WRITE_REQUEST_REF = "gateway-write-request:123e4567-e89b-12d3-a456-426614174000";
 
-function receipt(overrides = {}) {
+function receipt(overrides: Record<string, unknown> = {}) {
 	return {
 		schema_version: "ceal.gateway_write_request_receipt.v1",
 		write_request_sha256: sha256(WRITE_REQUEST_REF),
@@ -26,8 +28,8 @@ function receipt(overrides = {}) {
 	};
 }
 
-function readbackResponse(body) {
-	const request = { protocol_version: CEAL_PROTOCOL_VERSION, request_id: "request:readback:write-identity", profile_ref: "profile:test", operation: "readback", body: { write_request_ref: WRITE_REQUEST_REF } };
+function readbackResponse(body: unknown) {
+	const request: CealGatewayWriteReceiptRequest = { protocol_version: CEAL_PROTOCOL_VERSION, request_id: "request:readback:write-identity", profile_ref: "profile:test", operation: "readback", body: { write_request_ref: WRITE_REQUEST_REF } };
 	const response = {
 		protocol_version: CEAL_PROTOCOL_VERSION, request_id: request.request_id, ok: true,
 		proof_ref_or_unavailable: `proof:${request.request_id}`,
@@ -80,5 +82,5 @@ test("the wire decoder refuses a collapsed receipt at the readback boundary", ()
 	const { request, response } = readbackResponse(receipt());
 	assert.deepEqual(decodeCealClientResponse(response, request), response);
 	const collapsed = readbackResponse(receipt({ normalized_mutation_sha256: sha256(WRITE_REQUEST_REF) }));
-	assert.throws(() => decodeCealClientResponse(collapsed.response, collapsed.request), (error) => error.code === "invalid_client_response");
+	assert.throws(() => decodeCealClientResponse(collapsed.response, collapsed.request), (error) => isErrorWithCode(error, "invalid_client_response"));
 });

@@ -1,4 +1,4 @@
-import { isCealPublicSafeDisplayName } from "./gateway-validation-primitives.js";
+import { isCealPublicSafeDisplayName } from "./gateway-validation-primitives.ts";
 
 export interface CealLeasedConsumerMessageAuthor {
 	author_ref: string;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isCealPublicSafeDisplayName, isCealPublicSafeText, RAW_PROVIDER_REF, SAFE_REF as VALIDATION_SAFE_REF, SECRET_MATERIAL } from "./gateway-validation-primitives.js";
+import { isCealPublicSafeDisplayName, isCealPublicSafeText, RAW_PROVIDER_REF, SAFE_REF as VALIDATION_SAFE_REF, SECRET_MATERIAL } from "./gateway-validation-primitives.ts";
 
 /**
  * Provider-neutral, read-only result custody. This vocabulary is deliberately

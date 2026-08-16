@@ -1,4 +1,4 @@
-import { requireJsonByteSize } from "./gateway-validation-primitives.js";
+import { requireJsonByteSize } from "./gateway-validation-primitives.ts";
 import {
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
@@ -7,7 +7,7 @@ import {
 	decodeCealLeasedConsumerCapabilityControlResponse,
 	type CealLeasedConsumerCapabilityControlRequest,
 	type CealLeasedConsumerCapabilityControlResponse,
-} from "./leased-consumer-control.js";
+} from "./leased-consumer-control.ts";
 import {
 	decodeCealLeasedConsumerAgentControlProjectionResult,
 	decodeCealLeasedConsumerControlEffectCompleteInput,
@@ -15,21 +15,21 @@ import {
 	isCealLeasedConsumerControlEffectCompleteCandidate,
 	type CealLeasedConsumerControlEffectCompleteInput,
 	type CealLeasedConsumerV5CapabilityProjectionResult,
-} from "./leased-consumer-agent-control.js";
+} from "./leased-consumer-agent-control.ts";
 import {
 	decodeCealLeasedConsumerCapabilityNotificationBinding,
 	decodeCealLeasedConsumerCapabilityNotificationReceiptResult,
 	type CealLeasedConsumerCapabilityNotificationBinding,
 	type CealLeasedConsumerCapabilityNotificationReceiptResult,
-} from "./leased-consumer-notification.js";
+} from "./leased-consumer-notification.ts";
 
-export * from "./leased-consumer-control.js";
-export * from "./leased-consumer-directory-reads.js";
-export * from "./leased-consumer-notion.js";
-export * from "./leased-consumer-search-arguments.js";
-export * from "./leased-consumer-agent-control.js";
-export * from "./leased-consumer-presentation.js";
-export * from "./leased-consumer-notification.js";
+export * from "./leased-consumer-control.ts";
+export * from "./leased-consumer-directory-reads.ts";
+export * from "./leased-consumer-notion.ts";
+export * from "./leased-consumer-search-arguments.ts";
+export * from "./leased-consumer-agent-control.ts";
+export * from "./leased-consumer-presentation.ts";
+export * from "./leased-consumer-notification.ts";
 
 /**
  * Candidate-only v5 frame family. The currently selected serving ABI remains

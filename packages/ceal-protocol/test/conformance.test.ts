@@ -13,10 +13,7 @@ import {
 	validateCorpus,
 	verifyCorpusDigest,
 } from "../dist/conformance.js";
-
-function cloneJson(value) {
-	return JSON.parse(JSON.stringify(value));
-}
+import { cloneJson } from "./protocol-test-support.ts";
 
 test("canonical corpus validates exact bytes and runs through a consumer harness", async () => {
 	const { corpus, digest } = await loadCanonicalCorpus();

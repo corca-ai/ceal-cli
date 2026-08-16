@@ -8,11 +8,13 @@ export type CealProtocolValidationErrorCode = "invalid_gateway_request" | "inval
 
 export class CealProtocolValidationError extends Error {
 	override readonly name = "CealProtocolValidationError";
+	readonly code: CealProtocolValidationErrorCode;
 
-	constructor(readonly code: CealProtocolValidationErrorCode) {
+	constructor(code: CealProtocolValidationErrorCode) {
 		super(code === "invalid_gateway_request"
 			? "Ceal Gateway request is invalid."
 			: "Ceal client response is invalid.");
+		this.code = code;
 	}
 }
 

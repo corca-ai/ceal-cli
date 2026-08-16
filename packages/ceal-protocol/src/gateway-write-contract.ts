@@ -23,7 +23,7 @@
  * only by the write contract's index signature: no type, no member check, and no
  * grammar beyond generic safe-JSON.
  */
-import { assertSafeJsonValue, invalidResponse, requireRecord, requireSafeRef } from "./gateway-validation-primitives.js";
+import { assertSafeJsonValue, invalidResponse, requireRecord, requireSafeRef } from "./gateway-validation-primitives.ts";
 
 /** Gateway-guaranteed members. Adding one is a release event, not a free field. */
 export const CEAL_GATEWAY_WRITE_CONTRACT_CLOSED_VOCABULARIES: Readonly<Record<string, readonly string[]>> = Object.freeze({

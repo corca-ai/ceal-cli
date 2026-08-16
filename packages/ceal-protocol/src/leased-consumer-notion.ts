@@ -1,5 +1,5 @@
-import { CEAL_RESULT_MATERIALIZATION_MAX_FILES, CEAL_RESULT_MATERIALIZATION_MAX_PREVIEW_BYTES } from "./result-materialization.js";
-import { opaqueDocumentRef } from "./leased-consumer-opaque-refs.js";
+import { CEAL_RESULT_MATERIALIZATION_MAX_FILES, CEAL_RESULT_MATERIALIZATION_MAX_PREVIEW_BYTES } from "./result-materialization.ts";
+import { opaqueDocumentRef } from "./leased-consumer-opaque-refs.ts";
 
 export const CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_notion_search_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_notion_page_get_arguments.v1" as const;

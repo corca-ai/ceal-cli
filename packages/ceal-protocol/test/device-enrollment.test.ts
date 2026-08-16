@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { generateKeyPairSync, sign, verify } from "node:crypto";
 import test from "node:test";
-import { nonCanonicalBase64urlAlias } from "../../../scripts/test-support/base64url.mjs";
+import type {
+	CealDeviceEnrollmentChallenge,
+	CealDeviceEnrollmentDeliveryBinding,
+	CealDeviceEnrollmentStartResult,
+} from "../dist/index.js";
 import {
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
@@ -25,13 +29,14 @@ import {
 	deviceEnrollmentProofPayload,
 	deviceEnrollmentPublicKeyFingerprint,
 } from "../dist/index.js";
+import { nonCanonicalBase64urlAlias, requireString } from "./protocol-test-support.ts";
 
 const { privateKey: proofPrivateKey, publicKey: proofPublicKey } = generateKeyPairSync("ed25519");
 const { publicKey: recipientPublicKey } = generateKeyPairSync("x25519");
-const PROOF_KEY = proofPublicKey.export({ format: "jwk" }).x;
-const RECIPIENT_KEY = recipientPublicKey.export({ format: "jwk" }).x;
+const PROOF_KEY = requireString(proofPublicKey.export({ format: "jwk" }).x, "proof public key");
+const RECIPIENT_KEY = requireString(recipientPublicKey.export({ format: "jwk" }).x, "recipient public key");
 const NONCE = "qoI8FzONCv0y1G9ZgjVzcvQGuQ6lFzP-k6XPwHWE5UQ";
-const binding = {
+const binding: CealDeviceEnrollmentDeliveryBinding = {
 	gateway_origin: "https://ceal.example.test",
 	protocol_version: "1.3.0",
 	feature: CEAL_DEVICE_ENROLLMENT_FEATURE,
@@ -50,7 +55,7 @@ const binding = {
 	delivery_generation: 1,
 	expires_at: "2026-07-28T12:00:00.000Z",
 };
-const challenge = {
+const challenge: CealDeviceEnrollmentChallenge = {
 	schema_version: "ceal.device_enrollment_challenge.v1",
 	registration_ref: binding.registration_ref,
 	nonce_ref: "nonce:device-1",
@@ -90,7 +95,7 @@ test("device enrollment start names raw-key algorithms and embeds the required p
 	assert.deepEqual(decodeCealDeviceEnrollmentChallengeRequest({
 		schema_version: CEAL_DEVICE_ENROLLMENT_CHALLENGE_REQUEST_SCHEMA, registration_ref: binding.registration_ref, challenge_handle: "H".repeat(43),
 	}), { schema_version: CEAL_DEVICE_ENROLLMENT_CHALLENGE_REQUEST_SCHEMA, registration_ref: binding.registration_ref, challenge_handle: "H".repeat(43) });
-	const start = {
+	const start: CealDeviceEnrollmentStartResult = {
 		schema_version: "ceal.device_enrollment_start_result.v1", status: "pending", transaction_ref: binding.transaction_ref, registration_ref: binding.registration_ref,
 		gateway_origin: binding.gateway_origin, proof_key_sha256: binding.proof_key_sha256, recipient_key_sha256: binding.recipient_key_sha256,
 		challenge_handle: "H".repeat(43), browser_session_url: "https://ceal.example.test/device/session#opaque", challenge,

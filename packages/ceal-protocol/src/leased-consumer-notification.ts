@@ -1,4 +1,4 @@
-import { requireJsonByteSize } from "./gateway-validation-primitives.js";
+import { requireJsonByteSize } from "./gateway-validation-primitives.ts";
 
 /**
  * Gateway-parent → signed-worker → Agent notification for one exact leased

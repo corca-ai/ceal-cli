@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { decodeCealEnrollmentResponse } from "./enrollment.js";
+import { decodeCealEnrollmentResponse } from "./enrollment.ts";
 import type { CealEnrollmentResult } from "./enrollment.js";
-import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.ts";
 
 export const CEAL_DEVICE_ENROLLMENT_FEATURE = "device_enrollment_sealed_v1" as const;
 export const CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE = "device_enrollment_approval_wait_v1" as const;

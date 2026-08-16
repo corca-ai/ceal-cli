@@ -1,20 +1,20 @@
 import { createHash } from "node:crypto";
-import { decodeCealCapabilityNavigation } from "./capability-navigation.js";
-import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+import { decodeCealCapabilityNavigation } from "./capability-navigation.ts";
+import { CEAL_GATEWAY_POLICY_DENIAL_MESSAGE, CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.ts";
 import type { CealGatewayPolicyDenial, CealGatewayResponseFor } from "./gateway-response-types.js";
-import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.js";
-import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.js";
-import { validateCealGatewayAnnouncementWriteContract, validateCealGatewayWriteContract } from "./gateway-write-contract.js";
-export { CEAL_GATEWAY_WRITE_CONTRACT_CLOSED_VOCABULARIES } from "./gateway-write-contract.js";
-import { isValidCealGatewayWriteIdentitySeparation } from "./gateway-write-identity.js";
-import { validateCealGatewayScopedIdentityProjection } from "./gateway-scoped-identity-projection-validation.js";
+import { validateGatewayTargetCatalog } from "./gateway-target-catalog-validation.ts";
+import { validateGatewayCacheOrigin } from "./gateway-cache-origin-validation.ts";
+import { validateCealGatewayAnnouncementWriteContract, validateCealGatewayWriteContract } from "./gateway-write-contract.ts";
+export { CEAL_GATEWAY_WRITE_CONTRACT_CLOSED_VOCABULARIES } from "./gateway-write-contract.ts";
+import { isValidCealGatewayWriteIdentitySeparation } from "./gateway-write-identity.ts";
+import { validateCealGatewayScopedIdentityProjection } from "./gateway-scoped-identity-projection-validation.ts";
 export {
 	CEAL_GATEWAY_WRITE_IDENTITY_FIELDS,
 	CEAL_GATEWAY_WRITE_IDENTITY_ROLES,
 	isValidCealGatewayWriteIdentitySeparation,
-} from "./gateway-write-identity.js";
+} from "./gateway-write-identity.ts";
 export type { CealGatewayWriteIdentityRole } from "./gateway-write-identity.js";
-import { isValidCealGatewayHostNonClaims } from "./gateway-proof-claims.js";
+import { isValidCealGatewayHostNonClaims } from "./gateway-proof-claims.ts";
 export {
 	CEAL_GATEWAY_HOST_NON_CLAIM_ORDER,
 	CEAL_GATEWAY_MANDATORY_NON_CLAIM,
@@ -22,10 +22,10 @@ export {
 	CEAL_GATEWAY_PROOF_AXIS_NON_CLAIMS,
 	cealGatewayProofAxisState,
 	isValidCealGatewayHostNonClaims,
-} from "./gateway-proof-claims.js";
+} from "./gateway-proof-claims.ts";
 export type { CealGatewayProofAxis, CealGatewayProofAxisState, CealGatewayProviderReachDisposition } from "./gateway-proof-claims.js";
-export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.js";
-import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.js";
+export { CEAL_MAX_CACHE_ORIGIN_AGE_MS } from "./gateway-cache-origin-validation.ts";
+import { negotiateCealProtocol, parseProtocolVersion } from "./protocol-negotiation.ts";
 import type { CealClientFailure, CealClientOperation, CealClientSuccess, CealGatewayAnnouncementPolicy, CealGatewayCallRequest, CealGatewayDiscoverBody, CealGatewayDiscoverRequest, CealGatewayHandshakeRequest, CealGatewayAuditReadbackRequest, CealGatewayReadbackRequest, CealGatewayRequest, CealGatewayWriteReceiptRequest } from "./gateway-response-types.js";
 import {
 	assertSafeJsonValue,
@@ -44,16 +44,16 @@ import {
 	requireSafeRef,
 	requireSafeText, retainDeclaredResponseKeys,
 	SAFE_CODE, safeJsonNodeBudgetForBytes,
-} from "./gateway-validation-primitives.js";
-export { CEAL_PUBLIC_DISPLAY_NAME_MAX_BYTES, CealProtocolValidationError, isCealDerivedCapabilityResultSchema, isCealPublicSafeDisplayName, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.js";
+} from "./gateway-validation-primitives.ts";
+export { CEAL_PUBLIC_DISPLAY_NAME_MAX_BYTES, CealProtocolValidationError, isCealDerivedCapabilityResultSchema, isCealPublicSafeDisplayName, isCealPublicSafeText, redactCealPublicUnsafeText, SAFE_JSON_MIN_BYTES_PER_NODE, safeJsonNodeBudgetForBytes } from "./gateway-validation-primitives.ts";
 export type { CealProtocolValidationErrorCode } from "./gateway-validation-primitives.js";
-export { decodeCealCapabilityNavigation } from "./capability-navigation.js";
+export { decodeCealCapabilityNavigation } from "./capability-navigation.ts";
 export type { CealCapabilityNavigation } from "./capability-navigation.js";
 
 export {
 	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
 	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION, CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA,
-} from "./gateway-response-types.js";
+} from "./gateway-response-types.ts";
 export {
 	CEAL_ENROLLMENT_EXCHANGE_SCHEMA,
 	CEAL_ENROLLMENT_CREATE_SCHEMA,
@@ -63,7 +63,7 @@ export {
 	decodeCealEnrollmentCreateResult,
 	decodeCealEnrollmentExchangeRequest,
 	decodeCealEnrollmentResponse,
-} from "./enrollment.js";
+} from "./enrollment.ts";
 export type {
 	CealEnrollmentExchangeRequest,
 	CealEnrollmentCreateRequest,
@@ -72,9 +72,10 @@ export type {
 	CealEnrollmentResponse,
 	CealEnrollmentResult,
 } from "./enrollment.js";
-export * from "./device-enrollment.js";
-export * from "./leased-consumer-surfaces.js";
-export { PORTABLE_UNIX_SOCKET_PATH_MAX_BYTES, isSafeUnixSocketPath } from "./unix-socket-path-safety.js";
+export * from "./device-enrollment.ts";
+export * from "./leased-consumer-surfaces.ts";
+export * from "./leased-consumer-attachment-stream.ts";
+export { PORTABLE_UNIX_SOCKET_PATH_MAX_BYTES, isSafeUnixSocketPath } from "./unix-socket-path-safety.ts";
 export {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 	CEAL_CLIENT_REFRESH_RESULT_SCHEMA,
@@ -84,7 +85,7 @@ export {
 	decodeCealClientRefreshResponse,
 	decodeCealClientRevokeRequest,
 	decodeCealClientRevokeResponse,
-} from "./personal-client-session.js";
+} from "./personal-client-session.ts";
 export type {
 	CealClientRefreshRequest,
 	CealClientRefreshResponse,
@@ -132,9 +133,9 @@ export type {
 	CealGatewayRequestInput,
 	CealGatewayResponseFor,
 } from "./gateway-response-types.js";
-export { CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
-export * from "./gateway-additive-response-fields.js";
-export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.js";
+export { CEAL_GATEWAY_RECOVERY_KINDS, CEAL_PROTOCOL_VERSION } from "./gateway-response-types.ts";
+export * from "./gateway-additive-response-fields.ts";
+export { CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE, negotiateCealProtocol } from "./protocol-negotiation.ts";
 export type {
 	CealProtocolNegotiation,
 	CealProtocolNegotiationFailure,
@@ -158,7 +159,7 @@ export type {
 export {
 	GOVERNED_RUNNER_CORPUS_SCHEMA,
 	GOVERNED_RUNNER_CORPUS_VERSION,
-} from "./governed-runner-conformance.js";
+} from "./governed-runner-conformance.ts";
 export type {
 	GovernedRunnerConformanceCase,
 	GovernedRunnerConformanceCorpus,

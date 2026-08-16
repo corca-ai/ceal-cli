@@ -4,8 +4,8 @@
 	"source": {
 		"repository": "corca-ai/ceal",
 		"package_path": "packages/ceal-protocol",
-		"commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
-		"tree": "e20497d4ebe25a675012c676448e14eea4da891c"
+		"commit": "63e5cb1c72534fb9391bf39fccd5848cb915a1ed",
+		"tree": "42f9c7920b2c72fceb5347d9279537fca7e057ad"
 	},
 	"test_support": {
 		"source_path": "scripts/test-support/base64url.mjs",
@@ -14,9 +14,12 @@
 	},
 	"shipped": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
-		"status": "agreed",
+		"status": "diverged",
 		"gateway_commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
-		"protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c"
+		"protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c",
+		"reason": "candidate Gateway source 63e5cb1c72534fb9391bf39fccd5848cb915a1ed remains development-only until the signed handoff lock moves.",
+		"disposition_owner": "Gateway Protocol owner in corca-ai/ceal",
+		"disposition_request": "docs/protocol-quarantine.md"
 	},
 	"non_claims": [
 		"This pin records an identity; it does not fetch, verify against, or prove anything about the live corca-ai/ceal remote.",

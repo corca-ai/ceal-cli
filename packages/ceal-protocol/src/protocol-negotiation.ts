@@ -1,4 +1,4 @@
-import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.js";
+import { CEAL_PROTOCOL_VERSION } from "./gateway-response-types.ts";
 
 export const CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE = Object.freeze({
 	minimum: CEAL_PROTOCOL_VERSION,

@@ -1,4 +1,4 @@
-import { opaqueArtifactRef } from "./leased-consumer-opaque-refs.js";
+import { opaqueArtifactRef } from "./leased-consumer-opaque-refs.ts";
 
 export const CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_file_upload_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_FILE_UPLOAD_DATA_SCHEMA = "ceal.gateway_leased_agent_file_upload_data.v1" as const;

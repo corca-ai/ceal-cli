@@ -8,7 +8,7 @@ import {
 	type GovernedRunnerConformanceCase,
 	type GovernedRunnerConformanceCorpus,
 	type GovernedRunnerConformanceKind,
-} from "./index.js";
+} from "./index.ts";
 
 const CORPUS_URL = new URL("../conformance/governed-runner/v1/corpus.json", import.meta.url);
 const DIGEST_URL = new URL("../conformance/governed-runner/v1/corpus.json.sha256", import.meta.url);

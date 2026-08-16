@@ -23,6 +23,7 @@ export const opaqueThreadRef = opaqueRefMatcher("thread");
 export const opaqueArtifactRef = opaqueRefMatcher("artifact");
 export const opaqueDocumentRef = opaqueRefMatcher("document");
 export const safeReplyReceiptRef = opaqueRefMatcher("reply-receipt");
+export const opaqueCapabilityReceiptRef = opaqueRefMatcher("capability-receipt");
 
 export interface CealLeasedConsumerCapabilityHandle {
 	kind: "target" | "message" | "thread" | "artifact" | "document";

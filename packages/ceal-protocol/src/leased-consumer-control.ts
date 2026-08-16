@@ -9,20 +9,26 @@
  * beside an opaque subject ref; that context is neither a locator nor
  * authority.
  */
-import { isAuthorityStateKey, requireJsonByteSize } from "./gateway-validation-primitives.js";
-import { decodeResultMaterializationInput, decodeResultMaterializationResult, type CealLeasedConsumerResultMaterializationInput, type CealLeasedConsumerResultMaterializationResult } from "./result-materialization.js";
+import { isAuthorityStateKey, requireJsonByteSize } from "./gateway-validation-primitives.ts";
+import { decodeResultMaterializationInput, decodeResultMaterializationResult, type CealLeasedConsumerResultMaterializationInput, type CealLeasedConsumerResultMaterializationResult } from "./result-materialization.ts";
 export type { CealLeasedConsumerResultMaterializationInput, CealLeasedConsumerResultMaterializationResult } from "./result-materialization.js";
-import { validCealLeasedConsumerMessageAuthor, type CealLeasedConsumerMessageAuthor } from "./leased-consumer-message-author.js";
+import { validCealLeasedConsumerMessageAuthor, type CealLeasedConsumerMessageAuthor } from "./leased-consumer-message-author.ts";
 export type { CealLeasedConsumerMessageAuthor } from "./leased-consumer-message-author.js";
-import { decodeCealLeasedConsumerCapabilityCatalog, type CealLeasedConsumerCapabilityCatalog } from "./leased-consumer-capability-catalog.js";
-import { opaqueMessageRef, opaqueResultRef, opaqueTargetRef, opaqueThreadRef, safeReplyReceiptRef, validCealLeasedConsumerCapabilityHandle, type CealLeasedConsumerCapabilityHandle } from "./leased-consumer-opaque-refs.js";
+import { decodeCealLeasedConsumerCapabilityCatalog, type CealLeasedConsumerCapabilityCatalog } from "./leased-consumer-capability-catalog.ts";
+import { opaqueMessageRef, opaqueResultRef, opaqueTargetRef, opaqueThreadRef, safeReplyReceiptRef, validCealLeasedConsumerCapabilityHandle, type CealLeasedConsumerCapabilityHandle } from "./leased-consumer-opaque-refs.ts";
 export type { CealLeasedConsumerCapabilityHandle } from "./leased-consumer-opaque-refs.js";
-import { CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerNotionPageGetArguments, decodeCealLeasedConsumerNotionSearchArguments, validCealLeasedConsumerDocumentReadData, type CealLeasedConsumerDocumentReadData } from "./leased-consumer-notion.js";
-export { CEAL_LEASED_CONSUMER_DOCUMENT_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA } from "./leased-consumer-notion.js";
-import { CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_READ_ITEM_KINDS, decodeCealLeasedConsumerPeopleSearchArguments, validCealLeasedConsumerReadItemDetail, validCealLeasedConsumerSubjectRef, type CealLeasedConsumerResourceReadItem } from "./leased-consumer-directory-reads.js";
-import { CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS, cealLeasedConsumerSearchArgumentsDecoder, decodeCealLeasedConsumerFileSearchArguments, type CealLeasedConsumerSearchArguments } from "./leased-consumer-search-arguments.js";
-import { CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerFileUploadArguments, validCealLeasedConsumerFileUploadData, type CealLeasedConsumerFileUploadArguments, type CealLeasedConsumerFileUploadData } from "./leased-consumer-file-upload.js";
-export * from "./leased-consumer-file-upload.js";
+import { CEAL_LEASED_CONSUMER_COMMENT_CREATE_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCommentCreateArguments, validCealLeasedConsumerCommentCreateData, type CealLeasedConsumerCommentCreateArguments, type CealLeasedConsumerCommentCreateData } from "./leased-consumer-comment.ts";
+export * from "./leased-consumer-comment.ts";
+import { CEAL_LEASED_CONSUMER_DOCUMENT_CREATE_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerDocumentCreateArguments, validCealLeasedConsumerDocumentCreateData } from "./leased-consumer-document.ts"; export * from "./leased-consumer-document.ts";
+import { CEAL_LEASED_CONSUMER_GITHUB_ISSUE_CREATE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_GITHUB_ISSUE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_GITHUB_PULL_REQUEST_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubIssueCreateArguments, decodeCealLeasedConsumerGithubIssueGetArguments, decodeCealLeasedConsumerGithubPullRequestGetArguments, validCealLeasedConsumerGithubIssueCreateData, type CEAL_LEASED_CONSUMER_GITHUB_ISSUE_CREATE_DATA_SCHEMA, type CealLeasedConsumerGithubIssueCreateArguments, type CealLeasedConsumerGithubIssueGetArguments, type CealLeasedConsumerGithubPullRequestGetArguments } from "./leased-consumer-github.ts";
+export * from "./leased-consumer-github.ts";
+import { CEAL_LEASED_CONSUMER_CALENDAR_AVAILABILITY_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_CALENDAR_EVENT_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_CALENDAR_EVENT_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_COLLECTION_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_GITHUB_REPOSITORY_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_GITHUB_WORKFLOW_RUN_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCalendarAvailabilityArguments, decodeCealLeasedConsumerCalendarEventGetArguments, decodeCealLeasedConsumerCalendarEventSearchArguments, decodeCealLeasedConsumerCollectionSearchArguments, decodeCealLeasedConsumerGithubRepositoryGetArguments, decodeCealLeasedConsumerGithubWorkflowRunGetArguments, validCealLeasedConsumerCalendarAvailabilityData, validCealLeasedConsumerCalendarEventGetData, validCealLeasedConsumerCalendarEventSearchData, validCealLeasedConsumerCollectionSearchData, validCealLeasedConsumerGithubRepositoryReadData, validCealLeasedConsumerGithubWorkflowRunReadData, type CEAL_LEASED_CONSUMER_CALENDAR_AVAILABILITY_DATA_SCHEMA, type CEAL_LEASED_CONSUMER_CALENDAR_EVENT_GET_DATA_SCHEMA, type CEAL_LEASED_CONSUMER_CALENDAR_EVENT_SEARCH_DATA_SCHEMA, type CEAL_LEASED_CONSUMER_COLLECTION_SEARCH_DATA_SCHEMA, type CEAL_LEASED_CONSUMER_GITHUB_REPOSITORY_READ_DATA_SCHEMA, type CEAL_LEASED_CONSUMER_GITHUB_WORKFLOW_RUN_READ_DATA_SCHEMA, type CealLeasedConsumerCalendarAvailabilityArguments, type CealLeasedConsumerCalendarEventGetArguments, type CealLeasedConsumerCalendarEventSearchArguments, type CealLeasedConsumerCollectionSearchArguments, type CealLeasedConsumerGithubRepositoryGetArguments, type CealLeasedConsumerGithubWorkflowRunGetArguments } from "./leased-consumer-provider-reads.ts"; export * from "./leased-consumer-provider-reads.ts";
+import { CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerNotionPageGetArguments, decodeCealLeasedConsumerNotionSearchArguments, validCealLeasedConsumerDocumentReadData, type CealLeasedConsumerDocumentReadData } from "./leased-consumer-notion.ts";
+export { CEAL_LEASED_CONSUMER_DOCUMENT_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA } from "./leased-consumer-notion.ts";
+import { CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_READ_ITEM_KINDS, decodeCealLeasedConsumerPeopleSearchArguments, validCealLeasedConsumerReadItemDetail, validCealLeasedConsumerSubjectRef, type CealLeasedConsumerResourceReadItem } from "./leased-consumer-directory-reads.ts";
+import { CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS, cealLeasedConsumerSearchArgumentsDecoder, decodeCealLeasedConsumerFileSearchArguments, type CealLeasedConsumerSearchArguments } from "./leased-consumer-search-arguments.ts";
+import { CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerFileUploadArguments, validCealLeasedConsumerFileUploadData, type CealLeasedConsumerFileUploadArguments, type CealLeasedConsumerFileUploadData } from "./leased-consumer-file-upload.ts";
+export * from "./leased-consumer-file-upload.ts";
 import {
 	CEAL_LEASED_CONSUMER_SHEETS_VALUES_CLEAR_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_ARGUMENTS_SCHEMA,
@@ -39,13 +45,13 @@ import {
 	type CealLeasedConsumerSheetsClearData,
 	type CealLeasedConsumerSheetsReadData,
 	type CealLeasedConsumerSheetsUpdateData,
-} from "./leased-consumer-sheets.js";
-export * from "./leased-consumer-sheets.js";
+} from "./leased-consumer-sheets.ts";
+export * from "./leased-consumer-sheets.ts";
 import {
 	CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_LABEL_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_CONTROL_TOKEN_MAX_BYTES, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_MAX_CONTROLS, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_PRESENTATION_V2_SCHEMA, validCealLeasedConsumerCompletedPhaseHistory, type CealLeasedConsumerMessagePresentation,
-} from "./leased-consumer-presentation.js";
-import { CEAL_LEASED_CONSUMER_ARTIFACT_CHUNK_MAX_BYTES, CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES, CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA, CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA, CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_INTAKE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_WRITE_MESSAGE_HANDLE_LIMIT } from "./leased-consumer-control-schemas.js";
-export * from "./leased-consumer-control-schemas.js";
+} from "./leased-consumer-presentation.ts";
+import { CEAL_LEASED_CONSUMER_ARTIFACT_CHUNK_MAX_BYTES, CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES, CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_CONTROL_SESSION_SCHEMA, CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES, CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_SCHEMA, CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA, CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_REPLY_INTAKE_DATA_SCHEMA, CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA, CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_RESULT_CONTROL_REQUEST_SCHEMA, CEAL_LEASED_CONSUMER_RESULT_CONTROL_RESPONSE_SCHEMA, CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_WRITE_MESSAGE_HANDLE_LIMIT } from "./leased-consumer-control-schemas.ts";
+export * from "./leased-consumer-control-schemas.ts";
 
 export type CealLeasedConsumerControlOperation = "acquire" | "projection" | "recheck" | "call" | "complete";
 export type CealLeasedConsumerReplyControlOperation = CealLeasedConsumerControlOperation | "reply";
@@ -208,6 +214,7 @@ export type CealLeasedConsumerCapabilityArguments =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA; message_ref: string; text: string; presentation?: CealLeasedConsumerMessagePresentation }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA; message_ref: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA; kind: "conversation" | "identity" | "usergroup" | "permalink"; query: string }
+	| CealLeasedConsumerCommentCreateArguments | CealLeasedConsumerGithubIssueCreateArguments | CealLeasedConsumerGithubIssueGetArguments | CealLeasedConsumerGithubPullRequestGetArguments | CealLeasedConsumerGithubRepositoryGetArguments | CealLeasedConsumerGithubWorkflowRunGetArguments | CealLeasedConsumerCollectionSearchArguments | CealLeasedConsumerCalendarAvailabilityArguments | CealLeasedConsumerCalendarEventSearchArguments | CealLeasedConsumerCalendarEventGetArguments
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA; activity: "typing" | "none" }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA; message_ref: string; name: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA; include_disabled?: boolean }
@@ -311,6 +318,7 @@ export type CealLeasedConsumerCapabilityData =
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA; items: readonly { text: string; author?: CealLeasedConsumerMessageAuthor }[] }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed"; text?: string }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed" }
+	| CealLeasedConsumerCommentCreateData
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA; truncated?: boolean; items: readonly CealLeasedConsumerResourceReadItem[] }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA; terminal: "acknowledged" | "idempotency_replayed" }
 	| { schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed" }
@@ -320,7 +328,14 @@ export type CealLeasedConsumerCapabilityData =
 	| CealLeasedConsumerDocumentReadData
 	| CealLeasedConsumerSheetsReadData
 	| CealLeasedConsumerSheetsUpdateData
-	| CealLeasedConsumerSheetsClearData;
+	| CealLeasedConsumerSheetsClearData
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_GITHUB_ISSUE_CREATE_DATA_SCHEMA; terminal: "readback_confirmed" | "idempotency_replayed" }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_GITHUB_REPOSITORY_READ_DATA_SCHEMA; repository: Record<string, unknown> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_GITHUB_WORKFLOW_RUN_READ_DATA_SCHEMA; workflow_run: Record<string, unknown> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_COLLECTION_SEARCH_DATA_SCHEMA; query: Record<string, unknown>; offset: number; result_count: number; results: readonly Record<string, unknown>[]; coverage: Record<string, unknown> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_CALENDAR_AVAILABILITY_DATA_SCHEMA; time_min: string; time_max: string; busy_periods: readonly Record<string, string>[]; partial: boolean }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_CALENDAR_EVENT_SEARCH_DATA_SCHEMA; query: Record<string, unknown>; time_min: string; time_max: string; result_count: number; results: readonly Record<string, unknown>[]; coverage: Record<string, unknown> }
+	| { schema_version: typeof CEAL_LEASED_CONSUMER_CALENDAR_EVENT_GET_DATA_SCHEMA; summary: string | null; start: string | null; end: string | null; status: string | null };
 
 export type CealLeasedConsumerCapabilityControlCallResult =
 	| { status: "result"; result: CealLeasedConsumerCapabilityResult }
@@ -359,8 +374,7 @@ const TERMINAL_STATUSES = new Set<CealLeasedConsumerControlTerminalResult["statu
 // undeclared-capability path — bounded generic argument safety and a Gateway
 // authorization denial — not a decode throw, because #700 already stopped an
 // unknown id from ending the frame loop.
-export const CEAL_LEASED_CONSUMER_V4_READ_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "resource.resolve", "directory.usergroups.list", "directory.usergroups.members.list", "directory.people.search", "identity.profile_image.get", "conversation.direct.resolve", "file.search", "notion.search", "notion.page.get", "sheets.values.read"] as const);
-export const CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS = Object.freeze(["message.create", "message.update", "message.delete", "presentation.activity.set", "message.reaction.add", "workflow.reply_intake.register", "artifact.stage", "file.upload", "sheets.values.update", "sheets.values.clear"] as const);
+export const CEAL_LEASED_CONSUMER_V4_READ_CAPABILITY_IDS = Object.freeze(["message.search", "message.get", "conversation.thread.get", "resource.resolve", "directory.usergroups.list", "directory.usergroups.members.list", "directory.people.search", "identity.profile_image.get", "conversation.direct.resolve", "file.search", "github.issue.get", "github.pull_request.get", "github.repository.get", "collection.search", "github.workflow_run.get", "calendar.availability", "calendar.event.search", "calendar.event.get", "notion.search", "notion.page.get", "sheets.values.read"] as const); export const CEAL_LEASED_CONSUMER_V4_WRITE_CAPABILITY_IDS = Object.freeze(["message.create", "message.update", "message.delete", "comment.create", "document.create", "github.issue.create", "presentation.activity.set", "message.reaction.add", "workflow.reply_intake.register", "artifact.stage", "file.upload", "sheets.values.update", "sheets.values.clear"] as const);
 // Delete and update intentionally have no ingress bootstrap context. The
 // ingress message is normally user-authored, and the continuation store is
 // deny-default for updateability: a mutation handle exists only after a
@@ -382,23 +396,16 @@ const V4_INGRESS_CONTEXT_CAPABILITIES = new Set<string>(CEAL_LEASED_CONSUMER_V4_
 // source the wire decoders use.
 const V4_CAPABILITY_GRAMMAR: ReadonlyArray<readonly [string, string, (value: unknown) => void]> = [
 	["message.search", CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA, cealLeasedConsumerSearchArgumentsDecoder(CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS)],
-	["message.get", CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA, decodeMessageGetArguments],
-	["conversation.thread.get", CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA, decodeConversationThreadGetArguments],
-	["message.create", CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, decodeMessageCreateArguments],
-	["message.update", CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, decodeMessageUpdateArguments],
-	["message.delete", CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA, decodeMessageDeleteArguments],
-	["resource.resolve", CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA, decodeResourceResolveArguments],
-	["presentation.activity.set", CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA, decodePresentationActivityArguments],
-	["message.reaction.add", CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA, decodeMessageReactionArguments],
-	["directory.usergroups.list", CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA, decodeUsergroupsListArguments],
-	["directory.usergroups.members.list", CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA, decodeUsergroupMembersArguments],
-	["directory.people.search", CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerPeopleSearchArguments],
-	["file.search", CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerFileSearchArguments],
-	["identity.profile_image.get", CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA)],
-	["conversation.direct.resolve", CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA)],
-	["workflow.reply_intake.register", CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA, decodeReplyIntakeArguments],
-	["artifact.stage", CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA, decodeArtifactStageArguments],
+	["message.get", CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA, decodeMessageGetArguments], ["conversation.thread.get", CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA, decodeConversationThreadGetArguments],
+	["message.create", CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA, decodeMessageCreateArguments], ["message.update", CEAL_LEASED_CONSUMER_MESSAGE_UPDATE_ARGUMENTS_SCHEMA, decodeMessageUpdateArguments],
+	["message.delete", CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA, decodeMessageDeleteArguments], ["resource.resolve", CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA, decodeResourceResolveArguments],
+	["presentation.activity.set", CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA, decodePresentationActivityArguments], ["message.reaction.add", CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA, decodeMessageReactionArguments],
+	["directory.usergroups.list", CEAL_LEASED_CONSUMER_USERGROUPS_LIST_ARGUMENTS_SCHEMA, decodeUsergroupsListArguments], ["directory.usergroups.members.list", CEAL_LEASED_CONSUMER_USERGROUP_MEMBERS_ARGUMENTS_SCHEMA, decodeUsergroupMembersArguments],
+	["directory.people.search", CEAL_LEASED_CONSUMER_PEOPLE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerPeopleSearchArguments], ["file.search", CEAL_LEASED_CONSUMER_FILE_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerFileSearchArguments],
+	["identity.profile_image.get", CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_PROFILE_IMAGE_ARGUMENTS_SCHEMA)], ["conversation.direct.resolve", CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA, decodeSubjectReadArguments(CEAL_LEASED_CONSUMER_DIRECT_RESOLVE_ARGUMENTS_SCHEMA)],
+	["workflow.reply_intake.register", CEAL_LEASED_CONSUMER_REPLY_INTAKE_ARGUMENTS_SCHEMA, decodeReplyIntakeArguments], ["artifact.stage", CEAL_LEASED_CONSUMER_ARTIFACT_STAGE_ARGUMENTS_SCHEMA, decodeArtifactStageArguments],
 	["file.upload", CEAL_LEASED_CONSUMER_FILE_UPLOAD_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerFileUploadArguments],
+	["comment.create", CEAL_LEASED_CONSUMER_COMMENT_CREATE_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCommentCreateArguments], ["document.create", CEAL_LEASED_CONSUMER_DOCUMENT_CREATE_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerDocumentCreateArguments], ["github.issue.create", CEAL_LEASED_CONSUMER_GITHUB_ISSUE_CREATE_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubIssueCreateArguments], ["github.issue.get", CEAL_LEASED_CONSUMER_GITHUB_ISSUE_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubIssueGetArguments], ["github.pull_request.get", CEAL_LEASED_CONSUMER_GITHUB_PULL_REQUEST_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubPullRequestGetArguments], ["github.repository.get", CEAL_LEASED_CONSUMER_GITHUB_REPOSITORY_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubRepositoryGetArguments], ["collection.search", CEAL_LEASED_CONSUMER_COLLECTION_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCollectionSearchArguments], ["github.workflow_run.get", CEAL_LEASED_CONSUMER_GITHUB_WORKFLOW_RUN_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerGithubWorkflowRunGetArguments], ["calendar.availability", CEAL_LEASED_CONSUMER_CALENDAR_AVAILABILITY_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCalendarAvailabilityArguments], ["calendar.event.search", CEAL_LEASED_CONSUMER_CALENDAR_EVENT_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCalendarEventSearchArguments], ["calendar.event.get", CEAL_LEASED_CONSUMER_CALENDAR_EVENT_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerCalendarEventGetArguments],
 	["notion.search", CEAL_LEASED_CONSUMER_NOTION_SEARCH_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerNotionSearchArguments],
 	["notion.page.get", CEAL_LEASED_CONSUMER_NOTION_PAGE_GET_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerNotionPageGetArguments],
 	["sheets.values.read", CEAL_LEASED_CONSUMER_SHEETS_VALUES_READ_ARGUMENTS_SCHEMA, decodeCealLeasedConsumerSheetsReadArguments],
@@ -850,9 +857,10 @@ function decodePresentationControls(value: unknown): void {
 }
 type CapabilityResultRule = (effect: unknown, handles: readonly unknown[], data: unknown) => boolean;
 const RESOURCE_READ_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "read" && decodeResourceReadData(data, handles);
-const DOCUMENT_READ_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerDocumentReadData(data);
+const DOCUMENT_READ_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "read" && handles.length <= 1 && handles.every((handle) => capabilityHandleKind(handle, "document")) && validCealLeasedConsumerDocumentReadData(data);
 const MESSAGE_READ_RESULT_RULE: CapabilityResultRule = (effect, _handles, data) => effect === "read" && decodeMessageReadData(data);
 const MESSAGE_WRITE_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "write" && mutationHandleGroup(handles) && decodeMessageWriteData(data);
+const MESSAGE_DELETE_RECEIPT_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "write" && handles.length === 1 && capabilityHandleKind(handles[0], "message") && decodeMessageDeleteData(data); const MESSAGE_REACTION_RECEIPT_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "write" && handles.length === 1 && capabilityHandleKind(handles[0], "message") && decodeMessageReactionData(data);
 const SHEETS_READ_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerSheetsReadData(data);
 const SHEETS_UPDATE_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "write" && handles.length === 0 && validCealLeasedConsumerSheetsUpdateData(data);
 const SHEETS_CLEAR_RESULT_RULE: CapabilityResultRule = (effect, handles, data) => effect === "write" && handles.length === 0 && validCealLeasedConsumerSheetsClearData(data);
@@ -873,16 +881,17 @@ const V4_CAPABILITY_RESULT_RULES = new Map<string, CapabilityResultRule>([
 	["conversation.direct.resolve", RESOURCE_READ_RESULT_RULE],
 	["message.create", MESSAGE_WRITE_RESULT_RULE],
 	["message.update", MESSAGE_WRITE_RESULT_RULE],
-	["message.delete", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeMessageDeleteData(data)],
+	["message.delete", MESSAGE_DELETE_RECEIPT_RESULT_RULE],
+	["comment.create", (effect, handles, data) => effect === "write" && handles.length === 0 && validCealLeasedConsumerCommentCreateData(data)], ["document.create", (effect, handles, data) => effect === "write" && handles.length === 1 && capabilityHandleKind(handles[0], "document") && validCealLeasedConsumerDocumentCreateData(data)], ["github.issue.create", (effect, handles, data) => effect === "write" && handles.length === 0 && validCealLeasedConsumerGithubIssueCreateData(data)],
 	["presentation.activity.set", (effect, handles, data) => effect === "write" && handles.length === 0 && decodePresentationActivityData(data)],
-	["message.reaction.add", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeMessageReactionData(data)],
-	["workflow.reply_intake.register", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeReplyIntakeData(data)],
+	["message.reaction.add", MESSAGE_REACTION_RECEIPT_RESULT_RULE], ["workflow.reply_intake.register", (effect, handles, data) => effect === "write" && handles.length === 0 && decodeReplyIntakeData(data)],
 	// A chunk ack carries no handle; the final chunk carries exactly the one
 	// digest-verified artifact handle.
 	["artifact.stage", (effect, handles, data) => effect === "write" && artifactStageHandles(handles, data) && decodeArtifactStageData(data)],
 	// Placement is target-owned; no provider file locator or message mutation
 	// handle crosses the leased result boundary.
 	["file.upload", FILE_UPLOAD_RESULT_RULE],
+	["github.issue.get", RESOURCE_READ_RESULT_RULE], ["github.pull_request.get", RESOURCE_READ_RESULT_RULE], ["github.repository.get", (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerGithubRepositoryReadData(data)], ["collection.search", (effect, handles, data) => effect === "read" && handles.length <= 32 && validCealLeasedConsumerCollectionSearchData(data)], ["github.workflow_run.get", (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerGithubWorkflowRunReadData(data)], ["calendar.availability", (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerCalendarAvailabilityData(data)], ["calendar.event.search", (effect, handles, data) => effect === "read" && handles.length <= 25 && validCealLeasedConsumerCalendarEventSearchData(data)], ["calendar.event.get", (effect, handles, data) => effect === "read" && handles.length === 0 && validCealLeasedConsumerCalendarEventGetData(data)],
 	["notion.search", RESOURCE_READ_RESULT_RULE],
 	["notion.page.get", DOCUMENT_READ_RESULT_RULE],
 	["sheets.values.read", SHEETS_READ_RESULT_RULE],
@@ -1031,4 +1040,4 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function plainRecord(value: unknown): value is Record<string, unknown> { return record(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null); }
 function invalid(): never { throw new TypeError("Ceal leased-consumer control record is invalid"); }
-import { isSafeUnixSocketPath } from "./unix-socket-path-safety.js";
+import { isSafeUnixSocketPath } from "./unix-socket-path-safety.ts";

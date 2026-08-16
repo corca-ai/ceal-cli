@@ -6,9 +6,9 @@ import {
 	RAW_PROVIDER_REF,
 	requireJsonByteSize,
 	SECRET_MATERIAL,
-} from "./gateway-validation-primitives.js";
-import { opaqueTargetRef } from "./leased-consumer-opaque-refs.js";
-import { decodeCealCapabilityNavigation, type CealCapabilityNavigation } from "./capability-navigation.js";
+} from "./gateway-validation-primitives.ts";
+import { opaqueTargetRef } from "./leased-consumer-opaque-refs.ts";
+import { decodeCealCapabilityNavigation, type CealCapabilityNavigation } from "./capability-navigation.ts";
 
 export const CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA = "ceal.gateway_leased_agent_capability_catalog.v1" as const;
 export const CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_MAX_BYTES = 64 * 1024;

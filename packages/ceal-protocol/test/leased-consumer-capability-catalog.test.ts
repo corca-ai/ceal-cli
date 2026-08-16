@@ -6,8 +6,19 @@ import {
 	decodeCealLeasedConsumerCapabilityCatalog,
 } from "../dist/leased-consumer-capability-catalog.js";
 
-const target = (digit, label = "Notion shared workspace", connector_kind = "notion", target_kind = "workspace") => ({ target_ref: `target:${digit.repeat(64)}`, label, connector_kind, target_kind, readiness: "ready" });
-const entry = (overrides = {}) => ({
+const target = (
+	digit: string,
+	label = "Notion shared workspace",
+	connector_kind = "notion",
+	target_kind = "workspace",
+): Record<string, unknown> => ({
+	target_ref: `target:${digit.repeat(64)}`,
+	label,
+	connector_kind,
+	target_kind,
+	readiness: "ready",
+});
+const entry = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
 	capability_id: "notion.search",
 	label: "Search Notion",
 	effect: "read",
@@ -17,7 +28,10 @@ const entry = (overrides = {}) => ({
 	targets: [target("a")],
 	...overrides,
 });
-const catalog = (capabilities = [entry()]) => ({ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA, capabilities });
+const catalog = (capabilities: unknown[] = [entry()]): Record<string, unknown> => ({
+	schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CATALOG_SCHEMA,
+	capabilities,
+});
 
 test("decodes one provider-neutral non-messenger capability catalog", () => {
 	const value = catalog([

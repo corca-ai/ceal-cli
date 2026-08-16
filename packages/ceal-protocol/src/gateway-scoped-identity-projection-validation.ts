@@ -1,11 +1,11 @@
-import { CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA } from "./gateway-response-types.js";
+import { CEAL_GATEWAY_SCOPED_IDENTITY_PROJECTION_SCHEMA } from "./gateway-response-types.ts";
 import {
 	invalidResponse,
 	requireExactKeys,
 	requireRecord,
 	requireSafeRef,
 	requireSafeText,
-} from "./gateway-validation-primitives.js";
+} from "./gateway-validation-primitives.ts";
 
 export function validateCealGatewayScopedIdentityProjection(value: unknown, handshake: Record<string, unknown>): void {
 	const projection = requireRecord(value);
