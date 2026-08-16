@@ -4,8 +4,8 @@
 	"writes_external": false,
 	"source": {
 		"repository": "corca-ai/ceal",
-				"commit": "9b9838be69171fd2340d58a8c15a0e29c2b8391f",
-				"tree": "d20bd6426647f8df2b191424310cd2cc9c5d4ee0",
+					"commit": "070485c3e05c5213bd5fbf72c8dfba55d16ee858",
+					"tree": "49d65242f2d46958a673afb173fb21068b3d465d",
 		"protocol_tree": "42f9c7920b2c72fceb5347d9279537fca7e057ad",
 		"inputs": [
 			{
@@ -18,7 +18,7 @@
 			},
 			{
 				"path": "scripts/agent-runtime/gateway-leased-consumer-attachment-stream-route.ts",
-					"sha256": "7b574d8db453379333b5b3520107e5e07d9311e9be28f3a7e115ffd3e68363b9"
+						"sha256": "a3efbe68993ff0c3a9fed3c7866dfd5b169c4fb8575141802214a94f1d9427a7"
 			},
 			{
 				"path": "scripts/agent-runtime/fixtures/gateway-leased-consumer-attachment-stream-transport.json",
