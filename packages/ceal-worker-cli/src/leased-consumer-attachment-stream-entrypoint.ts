@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CealLeasedConsumerAttachmentStreamBinding, decodeCealLeasedConsumerAttachmentStreamRequest } from "@corca-ai/ceal-protocol";
@@ -47,16 +47,21 @@ export async function runLeasedConsumerAttachmentStreamEntrypoint(
 			},
 			runtime,
 		);
-		writeJson(output, { schema_version: ENTRYPOINT_CONTRACT.result.schema_version, ok: true, status: "handoff_ready", handoff });
+		const result = { schema_version: ENTRYPOINT_CONTRACT.result.schema_version, ok: true, status: "handoff_ready", handoff };
+		if (!writeJson(output, result)) {
+			const cleanupSucceeded = await cleanupOversizedHandoff(handoff);
+			return writeRuntimeFailure(output, cleanupSucceeded ? "handoff_write_failed" : "handoff_cleanup_failed");
+		}
 		return 0;
 	} catch (error) {
 		const errorCode = publicErrorCode(error);
-		writeJson(output, {
+		const result = {
 			schema_version: ENTRYPOINT_CONTRACT.result.schema_version,
 			ok: false,
 			status: ENTRYPOINT_RUNTIME_FAILURES.has(errorCode) ? "unavailable" : "error",
 			error_code: errorCode,
-		});
+		};
+		if (!writeJson(output, result)) return writeRuntimeFailure(output, "handoff_write_failed");
 		return ENTRYPOINT_RUNTIME_FAILURES.has(errorCode) ? 3 : 2;
 	}
 }
@@ -96,8 +101,40 @@ function publicErrorCode(error: unknown): string {
 	return ENTRYPOINT_CONTRACT.result.allowed_error_codes.includes(candidate) ? candidate : "stream_invalid";
 }
 
-function writeJson(output: JsonOutput, value: Readonly<Record<string, unknown>>): void {
-	output.write(`${JSON.stringify(value)}\n`);
+function writeJson(output: JsonOutput, value: Readonly<Record<string, unknown>>): boolean {
+	const serialized = serializeLeasedConsumerAttachmentStreamResult(value);
+	if (serialized === null) return false;
+	output.write(serialized);
+	return true;
+}
+
+function writeRuntimeFailure(output: JsonOutput, errorCode: "handoff_cleanup_failed" | "handoff_write_failed"): number {
+	const written = writeJson(output, {
+		schema_version: ENTRYPOINT_CONTRACT.result.schema_version,
+		ok: false,
+		status: "unavailable",
+		error_code: errorCode,
+	});
+	if (!written) throw new Error("attachment_stream_result_contract_unwritable");
+	return 3;
+}
+
+/** @testOnly */
+export function serializeLeasedConsumerAttachmentStreamResult(value: Readonly<Record<string, unknown>>): string | null {
+	const json = JSON.stringify(value);
+	if (json === undefined) return null;
+	const serialized = `${json}\n`;
+	return new TextEncoder().encode(serialized).byteLength <= ENTRYPOINT_CONTRACT.result.maximum_bytes ? serialized : null;
+}
+
+async function cleanupOversizedHandoff(value: unknown): Promise<boolean> {
+	if (!isRecord(value) || typeof value.handoff_root !== "string") return false;
+	try {
+		await rm(value.handoff_root, { recursive: true, force: true });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function sameKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

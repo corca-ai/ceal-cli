@@ -14,7 +14,7 @@ import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256,
 } from "../dist/generated/leased-consumer-attachment-stream-contract.js";
 import { consumeLeasedConsumerAttachmentStream } from "../dist/leased-consumer-attachment-stream-carrier.js";
-import { runLeasedConsumerAttachmentStreamEntrypoint } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
+import { runLeasedConsumerAttachmentStreamEntrypoint, serializeLeasedConsumerAttachmentStreamResult } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
 import { postUnixSocketStream } from "../dist/private-worker-transport.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.mjs";
 
@@ -251,6 +251,25 @@ test("private attachment-stream entrypoint returns only the verified Agent hando
 	assert.equal(calls[0].path, "/api/ceal/agent/v1/control/attachment-stream");
 	assert.equal(calls[0].body, JSON.stringify(request));
 	assert.doesNotMatch(stdout, /caller-selected|credential|provider/u);
+});
+
+test("private attachment-stream result serialization enforces its UTF-8 byte bound", () => {
+	const oversized = serializeLeasedConsumerAttachmentStreamResult({
+		schema_version: "ceal.worker_private_leased_consumer_attachment_stream_result.v1",
+		ok: true,
+		status: "handoff_ready",
+		handoff: { handoff_root: "x".repeat(32 * 1024) },
+	});
+	assert.equal(oversized, null);
+
+	const bounded = serializeLeasedConsumerAttachmentStreamResult({
+		schema_version: "ceal.worker_private_leased_consumer_attachment_stream_result.v1",
+		ok: false,
+		status: "unavailable",
+		error_code: "handoff_write_failed",
+	});
+	assert.ok(bounded);
+	assert.ok(new TextEncoder().encode(bounded).byteLength <= 32 * 1024);
 });
 
 test("candidate carrier refuses request or protected-session drift before any network or handoff root", async () => {
