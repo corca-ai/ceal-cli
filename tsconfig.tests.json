@@ -1,6 +1,7 @@
 {
 	"extends": "./tsconfig.typecheck.json",
 	"compilerOptions": {
+		"lib": ["ES2022", "DOM"],
 		"strict": true,
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",

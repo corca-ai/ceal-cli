@@ -496,6 +496,40 @@ test("the linter and formatter both run, and both exclude the frozen package", (
 	);
 });
 
+test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit compatibility diagnostic", () => {
+	const packageJson = JSON.parse(read("package.json"));
+	assert.equal(packageJson.devDependencies["@typescript/native"], "npm:typescript@7.0.2");
+	assert.equal(packageJson.devDependencies.typescript, "npm:@typescript/typescript6@6.0.2");
+	for (const script of ["lint:types:packages", "lint:types:tools", "lint:types:tests"]) assert.match(packageJson.scripts[script], /\btsc\b/u);
+	assert.match(packageJson.scripts["lint:types:ts6"], /\btsc6\b/u);
+	for (const script of ["lint:types", "lint:types:packages", "lint:types:tools", "lint:types:tests"]) {
+		assert.doesNotMatch(packageJson.scripts[script], /node_modules[\\/]\.bin/u);
+	}
+	assert.doesNotMatch(packageJson.scripts["lint:types:ts6"], /node_modules[\\/]\.bin/u);
+	const typecheck = JSON.parse(read("tsconfig.typecheck.json"));
+	assert.equal(typecheck.compilerOptions.baseUrl, undefined);
+	assert.deepEqual(typecheck.compilerOptions.paths, {
+		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
+		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
+	});
+	assert.deepEqual(typecheck.compilerOptions.lib, ["ES2022"]);
+	assert.deepEqual(typecheck.compilerOptions.types, ["node"]);
+	const tools = JSON.parse(read("tsconfig.tools.json"));
+	assert.deepEqual(tools.compilerOptions.lib, ["ES2022"]);
+	assert.deepEqual(tools.compilerOptions.types, ["node"]);
+	assert.deepEqual(tools.compilerOptions.paths, {
+		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
+		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
+	});
+	const lock = JSON.parse(read("package-lock.json"));
+	assert.equal(lock.packages[""].devDependencies["@typescript/native"], "npm:typescript@7.0.2");
+	assert.equal(lock.packages[""].devDependencies.typescript, "npm:@typescript/typescript6@6.0.2");
+	assert.equal(lock.packages["node_modules/@typescript/native"].version, "7.0.2");
+	assert.equal(lock.packages["node_modules/typescript"].name, "@typescript/typescript6");
+	assert.equal(lock.packages["node_modules/typescript"].version, "6.0.2");
+	assert.deepEqual(lock.packages["node_modules/typescript"].bin, { tsc6: "bin/tsc6" });
+});
+
 // `lint:shell` covers exactly two checked-in shell files by name, and no linter
 // reads a workflow's `run:` block, so the shell inside CI had no gate at all. The
 // class this catches is one defect, precisely: `npm stage publish … | tee` under

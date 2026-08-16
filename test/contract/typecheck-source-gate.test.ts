@@ -31,7 +31,7 @@ function trackedSourceFiles() {
 }
 
 function showConfig() {
-	const compiler = path.join(ROOT, "node_modules", "typescript", "bin", "tsc");
+	const compiler = path.join(ROOT, "node_modules", ".bin", "tsc");
 	return JSON.parse(execFileSync(process.execPath, [compiler, "--showConfig", "-p", typecheckConfigPath], { cwd: ROOT, encoding: "utf8" }));
 }
 
@@ -44,10 +44,12 @@ test("source typecheck covers every tracked package TypeScript source", () => {
 
 test("source typecheck resolves workspace packages to exact editable source entrypoints", () => {
 	assert.deepEqual(typecheckConfig.compilerOptions.paths, {
-		"@corca-ai/ceal-protocol": ["packages/ceal-protocol/src/index.ts"],
-		"@corca-ai/ceal": ["packages/ceal-client/src/index.ts"],
+		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
+		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
 	});
-	assert.equal(typecheckConfig.compilerOptions.baseUrl, ".");
+	assert.equal(typecheckConfig.compilerOptions.baseUrl, undefined);
+	assert.deepEqual(typecheckConfig.compilerOptions.lib, ["ES2022"]);
+	assert.equal(typecheckConfig.compilerOptions.lib.includes("DOM"), false);
 	assert.equal(typecheckConfig.compilerOptions.module, "NodeNext");
 	assert.equal(typecheckConfig.compilerOptions.moduleResolution, "NodeNext");
 });
@@ -88,6 +90,7 @@ test("test typecheck is strict, source-only, and cached separately", () => {
 	assert.equal(testsTypecheckConfig.compilerOptions.moduleResolution, "NodeNext");
 	assert.equal(testsTypecheckConfig.compilerOptions.allowImportingTsExtensions, true);
 	assert.deepEqual(testsTypecheckConfig.compilerOptions.types, ["node"]);
+	assert.deepEqual(testsTypecheckConfig.compilerOptions.lib, ["ES2022", "DOM"]);
 	assert.deepEqual(testsTypecheckConfig.include, ["packages/*/test/**/*.ts"]);
 	assert.doesNotMatch(JSON.stringify(testsTypecheckConfig.compilerOptions), /erasableSyntaxOnly/u);
 });
