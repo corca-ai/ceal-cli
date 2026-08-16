@@ -1,11 +1,64 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmdirSync,
+	rmSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
+
+type BuildRunner = (packagePath: string) => void;
+type DistReader<Result> = () => Result;
+type LockGeneration = ReturnType<typeof statSync>;
+type Owner = { pid: number; marker: string };
+type LockHandle = { marker: string; generation: LockGeneration };
+type SupervisorResult = {
+	code: number | null;
+	signal: string | null;
+	spawnError: string | null;
+	stdout: string;
+	stderr: string;
+	truncated: boolean;
+	timedOut: boolean;
+	orphaned: boolean;
+};
+const RESULT_KEYS = ["code", "signal", "spawnError", "stdout", "stderr", "truncated", "timedOut", "orphaned"];
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isSupervisorResult(value: unknown): value is SupervisorResult {
+	if (!isRecord(value)) return false;
+	const result = value;
+	return (
+		Object.keys(result).length === RESULT_KEYS.length &&
+		RESULT_KEYS.every((key) => Object.hasOwn(result, key)) &&
+		(result.code === null || (typeof result.code === "number" && Number.isSafeInteger(result.code))) &&
+		(result.signal === null || typeof result.signal === "string") &&
+		(result.spawnError === null || typeof result.spawnError === "string") &&
+		typeof result.stdout === "string" &&
+		typeof result.stderr === "string" &&
+		typeof result.truncated === "boolean" &&
+		typeof result.timedOut === "boolean" &&
+		typeof result.orphaned === "boolean"
+	);
+}
 
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -44,7 +97,7 @@ const OWNER_WRITE_GRACE_MS = 2_000;
 // every listed package is built. `read` must finish everything it does with
 // `dist` before returning — copying out or packing is fine, holding a path to
 // come back to later is not.
-export function withBuiltPackages(packagePaths, read) {
+export function withBuiltPackages<Result>(packagePaths: readonly string[], read: DistReader<Result>): Result {
 	return withDistLock(() => {
 		for (const packagePath of packagePaths) ensurePackageBuilt(packagePath);
 		return read();
@@ -54,7 +107,7 @@ export function withBuiltPackages(packagePaths, read) {
 // Exported so the memo can be proven against a counter instead of a real `tsc`
 // run, which would make the contract tier a writer of the `dist` its sibling
 // tests execute.
-export function ensurePackageBuilt(packagePath, build = runNpmBuild) {
+export function ensurePackageBuilt(packagePath: string, build: BuildRunner = runNpmBuild): boolean {
 	const key = path.normalize(packagePath);
 	if (BUILT.has(key)) return false;
 	build(key);
@@ -62,7 +115,7 @@ export function ensurePackageBuilt(packagePath, build = runNpmBuild) {
 	return true;
 }
 
-function runNpmBuild(packagePath) {
+function runNpmBuild(packagePath: string): void {
 	const packageRoot = path.join(REPO_ROOT, packagePath);
 	const cache = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-tsbuildinfo", `${path.basename(packagePath)}.tsbuildinfo`);
 	// TypeScript trusts an incremental record even if somebody removed its emitted
@@ -90,7 +143,14 @@ function runNpmBuild(packagePath) {
 		timeout: BUILD_TIMEOUT_MS + BUILD_TERMINATION_GRACE_MS + BUILD_POST_KILL_REPORT_MS + BUILD_POST_EXIT_DRAIN_MS + 5_000,
 	});
 	if (result.error || result.status !== 0) throw result.error ?? new Error(`build supervisor exited ${result.status}: ${result.stderr}`);
-	const build = JSON.parse(result.stdout);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(result.stdout);
+	} catch (error) {
+		throw new Error(`build supervisor returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (!isSupervisorResult(parsed)) throw new Error("build supervisor returned an invalid result");
+	const build = parsed;
 	if (build.spawnError || build.timedOut || build.truncated || build.orphaned || build.code !== 0) {
 		const reason = build.spawnError
 			? `could not start (${build.spawnError})`
@@ -107,16 +167,16 @@ function runNpmBuild(packagePath) {
 
 // Exported so the mutex can be proven against a cheap body instead of only
 // against a multi-second compile.
-export function withDistLock(run) {
-	const nonce = acquire();
+export function withDistLock<Result>(run: () => Result): Result {
+	const handle = acquire();
 	try {
 		return run();
 	} finally {
-		release(nonce);
+		release(handle);
 	}
 }
 
-function acquire() {
+function acquire(): LockHandle {
 	mkdirSync(path.dirname(LOCK), { recursive: true });
 	const deadline = performance.now() + WAIT_TIMEOUT_MS;
 	for (;;) {
@@ -138,12 +198,12 @@ function acquire() {
 	}
 }
 
-function publishCandidate() {
+function publishCandidate(): LockHandle | null {
 	const nonce = randomBytes(16).toString("hex");
 	const candidate = `${LOCK}.candidate-${process.pid}-${nonce}`;
 	try {
 		mkdirSync(candidate);
-		writeFileSync(path.join(candidate, "owner"), `${process.pid} ${nonce}\n`, { flag: "wx" });
+		writeFileSync(path.join(candidate, `owner-${nonce}`), `${process.pid}\n`, { flag: "wx" });
 	} catch (error) {
 		rmSync(candidate, { recursive: true, force: true });
 		throw error;
@@ -158,39 +218,38 @@ function publishCandidate() {
 			return null;
 		}
 		renameSync(candidate, LOCK);
-		return nonce;
-	} catch (error) {
+		return { marker: `owner-${nonce}`, generation: statSync(LOCK) };
+	} catch (error: unknown) {
 		rmSync(candidate, { recursive: true, force: true });
-		if (error.code === "EEXIST" || error.code === "ENOTEMPTY") return null;
+		if (isNodeError(error) && (error.code === "EEXIST" || error.code === "ENOTEMPTY")) return null;
 		throw error;
 	}
 }
 
-function release(nonce) {
-	// Only the owner may delete the lock. Without this check a process whose lock
-	// was reclaimed as stale would go on to delete its *successor's* lock, handing
-	// the mutex to a third process while the second is still inside it.
-	if (readOwner()?.nonce !== nonce) return;
-	rmSync(LOCK, { recursive: true, force: true });
+function release(handle: LockHandle): void {
+	// A nonce-addressed marker is the ownership proof. If a successor replaced the
+	// path, its marker has a different name and this unlink is an ENOENT no-op.
+	disposeMarker(handle.marker, handle.generation);
 }
 
-function reclaimIfHolderIsGone() {
-	let generation;
+function reclaimIfHolderIsGone(): boolean {
+	let generation: ReturnType<typeof statSync>;
 	try {
 		generation = statSync(LOCK);
-	} catch (error) {
-		return error.code === "ENOENT";
+	} catch (error: unknown) {
+		return isNodeError(error) && error.code === "ENOENT";
 	}
+	if (!generation) return false;
 	const owner = readOwner();
 	if (owner) {
 		if (!processIsGone(owner.pid)) return false;
-		return quarantineGeneration(generation, owner.nonce, `dead pid ${owner.pid}`);
+		return disposeMarker(owner.marker, generation);
 	}
 	// New holders publish a completed private candidate atomically. An empty
 	// visible directory can only be a legacy holder that died before its owner
 	// write; rmdir is deliberate because it cannot remove a non-empty successor.
 	if (Date.now() - generation.mtimeMs < OWNER_WRITE_GRACE_MS) return false;
-	let entries;
+	let entries: string[];
 	try {
 		entries = readdirSync(LOCK);
 	} catch {
@@ -201,62 +260,79 @@ function reclaimIfHolderIsGone() {
 			rmdirSync(LOCK);
 			process.emitWarning(`reclaiming the workspace dist lock from a legacy owner-less holder: ${LOCK}`);
 			return true;
-		} catch (error) {
+		} catch (error: unknown) {
+			if (!isNodeError(error)) throw error;
 			if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY" && error.code !== "EEXIST") throw error;
 			return error.code === "ENOENT";
 		}
 	}
-	return quarantineGeneration(
-		generation,
-		`invalid-${generation.dev.toString(16)}-${generation.ino.toString(16)}`,
-		"an invalid owner generation",
-	);
+	// Fixed-owner legacy and unknown non-empty generations are intentionally
+	// non-claimable: their marker cannot be unlinked without a successor race.
+	return false;
 }
 
-function quarantineGeneration(generation, suffix, reason) {
-	const tombstone = `${LOCK}.reclaimed-${suffix}`;
+function disposeMarker(marker: string, expectedGeneration: LockGeneration): boolean {
+	if (!expectedGeneration) return false;
+	const markerPath = path.join(LOCK, marker);
 	try {
-		renameSync(LOCK, tombstone);
-		process.emitWarning(`reclaiming the workspace dist lock from ${reason}: ${LOCK}`);
-		return true;
-	} catch (error) {
+		unlinkSync(markerPath);
+	} catch (error: unknown) {
+		if (!isNodeError(error)) throw error;
 		if (error.code === "ENOENT") return true;
-		if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error;
+		throw error;
 	}
-	const retained = statSync(tombstone);
-	if (retained.dev !== generation.dev || retained.ino !== generation.ino) {
-		throw new Error(`workspace dist lock tombstone identity mismatch at ${tombstone}`);
+	let retained: LockGeneration;
+	try {
+		retained = statSync(LOCK);
+	} catch (error: unknown) {
+		if (isNodeError(error) && error.code === "ENOENT") return true;
+		throw error;
 	}
-	return true;
+	if (retained.dev !== expectedGeneration.dev || retained.ino !== expectedGeneration.ino) return false;
+	try {
+		rmdirSync(LOCK);
+		return true;
+	} catch (error: unknown) {
+		if (!isNodeError(error)) throw error;
+		if (error.code === "ENOENT") return true;
+		if (error.code === "ENOTEMPTY" || error.code === "EEXIST") return false;
+		throw error;
+	}
 }
 
-function readOwner(lockPath = LOCK) {
-	let raw;
+function readOwner(lockPath: string = LOCK): Owner | null {
+	let entries: string[];
 	try {
-		raw = readFileSync(path.join(lockPath, "owner"), "utf8");
+		entries = readdirSync(lockPath);
 	} catch {
 		return null;
 	}
-	const parts = raw.trim().split(" ");
-	if (parts.length !== 2) return null;
-	const [pid, nonce] = parts;
-	const parsedPid = Number(pid);
-	return Number.isSafeInteger(parsedPid) && parsedPid > 0 && /^[a-f0-9]{32}$/u.test(nonce ?? "") ? { pid: parsedPid, nonce } : null;
+	if (entries.length !== 1) return null;
+	const [marker] = entries;
+	if (!marker || !/^owner-[a-f0-9]{32}$/u.test(marker)) return null;
+	let raw: string;
+	try {
+		raw = readFileSync(path.join(lockPath, marker), "utf8");
+	} catch {
+		return null;
+	}
+	const parsedPid = Number(raw.trim());
+	return Number.isSafeInteger(parsedPid) && parsedPid > 0 ? { pid: parsedPid, marker } : null;
 }
 
-export function processIsGone(pid) {
+export function processIsGone(pid: number): boolean {
 	try {
 		// Signal 0 performs the permission and existence checks without delivering a
 		// signal, so this asks "is that pid alive" and nothing else.
 		process.kill(pid, 0);
 		return false;
-	} catch (error) {
+	} catch (error: unknown) {
 		// EPERM means it is alive and owned by somebody else, which is still alive.
-		return error.code === "ESRCH";
+		return isNodeError(error) && error.code === "ESRCH";
 	}
 }
 
-function sleep(ms) {
+function sleep(ms: number): void {
 	// The callers are synchronous fixture builders, so this has to block the thread
 	// rather than yield to the event loop.
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
