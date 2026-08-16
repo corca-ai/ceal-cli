@@ -30,9 +30,9 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"test": "node --import ../../test/source-loader.mjs --test test/*.test.ts",
+		"test": "node --import ../../test/source-loader.ts --test test/*.test.ts",
 		"prepack": "npm run clean && npm run build",
-		"coverage": "c8 node --import ../../test/source-loader.mjs --test test/*.test.ts"
+		"coverage": "c8 node --import ../../test/source-loader.ts --test test/*.test.ts"
 	},
 	"dependencies": {
 		"@corca-ai/ceal-protocol": "0.72.21"

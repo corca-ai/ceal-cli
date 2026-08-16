@@ -35,7 +35,7 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"test": "npm run build && node --test test/*.test.mjs",
+		"test": "npm run build && node --test test/*.test.ts",
 		"prepack": "npm run clean && npm run build"
 	},
 	"devDependencies": {

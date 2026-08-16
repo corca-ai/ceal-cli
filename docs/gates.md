@@ -17,7 +17,7 @@ explicit owners: package source (`lint:types:packages`), tools and contract test
 NodeNext program covers every tracked
 `packages/*/src/**/*.ts` file and maps workspace package names to their editable
 source entrypoints, so it does not need checkout `dist` or invoke
-`test/repo-build.mjs`. The tools program covers tracked `scripts/**/*.ts` and
+`test/repo-build.ts`. The tools program covers tracked `scripts/**/*.ts` and
 `test/**/*.ts`, allows exact `.ts` imports under NodeNext, and uses a dedicated
 incremental cache. `lint:types:watch` watches package sources and
 `lint:types:tools:watch` watches tools; they are intentionally separate watchers,
@@ -102,10 +102,10 @@ Formatting-only commits belong in `.git-blame-ignore-revs`, which
 ### Source-authoritative behavior and isolated package artifacts
 
 Protocol, client, and Worker behavior tests execute `src/**/*.ts` through
-`test/source-loader.mjs`.
+`test/source-loader.ts`.
 The loader owns both direct workspace paths and bare workspace package names;
 it redirects either form to the editable TypeScript source and refuses a
-workspace `dist` resolution that has no source authority. `test/run-source-tests.mjs`
+workspace `dist` resolution that has no source authority. `test/run-source-tests.ts`
 also installs that loader through `NODE_OPTIONS`, so Worker CLI subprocesses
 inherit the same authority instead of silently returning to checkout `dist`.
 The client and Worker `test` and `coverage` scripts therefore have no build
@@ -121,8 +121,8 @@ pay for a second build. A green contract lane is local emitted-surface proof;
 it is not installed-worker, release, or live-serving proof.
 
 Emitted declarations, package exports, and executable JavaScript are a
-different proof purpose. `test/client-artifact.test.mjs` asks
-`test/artifact-workspace.mjs` to copy only source/config/manifest inputs into a
+different proof purpose. `test/client-artifact.test.ts` asks
+`test/artifact-workspace.ts` to copy only source/config/manifest inputs into a
 fresh temporary workspace, emit Protocol, client, and Worker packages there,
 and load their exact public exports and Worker executable against those
 temporary dependencies. The proof binds source and artifact digests and
@@ -141,7 +141,7 @@ building there at once can let a third pack a half-written `dist`. Serializing
 the whole tier hid that race behind a 74s wall clock.
 
 The pin is gone and the race is closed at its source instead. `dist` now has one
-writer: `ensurePackageBuilt` in `test/repo-build.mjs`, an inter-process mutex —
+writer: `ensurePackageBuilt` in `test/repo-build.ts`, an inter-process mutex —
 `mkdir` as the atomic test-and-set — plus an in-process memo. A fixture that
 needs a current `dist` asks for it there rather than building its own.
 
@@ -157,7 +157,7 @@ so a clean cannot turn a stale compiler record into a missing release tree.
 Three things keep this honest, and none of them is the tier passing, because a
 race that loses is silent:
 
-- `test/contract/repo-build.test.mjs` proves the mutex by running six *concurrent*
+- `test/contract/repo-build.test.ts` proves the mutex by running six *concurrent*
   holders and asserting their enter/exit journal never interleaves. Spawn them
   synchronously and the assertion goes vacuous — that is how it was first
   written, and removing the mutex did not turn it red.
@@ -179,8 +179,8 @@ infrastructure. `test/release-process-bounds.ts` imports the editable
 `packages/ceal-worker-cli/src/bounded-process.ts`, and its supervisor invokes
 that same source module; these tests therefore provide fresh source feedback,
 not direct proof of an emitted `dist/bounded-process.js`. Emitted/package proof
-lives in `test/client-artifact.test.mjs` and the release package/native suites
-(`test/worker-release-package.test.mjs`, `test/worker-native-artifact.test.mjs`)
+lives in `test/client-artifact.test.ts` and the release package/native suites
+(`test/worker-release-package.test.ts`, `test/worker-native-artifact.test.ts`)
 through their isolated build and artifact checks. On Darwin, platform-gated
 Linux-only checks report their unproved Linux scope; a green Darwin release run
 does not claim that the Linux executable lane was exercised.
@@ -201,7 +201,7 @@ about which: the copy drifting from *its own record*. The copy falling behind th
 remote, and this check never reaches one.
 
 `protocol-vendor-pin.json` names three identities and
-`scripts/verify-protocol-vendor-pin.mjs` binds them offline, reading local files,
+`scripts/verify-protocol-vendor-pin.ts` binds them offline, reading local files,
 the Git index, and the working tree:
 
 - **source** — the Gateway commit and `packages/ceal-protocol` subtree this copy
@@ -211,7 +211,7 @@ the Git index, and the working tree:
   `gateway-protocol-handoff-lock.json` binds a release to consume.
 
 The frozen package suite is part of `test:contract`. One owner test imports
-`scripts/test-support/base64url.mjs`, which sits outside the pinned package
+`scripts/test-support/base64url.ts`, which sits outside the pinned package
 subtree in the Gateway repository. This repository copies that test-only helper
 at the same path; `protocol-vendor-pin.json` records its owner blob and
 `protocol-vendor-pin.test.mjs` hashes the local file against it. The helper is
@@ -515,7 +515,7 @@ gates therefore run from `.githooks/pre-push` instead:
   accepted baseline and the reviewed overlay are tracked under
   `charness-artifacts/quality/` rather than gitignored `.charness/`, because the
   boy-scout arm measures stagnation from the commit that last touched the
-  overlay — an untracked overlay has no anchor. `scripts/check-dup-ratchet.mjs`
+  overlay — an untracked overlay has no anchor. `scripts/check-dup-ratchet.ts`
   is the repo-owned front door: it resolves the skill rather than hardcoding one
   maintainer's home directory, and `CEAL_SKIP_DUP_RATCHET=1` bypasses it.
 - `npm run lint:shell` runs `shellcheck -s sh --severity=warning` over
@@ -616,7 +616,7 @@ produce that silence — both checked with a planted export:
 
 - The 20 top-level `scripts/*.mjs` are declared `entry`, and `knip` does not
   report exports in an entry file. A planted export in
-  `scripts/worker-release-inputs.mjs` goes unreported.
+  `scripts/worker-release-inputs.ts` goes unreported.
 - Under `scripts/lib/`, which is not entry, an export *is* reported — until a
   test imports it, which every one of them does. Those suites import
   `scripts/*.mjs` directly rather than a built copy, so unlike the TypeScript
@@ -629,7 +629,7 @@ Either mechanism alone would have hidden both guards slice 2 deleted by hand.
 ## Production Reachability Under `scripts/`
 
 `npm run lint:reachability` answers the question the section above ends on, and
-runs in both gates. `scripts/lib/production-reachability.mjs` walks the
+runs in both gates. `scripts/lib/production-reachability.ts` walks the
 production graph and nothing else: entries are the `node scripts/*.mjs`
 invocations the manifest, the lanes, and the hook declare; edges are static
 relative imports; a release lane's inline `node --input-type=module` step is a
@@ -684,12 +684,12 @@ was enforced exactly where the fact had already been made a symbol with an edge,
 and nowhere else. Every survivor of every sweep in that range lived in the
 complement of that set. These two checks read the complement. Both run in
 `npm run check` and `npm run check:unit`, and
-`test/contract/one-fact-one-home.test.mjs` proves each on fixtures whose answer
+`test/contract/one-fact-one-home.test.ts` proves each on fixtures whose answer
 is known before it runs.
 
 ### `lint:store-lock` — enumerate a resource's writers
 
-`scripts/check-store-lock-census.mjs` reports every writer that reaches a
+`scripts/check-store-lock-census.ts` reports every writer that reaches a
 lock-guarded local store without the module's lock. The rule is narrow on
 purpose: it says nothing about whether a module *should* own a lock, only that
 inside a module which has already declared one by calling a `with…Lock` helper,
@@ -713,7 +713,7 @@ protection against the worse failure, a lock helper renamed out of the shape and
 the whole check silently reporting zero over nothing.
 
 That protection has a bound worth naming, because the fresh-eye review named it.
-`test/contract/one-fact-one-home.test.mjs` pins `receipt-spool.ts` and
+`test/contract/one-fact-one-home.test.ts` pins `receipt-spool.ts` and
 `profile-store.ts` into the has-a-lock set *by name*, so renaming either store's
 real primitive goes red. A **third** store introduced later with a misnamed
 wrapper from day one has no such pin and would be skipped in silence. Add its
@@ -722,7 +722,7 @@ notice, and only if you read it.
 
 ### `lint:duplicate-literal` — one grammar, one home
 
-`scripts/check-duplicate-literal.mjs` reports every non-trivial regex literal
+`scripts/check-duplicate-literal.ts` reports every non-trivial regex literal
 spelled in two or more owned modules. `check:duplication` cannot answer this and
 it is worth being exact about why, because for a day a review file said the
 opposite: that ratchet's unit is a repeated *block*, so it read the
@@ -734,7 +734,7 @@ so the reviewed note ratified the duplicate it was dismissing — which is the
 failure `AGENTS.md` names, a claim in prose that no gate checks.
 
 The unit is therefore the literal. The triviality floor lives in
-`scripts/lib/duplicate-literal.mjs` as the single home for that number and was
+`scripts/lib/duplicate-literal.ts` as the single home for that number and was
 measured rather than chosen: below it the population is language idiom, above it
 every group is a grammar with a domain. Restricting it to regex literals was
 also measured — extending the same walk to strings and numbers takes the report
@@ -765,7 +765,7 @@ The blind spot is worth stating because it is the inverse of the check's own
 purpose: it matches literal text exactly, so it sees the duplication and not the
 drift that follows. Edit one of two copies and the group disappears. That is why
 the second homes are additionally bound by assertion in
-`test/contract/one-fact-one-home.test.mjs`, reading three separate modules so
+`test/contract/one-fact-one-home.test.ts`, reading three separate modules so
 the binding cannot be vacuous the way a fixture compared against its own
 producer was.
 

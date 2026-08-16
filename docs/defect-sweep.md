@@ -16,7 +16,7 @@ denominator, "six found" is a rate over an unknown area.
 
 One piece of re-sweep evidence does exist and it points the wrong way:
 `charness-artifacts/quality/2026-08-08-quality-review.md` reviewed
-`.githooks/pre-push` and `scripts/install-git-hooks.mjs` — including the `--check`
+`.githooks/pre-push` and `scripts/install-git-hooks.ts` — including the `--check`
 readback — with a delegated fresh-eye reviewer, and the next day's pass found two
 more defects in those same two files.
 

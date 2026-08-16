@@ -118,7 +118,7 @@ repository tests against are the bytes a release would ship from the locked
 handoff archive. To read it directly, offline and with no Gateway session:
 
 ```
-node scripts/verify-protocol-vendor-pin.mjs   # exit 0 only when shippable
+node scripts/verify-protocol-vendor-pin.ts   # exit 0 only when shippable
 ```
 
 A non-zero exit with `proof_shipment_protocol_divergence` names the vendored

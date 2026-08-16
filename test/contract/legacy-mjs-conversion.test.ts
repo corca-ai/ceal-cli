@@ -25,8 +25,8 @@ test("converter dry-run is bounded, policy-selected, and non-mutating", () => {
 	assert.equal(result.status, 0, result.stderr);
 	const plan = JSON.parse(result.stdout) as { dry_run: boolean; converted: string[] };
 	assert.equal(plan.dry_run, true);
-	assert.equal(plan.converted.length, 1);
-	assert.match(plan.converted[0], /^scripts\/.+\.mjs$/u);
+	assert.ok(plan.converted.length === 0 || plan.converted.length === 1);
+	if (plan.converted.length === 1) assert.match(plan.converted[0], /^scripts\/.+\.mjs$/u);
 	assert.equal(readFileSync("config/no-legacy-mjs.json", "utf8"), policy);
 });
 

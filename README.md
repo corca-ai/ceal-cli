@@ -29,7 +29,7 @@ SDK and the agent-facing `ceal` worker.
 `protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
 subtree the frozen protocol copy was taken from, alongside the protocol subtree
 inside the locked handoff archive a release consumes. `node
-scripts/verify-protocol-vendor-pin.mjs` binds the three offline, and both
+scripts/verify-protocol-vendor-pin.ts` binds the three offline, and both
 failures are fatal: the copy drifting from its recorded source, and a divergence
 between the copy and the shipped archive. The second fails
 `proof_shipment_protocol_divergence`, because it means what this repository tests

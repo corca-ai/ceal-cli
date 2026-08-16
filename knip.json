@@ -2,8 +2,8 @@
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"workspaces": {
 		".": {
-			"entry": ["scripts/*.mjs", "scripts/test-support/*.mjs", "test/**/*.test.mjs"],
-			"project": ["scripts/**/*.mjs", "test/**/*.mjs"]
+			"entry": ["scripts/*.ts", "scripts/test-support/*.ts", "test/**/*.test.ts"],
+			"project": ["scripts/**/*.ts", "test/**/*.ts"]
 		},
 		"packages/ceal-client": {
 			"entry": ["src/index.ts"],

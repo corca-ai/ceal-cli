@@ -1,7 +1,7 @@
 // Which TypeScript modules the owned packages hold — one home for the walk two
 // static checks need.
 //
-// `store-lock-census.mjs` and `duplicate-literal.mjs` ask different questions of
+// `store-lock-census.ts` and `duplicate-literal.ts` ask different questions of
 // the same file set, and each began with its own copy of this traversal. The
 // duplicate ratchet caught that on the run that armed them, which is exactly the
 // shape both checks exist to find: the fix for this class is the most reliable

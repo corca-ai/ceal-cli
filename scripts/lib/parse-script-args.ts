@@ -21,7 +21,7 @@
  * @param spec.unknownMessage refusal for an unrecognized argument
  * @returns `{ help, json, options }`
  */
-export type ScriptFail = (code: "invalid_argument", message: string) => never;
+type ScriptFail = (code: "invalid_argument", message: string) => never;
 
 export interface ScriptArgSpec {
 	fail: ScriptFail;

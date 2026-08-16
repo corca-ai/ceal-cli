@@ -90,7 +90,7 @@ jobs:
           inventory_listing="$(
             node --input-type=module -e '
               import { readFileSync } from "node:fs";
-              import { parsePublishedWorkerReleaseInventory } from "./scripts/build-worker-release-assets.mjs";
+              import { parsePublishedWorkerReleaseInventory } from "./scripts/build-worker-release-assets.ts";
               for (const asset of parsePublishedWorkerReleaseInventory(readFileSync(process.argv[1], "utf8"))) console.log(asset);
             ' "$readback_dir/SHA256SUMS"
           )"
