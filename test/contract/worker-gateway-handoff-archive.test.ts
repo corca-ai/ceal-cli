@@ -4,13 +4,39 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
-import { consumeLockedGatewayHandoffArchiveSync, WorkerGatewayHandoffArchiveError } from "../../scripts/worker-gateway-handoff-archive.ts";
+import test, { type TestContext } from "node:test";
+import {
+	type ArchiveResolution,
+	consumeLockedGatewayHandoffArchiveSync,
+	type RawInputs,
+	type SyncArchiveDependencies,
+	WorkerGatewayHandoffArchiveError,
+} from "../../scripts/worker-gateway-handoff-archive.ts";
 import { resolveWorkerReleaseInputsFromLockedGatewayArchive, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.ts";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const ORIGIN = "https://ceal.borca.ai/releases/gateway-protocol-handoff";
 const WORKFLOW_PATH = ".github/workflows/gateway-protocol-handoff-release.yml";
+
+type MutableLock = {
+	schema_version?: string;
+	status?: string;
+	gateway: Record<string, unknown>;
+	protocol: Record<string, unknown>;
+	archive: Record<string, unknown>;
+	reviewed_signature: Record<string, unknown>;
+};
+type ArchiveFixture = {
+	repoRoot: string;
+	archive: string;
+	archiveSha256: string;
+	commit: string;
+	tree: string;
+	protocolTree: string;
+	manifestSha256: string;
+	resolution: ArchiveResolution;
+};
+type TestDependencies = SyncArchiveDependencies<ArchiveResolution>;
 
 // Every refusal in this file is the same three moves: take the fixture's archive,
 // perturb one thing, and expect a coded refusal. Written out per case, the bodies
@@ -20,27 +46,32 @@ const WORKFLOW_PATH = ".github/workflows/gateway-protocol-handoff-release.yml";
 //
 // `lock` is passed in rather than re-read, because each case overwrites the lock
 // file and the next one still has to start from the reviewed original.
-function refusesMutatedLock(fixture, lock, mutate, code = "invalid_gateway_handoff_lock") {
-	const mutated = JSON.parse(JSON.stringify(lock));
+function refusesMutatedLock(
+	fixture: ArchiveFixture,
+	lock: MutableLock,
+	mutate: (value: MutableLock) => void,
+	code = "invalid_gateway_handoff_lock",
+): void {
+	const mutated: MutableLock = JSON.parse(JSON.stringify(lock));
 	mutate(mutated);
 	writeFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), `${JSON.stringify(mutated)}\n`);
 	refuses(fixture, undefined, code);
 }
 
-function refuses(fixture, dependencies, code) {
+function refuses(fixture: ArchiveFixture, dependencies: TestDependencies | undefined, code: string): void {
 	assert.throws(
 		() => consumeLockedGatewayHandoffArchiveSync({ repoRoot: fixture.repoRoot, archiveFile: fixture.archive }, dependencies),
 		hasArchiveCode(code),
 	);
 }
 
-test("resolves only a lock-bound exact Gateway archive through a disposable packet", (context) => {
+test("resolves only a lock-bound exact Gateway archive through a disposable packet", (context: TestContext) => {
 	const fixture = archiveFixture(context);
-	let packetDirectory;
+	let packetDirectory = "";
 	const result = consumeLockedGatewayHandoffArchiveSync(
 		{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 		{
-			resolveInputs: (inputs) => {
+			resolveInputs: (inputs: RawInputs) => {
 				packetDirectory = path.dirname(inputs.protocolTarball);
 				assert.equal(existsSync(packetDirectory), true);
 				assert.equal(readFileSync(inputs.protocolTarball, "utf8"), "protocol\n");
@@ -64,7 +95,7 @@ test("resolves only a lock-bound exact Gateway archive through a disposable pack
 	});
 });
 
-test("refuses a changed archive or unsafe archive inventory before the input resolver", (context) => {
+test("refuses a changed archive or unsafe archive inventory before the input resolver", (context: TestContext) => {
 	const fixture = archiveFixture(context);
 	writeFileSync(fixture.archive, "changed bytes\n");
 	assert.throws(
@@ -95,7 +126,7 @@ test("refuses a changed archive or unsafe archive inventory before the input res
 // a packet that still carries one is not a Gateway protocol handoff — and a
 // consumer that tolerated the extra member would be accepting a client artifact
 // nobody in this repository reviewed.
-test("a packet carrying a client tarball is refused as an inventory violation", (context) => {
+test("a packet carrying a client tarball is refused as an inventory violation", (context: TestContext) => {
 	const fixture = archiveFixture(context, { extraFile: "corca-ai-ceal-0.71.0.tgz" });
 	assert.throws(
 		() =>
@@ -107,16 +138,16 @@ test("a packet carrying a client tarball is refused as an inventory violation", 
 	);
 });
 
-test("verifies and extracts the private copied archive when the supplied path changes after copy", (context) => {
+test("verifies and extracts the private copied archive when the supplied path changes after copy", (context: TestContext) => {
 	const fixture = archiveFixture(context);
 	const result = consumeLockedGatewayHandoffArchiveSync(
 		{ repoRoot: fixture.repoRoot, archiveFile: fixture.archive },
 		{
-			copyArchive: (source, destination) => {
+			copyArchive: (source: string, destination: string) => {
 				copyFileSync(source, destination);
 				writeFileSync(source, "attacker replaced the supplied path after copy\n");
 			},
-			resolveInputs: (inputs) => {
+			resolveInputs: (inputs: RawInputs) => {
 				assert.equal(readFileSync(inputs.protocolTarball, "utf8"), "protocol\n");
 				return fixture.resolution;
 			},
@@ -129,19 +160,19 @@ test("verifies and extracts the private copied archive when the supplied path ch
 // rather than deriving it. Deriving the tarball name from the tag is what made a
 // genuine Protocol/Client pair archive unconsumable under the previous handoff
 // shape; the packet has one package now, but the lock is still what gets read.
-test("the lock declares the Protocol binding and it must agree with the tag", (context) => {
+test("the lock declares the Protocol binding and it must agree with the tag", (context: TestContext) => {
 	const fixture = archiveFixture(context);
-	const lock = JSON.parse(readFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), "utf8"));
+	const lock: MutableLock = JSON.parse(readFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), "utf8"));
 	for (const mutate of [
-		(value) => delete value.protocol,
+		(value: MutableLock) => removeProperty(value, "protocol"),
 		// The filename must agree with the declared version, so a lock cannot name
 		// one version and point at another tarball.
-		(value) => {
+		(value: MutableLock) => {
 			value.protocol.filename = "corca-ai-ceal-protocol-0.66.0.tgz";
 		},
 		// A Protocol version disagreeing with the tag is a lock error, not a silent
 		// preference for one of the two.
-		(value) => {
+		(value: MutableLock) => {
 			value.protocol.version = "0.66.0";
 			value.protocol.filename = "corca-ai-ceal-protocol-0.66.0.tgz";
 		},
@@ -155,26 +186,26 @@ test("the lock declares the Protocol binding and it must agree with the tag", (c
 // only property that can be enforced is that the recorded identity is the one the
 // lock's own tag and workflow imply — a lock naming some other workflow's
 // certificate is describing a different archive than the one it binds.
-test("the lock must record the Sigstore identity its own tag implies", (context) => {
+test("the lock must record the Sigstore identity its own tag implies", (context: TestContext) => {
 	const fixture = archiveFixture(context);
-	const lock = JSON.parse(readFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), "utf8"));
+	const lock: MutableLock = JSON.parse(readFileSync(path.join(fixture.repoRoot, LOCK_FILENAME), "utf8"));
 	lock.schema_version = "ceal.worker_gateway_protocol_handoff_lock.v2";
 	lock.reviewed_signature.workflow_sha = lock.gateway.commit;
 	for (const mutate of [
-		(value) => delete value.reviewed_signature,
-		(value) => {
+		(value: MutableLock) => removeProperty(value, "reviewed_signature"),
+		(value: MutableLock) => {
 			value.reviewed_signature.certificate_identity = "https://github.com/corca-ai/ceal/.github/workflows/other.yml@refs/tags/x";
 		},
-		(value) => {
+		(value: MutableLock) => {
 			value.reviewed_signature.oidc_issuer = "https://example.invalid";
 		},
-		(value) => {
+		(value: MutableLock) => {
 			value.reviewed_signature.run_invocation_uri = "https://github.com/corca-ai/ceal/actions/runs/1/attempts/1";
 		},
-		(value) => {
+		(value: MutableLock) => {
 			delete value.reviewed_signature.workflow_sha;
 		},
-		(value) => {
+		(value: MutableLock) => {
 			value.reviewed_signature.workflow_sha = "f".repeat(40);
 		},
 	]) {
@@ -186,16 +217,18 @@ test("the lock must record the Sigstore identity its own tag implies", (context)
 // a different Gateway identity than the reviewed lock names. It checks the whole
 // identity, not just the commit: two Gateway commits can share a tree, and the
 // protocol subtree is the field the vendored copy is pinned against.
-test("a packet resolving to another producer identity or another Protocol digest is refused", (context) => {
+test("a packet resolving to another producer identity or another Protocol digest is refused", (context: TestContext) => {
 	const drifts = [{ commit: "c".repeat(40) }, { tree: "c".repeat(40) }, { protocol_tree: "c".repeat(40) }];
 	for (const drift of drifts) {
 		const fixture = archiveFixture(context);
+		const protocol = fixture.resolution.protocol;
+		if (!protocol) throw new Error("fixture protocol resolution is required");
 		refuses(
 			fixture,
 			{
 				resolveInputs: () => ({
 					...fixture.resolution,
-					protocol: { ...fixture.resolution.protocol, producer: { ...fixture.resolution.protocol.producer, ...drift } },
+					protocol: { ...protocol, producer: { ...protocol.producer, ...drift } },
 				}),
 			},
 			"gateway_handoff_lock_mismatch",
@@ -226,9 +259,49 @@ test("worker input facade preserves the reviewed lock trust anchor and maps arch
 			consumeArchive: (_options, handlers) =>
 				handlers.consume({
 					lock,
-					rawInputs: { protocolTarball: "/tmp/protocol.tgz" },
+					rawInputs: {
+						repoRoot: "/tmp",
+						protocolTarball: "/tmp/protocol.tgz",
+						protocolProvenance: "/tmp/provenance.json",
+						controlConformance: "/tmp/control.json",
+						handoffManifest: "/tmp/handoff.json",
+						expectedHandoffSha256: "a".repeat(64),
+					},
 					resolution: {
-						protocol: { producer: { commit: lock.gateway_commit } },
+						schema_version: "ceal.worker_release_input_resolution.v1",
+						ok: true,
+						proof_level: "local_state",
+						writes_external: false,
+						worker: { package: "@corca-ai/ceal-worker-cli", source_path: "packages/ceal-worker-cli", command: "ceal" },
+						client: { package: "@corca-ai/ceal", source_path: "packages/ceal-client" },
+						guide: {
+							compatibility_asset: "ceal-guide-SKILL.md",
+							compatibility_source_path: "scripts/assets/ceal-guide-compatibility-SKILL.md",
+							embedded_asset: "ceal-guide.tar",
+							source_path: "skills/ceal-guide",
+							format: "tar",
+						},
+						protocol: {
+							package: "@corca-ai/ceal-protocol",
+							version: "0.65.0",
+							filename: "corca-ai-ceal-protocol-0.65.0.tgz",
+							sha256: "b".repeat(64),
+							npm_integrity: "sha512-placeholder",
+							exports: [".", "./conformance"],
+							producer: {
+								repository: "corca-ai/ceal",
+								commit: lock.gateway_commit,
+								tree: "b".repeat(40),
+								protocol_tree: "e".repeat(40),
+							},
+						},
+						control_conformance: { filename: "control.json", sha256: "c".repeat(64), bytes: 1 },
+						handoff: { filename: "handoff.json", sha256: "d".repeat(64) },
+						trust_anchor: {
+							kind: "caller_supplied_manifest_sha256",
+							value: "a".repeat(64),
+						},
+						forbidden_release_inputs: ["packages/ceal-protocol"],
 						non_claims: [
 							"This caller-supplied digest binds exact local input bytes; it does not authenticate who supplied that digest or packet.",
 						],
@@ -257,7 +330,7 @@ test("worker input facade preserves the reviewed lock trust anchor and maps arch
 	);
 });
 
-function archiveFixture(context, { extraFile = null } = {}) {
+function archiveFixture(context: TestContext, { extraFile = null }: { extraFile?: string | null } = {}): ArchiveFixture {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-gateway-handoff-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const repoRoot = path.join(root, "repo");
@@ -323,16 +396,19 @@ function archiveFixture(context, { extraFile = null } = {}) {
 	};
 }
 
-function readFileNames(directory) {
+function readFileNames(directory: string): string[] {
 	return readdirSync(directory).sort();
 }
+function removeProperty(record: Record<string, unknown>, key: string): void {
+	Reflect.deleteProperty(record, key);
+}
 
-function sha256(value) {
+function sha256(value: Uint8Array): string {
 	return createHash("sha256").update(value).digest("hex");
 }
-function hasArchiveCode(code) {
-	return (error) => error instanceof WorkerGatewayHandoffArchiveError && error.code === code;
+function hasArchiveCode(code: string): (error: unknown) => boolean {
+	return (error: unknown) => error instanceof WorkerGatewayHandoffArchiveError && error.code === code;
 }
-function hasInputCode(code) {
-	return (error) => error instanceof WorkerReleaseInputError && error.code === code;
+function hasInputCode(code: string): (error: unknown) => boolean {
+	return (error: unknown) => error instanceof WorkerReleaseInputError && error.code === code;
 }

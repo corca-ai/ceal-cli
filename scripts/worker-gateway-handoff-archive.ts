@@ -25,6 +25,61 @@ const HANDOFF_FILES = [
 
 const ORIGIN = "https://ceal.borca.ai/releases/gateway-protocol-handoff";
 
+type JsonRecord = Record<string, unknown>;
+export type ArchiveOptions = { repoRoot: string; archiveFile?: string };
+export type RawInputs = {
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	expectedHandoffSha256: string;
+	clientTarball?: never;
+};
+export type ProducerIdentity = { repository: string; commit: string; tree: string; protocol_tree: string };
+export type ArchiveResolution = {
+	protocol?: { sha256?: string; producer?: Partial<ProducerIdentity> };
+	[key: string]: unknown;
+};
+type GatewayLock = {
+	repository: string;
+	workflow_path: string;
+	commit: string;
+	tree: string;
+	protocol_tree: string;
+	tag: string;
+	actions_run_id: number;
+	origin: string;
+};
+type ProtocolBinding = { package: string; version: string; filename: string; sha256: string };
+type ArchiveBinding = { filename: string; sha256: string; handoff_manifest_sha256: string; control_routes_sha256?: string };
+type ValidatedLock = { gateway: GatewayLock; archive: ArchiveBinding; protocol: ProtocolBinding };
+export type ArchiveLock = {
+	filename: string;
+	gateway_repository: string;
+	gateway_commit: string;
+	gateway_tag: string;
+	actions_run_id: number;
+	origin: string;
+	archive_filename: string;
+	archive_sha256: string;
+};
+export type PreparedArchive<R extends ArchiveResolution = ArchiveResolution> = {
+	resolution: R;
+	rawInputs: RawInputs;
+	lock: ArchiveLock;
+	cleanup: () => void;
+};
+export type SyncArchiveDependencies<R extends ArchiveResolution = ArchiveResolution, T = R> = {
+	consume?: (prepared: PreparedArchive<R>) => T;
+	resolveInputs?: (rawInputs: RawInputs) => R;
+	copyArchive?: (source: string, destination: string) => void;
+	extract?: (archive: string, destination: string) => void;
+};
+type AsyncArchiveDependencies<R extends ArchiveResolution = ArchiveResolution, T = R> = Omit<SyncArchiveDependencies<R, T>, "consume"> & {
+	consume?: (prepared: PreparedArchive<R>) => T | PromiseLike<T>;
+};
+
 export const WorkerGatewayHandoffArchiveError = codedErrorClass("WorkerGatewayHandoffArchiveError");
 
 // `resolveLockedGatewayHandoffArchive` stood here from 2026-07-23 (437332a) and
@@ -36,12 +91,23 @@ export const WorkerGatewayHandoffArchiveError = codedErrorClass("WorkerGatewayHa
 // now. Verifies a source-reviewed lock and a locally supplied archive, extracts
 // the exact packet into a disposable directory, and invokes the worker input
 // resolver. Neither variant downloads, uploads, installs, or releases.
-export function consumeLockedGatewayHandoffArchiveSync(options = {}, dependencies = {}) {
+export function consumeLockedGatewayHandoffArchiveSync<R extends ArchiveResolution, T>(
+	options: ArchiveOptions,
+	dependencies: SyncArchiveDependencies<R, T> & { consume: (prepared: PreparedArchive<R>) => T },
+): T;
+export function consumeLockedGatewayHandoffArchiveSync<R extends ArchiveResolution = ArchiveResolution>(
+	options: ArchiveOptions,
+	dependencies?: SyncArchiveDependencies<R>,
+): { resolution: R; lock: ArchiveLock };
+export function consumeLockedGatewayHandoffArchiveSync<R extends ArchiveResolution, T>(
+	options: ArchiveOptions,
+	dependencies: SyncArchiveDependencies<R, T> = {},
+): { resolution: R; lock: ArchiveLock } | T {
 	const prepared = prepareLockedGatewayHandoffArchive(options, dependencies);
 	try {
 		if (typeof dependencies.consume !== "function") return { resolution: prepared.resolution, lock: prepared.lock };
 		const result = dependencies.consume(prepared);
-		if (result && typeof result.then === "function")
+		if (isPromiseLike(result))
 			fail("gateway_handoff_archive_async_consumer", "Synchronous Gateway handoff consumption cannot return a promise.");
 		return result;
 	} finally {
@@ -49,7 +115,18 @@ export function consumeLockedGatewayHandoffArchiveSync(options = {}, dependencie
 	}
 }
 
-export async function consumeLockedGatewayHandoffArchive(options = {}, dependencies = {}) {
+export function consumeLockedGatewayHandoffArchive<R extends ArchiveResolution, T>(
+	options: ArchiveOptions,
+	dependencies: AsyncArchiveDependencies<R, T> & { consume: (prepared: PreparedArchive<R>) => T | PromiseLike<T> },
+): Promise<T>;
+export function consumeLockedGatewayHandoffArchive<R extends ArchiveResolution = ArchiveResolution>(
+	options: ArchiveOptions,
+	dependencies?: AsyncArchiveDependencies<R>,
+): Promise<{ resolution: R; lock: ArchiveLock }>;
+export async function consumeLockedGatewayHandoffArchive<R extends ArchiveResolution, T>(
+	options: ArchiveOptions,
+	dependencies: AsyncArchiveDependencies<R, T> = {},
+): Promise<{ resolution: R; lock: ArchiveLock } | T> {
 	const prepared = prepareLockedGatewayHandoffArchive(options, dependencies);
 	try {
 		if (typeof dependencies.consume !== "function") return { resolution: prepared.resolution, lock: prepared.lock };
@@ -59,7 +136,10 @@ export async function consumeLockedGatewayHandoffArchive(options = {}, dependenc
 	}
 }
 
-function prepareLockedGatewayHandoffArchive(options, dependencies) {
+function prepareLockedGatewayHandoffArchive<R extends ArchiveResolution>(
+	options: ArchiveOptions,
+	dependencies: Pick<SyncArchiveDependencies<R>, "resolveInputs" | "copyArchive" | "extract">,
+): PreparedArchive<R> {
 	const repoRoot = path.resolve(options.repoRoot);
 	const archive = requireRegularAbsoluteFile(options.archiveFile, "invalid_gateway_handoff_archive");
 	const lockPath = requireRegularFile(path.join(repoRoot, LOCK_FILENAME), "gateway_handoff_lock_missing");
@@ -116,12 +196,19 @@ function prepareLockedGatewayHandoffArchive(options, dependencies) {
 	}
 }
 
-function validateLock(value) {
-	if (!isRecord(value) || ![LOCK_SCHEMA_V1, LOCK_SCHEMA_V2].includes(value.schema_version) || value.status !== "locked") {
+function validateLock(value: unknown): ValidatedLock {
+	if (
+		!isRecord(value) ||
+		typeof value.schema_version !== "string" ||
+		![LOCK_SCHEMA_V1, LOCK_SCHEMA_V2].includes(value.schema_version) ||
+		value.status !== "locked"
+	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock is invalid or not yet locked.");
 	}
 	const gateway = value.gateway;
 	const archive = value.archive;
+	if (!isRecord(gateway) || !isRecord(archive))
+		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid immutable producer identity.");
 	if (
 		!isRecord(gateway) ||
 		gateway.repository !== "corca-ai/ceal" ||
@@ -129,6 +216,7 @@ function validateLock(value) {
 		!isGitObject(gateway.commit) ||
 		!isGitObject(gateway.tree) ||
 		!isGitObject(gateway.protocol_tree) ||
+		typeof gateway.actions_run_id !== "number" ||
 		!Number.isSafeInteger(gateway.actions_run_id) ||
 		gateway.actions_run_id <= 0 ||
 		typeof gateway.tag !== "string" ||
@@ -172,10 +260,26 @@ function validateLock(value) {
 	if (protocol.version !== version) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock's Protocol version does not match the handoff tag it was cut from.");
 	}
-	return { gateway: { ...gateway }, archive: { ...archive }, protocol };
+	const validatedGateway: GatewayLock = {
+		repository: requireStringField(gateway, "repository"),
+		workflow_path: requireStringField(gateway, "workflow_path"),
+		commit: requireStringField(gateway, "commit"),
+		tree: requireStringField(gateway, "tree"),
+		protocol_tree: requireStringField(gateway, "protocol_tree"),
+		tag: requireStringField(gateway, "tag"),
+		actions_run_id: requireNumberField(gateway, "actions_run_id"),
+		origin: requireStringField(gateway, "origin"),
+	};
+	const validatedArchive: ArchiveBinding = {
+		filename: requireStringField(archive, "filename"),
+		sha256: requireStringField(archive, "sha256"),
+		handoff_manifest_sha256: requireStringField(archive, "handoff_manifest_sha256"),
+		...(typeof archive.control_routes_sha256 === "string" ? { control_routes_sha256: archive.control_routes_sha256 } : {}),
+	};
+	return { gateway: validatedGateway, archive: validatedArchive, protocol };
 }
 
-function requireProtocolBinding(value) {
+function requireProtocolBinding(value: unknown): ProtocolBinding {
 	if (
 		!isRecord(value) ||
 		value.package !== "@corca-ai/ceal-protocol" ||
@@ -192,18 +296,18 @@ function requireProtocolBinding(value) {
 	return { package: value.package, version: value.version, filename: value.filename, sha256: value.sha256 };
 }
 
-function assertArchiveLockBinding(archive, lock) {
+function assertArchiveLockBinding(archive: string, lock: ValidatedLock): void {
 	if (path.basename(archive) !== lock.archive.filename || sha256(readFileSync(archive)) !== lock.archive.sha256) {
 		fail("gateway_handoff_archive_mismatch", "Gateway handoff archive does not match the reviewed lock.");
 	}
 }
 
-function assertArchiveInventory(archive, lock) {
+function assertArchiveInventory(archive: string, lock: ValidatedLock): void {
 	assertGatewayHandoffArchiveInventory(archive, lock.protocol.filename);
 }
 
 /** Shared exact-member and regular-file check for pre-lock and locked consumers. */
-export function assertGatewayHandoffArchiveInventory(archive, protocolFilename) {
+export function assertGatewayHandoffArchiveInventory(archive: string, protocolFilename: string): void {
 	const expected = packetMembersForProtocol(protocolFilename);
 	const members = listArchive(archive);
 	if (JSON.stringify([...members].sort()) !== JSON.stringify(expected)) {
@@ -215,7 +319,7 @@ export function assertGatewayHandoffArchiveInventory(archive, protocolFilename) 
 	}
 }
 
-export function extractGatewayHandoffArchive(archive, destination) {
+export function extractGatewayHandoffArchive(archive: string, destination: string): void {
 	try {
 		execFileSync("tar", ["-xzf", archive, "-C", destination, "--no-same-owner", "--no-same-permissions"], { stdio: "pipe" });
 	} catch {
@@ -225,7 +329,7 @@ export function extractGatewayHandoffArchive(archive, destination) {
 
 const extractArchive = extractGatewayHandoffArchive;
 
-function assertExtractedPacket(directory, lock) {
+function assertExtractedPacket(directory: string, lock: ValidatedLock): void {
 	const expected = packetMembers(lock);
 	if (JSON.stringify(readdirSync(directory).sort()) !== JSON.stringify(expected)) {
 		fail("gateway_handoff_archive_inventory", "Extracted Gateway handoff packet inventory is invalid.");
@@ -235,18 +339,18 @@ function assertExtractedPacket(directory, lock) {
 	if (marker !== `${HANDOFF_SCHEMA}\n`) fail("gateway_handoff_archive_unsafe", "Gateway handoff archive marker is invalid.");
 }
 
-function packetMembers(lock) {
+function packetMembers(lock: ValidatedLock): string[] {
 	return packetMembersForProtocol(lock.protocol.filename);
 }
 
-function packetMembersForProtocol(protocolFilename) {
+function packetMembersForProtocol(protocolFilename: unknown): string[] {
 	if (typeof protocolFilename !== "string" || !/^corca-ai-ceal-protocol-\d+\.\d+\.\d+\.tgz$/u.test(protocolFilename)) {
 		fail("gateway_handoff_archive_inventory", "Gateway handoff Protocol filename is invalid.");
 	}
 	return [...HANDOFF_FILES, protocolFilename].sort();
 }
 
-function listArchive(archive) {
+function listArchive(archive: string): string[] {
 	try {
 		return execFileSync("tar", ["-tzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
 			.trim()
@@ -257,7 +361,7 @@ function listArchive(archive) {
 	}
 }
 
-function listArchiveDetails(archive) {
+function listArchiveDetails(archive: string): string[] {
 	try {
 		return execFileSync("tar", ["-tvzf", archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
 			.trim()
@@ -268,20 +372,20 @@ function listArchiveDetails(archive) {
 	}
 }
 
-function requireRegularAbsoluteFile(value, code) {
+function requireRegularAbsoluteFile(value: unknown, code: string): string {
 	if (typeof value !== "string" || !path.isAbsolute(value)) fail(code, "Gateway handoff archive must be an absolute regular file.");
 	assertNoSymlinkAncestor(value, code);
 	return requireRegularFile(path.resolve(value), code);
 }
 
-function requireRegularFile(filePath, code) {
+function requireRegularFile(filePath: string, code: string): string {
 	if (!existsSync(filePath)) fail(code, "Required Gateway handoff file is missing.");
 	const stat = lstatSync(filePath);
 	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Required Gateway handoff file must be regular and non-symlinked.");
 	return filePath;
 }
 
-function assertNoSymlinkAncestor(target, code) {
+function assertNoSymlinkAncestor(target: string, code: string): void {
 	let current = path.parse(target).root;
 	for (const part of target.slice(current.length).split(path.sep).filter(Boolean)) {
 		current = path.join(current, part);
@@ -290,7 +394,7 @@ function assertNoSymlinkAncestor(target, code) {
 	}
 }
 
-function readJson(filePath, code) {
+function readJson(filePath: string, code: string): unknown {
 	try {
 		return JSON.parse(readFileSync(filePath, "utf8"));
 	} catch {
@@ -298,18 +402,31 @@ function readJson(filePath, code) {
 	}
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is JsonRecord {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function isGitObject(value) {
+function requireStringField(record: JsonRecord, key: string): string {
+	const value = record[key];
+	if (typeof value !== "string") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid text field.");
+	return value;
+}
+function requireNumberField(record: JsonRecord, key: string): number {
+	const value = record[key];
+	if (typeof value !== "number") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid numeric field.");
+	return value;
+}
+function isGitObject(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
 }
-function isSha256(value) {
+function isSha256(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
-function sha256(bytes) {
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+	return value !== null && (typeof value === "object" || typeof value === "function") && "then" in value && typeof value.then === "function";
+}
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function fail(code, message) {
+function fail(code: string, message: string): never {
 	throw new WorkerGatewayHandoffArchiveError(code, message);
 }
