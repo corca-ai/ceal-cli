@@ -3,11 +3,12 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
 import { writeCealLocalStoreFile } from "../dist/local-store-file.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
 import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
+import type { CealReceiptSpoolEntry } from "../src/receipt-spool.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -26,7 +27,7 @@ const SESSION = {
 	refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
 };
 
-const SPOOL_ENTRY = {
+const SPOOL_ENTRY: CealReceiptSpoolEntry = {
 	recordedAt: Date.parse("2026-07-27T00:00:00.000Z"),
 	requestRef: "request:probe",
 	status: "completed",
@@ -34,7 +35,7 @@ const SPOOL_ENTRY = {
 	auditRefs: ["audit:one"],
 };
 
-function withHome(context) {
+function withHome(context: TestContext): string {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-store-file-"));
 	context.after(() => rmSync(home, { recursive: true, force: true }));
 	mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
@@ -42,7 +43,7 @@ function withHome(context) {
 }
 
 /** Plant an orphan of `prefix` and age it past the sweep threshold. */
-function plantStaleTemporary(directory, prefix, contents = "orphaned\n") {
+function plantStaleTemporary(directory: string, prefix: string, contents = "orphaned\n"): string {
 	const orphan = path.join(directory, `.${prefix}.999999.deadbeefdeadbeef.tmp`);
 	writeFileSync(orphan, contents, { mode: 0o600 });
 	const aged = (Date.now() - 2 * HOUR_MS) / 1000;
@@ -50,7 +51,7 @@ function plantStaleTemporary(directory, prefix, contents = "orphaned\n") {
 	return orphan;
 }
 
-function temporaries(directory) {
+function temporaries(directory: string): string[] {
 	return readdirSync(directory).filter((name) => name.endsWith(".tmp"));
 }
 
@@ -169,7 +170,10 @@ test("an unsafe temp prefix is refused rather than swept with", async (context) 
 	assert.deepEqual(readdirSync(directory), []);
 });
 
-function runKilledWriter(source, environment) {
+function runKilledWriter(
+	source: string,
+	environment: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; stdout: string; signal: NodeJS.Signals | null }> {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
 		env: { ...process.env, ...environment },
 		stdio: ["ignore", "pipe", "pipe"],

@@ -196,6 +196,17 @@ test("static templates and path.join references are planned like the real agent-
 	assert.deepEqual(plan.unresolvedReferences, []);
 });
 
+test("static selected paths in code comments move with their converted owner", (context) => {
+	const root = fixture();
+	writeFileSync(join(root, "scripts/reference.ts"), "// Keep parity with convert.mjs when this fixture changes.\n");
+	execFileSync("git", ["-C", root, "add", "-A"]);
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const plan = planConversion(root, "scripts", 1);
+	const reference = plan.references.find((entry) => entry.file === "scripts/reference.ts");
+	assert.equal(reference?.rewrites, 1);
+	assert.equal(reference?.after.toString("utf8"), "// Keep parity with convert.ts when this fixture changes.\n");
+});
+
 test("the exact policy authority is never treated as a reference", (context) => {
 	const root = fixture();
 	context.after(() => rmSync(root, { recursive: true, force: true }));

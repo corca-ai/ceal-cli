@@ -331,7 +331,7 @@ test("clearing the spool contends for the same lock the append holds", async () 
 		await store.append(entry({ requestRef: "narnia:call:1:call" }));
 		const lockPath = path.join(home, ".ceal", "receipt-spool.lock");
 		// This process is unquestionably alive, so the dead-owner reclamation path
-		// cannot fire — the same construction `local-store-lock.test.mjs` uses.
+		// cannot fire — the same construction `local-store-lock.test.ts` uses.
 		mkdirSync(lockPath, { mode: 0o700, recursive: true });
 		writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: process.pid, nonce: "a".repeat(32) })}\n`, { mode: 0o600 });
 

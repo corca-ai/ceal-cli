@@ -3,21 +3,24 @@ import { spawn } from "node:child_process";
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { assertDirectory, assertFile, prepareDirectory, removeOwnedFile, safeExistingFile } from "../dist/local-store-guards.js";
 
 class Refused extends Error {}
-function unsafe() {
+function unsafe(): never {
 	throw new Refused("unsafe_store");
 }
 
-function scratch(context) {
+function scratch(context: TestContext): string {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-store-guards-"));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	return root;
 }
 
-function store(root, { dirMode = 0o700, fileMode = 0o600 } = {}) {
+function store(
+	root: string,
+	{ dirMode = 0o700, fileMode = 0o600 }: { dirMode?: number; fileMode?: number } = {},
+): { directory: string; file: string } {
 	const directory = path.join(root, "store");
 	mkdirSync(directory, { recursive: true });
 	const file = path.join(directory, "entry.json");
@@ -112,8 +115,17 @@ test("the guard-child barrier fails promptly and reaps every child when readines
 	}
 });
 
-async function releaseGuardChildren(children, readyTimeoutMs = 10_000) {
-	let timer;
+type GuardChildResult = { code: number | null; stdout: string; stderr: string };
+type GuardChild = {
+	ready: Promise<void>;
+	release: () => void;
+	result: Promise<GuardChildResult>;
+	terminate: () => void;
+	isAlive: () => boolean;
+};
+
+async function releaseGuardChildren(children: readonly GuardChild[], readyTimeoutMs = 10_000): Promise<GuardChildResult[]> {
+	let timer: NodeJS.Timeout | undefined;
 	try {
 		await Promise.race([
 			Promise.all(children.map((child) => child.ready)),
@@ -130,7 +142,7 @@ async function releaseGuardChildren(children, readyTimeoutMs = 10_000) {
 	}
 }
 
-function runGuardChild(source, env) {
+function runGuardChild(source: string, env: NodeJS.ProcessEnv): GuardChild {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
 		env: { ...process.env, ...env },
 		stdio: ["pipe", "pipe", "pipe"],
@@ -138,9 +150,9 @@ function runGuardChild(source, env) {
 	let stdout = "";
 	let stderr = "";
 	let readySeen = false;
-	let resolveReady;
-	let rejectReady;
-	const ready = new Promise((resolve, reject) => {
+	let resolveReady: () => void;
+	let rejectReady: (reason?: unknown) => void;
+	const ready = new Promise<void>((resolve, reject) => {
 		resolveReady = resolve;
 		rejectReady = reject;
 	});
@@ -154,7 +166,7 @@ function runGuardChild(source, env) {
 	child.stderr.on("data", (chunk) => {
 		stderr += String(chunk);
 	});
-	const result = new Promise((resolve, reject) => {
+	const result = new Promise<GuardChildResult>((resolve, reject) => {
 		child.once("error", (error) => {
 			if (!readySeen) rejectReady(error);
 			reject(error);

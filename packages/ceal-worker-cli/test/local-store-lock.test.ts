@@ -8,6 +8,7 @@ import test from "node:test";
 import { transformSync } from "esbuild";
 import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
 import { withLocalStoreLock } from "../dist/local-store-lock.js";
+import type { LocalStoreLockOptions } from "../src/local-store-lock.js";
 
 // Every branch below was uncovered on both sides of the extraction that made
 // this module shared: the session store had carried the same code privately
@@ -42,7 +43,7 @@ test("Darwin refuses a visible directory path after the opened directory is rena
 	}
 });
 
-function options(directory, overrides = {}) {
+function options(directory: string, overrides: Partial<LocalStoreLockOptions> = {}): LocalStoreLockOptions {
 	return {
 		lockPath: path.join(directory, "test.lock"),
 		maxWaitMs: 250,
@@ -58,7 +59,7 @@ function options(directory, overrides = {}) {
 
 test("the lock serializes, then releases so the next caller can take it", async () => {
 	await withStore(async (directory) => {
-		const held = [];
+		const held: boolean[] = [];
 		await withLocalStoreLock(options(directory), async () => {
 			held.push(statSync(options(directory).lockPath).isDirectory());
 		});
@@ -77,13 +78,14 @@ test("a holder released between lock inspection and directory read is an availab
 		const originalReaddirSync = fs.readdirSync;
 		let released = false;
 		try {
-			fs.readdirSync = (...args) => {
-				if (!released && path.basename(args[0]) === path.basename(lockPath)) {
+			Reflect.set(fs, "readdirSync", (directoryPath: fs.PathLike) => {
+				const directory = String(directoryPath);
+				if (!released && path.basename(directory) === path.basename(lockPath)) {
 					released = true;
-					rmSync(args[0], { recursive: true, force: true });
+					rmSync(directory, { recursive: true, force: true });
 				}
-				return originalReaddirSync(...args);
-			};
+				return originalReaddirSync(directory);
+			});
 			syncBuiltinESMExports();
 			let entered = false;
 			await withLocalStoreLock(options(directory), async () => {
@@ -92,7 +94,7 @@ test("a holder released between lock inspection and directory read is an availab
 			assert.equal(released, true);
 			assert.equal(entered, true);
 		} finally {
-			fs.readdirSync = originalReaddirSync;
+			Reflect.set(fs, "readdirSync", originalReaddirSync);
 			syncBuiltinESMExports();
 		}
 	});
@@ -271,7 +273,7 @@ test("a lock directory or owner record readable beyond its owner is refused", as
 test("a holder whose lock was reclaimed does not delete its successor's", async () => {
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
-		let successorNonce;
+		let successorNonce: string | undefined;
 		await withLocalStoreLock(options(directory), async () => {
 			// Stand in for the sequence where this holder stalled, another process
 			// reclaimed the lock as stale, and a third now holds it. Releasing by
@@ -339,24 +341,21 @@ test("successive invalid lock generations get distinct retained tombstones", asy
 
 test("a lock owned by a pid this user cannot signal is busy, not unsafe", async () => {
 	await withStore(async (directory) => {
-		// pid 1 exists and is root-owned, so `kill(1, 0)` raises EPERM here. That is
-		// proof the pid is *alive*, which is the ordinary pid-reuse case — reporting
-		// it as unsafe left the session store refusing writes for as long as that
-		// process lived.
-		// Assert the precondition rather than assume it: running as root makes
-		// `kill(1, 0)` succeed, and this test would then quietly prove the
-		// already-covered live-owner path instead of the EPERM one.
-		let signalled = null;
-		try {
-			process.kill(1, 0);
-		} catch (error) {
-			signalled = error.code;
-		}
-		assert.equal(signalled, "EPERM", "this test needs a pid it cannot signal; it is not exercising the EPERM path");
-		writeOwnedLock(options(directory).lockPath, 1);
+		const ownerPid = 4242;
+		const probed: number[] = [];
+		const processProbe = (pid: number): never => {
+			probed.push(pid);
+			throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+		};
+		writeOwnedLock(options(directory).lockPath, ownerPid);
 		await assert.rejects(
-			withLocalStoreLock(options(directory), async () => {}),
+			withLocalStoreLock(options(directory, { processProbe }), async () => {}),
 			TestBusy,
+		);
+		assert.ok(probed.length > 0);
+		assert.equal(
+			probed.every((pid) => pid === ownerPid),
+			true,
 		);
 	});
 });
@@ -413,7 +412,7 @@ test("stale quarantine re-resolves both rename paths after the visible parent is
 
 const FOREIGN_NONCE = "c".repeat(32);
 
-function successorBeforeCandidatePublish(directory) {
+function successorBeforeCandidatePublish(directory: string): string {
 	const source = injectableLockSource();
 	const anchor = "renameSync(candidate(), options.lockPath);";
 	assert.ok(source.includes(anchor), "the create path no longer matches the candidate-publish seam");
@@ -428,7 +427,7 @@ function successorBeforeCandidatePublish(directory) {
 	return module;
 }
 
-function successorBeforeLateQuarantine(directory) {
+function successorBeforeLateQuarantine(directory: string): string {
 	const source = injectableLockSource();
 	const anchor = "renameSync(options.lockPath, quarantine());";
 	assert.ok(source.includes(anchor), "the stale path no longer matches the quarantine seam");
@@ -444,7 +443,7 @@ function successorBeforeLateQuarantine(directory) {
 	return module;
 }
 
-function parentSwapAfterCandidateMkdir(moduleDirectory, directory, moved) {
+function parentSwapAfterCandidateMkdir(moduleDirectory: string, directory: string, moved: string): string {
 	const source = injectableLockSource();
 	const anchor = "mkdirSync(candidate(), { mode: 0o700 });";
 	assert.ok(source.includes(anchor), "the create path no longer matches the candidate-mkdir seam");
@@ -458,7 +457,7 @@ function parentSwapAfterCandidateMkdir(moduleDirectory, directory, moved) {
 	return module;
 }
 
-function parentSwapBeforeQuarantine(moduleDirectory, directory, moved) {
+function parentSwapBeforeQuarantine(moduleDirectory: string, directory: string, moved: string): string {
 	const source = injectableLockSource();
 	const anchor = "renameSync(options.lockPath, quarantine());";
 	assert.ok(source.includes(anchor), "the stale path no longer matches the parent-swap seam");
@@ -472,7 +471,7 @@ function parentSwapBeforeQuarantine(moduleDirectory, directory, moved) {
 	return module;
 }
 
-function injectableLockSource() {
+function injectableLockSource(): string {
 	const source = readFileSync(new URL("../src/local-store-lock.ts", import.meta.url), "utf8");
 	const relativeImport = 'from "./local-store-anchor.js";';
 	const relativeClockImport = 'from "./monotonic-clock.js";';
@@ -489,27 +488,28 @@ function injectableLockSource() {
 		.replace(relativeModeImport, `from ${JSON.stringify(modeUrl)};`);
 }
 
-function emittedInjectedLock(source) {
+function emittedInjectedLock(source: string): string {
 	return transformSync(source, { format: "esm", loader: "ts", target: "node22" }).code;
 }
 
-function writeOwnedLock(lockPath, pid, ownerMode = 0o600, nonce = "a".repeat(32)) {
+function writeOwnedLock(lockPath: string, pid: number, ownerMode = 0o600, nonce = "a".repeat(32)): void {
 	mkdirSync(lockPath, { mode: 0o700, recursive: true });
 	writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid, nonce })}\n`, { mode: ownerMode });
 }
 
 // A pid that has certainly exited. Picking an arbitrary high number could name a
 // live process on a busy host and turn this into a flake.
-async function deadPid() {
+async function deadPid(): Promise<number> {
 	const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		child.once("error", reject);
-		child.once("close", resolve);
+		child.once("close", () => resolve());
 	});
+	if (child.pid === undefined) throw new Error("child_pid_missing");
 	return child.pid;
 }
 
-async function withStore(callback) {
+async function withStore(callback: (directory: string) => Promise<void>): Promise<void> {
 	const directory = mkdtempSync(path.join(tmpdir(), "ceal-store-lock-"));
 	try {
 		await callback(directory);

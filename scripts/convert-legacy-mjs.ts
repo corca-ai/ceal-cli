@@ -440,6 +440,17 @@ function transformStaticJoins(
 		ts.forEachChild(node, visit);
 	};
 	visit(source);
+	const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, text);
+	for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+		if (token !== ts.SyntaxKind.SingleLineCommentTrivia && token !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
+		const start = scanner.getTokenPos();
+		const end = scanner.getTextPos();
+		const raw = text.slice(start, end);
+		const changed = raw.replace(PATH_TOKEN, (match, target: string) =>
+			resolveTarget(root, file, target, selected) ? match.replace(target, target.replace(/\.mjs$/u, ".ts")) : match,
+		);
+		if (changed !== raw) edits.push({ start, end, value: changed });
+	}
 	const unique = [...new Map(edits.map((edit) => [edit.start, edit])).values()].sort((a, b) => b.start - a.start);
 	let updated = text;
 	for (const edit of unique) updated = `${updated.slice(0, edit.start)}${edit.value}${updated.slice(edit.end)}`;
