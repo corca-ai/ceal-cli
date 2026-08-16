@@ -971,16 +971,14 @@ test("every @testOnly export is actually reached by a suite", () => {
 	);
 });
 
-test("development-only attachment candidate files stay explicitly quarantined", () => {
+test("promoted attachment-stream private entrypoint is reachable and not quarantined", () => {
 	const knip = JSON.parse(read("knip.json"));
-	const ignored = knip.workspaces["packages/ceal-worker-cli"].ignore;
-	assert.deepEqual(ignored, [
-		"src/generated/leased-consumer-attachment-stream-contract.ts",
-		"src/leased-consumer-attachment-stream-carrier.ts",
-		"src/leased-consumer-attachment-stream.ts",
-	]);
-	for (const file of ignored)
-		assert.ok(existsSync(path.join(ROOT, "packages/ceal-worker-cli", file)), `${file} must exist before it is quarantined`);
+	assert.deepEqual(knip.workspaces["packages/ceal-worker-cli"].ignore ?? [], []);
+	const bin = read("packages/ceal-worker-cli/src/bin.ts");
+	const runtime = read("packages/ceal-worker-cli/src/private-bin-runtime.ts");
+	assert.match(bin, /LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV/u);
+	assert.match(runtime, /runLeasedConsumerAttachmentStreamEntrypoint/u);
+	assert.ok(existsSync(path.join(ROOT, "packages/ceal-worker-cli/src/leased-consumer-attachment-stream-entrypoint.ts")));
 });
 
 // `ceal update` runs this installer and waits for it, so an unbounded fetch here

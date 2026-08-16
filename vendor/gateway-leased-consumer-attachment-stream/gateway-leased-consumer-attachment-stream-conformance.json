@@ -4,8 +4,8 @@
 	"writes_external": false,
 	"source": {
 		"repository": "corca-ai/ceal",
-			"commit": "317d4245144fb1552e16175082951c882b3a452a",
-			"tree": "fe4e452dd83c28574963e22295d62957bc83d284",
+				"commit": "9b9838be69171fd2340d58a8c15a0e29c2b8391f",
+				"tree": "d20bd6426647f8df2b191424310cd2cc9c5d4ee0",
 		"protocol_tree": "42f9c7920b2c72fceb5347d9279537fca7e057ad",
 		"inputs": [
 			{
@@ -18,7 +18,7 @@
 			},
 			{
 				"path": "scripts/agent-runtime/gateway-leased-consumer-attachment-stream-route.ts",
-				"sha256": "6cfc84a357acc07f9ad7430cbf1df3d557ed738d467d57c2bfb6c0b5ebd6e79c"
+					"sha256": "7b574d8db453379333b5b3520107e5e07d9311e9be28f3a7e115ffd3e68363b9"
 			},
 			{
 				"path": "scripts/agent-runtime/fixtures/gateway-leased-consumer-attachment-stream-transport.json",
@@ -77,8 +77,8 @@
 		"provider credentials, URLs, source refs, and provider file identifiers never cross the boundary"
 	],
 	"non_claims": [
-		"This is a local immutable-source candidate handoff, not a signed release, installed Worker artifact, registered Gateway route, or live serving proof.",
+		"This local immutable-source handoff is not a signed release, installed Worker artifact, or live serving proof; local route registration does not prove live availability.",
 		"The protected service credential remains a runtime input and is never included in this packet or exposed to Agent IPC.",
-		"The candidate route does not select a provider file, authorize an arbitrary path, or prove a successful provider download."
+		"The route does not select a provider file, authorize an arbitrary path, or prove a successful provider download."
 	]
 }

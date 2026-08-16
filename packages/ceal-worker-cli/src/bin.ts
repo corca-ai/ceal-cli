@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
 import { runCealStaticCommand } from "./command-surface.js";
+import { LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV } from "./generated/leased-consumer-attachment-stream-contract.js";
 import { LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV } from "./generated/leased-consumer-carrier-contract.js";
 import { LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV } from "./generated/leased-consumer-control-session-contract.js";
 import { renderPlainYamlDocument } from "./yaml.js";
 
-const PRIVATE_ENTRYPOINTS = new Set<string>([LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV, LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV]);
+const PRIVATE_ENTRYPOINTS = new Set<string>([
+	LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV,
+	LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV,
+	LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV,
+]);
 
 const args = process.argv.slice(2);
 void dispatch(args).then(

@@ -23,7 +23,7 @@ import { postUnixSocketStream, type UnixSocketErrorNames } from "./private-worke
 const OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
 const CONTRACT = readCandidateContract();
 
-export const LEASED_CONSUMER_ATTACHMENT_STREAM_ARGV = LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV;
+export const LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_CONTRACT = CONTRACT;
 
 export class LeasedConsumerAttachmentStreamCarrierError extends Error {
 	readonly code: string;
@@ -156,7 +156,19 @@ function readCandidateContract(): CandidateContract {
 		value.response?.content_type !== "application/octet-stream" ||
 		value.protected_session?.child_fd !== 4 ||
 		value.protected_session.schema_version !== "ceal.leased_consumer_control_session.v1" ||
-		value.operation_deadline_bounds_ms?.minimum > value.operation_deadline_bounds_ms?.maximum
+		value.operation_deadline_bounds_ms?.minimum > value.operation_deadline_bounds_ms?.maximum ||
+		!plainRecord(value.stdin) ||
+		!sameKeys(value.stdin, ["maximum_bytes", "schema_version", "transport"]) ||
+		value.stdin.transport !== "stdin_stdout_json" ||
+		value.stdin.schema_version !== "ceal.worker_private_leased_consumer_attachment_stream_request.v1" ||
+		value.stdin.maximum_bytes !== 32 * 1024 ||
+		!plainRecord(value.result) ||
+		!sameKeys(value.result, ["allowed_error_codes", "maximum_bytes", "schema_version"]) ||
+		value.result.schema_version !== "ceal.worker_private_leased_consumer_attachment_stream_result.v1" ||
+		value.result.maximum_bytes !== 32 * 1024 ||
+		!Array.isArray(value.result.allowed_error_codes) ||
+		value.result.allowed_error_codes.length < 1 ||
+		!value.result.allowed_error_codes.every((code) => typeof code === "string")
 	)
 		throw new Error("invalid_attachment_stream_contract");
 	return value;
@@ -170,6 +182,8 @@ type CandidateContract = Readonly<{
 	protected_session: Readonly<{ child_fd: number; schema_version: string; maximum_bytes: number; deadline_ms: number }>;
 	operation_deadline_bounds_ms: Readonly<{ minimum: number; maximum: number }>;
 	limits: Readonly<{ safety: Readonly<{ max_attachment_count: number; max_total_bytes: number }> }>;
+	stdin: Readonly<{ transport: string; schema_version: string; maximum_bytes: number }>;
+	result: Readonly<{ schema_version: string; maximum_bytes: number; allowed_error_codes: readonly string[] }>;
 }>;
 
 type CandidateStreamResponse = Awaited<ReturnType<typeof postUnixSocketStream>>;
@@ -181,3 +195,11 @@ const STREAM_ERROR_NAMES: UnixSocketErrorNames = Object.freeze({
 	responseFailed: "attachment_stream_response_failed",
 	requestFailed: "attachment_stream_request_failed",
 });
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function sameKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+	return Object.keys(value).sort().join("|") === [...expected].sort().join("|");
+}

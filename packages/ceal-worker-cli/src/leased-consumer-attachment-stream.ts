@@ -15,8 +15,11 @@ import {
 	decodeCealLeasedConsumerAttachmentStreamRecord,
 	CealLeasedConsumerAttachmentStreamError as ProtocolAttachmentStreamError,
 } from "@corca-ai/ceal-protocol";
+import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 
+/** @testOnly */
 export const CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA = "ceal.agent.attachment_materialization.v1" as const;
+/** @testOnly */
 export const CEAL_AGENT_ATTACHMENT_HANDOFF_MANIFEST_NAME = "manifest.json" as const;
 
 const CREATE_FILE_FLAGS = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW;
@@ -42,21 +45,21 @@ interface AgentAttachmentBase {
 	observed_media_type: string;
 }
 
-export interface CealAgentMaterializedAttachment extends AgentAttachmentBase {
+interface CealAgentMaterializedAttachment extends AgentAttachmentBase {
 	status: "materialized";
 	relative_path: `attachments/${number}.bin`;
 	size_bytes: number;
 	sha256: string;
 }
 
-export interface CealAgentUnreadAttachment extends AgentAttachmentBase {
+interface CealAgentUnreadAttachment extends AgentAttachmentBase {
 	status: "unread";
 	unread_reason: CealLeasedConsumerAttachmentStreamUnreadReason;
 }
 
-export type CealAgentAttachmentMaterializationAttachment = CealAgentMaterializedAttachment | CealAgentUnreadAttachment;
+type CealAgentAttachmentMaterializationAttachment = CealAgentMaterializedAttachment | CealAgentUnreadAttachment;
 
-export interface CealAgentAttachmentMaterializationManifest {
+interface CealAgentAttachmentMaterializationManifest {
 	schema_version: typeof CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA;
 	binding: CealAgentAttachmentMaterializationBinding;
 	materialization_ref: string;
@@ -99,7 +102,7 @@ export interface ReceiveLeasedConsumerAttachmentStreamInput {
 export async function receiveLeasedConsumerAttachmentStream(
 	input: ReceiveLeasedConsumerAttachmentStreamInput,
 ): Promise<CealAgentAttachmentHandoff> {
-	assertExpectedBinding(input.expected_binding);
+	assertLeasedConsumerAttachmentStreamBinding(input.expected_binding);
 	let handoffRoot: string | undefined;
 	let rootOwned = false;
 	try {
@@ -258,10 +261,20 @@ async function writeCreateOnly(filePath: string, bytes: Uint8Array): Promise<voi
 	}
 }
 
-function assertExpectedBinding(binding: Readonly<CealAgentAttachmentMaterializationBinding>): void {
+export function assertLeasedConsumerAttachmentStreamBinding(
+	binding: unknown,
+): asserts binding is CealAgentAttachmentMaterializationBinding {
+	if (!isRecord(binding)) fail("invalid_expected_binding");
 	const actual = Object.keys(binding).sort();
 	const expected = [...BINDING_KEYS].sort();
 	if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) fail("invalid_expected_binding");
+	if (
+		![binding.event_ref, binding.requester_subject_ref, binding.lease_ref, binding.consumer_ref, binding.attachment_set_ref].every(
+			(value) => typeof value === "string" && CEAL_SAFE_REQUEST_REF.test(value),
+		) ||
+		![binding.event_revision, binding.normalized_projection_revision, binding.lease_fence, binding.consumer_generation].every(positiveInteger)
+	)
+		fail("invalid_expected_binding");
 }
 
 function sameBinding(
@@ -279,6 +292,14 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 function fail(code: string): never {
 	throw new LeasedConsumerAttachmentStreamError(code);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function positiveInteger(value: unknown): value is number {
+	return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 class ByteQueue {

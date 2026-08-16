@@ -326,10 +326,8 @@ export function postUnixSocket(
 
 /**
  * The streaming sibling of `postUnixSocket`: headers are returned immediately,
- * while the bounded body stays an async iterable. It is used only for the raw
- * attachment candidate; JSON control routes retain the buffered response above.
- *
- * @testOnly The candidate route is not an installed Worker entrypoint yet.
+ * while the bounded body stays an async iterable. It is used by the private
+ * attachment-stream entrypoint; JSON control routes retain the buffered response above.
  */
 export function postUnixSocketStream(
 	input: Readonly<{

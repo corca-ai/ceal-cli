@@ -11,12 +11,7 @@
 		},
 		"packages/ceal-worker-cli": {
 			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts", "test/**/*.test.mjs"],
-			"project": ["src/**/*.ts"],
-			"ignore": [
-				"src/generated/leased-consumer-attachment-stream-contract.ts",
-				"src/leased-consumer-attachment-stream-carrier.ts",
-				"src/leased-consumer-attachment-stream.ts"
-			]
+			"project": ["src/**/*.ts"]
 		}
 	},
 	"tags": ["-testOnly"],

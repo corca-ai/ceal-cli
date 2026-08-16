@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -12,10 +13,8 @@ import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV,
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256,
 } from "../dist/generated/leased-consumer-attachment-stream-contract.js";
-import {
-	consumeLeasedConsumerAttachmentStream,
-	LEASED_CONSUMER_ATTACHMENT_STREAM_ARGV,
-} from "../dist/leased-consumer-attachment-stream-carrier.js";
+import { consumeLeasedConsumerAttachmentStream } from "../dist/leased-consumer-attachment-stream-carrier.js";
+import { runLeasedConsumerAttachmentStreamEntrypoint } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
 import { postUnixSocketStream } from "../dist/private-worker-transport.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.mjs";
 
@@ -90,7 +89,6 @@ test("private candidate carrier derives its fixed route and produces the Agent h
 		},
 	);
 
-	assert.equal(LEASED_CONSUMER_ATTACHMENT_STREAM_ARGV, LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV);
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0].socketPath, socketPath);
 	assert.equal(calls[0].path, "/api/ceal/agent/v1/control/attachment-stream");
@@ -123,6 +121,136 @@ test("private candidate carrier derives its fixed route and produces the Agent h
 	assert.deepEqual(await readFile(join(output.handoff_root, "attachments/0.bin")), image);
 	assert.deepEqual(await readFile(join(output.handoff_root, "attachments/1.bin")), document);
 	assert.deepEqual(JSON.parse(await readFile(output.manifest_path, "utf8")), output.manifest);
+});
+
+test("private attachment-stream entrypoint rejects path and credential fields before session or root authority", async () => {
+	let protectedReads = 0;
+	let rootCalls = 0;
+	let stdout = "";
+	const code = await runLeasedConsumerAttachmentStreamEntrypoint(
+		chunked(
+			encoder.encode(
+				JSON.stringify({
+					schema_version: "ceal.worker_private_leased_consumer_attachment_stream_request.v1",
+					request,
+					expected_binding: binding,
+					handoff_root: "/tmp/caller-selected-root",
+					credential: "caller-selected-credential",
+				}),
+			),
+		),
+		{
+			write(chunk) {
+				stdout += chunk;
+				return true;
+			},
+		},
+		{
+			readProtectedSession: async () => {
+				protectedReads += 1;
+				return sessionBytes("/run/user/1001/ceal/gateway-candidate.sock");
+			},
+			createHandoffRoot: () => {
+				rootCalls += 1;
+				return "/tmp/caller-selected-root";
+			},
+		},
+	);
+	assert.equal(code, 2);
+	assert.deepEqual(JSON.parse(stdout), {
+		schema_version: "ceal.worker_private_leased_consumer_attachment_stream_result.v1",
+		ok: false,
+		status: "error",
+		error_code: "invalid_request",
+	});
+	assert.equal(protectedReads, 0);
+	assert.equal(rootCalls, 0);
+});
+
+test("private attachment-stream entrypoint rejects duplicate JSON keys and oversized input before session access", async () => {
+	const inputs = [
+		encoder.encode(
+			'{"schema_version":"ceal.worker_private_leased_consumer_attachment_stream_request.v1","schema_version":"spoofed","request":{},"expected_binding":{}}',
+		),
+		new Uint8Array(32 * 1024 + 1),
+	];
+	for (const input of inputs) {
+		let protectedReads = 0;
+		let stdout = "";
+		const code = await runLeasedConsumerAttachmentStreamEntrypoint(
+			chunked(input),
+			{
+				write(chunk) {
+					stdout += chunk;
+					return true;
+				},
+			},
+			{
+				readProtectedSession: async () => {
+					protectedReads += 1;
+					return sessionBytes("/run/user/1001/ceal/gateway-candidate.sock");
+				},
+			},
+		);
+		assert.equal(code, 2);
+		assert.equal(JSON.parse(stdout).error_code, "invalid_request");
+		assert.equal(protectedReads, 0);
+	}
+});
+
+test("private attachment-stream entrypoint returns only the verified Agent handoff envelope", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-entrypoint-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	let stdout = "";
+	const calls = [];
+	const code = await runLeasedConsumerAttachmentStreamEntrypoint(
+		chunked(
+			encoder.encode(
+				JSON.stringify({
+					schema_version: "ceal.worker_private_leased_consumer_attachment_stream_request.v1",
+					request,
+					expected_binding: binding,
+				}),
+			),
+		),
+		{
+			write(chunk) {
+				stdout += chunk;
+				return true;
+			},
+		},
+		{
+			env: {},
+			readProtectedSession: async () => sessionBytes("/run/user/1001/ceal/gateway-candidate.sock"),
+			closeProtectedSession: async () => {},
+			createHandoffRoot: () => mkdtemp(join(root, "run-")),
+			requestUnixSocketStream: async (input) => {
+				calls.push(input);
+				return {
+					status: 200,
+					contentType: "application/octet-stream",
+					stream: chunked(
+						streamBytes(completeManifest(), [
+							[0, image],
+							[1, document],
+						]),
+					),
+					close: () => {},
+				};
+			},
+		},
+	);
+	assert.equal(code, 0);
+	const result = JSON.parse(stdout);
+	assert.equal(result.schema_version, "ceal.worker_private_leased_consumer_attachment_stream_result.v1");
+	assert.equal(result.ok, true);
+	assert.equal(result.status, "handoff_ready");
+	assert.equal(result.handoff.manifest.schema_version, "ceal.agent.attachment_materialization.v1");
+	assert.ok(result.handoff.handoff_root.startsWith(root));
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].path, "/api/ceal/agent/v1/control/attachment-stream");
+	assert.equal(calls[0].body, JSON.stringify(request));
+	assert.doesNotMatch(stdout, /caller-selected|credential|provider/u);
 });
 
 test("candidate carrier refuses request or protected-session drift before any network or handoff root", async () => {
@@ -334,6 +462,28 @@ test("raw Unix-socket stream adapter returns body chunks and enforces its wall d
 	trickleResponse.close();
 });
 
+test("the shipped bin dispatches the attachment-stream private token before public parsing", async () => {
+	const binary = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
+	const child = await runPrivateProcess(
+		binary,
+		LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV,
+		JSON.stringify({
+			schema_version: "ceal.worker_private_leased_consumer_attachment_stream_request.v1",
+			request,
+			expected_binding: binding,
+			path: "/tmp/not-accepted",
+		}),
+	);
+	assert.equal(child.status, 2, child.stderr);
+	assert.equal(child.stderr, "");
+	assert.deepEqual(JSON.parse(child.stdout), {
+		schema_version: "ceal.worker_private_leased_consumer_attachment_stream_result.v1",
+		ok: false,
+		status: "error",
+		error_code: "invalid_request",
+	});
+});
+
 function sessionBytes(socketPath) {
 	return encoder.encode(
 		JSON.stringify({
@@ -359,6 +509,41 @@ async function collect(stream) {
 	const chunks = [];
 	for await (const chunk of stream) chunks.push(Buffer.from(chunk));
 	return Buffer.concat(chunks);
+}
+
+function runPrivateProcess(binary, argv, input) {
+	return new Promise((resolve, reject) => {
+		const devNull = openSync("/dev/null", "r");
+		let child;
+		try {
+			child = spawn(process.execPath, [binary, argv], { stdio: ["pipe", "pipe", "pipe", devNull, devNull] });
+		} finally {
+			closeSync(devNull);
+		}
+		let stdout = "";
+		let stderr = "";
+		const timeout = setTimeout(() => {
+			child.kill("SIGKILL");
+			reject(new Error("leased consumer attachment-stream child timed out"));
+		}, 5_000);
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.once("error", (error) => {
+			clearTimeout(timeout);
+			reject(error);
+		});
+		child.once("close", (exitCode) => {
+			clearTimeout(timeout);
+			resolve({ status: exitCode, stdout, stderr });
+		});
+		child.stdin.end(input);
+	});
 }
 
 assert.equal(LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256.length, 64);
