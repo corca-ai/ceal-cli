@@ -388,10 +388,7 @@ function resolveTypeScriptCompiler(dependencyRoot: string): string {
 	const record = asRecord(packageJson);
 	if (!record) fail("missing_build_dependency", "Staged TypeScript dependency metadata is invalid.");
 	const entries: Array<{ name: string; path: string }> = [];
-	if (typeof record.bin === "string") {
-		const entryName = path.basename(record.bin);
-		if (/^tsc\d*$/u.test(entryName)) entries.push({ name: entryName, path: record.bin });
-	} else if (asRecord(record.bin)) {
+	if (asRecord(record.bin)) {
 		for (const [name, value] of Object.entries(asRecord(record.bin) ?? {})) {
 			if (typeof value === "string") entries.push({ name, path: value });
 		}

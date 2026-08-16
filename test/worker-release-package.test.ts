@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -24,14 +24,48 @@ let packedFixture: {
 	provenance: { artifact: { sha256: string } };
 	expectedHandoffSha256: string;
 };
+type WorkerReleasePackageFixture = typeof packedFixture;
 test.before((context) => {
 	packedFixture = packedProtocolFixture(context);
 });
 
-test("worker package build consumes a manifest-bound packed Protocol and emits no operator material", () => {
+test("worker package build stages recursive dependencies, consumes a packed Protocol, and emits no operator material", (context) => {
 	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-package");
-	const result = buildWorkerReleasePackageFromDevelopmentInputs({ outputDirectory: output, ...fixture });
+	const packageJsonPath = path.join(fixture.repoRoot, "node_modules", "typescript", "package.json");
+	const nestedPackage = path.join(fixture.repoRoot, "node_modules", "ceal-release-fixture-nested");
+	const original = readFileSync(packageJsonPath, "utf8");
+	context.after(() => {
+		writeFileSync(packageJsonPath, original);
+		rmSync(nestedPackage, { recursive: true, force: true });
+	});
+	mkdirSync(nestedPackage, { recursive: true });
+	writeFileSync(path.join(nestedPackage, "package.json"), `${JSON.stringify({ name: "ceal-release-fixture-nested", version: "1.0.0" })}\n`);
+	const compilerManifest = readJsonRecord(original);
+	compilerManifest.dependencies = { ...(asRecord(compilerManifest.dependencies) ?? {}), "ceal-release-fixture-nested": "1.0.0" };
+	writeFileSync(packageJsonPath, `${JSON.stringify(compilerManifest)}\n`);
+	let compilerCalls = 0;
+	const result = buildWorkerReleasePackageFromDevelopmentInputs(
+		{ outputDirectory: output, ...fixture },
+		{
+			runCompiler: (file, args, options) => {
+				compilerCalls += 1;
+				const typeRootsIndex = args.indexOf("--typeRoots");
+				assert.ok(typeRootsIndex >= 0);
+				const typeRoots = args[typeRootsIndex + 1];
+				assert.equal(typeof typeRoots, "string");
+				const dependencyRoot = path.dirname(typeRoots);
+				assert.equal(
+					readFileSync(path.join(dependencyRoot, "ceal-release-fixture-nested", "package.json"), "utf8").includes(
+						'"name":"ceal-release-fixture-nested"',
+					),
+					true,
+				);
+				execFileSync(file, args, options);
+			},
+		},
+	);
+	assert.equal(compilerCalls, 2);
 	assert.equal(result.ok, true);
 	assert.deepEqual(result.consumer_smoke, {
 		command: "ceal",
@@ -103,35 +137,18 @@ test("a failed worker compile carries the compiler's own output and its terminat
 	);
 });
 
-test("compiler accepts string-form TypeScript bin and passes isolated type arguments", () => {
+test("compiler rejects string-form TypeScript bin metadata", () => {
 	const fixture = packedFixture;
 	const packageJsonPath = path.join(fixture.repoRoot, "node_modules", "typescript", "package.json");
 	const original = readFileSync(packageJsonPath, "utf8");
-	const compilerCalls: string[][] = [];
 	try {
 		const manifest = readJsonRecord(original);
 		manifest.bin = "./bin/tsc6";
 		writeFileSync(packageJsonPath, `${JSON.stringify(manifest)}\n`);
-		buildWorkerReleasePackageFromDevelopmentInputs(
-			{ outputDirectory: path.join(fixture.root, "worker-package-string-bin"), ...fixture },
-			{
-				runCompiler: (file, args, options) => {
-					compilerCalls.push([...args]);
-					execFileSync(file, args, options);
-				},
-			},
-		);
+		assertMissingBuildDependency(fixture, "worker-package-string-bin");
 	} finally {
 		writeFileSync(packageJsonPath, original);
 	}
-	assert.equal(compilerCalls.length, 2);
-	assert.ok(
-		compilerCalls.every((args) => {
-			const typeRootsIndex = args.indexOf("--typeRoots");
-			return typeRootsIndex >= 0 && args[typeRootsIndex + 1]?.endsWith(`${path.sep}node_modules${path.sep}@types`);
-		}),
-	);
-	assert.ok(compilerCalls.every((args) => args.includes("--types") && args.includes("node")));
 });
 
 test("recursive dependency staging fails closed for traversal and missing nested names", () => {
@@ -147,14 +164,7 @@ test("recursive dependency staging fails closed for traversal and missing nested
 			const manifest = readJsonRecord(original);
 			manifest.dependencies = { ...(asRecord(manifest.dependencies) ?? {}), [dependency]: version };
 			writeFileSync(packageJsonPath, `${JSON.stringify(manifest)}\n`);
-			assert.throws(
-				() =>
-					buildWorkerReleasePackageFromDevelopmentInputs({
-						outputDirectory: path.join(fixture.root, `worker-package-${dependency.replaceAll("/", "-")}`),
-						...fixture,
-					}),
-				(error) => error instanceof WorkerReleasePackageError && error.code === "missing_build_dependency",
-			);
+			assertMissingBuildDependency(fixture, `worker-package-${dependency.replaceAll("/", "-")}`);
 		} finally {
 			writeFileSync(packageJsonPath, original);
 		}
@@ -200,6 +210,17 @@ function readJsonRecord(value: string): Record<string, unknown> {
 	const record = asRecord(parsed);
 	if (!record) throw new Error("expected JSON object");
 	return record;
+}
+
+function assertMissingBuildDependency(fixture: WorkerReleasePackageFixture, outputName: string): void {
+	assert.throws(
+		() =>
+			buildWorkerReleasePackageFromDevelopmentInputs({
+				outputDirectory: path.join(fixture.root, outputName),
+				...fixture,
+			}),
+		(error) => error instanceof WorkerReleasePackageError && error.code === "missing_build_dependency",
+	);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
