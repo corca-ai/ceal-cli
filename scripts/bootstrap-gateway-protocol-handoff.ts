@@ -228,10 +228,7 @@ function downloadAsset(url: string, destination: string): void {
 	}
 }
 
-/**
- * @testOnly
- */
-export type RemoteTagRunner = (
+type RemoteTagRunner = (
 	command: string,
 	argv: readonly string[],
 	options: { encoding: "utf8"; stdio: ["ignore", "pipe", "pipe"]; timeout: number },

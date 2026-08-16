@@ -36,6 +36,7 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/script-lib.test.ts",
 	"test/contract/source-loader.test.ts",
 	"test/contract/typecheck-source-gate.test.ts",
+	"test/contract/typecheck-ratchet.test.ts",
 	"test/contract/worker-acceptance-packet.test.ts",
 	"test/contract/worker-gateway-handoff-archive.test.ts",
 	"test/contract/worker-guide-contract.test.ts",
@@ -46,6 +47,7 @@ const WORKER_RELEASE_TESTS = [
 	"test/client-artifact.test.ts",
 	"test/gateway-protocol-consumer.test.ts",
 	"test/npm-pack-metadata.test.ts",
+	"test/package-bin.test.ts",
 	"test/release-process-supervisor.test.ts",
 	"test/worker-native-artifact.test.ts",
 	"test/worker-release-installer.test.ts",
@@ -501,6 +503,8 @@ test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit 
 	assert.equal(packageJson.devDependencies["@typescript/native"], "npm:typescript@7.0.2");
 	assert.equal(packageJson.devDependencies.typescript, "npm:@typescript/typescript6@6.0.2");
 	for (const script of ["lint:types:packages", "lint:types:tools", "lint:types:tests"])
+		assert.match(packageJson.scripts[script], /check-typecheck-ratchet/u);
+	for (const script of ["lint:types:raw:packages", "lint:types:raw:tools", "lint:types:raw:tests"])
 		assert.match(packageJson.scripts[script], /\btsc\b/u);
 	assert.match(packageJson.scripts["lint:types:ts6"], /\btsc6\b/u);
 	for (const script of ["lint:types", "lint:types:packages", "lint:types:tools", "lint:types:tests"]) {
