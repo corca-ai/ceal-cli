@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import test from "node:test";
+import test, { type TestFn } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.ts";
@@ -37,7 +37,51 @@ const CEAL_0_76_1_COMMIT = "2edf126e1c7bf65900d40b449dce9ea4481c6ce7";
 // See restrictedTools below: the darwin simulation is assembled from a real
 // GNU sha256sum, so it can only be staged on a host that has one.
 const simulatedDarwinSkip = requireHostTools("sha256sum");
-const simulatedDarwinTest = (name, fn) => test(name, { skip: simulatedDarwinSkip }, fn);
+const simulatedDarwinTest = (name: string, fn: TestFn) => test(name, { skip: simulatedDarwinSkip }, fn);
+
+interface InstallerFixture {
+	root: string;
+	install: string;
+	release: string;
+	tools: string;
+	log: string;
+}
+
+interface RunOptions {
+	install: string;
+	release: string;
+	tools: string;
+	log: string;
+	version: string;
+	cosignFail?: boolean;
+	restrictedPath?: string | null;
+	token?: string;
+	minimumVersion?: string;
+	urlLog?: string;
+	installer?: string;
+}
+
+interface RunResult {
+	status: number | null;
+	stdout: string;
+	stderr: string;
+}
+
+interface StablePointer {
+	schema_version?: unknown;
+	tag?: unknown;
+	sha256sums_sha256?: unknown;
+	[key: string]: unknown;
+}
+
+interface ManifestOverrides {
+	[key: string]: unknown;
+}
+
+interface StablePointerCase {
+	why: string;
+	pointer: (release: string) => StablePointer;
+}
 
 test("worker-only installer migrates only ceal from a legacy dual release", () => {
 	withFixture(({ install, release, tools, log }) => {
@@ -76,7 +120,7 @@ test("the exact 0.76.1 installer crosses to the embedded-directory release witho
 		rewriteChecksumsAndSidecars(release);
 		const oldInstaller = path.join(root, "install-ceal-0.76.1.sh");
 		assert.equal(
-			execReleaseTestProcess("git", ["rev-parse", "ceal-v0.76.1^{}"], { encoding: "utf8", cwd: ROOT }).trim(),
+			String(execReleaseTestProcess("git", ["rev-parse", "ceal-v0.76.1^{}"], { encoding: "utf8", cwd: ROOT })).trim(),
 			CEAL_0_76_1_COMMIT,
 			"the compatibility tag moved away from the released commit",
 		);
@@ -118,7 +162,7 @@ test("the exact 0.76.1 installer crosses to the embedded-directory release witho
 		assert.equal(realpathSync(registration), path.join(realpathSync(path.join(install, ".ceal-cli", "worker", "current")), "guide"));
 		const bridgePath = path.join(registration, "SKILL.md");
 		const historicalMode = lstatSync(bridgePath).mode & 0o7777;
-		const assertUnsafeMode = (expectedMessage) => {
+		const assertUnsafeMode = (expectedMessage: RegExp): void => {
 			const result = run({
 				install,
 				release,
@@ -180,21 +224,22 @@ test("worker installer renders a copyable PATH command for a shell-active instal
 			encoding: "utf8",
 			env: { ...process.env, EXPECTED_INSTALL_DIR: shellActiveInstall },
 		});
-		assert.equal(applied.status, 0, applied.stderr);
+		assert.equal(applied.status, 0, String(applied.stderr));
 	});
 });
 
 test("worker installer rejects install directories that cannot be stable PATH entries before external work", () => {
-	for (const [install, message] of [
+	const invalidInstallCases: Array<[string, RegExp]> = [
 		["relative/worker-bin", /CEAL_INSTALL_DIR must be an absolute path/u],
 		["/tmp/worker:bin", /CEAL_INSTALL_DIR must not contain ':'/u],
-	]) {
+	];
+	for (const [install, message] of invalidInstallCases) {
 		const result = runSyncReleaseProcess("/bin/sh", [INSTALLER], {
 			encoding: "utf8",
 			env: { ...process.env, CEAL_INSTALL_DIR: install, CEAL_VERSION: TAG, PATH: "/usr/bin:/bin" },
 		});
 		assert.equal(result.status, 1);
-		assert.match(result.stderr, message);
+		assert.match(String(result.stderr), message);
 		assert.equal(result.stdout, "");
 	}
 });
@@ -235,8 +280,8 @@ test("release test children cannot inherit CI credential surfaces", () => {
 			},
 		},
 	);
-	assert.equal(result.status, 0, result.stderr);
-	assert.deepEqual(JSON.parse(result.stdout), {});
+	assert.equal(result.status, 0, String(result.stderr));
+	assert.deepEqual(JSON.parse(String(result.stdout)), {});
 });
 
 test("worker stable resolver follows the worker static-origin stable pointer", () => {
@@ -292,7 +337,7 @@ test("worker stable update refuses a pointer older than the installed release", 
 });
 
 test("worker installer rejects a malformed or mismatched stable pointer", () => {
-	for (const [prepare, message] of [
+	const malformedPointerCases: Array<[(release: string) => void, RegExp]> = [
 		[(release) => writeStablePointer(release, { tag: "v9.9.9" }), /stable release pointer is not a valid/u],
 		[(release) => writeStablePointer(release, { sha256sums_sha256: "not-a-release-set-digest" }), /stable release pointer is not a valid/u],
 		[(release) => writeFileSync(path.join(release, "ceal-worker-stable-release.json"), ""), /stable release pointer is not a valid/u],
@@ -300,18 +345,18 @@ test("worker installer rejects a malformed or mismatched stable pointer", () => 
 			(release) => writeStablePointer(release, { sha256sums_sha256: digest("tampered release set") }),
 			/does not match the downloaded signed SHA256SUMS/u,
 		],
-	])
-		assertStablePointerRefused(prepare, message);
+	];
+	for (const [prepare, message] of malformedPointerCases) assertStablePointerRefused(prepare, message);
 });
 
 // The pointer is read before any signature exists, so it is the one document an
 // origin can choose freely. Each case below fails if its specific guard in
 // resolve_stable_release is removed.
 test("worker installer rejects every pointer an origin could choose freely", () => {
-	const releaseSetOf = (release) => digest(readFileSync(path.join(release, "SHA256SUMS")));
-	const cases = [
+	const releaseSetOf = (release: string): string => digest(readFileSync(path.join(release, "SHA256SUMS")));
+	const cases: StablePointerCase[] = [
 		// A 64-character non-hex value: proves the character check, not the length check.
-		{ why: "digest is the right length but not hex", pointer: (_r) => ({ sha256sums_sha256: "z".repeat(64) }) },
+		{ why: "digest is the right length but not hex", pointer: (_r: string) => ({ sha256sums_sha256: "z".repeat(64) }) },
 		{ why: "schema_version is not the v1 reader's schema", pointer: () => ({ schema_version: "ceal.worker_stable_release.v2" }) },
 		{ why: "schema_version is absent", pointer: () => ({ schema_version: undefined }) },
 		{ why: "tag is absent", pointer: () => ({ tag: undefined }) },
@@ -322,7 +367,12 @@ test("worker installer rejects every pointer an origin could choose freely", () 
 		assertStablePointerRefused(
 			(release) => {
 				const overrides = pointer(release);
-				const body = { schema_version: "ceal.worker_stable_release.v1", tag: TAG, sha256sums_sha256: releaseSetOf(release), ...overrides };
+				const body: StablePointer = {
+					schema_version: "ceal.worker_stable_release.v1",
+					tag: TAG,
+					sha256sums_sha256: releaseSetOf(release),
+					...overrides,
+				};
 				for (const [key, value] of Object.entries(overrides)) if (value === undefined) delete body[key];
 				writeFileSync(path.join(release, "ceal-worker-stable-release.json"), `${JSON.stringify(body)}\n`);
 			},
@@ -345,11 +395,12 @@ test("worker installer rejects every pointer an origin could choose freely", () 
 // whatever the origin serves later, so a pointer that gained a field, changed
 // key order, or is pretty-printed must still resolve.
 test("worker installer resolves a reordered, extended, or pretty-printed pointer", () => {
-	for (const render of [
+	const pointerRenderers: Array<(body: StablePointer) => string> = [
 		(body) => JSON.stringify({ sha256sums_sha256: body.sha256sums_sha256, schema_version: body.schema_version, tag: body.tag }),
 		(body) => JSON.stringify({ ...body, published_at: "2026-07-25T00:00:00Z", signature: { keyless: true } }),
 		(body) => JSON.stringify(body, null, 2),
-	]) {
+	];
+	for (const render of pointerRenderers) {
 		withFixture(({ install, release, tools, log }) => {
 			const body = {
 				schema_version: "ceal.worker_stable_release.v1",
@@ -423,11 +474,12 @@ test("worker installer rejects a manifest that does not bind this release, platf
 });
 
 test("worker installer refuses a damaged or widened existing generation", () => {
-	for (const mutate of [
+	const generationMutators: Array<(generation: string) => void> = [
 		(generation) => chmodSync(path.join(generation, "ceal-linux-arm64"), 0o644),
 		(generation) => writeFileSync(path.join(generation, "unexpected"), "not signed\n"),
 		(generation) => chmodSync(path.join(generation, "ceal-worker-release-manifest-linux-arm64.json"), 0o755),
-	]) {
+	];
+	for (const mutate of generationMutators) {
 		withFixture(({ install, release, tools, log }) => {
 			runSuccessfully({ install, release, tools, log, version: TAG });
 			const current = realpathSync(path.join(install, ".ceal-cli", "worker", "current"));
@@ -535,7 +587,7 @@ platformProofTest(
 			assert.equal(result.status, 0, result.stderr);
 			assert.equal(readlinkSync(path.join(install, "ceal")), ".ceal-cli/worker/current/ceal-linux-amd64");
 			const installed = path.join(install, "ceal");
-			const version = parse(runSyncReleaseProcess(installed, ["version"], { encoding: "utf8" }).stdout);
+			const version = parse(String(runSyncReleaseProcess(installed, ["version"], { encoding: "utf8" }).stdout));
 			assert.equal(version.version, built.version);
 			assert.equal(version.protocol_version, "1.3.0");
 
@@ -547,11 +599,11 @@ platformProofTest(
 				encoding: "utf8",
 				env: { ...process.env, HOME: install },
 			});
-			assert.equal(unavailable.status, 3, `${unavailable.stderr}\n${unavailable.stdout}`);
-			const unavailablePayload = parse(unavailable.stdout);
+			assert.equal(unavailable.status, 3, `${String(unavailable.stderr)}\n${String(unavailable.stdout)}`);
+			const unavailablePayload = parse(String(unavailable.stdout));
 			assert.equal(unavailablePayload.schema_version, "ceal.result.v2");
 			assert.equal(unavailablePayload.receipt.evidence, "outcome_unknown");
-			assert.doesNotMatch(unavailable.stdout, /ceal_(?:personal|refresh)_/u);
+			assert.doesNotMatch(String(unavailable.stdout), /ceal_(?:personal|refresh)_/u);
 
 			const updated = runSyncReleaseProcess(installed, ["update"], {
 				encoding: "utf8",
@@ -563,8 +615,8 @@ platformProofTest(
 					PATH: `${tools}:${process.env.PATH}`,
 				},
 			});
-			assert.equal(updated.status, 0, `${updated.stderr}\n${updated.stdout}`);
-			const payload = parse(updated.stdout);
+			assert.equal(updated.status, 0, `${String(updated.stderr)}\n${String(updated.stdout)}`);
+			const payload = parse(String(updated.stdout));
 			assert.equal(payload.schema_version, "ceal.update.v1");
 			assert.equal(payload.status, "unchanged");
 			assert.equal(payload.stable_only, true);
@@ -576,7 +628,10 @@ platformProofTest(
 	},
 );
 
-function withFixture(callback) {
+function withFixture<Result>(
+	callback: (fixture: InstallerFixture) => Result,
+	..._synchronousOnly: Result extends PromiseLike<unknown> ? [never] : []
+): Result {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-worker-installer-"));
 	try {
 		const release = path.join(root, "release");
@@ -625,8 +680,8 @@ function run({
 	minimumVersion = "",
 	urlLog = "",
 	installer = INSTALLER,
-}) {
-	return runSyncReleaseProcess("/bin/sh", [installer], {
+}: RunOptions): RunResult {
+	const result = runSyncReleaseProcess("/bin/sh", [installer], {
 		encoding: "utf8",
 		env: {
 			...process.env,
@@ -642,15 +697,20 @@ function run({
 			PATH: restrictedPath ?? `${tools}:${process.env.PATH}`,
 		},
 	});
+	return {
+		status: result.status,
+		stdout: String(result.stdout),
+		stderr: String(result.stderr),
+	};
 }
 
-function runSuccessfully(options) {
+function runSuccessfully(options: RunOptions): RunResult {
 	const result = run(options);
 	assert.equal(result.status, 0, result.stderr);
 	return result;
 }
 
-function assertStablePointerRefused(prepare, message, why) {
+function assertStablePointerRefused(prepare: (release: string) => void, message: RegExp, why?: string): void {
 	withFixture(({ install, release, tools, log }) => {
 		prepare(release);
 		const result = run({ install, release, tools, log, version: "stable" });
@@ -665,8 +725,9 @@ function assertStablePointerRefused(prepare, message, why) {
 // is built by faking shasum on top of a real sha256sum, so it needs a host that
 // has one — which a real darwin runner does not. Skipping there loses nothing:
 // the host being simulated is the host running the test.
-function restrictedTools(tools) {
-	const resolve = (name) => runSyncReleaseProcess("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+function restrictedTools(tools: string): string {
+	const resolve = (name: string): string =>
+		String(runSyncReleaseProcess("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout).trim();
 	// Models a stock Mac: awk is present, python3 is deliberately absent, so an
 	// installer that reaches for python3 again fails here instead of on a
 	// colleague's machine.
@@ -703,7 +764,7 @@ function restrictedTools(tools) {
 	return tools;
 }
 
-function writeWorkerBinary(file, version = "0.65.0") {
+function writeWorkerBinary(file: string, version = "0.65.0"): void {
 	writeFileSync(
 		file,
 		`#!/usr/bin/env sh\nif [ "\${1:-}" = version ]; then printf 'schema_version: ceal.version.v1\\ncommand: ceal\\nversion: ${version}\\nprotocol_version: 1.3.0\\nsupported_gateway_protocol_range:\\n  minimum: 1.3.0\\n  maximum: 1.3.0\\ncredential_context: gateway_issued_client_session\\n'; exit 0; fi\nif [ "\${1:-}" = --help ]; then exit 0; fi\nexit 2\n`,
@@ -714,7 +775,7 @@ function writeWorkerBinary(file, version = "0.65.0") {
 // The stable pointer is operator-published static-origin metadata, not a
 // signed release asset; the installer re-checks its digest against the
 // downloaded signed SHA256SUMS.
-function writeStablePointer(release, overrides = {}) {
+function writeStablePointer(release: string, overrides: ManifestOverrides = {}): void {
 	const releaseSet = digest(readFileSync(path.join(release, "SHA256SUMS")));
 	writeFileSync(
 		path.join(release, "ceal-worker-stable-release.json"),
@@ -727,7 +788,7 @@ function writeStablePointer(release, overrides = {}) {
 // protocol and native_smoke carry their own version/command, so a manifest
 // reader that matches those keys at any depth binds the wrong value. A minimal
 // fixture cannot catch that.
-function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
+function writeManifest(release: string, platform: string, version = "0.65.0", overrides: ManifestOverrides = {}): void {
 	const guide = readFileSync(path.join(release, "ceal-guide-SKILL.md"));
 	const manifest = {
 		schema_version: "ceal.worker_release_manifest.v1",
@@ -746,7 +807,7 @@ function writeManifest(release, platform, version = "0.65.0", overrides = {}) {
 	writeFileSync(path.join(release, `ceal-worker-release-manifest-${platform}.json`), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {
+function writeChecksums(release: string, platforms: string[] = ["linux-arm64", "linux-amd64"]): string[] {
 	const entries = [
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
@@ -760,18 +821,18 @@ function writeChecksums(release, platforms = ["linux-arm64", "linux-amd64"]) {
 	return entries;
 }
 
-function writeDarwinAssets(release) {
+function writeDarwinAssets(release: string): void {
 	for (const platform of ["darwin-arm64", "darwin-amd64"]) {
 		writeWorkerBinary(path.join(release, `ceal-${platform}`));
 		writeManifest(release, platform);
 	}
 }
 
-function appendChecksum(release, name) {
+function appendChecksum(release: string, name: string): void {
 	writeFileSync(path.join(release, "SHA256SUMS"), `${digest(readFileSync(path.join(release, name)))}  ${name}\n`, { flag: "a" });
 }
 
-function rewriteSidecars(release) {
+function rewriteSidecars(release: string): void {
 	writeSignatureSidecars(release, [
 		...readFileSync(path.join(release, "SHA256SUMS"), "utf8")
 			.trim()
@@ -780,19 +841,19 @@ function rewriteSidecars(release) {
 		"SHA256SUMS",
 	]);
 }
-function rewriteChecksumsAndSidecars(release) {
+function rewriteChecksumsAndSidecars(release: string): void {
 	writeSignatureSidecars(release, writeChecksums(release));
 }
-function writeSignatureSidecars(release, names) {
+function writeSignatureSidecars(release: string, names: string[]): void {
 	for (const name of names) {
 		writeFileSync(path.join(release, `${name}.sig`), "signature\n");
 		writeFileSync(path.join(release, `${name}.pem`), "certificate\n");
 	}
 }
-function writeTool(file, body) {
+function writeTool(file: string, body: string): void {
 	writeFileSync(file, `#!/usr/bin/env sh\nset -eu\n${body}\n`);
 	chmodSync(file, 0o755);
 }
-function digest(bytes) {
+function digest(bytes: string | Buffer): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
