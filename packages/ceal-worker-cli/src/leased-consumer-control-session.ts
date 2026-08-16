@@ -1,26 +1,20 @@
 import { createHash } from "node:crypto";
 import { fstatSync } from "node:fs";
 import * as CealProtocol from "@corca-ai/ceal-protocol";
-import {
-	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
-	CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES,
-	decodeCealLeasedConsumerControlSession,
-} from "@corca-ai/ceal-protocol";
+import { CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES } from "@corca-ai/ceal-protocol";
 import {
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
 	LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV,
 	LEASED_CONSUMER_CONTROL_SESSION_ROUTES_SHA256,
 } from "./generated/leased-consumer-control-session-contract.js";
+import { readLeasedConsumerProtectedSession, resolveLeasedConsumerOperationDeadlineMs } from "./leased-consumer-protected-session.js";
 import {
 	closeReadable,
 	isJsonContentType,
-	onceAsync,
 	openInheritedReadable,
 	postUnixSocket,
 	raceDeadline,
-	readBeforeDeadline,
-	readBoundedStream,
 	type UnixSocketErrorNames,
 	type UnixSocketResponse,
 } from "./private-worker-transport.js";
@@ -67,12 +61,9 @@ const CONTROL_SESSION_CONTRACT = JSON.parse(verifiedControlSessionContractJson()
 	}>;
 }>;
 export const LEASED_CONSUMER_CONTROL_SESSION_ARGV = LEASED_CONSUMER_CONTROL_SESSION_ENTRYPOINT_ARGV;
-const PROTECTED_SESSION_DEADLINE_MS = CONTROL_SESSION_CONTRACT.protected_session.deadline_ms;
 const OPERATION_DEADLINE_BOUNDS_MS = CONTROL_SESSION_CONTRACT.gateway.operation_deadline_bounds_ms;
 /** The Gateway launcher injects the operative deadline; the contract keeps only its bounds. */
 const LEASED_CONSUMER_OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
-const PROTECTED_SESSION_FD = CONTROL_SESSION_CONTRACT.protected_session.child_fd;
-const MAX_SESSION_BYTES = CONTROL_SESSION_CONTRACT.protected_session.maximum_bytes;
 const MAX_FRAME_BYTES = CONTROL_SESSION_CONTRACT.agent_ipc.maximum_frame_bytes;
 const ROUTES = Object.freeze(CONTROL_SESSION_CONTRACT.gateway.routes);
 
@@ -217,13 +208,7 @@ export interface LeasedConsumerControlSessionRuntime {
  * @testOnly
  */
 export function resolveOperationDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
-	const raw = env[LEASED_CONSUMER_OPERATION_DEADLINE_ENV];
-	if (raw === undefined) return OPERATION_DEADLINE_BOUNDS_MS.minimum;
-	if (!/^\d+$/u.test(raw)) throw new Error("invalid_operation_deadline");
-	const value = Number(raw);
-	if (!Number.isSafeInteger(value) || value < OPERATION_DEADLINE_BOUNDS_MS.minimum || value > OPERATION_DEADLINE_BOUNDS_MS.maximum)
-		throw new Error("invalid_operation_deadline");
-	return value;
+	return resolveLeasedConsumerOperationDeadlineMs(env, LEASED_CONSUMER_OPERATION_DEADLINE_ENV, OPERATION_DEADLINE_BOUNDS_MS);
 }
 
 /**
@@ -232,25 +217,11 @@ export function resolveOperationDeadlineMs(env: Readonly<Record<string, string |
  * path, or a caller-selectable route to its caller.
  */
 export async function openLeasedConsumerControlSession(runtime: LeasedConsumerControlSessionRuntime = {}): Promise<ControlSession> {
-	let close = onceAsync(async () => {});
 	const operationDeadlineMs = resolveOperationDeadlineMs(runtime.env);
-	try {
-		const fd4 = runtime.readProtectedSession ? null : createProtectedFd4();
-		close = onceAsync(runtime.closeProtectedSession ?? (() => fd4?.close() ?? Promise.resolve()));
-		const bytes = await readProtectedSessionBeforeDeadline(
-			runtime,
-			runtime.readProtectedSession ?? (() => fd4?.read() ?? Promise.reject(new Error("missing_session"))),
-			close,
-		);
-		if (bytes === null) throw new Error("session_unavailable");
-		const session = decodeCealLeasedConsumerControlSession(parseStrictJson(bytes, MAX_SESSION_BYTES));
-		return Object.freeze({
-			dispatch: async (frame, signal) =>
-				dispatch(session.socket_path, session.service_credential, frame, runtime, operationDeadlineMs, signal),
-		});
-	} finally {
-		await close();
-	}
+	const session = await readLeasedConsumerProtectedSession(CONTROL_SESSION_CONTRACT.protected_session, runtime);
+	return Object.freeze({
+		dispatch: async (frame, signal) => dispatch(session.socket_path, session.service_credential, frame, runtime, operationDeadlineMs, signal),
+	});
 }
 
 /**
@@ -458,14 +429,6 @@ async function consumeNdjson(
 	if (pending.length !== 0) throw new Error("unterminated_frame");
 }
 
-async function readProtectedSessionBeforeDeadline(
-	runtime: LeasedConsumerControlSessionRuntime,
-	read: () => Promise<Uint8Array>,
-	close: () => Promise<void>,
-): Promise<Uint8Array | null> {
-	return readBeforeDeadline(runtime, PROTECTED_SESSION_DEADLINE_MS, read, close);
-}
-
 async function dispatch(
 	socketPath: string,
 	credential: string,
@@ -542,15 +505,6 @@ async function requestControlBeforeDeadline(
 	// caller dereferences `.status` immediately.
 	if (!outcome.settled || outcome.value === null) throw new Error("control_deadline_exceeded");
 	return outcome.value;
-}
-
-function createProtectedFd4(): Readonly<{ read: () => Promise<Uint8Array>; close: () => Promise<void> }> {
-	if (!fstatSync(PROTECTED_SESSION_FD).isFIFO()) throw new Error("missing_session");
-	const stream = openInheritedReadable(PROTECTED_SESSION_FD);
-	return Object.freeze({
-		read: () => readBoundedStream(stream, MAX_SESSION_BYTES, () => stream.destroy()),
-		close: () => closeReadable(stream),
-	});
 }
 
 function assertEmbeddedControlSessionContract(

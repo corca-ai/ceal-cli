@@ -1,0 +1,84 @@
+{
+	"schema_version": "ceal.gateway_leased_consumer_attachment_stream_conformance_handoff.v1",
+	"proof_level": "local_state",
+	"writes_external": false,
+	"source": {
+		"repository": "corca-ai/ceal",
+			"commit": "317d4245144fb1552e16175082951c882b3a452a",
+			"tree": "fe4e452dd83c28574963e22295d62957bc83d284",
+		"protocol_tree": "42f9c7920b2c72fceb5347d9279537fca7e057ad",
+		"inputs": [
+			{
+				"path": "packages/ceal-protocol/src/index.ts",
+				"sha256": "6e518fc92000d39ec9d96ef488797a0280c82bf7c52c97f57ab6d6f8a807beac"
+			},
+			{
+				"path": "packages/ceal-protocol/src/leased-consumer-attachment-stream.ts",
+				"sha256": "d9fed06804305c14382108283ebda849d73a9fa47cabf4b55b50b9fd6ab8dc5c"
+			},
+			{
+				"path": "scripts/agent-runtime/gateway-leased-consumer-attachment-stream-route.ts",
+				"sha256": "6cfc84a357acc07f9ad7430cbf1df3d557ed738d467d57c2bfb6c0b5ebd6e79c"
+			},
+			{
+				"path": "scripts/agent-runtime/fixtures/gateway-leased-consumer-attachment-stream-transport.json",
+					"sha256": "0db83d9d49a58e69e260558d34020cc92eb4d7c30a62a165a6b14c19b4519166"
+			}
+		]
+	},
+	"transport": {
+		"method": "POST",
+		"path": "/api/ceal/agent/v1/control/attachment-stream",
+		"authorization": "Bearer <protected-service-credential>",
+		"content_type": "application/json",
+		"schema_version": "ceal.leased_consumer_attachment_stream_request.v1"
+	},
+	"response": {
+		"content_type": "application/octet-stream",
+		"magic_hex": "4345414c41533100",
+		"transport_schema": "ceal.leased_consumer_attachment_stream_transport.v1",
+			"manifest_schema": "ceal.leased_consumer_attachment_stream_manifest.v1",
+			"frame_schema": "ceal.leased_consumer_attachment_stream_frame.v1"
+		},
+		"protected_session": {
+			"child_fd": 4,
+			"schema_version": "ceal.leased_consumer_control_session.v1",
+			"maximum_bytes": 8192,
+			"deadline_ms": 2000
+		},
+		"operation_deadline_bounds_ms": {
+			"minimum": 30000,
+			"maximum": 600000
+		},
+		"handoff": {
+		"schema_version": "ceal.agent.attachment_materialization.v1",
+		"manifest_name": "manifest.json",
+		"materialized_path": "attachments/<slot>.bin",
+		"unread_has_path": false
+	},
+	"limits": {
+		"effective": {
+			"max_attachment_count": 16,
+			"max_attachment_bytes": 52428800,
+			"max_total_bytes": 838860800
+		},
+		"safety": {
+			"max_attachment_count": 16,
+			"max_attachment_bytes": 52428800,
+			"max_total_bytes": 104857600
+		}
+	},
+	"invariants": [
+		"the request carries only the event and lease tuple; Gateway derives consumer identity",
+		"the response is a raw bounded binary stream, never a JSON result-materialization frame",
+		"the stream carries one complete manifest, ordered materialized slots, and one terminal digest/count proof",
+		"the Worker constructs the Agent handoff root and fixed slot filenames; stream data cannot choose a path",
+		"the handoff manifest is published only after terminal proof and every materialized digest passes",
+		"provider credentials, URLs, source refs, and provider file identifiers never cross the boundary"
+	],
+	"non_claims": [
+		"This is a local immutable-source candidate handoff, not a signed release, installed Worker artifact, registered Gateway route, or live serving proof.",
+		"The protected service credential remains a runtime input and is never included in this packet or exposed to Agent IPC.",
+		"The candidate route does not select a provider file, authorize an arbitrary path, or prove a successful provider download."
+	]
+}

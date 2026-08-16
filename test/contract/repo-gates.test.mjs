@@ -27,6 +27,7 @@ const WORKER_CONTRACT_TESTS = [
 	"packages/ceal-protocol/test/result-materialization.test.ts",
 	"packages/ceal-protocol/test/wire-boundary-response.test.ts",
 	"packages/ceal-protocol/test/wire-boundary.test.ts",
+	"packages/ceal-worker-cli/test/leased-consumer-attachment-stream-carrier.test.mjs",
 	"test/check-docs-graph.test.ts",
 	"test/contract/gateway-handoff-bootstrap.test.mjs",
 	"test/contract/gateway-leased-consumer-call-handoff.test.mjs",
@@ -280,7 +281,10 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.ok(manifest.scripts.lint.split(/\s+/u).includes("."), "the linter must run over the whole tree");
 	assert.doesNotMatch(manifest.scripts.lint, /--changed|--staged|--since/u);
 	assert.match(manifest.scripts.build, /npm run build:worker/u);
-	assert.match(manifest.scripts["build:worker"], /^node scripts\/generate-leased-consumer-handoff-runtime[.]mjs/u);
+	assert.match(
+		manifest.scripts["build:worker"],
+		/^node scripts\/generate-leased-consumer-attachment-stream-runtime[.]mjs && node scripts\/generate-leased-consumer-handoff-runtime[.]mjs/u,
+	);
 	assert.match(
 		manifest.scripts["build:worker"],
 		/node test\/repo-build[.]mjs packages\/ceal-protocol packages\/ceal-client packages\/ceal-worker-cli$/u,
@@ -965,6 +969,18 @@ test("every @testOnly export is actually reached by a suite", () => {
 		[],
 		"a @testOnly export that no suite imports is not test-only, it is unused — delete the export or the tag",
 	);
+});
+
+test("development-only attachment candidate files stay explicitly quarantined", () => {
+	const knip = JSON.parse(read("knip.json"));
+	const ignored = knip.workspaces["packages/ceal-worker-cli"].ignore;
+	assert.deepEqual(ignored, [
+		"src/generated/leased-consumer-attachment-stream-contract.ts",
+		"src/leased-consumer-attachment-stream-carrier.ts",
+		"src/leased-consumer-attachment-stream.ts",
+	]);
+	for (const file of ignored)
+		assert.ok(existsSync(path.join(ROOT, "packages/ceal-worker-cli", file)), `${file} must exist before it is quarantined`);
 });
 
 // `ceal update` runs this installer and waits for it, so an unbounded fetch here

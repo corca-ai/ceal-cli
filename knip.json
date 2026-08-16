@@ -10,12 +10,17 @@
 			"project": ["src/**/*.ts"]
 		},
 		"packages/ceal-worker-cli": {
-			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts"],
-			"project": ["src/**/*.ts"]
+			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts", "test/**/*.test.mjs"],
+			"project": ["src/**/*.ts"],
+			"ignore": [
+				"src/generated/leased-consumer-attachment-stream-contract.ts",
+				"src/leased-consumer-attachment-stream-carrier.ts",
+				"src/leased-consumer-attachment-stream.ts"
+			]
 		}
 	},
 	"tags": ["-testOnly"],
 	"ignoreWorkspaces": ["packages/ceal-protocol"],
-	"ignoreDependencies": ["postject"],
+	"ignoreDependencies": ["postject", "tsx"],
 	"ignoreBinaries": ["nose", "shellcheck", "mkfifo", "cosign", "openssl", "awiki"]
 }

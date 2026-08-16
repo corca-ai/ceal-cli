@@ -24,6 +24,13 @@ export interface UnixSocketResponse {
 	readonly bytes: Uint8Array;
 }
 
+interface UnixSocketStreamResponse {
+	readonly status: number;
+	readonly contentType: string | string[] | undefined;
+	readonly stream: AsyncIterable<Uint8Array>;
+	readonly close: () => void;
+}
+
 /** Derived from the seam declaration above so the two shapes cannot drift apart. */
 type ResolvedTimerSeams = Readonly<{ now: () => number }> & Required<Omit<TransportTimerSeams, "monotonicNow">>;
 
@@ -315,4 +322,126 @@ export function postUnixSocket(
 		input.signal?.addEventListener("abort", abortRequest, { once: true });
 		request.end(body);
 	});
+}
+
+/**
+ * The streaming sibling of `postUnixSocket`: headers are returned immediately,
+ * while the bounded body stays an async iterable. It is used only for the raw
+ * attachment candidate; JSON control routes retain the buffered response above.
+ *
+ * @testOnly The candidate route is not an installed Worker entrypoint yet.
+ */
+export function postUnixSocketStream(
+	input: Readonly<{
+		socketPath: string;
+		path: string;
+		method: string;
+		credential: string;
+		body: string;
+		deadlineMs: number;
+		maximumResponseBytes: number;
+		errors: UnixSocketErrorNames;
+		signal?: AbortSignal;
+	}>,
+): Promise<UnixSocketStreamResponse> {
+	const body = Buffer.from(input.body, "utf8");
+	return new Promise((resolve, reject) => {
+		let response: import("node:http").IncomingMessage | undefined;
+		let headersDelivered = false;
+		let deadline: ReturnType<typeof setTimeout> | undefined;
+		let abortError: Error | undefined;
+		let deadlineError: Error | undefined;
+		let cleaned = false;
+		const cleanup = () => {
+			if (cleaned) return;
+			cleaned = true;
+			if (deadline) clearTimeout(deadline);
+			input.signal?.removeEventListener("abort", abortRequest);
+		};
+		const close = () => {
+			response?.destroy();
+			request.destroy();
+			cleanup();
+		};
+		const abortRequest = () => {
+			abortError = new Error(input.errors.aborted);
+			close();
+			if (!headersDelivered) rejectBeforeHeaders(abortError);
+		};
+		const deadlineRequest = () => {
+			deadlineError = new Error(input.errors.deadlineExceeded);
+			close();
+			if (!headersDelivered) rejectBeforeHeaders(deadlineError);
+		};
+		const rejectBeforeHeaders = (error: Error) => {
+			if (headersDelivered) return;
+			headersDelivered = true;
+			reject(error);
+		};
+		const request = httpRequest(
+			{
+				socketPath: input.socketPath,
+				path: input.path,
+				method: input.method,
+				headers: {
+					Authorization: `Bearer ${input.credential}`,
+					"Content-Type": "application/json",
+					"Content-Length": String(body.byteLength),
+				},
+			},
+			(incoming) => {
+				response = incoming;
+				headersDelivered = true;
+				const stream = boundedResponseStream(
+					incoming,
+					input,
+					close,
+					cleanup,
+					() => deadlineError,
+					() => abortError,
+				);
+				resolve({ status: incoming.statusCode ?? 0, contentType: incoming.headers["content-type"], stream, close });
+			},
+		);
+		request.once("error", () => {
+			if (headersDelivered) return;
+			rejectBeforeHeaders(new Error(input.errors.requestFailed));
+		});
+		deadline = setTimeout(deadlineRequest, input.deadlineMs);
+		deadline.unref();
+		if (input.signal?.aborted) return abortRequest();
+		input.signal?.addEventListener("abort", abortRequest, { once: true });
+		request.end(body);
+	});
+}
+
+function boundedResponseStream(
+	response: import("node:http").IncomingMessage,
+	input: Readonly<{ maximumResponseBytes: number; errors: UnixSocketErrorNames }>,
+	close: () => void,
+	cleanup: () => void,
+	deadlineError: () => Error | undefined,
+	abortError: () => Error | undefined,
+): AsyncIterable<Uint8Array> {
+	return (async function* () {
+		let total = 0;
+		try {
+			for await (const chunk of response) {
+				if (!(chunk instanceof Uint8Array) || chunk.byteLength > input.maximumResponseBytes - total) {
+					close();
+					throw new Error(input.errors.responseTooLarge);
+				}
+				total += chunk.byteLength;
+				yield new Uint8Array(chunk);
+			}
+		} catch (error) {
+			close();
+			if (deadlineError()) throw deadlineError();
+			if (abortError()) throw abortError();
+			if (error instanceof Error && error.message === input.errors.responseTooLarge) throw error;
+			throw new Error(input.errors.responseFailed);
+		} finally {
+			cleanup();
+		}
+	})();
 }
