@@ -28,7 +28,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { projectAcceptanceReceipt } from "../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
-import { resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
+import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
@@ -42,14 +42,244 @@ const ACCEPTANCE_POST_KILL_REPORT_MS = 500;
 const ACCEPTANCE_POST_EXIT_DRAIN_MS = 100;
 const ACCEPTANCE_MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 
+type JsonRecord = Record<string, unknown>;
+type Environment = NodeJS.ProcessEnv;
+type FailureCode = string;
+
+interface ResolveBinaryOptions {
+	repoRoot?: string;
+	binary?: string;
+	env?: Environment;
+}
+
+interface CommandBounds {
+	timeoutMs?: number;
+	terminationGraceMs?: number;
+	postKillReportMs?: number;
+	postExitDrainMs?: number;
+	maxCapturedOutputBytes?: number;
+}
+
+interface RunCommandOptions extends CommandBounds {
+	env?: Environment;
+}
+
+interface BuildPacketOptions {
+	repoRoot?: string;
+	binary?: string;
+	capability?: string;
+	target?: string;
+	env?: Environment;
+	commandBounds?: CommandBounds;
+}
+
+interface ArtifactDescriptor {
+	sha256: string;
+}
+
+interface ReleaseManifest {
+	schema_version: "ceal.worker_release_manifest.v1";
+	platform: string;
+	version: string;
+	artifact_state: string;
+	artifact: ArtifactDescriptor;
+	protocol?: JsonRecord;
+}
+
+interface ProtocolProvenance {
+	package: string;
+	version: string;
+	sha256: string;
+	producer: JsonRecord;
+	lock_agreement: JsonRecord;
+}
+
+interface InstalledReleaseFacts {
+	directory: string;
+	manifestName: string;
+	manifest: ReleaseManifest;
+	artifactSha256: string;
+}
+
+interface CommandResult {
+	args: readonly string[];
+	status: number;
+	stdout: string;
+	stderr: string;
+	elapsed_ms: number;
+}
+
+interface ReceiptObservation {
+	[key: string]: unknown;
+	readback_status?: string;
+	gateway_audit_readback?: string;
+	provider_state_readback?: string;
+	outcome?: string;
+	authorization?: string;
+	audit_refs: string[];
+	gateway_elapsed_ms: number | null;
+	exit_code: number;
+	elapsed_ms: number;
+}
+
+interface BoundedCapabilityCall {
+	capability: string;
+	target: string;
+	status?: string;
+	exit_code: number;
+	elapsed_ms: number;
+	evidence?: string;
+	request_ref: string | null;
+	receipt: ReceiptObservation | null;
+}
+
+interface InstalledClient {
+	binary_path: string;
+	platform: string;
+	release_version: string;
+	artifact_sha256: string;
+	artifact_state: string;
+	manifest: string;
+	digest_agreement: string;
+	reported_version?: string;
+	client_protocol_version?: string;
+}
+
+interface GuideObservation {
+	status?: string;
+	exit_code: number;
+	resolved_host_paths: string[];
+	registered_host_count: number;
+}
+
+interface GatewaySessionObservation {
+	reached: boolean;
+	exit_code: number;
+	elapsed_ms: number;
+	instance_ref?: string;
+	profile_ref?: string;
+	negotiated_protocol_version?: string;
+	host_decision?: string;
+	catalog_source?: string;
+	live_gateway_checked: boolean;
+	capability_count: number;
+}
+
+interface AcceptancePacket {
+	schema_version: "ceal.worker_acceptance_packet.v1";
+	installed_client: InstalledClient;
+	gateway_protocol_input: ProtocolProvenance;
+	guide: GuideObservation;
+	gateway_session: GatewaySessionObservation;
+	bounded_capability_call: BoundedCapabilityCall | null;
+	non_claims: string[];
+}
+
+interface ParsedOptions {
+	json: boolean;
+	sanitized: boolean;
+	binary?: string;
+	capability?: string;
+	target?: string;
+}
+
+interface SanitizableAcceptancePacket<GatewayProtocolInput extends object> {
+	installed_client: InstalledClient;
+	gateway_protocol_input: GatewayProtocolInput;
+	guide: GuideObservation;
+	gateway_session: GatewaySessionObservation;
+	bounded_capability_call: SanitizableBoundedCapabilityCall | null;
+	non_claims: string[];
+}
+
+interface SanitizableBoundedCapabilityCall {
+	capability: string;
+	target: string;
+	status?: string;
+	exit_code: number;
+	elapsed_ms: number;
+	evidence?: string;
+	request_ref: string | null;
+	receipt: JsonRecord | null;
+}
+
+interface SanitizedAcceptanceRecord<GatewayProtocolInput extends object> {
+	schema_version: "ceal.worker_acceptance_result.v2";
+	command: "ceal";
+	ok: true;
+	status: "emitted";
+	emitted_by: "source_checkout";
+	installed_client: {
+		platform: string;
+		release_version: string;
+		artifact_sha256: string;
+		artifact_state: string;
+		manifest: string;
+		digest_agreement: string;
+		reported_version?: string;
+		client_protocol_version?: string;
+	};
+	gateway_protocol_input: GatewayProtocolInput;
+	guide: { status?: string; exit_code: number; registered_host_count: number };
+	gateway_session: {
+		reached: boolean;
+		exit_code: number;
+		elapsed_ms: number;
+		instance_ref?: string;
+		profile_ref?: string;
+		negotiated_protocol_version?: string;
+		host_decision?: string;
+		catalog_source?: string;
+		live_gateway_checked: boolean;
+		capability_count: number;
+	};
+	bounded_capability_call: {
+		capability: string;
+		target: string;
+		status?: string;
+		exit_code: number;
+		elapsed_ms: number;
+		evidence?: string;
+		request_ref: string | null;
+		receipt: Record<string, unknown> | null;
+	} | null;
+	non_claims: string[];
+}
+
 export const WorkerAcceptanceError = codedErrorClass("WorkerAcceptanceError");
 
-function fail(code, message) {
+function isRecord(value: unknown): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isReleaseManifest(value: unknown): value is ReleaseManifest {
+	if (!isRecord(value) || value.schema_version !== "ceal.worker_release_manifest.v1") return false;
+	if (!isString(value.platform) || !isString(value.version) || !isString(value.artifact_state)) return false;
+	if (!isRecord(value.artifact) || !isString(value.artifact.sha256)) return false;
+	return value.protocol === undefined || isRecord(value.protocol);
+}
+
+function isProtocolProvenance(value: unknown): value is ProtocolProvenance {
+	return (
+		isRecord(value) &&
+		isString(value.package) &&
+		isString(value.version) &&
+		isString(value.sha256) &&
+		isRecord(value.producer) &&
+		isRecord(value.lock_agreement)
+	);
+}
+
+function fail(code: FailureCode, message: string): never {
 	throw new WorkerAcceptanceError(code, message);
 }
 
 /** Resolve the installed binary, refusing every source-shaped substitution. */
-export function resolveInstalledBinary({ repoRoot = REPO_ROOT, binary, env = process.env } = {}) {
+export function resolveInstalledBinary({ repoRoot = REPO_ROOT, binary, env = process.env }: ResolveBinaryOptions = {}): string {
 	const candidate = binary ?? which("ceal", env);
 	if (!candidate) fail("binary_not_found", "No 'ceal' on PATH; pass --binary <path> to name the installed release.");
 	if (!existsSync(candidate)) fail("binary_not_found", `No such file: ${candidate}`);
@@ -77,12 +307,12 @@ export function resolveInstalledBinary({ repoRoot = REPO_ROOT, binary, env = pro
 	return resolved;
 }
 
-function isInside(parent, child) {
+function isInside(parent: string, child: string): boolean {
 	const relative = path.relative(realpathSync(parent), child);
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function which(command, env) {
+function which(command: string, env: Environment): string | undefined {
 	for (const entry of (env.PATH ?? "").split(path.delimiter)) {
 		if (!entry) continue;
 		const candidate = path.join(entry, command);
@@ -98,8 +328,8 @@ function which(command, env) {
  * declared artifact digest, and the `SHA256SUMS` line. Any one of them alone is
  * a self-report.
  */
-export function inspectInstalledRelease(binaryPath) {
-	let installed;
+export function inspectInstalledRelease(binaryPath: string): InstalledReleaseFacts {
+	let installed: InstalledWorkerRelease | undefined;
 	try {
 		installed = resolveInstalledWorkerRelease(binaryPath);
 	} catch {
@@ -110,10 +340,11 @@ export function inspectInstalledRelease(binaryPath) {
 	const manifestName = readdirSync(directory).find((name) => name.startsWith(MANIFEST_PREFIX) && name.endsWith(".json"));
 	if (!manifestName)
 		fail("release_manifest_missing", `No ${MANIFEST_PREFIX}*.json beside ${binaryPath}; this is not an installed release layout.`);
-	const manifest = JSON.parse(readFileSync(path.join(directory, manifestName), "utf8"));
-	if (manifest.schema_version !== "ceal.worker_release_manifest.v1") {
-		fail("release_manifest_schema", `Unexpected manifest schema: ${manifest.schema_version}`);
+	const parsedManifest: unknown = JSON.parse(readFileSync(path.join(directory, manifestName), "utf8"));
+	if (!isReleaseManifest(parsedManifest)) {
+		fail("release_manifest_schema", "Unexpected release manifest schema or shape.");
 	}
+	const manifest = parsedManifest;
 	const observed = sha256File(binary);
 	if (observed !== manifest.artifact?.sha256) {
 		fail("artifact_digest_mismatch", `Installed bytes ${observed} do not match the manifest's ${manifest.artifact?.sha256}.`);
@@ -126,19 +357,21 @@ export function inspectInstalledRelease(binaryPath) {
 	return { directory, manifestName, manifest, artifactSha256: observed };
 }
 
-function readChecksums(file) {
+function readChecksums(file: string): Map<string, string> {
 	if (!existsSync(file)) fail("checksums_missing", `No ${SUMS_NAME} beside the installed binary.`);
-	const entries = new Map();
+	const entries = new Map<string, string>();
 	for (const line of readFileSync(file, "utf8").split("\n")) {
 		if (!line.trim()) continue;
 		const match = /^([0-9a-f]{64}) {2}(\S+)$/u.exec(line);
 		if (!match) fail("checksums_malformed", `Unparseable ${SUMS_NAME} line: ${line}`);
-		entries.set(match[2], match[1]);
+		const [, digest, name] = match;
+		if (!digest || !name) fail("checksums_malformed", `Unparseable ${SUMS_NAME} line: ${line}`);
+		entries.set(name, digest);
 	}
 	return entries;
 }
 
-function sha256File(file) {
+function sha256File(file: string): string {
 	return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
@@ -147,12 +380,15 @@ function sha256File(file) {
  * `lib/protocol-provenance.mjs` because the asset merge asks the same question
  * before signing; only the error envelope differs.
  */
-export function verifyProtocolProvenance(manifest, { repoRoot = REPO_ROOT } = {}) {
-	return verifyProtocolProvenanceAgainstLock(manifest, { repoRoot, fail });
+export function verifyProtocolProvenance(manifest: unknown, { repoRoot = REPO_ROOT }: { repoRoot?: string } = {}): ProtocolProvenance {
+	if (!isReleaseManifest(manifest)) fail("release_manifest_schema", "Unexpected release manifest schema or shape.");
+	const provenance: unknown = verifyProtocolProvenanceAgainstLock(manifest, { repoRoot, fail });
+	if (!isProtocolProvenance(provenance)) fail("protocol_provenance_incomplete", "Protocol provenance output is incomplete.");
+	return provenance;
 }
 
-function acceptanceCommandEnv(base) {
-	const clean = { ...base };
+function acceptanceCommandEnv(base: Environment): Environment {
+	const clean: Environment = { ...base };
 	for (const name of [
 		"ACTIONS_ID_TOKEN_REQUEST_TOKEN",
 		"ACTIONS_ID_TOKEN_REQUEST_URL",
@@ -168,8 +404,8 @@ function acceptanceCommandEnv(base) {
 }
 
 export async function runInstalledCommand(
-	binaryPath,
-	args,
+	binaryPath: string,
+	args: readonly string[],
 	{
 		env = process.env,
 		timeoutMs = ACCEPTANCE_COMMAND_TIMEOUT_MS,
@@ -177,8 +413,8 @@ export async function runInstalledCommand(
 		postKillReportMs = ACCEPTANCE_POST_KILL_REPORT_MS,
 		postExitDrainMs = ACCEPTANCE_POST_EXIT_DRAIN_MS,
 		maxCapturedOutputBytes = ACCEPTANCE_MAX_CAPTURED_OUTPUT_BYTES,
-	} = {},
-) {
+	}: RunCommandOptions = {},
+): Promise<CommandResult> {
 	const started = Date.now();
 	const result = await runBoundedProcess(binaryPath, args, {
 		cwd: path.dirname(binaryPath),
@@ -198,18 +434,26 @@ export async function runInstalledCommand(
 		const action = args[0] === "call" ? " The provider outcome may be unknown; do not repeat the call until its receipt is read back." : "";
 		fail("installed_binary_failed", `'${binaryPath} ${args.join(" ")}' did not exit normally.${action}`);
 	}
+	if (result.code === null) fail("installed_binary_failed", `'${binaryPath} ${args.join(" ")}' did not return an exit code.`);
 	return { args, status: result.code, stdout: result.stdout, stderr: result.stderr, elapsed_ms: Date.now() - started };
 }
 
 // Deliberately not a YAML parser: the packet records a handful of scalar
 // fields, and a real parser here would invite reading structure the CLI never
 // promised to keep stable.
-function scalar(stdout, key) {
+function scalar(stdout: string, key: string): string | undefined {
 	const match = new RegExp(`^\\s*${key}:[ ]+(.+)$`, "mu").exec(stdout);
 	return match ? match[1].trim() : undefined;
 }
 
-export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capability, target, env = process.env, commandBounds } = {}) {
+export async function buildAcceptancePacket({
+	repoRoot = REPO_ROOT,
+	binary,
+	capability,
+	target,
+	env = process.env,
+	commandBounds = {},
+}: BuildPacketOptions = {}): Promise<AcceptancePacket> {
 	// Acceptance-candidate emission is one of the paths the Gateway owner made
 	// ship-blocking on a proof/ship divergence, and it must refuse on its own
 	// rather than on the strength of some test command having passed earlier. It
@@ -219,19 +463,20 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 	try {
 		assertShippableProtocolVendorPin({ repoRoot });
 	} catch (error) {
-		fail(error instanceof ProtocolVendorPinError ? error.code : "protocol_vendor_pin_verification_failed", error.message);
+		const message = error instanceof Error ? error.message : "Protocol vendor pin verification failed.";
+		fail(error instanceof ProtocolVendorPinError ? error.code : "protocol_vendor_pin_verification_failed", message);
 	}
 	const binaryPath = resolveInstalledBinary({ repoRoot, binary, env });
 	const release = inspectInstalledRelease(binaryPath);
 	const protocol = verifyProtocolProvenance(release.manifest, { repoRoot });
 
-	const installedCommandOptions = { ...commandBounds, env };
+	const installedCommandOptions: RunCommandOptions = { ...commandBounds, env };
 	const version = await runInstalledCommand(binaryPath, ["version"], installedCommandOptions);
 	if (version.status !== 0) fail("installed_binary_unusable", `'${binaryPath} version' exited ${version.status}.`);
 	const guide = await runInstalledCommand(binaryPath, ["guide", "status"], installedCommandOptions);
 	const discovery = await runInstalledCommand(binaryPath, ["capabilities", "--fresh"], installedCommandOptions);
 
-	const packet = {
+	const packet: AcceptancePacket = {
 		schema_version: "ceal.worker_acceptance_packet.v1",
 		installed_client: {
 			binary_path: binaryPath,
@@ -273,7 +518,7 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 	if (capability && target) {
 		const call = await runInstalledCommand(binaryPath, ["call", capability, "--target", target], installedCommandOptions);
 		const requestRef = scalar(call.stdout, "request_ref");
-		let receipt;
+		let receipt: ReceiptObservation | null = null;
 		if (requestRef) {
 			const shown = await runInstalledCommand(binaryPath, ["receipt", "show", requestRef], installedCommandOptions);
 			// These are the rendered observations available on the checkout side.
@@ -301,7 +546,7 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 			elapsed_ms: call.elapsed_ms,
 			evidence: scalar(call.stdout, "evidence"),
 			request_ref: requestRef ?? null,
-			receipt: receipt ?? null,
+			receipt,
 		};
 	}
 
@@ -312,7 +557,7 @@ export async function buildAcceptancePacket({ repoRoot = REPO_ROOT, binary, capa
 // The non-claims are derived from what the run actually reached, so a row that
 // was skipped says so in the packet itself rather than in a covering note that
 // travels separately and goes stale.
-function nonClaims(packet) {
+function nonClaims(packet: AcceptancePacket): string[] {
 	const claims = [
 		`Only ${packet.installed_client.platform} is evidenced by this packet; every other platform is unproved by it.`,
 		"No tag, signature, upload, publication, or Gateway configuration change was performed.",
@@ -359,7 +604,10 @@ function nonClaims(packet) {
  * the number is the evidence ("guide registration reached N hosts"), the paths
  * are the leak.
  */
-export function sanitizedAcceptanceRecord(packet) {
+
+export function sanitizedAcceptanceRecord<GatewayProtocolInput extends object>(
+	packet: SanitizableAcceptancePacket<GatewayProtocolInput>,
+): SanitizedAcceptanceRecord<GatewayProtocolInput> {
 	const client = packet.installed_client;
 	const session = packet.gateway_session;
 	const call = packet.bounded_capability_call;
@@ -435,9 +683,13 @@ export function sanitizedAcceptanceRecord(packet) {
 	};
 }
 
-function parseArgs(argv) {
-	const options = { json: false, sanitized: false };
-	const valued = { "--binary": "binary", "--capability": "capability", "--target": "target" };
+function parseArgs(argv: readonly string[]): ParsedOptions {
+	const options: ParsedOptions = { json: false, sanitized: false };
+	const valued: Record<string, "binary" | "capability" | "target"> = {
+		"--binary": "binary",
+		"--capability": "capability",
+		"--target": "target",
+	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const token = argv[index];
 		if (token === "--json") {
@@ -450,7 +702,9 @@ function parseArgs(argv) {
 		} else if (valued[token]) {
 			index += 1;
 			if (index >= argv.length) fail("missing_argument_value", `${token} needs a value.`);
-			options[valued[token]] = argv[index];
+			const value = argv[index];
+			if (value === undefined) fail("missing_argument_value", `${token} needs a value.`);
+			options[valued[token]] = value;
 		} else {
 			fail("unknown_argument", `Unknown argument: ${token}`);
 		}
@@ -461,8 +715,8 @@ function parseArgs(argv) {
 	return options;
 }
 
-function render(packet) {
-	const lines = [];
+function render(packet: AcceptancePacket): string {
+	const lines: string[] = [];
 	const client = packet.installed_client;
 	lines.push(`installed:  ${client.release_version} ${client.platform}  ${client.artifact_sha256}`);
 	lines.push(`            ${client.binary_path}`);
@@ -505,9 +759,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 		const packet = await buildAcceptancePacket(options);
 		const emitted = options.sanitized ? sanitizedAcceptanceRecord(packet) : packet;
 		process.stdout.write(options.json ? `${JSON.stringify(emitted, null, 2)}\n` : `${render(packet)}\n`);
-	} catch (error) {
+	} catch (error: unknown) {
 		const code = error instanceof WorkerAcceptanceError ? error.code : "unexpected_error";
-		process.stderr.write(`worker-acceptance: ${code}: ${error.message}\n`);
+		const message = error instanceof Error ? error.message : "Unknown failure.";
+		process.stderr.write(`worker-acceptance: ${code}: ${message}\n`);
 		process.exit(1);
 	}
 }
