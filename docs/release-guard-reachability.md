@@ -114,7 +114,7 @@ runner lost its toolchain.
 
 Measured before deciding, on a `linux-arm64` host: `npm run test:release` runs
 there and passes — 23 tests, 22 pass, 1 skip, about a minute. The consumer proof is not platform-gated
-(only `test/worker-release-installer.test.mjs` imports `test/platform-proof.mjs`),
+(only `test/worker-release-installer.test.mjs` imports `test/platform-proof.ts`),
 so the tier buys the missing proof on arm64 rather than skipping itself.
 
 | option | buys | costs |

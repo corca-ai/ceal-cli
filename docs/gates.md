@@ -417,7 +417,7 @@ where the composers and native-artifact paths actually run.
 **Why a runner script rather than a `c8` prefix in the npm script.** Two reasons,
 and the first is the load-bearing one. A floor only holds against the proof set
 it was measured on. `platformProofSkip` decides from `process.platform` and
-`process.arch` alone (`test/platform-proof.mjs:16-17`), so the macOS leg of
+`process.arch` alone (`test/platform-proof.ts:16-17`), so the macOS leg of
 `check.yml` skips the installed-binary and installer proofs whatever
 `CEAL_REQUIRE_PLATFORM_PROOFS` is set to — that variable turns an
 already-decided skip into a failure, it does not cause one. The scripts those

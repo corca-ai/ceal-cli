@@ -99,8 +99,6 @@
 		"test/converged-protocol-repo-fixture.mjs",
 		"test/gateway-protocol-consumer.test.mjs",
 		"test/gateway-protocol-fixture.mjs",
-		"test/host-tools.mjs",
-		"test/platform-proof.mjs",
 		"test/repo-build-supervisor.mjs",
 		"test/repo-build.mjs",
 		"test/run-source-tests.mjs",

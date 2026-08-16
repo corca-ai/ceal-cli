@@ -13,7 +13,7 @@ reasoning in [gates.md](gates.md).
 
 - **CI runs macOS but proves no install there.** `check.yml`'s `check-native` leg
   and the release lane's `darwin-arm64` build both set
-  `require_platform_proofs: "0"`, and `test/platform-proof.mjs` grants a non-skip
+  `require_platform_proofs: "0"`, and `test/platform-proof.ts` grants a non-skip
   only on `linux`/`x64`, so every installed-binary and installer proof self-skips
   on macOS. Do not "fix" this by flipping the flag — requiring it across all of
   `linux-*` is what burned `ceal-v0.67.0`. What a Mac checkout can still do

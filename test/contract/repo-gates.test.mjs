@@ -401,7 +401,7 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	// there would fail a run for skipping what it is right to skip — but the
 	// converse is the real risk: dropping the release platform out of the runner's
 	// list would leave the floor enforced only on hosts that prove less.
-	const proofPlatform = read("test/platform-proof.mjs").match(/PLATFORM_PROOF_PLATFORM = "([^"]+)"/u);
+	const proofPlatform = read("test/platform-proof.ts").match(/PLATFORM_PROOF_PLATFORM = "([^"]+)"/u);
 	const enforced = runnerSource().match(/MEASURED_PLATFORMS = Object\.freeze\(\[([^\]]*)\]\)/u);
 	assert.ok(proofPlatform && enforced, "the proof helper and the coverage runner must each name their platforms in one place");
 	assert.ok(
@@ -1114,7 +1114,7 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 	for (const suite of suites) {
 		const source = read(path.join("test", suite));
 		const inline = /skip:\s*process\.(?:platform|arch)/u.test(source);
-		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.mjs`);
+		assert.equal(inline, false, `test/${suite} skips on the host platform inline; use platformProofTest from test/platform-proof.ts`);
 	}
 	// The helper is only load-bearing if the proofs that motivated it use it, and
 	// that is an anti-vacuity floor, not an inventory. Naming the suites here made

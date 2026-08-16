@@ -1,3 +1,4 @@
+import type { TestFn } from "node:test";
 import test from "node:test";
 
 // The real-binary and installer proofs build a SEA and run an installer, so they
@@ -12,7 +13,7 @@ import test from "node:test";
 // than trusting the image to still be linux-x64.
 export const PLATFORM_PROOF_PLATFORM = "linux-x64";
 
-export function platformProofSkip(proof) {
+export function platformProofSkip(proof: string): false | string {
 	if (process.platform === "linux" && process.arch === "x64") return false;
 	return `${proof} requires ${PLATFORM_PROOF_PLATFORM}; this run is ${process.platform}-${process.arch} and proves no installed binary`;
 }
@@ -24,7 +25,7 @@ export function platformProofSkip(proof) {
  * gap is named in the output and the strict-runner escape hatch stays in one
  * place. `test/contract/repo-gates.test.mjs` enforces that.
  */
-export function platformProofTest(proof, name, fn) {
+export function platformProofTest(proof: string, name: string, fn: TestFn): void {
 	const skip = platformProofSkip(proof);
 	if (skip && process.env.CEAL_REQUIRE_PLATFORM_PROOFS === "1") {
 		test(name, () => {

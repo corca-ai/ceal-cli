@@ -22,8 +22,8 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.mjs";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.mjs";
-import { requireHostTools } from "./host-tools.mjs";
-import { platformProofTest } from "./platform-proof.mjs";
+import { requireHostTools } from "./host-tools.ts";
+import { platformProofTest } from "./platform-proof.ts";
 import { execReleaseTestProcess, processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture } from "./worker-release-package-fixture.mjs";
 

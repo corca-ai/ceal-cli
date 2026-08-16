@@ -11,7 +11,7 @@
 // Why a runner rather than a `c8` prefix in package.json:
 //
 //   1. A floor only holds where the proof set it was measured against runs.
-//      `platformProofSkip` (test/platform-proof.mjs:16-17) decides from
+//      `platformProofSkip` (test/platform-proof.ts:16-17) decides from
 //      `process.platform` and `process.arch` alone, so the macOS leg of
 //      `check.yml` skips the installed-binary and installer proofs whatever
 //      `CEAL_REQUIRE_PLATFORM_PROOFS` says — that variable only turns an
@@ -39,7 +39,7 @@ const CONFIG = ".c8rc.scripts.json";
 const TIERS = "test:tiers";
 
 // Where the floor is enforced. It has to include `PLATFORM_PROOF_PLATFORM` from
-// `test/platform-proof.mjs` — the host carrying the full proof set, and so the
+// `test/platform-proof.ts` — the host carrying the full proof set, and so the
 // one whose numbers must never be allowed to drop unnoticed — and
 // `repo-gates.test.mjs` asserts that it does.
 //
