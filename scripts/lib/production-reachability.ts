@@ -4,11 +4,11 @@
 // exhaustively tested guard as covered whether or not production ever calls it,
 // which is how two dead guards sat inside files reading 91-94% function coverage
 // (docs/release-guard-reachability.md). `knip` cannot answer it here for two
-// separate reasons, both measured: the top-level `scripts/*.mjs` are its `entry`
+// separate reasons, both measured: the top-level `scripts/*.ts` are its `entry`
 // files and it never reports an entry file's exports, and under `scripts/lib/`
 // it counts a test as a consumer — and every one of them is test-imported.
 //
-// So this walks the production graph only. Entries are the `node scripts/*.mjs`
+// So this walks the production graph only. Entries are the `node scripts/*.ts`
 // invocations declared in `package.json` scripts; edges are static relative
 // imports. Tests are not in the graph by construction, which is the whole point:
 // a guard only its own test calls is exactly the defect being looked for.
@@ -23,12 +23,27 @@ import ts from "typescript";
 import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.ts";
 
 /** A file is production-reachable if some entry reaches it through static imports. */
-function parse(file, text) {
+type ImportName = { imported: string; local: string };
+type ModuleImport = { specifier: string; names: ImportName[]; namespace: boolean };
+type ModuleRecord = {
+	file: string;
+	absolute: string;
+	exports: Map<string, number>;
+	testOnly: Set<string>;
+	imports: ModuleImport[];
+	identifiers: ts.Identifier[];
+};
+type WorkflowConsumer = { workflow: string; target: string; names: string[]; namespace: boolean };
+type ReachabilityFinding = { file: string; symbol: string; line: number };
+type ReachabilityReport = { entries: string[]; reachable: string[]; unreachableFiles: string[]; findings: ReachabilityFinding[] };
+type ReachabilityOptions = { repoRoot: string; entries?: string[]; testOnlyFiles?: Set<string>; workflows?: WorkflowConsumer[] };
+
+function parse(file: string, text: string): ts.SourceFile {
 	return ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, file.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS);
 }
 
-function isExported(node) {
-	return (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
+function isExported(node: ts.VariableStatement | ts.FunctionDeclaration | ts.ClassDeclaration): boolean {
+	return node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
 }
 
 /**
@@ -39,15 +54,15 @@ function isExported(node) {
  * running the program, and treating an unresolvable specifier as an edge would
  * silently widen the graph until nothing could be unreachable.
  */
-function readModule(absolute, repoRoot) {
+function readModule(absolute: string, repoRoot: string): ModuleRecord {
 	const relative = path.relative(repoRoot, absolute);
 	const source = parse(relative, readFileSync(absolute, "utf8"));
-	const exports = new Map();
-	const testOnly = new Set();
-	const imports = [];
-	const identifiers = [];
+	const exports = new Map<string, number>();
+	const testOnly = new Set<string>();
+	const imports: ModuleImport[] = [];
+	const identifiers: ts.Identifier[] = [];
 
-	const declare = (name, node) => {
+	const declare = (name: string, node: ts.Node): void => {
 		if (!exports.has(name)) exports.set(name, ts.getLineAndCharacterOfPosition(source, node.getStart()).line + 1);
 		// The tag is read off the declaration's own leading comment rather than by
 		// scanning the file, so a tag written above one export cannot silence the
@@ -56,10 +71,10 @@ function readModule(absolute, repoRoot) {
 		if (/@testOnly\b/u.test(leading)) testOnly.add(name);
 	};
 
-	const visit = (node) => {
+	const visit = (node: ts.Node): void => {
 		if (ts.isIdentifier(node)) identifiers.push(node);
 		if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-			const names = [];
+			const names: ImportName[] = [];
 			const clause = node.importClause;
 			if (clause?.name) names.push({ imported: "default", local: clause.name.text });
 			if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
@@ -101,7 +116,7 @@ function readModule(absolute, repoRoot) {
 	return { file: relative, absolute, exports, testOnly, imports, identifiers };
 }
 
-function resolve(repoRoot, fromAbsolute, specifier) {
+function resolve(repoRoot: string, fromAbsolute: string, specifier: string): string | undefined {
 	if (!specifier.startsWith(".")) return undefined;
 	return resolveWorkspaceSourceAuthority(path.resolve(path.dirname(fromAbsolute), specifier), { repoRoot });
 }
@@ -109,7 +124,7 @@ function resolve(repoRoot, fromAbsolute, specifier) {
 const INVOCATION = /node\s+(?:[\w-]+=\S+\s+)*(scripts\/[\w./-]+\.ts)/gu;
 
 /**
- * Every `node scripts/*.mjs` a production caller runs.
+ * Every `node scripts/*.ts` a production caller runs.
  *
  * The manifest is the primary source, and read rather than listed here: a script
  * added to it becomes an entry without anyone remembering to teach this, and — the
@@ -121,15 +136,15 @@ const INVOCATION = /node\s+(?:[\w-]+=\S+\s+)*(scripts\/[\w./-]+\.ts)/gu;
  * and the next lane to break it would get a false positive rather than a finding,
  * so they are read as entries in their own right.
  */
-export function productionEntries(repoRoot) {
-	const entries = new Set();
-	const add = (text) => {
+export function productionEntries(repoRoot: string): string[] {
+	const entries = new Set<string>();
+	const add = (text: string): void => {
 		for (const match of String(text).matchAll(INVOCATION)) entries.add(path.join(repoRoot, match[1]));
 	};
 	const manifest = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-	for (const command of Object.values(manifest.scripts ?? {})) add(command);
+	for (const command of Object.values(manifest.scripts ?? {})) if (typeof command === "string") add(command);
 	for (const directory of [path.join(repoRoot, ".github", "workflows"), path.join(repoRoot, ".githooks")]) {
-		let names;
+		let names: string[];
 		try {
 			names = readdirSync(directory);
 		} catch {
@@ -155,15 +170,15 @@ export function productionEntries(repoRoot) {
  * `from` reads two adjacent statements as one and attributes the wrong names —
  * which it did here, silently, on the first attempt.
  */
-export function workflowConsumers(repoRoot) {
+export function workflowConsumers(repoRoot: string): WorkflowConsumer[] {
 	const directory = path.join(repoRoot, ".github", "workflows");
-	const consumers = [];
+	const consumers: WorkflowConsumer[] = [];
 	for (const name of readdirSync(directory)) {
 		if (!name.endsWith(".yml") && !name.endsWith(".yaml")) continue;
 		const lines = readFileSync(path.join(directory, name), "utf8").split("\n");
 		for (let index = 0; index < lines.length; index += 1) {
 			if (!/--input-type=module\s+-e\s+'/u.test(lines[index])) continue;
-			const body = [];
+			const body: string[] = [];
 			for (let cursor = index + 1; cursor < lines.length && !lines[cursor].trimStart().startsWith("'"); cursor += 1) {
 				body.push(lines[cursor]);
 			}
@@ -201,24 +216,26 @@ export function analyzeProductionReachability({
 	entries = productionEntries(repoRoot),
 	workflows = workflowConsumers(repoRoot),
 	testOnlyFiles = declaredTestOnlyFiles(repoRoot),
-} = {}) {
+}: ReachabilityOptions): ReachabilityReport {
 	const sourceWorkflows = workflows.map((consumer) => ({
 		...consumer,
 		target: resolveWorkspaceSourceAuthority(consumer.target, { repoRoot }),
 	}));
-	const modules = new Map();
-	const load = (absolute) => {
-		if (modules.has(absolute)) return modules.get(absolute);
+	const modules = new Map<string, ModuleRecord>();
+	const load = (absolute: string): ModuleRecord => {
+		const existing = modules.get(absolute);
+		if (existing) return existing;
 		const module = readModule(absolute, repoRoot);
 		modules.set(absolute, module);
 		return module;
 	};
 
 	// Reachability first: only a module an entry reaches can consume anything.
-	const reachable = new Set();
-	const queue = [...entries, ...sourceWorkflows.map((consumer) => consumer.target)];
+	const reachable = new Set<string>();
+	const queue: string[] = [...entries, ...sourceWorkflows.map((consumer) => consumer.target)];
 	while (queue.length > 0) {
 		const absolute = queue.pop();
+		if (absolute === undefined) break;
 		if (reachable.has(absolute)) continue;
 		reachable.add(absolute);
 		for (const record of load(absolute).imports) {
@@ -228,8 +245,8 @@ export function analyzeProductionReachability({
 	}
 
 	// What the production graph actually consumes, keyed file -> imported names.
-	const consumed = new Map();
-	const wholeModule = new Set();
+	const consumed = new Map<string, Set<string>>();
+	const wholeModule = new Set<string>();
 	for (const absolute of reachable) {
 		for (const record of load(absolute).imports) {
 			const target = resolve(repoRoot, absolute, record.specifier);
@@ -250,8 +267,8 @@ export function analyzeProductionReachability({
 	// A module under `scripts/` that no entry reaches at all is the coarser half
 	// of the same defect, and the one a per-export walk cannot state: nothing it
 	// exports could be reported, because the walk never opens the file.
-	const owned = [];
-	const walk = (directory) => {
+	const owned: string[] = [];
+	const walk = (directory: string): void => {
 		for (const entry of readdirSync(directory, { withFileTypes: true })) {
 			const absolute = path.join(directory, entry.name);
 			if (entry.isDirectory()) walk(absolute);
@@ -264,7 +281,7 @@ export function analyzeProductionReachability({
 		.map((absolute) => path.relative(repoRoot, absolute))
 		.sort();
 
-	const findings = [];
+	const findings: ReachabilityFinding[] = [];
 	for (const absolute of [...reachable].sort()) {
 		// This gate owns the production wiring of repo scripts. Package exports are
 		// a different public-ABI question, proved from an isolated emitted artifact.
@@ -278,7 +295,7 @@ export function analyzeProductionReachability({
 		for (const [name, line] of module.exports) {
 			if (importedHere.has(name)) continue;
 			// The same declared exception the TypeScript packages use, checked the
-			// same way: `repo-gates.test.mjs` fails when a tagged export is reached
+			// same way: `repo-gates.test.ts` fails when a tagged export is reached
 			// by no suite, so the tag cannot quietly become a mute button.
 			if (module.testOnly.has(name)) continue;
 			// An export the production graph does not import may still be called
@@ -301,7 +318,7 @@ export function analyzeProductionReachability({
 	};
 }
 
-function declaredTestOnlyFiles(repoRoot) {
+function declaredTestOnlyFiles(repoRoot: string): Set<string> {
 	try {
 		const pin = JSON.parse(readFileSync(path.join(repoRoot, "protocol-vendor-pin.json"), "utf8"));
 		const declared = pin?.test_support?.vendored_path;

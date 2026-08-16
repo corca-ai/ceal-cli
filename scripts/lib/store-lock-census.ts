@@ -45,11 +45,17 @@ const WRITE_OPEN_FLAGS = /\bO_(WRONLY|RDWR|CREAT|APPEND|TRUNC)\b/u;
 const GUARD_NAME = /^with[A-Z]\w*Lock$/u;
 const PRIMITIVE_MODULES = new Set(["local-store-lock.ts"]);
 
-function lineOf(source, node) {
+type FunctionMap = Map<string, ts.FunctionDeclaration>;
+type CallSite = { guarded: boolean; owner: string | undefined };
+type Finding = { file: string; line: number; symbol: string; mutations: string[]; guards: string[] };
+type Exempt = { file: string; line: number; symbol: string; mutations: string[] };
+type CensusModule = { file: string; guards: string[]; findings: Finding[]; exempt: Exempt[]; clean: string[] };
+
+function lineOf(source: ts.SourceFile, node: ts.Node): number {
 	return ts.getLineAndCharacterOfPosition(source, node.getStart()).line + 1;
 }
 
-function calleeName(node) {
+function calleeName(node: ts.Node): string | undefined {
 	if (!ts.isCallExpression(node)) return undefined;
 	if (ts.isIdentifier(node.expression)) return node.expression.text;
 	if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.name)) return node.expression.name.text;
@@ -57,8 +63,8 @@ function calleeName(node) {
 }
 
 /** Every top-level `function` declaration in the module, by name. */
-function topLevelFunctions(source) {
-	const functions = new Map();
+function topLevelFunctions(source: ts.SourceFile): FunctionMap {
+	const functions: FunctionMap = new Map();
 	for (const statement of source.statements) {
 		if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
 			functions.set(statement.name.text, statement);
@@ -78,9 +84,9 @@ function topLevelFunctions(source) {
  * consumer of the lock as a guard and widen what counts as protected, which is
  * the direction that hides a finding.
  */
-function resolveGuards(source, functions) {
-	const guards = new Set();
-	const visitForPrimitives = (node) => {
+function resolveGuards(source: ts.SourceFile, functions: FunctionMap): Set<string> {
+	const guards = new Set<string>();
+	const visitForPrimitives = (node: ts.Node): void => {
 		const name = calleeName(node);
 		if (name && GUARD_NAME.test(name)) guards.add(name);
 		ts.forEachChild(node, visitForPrimitives);
@@ -93,16 +99,18 @@ function resolveGuards(source, functions) {
 		widened = false;
 		for (const [name, declaration] of functions) {
 			if (guards.has(name)) continue;
-			const parameters = new Set(declaration.parameters.filter((p) => ts.isIdentifier(p.name)).map((p) => p.name.text));
+			const parameters = new Set(
+				declaration.parameters.flatMap((parameter) => (ts.isIdentifier(parameter.name) ? [parameter.name.text] : [])),
+			);
 			let delegates = false;
-			const visit = (node) => {
+			const visit = (node: ts.Node): void => {
 				const callee = calleeName(node);
-				if (callee && guards.has(callee)) {
+				if (callee && guards.has(callee) && ts.isCallExpression(node)) {
 					for (const argument of node.arguments) {
 						if (!ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument)) continue;
 						let onlyInvokesParameter = false;
 						let touchesAnythingElse = false;
-						const inspect = (inner) => {
+						const inspect = (inner: ts.Node): void => {
 							const innerCallee = calleeName(inner);
 							if (innerCallee) {
 								if (parameters.has(innerCallee)) onlyInvokesParameter = true;
@@ -127,12 +135,17 @@ function resolveGuards(source, functions) {
 }
 
 /** True when the node sits inside an argument of a call to one of the module's guards. */
-function underGuard(node, guards) {
+function underGuard(node: ts.Node, guards: Set<string>): boolean {
 	let child = node;
 	let parent = node.parent;
 	while (parent) {
 		const callee = calleeName(parent);
-		if (callee && guards.has(callee) && parent.arguments.some((argument) => argument === child || argument.pos <= child.pos)) {
+		if (
+			callee &&
+			guards.has(callee) &&
+			ts.isCallExpression(parent) &&
+			parent.arguments.some((argument: ts.Expression) => argument === child || argument.pos <= child.pos)
+		) {
 			// `argument === child` covers a direct argument; the position test covers
 			// a node nested anywhere inside one. The callee itself is never an
 			// argument, so a recursive guard call is not self-protecting.
@@ -145,14 +158,14 @@ function underGuard(node, guards) {
 }
 
 /** The enclosing top-level function declaration, or undefined for module-level code. */
-function enclosingFunction(node, functions) {
+function enclosingFunction(node: ts.Node, functions: FunctionMap): string | undefined {
 	for (let parent = node.parent; parent; parent = parent.parent) {
 		if (ts.isFunctionDeclaration(parent) && parent.name && functions.get(parent.name.text) === parent) return parent.name.text;
 	}
 	return undefined;
 }
 
-function hasLockFreeTag(source, declaration) {
+function hasLockFreeTag(source: ts.SourceFile, declaration: ts.FunctionDeclaration): boolean {
 	const leading = source.text.slice(declaration.getFullStart(), declaration.getStart());
 	return /@lockFree\b/u.test(leading);
 }
@@ -162,29 +175,31 @@ function hasLockFreeTag(source, declaration) {
  * the caller can name it in the census as considered-and-skipped rather than
  * letting a silent skip read as a clean result.
  */
-function analyzeModule(relative, source) {
+function analyzeModule(relative: string, source: ts.SourceFile): CensusModule | undefined {
 	const functions = topLevelFunctions(source);
 	const guards = resolveGuards(source, functions);
 	if (guards.size === 0) return undefined;
 
 	// Every mutating call, attributed to the function that lexically contains it.
-	const mutations = new Map();
+	const mutations = new Map<string, string[]>();
 	// Every intra-module call of a top-level function, with whether it is guarded.
-	const callSites = new Map();
-	const visit = (node) => {
+	const callSites = new Map<string, CallSite[]>();
+	const visit = (node: ts.Node): void => {
 		const callee = calleeName(node);
 		if (callee) {
 			const isMutation = MUTATORS.has(callee) || (callee === "openSync" && WRITE_OPEN_FLAGS.test(node.getText()));
 			if (isMutation && !underGuard(node, guards)) {
 				const owner = enclosingFunction(node, functions);
 				if (owner) {
-					if (!mutations.has(owner)) mutations.set(owner, []);
-					mutations.get(owner).push(`${callee}@${lineOf(source, node)}`);
+					const ownerMutations = mutations.get(owner) ?? [];
+					ownerMutations.push(`${callee}@${lineOf(source, node)}`);
+					mutations.set(owner, ownerMutations);
 				}
 			}
 			if (functions.has(callee)) {
-				if (!callSites.has(callee)) callSites.set(callee, []);
-				callSites.get(callee).push({ guarded: underGuard(node, guards), owner: enclosingFunction(node, functions) });
+				const sites = callSites.get(callee) ?? [];
+				sites.push({ guarded: underGuard(node, guards), owner: enclosingFunction(node, functions) });
+				callSites.set(callee, sites);
 			}
 		}
 		ts.forEachChild(node, visit);
@@ -194,7 +209,7 @@ function analyzeModule(relative, source) {
 	// A function is protected when it has at least one intra-module call site and
 	// every one of them is either lexically under a guard or inside a function
 	// that is itself protected. Fixpoint, because the chain can be longer than one.
-	const protectedFns = new Set();
+	const protectedFns = new Set<string>();
 	let widened = true;
 	while (widened) {
 		widened = false;
@@ -209,9 +224,9 @@ function analyzeModule(relative, source) {
 		}
 	}
 
-	const findings = [];
-	const exempt = [];
-	const clean = [];
+	const findings: Finding[] = [];
+	const exempt: Exempt[] = [];
+	const clean: string[] = [];
 	for (const [name, mutating] of mutations) {
 		const declaration = functions.get(name);
 		if (!declaration) continue;
@@ -236,11 +251,14 @@ function analyzeModule(relative, source) {
  * this check can only be trusted while it is looking at the modules it claims
  * to, and a renamed lock helper would otherwise empty it silently.
  */
-export function analyzeStoreLockCensus({ repoRoot, roots }) {
-	const guarded = [];
-	const skipped = [];
-	const findings = [];
-	const exempt = [];
+type StoreLockOptions = { repoRoot: string; roots?: readonly string[] };
+type StoreLockReport = { considered: string[]; guarded: CensusModule[]; skipped: string[]; findings: Finding[]; exempt: Exempt[] };
+
+export function analyzeStoreLockCensus({ repoRoot, roots }: StoreLockOptions): StoreLockReport {
+	const guarded: CensusModule[] = [];
+	const skipped: string[] = [];
+	const findings: Finding[] = [];
+	const exempt: Exempt[] = [];
 	// `local-store-lock.ts` *is* the primitive and cannot be judged against itself.
 	const considered = forEachOwnedSource({ repoRoot, roots, skipFile: (name) => PRIMITIVE_MODULES.has(name) }, (relative, source) => {
 		const module = analyzeModule(relative, source);

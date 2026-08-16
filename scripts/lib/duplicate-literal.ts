@@ -78,7 +78,16 @@ export const DUPLICATE_LITERAL_EXEMPTIONS = [
  * same function, which is a mute button wearing a reason. A tag now covers the
  * statement it sits above and nothing else.
  */
-function isSeparateGrammar(source, node) {
+type LiteralSite = { file: string; line: number; separateGrammar: boolean };
+type DuplicateFinding = {
+	literal: string;
+	sites: LiteralSite[];
+	partiallyTagged: boolean;
+	escapedExemption?: { declared: string[]; covered: string[] };
+};
+type DuplicateExempt = { literal: string; sites: LiteralSite[]; boundary: string; reason: string; files?: string[] };
+
+function isSeparateGrammar(source: ts.SourceFile, node: ts.Node): boolean {
 	for (let current = node; current && current !== source; current = current.parent) {
 		if (/@separateGrammar\b/u.test(source.text.slice(current.getFullStart(), current.getStart()))) return true;
 		if (ts.isStatement(current)) return false;
@@ -87,7 +96,7 @@ function isSeparateGrammar(source, node) {
 }
 
 /** The pattern between the delimiters, without the flags. */
-function patternBody(literal) {
+function patternBody(literal: string): string {
 	const end = literal.lastIndexOf("/");
 	return end > 0 ? literal.slice(1, end) : literal;
 }
@@ -100,19 +109,29 @@ function patternBody(literal) {
  * target: it is frozen, it hand-copies its own `SAFE_REF` three times, and a
  * finding there names a site no agent in this lane may edit.
  */
-export function analyzeDuplicateLiterals({ repoRoot, roots }) {
-	const byLiteral = new Map();
+type DuplicateOptions = { repoRoot: string; roots?: readonly string[] };
+type DuplicateReport = {
+	considered: string[];
+	scanned: number;
+	findings: DuplicateFinding[];
+	exempt: DuplicateExempt[];
+	staleExemptions: string[];
+};
+
+export function analyzeDuplicateLiterals({ repoRoot, roots }: DuplicateOptions): DuplicateReport {
+	const byLiteral = new Map<string, LiteralSite[]>();
 	const considered = forEachOwnedSource({ repoRoot, roots }, (relative, source) => {
-		const visit = (node) => {
+		const visit = (node: ts.Node): void => {
 			if (ts.isRegularExpressionLiteral(node)) {
 				const literal = node.getText();
 				if (patternBody(literal).length >= DUPLICATE_LITERAL_MIN_BODY_LENGTH) {
-					if (!byLiteral.has(literal)) byLiteral.set(literal, []);
-					byLiteral.get(literal).push({
+					const sites = byLiteral.get(literal) ?? [];
+					sites.push({
 						file: relative,
 						line: ts.getLineAndCharacterOfPosition(source, node.getStart()).line + 1,
 						separateGrammar: isSeparateGrammar(source, node),
 					});
+					byLiteral.set(literal, sites);
 				}
 			}
 			ts.forEachChild(node, visit);
@@ -121,8 +140,8 @@ export function analyzeDuplicateLiterals({ repoRoot, roots }) {
 	});
 
 	const exemptions = new Map(DUPLICATE_LITERAL_EXEMPTIONS.map((entry) => [entry.literal, entry]));
-	const findings = [];
-	const exempt = [];
+	const findings: DuplicateFinding[] = [];
+	const exempt: DuplicateExempt[] = [];
 	for (const [literal, sites] of [...byLiteral].sort(([a], [b]) => a.localeCompare(b))) {
 		const distinctFiles = new Set(sites.map((site) => site.file));
 		if (distinctFiles.size < 2) continue;
@@ -131,7 +150,7 @@ export function analyzeDuplicateLiterals({ repoRoot, roots }) {
 			const covered = [...distinctFiles].sort();
 			const declared = [...exemption.files].sort();
 			if (covered.length === declared.length && covered.every((file, index) => file === declared[index])) {
-				exempt.push({ literal, sites, ...exemption });
+				exempt.push({ literal, sites, boundary: exemption.boundary, reason: exemption.reason, files: [...exemption.files] });
 				continue;
 			}
 			findings.push({

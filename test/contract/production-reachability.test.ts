@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.ts";
-import { scratchDir, scratchTree } from "../scratch-dir.ts";
+import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function fixture(context, files) {
+function fixture(context: TestContext, files: Record<string, string>): string {
 	const root = scratchTree(context, "ceal-reach-", files);
 	// The analyzer reads this directory whether or not a fixture declares a
 	// workflow, so it has to exist even when the file map is silent about it.
@@ -17,7 +16,7 @@ function fixture(context, files) {
 	return root;
 }
 
-const MANIFEST = JSON.stringify({ scripts: { build: "node scripts/entry.mjs" } });
+const MANIFEST = JSON.stringify({ scripts: { build: "node scripts/entry.ts" } });
 
 // The analyzer is proven on trees whose answer is known before it runs. Asserting
 // only that this repository reports zero would pass just as well if the walk
@@ -27,13 +26,13 @@ const MANIFEST = JSON.stringify({ scripts: { build: "node scripts/entry.mjs" } }
 test("an export no production path reaches is reported, and one that is reached is not", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { used } from "./lib/helper.mjs";\nused();\n',
-		"scripts/lib/helper.mjs": "export function used() {}\nexport function neverCalled() {}\n",
+		"scripts/entry.ts": 'import { used } from "./lib/helper.ts";\nused();\n',
+		"scripts/lib/helper.ts": "export function used() {}\nexport function neverCalled() {}\n",
 	});
 	const { findings } = analyzeProductionReachability({ repoRoot: root, workflows: [] });
 	assert.deepEqual(
 		findings.map(({ file, symbol }) => `${file}: ${symbol}`),
-		["scripts/lib/helper.mjs: neverCalled"],
+		["scripts/lib/helper.ts: neverCalled"],
 	);
 });
 
@@ -42,7 +41,7 @@ test("an export the production graph does not import but its own module calls is
 		"package.json": MANIFEST,
 		// The surplus-modifier case: `knip`'s question, not this one. Reporting it
 		// here would bury the reachability finding under export hygiene.
-		"scripts/entry.mjs": "export function helper() {}\nhelper();\n",
+		"scripts/entry.ts": "export function helper() {}\nhelper();\n",
 	});
 	assert.deepEqual(analyzeProductionReachability({ repoRoot: root, workflows: [] }).findings, []);
 });
@@ -50,7 +49,7 @@ test("an export the production graph does not import but its own module calls is
 test("package artifact edges use current source and never poisoned checkout dist", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { used } from "../packages/ceal-client/dist/index.js";\nused();\n',
+		"scripts/entry.ts": 'import { used } from "../packages/ceal-client/dist/index.js";\nused();\n',
 		"packages/ceal-client/dist/index.js": 'throw new Error("poisoned dist executed");\n',
 		"packages/ceal-client/src/index.ts": 'import { value } from "./value.js";\nexport function used() { return value; }\n',
 		"packages/ceal-client/src/value.ts": 'export const value: string = "source";\n',
@@ -65,7 +64,7 @@ test("package artifact edges use current source and never poisoned checkout dist
 test("a workspace artifact edge with no source owner fails closed", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { orphan } from "../packages/ceal-client/dist/orphan.js";\norphan();\n',
+		"scripts/entry.ts": 'import { orphan } from "../packages/ceal-client/dist/orphan.js";\norphan();\n',
 		"packages/ceal-client/dist/orphan.js": "export function orphan() {}\n",
 	});
 	assert.throws(() => analyzeProductionReachability({ repoRoot: root, workflows: [] }), /workspace source authority is missing/u);
@@ -74,7 +73,7 @@ test("a workspace artifact edge with no source owner fails closed", (context) =>
 test("an artifact edge outside declared workspace packages remains literal", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { used } from "../vendor/example/dist/index.js";\nused();\n',
+		"scripts/entry.ts": 'import { used } from "../vendor/example/dist/index.js";\nused();\n',
 		"vendor/example/dist/index.js": "export function used() {}\n",
 	});
 	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
@@ -84,7 +83,7 @@ test("an artifact edge outside declared workspace packages remains literal", (co
 test("an inline workflow target uses the same workspace source authority", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": "export function unrelated() {}\nunrelated();\n",
+		"scripts/entry.ts": "export function unrelated() {}\nunrelated();\n",
 		"packages/ceal-client/dist/index.js": 'throw new Error("poisoned dist executed");\n',
 		"packages/ceal-client/src/index.ts": "export function used() {}\n",
 	});
@@ -107,7 +106,7 @@ test("an inline workflow target uses the same workspace source authority", (cont
 test("an inline workflow artifact target without source fails closed", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": "export function unrelated() {}\nunrelated();\n",
+		"scripts/entry.ts": "export function unrelated() {}\nunrelated();\n",
 		"packages/ceal-client/dist/orphan.js": "export function orphan() {}\n",
 	});
 	assert.throws(
@@ -130,11 +129,11 @@ test("an inline workflow artifact target without source fails closed", (context)
 test("a module no entry reaches is reported as a file rather than export by export", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": "export function nothing() {}\nnothing();\n",
-		"scripts/stranded.mjs": "export function alsoStranded() {}\n",
+		"scripts/entry.ts": "export function nothing() {}\nnothing();\n",
+		"scripts/stranded.ts": "export function alsoStranded() {}\n",
 	});
 	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
-	assert.deepEqual(report.unreachableFiles, ["scripts/stranded.mjs"]);
+	assert.deepEqual(report.unreachableFiles, ["scripts/stranded.ts"]);
 	// And not also as an export finding: the file is the actionable statement, and
 	// listing every export inside it would be the same defect counted twice.
 	assert.deepEqual(report.findings, []);
@@ -144,19 +143,19 @@ test("the protocol pin exempts only its exact owner-bound test-support file", (c
 	const root = fixture(context, {
 		"package.json": MANIFEST,
 		"protocol-vendor-pin.json": JSON.stringify({ test_support: { vendored_path: "scripts/test-support/base64url.ts" } }),
-		"scripts/entry.mjs": "export function nothing() {}\nnothing();\n",
+		"scripts/entry.ts": "export function nothing() {}\nnothing();\n",
 		"scripts/test-support/base64url.ts": "export function fixtureOnly() {}\n",
-		"scripts/test-support/stranded.mjs": "export function stillStranded() {}\n",
+		"scripts/test-support/stranded.ts": "export function stillStranded() {}\n",
 	});
 	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
-	assert.deepEqual(report.unreachableFiles, ["scripts/test-support/stranded.mjs"]);
+	assert.deepEqual(report.unreachableFiles, ["scripts/test-support/stranded.ts"]);
 });
 
 test("a @testOnly export is exempt, and the tag on one declaration does not cover the next", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": 'import { used } from "./lib/helper.mjs";\nused();\n',
-		"scripts/lib/helper.mjs":
+		"scripts/entry.ts": 'import { used } from "./lib/helper.ts";\nused();\n',
+		"scripts/lib/helper.ts":
 			"export function used() {}\n/**\n * @testOnly\n */\nexport function forTheSuite() {}\nexport function untagged() {}\n",
 	});
 	const { findings } = analyzeProductionReachability({ repoRoot: root, workflows: [] });
@@ -173,8 +172,8 @@ test("a @testOnly export is exempt, and the tag on one declaration does not cove
 test("an inline workflow script counts as a production consumer", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,
-		"scripts/entry.mjs": "export function unrelated() {}\nunrelated();\n",
-		"scripts/parser.mjs": "export function parseInventory() {}\n",
+		"scripts/entry.ts": "export function unrelated() {}\nunrelated();\n",
+		"scripts/parser.ts": "export function parseInventory() {}\n",
 		".github/workflows/release.yml": [
 			"jobs:",
 			"  publish:",
@@ -182,7 +181,7 @@ test("an inline workflow script counts as a production consumer", (context) => {
 			"      - run: |",
 			"          node --input-type=module -e '",
 			'            import { readFileSync } from "node:fs";',
-			'            import { parseInventory } from "./scripts/parser.mjs";',
+			'            import { parseInventory } from "./scripts/parser.ts";',
 			"            parseInventory(readFileSync(process.argv[1]));",
 			"          ' arg",
 		].join("\n"),
@@ -198,36 +197,6 @@ test("an inline workflow script counts as a production consumer", (context) => {
 	const report = analyzeProductionReachability({ repoRoot: root });
 	assert.deepEqual(report.findings, []);
 	assert.deepEqual(report.unreachableFiles, []);
-});
-
-// The claim this whole check is built to support, checked against the tree that
-// actually held the defect rather than against a fixture imitating it: run the
-// analyzer over the commit before slice 2's deletions and it must name both
-// guards. Reconstructed with `git archive` so nothing is checked out.
-test("the two guards slice 2 deleted are exactly what this reports on the tree that held them", (context) => {
-	// A shallow or rewritten clone cannot answer this, and inventing a verdict
-	// from a missing commit would be worse than saying so.
-	//
-	// Asked of `git` on its own, BEFORE the pipeline. `sh` reports a pipeline's
-	// status from its LAST command, so `git archive ... | tar -x` reports `tar`'s
-	// verdict and the guard below could never see `git` fail. Observed on the
-	// GitHub macOS runner (run 31284777516): the skip did not fire, the directory
-	// was empty, and the test failed on a missing `package.json` as though the
-	// analyzer were broken. `tar` there accepted the empty stream a failed
-	// `git archive` leaves it — GNU `tar` on this host rejects it and exits 2,
-	// which is why every Linux leg hid this.
-	const present = spawnSync("git", ["-C", ROOT, "cat-file", "-e", "0cce9f9^^{commit}"], { encoding: "utf8" });
-	if (present.status !== 0) {
-		context.skip(`the pre-deletion commit is not in this clone: ${present.stderr.trim() || "0cce9f9^ is unreachable"}`);
-		return;
-	}
-	const scratch = scratchDir(context, "ceal-reach-history-");
-	const archive = spawnSync("sh", ["-c", `set -e; git -C '${ROOT}' archive 0cce9f9^ | tar -x -C '${scratch}'`], { encoding: "utf8" });
-	assert.equal(archive.status, 0, `extracting the pre-deletion tree failed: ${archive.stderr}`);
-	const reported = new Set(analyzeProductionReachability({ repoRoot: scratch }).findings.map(({ symbol }) => symbol));
-	for (const guard of ["assertWorkerReleaseSourcePath", "resolveLockedGatewayHandoffArchive"]) {
-		assert.ok(reported.has(guard), `${guard} was production-unreachable in that tree and must be reported`);
-	}
 });
 
 // The gate itself. Every assertion above proves the analyzer can speak; this one

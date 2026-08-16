@@ -665,14 +665,14 @@ Three properties are worth keeping when this is edited:
 - **A dynamic `import()` is not an edge.** It cannot be resolved without running
   the program, and treating an unresolvable specifier as an edge widens the graph
   until nothing can be unreachable.
-- **`@testOnly` exempts, and the exemption is checked.** `repo-gates.test.mjs`
+- **`@testOnly` exempts, and the exemption is checked.** `repo-gates.test.ts`
   fails when a tagged export is reached by no suite, in `scripts/` and in the
   packages alike.
 
-The suite proves it on fixtures whose answer is known before it runs, and then on
-the real thing: it reconstructs `0cce9f9^` with `git archive` and requires the
-analyzer to name both guards slice 2 deleted by hand. On a clone without that
-commit it skips and says so rather than passing.
+The suite proves the analyzer on fixtures whose answer is known before it runs,
+then runs the same analyzer over the current repository. The current-tree case
+requires a non-vacuous entry/module census and no unreachable file or export; it
+does not retain a migration-only dependency on a historical JavaScript tree.
 
 ## The Two Checks That Arm `One Fact, One Home`
 

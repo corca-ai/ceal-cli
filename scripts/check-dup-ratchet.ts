@@ -31,8 +31,8 @@ import { exitWith } from "./lib/exit-with.ts";
 
 const GATE = path.join("scripts", "check_dup_ratchet.py");
 
-function isQualitySkill(candidate) {
-	return Boolean(candidate) && existsSync(path.join(candidate, GATE));
+function isQualitySkill(candidate: string | null | undefined): boolean {
+	return candidate !== undefined && candidate !== null && existsSync(path.join(candidate, GATE));
 }
 
 // Newest first by semver-ish ordering, so a stale cached plugin version does not
@@ -51,8 +51,8 @@ function newestPluginCacheSkill() {
 	return null;
 }
 
-function compareVersions(left, right) {
-	const parse = (value) => value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+function compareVersions(left: string, right: string): number {
+	const parse = (value: string): number[] => value.split(".").map((part: string) => Number.parseInt(part, 10) || 0);
 	const [a, b] = [parse(left), parse(right)];
 	for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
 		const delta = (a[index] ?? 0) - (b[index] ?? 0);
@@ -73,7 +73,7 @@ function resolveSkillDir() {
 
 // Exit 0: every skip reason is "this clone cannot run the check", never "the
 // check passed", and the caller must not treat the two the same way.
-function skip(reason) {
+function skip(reason: string): never {
 	exitWith("dup-ratchet", `skipped — ${reason}`, 0);
 }
 
