@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,10 +10,20 @@ import {
 	runCli,
 	WorkerReleasePackageError,
 } from "../scripts/build-worker-release-package.ts";
+import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.ts";
 
-let packedFixture;
+let packedFixture: {
+	root: string;
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	provenance: { artifact: { sha256: string } };
+	expectedHandoffSha256: string;
+};
 test.before((context) => {
 	packedFixture = packedProtocolFixture(context);
 });
@@ -57,7 +68,7 @@ test("worker package build consumes a manifest-bound packed Protocol and emits n
 			true,
 		);
 	}
-	const packedPaths = execReleaseTestProcess("tar", ["-tzf", path.join(output, result.artifact.name)], { encoding: "utf8" });
+	const packedPaths = String(execReleaseTestProcess("tar", ["-tzf", path.join(output, result.artifact.name)], { encoding: "utf8" }));
 	assert.match(packedPaths, /^package\/dist\/bin[.]js$/mu);
 	assert.doesNotMatch(packedPaths, /(?:^|\/)src\//u);
 	assert.doesNotMatch(packedPaths, /cealctl|operator/u);
@@ -92,6 +103,79 @@ test("a failed worker compile carries the compiler's own output and its terminat
 	);
 });
 
+test("compiler accepts string-form TypeScript bin and passes isolated type arguments", () => {
+	const fixture = packedFixture;
+	const packageJsonPath = path.join(fixture.repoRoot, "node_modules", "typescript", "package.json");
+	const original = readFileSync(packageJsonPath, "utf8");
+	const compilerCalls: string[][] = [];
+	try {
+		const manifest = readJsonRecord(original);
+		manifest.bin = "./bin/tsc6";
+		writeFileSync(packageJsonPath, `${JSON.stringify(manifest)}\n`);
+		buildWorkerReleasePackageFromDevelopmentInputs(
+			{ outputDirectory: path.join(fixture.root, "worker-package-string-bin"), ...fixture },
+			{
+				runCompiler: (file, args, options) => {
+					compilerCalls.push([...args]);
+					execFileSync(file, args, options);
+				},
+			},
+		);
+	} finally {
+		writeFileSync(packageJsonPath, original);
+	}
+	assert.equal(compilerCalls.length, 2);
+	assert.ok(
+		compilerCalls.every((args) => {
+			const typeRootsIndex = args.indexOf("--typeRoots");
+			return typeRootsIndex >= 0 && args[typeRootsIndex + 1]?.endsWith(`${path.sep}node_modules${path.sep}@types`);
+		}),
+	);
+	assert.ok(compilerCalls.every((args) => args.includes("--types") && args.includes("node")));
+});
+
+test("recursive dependency staging fails closed for traversal and missing nested names", () => {
+	const fixture = packedFixture;
+	const packageJsonPath = path.join(fixture.repoRoot, "node_modules", "typescript", "package.json");
+	const original = readFileSync(packageJsonPath, "utf8");
+	for (const [dependency, version] of [
+		["../escape", "*"],
+		["@typescript/missing", "*"],
+		["@typescript/old", null],
+	] as const) {
+		try {
+			const manifest = readJsonRecord(original);
+			manifest.dependencies = { ...(asRecord(manifest.dependencies) ?? {}), [dependency]: version };
+			writeFileSync(packageJsonPath, `${JSON.stringify(manifest)}\n`);
+			assert.throws(
+				() =>
+					buildWorkerReleasePackageFromDevelopmentInputs({
+						outputDirectory: path.join(fixture.root, `worker-package-${dependency.replaceAll("/", "-")}`),
+						...fixture,
+					}),
+				(error) => error instanceof WorkerReleasePackageError && error.code === "missing_build_dependency",
+			);
+		} finally {
+			writeFileSync(packageJsonPath, original);
+		}
+	}
+});
+
+test("npm pack metadata requires a non-empty version", () => {
+	assert.throws(
+		() =>
+			parseNpmPackMetadata([
+				{
+					name: "@corca-ai/ceal",
+					filename: "corca-ai-ceal.tgz",
+					integrity: "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+					shasum: "a".repeat(40),
+				},
+			]),
+		/version/u,
+	);
+});
+
 test("production package build accepts only the locked archive lane", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -100,8 +184,24 @@ test("production package build accepts only the locked archive lane", (context) 
 			buildWorkerReleasePackage({ repoRoot: ROOT, outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
 		(error) => error instanceof WorkerReleasePackageError && error.code === "gateway_handoff_archive_required",
 	);
-	const messages = [];
-	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	const messages: string[] = [];
+	const io: Pick<Console, "log" | "error"> = {
+		log: (message: unknown) => messages.push(String(message)),
+		error: (message: unknown) => messages.push(String(message)),
+	};
 	assert.equal(runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
+	const cliMessage = messages.pop();
+	if (cliMessage === undefined) throw new Error("expected CLI error message");
+	assert.equal(readJsonRecord(cliMessage).error_code, "invalid_argument");
 });
+
+function readJsonRecord(value: string): Record<string, unknown> {
+	const parsed: unknown = JSON.parse(value);
+	const record = asRecord(parsed);
+	if (!record) throw new Error("expected JSON object");
+	return record;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
+}

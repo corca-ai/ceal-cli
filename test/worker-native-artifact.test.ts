@@ -21,7 +21,28 @@ import {
 } from "./release-process-bounds.ts";
 import { packedProtocolFixture } from "./worker-release-package-fixture.ts";
 
-let packedFixture;
+type NativeFixture = {
+	root: string;
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	provenance: { artifact: { sha256: string } };
+	expectedHandoffSha256: string;
+};
+type NativeManifest = {
+	artifact: { sha256: string };
+	client: unknown;
+	protocol: { sha256: string };
+	handoff: { sha256: string };
+	native_smoke: { operator_surface_absent: boolean };
+	guide: { name: string; sha256: string; files: Array<{ path: string }> };
+	compatibility_guide: { name: string };
+};
+type ReleaseBounds = Parameters<typeof runAsyncReleaseProcess>[3];
+
+let packedFixture: NativeFixture;
 test.before((context) => {
 	packedFixture = packedProtocolFixture(context);
 });
@@ -61,7 +82,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 		files.some((name) => name.includes("cealctl")),
 		false,
 	);
-	const manifest = JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8"));
+	const manifest = readNativeManifest(JSON.parse(readFileSync(path.join(output, "ceal-worker-native-artifact-manifest.json"), "utf8")));
 	assertReleaseManifestProvenance(manifest, result, fixture.provenance.artifact.sha256);
 	assert.equal(manifest.handoff.sha256, fixture.expectedHandoffSha256);
 	assert.equal(manifest.native_smoke.operator_surface_absent, true);
@@ -71,9 +92,9 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 	assert.equal(result.native_smoke.embedded_guide_sha256, manifest.guide.sha256);
 	assert.equal(result.native_smoke.guide_registration, true);
 	const outputCommands = execReleaseTestProcess(path.join(output, result.artifact.name), ["commands"], { encoding: "utf8" });
-	assert.match(outputCommands, /command: ceal\n/u);
-	assert.match(outputCommands, /name: update\n/u);
-	assert.doesNotMatch(outputCommands, /cealctl/u);
+	assert.match(String(outputCommands), /command: ceal\n/u);
+	assert.match(String(outputCommands), /name: update\n/u);
+	assert.doesNotMatch(String(outputCommands), /cealctl/u);
 	const artifact = path.join(output, result.artifact.name);
 	const unknownHome = path.join(fixture.root, "unknown-home");
 	writeClientSessionStoreFixture(unknownHome, {
@@ -126,7 +147,7 @@ test("native worker artifact consumes a manifest-bound packed consumer and emits
 test("darwin native build removes, injects, then ad-hoc signs in order", async () => {
 	const fixture = packedFixture;
 	const output = path.join(fixture.root, "worker-native-darwin");
-	const steps = [];
+	const steps: string[] = [];
 	const result = await buildWorkerNativeArtifactFromDevelopmentInputs(
 		{ outputDirectory: output, ...fixture },
 		{
@@ -202,10 +223,15 @@ test("production native build accepts only the locked archive lane", async (cont
 		() => buildWorkerNativeArtifact({ outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
 		hasCode("gateway_handoff_archive_required"),
 	);
-	const messages = [];
-	const io = { log: (message) => messages.push(message), error: (message) => messages.push(message) };
+	const messages: string[] = [];
+	const io: Pick<Console, "log" | "error"> = {
+		log: (message: unknown) => messages.push(String(message)),
+		error: (message: unknown) => messages.push(String(message)),
+	};
 	assert.equal(await runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	assert.equal(JSON.parse(messages.pop()).error_code, "invalid_argument");
+	const cliMessage = messages.pop();
+	assert.ok(cliMessage);
+	assert.equal(readJsonRecord(cliMessage).error_code, "invalid_argument");
 });
 
 test("native artifact process proof kills a command tree that exceeds its deadline", async (context) => {
@@ -254,7 +280,7 @@ test("release process deadline starts only after its fixture-ready marker", asyn
 		},
 	);
 	assert.equal(result.timedOut, true);
-	assert.match(result.stdout, /ready/u);
+	assert.match(String(result.stdout), /ready/u);
 	assert.doesNotMatch(result.stdout, /late/u);
 });
 
@@ -286,18 +312,18 @@ test("sync release supervisor budgets the fixture-ready deadline before the comm
 		0,
 	);
 	assert.equal(result.timedOut, true);
-	assert.match(result.stdout, /ready/u);
+	assert.match(String(result.stdout), /ready/u);
 });
 
-function hasCode(code) {
-	return (error) => error instanceof WorkerNativeArtifactError && error.code === code;
+function hasCode(code: string) {
+	return (error: unknown): boolean => error instanceof WorkerNativeArtifactError && error.code === code;
 }
 
-async function runArtifact(artifact, args, home, bounds) {
+async function runArtifact(artifact: string, args: readonly string[], home: string, bounds: ReleaseBounds = {}) {
 	return runAsyncReleaseProcess(artifact, args, { cwd: process.cwd(), env: { ...process.env, HOME: home } }, bounds);
 }
 
-async function withFailureGateway(callback) {
+async function withFailureGateway(callback: (endpoint: string) => Promise<void>): Promise<void> {
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
@@ -316,15 +342,66 @@ async function withFailureGateway(callback) {
 			}),
 		);
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(0, "127.0.0.1", resolve);
+		server.listen(0, "127.0.0.1", () => resolve());
 	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("fixture Gateway address unavailable");
 	try {
 		await callback(`http://127.0.0.1:${address.port}/gateway/client`);
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
+}
+
+function readJsonRecord(value: string): Record<string, unknown> {
+	return asRecord(JSON.parse(value)) ?? {};
+}
+
+function readNativeManifest(value: unknown): NativeManifest {
+	const record = asRecord(value);
+	const artifact = asRecord(record?.artifact);
+	const client = record?.client;
+	const protocol = asRecord(record?.protocol);
+	const handoff = asRecord(record?.handoff);
+	const nativeSmoke = asRecord(record?.native_smoke);
+	const guide = asRecord(record?.guide);
+	const compatibilityGuide = asRecord(record?.compatibility_guide);
+	const files = Array.isArray(guide?.files)
+		? guide.files.map((file) => {
+				const entry = asRecord(file);
+				if (!entry || typeof entry.path !== "string") throw new Error("invalid native manifest guide file");
+				return { path: entry.path };
+			})
+		: undefined;
+	if (
+		!artifact ||
+		typeof artifact.sha256 !== "string" ||
+		!protocol ||
+		typeof protocol.sha256 !== "string" ||
+		!handoff ||
+		typeof handoff.sha256 !== "string" ||
+		!nativeSmoke ||
+		typeof nativeSmoke.operator_surface_absent !== "boolean" ||
+		!guide ||
+		typeof guide.name !== "string" ||
+		typeof guide.sha256 !== "string" ||
+		!files ||
+		typeof compatibilityGuide?.name !== "string"
+	)
+		throw new Error("invalid native manifest");
+	return {
+		artifact: { sha256: artifact.sha256 },
+		client,
+		protocol: { sha256: protocol.sha256 },
+		handoff: { sha256: handoff.sha256 },
+		native_smoke: { operator_surface_absent: nativeSmoke.operator_surface_absent },
+		guide: { name: guide.name, sha256: guide.sha256, files },
+		compatibility_guide: { name: compatibilityGuide.name },
+	};
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }

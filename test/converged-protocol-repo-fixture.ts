@@ -82,7 +82,8 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	runFixtureGit(root, ["add", "."]);
 	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: bind converged protocol identity"]);
 	if (releaseBuild) {
-		for (const dependency of ["typescript", "yaml", "undici-types", "@types/node"]) copy(`node_modules/${dependency}`, root);
+		for (const dependency of ["typescript", "yaml", "undici-types", "@types/node", "@typescript/old"])
+			copy(`node_modules/${dependency}`, root);
 	}
 	return {
 		root,
@@ -91,7 +92,7 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	};
 }
 
-function copyOwnedPackage(relative, destinationRoot, releaseBuild) {
+function copyOwnedPackage(relative: string, destinationRoot: string, releaseBuild: boolean): void {
 	copy(`${relative}/package.json`, destinationRoot);
 	if (!releaseBuild) return;
 	for (const entry of ["LICENSE", "src", "tsconfig.build.json", "tsconfig.json"]) copy(`${relative}/${entry}`, destinationRoot);
@@ -101,17 +102,17 @@ function copyOwnedPackage(relative, destinationRoot, releaseBuild) {
 	}
 }
 
-function copy(relative, destinationRoot) {
+function copy(relative: string, destinationRoot: string): void {
 	const source = path.join(SOURCE_ROOT, relative);
 	const destination = path.join(destinationRoot, relative);
 	mkdirSync(path.dirname(destination), { recursive: true });
 	cpSync(source, destination, { recursive: true });
 }
 
-export function runFixtureGit(root, args) {
+export function runFixtureGit(root: string, args: readonly string[]): string {
 	return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 
-function writeJson(file, value) {
+function writeJson(file: string, value: unknown): void {
 	writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }

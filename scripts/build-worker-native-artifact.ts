@@ -30,11 +30,7 @@ import { codedErrorClass } from "./lib/coded-error.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
-import {
-	WorkerReleaseInputError,
-	withWorkerReleaseDevelopmentInputsAsync,
-	withWorkerReleaseInputsAsync,
-} from "./worker-release-inputs.ts";
+import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync } from "./worker-release-inputs.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);
@@ -44,9 +40,114 @@ const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
 const SEA_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 const REQUIRED_COMMANDS = Object.freeze(["update", "session", "guide", "capabilities", "call", "receipt"]);
 
+type JsonRecord = Record<string, unknown>;
+type NativeOptions = {
+	repoRoot?: string;
+	inventoryPath?: string;
+	outputDirectory?: string;
+	force?: boolean;
+	platform?: string;
+	gatewayHandoffArchive?: string;
+	protocolTarball?: string;
+	protocolProvenance?: string;
+	controlConformance?: string;
+	handoffManifest?: string;
+	expectedHandoffSha256?: string;
+};
+type ResolverInput = Parameters<typeof withWorkerReleaseInputsAsync>[1] extends (value: infer Value) => unknown ? Value : never;
+type NativeInputValue = ResolverInput;
+type NativeInputs = NativeInputValue extends { inputs: infer Inputs } ? Inputs : never;
+type RawInputs = NativeInputValue extends { rawInputs: infer Inputs } ? Inputs : never;
+type ArchiveLock = {
+	filename: string;
+	gateway_repository: string;
+	gateway_commit: string;
+	gateway_tag: string;
+	actions_run_id: number;
+	origin: string;
+	archive_filename: string;
+	archive_sha256: string;
+};
+type GuideFile = { path: string; bytes: number; sha256: string; mode: number };
+type GuideBundle = { bytes: Buffer; files: GuideFile[]; sha256: string };
+type NativeSmoke = {
+	command: string;
+	version: string;
+	help: true;
+	required_commands: string[];
+	operator_surface_absent: true;
+	embedded_guide_sha256?: string;
+	guide_registration?: true;
+	[key: string]: unknown;
+};
+type PackedConsumer = {
+	worker: { name: string; bytes: number; sha256: string; path: string };
+	client: { package: string; version: string; filename: string; bytes: number; sha256: string };
+	consumerSmoke: JsonRecord;
+	consumer: { directory: string; workerBin: string };
+	controlSessionContract?: unknown;
+};
+type NativeDependencies = {
+	consumeArchive?: (
+		options: { repoRoot: string; archiveFile?: string },
+		dependencies: {
+			resolveInputs: (raw: RawInputs) => NativeInputs;
+			consume: (value: { resolution: NativeInputs; rawInputs: RawInputs; lock: ArchiveLock }) => NativeResult | PromiseLike<NativeResult>;
+		},
+	) => NativeResult | PromiseLike<NativeResult>;
+	currentPlatform?: () => string;
+	prepareConsumer?: (value: {
+		repoRoot: string;
+		stage: string;
+		inputs: NativeInputs;
+		protocolTarball: string;
+		controlConformance: string;
+		dependencies: NativeDependencies;
+	}) => PackedConsumer;
+	bundle?: (value: { workerBin: string; bundlePath: string; consumerDirectory: string }) => void | Promise<void>;
+	createBlob?: (value: { bundlePath: string; blobPath: string; work: string; guideBundlePath: string; guideAsset: string }) => void;
+	copyRuntime?: (value: { artifactPath: string }) => void;
+	removeMachoSignature?: (value: { artifactPath: string }) => void;
+	injectBlob?: (value: { artifactPath: string; blobPath: string; platform: string; postjectCli: string }) => void;
+	signMachoAdhoc?: (value: { artifactPath: string }) => void;
+	resolvePostjectCli?: () => string;
+	smoke?: (value: { artifactPath: string; version: string; guide: GuideBundle }) => NativeSmoke;
+};
+type NativeResult = {
+	schema_version: string;
+	ok: true;
+	proof_level: "local_state";
+	writes_external: false;
+	output_dir: string;
+	version: string;
+	platform: string;
+	artifact: { name: string; bytes: number; sha256: string };
+	client: PackedConsumer["client"];
+	guide: JsonRecord;
+	compatibility_guide: JsonRecord;
+	consumer_smoke: JsonRecord;
+	native_smoke: NativeSmoke;
+	protocol: JsonRecord;
+	private_leased_consumer_carrier: unknown;
+	private_leased_consumer_control_session: unknown;
+	private_leased_consumer_handoff: unknown;
+	non_claims: string[];
+};
+type NativeOutput = { directory: string; force: boolean };
+type NativeArtifact = { name: string; path: string; bytes: number; sha256: string; smoke: NativeSmoke };
+type InputResolver = (
+	options: NativeOptions,
+	consume: (value: NativeInputValue) => NativeResult | PromiseLike<NativeResult>,
+	dependencies?: NativeDependencies,
+) => Promise<NativeResult>;
+type OutputManifest = {
+	embedded: JsonRecord;
+	compatibility: JsonRecord;
+};
+
 export const WorkerNativeArtifactError = codedErrorClass("WorkerNativeArtifactError");
 
-export async function buildWorkerNativeArtifact(options = {}, dependencies = {}) {
+export async function buildWorkerNativeArtifact(options: NativeOptions = {}, dependencies: NativeDependencies = {}): Promise<NativeResult> {
 	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseInputsAsync);
 }
 
@@ -58,11 +159,18 @@ export async function buildWorkerNativeArtifact(options = {}, dependencies = {})
  *
  * @testOnly
  */
-export async function buildWorkerNativeArtifactFromDevelopmentInputs(options = {}, dependencies = {}) {
+export async function buildWorkerNativeArtifactFromDevelopmentInputs(
+	options: NativeOptions = {},
+	dependencies: NativeDependencies = {},
+): Promise<NativeResult> {
 	return await buildWorkerNativeArtifactWithInputs(options, dependencies, withWorkerReleaseDevelopmentInputsAsync);
 }
 
-async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolveInputs) {
+async function buildWorkerNativeArtifactWithInputs(
+	options: NativeOptions,
+	dependencies: NativeDependencies,
+	resolveInputs: InputResolver,
+): Promise<NativeResult> {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const output = inspectOutputDirectory(options.outputDirectory, {
 		repoRoot,
@@ -75,13 +183,13 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 	try {
 		return await resolveInputs(
 			{ ...options, repoRoot },
-			async ({ inputs, rawInputs }) => {
-				let stage;
+			async ({ inputs, rawInputs }: NativeInputValue): Promise<NativeResult> => {
+				let stage: string | undefined;
 				try {
 					stage = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-artifact-"));
-					let privateCarrierContract;
-					let privateControlSessionContract;
-					let privateCarrierHandoff;
+					let privateCarrierContract: unknown;
+					let privateControlSessionContract: unknown;
+					let privateCarrierHandoff: unknown;
 					try {
 						privateCarrierContract = verifyEmbeddedCarrierContractSource({ repoRoot });
 					} catch {
@@ -182,7 +290,23 @@ async function buildWorkerNativeArtifactWithInputs(options, dependencies, resolv
 	}
 }
 
-async function buildNativeArtifact({ stage, packed, platform, version, guide, guideAsset, dependencies }) {
+async function buildNativeArtifact({
+	stage,
+	packed,
+	platform,
+	version,
+	guide,
+	guideAsset,
+	dependencies,
+}: {
+	stage: string;
+	packed: PackedConsumer;
+	platform: string;
+	version: string;
+	guide: GuideBundle;
+	guideAsset: string;
+	dependencies: NativeDependencies;
+}): Promise<NativeArtifact> {
 	const work = path.join(stage, "native");
 	mkdirSync(work, { recursive: true, mode: 0o755 });
 	const bundlePath = path.join(work, "ceal.cjs");
@@ -216,7 +340,15 @@ async function buildNativeArtifact({ stage, packed, platform, version, guide, gu
 	}
 }
 
-async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory }) {
+async function bundleInstalledWorker({
+	workerBin,
+	bundlePath,
+	consumerDirectory,
+}: {
+	workerBin: string;
+	bundlePath: string;
+	consumerDirectory: string;
+}): Promise<void> {
 	if (!existsSync(workerBin) || lstatSync(workerBin).isSymbolicLink())
 		fail("worker_native_bundle_failed", "Packed worker consumer entrypoint is unavailable.");
 	try {
@@ -238,7 +370,19 @@ async function bundleInstalledWorker({ workerBin, bundlePath, consumerDirectory 
 	}
 }
 
-function createBlob({ bundlePath, blobPath, work, guideBundlePath, guideAsset }) {
+function createBlob({
+	bundlePath,
+	blobPath,
+	work,
+	guideBundlePath,
+	guideAsset,
+}: {
+	bundlePath: string;
+	blobPath: string;
+	work: string;
+	guideBundlePath: string;
+	guideAsset: string;
+}): void {
 	const config = path.join(work, "ceal.sea.json");
 	writeFileSync(
 		config,
@@ -265,11 +409,21 @@ function createBlob({ bundlePath, blobPath, work, guideBundlePath, guideAsset })
 	}
 }
 
-function copyRuntime({ artifactPath }) {
+function copyRuntime({ artifactPath }: { artifactPath: string }): void {
 	copyFileSync(process.execPath, artifactPath);
 }
 
-function injectBlob({ artifactPath, blobPath, platform, postjectCli }) {
+function injectBlob({
+	artifactPath,
+	blobPath,
+	platform,
+	postjectCli,
+}: {
+	artifactPath: string;
+	blobPath: string;
+	platform: string;
+	postjectCli: string;
+}): void {
 	const machoArguments = platform.startsWith("darwin-") ? ["--macho-segment-name", "NODE_SEA"] : [];
 	try {
 		execFileSync(
@@ -284,7 +438,7 @@ function injectBlob({ artifactPath, blobPath, platform, postjectCli }) {
 
 // Mach-O binaries must drop the runtime's original signature before postject
 // injection and carry at least an ad-hoc signature to execute on arm64 macOS.
-function removeMachoSignature({ artifactPath }) {
+function removeMachoSignature({ artifactPath }: { artifactPath: string }): void {
 	try {
 		execFileSync("codesign", ["--remove-signature", artifactPath], { stdio: "pipe" });
 	} catch {
@@ -292,7 +446,7 @@ function removeMachoSignature({ artifactPath }) {
 	}
 }
 
-function signMachoAdhoc({ artifactPath }) {
+function signMachoAdhoc({ artifactPath }: { artifactPath: string }): void {
 	try {
 		execFileSync("codesign", ["--force", "--sign", "-", artifactPath], { stdio: "pipe" });
 	} catch {
@@ -300,10 +454,10 @@ function signMachoAdhoc({ artifactPath }) {
 	}
 }
 
-function smokeArtifact({ artifactPath, version, guide }) {
+function smokeArtifact({ artifactPath, version, guide }: { artifactPath: string; version: string; guide: GuideBundle }): NativeSmoke {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-worker-native-smoke-home-"));
 	const installedCommand = prepareManagedSmokeInstall(artifactPath, home, version);
-	const run = (args) =>
+	const run = (args: readonly string[]): string =>
 		execFileSync(installedCommand, args, {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
@@ -315,28 +469,30 @@ function smokeArtifact({ artifactPath, version, guide }) {
 			},
 		});
 	try {
-		const identity = parse(run(["version"]));
-		const commands = parse(run(["commands"]));
+		const identity = asRecord(parse(run(["version"])));
+		const commands = asRecord(parse(run(["commands"])));
 		const help = run(["--help"]);
-		const guideStatus = parse(run(["guide", "status"]));
-		const guideRegistration = parse(run(["guide", "register", "codex"]));
+		const guideStatus = asRecord(parse(run(["guide", "status"])));
+		const guideRegistration = asRecord(parse(run(["guide", "register", "codex"])));
 		const names = Array.isArray(commands?.commands)
-			? commands.commands.map((entry) => entry?.name).filter((entry) => typeof entry === "string")
+			? commands.commands.map((entry) => asRecord(entry)?.name).filter((entry): entry is string => typeof entry === "string")
 			: [];
 		if (
 			identity?.command !== "ceal" ||
 			identity?.version !== version ||
 			guideStatus?.status !== "available" ||
 			guideRegistration?.status !== "available" ||
-			guideRegistration?.hosts?.find?.((host) => host?.agent === "codex")?.registered !== true ||
+			!findRegisteredCodexHost(guideRegistration) ||
 			!/^Usage: ceal (?:\[[^\]\n]+\] )*<command> \[options\]$/mu.test(help) ||
 			REQUIRED_COMMANDS.some((name) => !names.includes(name)) ||
 			names.includes("cealctl")
 		) {
 			fail("worker_native_smoke_failed", "Native worker artifact did not expose the expected worker-only command surface.");
 		}
+		const guidePath = guideRegistration?.guide_path;
+		if (typeof guidePath !== "string") fail("worker_native_smoke_failed", "Native worker artifact did not expose its registered guide path.");
 		for (const file of guide.files) {
-			const materialized = path.join(guideRegistration.guide_path, ...file.path.split("/"));
+			const materialized = path.join(guidePath, ...file.path.split("/"));
 			if (!existsSync(materialized) || sha256(readFileSync(materialized)) !== file.sha256)
 				fail("worker_native_smoke_failed", "Native worker artifact did not materialize its complete signed guide directory.");
 		}
@@ -357,7 +513,7 @@ function smokeArtifact({ artifactPath, version, guide }) {
 	}
 }
 
-function prepareManagedSmokeInstall(artifactPath, home, version) {
+function prepareManagedSmokeInstall(artifactPath: string, home: string, version: string): string {
 	const platform = /^ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(path.basename(artifactPath))?.[1];
 	if (!platform) fail("worker_native_smoke_failed", "Native worker artifact has an invalid platform name.");
 	const install = path.join(home, "install");
@@ -377,6 +533,19 @@ function prepareManagedSmokeInstall(artifactPath, home, version) {
 	return path.join(install, "ceal");
 }
 
+function asRecord(value: unknown): JsonRecord | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
+}
+
+function findRegisteredCodexHost(value: JsonRecord | undefined): boolean {
+	const hosts = value?.hosts;
+	if (!Array.isArray(hosts)) return false;
+	return hosts.some((host) => {
+		const record = asRecord(host);
+		return record?.agent === "codex" && record.registered === true;
+	});
+}
+
 function materializeOutput({
 	output,
 	repoRoot,
@@ -389,7 +558,19 @@ function materializeOutput({
 	privateCarrierContract,
 	privateControlSessionContract,
 	privateCarrierHandoff,
-}) {
+}: {
+	output: NativeOutput;
+	repoRoot: string;
+	inputs: NativeInputs;
+	guide: GuideBundle;
+	version: string;
+	platform: string;
+	artifact: NativeArtifact;
+	client: PackedConsumer["client"];
+	privateCarrierContract: unknown;
+	privateControlSessionContract: unknown;
+	privateCarrierHandoff: unknown;
+}): OutputManifest {
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-native-`));
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
@@ -447,19 +628,21 @@ function materializeOutput({
 	}
 }
 
-function resolveVersion(repoRoot, inputs) {
+function resolveVersion(repoRoot: string, inputs: NativeInputs): string {
 	// Worker and client version together; the exact protocol pin against the
 	// supplied artifact is enforced by the release-input resolver.
 	const versions = [inputs.worker, inputs.client].map(
-		(entry) => readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory").version,
+		(entry) => asRecord(readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory"))?.version,
 	);
 	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
 		fail("version_mismatch", "Worker and client package versions must match exactly.");
 	}
-	return versions[0];
+	const version = versions[0];
+	if (typeof version !== "string") fail("version_mismatch", "Worker and client package versions must match exactly.");
+	return version;
 }
 
-function resolvePlatform(value, dependencies) {
+function resolvePlatform(value: string | undefined, dependencies: NativeDependencies): string {
 	const current = (dependencies.currentPlatform ?? currentPlatform)();
 	if (!/^(?:linux|darwin)-(?:arm64|amd64)$/u.test(current))
 		fail("unsupported_platform", "Native worker artifacts require a supported Linux or macOS host platform.");
@@ -482,7 +665,7 @@ function resolvePostjectCli() {
 	fail("postject_unavailable", "postject is required to build native worker artifacts.");
 }
 
-function readJson(filePath, code) {
+function readJson(filePath: string, code: string): unknown {
 	try {
 		return JSON.parse(readFileSync(filePath, "utf8"));
 	} catch {
@@ -490,15 +673,15 @@ function readJson(filePath, code) {
 	}
 }
 
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function fail(code, message) {
+function fail(code: string, message: string): never {
 	throw new WorkerNativeArtifactError(code, message);
 }
 
-function parseArgs(argv) {
-	return parseScriptArgs(argv, {
+function parseArgs(argv: readonly string[]): { help: boolean; json: boolean; options: NativeOptions } {
+	const parsed = parseScriptArgs(argv, {
 		fail,
 		defaults: { force: false },
 		flags: { "--force": "force" },
@@ -506,9 +689,28 @@ function parseArgs(argv) {
 		valueMessage: "Native worker artifact option requires a value.",
 		unknownMessage: "Unexpected native worker artifact argument.",
 	});
+	const options: NativeOptions = { force: parsed.options.force === true };
+	for (const [key, value] of Object.entries(parsed.options)) {
+		if (key === "force") continue;
+		if (
+			key === "repoRoot" ||
+			key === "inventoryPath" ||
+			key === "outputDirectory" ||
+			key === "platform" ||
+			key === "gatewayHandoffArchive" ||
+			key === "protocolTarball" ||
+			key === "protocolProvenance" ||
+			key === "controlConformance" ||
+			key === "handoffManifest" ||
+			key === "expectedHandoffSha256"
+		) {
+			if (typeof value === "string") options[key] = value;
+		}
+	}
+	return { help: parsed.help, json: parsed.json, options };
 }
 
-export async function runCli(argv, io = console) {
+export async function runCli(argv: readonly string[], io: Pick<Console, "log" | "error"> = console): Promise<number> {
 	const json = argv.includes("--json");
 	try {
 		const parsed = parseArgs(argv);
