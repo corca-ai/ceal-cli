@@ -5,6 +5,8 @@ import path from "node:path";
 const BLOCK_SIZE = 512;
 const ROOT_ENTRIES = new Set(["SKILL.md", "agents", "assets", "references", "scripts"]);
 const PORTABLE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+type SkillFile = { path: string; bytes: Buffer; mode: number };
+type SkillBundle = { bytes: Buffer; files: Array<{ path: string; bytes: number; sha256: string; mode: number }>; sha256: string };
 
 /**
  * Build a byte-stable POSIX ustar archive from one complete skill directory.
@@ -13,7 +15,7 @@ const PORTABLE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
  * paths relative to the skill root so the installer can materialize the whole
  * directory at its update-safe `guide/` location without a second source list.
  */
-export function createSkillDirectoryBundle(skillDirectory) {
+export function createSkillDirectoryBundle(skillDirectory: string): SkillBundle {
 	const root = path.resolve(skillDirectory);
 	const files = collectFiles(root);
 	if (!files.some((file) => file.path === "SKILL.md")) throw new Error("skill directory must contain a regular SKILL.md");
@@ -32,9 +34,9 @@ export function createSkillDirectoryBundle(skillDirectory) {
 	};
 }
 
-function collectFiles(root) {
-	const files = [];
-	const visit = (directory, prefix) => {
+function collectFiles(root: string): SkillFile[] {
+	const files: SkillFile[] = [];
+	const visit = (directory: string, prefix: string): void => {
 		for (const entry of readdirSync(directory).sort()) {
 			if (!PORTABLE_COMPONENT.test(entry)) throw new Error(`skill bundle path is not portable: ${entry}`);
 			const relative = prefix ? `${prefix}/${entry}` : entry;
@@ -58,7 +60,7 @@ function collectFiles(root) {
 	return files;
 }
 
-function tarHeader(name, size, mode) {
+function tarHeader(name: string, size: number, mode: number): Buffer {
 	const header = Buffer.alloc(BLOCK_SIZE);
 	header.write(name, 0, 100, "utf8");
 	writeOctal(header, 100, 8, mode);
@@ -78,13 +80,13 @@ function tarHeader(name, size, mode) {
 	return header;
 }
 
-function writeOctal(buffer, offset, width, value) {
+function writeOctal(buffer: Buffer, offset: number, width: number, value: number): void {
 	const encoded = value.toString(8).padStart(width - 1, "0");
 	if (encoded.length >= width) throw new Error("skill bundle value exceeds ustar field");
 	buffer.write(encoded, offset, width - 1, "ascii");
 	buffer[offset + width - 1] = 0;
 }
 
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }

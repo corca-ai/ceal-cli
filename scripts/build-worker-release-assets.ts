@@ -9,6 +9,7 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { buildWorkerNativeArtifact } from "./build-worker-native-artifact.ts";
 import {
 	readCarrierContract,
 	readControlSessionContract,
@@ -39,6 +40,24 @@ const PLATFORM_PATTERN = /^(?:linux|darwin)-(?:arm64|amd64)$/u;
 // for a future release to produce every one of these platforms.
 const HISTORICAL_RELEASE_PLATFORMS = Object.freeze(["linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"]);
 
+type AssetEntry = { bytes: Buffer; digest: string; mode: number };
+type AssetInventory = Array<[string, string]>;
+type AssetDirectory = string;
+type ContractSource = { bytes: Buffer; sha256: string; value: unknown };
+type ContractDescriptor = { contract: unknown; sha256: string };
+type GuideBundle = { bytes: Buffer; files: Array<{ path: string; bytes: number; sha256: string; mode: number }>; sha256: string };
+type NativeBuild = typeof buildWorkerNativeArtifact;
+type ComposeOptions = {
+	repoRoot?: string;
+	outputDirectory?: string;
+	force?: boolean;
+	gatewayHandoffArchive?: string;
+	platform?: string;
+	version?: string;
+};
+type ComposeDependencies = { buildNative?: NativeBuild };
+type MergeOptions = { repoRoot?: string; outputDirectory?: string; force?: boolean; inputs?: unknown[] };
+type ParsedArgs = { help: boolean; json: boolean; mode?: string; options: ComposeOptions & { inputs: string[]; force: boolean } };
 export const WorkerReleaseAssetsError = codedErrorClass("WorkerReleaseAssetsError");
 
 /**
@@ -47,12 +66,14 @@ export const WorkerReleaseAssetsError = codedErrorClass("WorkerReleaseAssetsErro
  * the parser then prevents that trusted inventory from widening the rollback
  * writer's URL/path vocabulary beyond complete historical worker pairs.
  */
-export function parsePublishedWorkerReleaseInventory(bytes) {
-	const lines = String(bytes).split("\n").filter(Boolean);
+export function parsePublishedWorkerReleaseInventory(bytes: Uint8Array | string): string[] {
+	const text = typeof bytes === "string" ? bytes : Buffer.from(bytes).toString("utf8");
+	const lines = text.split("\n").filter(Boolean);
 	if (lines.length === 0) fail("published_inventory_malformed", "Published worker SHA256SUMS is empty.");
-	const entries = lines.map((line) => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
+	const entries = lines.map((line): RegExpExecArray | null => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
 	if (entries.some((entry) => entry === null)) fail("published_inventory_malformed", "Published worker SHA256SUMS is malformed.");
-	const names = entries.map((entry) => entry[2]);
+	const validEntries = entries.filter((entry): entry is RegExpExecArray => entry !== null);
+	const names = validEntries.map((entry) => entry[2]);
 	if (new Set(names).size !== names.length) fail("published_inventory_malformed", "Published worker SHA256SUMS contains duplicate entries.");
 	const named = new Set(names);
 	for (const shared of SHARED_ASSETS)
@@ -73,7 +94,7 @@ export function parsePublishedWorkerReleaseInventory(bytes) {
 	return [...named].sort();
 }
 
-export async function composeWorkerReleaseAssets(options = {}, dependencies = {}) {
+export async function composeWorkerReleaseAssets(options: ComposeOptions = {}, dependencies: ComposeDependencies = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	const output = inspectOutputDirectory(options.outputDirectory, {
 		repoRoot,
@@ -87,14 +108,13 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 	const stage = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-assets-")));
 	// The native builder needs build-time dependencies (esbuild/postject);
 	// loading it lazily keeps `merge` runnable on a dependency-free host.
-	let nativeErrorClass = null;
 	try {
-		let buildNative = dependencies.buildNative;
+		let buildNative: NativeBuild | undefined = dependencies.buildNative;
 		if (!buildNative) {
 			const nativeModule = await import("./build-worker-native-artifact.ts");
 			buildNative = nativeModule.buildWorkerNativeArtifact;
-			nativeErrorClass = nativeModule.WorkerNativeArtifactError;
 		}
+		if (!buildNative) fail("native_build_failed", "Worker release assets require a native artifact builder.");
 		const nativeOut = path.join(stage, "native");
 		const native = await buildNative({
 			outputDirectory: nativeOut,
@@ -124,12 +144,10 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 			fail("native_output_incomplete", "Native worker embedded guide metadata is incomplete or drifted.");
 		const notices = readStagedFile(path.join(nativeOut, NOTICE_NAME), "native_output_incomplete");
 		const installer = readStagedFile(path.join(repoRoot, INSTALLER_NAME), "installer_unavailable");
-		let privateCarrierContract;
-		let privateControlSessionContract;
-		let privateCarrierHandoff;
+		let privateCarrierContract: ContractSource | undefined;
+		let privateCarrierHandoff: unknown;
 		try {
 			privateCarrierContract = readCarrierContract(path.join(repoRoot, PRIVATE_CARRIER_CONTRACT_PATH));
-			privateControlSessionContract = native.private_leased_consumer_control_session;
 			privateCarrierHandoff = verifyEmbeddedGatewayLeasedConsumerHandoffSource({ repoRoot });
 		} catch {
 			fail(
@@ -137,23 +155,34 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 				"Worker release assets require exact validated private carrier contract and Gateway handoff bytes.",
 			);
 		}
+		const privateControlSessionMessage =
+			"Worker release assets refuse a native binary whose embedded control-session contract differs from the source contract.";
+		const privateControlSessionContract = contractDescriptor(
+			native.private_leased_consumer_control_session,
+			"private_control_session_contract_drift",
+			privateControlSessionMessage,
+		);
+		const privateCarrierMessage =
+			"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.";
+		const nativeCarrier = contractDescriptor(native.private_leased_consumer_carrier, "private_carrier_contract_drift", privateCarrierMessage);
 		if (
-			!native.private_leased_consumer_carrier ||
-			native.private_leased_consumer_carrier.sha256 !== privateCarrierContract.sha256 ||
-			JSON.stringify(native.private_leased_consumer_carrier.contract) !== JSON.stringify(privateCarrierContract.value)
+			!privateCarrierContract ||
+			!privateControlSessionContract ||
+			privateCarrierContract === undefined ||
+			privateControlSessionContract === undefined ||
+			nativeCarrier.sha256 !== privateCarrierContract.sha256 ||
+			JSON.stringify(nativeCarrier.contract) !== JSON.stringify(privateCarrierContract.value)
 		)
-			fail(
-				"private_carrier_contract_drift",
-				"Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
-			);
+			fail("private_carrier_contract_drift", privateCarrierMessage);
 		const projectedControlSessionBytes = privateControlSessionContract?.contract
 			? Buffer.from(`${JSON.stringify(privateControlSessionContract.contract, null, "\t")}\n`)
 			: null;
-		if (!projectedControlSessionBytes || privateControlSessionContract.sha256 !== sha256(projectedControlSessionBytes))
-			fail(
-				"private_control_session_contract_drift",
-				"Worker release assets refuse a native binary whose embedded control-session contract differs from the source contract.",
-			);
+		if (
+			!projectedControlSessionBytes ||
+			!privateControlSessionContract ||
+			privateControlSessionContract.sha256 !== sha256(projectedControlSessionBytes)
+		)
+			fail("private_control_session_contract_drift", privateControlSessionMessage);
 		if (JSON.stringify(native.private_leased_consumer_handoff) !== JSON.stringify(privateCarrierHandoff))
 			fail(
 				"private_carrier_handoff_drift",
@@ -223,14 +252,15 @@ export async function composeWorkerReleaseAssets(options = {}, dependencies = {}
 		};
 	} catch (error) {
 		if (error instanceof WorkerReleaseAssetsError) throw error;
-		if (nativeErrorClass && error instanceof nativeErrorClass) throw new WorkerReleaseAssetsError(error.code, error.message);
+		if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string")
+			throw new WorkerReleaseAssetsError(error.code, error.message);
 		throw new WorkerReleaseAssetsError("worker_release_assets_failed", "Could not compose worker release assets.");
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
 	}
 }
 
-export function mergeWorkerReleaseAssetSets(options = {}) {
+export function mergeWorkerReleaseAssetSets(options: MergeOptions = {}) {
 	const repoRoot = path.resolve(options.repoRoot ?? ROOT);
 	try {
 		assertShippableProtocolVendorPin({ repoRoot });
@@ -247,24 +277,31 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	});
 	const inputs = Array.isArray(options.inputs) ? options.inputs.map((value) => requireAssetDirectory(value)) : [];
 	if (inputs.length === 0) fail("merge_inputs_required", "Merging worker release assets requires at least one composed input set.");
-	const platforms = new Map();
-	const shared = new Map();
+	const platforms = new Map<string, Map<string, AssetEntry>>();
+	const shared = new Map<string, AssetEntry>();
 	for (const input of inputs) {
 		const inventory = readInventory(input);
+		const seenInputNames = new Set<string>();
 		for (const [name, digest] of inventory) {
+			if (seenInputNames.has(name)) fail("merge_duplicate_asset", `Worker release asset ${name} appears more than once in one input set.`);
+			seenInputNames.add(name);
 			const bytes = readStagedFile(path.join(input, name), "merge_input_incomplete");
 			if (sha256(bytes) !== digest) fail("merge_input_incomplete", "Composed worker asset does not match its checksum inventory.");
 			if (SHARED_ASSETS.includes(name)) {
-				if (shared.has(name) && shared.get(name).digest !== digest)
+				if (shared.has(name) && shared.get(name)?.digest !== digest)
 					fail("merge_shared_drift", `Shared worker release asset ${name} differs between platform sets.`);
 				shared.set(name, { bytes, digest, mode: name === INSTALLER_NAME ? 0o755 : 0o644 });
 				continue;
 			}
 			const platform = platformOfAsset(name);
 			if (platform === null) fail("merge_unexpected_asset", `Composed worker asset ${name} is not a worker release asset.`);
-			if (!platforms.has(platform)) platforms.set(platform, new Map());
-			if (platforms.get(platform).has(name)) fail("merge_duplicate_asset", `Worker release asset ${name} appears in more than one input set.`);
-			platforms.get(platform).set(name, { bytes, digest, mode: name.startsWith("ceal-worker-release-manifest-") ? 0o644 : 0o755 });
+			let platformEntries = platforms.get(platform);
+			if (!platformEntries) {
+				platformEntries = new Map<string, AssetEntry>();
+				platforms.set(platform, platformEntries);
+			}
+			if (platformEntries.has(name)) fail("merge_duplicate_asset", `Worker release asset ${name} appears in more than one input set.`);
+			platformEntries.set(name, { bytes, digest, mode: name.startsWith("ceal-worker-release-manifest-") ? 0o644 : 0o755 });
 		}
 	}
 	for (const shortName of SHARED_ASSETS)
@@ -273,7 +310,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		if (entries.size !== 2) fail("merge_input_incomplete", `Merged worker release set has an incomplete pair for ${platform}.`);
 	}
 	if (platforms.size === 0) fail("merge_input_incomplete", "Merged worker release set names no platform.");
-	let sourceGuide;
+	let sourceGuide: GuideBundle | undefined;
 	try {
 		const guideInput = resolveWorkerReleaseGuideInput({ repoRoot });
 		sourceGuide = createSkillDirectoryBundle(path.join(repoRoot, guideInput.source_path));
@@ -285,9 +322,9 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	// corruption that hit every leg identically, which is the ordinary shape when
 	// every leg stages from one stale snapshot. Only the control-session check
 	// used to do this; the two beside it checked agreement and stopped.
-	let sourceControlSessionContract;
-	let sourceCarrierContract;
-	let sourceCarrierHandoff;
+	let sourceControlSessionContract: ContractSource | undefined;
+	let sourceCarrierContract: ContractSource | undefined;
+	let sourceCarrierHandoff: unknown;
 	try {
 		sourceControlSessionContract = readControlSessionContract(path.join(repoRoot, PRIVATE_CONTROL_SESSION_CONTRACT_PATH), { repoRoot });
 	} catch {
@@ -313,6 +350,8 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	// nothing. Agreement is the consequence; equality with the source is the rule.
 	for (const [platform, entries] of platforms) {
 		const manifestBytes = entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes;
+		if (!manifestBytes || !sourceGuide || !sourceCarrierContract || sourceCarrierHandoff === undefined || !sourceControlSessionContract)
+			fail("merge_input_incomplete", `Merged worker release set is missing the manifest for ${platform}.`);
 		embeddedGuideIdentity(manifestBytes, sourceGuide);
 		carrierContractIdentity(manifestBytes, sourceCarrierContract);
 		carrierHandoffIdentity(manifestBytes, sourceCarrierHandoff);
@@ -322,6 +361,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	const clientIdentities = new Set();
 	for (const [platform, entries] of platforms) {
 		const manifestBytes = entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes;
+		if (!manifestBytes) fail("merge_input_incomplete", `Merged worker release set is missing the manifest for ${platform}.`);
 		clientIdentities.add(clientProvenanceIdentity(manifestBytes, expectedClientVersion));
 	}
 	if (clientIdentities.size !== 1)
@@ -335,7 +375,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	// release tag cannot be reused. This job already checked out the exact tag,
 	// so the lock it reads is the one these artifacts were built against.
 	for (const [platform, entries] of platforms) {
-		let manifest;
+		let manifest: Record<string, unknown> = {};
 		try {
 			manifest = JSON.parse(entries.get(`ceal-worker-release-manifest-${platform}.json`)?.bytes?.toString("utf8") ?? "");
 		} catch {
@@ -343,7 +383,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 		}
 		verifyProtocolProvenanceAgainstLock(manifest, {
 			repoRoot,
-			fail: (code, message) => fail(`merge_${code}`, `${message} (${platform})`),
+			fail: (code: string, message: string) => fail(`merge_${code}`, `${message} (${platform})`),
 		});
 	}
 	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
@@ -369,7 +409,7 @@ export function mergeWorkerReleaseAssetSets(options = {}) {
 	};
 }
 
-function embeddedGuideIdentity(bytes, sourceGuide) {
+function embeddedGuideIdentity(bytes: Buffer, sourceGuide: GuideBundle): void {
 	try {
 		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
 		const expected = {
@@ -390,14 +430,14 @@ function embeddedGuideIdentity(bytes, sourceGuide) {
 	}
 }
 
-function platformOfAsset(name) {
+function platformOfAsset(name: string): string | null {
 	const binary = /^ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(name);
 	if (binary) return binary[1];
 	const manifest = /^ceal-worker-release-manifest-((?:linux|darwin)-(?:arm64|amd64))[.]json$/u.exec(name);
 	return manifest ? manifest[1] : null;
 }
 
-function clientProvenanceIdentity(bytes, expectedVersion) {
+function clientProvenanceIdentity(bytes: Buffer, expectedVersion: string): string {
 	try {
 		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
 		return JSON.stringify(requireClientProvenance(manifest?.client, expectedVersion, "merge_client_provenance_invalid"));
@@ -407,11 +447,13 @@ function clientProvenanceIdentity(bytes, expectedVersion) {
 	}
 }
 
-function requireClientProvenance(value, expectedVersion, code) {
+function requireClientProvenance(value: unknown, expectedVersion: string, code: string) {
+	if (!isRecord(value)) fail(code, "Worker release assets require exact packed client package provenance.");
 	if (
 		value?.package !== "@corca-ai/ceal" ||
 		value.version !== expectedVersion ||
 		value.filename !== `corca-ai-ceal-${expectedVersion}.tgz` ||
+		typeof value.bytes !== "number" ||
 		!Number.isSafeInteger(value.bytes) ||
 		value.bytes <= 0 ||
 		typeof value.sha256 !== "string" ||
@@ -427,7 +469,16 @@ function requireClientProvenance(value, expectedVersion, code) {
 	};
 }
 
-function readPackageVersion(repoRoot, relativeDirectory) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function contractDescriptor(value: unknown, code: string, message: string): ContractDescriptor {
+	if (!isRecord(value) || typeof value.sha256 !== "string" || !("contract" in value) || value.contract === undefined) fail(code, message);
+	return { contract: value.contract, sha256: value.sha256 };
+}
+
+function readPackageVersion(repoRoot: string, relativeDirectory: string): string {
 	try {
 		const manifest = JSON.parse(readFileSync(path.join(repoRoot, relativeDirectory, "package.json"), "utf8"));
 		if (typeof manifest.version !== "string") throw new Error("invalid_version");
@@ -437,16 +488,16 @@ function readPackageVersion(repoRoot, relativeDirectory) {
 	}
 }
 
-function readInventory(directory) {
+function readInventory(directory: AssetDirectory): AssetInventory {
 	const bytes = readStagedFile(path.join(directory, "SHA256SUMS"), "merge_input_incomplete").toString("utf8");
 	const lines = bytes.split("\n").filter(Boolean);
-	const entries = lines.map((line) => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
+	const entries = lines.map((line): RegExpExecArray | null => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
 	if (lines.length === 0 || entries.some((entry) => entry === null))
 		fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
-	return entries.map((entry) => [entry[2], entry[1]]);
+	return entries.filter((entry): entry is RegExpExecArray => entry !== null).map((entry) => [entry[2], entry[1]]);
 }
 
-function carrierContractIdentity(bytes, sourceCarrierContract) {
+function carrierContractIdentity(bytes: Buffer, sourceCarrierContract: ContractSource): string {
 	try {
 		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
 		const carrier = manifest?.private_leased_consumer_carrier;
@@ -474,7 +525,7 @@ function carrierContractIdentity(bytes, sourceCarrierContract) {
 	}
 }
 
-function carrierHandoffIdentity(bytes, sourceCarrierHandoff) {
+function carrierHandoffIdentity(bytes: Buffer, sourceCarrierHandoff: unknown): string {
 	try {
 		const handoff = JSON.parse(bytes?.toString("utf8") ?? "")?.private_leased_consumer_handoff;
 		if (
@@ -484,7 +535,7 @@ function carrierHandoffIdentity(bytes, sourceCarrierHandoff) {
 			!/^[a-f0-9]{64}$/u.test(handoff.sha256) ||
 			typeof handoff.source_repository !== "string" ||
 			!Array.isArray(handoff.vector_ids) ||
-			handoff.vector_ids.some((value) => typeof value !== "string")
+			handoff.vector_ids.some((value: unknown) => typeof value !== "string")
 		)
 			throw new Error("invalid_manifest");
 		// The manifest field IS the verifier's return value, the same way compose
@@ -505,7 +556,7 @@ function carrierHandoffIdentity(bytes, sourceCarrierHandoff) {
 	}
 }
 
-function controlSessionContractIdentity(bytes, sourceControlSessionContract) {
+function controlSessionContractIdentity(bytes: Buffer, sourceControlSessionContract: ContractSource): string {
 	try {
 		const manifest = JSON.parse(bytes?.toString("utf8") ?? "");
 		const controlSession = manifest?.private_leased_consumer_control_session;
@@ -536,7 +587,7 @@ function controlSessionContractIdentity(bytes, sourceControlSessionContract) {
 	}
 }
 
-function writeChecksumInventory(directory) {
+function writeChecksumInventory(directory: string): void {
 	const names = readdirSync(directory)
 		.filter((name) => name !== MARKER && name !== "SHA256SUMS")
 		.sort();
@@ -544,7 +595,7 @@ function writeChecksumInventory(directory) {
 	writeFileSync(path.join(directory, "SHA256SUMS"), `${lines.join("\n")}\n`, { mode: 0o644 });
 }
 
-function requireAssetDirectory(value) {
+function requireAssetDirectory(value: unknown): AssetDirectory {
 	if (typeof value !== "string" || !path.isAbsolute(value))
 		fail("merge_inputs_required", "Merged worker asset inputs must be absolute directories.");
 	const directory = path.resolve(value);
@@ -555,22 +606,22 @@ function requireAssetDirectory(value) {
 	return directory;
 }
 
-function readStagedFile(file, code) {
+function readStagedFile(file: string, code: string): Buffer {
 	if (!existsSync(file) || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())
 		fail(code, `Worker release asset input ${path.basename(file)} is unavailable.`);
 	return readFileSync(file);
 }
 
-function sha256(bytes) {
+function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function fail(code, message) {
+function fail(code: string, message: string): never {
 	throw new WorkerReleaseAssetsError(code, message);
 }
 
-function parseArgs(argv) {
+function parseArgs(argv: string[]): ParsedArgs {
 	const [mode, ...rest] = argv;
-	const options = { force: false, inputs: [] };
+	const options: ParsedArgs["options"] = { force: false, inputs: [] };
 	let json = false;
 	for (let index = 0; index < rest.length; index += 1) {
 		const arg = rest[index];
@@ -591,12 +642,16 @@ function parseArgs(argv) {
 			return value;
 		};
 		if (arg === "--input") {
-			options.inputs.push(takeValue());
+			const input = takeValue();
+			options.inputs.push(input);
 			continue;
 		}
 		if (["--out", "--platform", "--version", "--gateway-handoff-archive"].includes(arg)) {
-			const name = arg === "--out" ? "outputDirectory" : arg === "--gateway-handoff-archive" ? "gatewayHandoffArchive" : arg.slice(2);
-			options[name] = takeValue();
+			const value = takeValue();
+			if (arg === "--out") options.outputDirectory = value;
+			else if (arg === "--gateway-handoff-archive") options.gatewayHandoffArchive = value;
+			else if (arg === "--platform") options.platform = value;
+			else options.version = value;
 			continue;
 		}
 		fail("invalid_argument", "Unexpected worker release assets argument.");
@@ -604,7 +659,7 @@ function parseArgs(argv) {
 	return { help: false, json, mode, options };
 }
 
-export async function runCli(argv, io = console) {
+export async function runCli(argv: string[], io: Pick<Console, "log" | "error"> = console) {
 	const json = argv.includes("--json");
 	try {
 		const parsed = parseArgs(argv);

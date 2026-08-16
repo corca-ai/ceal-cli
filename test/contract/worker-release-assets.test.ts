@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import type { BinaryLike } from "node:crypto";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +11,7 @@ import { parse } from "yaml";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+import type { buildWorkerNativeArtifact } from "../../scripts/build-worker-native-artifact.ts";
 import {
 	composeWorkerReleaseAssets,
 	mergeWorkerReleaseAssetSets,
@@ -22,6 +24,7 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
+import { inspectOutputDirectory } from "../../scripts/lib/output-directory.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.ts";
 
@@ -52,6 +55,20 @@ const LOCKED_PROTOCOL_PRODUCER = Object.freeze({
 // narrowing there fails here.
 const INSTALLER_ALLOWLIST = installerAllowlist();
 
+type Manifest = {
+	client: { sha256: string };
+	embedded_guide: { sha256: string };
+	native_smoke: { embedded_guide_sha256: string; guide_registration: boolean };
+	private_leased_consumer_control_session: { contract_json: string; contract_sha256: string };
+	private_leased_consumer_carrier: { contract_json: string; contract_sha256: string };
+	private_leased_consumer_handoff: { sha256: string };
+	protocol: { producer?: unknown };
+};
+type DriftCase = [string, (manifest: Manifest) => void, string];
+type ReleaseStep = { run?: string; with?: { name?: string } };
+type ReleaseJob = { steps: ReleaseStep[] };
+type FakeNativeBuild = typeof buildWorkerNativeArtifact;
+
 function installerAllowlist() {
 	const script = readFileSync(path.join(REPO_ROOT, "install-ceal.sh"), "utf8");
 	// The one `grep -Ev` in verify_checksum_inventory carries the allowlist as
@@ -67,7 +84,7 @@ function installerAllowlist() {
 // it decides what the installer must be able to accept.
 function releasePlatforms() {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github", "workflows", "ceal-release.yml"), "utf8");
-	const platforms = parse(workflow).jobs?.build?.strategy?.matrix?.include?.map((entry) => entry.platform) ?? [];
+	const platforms = parse(workflow).jobs?.build?.strategy?.matrix?.include?.map((entry: { platform: string }) => entry.platform) ?? [];
 	assert.ok(platforms.length >= 3, `ceal-release.yml build matrix names only ${platforms.length} platforms`);
 	return platforms;
 }
@@ -136,7 +153,7 @@ test("composed worker release assets match the installer's signed inventory cont
 	assert.doesNotMatch(compatibilityGuide, /references\//u);
 	assert.equal(manifest.embedded_guide.name, "ceal-guide.tar");
 	assert.equal(manifest.embedded_guide.format, "ustar");
-	assert.ok(manifest.embedded_guide.files.some((file) => file.path === "SKILL.md"));
+	assert.ok(manifest.embedded_guide.files.some((file: { path: string }) => file.path === "SKILL.md"));
 	assert.equal(manifest.installer.sha256, digest(readFileSync(path.join(output, "install-ceal.sh"))));
 	await assert.rejects(
 		() =>
@@ -170,6 +187,73 @@ test("composed worker release assets match the installer's signed inventory cont
 				{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0", { controlSessionSha256: "f".repeat(64) }) },
 			),
 		hasCode("private_control_session_contract_drift"),
+	);
+});
+
+test("output directory refuses a relative path before resolving it", () => {
+	assert.throws(
+		() =>
+			inspectOutputDirectory("relative-output", {
+				repoRoot: REPO_ROOT,
+				force: false,
+				subject: "Worker release assets output",
+				marker: ".ceal-worker-release-assets",
+				fail: (code: string, message: string): never => {
+					throw new Error(`${code}:${message}`);
+				},
+			}),
+		/invalid_output/u,
+	);
+});
+
+test("compose preserves a coded native-builder error", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-error-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const buildNative: FakeNativeBuild = async () => {
+		throw Object.assign(new Error("fixture native failure"), { code: "fixture_native_failure" });
+	};
+	await assert.rejects(
+		() => composeWorkerReleaseAssets({ outputDirectory: path.join(root, "assets"), repoRoot }, { buildNative }),
+		(error: unknown) =>
+			error instanceof WorkerReleaseAssetsError && error.code === "fixture_native_failure" && error.message === "fixture native failure",
+	);
+});
+
+test("compose classifies a malformed native carrier descriptor as carrier drift", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-carrier-descriptor-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const base = fakeNativeBuild("linux-arm64", "0.65.0");
+	const buildNative: FakeNativeBuild = async (options = {}, dependencies = {}) => ({
+		...(await base(options, dependencies)),
+		private_leased_consumer_carrier: { sha256: CARRIER_CONTRACT_SHA256 },
+	});
+	await assert.rejects(
+		() => composeWorkerReleaseAssets({ outputDirectory: path.join(root, "assets"), repoRoot }, { buildNative }),
+		(error: unknown) =>
+			error instanceof WorkerReleaseAssetsError &&
+			error.code === "private_carrier_contract_drift" &&
+			error.message === "Worker release assets refuse a native binary whose embedded carrier contract differs from the source contract.",
+	);
+});
+
+test("compose classifies a malformed native control-session descriptor as control-session drift", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-control-descriptor-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const base = fakeNativeBuild("linux-arm64", "0.65.0");
+	const buildNative: FakeNativeBuild = async (options = {}, dependencies = {}) => ({
+		...(await base(options, dependencies)),
+		private_leased_consumer_control_session: { sha256: CONTROL_SESSION_CONTRACT_SHA256 },
+	});
+	await assert.rejects(
+		() => composeWorkerReleaseAssets({ outputDirectory: path.join(root, "assets"), repoRoot }, { buildNative }),
+		(error: unknown) =>
+			error instanceof WorkerReleaseAssetsError &&
+			error.code === "private_control_session_contract_drift" &&
+			error.message ===
+				"Worker release assets refuse a native binary whose embedded control-session contract differs from the source contract.",
 	);
 });
 
@@ -225,7 +309,7 @@ test("private control-session release input accepts only the signed v6 dispositi
 		path.join(root, "gateway-protocol-handoff-lock.json"),
 		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
 	);
-	const current = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES);
+	const current = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
 	writeFileSync(contractPath, `${JSON.stringify(current, null, 2)}\n`);
 	const accepted = readControlSessionContract(contractPath, { repoRoot: root }).value;
 	assert.equal(accepted.agent_ipc.request_schema_version, "ceal.leased_consumer_capability_control_request.v6");
@@ -249,16 +333,16 @@ test("private control-session release input accepts only the signed v6 dispositi
 	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 
 	for (const mutate of [
-		(value) => (value.notification_channel.child_fd = 4),
-		(value) => (value.notification_channel.maximum_frame_bytes = 4097),
-		(value) => (value.agent_ipc.request_schema_version = "ceal.leased_consumer_capability_control_request.v5"),
-		(value) => (value.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v5"),
-		(value) => (value.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v4"),
-		(value) => delete value.gateway.routes.notification_receipt,
-		(value) => delete value.gateway.routes.materialization,
-		(value) => (value.gateway.routes.unexpected_materializer = value.gateway.routes.materialization),
-		(value) => (value.gateway.routes.materialization = "/api/ceal/agent/v1/control/unexpected-materializer"),
-		(value) => (value.gateway.routes.extra = "/api/ceal/agent/v1/control/extra"),
+		(value: typeof current) => (value.notification_channel.child_fd = 4),
+		(value: typeof current) => (value.notification_channel.maximum_frame_bytes = 4097),
+		(value: typeof current) => (value.agent_ipc.request_schema_version = "ceal.leased_consumer_capability_control_request.v5"),
+		(value: typeof current) => (value.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v5"),
+		(value: typeof current) => (value.agent_ipc.response_schema_version = "ceal.leased_consumer_capability_control_response.v4"),
+		(value: typeof current) => delete value.gateway.routes.notification_receipt,
+		(value: typeof current) => delete value.gateway.routes.materialization,
+		(value: typeof current) => (value.gateway.routes.unexpected_materializer = value.gateway.routes.materialization),
+		(value: typeof current) => (value.gateway.routes.materialization = "/api/ceal/agent/v1/control/unexpected-materializer"),
+		(value: typeof current) => (value.gateway.routes.extra = "/api/ceal/agent/v1/control/extra"),
 	]) {
 		const invalid = structuredClone(current);
 		mutate(invalid);
@@ -315,7 +399,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-merge-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const repoRoot = fixtureRepo(root);
-	const inputs = [];
+	const inputs: string[] = [];
 	for (const platform of ["linux-arm64", "linux-amd64"]) {
 		const output = path.join(root, `assets-${platform}`);
 		await composeWorkerReleaseAssets(
@@ -348,7 +432,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// identical corruption walks straight through. Protocol provenance carries two
 	// cases because they are different mistakes: bytes bound to another Gateway
 	// commit, and a manifest that names a version with no producer at all.
-	const driftCases = [
+	const driftCases: DriftCase[] = [
 		["client", (manifest) => (manifest.client.sha256 = "d".repeat(64)), "merge_client_provenance_drift"],
 		["embedded-guide", (manifest) => (manifest.embedded_guide.sha256 = "d".repeat(64)), "merge_embedded_guide_drift"],
 		["carrier", (manifest) => (manifest.private_leased_consumer_carrier.contract_json = "{}"), "merge_private_carrier_contract_drift"],
@@ -370,20 +454,20 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// get written is the ONLY difference between drifting one leg and drifting all
 	// of them, and spelling the rest twice is what let the two populations cover
 	// different sets of inputs without anyone noticing.
-	const writeOneLeg = (body) => {
+	const writeOneLeg = (body: string | Uint8Array): void => {
 		writeFileSync(platformManifest, body);
 		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
 	};
-	const writeEveryLeg = (body) => {
+	const writeEveryLeg = (body: string | Uint8Array): void => {
 		for (const input of inputs) {
 			const name = `ceal-worker-release-manifest-${input.endsWith("linux-amd64") ? "linux-amd64" : "linux-arm64"}.json`;
 			writeFileSync(path.join(input, name), body);
 			rewriteInventoryDigest(input, name);
 		}
 	};
-	const expectRefusals = (cases, write, prefix) => {
+	const expectRefusals = (cases: DriftCase[], write: (body: string | Uint8Array) => void, prefix: string): void => {
 		for (const [label, mutate, expected] of cases) {
-			const drifted = JSON.parse(originalManifest);
+			const drifted: Manifest = JSON.parse(originalManifest.toString("utf8"));
 			mutate(drifted);
 			write(`${JSON.stringify(drifted, null, 2)}\n`);
 			assert.throws(
@@ -399,7 +483,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// The corruption that agreement alone cannot see: every leg wrong, identically.
 	// That is the ordinary shape, not an exotic one — every leg stages from one
 	// snapshot, so a stale or tampered snapshot reaches all of them the same way.
-	const identicalDriftCases = [
+	const identicalDriftCases: DriftCase[] = [
 		[
 			"embedded-guide",
 			(manifest) => {
@@ -461,6 +545,24 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	);
 });
 
+test("merge rejects duplicate checksum entries within one input set", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-duplicate-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const input = path.join(root, "assets-linux-arm64");
+	await composeWorkerReleaseAssets(
+		{ outputDirectory: input, gatewayHandoffArchive: "/unused/fixture.tar.gz", repoRoot },
+		{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0") },
+	);
+	const inventoryPath = path.join(input, "SHA256SUMS");
+	const inventory = readFileSync(inventoryPath, "utf8").trim();
+	writeFileSync(inventoryPath, `${inventory}\n${inventory.split("\n")[0]}\n`);
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged"), inputs: [input], repoRoot }),
+		hasCode("merge_duplicate_asset"),
+	);
+});
+
 test("merge refuses a declared proof and shipment Protocol divergence before reading composed assets", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-diverged-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -485,8 +587,8 @@ test("worker release workflow signs only the worker inventory from the locked ar
 	// raw-text form that used to sit here pinned six-space indentation and the
 	// choice of quote character too.
 	assert.match(workflow, /gateway-protocol-handoff-lock\.json/u);
-	assert.match(workflow, /build-worker-release-assets\.mjs compose/u);
-	assert.match(workflow, /build-worker-release-assets\.mjs merge/u);
+	assert.match(workflow, /build-worker-release-assets\.ts compose/u);
+	assert.match(workflow, /build-worker-release-assets\.ts merge/u);
 	assert.doesNotMatch(workflow, /cealctl-linux/u);
 	assert.doesNotMatch(workflow, /cealctl-guide/u);
 	assert.match(workflow, /\$GATEWAY_HANDOFF_ORIGIN\/\$HANDOFF_RELEASE_TAG\/\$HANDOFF_ARCHIVE/u);
@@ -576,15 +678,15 @@ test("worker release workflow signs only the worker inventory from the locked ar
 test("worker release workflow builds, merges, and signs every platform it builds", () => {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
 	const parsed = parse(workflow);
-	const platforms = parsed.jobs.build.strategy.matrix.include.map((entry) => entry.platform);
+	const platforms = parsed.jobs.build.strategy.matrix.include.map((entry: { platform: string }) => entry.platform);
 	// A floor, not a snapshot: every assertion below derives from `platforms`, so
 	// the only thing this has to rule out is an empty list making them vacuous.
 	assert.ok(platforms.length >= 3, `the build matrix names only ${platforms.length} release platforms`);
 
 	// Each site is isolated: asserting against a whole job lets one site cover
 	// for another, which is exactly the partial-inventory bug being guarded.
-	const downloads = parsed.jobs.assemble.steps.flatMap((step) => (step.with?.name ? [step.with.name] : []));
-	const merge = runStepContaining(parsed.jobs.assemble, "build-worker-release-assets.mjs merge");
+	const downloads = parsed.jobs.assemble.steps.flatMap((step: ReleaseStep) => (step.with?.name ? [step.with.name] : []));
+	const merge = runStepContaining(parsed.jobs.assemble, "build-worker-release-assets.ts merge");
 	const inventory = runStepContaining(parsed.jobs["sign-and-publish"], "Unexpected worker release inventory");
 	const signing = bashArray(runStepContaining(parsed.jobs["sign-and-publish"], "cosign sign-blob"), "primary");
 	// The rollback lane re-verifies this same set before moving stable, so it is
@@ -599,11 +701,12 @@ test("worker release workflow builds, merges, and signs every platform it builds
 		"rollback must verify SHA256SUMS before parsing its asset names",
 	);
 	const manifestLoop = /for platform in ([^;]+); do/u.exec(inventory)?.[1].trim().split(/\s+/u);
+	assert.ok(manifestLoop);
 
 	assert.deepEqual([...manifestLoop].sort(), [...platforms].sort(), "manifest check must cover every platform");
 	for (const platform of platforms) {
 		assert.ok(
-			downloads.some((name) => name.endsWith(`-${platform}`)),
+			downloads.some((name: string) => name.endsWith(`-${platform}`)),
 			`assemble must download the ${platform} handoff`,
 		);
 		assert.ok(merge.includes(`--input "$PWD/handoff/${platform}"`), `assemble must merge the ${platform} input`);
@@ -634,6 +737,12 @@ test("published worker inventory parser accepts both historical and current rele
 	assert.equal(parsePublishedWorkerReleaseInventory(publishedInventory(["linux-arm64", "linux-amd64", "darwin-arm64"])).length, 9);
 });
 
+test("published worker inventory parser decodes a plain Uint8Array as UTF-8", () => {
+	const inventory = publishedInventory(["linux-arm64"]);
+	const bytes = new Uint8Array(Buffer.from(inventory, "utf8"));
+	assert.equal(parsePublishedWorkerReleaseInventory(bytes).length, 5);
+});
+
 test("published worker inventory parser rejects duplicate, partial, and widened rollback input", () => {
 	const complete = publishedInventory(["linux-arm64"]);
 	assert.throws(
@@ -650,26 +759,28 @@ test("published worker inventory parser rejects duplicate, partial, and widened 
 	);
 });
 
-function runStepContaining(job, needle) {
+function runStepContaining(job: ReleaseJob, needle: string): string {
 	const found = job.steps.filter((step) => (step.run ?? "").includes(needle));
 	assert.equal(found.length, 1, `expected exactly one step containing ${needle}`);
-	return found[0].run;
+	const run = found[0]?.run;
+	if (typeof run !== "string") throw new Error(`step containing ${needle} has no run script`);
+	return run;
 }
 
 // Reads `name=( ... )` as the shell would split it, so a token dropped from the
 // array is visible even when the same token appears elsewhere in the step.
-function bashArray(script, name) {
+function bashArray(script: string, name: string): string[] {
 	const body = new RegExp(`${name}=\\(([^)]*)\\)`, "u").exec(script);
 	assert.ok(body, `expected a ${name}=( ... ) array`);
 	return body[1].trim().split(/\s+/u);
 }
 
-function publishedInventory(platforms) {
+function publishedInventory(platforms: string[]): string {
 	const names = [
 		"THIRD_PARTY_NOTICES.txt",
 		"ceal-guide-SKILL.md",
 		"install-ceal.sh",
-		...platforms.flatMap((platform) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
+		...platforms.flatMap((platform: string) => [`ceal-${platform}`, `ceal-worker-release-manifest-${platform}.json`]),
 	];
 	return `${names.map((name) => `${digest(name)}  ${name}`).join("\n")}\n`;
 }
@@ -679,14 +790,14 @@ function publishedInventory(platforms) {
 test("worker release build job uses no GNU-only tool on its macOS runners", () => {
 	const parsed = parse(readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8"));
 	assert.ok(
-		parsed.jobs.build.strategy.matrix.include.some((entry) => entry.runner.startsWith("macos-")),
+		parsed.jobs.build.strategy.matrix.include.some((entry: { runner: string }) => entry.runner.startsWith("macos-")),
 		"this guard is only meaningful while a darwin runner exists",
 	);
 	// Whole-line comments are dropped: the guard is about executed commands, and
 	// the step that replaced sha256sum names it while explaining why.
 	const scripts = parsed.jobs.build.steps
-		.flatMap((step) => (step.run ?? "").split("\n"))
-		.filter((line) => !line.trimStart().startsWith("#"))
+		.flatMap((step: ReleaseStep) => (step.run ?? "").split("\n"))
+		.filter((line: string) => !line.trimStart().startsWith("#"))
 		.join("\n");
 	assert.doesNotMatch(scripts, /\bsha256sum\b/u);
 });
@@ -708,8 +819,8 @@ test("worker stable rollback re-verifies an immutable public tag before moving t
 });
 
 function fakeNativeBuild(
-	platform,
-	version,
+	platform: string,
+	version: string,
 	{
 		carrierContract = CARRIER_CONTRACT,
 		carrierSha256 = CARRIER_CONTRACT_SHA256,
@@ -719,8 +830,13 @@ function fakeNativeBuild(
 		protocolProducer = LOCKED_PROTOCOL_PRODUCER,
 		clientSha256 = "c".repeat(64),
 	} = {},
-) {
-	return async ({ outputDirectory }) => {
+): FakeNativeBuild {
+	return async (
+		options: Parameters<FakeNativeBuild>[0] = {},
+		_dependencies: Parameters<FakeNativeBuild>[1] = {},
+	): ReturnType<FakeNativeBuild> => {
+		if (!options || typeof options.outputDirectory !== "string") throw new Error("fixture output directory is required");
+		const { outputDirectory } = options;
 		mkdirSync(outputDirectory, { recursive: true });
 		const binary = Buffer.from(`native-${platform}\n`);
 		writeFileSync(path.join(outputDirectory, `ceal-${platform}`), binary, { mode: 0o755 });
@@ -729,7 +845,11 @@ function fakeNativeBuild(
 		writeFileSync(path.join(outputDirectory, "ceal-guide-SKILL.md"), compatibilityGuide);
 		writeFileSync(path.join(outputDirectory, "THIRD_PARTY_NOTICES.txt"), "notice\n");
 		return {
+			schema_version: "ceal.worker_native_artifact.v1",
 			ok: true,
+			proof_level: "local_state",
+			writes_external: false,
+			output_dir: outputDirectory,
 			version,
 			platform,
 			artifact: { name: `ceal-${platform}`, bytes: binary.length, sha256: digest(binary) },
@@ -764,15 +884,19 @@ function fakeNativeBuild(
 			native_smoke: {
 				command: "ceal",
 				version,
+				help: true,
+				required_commands: [],
 				operator_surface_absent: true,
 				embedded_guide_sha256: guide.sha256,
 				guide_registration: true,
 			},
+			non_claims: [],
+			consumer_smoke: {},
 		};
 	};
 }
 
-function fixtureRepo(root) {
+function fixtureRepo(root: string): string {
 	const repo = path.join(root, "repo");
 	mkdirSync(repo, { recursive: true });
 	writeFileSync(path.join(repo, "install-ceal.sh"), "#!/usr/bin/env sh\nexit 0\n", { mode: 0o755 });
@@ -817,7 +941,7 @@ function fixtureRepo(root) {
 	return repo;
 }
 
-function declareFixtureDivergence(repo) {
+function declareFixtureDivergence(repo: string): void {
 	const request = "docs/protocol-quarantine.md";
 	const pinPath = path.join(repo, "protocol-vendor-pin.json");
 	const pin = JSON.parse(readFileSync(pinPath, "utf8"));
@@ -833,13 +957,13 @@ function declareFixtureDivergence(repo) {
 	runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: declare Protocol divergence"]);
 }
 
-function materializeGitTree(tree, destination) {
+function materializeGitTree(tree: string, destination: string): void {
 	mkdirSync(destination, { recursive: true });
 	const archive = execFileSync("git", ["archive", tree], { cwd: REPO_ROOT });
 	execFileSync("tar", ["-xf", "-", "-C", destination], { input: archive });
 }
 
-function writeGatewayHandoffFixture(root) {
+function writeGatewayHandoffFixture(root: string): void {
 	const vendor = path.join(root, "vendor", "gateway-leased-consumer-call");
 	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
 	mkdirSync(vendor, { recursive: true });
@@ -858,15 +982,15 @@ function writeGatewayHandoffFixture(root) {
 	);
 }
 
-function hasCode(code) {
-	return (error) => error instanceof WorkerReleaseAssetsError && error.code === code;
+function hasCode(code: string) {
+	return (error: unknown): boolean => error instanceof WorkerReleaseAssetsError && error.code === code;
 }
 
-function digest(bytes) {
+function digest(bytes: BinaryLike): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-function rewriteInventoryDigest(directory, name) {
+function rewriteInventoryDigest(directory: string, name: string): void {
 	const inventory = path.join(directory, "SHA256SUMS");
 	const digestLine = `${digest(readFileSync(path.join(directory, name)))}  ${name}`;
 	writeFileSync(inventory, readFileSync(inventory, "utf8").replace(new RegExp(`^[a-f0-9]{64}  ${name}$`, "mu"), digestLine));

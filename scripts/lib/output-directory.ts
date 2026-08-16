@@ -20,6 +20,16 @@ import { existsSync, lstatSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { assertNoSymlinkComponents } from "./safe-output-path.ts";
 
+type OutputFailure = (code: string, message: string) => never;
+type OutputInspection = { directory: string; force: boolean };
+type OutputInspectionOptions = {
+	repoRoot: string;
+	force: boolean;
+	subject: string;
+	marker: string;
+	fail: OutputFailure;
+};
+
 /**
  * Resolve and vet a composer's output directory.
  *
@@ -28,9 +38,14 @@ import { assertNoSymlinkComponents } from "./safe-output-path.ts";
  * enough: the marker is what says the tree was written by this lane, so the flag
  * can never point at a directory the composer did not create.
  */
-export function inspectOutputDirectory(value, { repoRoot, force, subject, marker, fail }) {
-	if (typeof value !== "string" || !path.isAbsolute(value)) fail("invalid_output", `${subject} must be an absolute directory.`);
-	const directory = path.resolve(value);
+export function inspectOutputDirectory(
+	value: unknown,
+	{ repoRoot, force, subject, marker, fail }: OutputInspectionOptions,
+): OutputInspection {
+	if (typeof value !== "string") return fail("invalid_output", `${subject} must be an absolute directory.`);
+	if (!path.isAbsolute(value)) return fail("invalid_output", `${subject} must be an absolute directory.`);
+	const candidate: string = value;
+	const directory = path.resolve(candidate);
 	if ([path.parse(directory).root, repoRoot, path.resolve(repoRoot, "..")].includes(directory))
 		fail("unsafe_output", `${subject} is too broad.`);
 	assertNoSymlinkComponents(directory, fail, subject);
@@ -49,7 +64,7 @@ export function inspectOutputDirectory(value, { repoRoot, force, subject, marker
  * renaming is what keeps a partial tree from ever being visible at the
  * destination.
  */
-export function publishOutputDirectory(staging, output) {
+export function publishOutputDirectory(staging: string, output: OutputInspection): void {
 	if (output.force) rmSync(output.directory, { recursive: true, force: true });
 	renameSync(staging, output.directory);
 }
