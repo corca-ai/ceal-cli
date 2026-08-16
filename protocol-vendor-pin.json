@@ -8,8 +8,8 @@
 		"tree": "e20497d4ebe25a675012c676448e14eea4da891c"
 	},
 	"test_support": {
-		"source_path": "scripts/test-support/base64url.ts",
-		"vendored_path": "scripts/test-support/base64url.ts",
+		"source_path": "scripts/test-support/base64url.mjs",
+		"vendored_path": "scripts/test-support/base64url.mjs",
 		"blob": "76ed97276986f2416e7bed997f774b6b14fe8951"
 	},
 	"shipped": {

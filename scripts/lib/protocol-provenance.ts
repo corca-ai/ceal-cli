@@ -2,7 +2,7 @@
 // artifact the lock binds.
 //
 // It lives here because two lanes ask it at two different times and neither may
-// answer differently. `worker-acceptance-packet.mjs` asks it of an INSTALLED
+// answer differently. `worker-acceptance-packet.ts` asks it of an INSTALLED
 // release, which is after signing and publishing by definition; the asset
 // merge asks it of the manifests it is about to hand to the signing job, which
 // is the only point where a disagreement can still be fixed without burning a

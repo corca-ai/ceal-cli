@@ -91,8 +91,8 @@ test("the vendored protocol copy matches its recorded Gateway source", () => {
 test("the frozen Protocol suite's out-of-subtree helper matches its recorded owner blob", () => {
 	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
 	assert.deepEqual(pin.test_support, {
-		source_path: "scripts/test-support/base64url.ts",
-		vendored_path: "scripts/test-support/base64url.ts",
+		source_path: "scripts/test-support/base64url.mjs",
+		vendored_path: "scripts/test-support/base64url.mjs",
 		blob: "76ed97276986f2416e7bed997f774b6b14fe8951",
 	});
 	const observed = execFileSync("git", ["hash-object", pin.test_support.vendored_path], { cwd: ROOT, encoding: "utf8" }).trim();

@@ -23,7 +23,7 @@ export function platformProofSkip(proof: string): false | string {
  *
  * Use this instead of an inline `process.platform`/`process.arch` skip so the
  * gap is named in the output and the strict-runner escape hatch stays in one
- * place. `test/contract/repo-gates.test.mjs` enforces that.
+ * place. `test/contract/repo-gates.test.ts` enforces that.
  */
 export function platformProofTest(proof: string, name: string, fn: TestFn): void {
 	const skip = platformProofSkip(proof);

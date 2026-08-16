@@ -1,4 +1,19 @@
 {
 	"schema_version": "ceal.no_legacy_mjs.v1",
-	"files": []
+	"files": [
+		"packages/ceal-protocol/test/conformance.test.mjs",
+		"packages/ceal-protocol/test/device-enrollment.test.mjs",
+		"packages/ceal-protocol/test/enrollment.test.mjs",
+		"packages/ceal-protocol/test/gateway-proof-claims.test.mjs",
+		"packages/ceal-protocol/test/gateway-write-identity.test.mjs",
+		"packages/ceal-protocol/test/leased-consumer-capability-catalog.test.mjs",
+		"packages/ceal-protocol/test/leased-consumer-control.test.mjs",
+		"packages/ceal-protocol/test/leased-consumer-disposition-control.test.mjs",
+		"packages/ceal-protocol/test/leased-consumer-file-upload.test.mjs",
+		"packages/ceal-protocol/test/personal-client-session.test.mjs",
+		"packages/ceal-protocol/test/protocol-negotiation.test.mjs",
+		"packages/ceal-protocol/test/result-materialization.test.mjs",
+		"packages/ceal-protocol/test/wire-boundary.test.mjs",
+		"scripts/test-support/base64url.mjs"
+	]
 }

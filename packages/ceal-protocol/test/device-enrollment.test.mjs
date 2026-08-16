@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { generateKeyPairSync, sign, verify } from "node:crypto";
 import test from "node:test";
-import { nonCanonicalBase64urlAlias } from "../../../scripts/test-support/base64url.ts";
+import { nonCanonicalBase64urlAlias } from "../../../scripts/test-support/base64url.mjs";
 import {
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,

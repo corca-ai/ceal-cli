@@ -11,13 +11,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
 const WORKER_CONTRACT_TESTS = [
-	"packages/ceal-protocol/test/conformance.test.ts",
-	"packages/ceal-protocol/test/device-enrollment.test.ts",
-	"packages/ceal-protocol/test/enrollment.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-control.test.ts",
-	"packages/ceal-protocol/test/personal-client-session.test.ts",
-	"packages/ceal-protocol/test/protocol-negotiation.test.ts",
-	"packages/ceal-protocol/test/wire-boundary.test.ts",
+	"packages/ceal-protocol/test/conformance.test.mjs",
+	"packages/ceal-protocol/test/device-enrollment.test.mjs",
+	"packages/ceal-protocol/test/enrollment.test.mjs",
+	"packages/ceal-protocol/test/leased-consumer-control.test.mjs",
+	"packages/ceal-protocol/test/personal-client-session.test.mjs",
+	"packages/ceal-protocol/test/protocol-negotiation.test.mjs",
+	"packages/ceal-protocol/test/wire-boundary.test.mjs",
 	"test/check-docs-graph.test.ts",
 	"test/contract/gateway-handoff-bootstrap.test.ts",
 	"test/contract/gateway-leased-consumer-call-handoff.test.ts",
@@ -500,7 +500,8 @@ test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit 
 	const packageJson = JSON.parse(read("package.json"));
 	assert.equal(packageJson.devDependencies["@typescript/native"], "npm:typescript@7.0.2");
 	assert.equal(packageJson.devDependencies.typescript, "npm:@typescript/typescript6@6.0.2");
-	for (const script of ["lint:types:packages", "lint:types:tools", "lint:types:tests"]) assert.match(packageJson.scripts[script], /\btsc\b/u);
+	for (const script of ["lint:types:packages", "lint:types:tools", "lint:types:tests"])
+		assert.match(packageJson.scripts[script], /\btsc\b/u);
 	assert.match(packageJson.scripts["lint:types:ts6"], /\btsc6\b/u);
 	for (const script of ["lint:types", "lint:types:packages", "lint:types:tools", "lint:types:tests"]) {
 		assert.doesNotMatch(packageJson.scripts[script], /node_modules[\\/]\.bin/u);

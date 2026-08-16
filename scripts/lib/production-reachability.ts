@@ -322,7 +322,7 @@ function declaredTestOnlyFiles(repoRoot: string): Set<string> {
 	try {
 		const pin = JSON.parse(readFileSync(path.join(repoRoot, "protocol-vendor-pin.json"), "utf8"));
 		const declared = pin?.test_support?.vendored_path;
-		if (declared !== "scripts/test-support/base64url.ts") return new Set();
+		if (declared !== "scripts/test-support/base64url.mjs") return new Set();
 		return new Set([path.join(repoRoot, declared)]);
 	} catch {
 		return new Set();

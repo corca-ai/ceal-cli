@@ -28,7 +28,7 @@ over the tree that held the two guards slice 2 found by hand.
 ## Acceptance
 
 **Deleting any guard call must turn something red.** That is the whole goal in one
-sentence, and it is testable *in a test* — `worker-release-inputs.test.mjs` does it
+sentence, and it is testable *in a test* — `worker-release-inputs.test.ts` does it
 for the protocol pin by reaching the guard, not by deleting one for real, and the
 same shape works for the rest. A slice that ends with a
 guard still only pinned by a regex has not finished.
@@ -290,5 +290,5 @@ What it does not cover, stated so a green run is not read as more than it is: on
 `scripts/`, only static imports — a dynamic `import()` is deliberately not an edge,
 because treating an unresolvable specifier as one would widen the graph until
 nothing could be unreachable — and a `@testOnly` export is exempt by declaration.
-That exemption is checked rather than trusted: `repo-gates.test.mjs` fails when a
+That exemption is checked rather than trusted: `repo-gates.test.ts` fails when a
 tagged export is reached by no suite.

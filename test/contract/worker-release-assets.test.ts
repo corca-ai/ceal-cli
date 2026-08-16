@@ -583,7 +583,7 @@ test("merge refuses a declared proof and shipment Protocol divergence before rea
 
 test("worker release workflow signs only the worker inventory from the locked archive", () => {
 	const workflow = readFileSync(path.join(REPO_ROOT, ".github/workflows/ceal-release.yml"), "utf8");
-	// The tag trigger is asserted against parsed YAML in repo-gates.test.mjs; the
+	// The tag trigger is asserted against parsed YAML in repo-gates.test.ts; the
 	// raw-text form that used to sit here pinned six-space indentation and the
 	// choice of quote character too.
 	assert.match(workflow, /gateway-protocol-handoff-lock\.json/u);

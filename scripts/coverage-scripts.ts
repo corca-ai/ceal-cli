@@ -21,7 +21,7 @@
 //      which is the shape that burned `ceal-v0.67.0`. macOS runs the tiers
 //      plainly, and says which measurement it is not carrying.
 //   2. `test:contract` and `test:release` have to keep starting with
-//      `node --test`; `repo-gates.test.mjs` reads their file inventories, and a
+//      `node --test`; `repo-gates.test.ts` reads their file inventories, and a
 //      `c8` prefix would have to be parsed around.
 //
 // Coverage is collected across BOTH tiers because it takes both: the contract
@@ -41,7 +41,7 @@ const TIERS = "test:tiers";
 // Where the floor is enforced. It has to include `PLATFORM_PROOF_PLATFORM` from
 // `test/platform-proof.ts` — the host carrying the full proof set, and so the
 // one whose numbers must never be allowed to drop unnoticed — and
-// `repo-gates.test.mjs` asserts that it does.
+// `repo-gates.test.ts` asserts that it does.
 //
 // `linux-arm64` is here as well, because the maintainer host is arm64 and a gate
 // no maintainer can run before pushing is one CI discovers for them.

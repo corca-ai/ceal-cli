@@ -275,7 +275,7 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 // It matters because the shape gate could not see the difference. Deleting the
 // one invocation in `resolveWorkerReleaseDevelopmentInputs` -- which disarms
 // release-input resolution, packing, the native build, and the workflow's own
-// compose step -- left `repo-gates.test.mjs` green, because the regex still
+// compose step -- left `repo-gates.test.ts` green, because the regex still
 // matched the call inside the error-translating wrapper that nothing then called.
 test("the release chokepoint reaches the protocol pin guard before it reads any argument", async (context: TestContext) => {
 	const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-pin-chokepoint-")));
@@ -317,7 +317,7 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 	);
 	// The scratch tree is not a git checkout, so the guard cannot establish the
 	// vendored identity — which is a guard verdict, and the point. The divergence
-	// verdicts themselves belong to protocol-vendor-pin.test.mjs; this asserts only
+	// verdicts themselves belong to protocol-vendor-pin.test.ts; this asserts only
 	// that a release path cannot get past the guard without one.
 	assert.match(
 		code,

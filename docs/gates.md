@@ -44,7 +44,7 @@ Gateway-owned.
 There is no third suite any more. `test:legacy-compatibility` audited the frozen
 `cealctl` and dual-release material, and that material was deleted once
 `corca-ai/ceal` had moved past the copies kept here — so every test file now
-belongs to `test:contract` or `test:release`, and `repo-gates.test.mjs` fails if
+belongs to `test:contract` or `test:release`, and `repo-gates.test.ts` fails if
 one belongs to neither.
 
 The signed Gateway Protocol source materializer is an explicit operator entry:
@@ -164,7 +164,7 @@ race that loses is silent:
 - The same file forbids any other fixture under `test/` from invoking
   `npm run build` itself, because a new one that did would reintroduce exactly
   this race and pass its own tests.
-- `repo-gates.test.mjs` binds the root build and coverage routes, while
+- `repo-gates.test.ts` binds the root build and coverage routes, while
   `repo-build.test.mjs` proves standalone package behavior tests have no
   checkout-dist hooks. Keeping those assertions at both consumer boundaries
   prevents a behavior lane from silently reacquiring artifact authority.
@@ -211,10 +211,10 @@ the Git index, and the working tree:
   `gateway-protocol-handoff-lock.json` binds a release to consume.
 
 The frozen package suite is part of `test:contract`. One owner test imports
-`scripts/test-support/base64url.ts`, which sits outside the pinned package
+`scripts/test-support/base64url.mjs`, which sits outside the pinned package
 subtree in the Gateway repository. This repository copies that test-only helper
 at the same path; `protocol-vendor-pin.json` records its owner blob and
-`protocol-vendor-pin.test.mjs` hashes the local file against it. The helper is
+`protocol-vendor-pin.test.ts` hashes the local file against it. The helper is
 not production or release input, but leaving it unbound would make the exact
 frozen suite silently depend on a second freehand implementation.
 
@@ -264,7 +264,7 @@ the pin and shipment lock converge.
 The refusal does not depend on which test command ran. `worker-release-inputs.mjs`
 asserts shippability inside `resolveWorkerReleaseDevelopmentInputs`, the single
 chokepoint every release, packing, and native-artifact path funnels through, and
-`worker-acceptance-packet.mjs` asserts it before it resolves the installed binary
+`worker-acceptance-packet.ts` asserts it before it resolves the installed binary
 — a packet describing a real install is the most convincing possible evidence for
 bytes the lock does not bind, so the refusal comes before anything is measured.
 
@@ -278,17 +278,17 @@ own compose step — left every gate green, because the regex still matched the
 call inside `assertShippableProtocolVendorPinFor`, the error-translating wrapper
 that nothing then called. Reproduced on 2026-08-08.
 
-`worker-release-inputs.test.mjs` now falsifies it behaviourally. A scratch
+`worker-release-inputs.test.ts` now falsifies it behaviourally. A scratch
 `repoRoot` reaches the guard and fails for a pin reason; with the call removed the
 same input walks past it and fails on the next argument check instead. The
 acceptance suite has the sibling proof: its deliberately divergent scratch pin
 must fail before an absent binary is resolved. Two distinguishable outcomes are
 all a falsification needs. The divergence verdicts stay in
-`protocol-vendor-pin.test.mjs`, which owns them properly, while the shared
+`protocol-vendor-pin.test.ts`, which owns them properly, while the shared
 converged fixture owns the repeated contract setup.
 
-The source-shape gate in `repo-gates.test.mjs` stays, because it still catches the
-easy case in `worker-acceptance-packet.mjs`. Do not treat it as the guard's
+The source-shape gate in `repo-gates.test.ts` stays, because it still catches the
+easy case in `worker-acceptance-packet.ts`. Do not treat it as the guard's
 protection: it reads text, and text cannot tell a live call from a dead one.
 
 Two things then expire the declaration, and it is worth naming them exactly
@@ -386,7 +386,7 @@ node_modules/c8/lib/parse-args.js`. This paragraph used to state a single
 the moment nobody can re-derive it.
 
 `check-coverage: true` is what makes a breach an exit code rather than a printed
-number, and `repo-gates.test.mjs` asserts the properties — that each floor is
+number, and `repo-gates.test.ts` asserts the properties — that each floor is
 declared, plus `all` and `check-coverage` — so the gate cannot be quietly
 softened into a report. It asserts the floors are *present*, not what they equal:
 a test holding a second copy of the numbers cannot tell a right floor from a
@@ -407,7 +407,7 @@ Now the first reads as `0` on every run.
 
 `npm run coverage:scripts` is the front door and `.c8rc.scripts.json` the config.
 The three properties that carry the other two targets carry this one — `all`, the
-floor, and `check-coverage` — and `repo-gates.test.mjs` asserts each, plus the
+floor, and `check-coverage` — and `repo-gates.test.ts` asserts each, plus the
 `include`/`src`/`extension` scoping and the single named exclusion.
 
 **It needs both tiers, so it belongs to `npm run check` and not to
@@ -426,7 +426,7 @@ floor would fail that leg for skipping what it is right to skip, which is the
 shape that burned `ceal-v0.67.0`. So macOS runs the tiers plainly and prints the
 measurement it is not carrying. The second reason is mechanical: `test:contract`
 and `test:release` must keep starting with `node --test` because
-`repo-gates.test.mjs` reads their file inventories, so the wrapper cannot sit in
+`repo-gates.test.ts` reads their file inventories, so the wrapper cannot sit in
 front of them.
 
 The pre-push hook admits only one gate per repository at a time. Build output,
@@ -446,13 +446,13 @@ a changed cwd would therefore leave this gate green while measuring nothing, and
 the printed report would not look wrong — the exact failure the `src`/`dist`
 remap notes above call the worst of them. After a passing measured run the runner
 reads `coverage/scripts/coverage-summary.json` and fails unless it names every
-`.mjs` the config claims. `repo-gates.test.mjs` asserts that check is both
+`.mjs` the config claims. `repo-gates.test.ts` asserts that check is both
 declared and called.
 
 **Where the floor applies.** It is enforced on `linux-arm64` and `linux-x64`.
 arm64 is there because it is the maintainer host, and a gate no maintainer can
 run before pushing is one CI discovers for them; x64 is there because it carries
-every platform proof, and `repo-gates.test.mjs` asserts `PLATFORM_PROOF_PLATFORM`
+every platform proof, and `repo-gates.test.ts` asserts `PLATFORM_PROOF_PLATFORM`
 stays in that list. The floor is the lower reading of the two, and it lives in
 `.c8rc.scripts.json` alone — `npm run coverage:scripts` on each is how to move
 it.
@@ -471,9 +471,9 @@ do not re-derive one from the other.
 **What the report already says, and one thing it does not.** `lint-shell.mjs` at
 0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not
 invoke. `check-dup-ratchet.mjs` is hook-only in the same way and yet reads about
-49%, because `repo-gates.test.mjs:730` runs the hook itself; hook-only does not
+49%, because `repo-gates.test.ts:730` runs the hook itself; hook-only does not
 imply zero here. And `install-git-hooks.mjs` at 0% is not a reachability finding
-at all: `repo-gates.test.mjs` runs it, but against a throwaway clone, so the
+at all: `repo-gates.test.ts` runs it, but against a throwaway clone, so the
 coverage lands under a temp path that remaps to nothing. A zero is therefore a
 question, not a verdict — the reachability claim needs the same positive control
 any absence claim needs.
@@ -606,7 +606,7 @@ as a delete-list would have deleted working code. What closed them:
   [release-guard-reachability.md](release-guard-reachability.md) records those
   three, because two of them were live defects rather than tidiness.
 
-`@testOnly` is a claim the tool obeys, so it is checked: `repo-gates.test.mjs`
+`@testOnly` is a claim the tool obeys, so it is checked: `repo-gates.test.ts`
 fails when a tagged export is reached by no suite. Without that, tagging a symbol
 nothing uses silences `knip` exactly as well as tagging one a suite needs.
 
