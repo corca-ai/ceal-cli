@@ -30,7 +30,7 @@
 		"lint:types:tools": "tsc -p tsconfig.tools.json --pretty false",
 		"lint:types:tests": "tsc -p tsconfig.tests.json --pretty false",
 		"lint:types": "npm run lint:types:packages && npm run lint:types:tools && npm run lint:types:tests",
-		"lint:types:ts6": "tsc6 -p tsconfig.typecheck.json --pretty false && tsc6 -p tsconfig.tools.json --pretty false && tsc6 -p tsconfig.tests.json --pretty false",
+		"lint:types:ts6": "tsc6 -p tsconfig.typecheck.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tools.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tests.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tests-typecheck-ts6.tsbuildinfo",
 		"lint:types:watch": "tsc -p tsconfig.typecheck.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-typecheck-watch.tsbuildinfo",
 		"lint:types:tools:watch": "tsc -p tsconfig.tools.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-watch.tsbuildinfo",
 		"lint:no-legacy-mjs": "node scripts/check-no-legacy-mjs.ts",

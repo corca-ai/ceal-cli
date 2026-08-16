@@ -60,16 +60,35 @@ test("terminating and watch typecheck modes use distinct cache writers", () => {
 	const testsTerminating = manifest.scripts["lint:types:tests"];
 	const packageWatch = manifest.scripts["lint:types:watch"];
 	const toolsWatch = manifest.scripts["lint:types:tools:watch"];
+	const ts6Terminating = manifest.scripts["lint:types:ts6"];
 	const terminatingCache = typecheckConfig.compilerOptions.tsBuildInfoFile;
 	const toolsTerminatingCache = toolsTypecheckConfig.compilerOptions.tsBuildInfoFile;
 	const testsTerminatingCache = testsTypecheckConfig.compilerOptions.tsBuildInfoFile;
 	const packageWatchCache = packageWatch.match(/--tsBuildInfoFile\s+(\S+)/u)?.[1];
 	const toolsWatchCache = toolsWatch.match(/--tsBuildInfoFile\s+(\S+)/u)?.[1];
+	const ts6CacheEntries = [
+		...ts6Terminating.matchAll(/tsc6 -p (tsconfig\.(?:typecheck|tools|tests)\.json) --pretty false --tsBuildInfoFile (\S+)/gu),
+	].map(([, config, cache]) => ({ config, cache }));
 	assert.equal(packageTerminating, "tsc -p tsconfig.typecheck.json --pretty false");
 	assert.equal(toolsTerminating, "tsc -p tsconfig.tools.json --pretty false");
 	assert.equal(testsTerminating, "tsc -p tsconfig.tests.json --pretty false");
+	assert.equal(
+		ts6Terminating,
+		"tsc6 -p tsconfig.typecheck.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tools.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tests.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tests-typecheck-ts6.tsbuildinfo",
+	);
 	assert.equal(packageWatchCache, "node_modules/.cache/ceal-typecheck-watch.tsbuildinfo");
 	assert.equal(toolsWatchCache, "node_modules/.cache/ceal-tools-typecheck-watch.tsbuildinfo");
+	assert.deepEqual(ts6CacheEntries, [
+		{ config: "tsconfig.typecheck.json", cache: "node_modules/.cache/ceal-typecheck-ts6.tsbuildinfo" },
+		{ config: "tsconfig.tools.json", cache: "node_modules/.cache/ceal-tools-typecheck-ts6.tsbuildinfo" },
+		{ config: "tsconfig.tests.json", cache: "node_modules/.cache/ceal-tests-typecheck-ts6.tsbuildinfo" },
+	]);
+	const ts6Caches = ts6CacheEntries.map(({ cache }) => cache);
+	assert.equal(new Set(ts6Caches).size, 3);
+	assert.equal(ts6Caches.includes(terminatingCache.replace(/^\.\//u, "")), false);
+	assert.equal(ts6Caches.includes(toolsTerminatingCache.replace(/^\.\//u, "")), false);
+	assert.equal(ts6Caches.includes(testsTerminatingCache.replace(/^\.\//u, "")), false);
+	assert.equal(ts6Terminating.includes("--watch"), false);
 	assert.notEqual(terminatingCache, packageWatchCache);
 	assert.notEqual(toolsTerminatingCache, toolsWatchCache);
 	assert.notEqual(terminatingCache, toolsTerminatingCache);
@@ -80,6 +99,7 @@ test("terminating and watch typecheck modes use distinct cache writers", () => {
 	assert.match(testsTerminatingCache, /^\.\/node_modules\/[.]cache\//u);
 	assert.match(packageWatchCache, /^node_modules\/[.]cache\//u);
 	assert.match(toolsWatchCache, /^node_modules\/[.]cache\//u);
+	for (const cache of ts6Caches) assert.match(cache, /^node_modules\/[.]cache\//u);
 });
 
 test("test typecheck is strict, source-only, and cached separately", () => {
