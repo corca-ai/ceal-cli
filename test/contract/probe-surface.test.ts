@@ -7,6 +7,8 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "../../packages/ceal-worker-cli/dist/agent-guide.js";
+import { CEAL_SUBCOMMANDS } from "../../packages/ceal-worker-cli/dist/subcommands.js";
+import { isAgentHostEnvironmentVariables, isSplitSubcommandResult, lookupProbeBinary } from "../../scripts/probe-surface-contract.ts";
 
 // Contract tier, not release: this needs only `npm run build`, and the guard it
 // proves exists to stop a destructive probe — so the pre-push hook is exactly
@@ -220,4 +222,23 @@ test("an unknown binary or command is refused before spawning", () => {
 		assert.equal(result.status, 2, args.join(" "));
 		assert.equal(result.stdout, "");
 	}
+});
+
+test("probe declaration contracts reject path escapes and malformed routes", () => {
+	assert.equal(isAgentHostEnvironmentVariables(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES), true);
+	for (const variables of [["../outside"], ["A/B"], [""], ["SAFE", "SAFE"]]) {
+		assert.equal(isAgentHostEnvironmentVariables(variables), false, variables.join(","));
+	}
+
+	const valid = CEAL_SUBCOMMANDS.find((entry) => entry.parent === "guide" && entry.route[0] === "status");
+	assert.ok(valid);
+	assert.equal(isSplitSubcommandResult({ subcommand: valid, rest: [] }, "guide"), true);
+	assert.equal(isSplitSubcommandResult({ subcommand: { ...valid, parent: "session" }, rest: [] }, "guide"), false);
+	assert.equal(isSplitSubcommandResult({ subcommand: { ...valid, route: [] }, rest: [] }, "guide"), false);
+	assert.equal(isSplitSubcommandResult({ subcommand: { ...valid, route: ["../outside"] }, rest: [] }, "guide"), false);
+	assert.equal(isSplitSubcommandResult({ subcommand: { ...valid, route: ["bad/route"] }, rest: [] }, "guide"), false);
+	const binaries = { ceal: "primary", second: "secondary" };
+	assert.equal(lookupProbeBinary(binaries, "ceal"), "primary");
+	assert.equal(lookupProbeBinary(binaries, "second"), "secondary");
+	for (const key of ["unknown", "toString", "__proto__"]) assert.equal(lookupProbeBinary(binaries, key), undefined, key);
 });

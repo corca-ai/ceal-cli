@@ -33,6 +33,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { exitWith } from "./lib/exit-with.ts";
+import { isAgentHostEnvironmentVariables, isProbeModule, lookupProbeBinary, resolveProbeRoute } from "./probe-surface-contract.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // `cealctl` was a second entry here until its source left this repository. The
@@ -41,8 +42,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BINARIES = {
 	ceal: {
 		packageDir: "ceal-worker-cli",
-		commands: "CEAL_COMMANDS",
-		splitSubcommandRoute: "splitSubcommandRoute",
 		// The agent-host table declares which environment variables can redirect a
 		// host's state root, and this guard is the caller that must neutralize all
 		// of them. It used to name two of them by hand, which is the copy the
@@ -53,7 +52,7 @@ const BINARIES = {
 	},
 };
 
-function fail(message) {
+function fail(message: string): never {
 	exitWith("probe-surface", message, 2);
 }
 
@@ -63,6 +62,7 @@ const allowed = new Set(["read_only"]);
 // HOME cannot make safe, so it must not widen just because a new route picked up
 // a new effect string.
 const NEVER_ALLOWED = new Set(["remote_write"]);
+
 while (argv[0] === "--allow-effect") {
 	const effect = argv[1];
 	if (!effect) fail("--allow-effect needs an effect name");
@@ -73,31 +73,33 @@ while (argv[0] === "--allow-effect") {
 }
 
 const [binary, command, ...tail] = argv;
-const target = BINARIES[binary];
+const target = lookupProbeBinary(BINARIES, binary);
 if (!target) fail(`first argument must be one of: ${Object.keys(BINARIES).join(", ")}`);
 if (!command) fail(`usage: probe-surface.mjs [--allow-effect <effect>] ${binary} <command> [route/options ...]`);
 
 const dist = path.join(ROOT, "packages", target.packageDir, "dist", "index.js");
-const module = await import(dist).catch(() => fail(`build first: ${dist} is missing`));
-const agentHostVariables = module[target.agentHosts];
+const importedModule: unknown = await import(dist).catch(() => fail(`build first: ${dist} is missing`));
+if (!isProbeModule(importedModule)) fail(`${dist} does not export a valid probe declaration module`);
+const module = importedModule;
+const agentHostVariables = module.CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES;
 // Refuse rather than probe with nothing pinned: an empty set would mean every
 // inherited host variable still reaches the operator's real state, which is the
 // failure this guard exists to prevent.
-if (!Array.isArray(agentHostVariables) || agentHostVariables.length === 0) {
+if (!isAgentHostEnvironmentVariables(agentHostVariables)) {
 	fail(`${dist} declares no ${target.agentHosts} to neutralize`);
 }
-const commands = module[target.commands];
-const splitSubcommandRoute = module[target.splitSubcommandRoute];
-if (typeof splitSubcommandRoute !== "function") fail(`${dist} declares no ${target.splitSubcommandRoute} route resolver`);
+const commands = module.CEAL_COMMANDS;
 const definition = commands.find((entry) => entry.name === command);
 if (!definition) fail(`${binary} has no command '${command}'`);
 
 // Use the same resolver as dispatch. This includes a parent's declared default
 // leaf: bare `guide` and `session` are their read-only status routes, not the
 // wider parent effect that summarizes every child in the family.
-const route = splitSubcommandRoute(command, tail).subcommand ?? definition;
+const resolvedRoute = resolveProbeRoute(module, definition.name, tail);
+if (!resolvedRoute) fail("built module returned an invalid subcommand route");
+const route = resolvedRoute.subcommand ?? definition;
 
-const name = route.route ? `${command} ${route.route.join(" ")}` : command;
+const name = "route" in route && route.route.length > 0 ? `${command} ${route.route.join(" ")}` : command;
 const isHelp = tail.some((token) => token === "--help" || token === "-h");
 if (!isHelp && !allowed.has(route.effect)) {
 	// The two refusals differ in what they offer, because offering a hatch this
@@ -111,7 +113,7 @@ if (!isHelp && !allowed.has(route.effect)) {
 			"  throwaway HOME anyway, or run the installed binary directly and deliberately.";
 	fail(`refusing '${binary} ${name}': declared effect is ${route.effect}, not read_only.\n${remedy}`);
 }
-if (!isHelp && route.lifecycle === "until_interrupted") {
+if (!isHelp && "lifecycle" in route && route.lifecycle === "until_interrupted") {
 	fail(
 		`refusing '${binary} ${name}': declared lifecycle is until_interrupted, so a synchronous surface probe would not settle.\n` +
 			"  Inspect its help through this guard, or run the installed binary directly and stop it deliberately.",
