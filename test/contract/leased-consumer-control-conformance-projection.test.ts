@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
 	decodeCealLeasedConsumerDispositionControlRequest,
@@ -9,7 +12,10 @@ import { openLeasedConsumerControlSession } from "../../packages/ceal-worker-cli
 import {
 	controlSessionContractFromVerifiedConformance,
 	projectVerifiedControlConformanceRoutes,
+	readControlSessionContract,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
+
+const ROOT = path.resolve(import.meta.dirname, "../..");
 
 const REQUEST_SCHEMA = "ceal.leased_consumer_capability_control_request.v5";
 const RESPONSE_SCHEMA = "ceal.leased_consumer_capability_control_response.v5";
@@ -20,7 +26,29 @@ const HANDOFF = {
 	archive_sha256: "c".repeat(64),
 };
 
-function operation(operation, route) {
+type JsonRecord = Record<string, unknown>;
+type Decoded = JsonRecord & { operation: string };
+type Operation = JsonRecord & {
+	operation: string;
+	path: string;
+	request: JsonRecord & { schema_version: string; operation: string };
+	response: JsonRecord & { schema_version: string; operation: string };
+};
+
+function isRecord(value: unknown): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asRecord(value: unknown): JsonRecord {
+	if (!isRecord(value)) throw new Error("invalid_decoder_input");
+	return value;
+}
+function asDecoded(value: unknown): Decoded {
+	const record = asRecord(value);
+	if (typeof record.operation !== "string") throw new Error("invalid_decoder_input");
+	return { ...record, operation: record.operation };
+}
+
+function operation(operation: string, route: string): Operation {
 	return {
 		operation,
 		path: route,
@@ -30,7 +58,10 @@ function operation(operation, route) {
 }
 
 function conformanceBytes(
-	operations = [operation("call", "/api/ceal/agent/v1/call"), operation("materialization", "/api/ceal/agent/v1/control/materialization")],
+	operations: Operation[] = [
+		operation("call", "/api/ceal/agent/v1/call"),
+		operation("materialization", "/api/ceal/agent/v1/control/materialization"),
+	],
 ) {
 	return Buffer.from(
 		JSON.stringify({
@@ -41,17 +72,19 @@ function conformanceBytes(
 }
 
 const decoders = {
-	decodeRequest(value) {
-		assert.deepEqual(Object.keys(value).sort(), ["input", "operation", "schema_version"]);
-		assert.equal(value.schema_version, REQUEST_SCHEMA);
-		assert.deepEqual(value.input, { fixture: value.operation });
-		return value;
+	decodeRequest(value: unknown) {
+		const record = asDecoded(value);
+		assert.deepEqual(Object.keys(record).sort(), ["input", "operation", "schema_version"]);
+		assert.equal(record.schema_version, REQUEST_SCHEMA);
+		assert.deepEqual(record.input, { fixture: record.operation });
+		return record;
 	},
-	decodeResponse(value) {
-		assert.deepEqual(Object.keys(value).sort(), ["operation", "result", "schema_version"]);
-		assert.equal(value.schema_version, RESPONSE_SCHEMA);
-		assert.deepEqual(value.result, { fixture: value.operation });
-		return value;
+	decodeResponse(value: unknown) {
+		const record = asDecoded(value);
+		assert.deepEqual(Object.keys(record).sort(), ["operation", "result", "schema_version"]);
+		assert.equal(record.schema_version, RESPONSE_SCHEMA);
+		assert.deepEqual(record.result, { fixture: record.operation });
+		return record;
 	},
 };
 
@@ -61,7 +94,9 @@ test("verified control conformance is the sole operation and fixed-route authori
 		call: "/api/ceal/agent/v1/call",
 		materialization: "/api/ceal/agent/v1/control/materialization",
 	});
-	const base = { gateway: { transport: "unix_socket", routes: { call: "/api/ceal/agent/v1/call" } } };
+	const base: JsonRecord & { gateway: JsonRecord; agent_ipc?: JsonRecord } = {
+		gateway: { transport: "unix_socket", routes: { call: "/api/ceal/agent/v1/call" } },
+	};
 	base.agent_ipc = {};
 	const projected = controlSessionContractFromVerifiedConformance(base, bytes, decoders, { materialize: true, handoff: HANDOFF });
 	assert.deepEqual(projected.gateway.routes, {
@@ -73,9 +108,9 @@ test("verified control conformance is the sole operation and fixed-route authori
 
 test("route omission and route drift from the verified sidecar are refused", () => {
 	const bytes = conformanceBytes();
-	const omitted = { gateway: { routes: { call: "/api/ceal/agent/v1/call" } } };
+	const omitted: JsonRecord = { gateway: { routes: { call: "/api/ceal/agent/v1/call" } } };
 	assert.throws(() => controlSessionContractFromVerifiedConformance(omitted, bytes, decoders), /invalid_control_session_contract/u);
-	const drifted = {
+	const drifted: JsonRecord = {
 		gateway: {
 			routes: {
 				call: "/api/ceal/agent/v1/call",
@@ -84,10 +119,30 @@ test("route omission and route drift from the verified sidecar are refused", () 
 		},
 	};
 	assert.throws(() => controlSessionContractFromVerifiedConformance(drifted, bytes, decoders), /invalid_control_session_contract/u);
+	assert.throws(
+		() => controlSessionContractFromVerifiedConformance({ gateway: { routes: {} } }, bytes, decoders, { materialize: true }),
+		/invalid_control_session_contract/u,
+	);
+	assert.throws(() => projectVerifiedControlConformanceRoutes(bytes, undefined), /invalid_control_conformance/u);
+	assert.throws(() => projectVerifiedControlConformanceRoutes(bytes, null), /invalid_control_conformance/u);
+});
+
+test("control-session lock identity is validated before route projection is accepted", (t) => {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-control-session-lock-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const contractPath = path.join(root, "leased-consumer-control-session-contract.json");
+	writeFileSync(contractPath, readFileSync(path.join(ROOT, "packages/ceal-worker-cli/leased-consumer-control-session-contract.json")));
+	const lockPath = path.join(root, "gateway-protocol-handoff-lock.json");
+	const malformed = readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8").replace(
+		/"commit": "[a-f0-9]{40}"/u,
+		'"commit": "not-a-commit"',
+	);
+	writeFileSync(lockPath, malformed);
+	assert.throws(() => readControlSessionContract(contractPath, { repoRoot: root }), /invalid_control_session_contract/u);
 });
 
 test("a changed reviewed archive identity cannot reuse an old projected contract", () => {
-	const base = { agent_ipc: {}, gateway: { routes: {} }, gateway_protocol_handoff: {} };
+	const base: JsonRecord = { agent_ipc: {}, gateway: { routes: {} }, gateway_protocol_handoff: {} };
 	const bytes = conformanceBytes();
 	const first = controlSessionContractFromVerifiedConformance(base, bytes, decoders, { materialize: true, handoff: HANDOFF });
 	const changed = controlSessionContractFromVerifiedConformance(base, bytes, decoders, {
@@ -179,7 +234,7 @@ test("the signed v6 disposition decoders admit the exact materialization vector"
 });
 
 test("materialization forwarding keeps the protected session and signed fixed route", async () => {
-	const calls = [];
+	const calls: JsonRecord[] = [];
 	const session = await openLeasedConsumerControlSession({
 		readProtectedSession: async () =>
 			Buffer.from(
