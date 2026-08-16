@@ -312,8 +312,8 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	assert.match(clientPackage.scripts.coverage, /--import [.][.]\/[.][.]\/test\/source-loader[.]mjs/u);
 	assert.equal(clientPackage.scripts.pretest, undefined);
 	assert.equal(clientPackage.scripts.precoverage, undefined);
-	assert.equal(workerPackage.scripts.test, "node ../../test/run-source-tests.mjs test/*.test.mjs");
-	assert.equal(workerPackage.scripts.coverage, "c8 node ../../test/run-source-tests.mjs test/*.test.mjs");
+	assert.equal(workerPackage.scripts.test, "node ../../test/run-source-tests.mjs test/*.test.mjs test/*.test.ts");
+	assert.equal(workerPackage.scripts.coverage, "c8 node ../../test/run-source-tests.mjs test/*.test.mjs test/*.test.ts");
 	assert.equal(workerPackage.scripts.pretest, undefined);
 	assert.equal(workerPackage.scripts.precoverage, undefined);
 	assertContractGateScriptShape(manifest.scripts);
@@ -943,7 +943,7 @@ test("every @testOnly export is actually reached by a suite", () => {
 	// regex that silently stopped matching would otherwise turn this test green.
 	assert.ok(tagged.length > 0, "no @testOnly exports found; either the tag is gone or this scan stopped matching");
 
-	const isSuite = (name) => name.endsWith(".test.mjs");
+	const isSuite = (name) => /[.]test[.](?:mjs|ts)$/u.test(name);
 	const suiteFiles = [...filesUnder("test", isSuite)];
 	for (const workspace of manifest.workspaces) suiteFiles.push(...filesUnder(path.join(workspace, "test"), isSuite));
 	const suites = suiteFiles.map((file) => read(file));

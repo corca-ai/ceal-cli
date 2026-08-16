@@ -27,9 +27,9 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"test": "node ../../test/run-source-tests.mjs test/*.test.mjs",
+		"test": "node ../../test/run-source-tests.mjs test/*.test.mjs test/*.test.ts",
 		"prepack": "npm run clean && npm run build",
-		"coverage": "c8 node ../../test/run-source-tests.mjs test/*.test.mjs"
+		"coverage": "c8 node ../../test/run-source-tests.mjs test/*.test.mjs test/*.test.ts"
 	},
 	"dependencies": {
 		"@corca-ai/ceal": "0.77.0",

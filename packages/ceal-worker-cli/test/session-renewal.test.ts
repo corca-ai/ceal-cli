@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { requireCealCallRenewalMode, requireCealSessionRenewalMode } from "../dist/session-renewal.js";
+import type { CealSessionRenewalMode } from "../src/session-renewal.ts";
 
 test("omitting session renewal mode fails before session or renewal work", () => {
 	let sessionReads = 0;
@@ -24,21 +25,21 @@ test("omitting session renewal mode fails before session or renewal work", () =>
 test("session renewal modes are explicit and deterministic", () => {
 	assert.equal(requireCealSessionRenewalMode("observe"), "observe");
 	assert.equal(requireCealSessionRenewalMode("renew"), "renew");
-	assert.throws(() => requireCealSessionRenewalMode("unexpected"), { name: "TypeError" });
+	assert.throws(() => Reflect.apply(requireCealSessionRenewalMode, undefined, ["unexpected"]), { name: "TypeError" });
 });
 
 test("capability call renewal rejects omission or observe before fake session or transport work", () => {
 	let sessionReads = 0;
 	let transportRequests = 0;
 	let sessionWrites = 0;
-	const attempt = (mode) => {
+	const attempt = (mode: CealSessionRenewalMode | undefined) => {
 		requireCealCallRenewalMode(mode);
 		sessionReads += 1;
 		transportRequests += 1;
 		sessionWrites += 1;
 	};
 
-	for (const mode of [undefined, "observe"]) {
+	for (const mode of [undefined, "observe"] satisfies readonly (CealSessionRenewalMode | undefined)[]) {
 		assert.throws(() => attempt(mode), { name: "TypeError", message: /explicit renew session mode/u });
 	}
 	assert.equal(sessionReads, 0);
