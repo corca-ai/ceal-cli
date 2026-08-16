@@ -3,20 +3,55 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "../dist/agent-audit.js";
 import {
 	inspectAgentAudit as inspectAgentAuditWithRuntime,
 	inspectAgentSessionEvents as inspectAgentSessionEventsWithRuntime,
 } from "../dist/agent-audit.js";
+import type { CealAgentHostOverrides } from "../dist/agent-guide.js";
+
+type AuditAdapter = CealAgentAuditState["adapters"][number];
+type AuditSession = NonNullable<AuditAdapter["sessions"]>[number];
+type AuditEvents = Exclude<NonNullable<AuditSession["events"]>, "unreadable">;
+type AuditRuntime = "claude" | "codex";
 
 const NOW = Date.parse("2026-07-24T12:00:00.000Z");
 const FIXED_MONOTONIC_CLOCK = Object.freeze({ monotonicNow: () => 0 });
 
-function inspectAgentAudit(home, overrides, now) {
+function inspectAgentAudit(home: string | undefined, overrides: CealAgentHostOverrides, now: number) {
 	return inspectAgentAuditWithRuntime(home, overrides, now, FIXED_MONOTONIC_CLOCK);
 }
 
-function inspectAgentSessionEvents(home, overrides, runtime, sessionRef) {
+function inspectAgentSessionEvents(home: string | undefined, overrides: CealAgentHostOverrides, runtime: string, sessionRef: string) {
 	return inspectAgentSessionEventsWithRuntime(home, overrides, runtime, sessionRef, FIXED_MONOTONIC_CLOCK);
+}
+
+function expectDefined<T>(value: T | null | undefined): T {
+	if (value === undefined || value === null) throw new Error("expected a defined fixture value");
+	return value;
+}
+
+function adapterFor(state: CealAgentAuditState, runtime: AuditRuntime): AuditAdapter {
+	return expectDefined(state.adapters.find((adapter) => adapter.runtime === runtime));
+}
+
+function sessionsOf(adapter: AuditAdapter): AuditSession[] {
+	return expectDefined(adapter.sessions);
+}
+
+function sessionAt(adapter: AuditAdapter, index = 0): AuditSession {
+	return expectDefined(sessionsOf(adapter)[index]);
+}
+
+function eventsOf(session: AuditSession): AuditEvents {
+	const events = session.events;
+	if (events === undefined || events === "unreadable") throw new Error("expected a scanned fixture session");
+	return events;
+}
+
+function scannedLookup(lookup: CealAgentSessionEventsLookup | null): AuditSession {
+	if (lookup === null || lookup.status !== "scanned") throw new Error("expected a scanned fixture lookup");
+	return expectDefined(lookup.session);
 }
 
 test("agent audit inventories Claude sessions without reading transcript content", () => {
@@ -30,21 +65,21 @@ test("agent audit inventories Claude sessions without reading transcript content
 
 		const state = inspectAgentAudit(home, {}, NOW);
 		assert.equal(state.schemaVersion, "ceal.agent_activity.v1");
-		const claude = state.adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(state, "claude");
 		assert.equal(claude.health, "active");
 		assert.equal(claude.coverage, "transcript-observed");
 		assert.equal(claude.depth, "session_events");
 		assert.equal(claude.sessionCount, 2);
 		// Event summaries expose kind counts only; the "secret" value stays local.
-		assert.deepEqual(claude.sessions[0].events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
-		assert.deepEqual(claude.sessions[1].events, { scan: "complete", eventCount: 0, kinds: {}, unparsedLines: 1 });
+		assert.deepEqual(sessionAt(claude).events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
+		assert.deepEqual(sessionAt(claude, 1).events, { scan: "complete", eventCount: 0, kinds: {}, unparsedLines: 1 });
 		assert.deepEqual(claude.eventScan, { scannedSessions: 2, sessionLimit: 3 });
 		assert.deepEqual(
-			claude.sessions.map((session) => session.sessionRef),
+			sessionsOf(claude).map((session) => session.sessionRef),
 			["11111111-2222-3333-4444-555555555555", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
 		);
-		assert.equal(claude.sessions[0].lastActivityAt, NOW - 60_000);
-		assert.equal(typeof claude.sessions[0].transcriptBytes, "number");
+		assert.equal(sessionAt(claude).lastActivityAt, NOW - 60_000);
+		assert.equal(typeof sessionAt(claude).transcriptBytes, "number");
 		// The projection carries file identity, stat metadata, and fixed-vocabulary
 		// event metadata only.
 		assert.equal(JSON.stringify(state).includes("transcript text"), false);
@@ -58,7 +93,7 @@ test("agent audit inventories Claude sessions without reading transcript content
 		);
 
 		// The Claude fixture home has no ~/.codex/sessions: a confirmed absence.
-		const codex = state.adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(state, "codex");
 		assert.equal(codex.coverage, "transcript-observed");
 		assert.equal(codex.health, "inactive");
 	});
@@ -80,18 +115,18 @@ test("agent audit inventories Codex rollouts newest-first without reading conten
 		writeFileSync(path.join(july, "not-a-rollout.jsonl"), "ignored");
 		symlinkSync(path.join(home, "outside.jsonl"), path.join(july, "rollout-2026-07-24T10-00-00-019f9174-fec1-78d2-b4be-91402cdc66d5.jsonl"));
 
-		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 		assert.equal(codex.health, "active");
 		assert.equal(codex.coverage, "transcript-observed");
 		assert.equal(codex.depth, "session_events");
 		assert.equal(codex.inventory, undefined);
 		assert.equal(codex.sessionCount, 2);
 		// A parsed line without a recognized grammar is counted, never echoed.
-		assert.deepEqual(codex.sessions[0].events, { scan: "complete", eventCount: 1, kinds: { other: 1 }, unparsedLines: 0 });
+		assert.deepEqual(sessionAt(codex).events, { scan: "complete", eventCount: 1, kinds: { other: 1 }, unparsedLines: 0 });
 		assert.deepEqual(codex.eventScan, { scannedSessions: 2, sessionLimit: 3 });
 		// Only the machine-generated rollout UUID surfaces as a session_ref.
 		assert.deepEqual(
-			codex.sessions.map((session) => session.sessionRef),
+			sessionsOf(codex).map((session) => session.sessionRef),
 			["019f9174-fec1-78d2-b4be-91402cdc66d4", "019f0000-0000-7000-8000-000000000001"],
 		);
 		assert.equal(JSON.stringify(inspectAgentAudit(home, {}, NOW)).includes("rollout text"), false);
@@ -104,12 +139,15 @@ test("a walk that exhausts its monotonic deadline reports unknown instead of fab
 		mkdirSync(july, { recursive: true });
 		writeSession(july, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, "x\n");
 		let reading = 0;
-		const codex = inspectAgentAuditWithRuntime(home, {}, NOW, {
-			monotonicNow: () => {
-				reading += 101;
-				return reading;
-			},
-		}).adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(
+			inspectAgentAuditWithRuntime(home, {}, NOW, {
+				monotonicNow: () => {
+					reading += 101;
+					return reading;
+				},
+			}),
+			"codex",
+		);
 		assert.equal(codex.health, "unknown");
 		assert.equal(codex.inventory, "partial");
 	});
@@ -122,10 +160,10 @@ test("codex bounded inventory keeps the newest rollout after a large streamed di
 		for (let index = 0; index < 2000; index += 1) writeFileSync(path.join(day, `noise-${String(index).padStart(4, "0")}.txt`), "");
 		writeSession(day, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, "x\n");
 
-		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 		assert.equal(codex.inventory, "partial");
 		assert.deepEqual(
-			codex.sessions.map((session) => session.sessionRef),
+			sessionsOf(codex).map((session) => session.sessionRef),
 			["019f9174-fec1-78d2-b4be-91402cdc66d4"],
 		);
 	});
@@ -135,7 +173,7 @@ test("codex adapter reports inactive, unknown, and recency-safe partial honestly
 	withHome((home) => {
 		// ~/.codex exists but sessions/ does not: a confirmed absence.
 		mkdirSync(path.join(home, ".codex"), { recursive: true });
-		const absent = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const absent = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 		assert.equal(absent.health, "inactive");
 		assert.deepEqual(absent.sessions, []);
 	});
@@ -144,7 +182,7 @@ test("codex adapter reports inactive, unknown, and recency-safe partial honestly
 		mkdirSync(path.join(home, ".codex"), { recursive: true });
 		mkdirSync(path.join(home, "elsewhere"));
 		symlinkSync(path.join(home, "elsewhere"), path.join(home, ".codex", "sessions"));
-		const refused = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const refused = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 		assert.equal(refused.health, "unknown");
 		assert.equal(refused.sessions, undefined);
 	});
@@ -160,12 +198,12 @@ test("codex adapter reports inactive, unknown, and recency-safe partial honestly
 		for (let index = 0; index < 2000; index += 1) writeFileSync(path.join(newest, `noise-${index}.txt`), "");
 		writeSession(oldest, "rollout-2025-01-01T00-00-00-019f0000-0000-7000-8000-000000000002.jsonl", NOW - 500 * 24 * 3_600_000, "y\n");
 
-		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 		assert.equal(codex.inventory, "partial");
-		assert.match(codex.note, /truncated or partly unreadable/u);
+		assert.match(expectDefined(codex.note), /truncated or partly unreadable/u);
 		assert.equal(codex.health, "active");
 		assert.deepEqual(
-			codex.sessions.map((session) => session.sessionRef),
+			sessionsOf(codex).map((session) => session.sessionRef),
 			["019f9174-fec1-78d2-b4be-91402cdc66d4"],
 		);
 	});
@@ -176,7 +214,7 @@ test("codex adapter reports inactive, unknown, and recency-safe partial honestly
 		mkdirSync(day, { recursive: true });
 		chmodSync(day, 0o000);
 		try {
-			const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+			const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
 			assert.equal(codex.inventory, "partial");
 			assert.equal(codex.health, "unknown");
 			assert.equal(codex.sessionCount, undefined);
@@ -189,7 +227,7 @@ test("codex adapter reports inactive, unknown, and recency-safe partial honestly
 test("agent audit reports inactive, stale, and unknown honestly", () => {
 	withHome((home) => {
 		// No ~/.claude/projects at all: inactive with an explicit empty inventory.
-		const absent = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const absent = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.equal(absent.health, "inactive");
 		assert.deepEqual(absent.sessions, []);
 	});
@@ -197,11 +235,11 @@ test("agent audit reports inactive, stale, and unknown honestly", () => {
 		const project = path.join(home, ".claude", "projects", "-repo");
 		mkdirSync(project, { recursive: true });
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 48 * 3_600_000, "old\n");
-		const stale = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const stale = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.equal(stale.health, "stale");
 	});
 	// A missing home cannot fabricate an inventory.
-	const unknown = inspectAgentAudit(undefined, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+	const unknown = adapterFor(inspectAgentAudit(undefined, {}, NOW), "claude");
 	assert.equal(unknown.health, "unknown");
 	assert.equal(unknown.sessions, undefined);
 	// A lookup failure that is not a confirmed absence (here: projects is a
@@ -210,7 +248,7 @@ test("agent audit reports inactive, stale, and unknown honestly", () => {
 		mkdirSync(path.join(home, ".claude"), { recursive: true });
 		mkdirSync(path.join(home, "elsewhere"));
 		symlinkSync(path.join(home, "elsewhere"), path.join(home, ".claude", "projects"));
-		const refused = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const refused = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.equal(refused.health, "unknown");
 		assert.equal(refused.sessions, undefined);
 	});
@@ -227,14 +265,14 @@ test("agent audit marks a truncated walk as a partial inventory, never complete"
 		mkdirSync(real, { recursive: true });
 		writeSession(real, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, "x\n");
 
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.equal(claude.inventory, "partial");
-		assert.match(claude.note, /truncated or partly unreadable/u);
+		assert.match(expectDefined(claude.note), /truncated or partly unreadable/u);
 		// A partial walk that found nothing proves nothing about inactivity.
 		assert.equal(claude.health, "unknown");
 		assert.equal(claude.sessionCount, undefined);
 		assert.equal(
-			inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555").status,
+			expectDefined(inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555")).status,
 			"unreadable",
 			"a bounded miss cannot claim the requested session is absent",
 		);
@@ -258,9 +296,9 @@ test("event depth classifies Claude lines with structural redaction", () => {
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
 
 		const state = inspectAgentAudit(home, {}, NOW);
-		const claude = state.adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(state, "claude");
 		assert.equal(claude.depth, "session_events");
-		assert.deepEqual(claude.sessions[0].events, {
+		assert.deepEqual(eventsOf(sessionAt(claude)), {
 			scan: "complete",
 			eventCount: 7,
 			kinds: { user_message: 1, reasoning: 1, tool_call: 1, tool_result: 1, assistant_message: 1, session_state: 1, other: 1 },
@@ -291,9 +329,9 @@ test("event depth classifies Codex rollout lines and never echoes payloads", () 
 		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
 
 		const state = inspectAgentAudit(home, {}, NOW);
-		const codex = state.adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(state, "codex");
 		assert.equal(codex.depth, "session_events");
-		assert.deepEqual(codex.sessions[0].events, {
+		assert.deepEqual(eventsOf(sessionAt(codex)), {
 			scan: "complete",
 			eventCount: 9,
 			// The event_msg mirror of the user utterance counts as session_state,
@@ -315,10 +353,10 @@ test("event scan stays bounded and declares truncation and unreadable transcript
 		for (let index = 0; index < 5; index += 1) {
 			writeSession(project, `11111111-2222-3333-4444-55555555555${index}.jsonl`, NOW - (index + 1) * 60_000, '{"type":"mode"}\n');
 		}
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.deepEqual(claude.eventScan, { scannedSessions: 3, sessionLimit: 3 });
 		assert.deepEqual(
-			claude.sessions.map((session) => session.events !== undefined),
+			sessionsOf(claude).map((session) => session.events !== undefined),
 			[true, true, true, false, false],
 		);
 	});
@@ -327,9 +365,9 @@ test("event scan stays bounded and declares truncation and unreadable transcript
 		const project = path.join(home, ".claude", "projects", "-repo");
 		mkdirSync(project, { recursive: true });
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n'.repeat(5010));
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-		assert.equal(claude.sessions[0].events.scan, "truncated");
-		assert.equal(claude.sessions[0].events.eventCount, 5000);
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal(eventsOf(sessionAt(claude)).scan, "truncated");
+		assert.equal(eventsOf(sessionAt(claude)).eventCount, 5000);
 	});
 	withHome((home) => {
 		// The byte budget drops the trailing partial line instead of counting a
@@ -338,11 +376,11 @@ test("event scan stays bounded and declares truncation and unreadable transcript
 		mkdirSync(project, { recursive: true });
 		const wideLine = `{"type":"mode","pad":"${"x".repeat(700)}"}\n`;
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, wideLine.repeat(3000));
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-		assert.equal(claude.sessions[0].events.scan, "truncated");
-		assert.equal(claude.sessions[0].events.unparsedLines, 0);
-		assert.ok(claude.sessions[0].events.eventCount > 0);
-		assert.ok(claude.sessions[0].events.eventCount < 3000);
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal(eventsOf(sessionAt(claude)).scan, "truncated");
+		assert.equal(eventsOf(sessionAt(claude)).unparsedLines, 0);
+		assert.ok(eventsOf(sessionAt(claude)).eventCount > 0);
+		assert.ok(eventsOf(sessionAt(claude)).eventCount < 3000);
 	});
 	withHome((home) => {
 		// An unreadable transcript is a declared per-session gap; with no scanned
@@ -352,8 +390,8 @@ test("event scan stays bounded and declares truncation and unreadable transcript
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
 		chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o000);
 		try {
-			const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-			assert.equal(claude.sessions[0].events, "unreadable");
+			const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+			assert.equal(sessionAt(claude).events, "unreadable");
 			assert.equal(claude.depth, "session_inventory");
 			assert.deepEqual(claude.eventScan, { scannedSessions: 0, sessionLimit: 3 });
 		} finally {
@@ -377,13 +415,13 @@ test("per-session drill-down scans any inventoried session without trusting the 
 		// The oldest session sits beyond the newest-3 auto-scan window; the
 		// drill-down still reaches it with the same structural redaction.
 		const lookup = inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555554");
-		assert.equal(lookup.status, "scanned");
-		assert.equal(lookup.session.sessionRef, "11111111-2222-3333-4444-555555555554");
-		assert.deepEqual(lookup.session.events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
+		const session = scannedLookup(lookup);
+		assert.equal(session.sessionRef, "11111111-2222-3333-4444-555555555554");
+		assert.deepEqual(session.events, { scan: "complete", eventCount: 1, kinds: { session_state: 1 }, unparsedLines: 0 });
 		assert.equal(JSON.stringify(lookup).includes("SECRET-DRILL"), false);
-		assert.equal("transcriptPath" in lookup.session, false);
+		assert.equal("transcriptPath" in session, false);
 
-		assert.equal(inspectAgentSessionEvents(home, {}, "claude", "99999999-9999-9999-9999-999999999999").status, "not_found");
+		assert.equal(expectDefined(inspectAgentSessionEvents(home, {}, "claude", "99999999-9999-9999-9999-999999999999")).status, "not_found");
 		// Grammar violations are rejected before any filesystem access; the ref
 		// is never joined into a path, so traversal shapes cannot resolve.
 		assert.equal(inspectAgentSessionEvents(home, {}, "claude", "../../etc/passwd"), null);
@@ -399,8 +437,7 @@ test("per-session drill-down scans any inventoried session without trusting the 
 			'{"timestamp":"2026-07-24T11:00:00.000Z","type":"session_meta","payload":{"instructions":"SECRET-META"}}\n',
 		);
 		const codex = inspectAgentSessionEvents(home, {}, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4");
-		assert.equal(codex.status, "scanned");
-		assert.deepEqual(codex.session.events, {
+		assert.deepEqual(scannedLookup(codex).events, {
 			scan: "complete",
 			eventCount: 1,
 			kinds: { session_state: 1 },
@@ -412,7 +449,7 @@ test("per-session drill-down scans any inventoried session without trusting the 
 	});
 	withHome((home) => {
 		// A missing sessions root is a confirmed absence, not a walk failure.
-		assert.equal(inspectAgentSessionEvents(home, {}, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4").status, "not_found");
+		assert.equal(expectDefined(inspectAgentSessionEvents(home, {}, "codex", "019f9174-fec1-78d2-b4be-91402cdc66d4")).status, "not_found");
 	});
 	withHome((home) => {
 		// A ref duplicated across projects resolves to the newest transcript —
@@ -424,12 +461,15 @@ test("per-session drill-down scans any inventoried session without trusting the 
 		writeSession(older, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 3_600_000, '{"type":"mode"}\n');
 		writeSession(newer, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n{"type":"mode"}\n');
 		const lookup = inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555");
-		assert.equal(lookup.status, "scanned");
-		assert.equal(lookup.session.lastActivityAt, NOW - 60_000);
-		assert.equal(lookup.session.events.eventCount, 2);
+		const session = scannedLookup(lookup);
+		assert.equal(session.lastActivityAt, NOW - 60_000);
+		assert.equal(eventsOf(session).eventCount, 2);
 	});
 	// A missing home cannot fabricate a lookup result.
-	assert.equal(inspectAgentSessionEvents(undefined, {}, "claude", "11111111-2222-3333-4444-555555555555").status, "unreadable");
+	assert.equal(
+		expectDefined(inspectAgentSessionEvents(undefined, {}, "claude", "11111111-2222-3333-4444-555555555555")).status,
+		"unreadable",
+	);
 	withHome((home) => {
 		// An unreadable transcript stays a declared per-session gap.
 		const project = path.join(home, ".claude", "projects", "-repo");
@@ -438,8 +478,8 @@ test("per-session drill-down scans any inventoried session without trusting the 
 		chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o000);
 		try {
 			const lookup = inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555");
-			assert.equal(lookup.status, "scanned");
-			assert.equal(lookup.session.events, "unreadable");
+			assert.equal(lookup?.status, "scanned");
+			assert.equal(lookup?.session?.events, "unreadable");
 		} finally {
 			chmodSync(path.join(project, "11111111-2222-3333-4444-555555555555.jsonl"), 0o600);
 		}
@@ -464,8 +504,8 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			'{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-07-24T10:00:04.000Z"}',
 		];
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-		assert.deepEqual(claude.sessions[0].events.tokenUsage, {
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.deepEqual(eventsOf(sessionAt(claude)).tokenUsage, {
 			source: "event_usage_sum",
 			completeness: "full_transcript",
 			usageEvents: 2,
@@ -488,8 +528,8 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			'{"timestamp":"2026-07-24T11:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":150,"output_tokens":40}}}}',
 		];
 		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, `${lines.join("\n")}\n`);
-		const codex = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "codex");
-		assert.deepEqual(codex.sessions[0].events.tokenUsage, {
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
+		assert.deepEqual(eventsOf(sessionAt(codex)).tokenUsage, {
 			source: "runtime_cumulative_last",
 			completeness: "full_transcript",
 			usageEvents: 2,
@@ -509,8 +549,8 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 			NOW - 60_000,
 			'{"type":"assistant","message":{"content":[{"type":"text","text":"a"}]},"timestamp":"2026-07-24T10:00:00.000Z"}\n',
 		);
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-		assert.equal("tokenUsage" in claude.sessions[0].events, false);
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal("tokenUsage" in eventsOf(sessionAt(claude)), false);
 	});
 	withHome((home) => {
 		// A truncated scan declares its figures cover only the scanned prefix.
@@ -520,9 +560,9 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 		const usageLine =
 			'{"type":"assistant","requestId":"req_1","message":{"content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0}},"timestamp":"2026-07-24T10:00:00.000Z"}\n';
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, usageLine + '{"type":"mode"}\n'.repeat(5010));
-		const claude = inspectAgentAudit(home, {}, NOW).adapters.find((adapter) => adapter.runtime === "claude");
-		assert.equal(claude.sessions[0].events.scan, "truncated");
-		assert.deepEqual(claude.sessions[0].events.tokenUsage, {
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal(eventsOf(sessionAt(claude)).scan, "truncated");
+		assert.deepEqual(eventsOf(sessionAt(claude)).tokenUsage, {
 			source: "event_usage_sum",
 			completeness: "scanned_prefix",
 			usageEvents: 1,
@@ -553,7 +593,7 @@ test("a configured host root is scanned and reported instead of the default", ()
 		// `inactive` here rather than failing loudly.
 		mkdirSync(path.join(home, ".claude", "projects"), { recursive: true });
 
-		const claude = inspectAgentAudit(home, { claude: moved }, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(inspectAgentAudit(home, { claude: moved }, NOW), "claude");
 		assert.equal(claude.health, "active");
 		assert.equal(claude.sessionCount, 1);
 		assert.equal(claude.root, moved);
@@ -567,7 +607,7 @@ test("a configured Codex root is scanned and reported instead of the default", (
 		mkdirSync(day, { recursive: true });
 		writeSession(day, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, '{"type":"mode"}\n');
 
-		const codex = inspectAgentAudit(home, { codex: moved }, NOW).adapters.find((adapter) => adapter.runtime === "codex");
+		const codex = adapterFor(inspectAgentAudit(home, { codex: moved }, NOW), "codex");
 		assert.equal(codex.health, "active");
 		assert.equal(codex.sessionCount, 1);
 		assert.equal(codex.root, moved);
@@ -582,7 +622,7 @@ test("an unusable host override is refused rather than replaced by the default",
 		mkdirSync(project, { recursive: true });
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
 
-		const claude = inspectAgentAudit(home, { claude: "relative/path" }, NOW).adapters.find((adapter) => adapter.runtime === "claude");
+		const claude = adapterFor(inspectAgentAudit(home, { claude: "relative/path" }, NOW), "claude");
 		assert.equal(claude.health, "unknown");
 		assert.equal(claude.root, "relative/path");
 	});
@@ -596,18 +636,18 @@ test("a session drill-down follows the configured host root", () => {
 		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
 
 		const lookup = inspectAgentSessionEvents(home, { claude: moved }, "claude", "11111111-2222-3333-4444-555555555555");
-		assert.equal(lookup.status, "scanned");
-		assert.equal(inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555").status, "not_found");
+		assert.equal(expectDefined(lookup).status, "scanned");
+		assert.equal(expectDefined(inspectAgentSessionEvents(home, {}, "claude", "11111111-2222-3333-4444-555555555555")).status, "not_found");
 	});
 });
 
-function writeSession(directory, name, mtimeMs, content) {
+function writeSession(directory: string, name: string, mtimeMs: number, content: string): void {
 	const file = path.join(directory, name);
 	writeFileSync(file, content);
 	utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
 }
 
-function withHome(callback) {
+function withHome(callback: (home: string) => void): void {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-agent-audit-"));
 	try {
 		callback(home);
