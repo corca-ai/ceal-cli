@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	consumerDependencyClosure,
 	lockPackages,
+	packageFetchIdentity,
 	readConsumerClosure,
 	UnpinnedDependencyError,
 } from "../../scripts/prewarm-offline-consumer-cache.ts";
@@ -21,6 +22,11 @@ test("the committed lockfile yields the real consumer closure", () => {
 	for (const required of ["@types/node", "typescript", "yaml", "undici-types"]) {
 		assert.ok(names.includes(required), `${required} must stay in the prewarmed closure`);
 	}
+	assert.ok(
+		closure.some(({ name, version }) => name === "typescript" && version === "6.0.3"),
+		"an aliased TypeScript package must be fetched by its lockfile-resolved name",
+	);
+	assert.ok(!names.includes("@typescript/old"), "an npm alias key must never be used as a fetch name");
 	// The owned scope is published by this repository's own release, never fetched.
 	assert.equal(
 		closure.filter(({ name }) => name.startsWith("@corca-ai/")).length,
@@ -77,6 +83,38 @@ test("every pinned version of a colliding name is prewarmed", () => {
 	);
 });
 
+test("an npm alias uses the lockfile-resolved package identity", () => {
+	const byName = lockPackages(
+		lockOf({
+			"node_modules/alias-name": {
+				name: "actual-package",
+				version: "2.3.4",
+				dependencies: { child: "^1.0.0" },
+			},
+			"node_modules/child": { version: "1.2.3" },
+		}),
+	);
+	const closure = consumerDependencyClosure(byName, [{ dependencies: { "alias-name": "npm:actual-package@^2" } }]);
+	assert.deepEqual(closure, [
+		{ name: "actual-package", version: "2.3.4" },
+		{ name: "child", version: "1.2.3" },
+	]);
+	assert.deepEqual(packageFetchIdentity("alias-name", { name: "actual-package", version: "2.3.4" }), {
+		name: "actual-package",
+		version: "2.3.4",
+	});
+});
+
+test("an alias to the owned scope is not fetched", () => {
+	const byName = lockPackages(
+		lockOf({
+			"node_modules/external-alias": { name: "@corca-ai/internal", version: "1.2.3" },
+		}),
+	);
+	assert.equal(byName.has("external-alias"), true, "the alias remains indexed so it is not misreported as unpinned");
+	assert.deepEqual(consumerDependencyClosure(byName, [{ dependencies: { "external-alias": "npm:@corca-ai/internal@1.2.3" } }]), []);
+});
+
 test("peer and dev edges are followed, and the owned scope never is", () => {
 	const byName = lockPackages(
 		lockOf({
@@ -111,6 +149,17 @@ test("malformed lock and manifest boundaries fail before traversal", () => {
 		() => lockPackages({ packages: { "node_modules/broken": { dependencies: {} } } }),
 		(error: unknown) => error instanceof TypeError && error.message.includes("must contain a version"),
 	);
+	assert.throws(
+		() => lockPackages({ packages: { "node_modules/broken": { name: 42, version: "1.0.0" } } }),
+		(error: unknown) => error instanceof TypeError && error.message.includes("must contain a version"),
+	);
+	for (const malformed of ["", "../escape", "@broken", "a/b/c", "a\\b", "a b"]) {
+		assert.throws(
+			() => lockPackages({ packages: { [`node_modules/${malformed}`]: { version: "1.0.0" } } }),
+			(error: unknown) => error instanceof TypeError && error.message.includes("valid package name"),
+		);
+		assert.throws(() => packageFetchIdentity("valid", { name: malformed, version: "1.0.0" }), /valid package name/u);
+	}
 	assert.throws(
 		() => consumerDependencyClosure(lockPackages(lockOf({})), [{ dependencies: ["not-a-map"] }]),
 		(error: unknown) => error instanceof TypeError && error.message.includes("must be an object of string ranges"),

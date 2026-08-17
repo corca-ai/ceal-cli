@@ -2,6 +2,13 @@
 	"entries": [
 		{
 			"surface": "code",
+			"id": "cb15aaff0319d8ce",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Detector window around the pre-existing isStringMap record predicate in the independently runnable signed-handoff generator and offline-cache prewarmer, re-keyed when adjacent package-name validation was added. The predicate carries no mutable domain policy; sharing it would couple a release trust-schema generator to cold-host npm cache bootstrap without removing a fact owner. The alias-resolution and package-name rules remain local to the prewarmer and are not duplicated."
+		},
+		{
+			"surface": "code",
 			"id": "2062194b2d2585d0",
 			"class": "intentional",
 			"reviewed_at": "2026-08-13",

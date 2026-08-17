@@ -31,9 +31,10 @@ const DEPENDENCY_FIELDS = [
 	"optionalDependencies",
 	"peerDependencies",
 ] satisfies readonly DependencyField[];
+const NPM_PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u;
 
 type JsonRecord = Record<string, unknown>;
-type PackageRecord = JsonRecord & { version: string };
+type PackageRecord = JsonRecord & { name?: string; version: string };
 type Lockfile = { packages: JsonRecord };
 type Manifest = JsonRecord;
 type PackageIndex = Map<string, Map<string, PackageRecord>>;
@@ -52,8 +53,12 @@ function isStringMap(value: unknown): value is Record<string, string> {
 	return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+function isPackageName(value: unknown): value is string {
+	return typeof value === "string" && value.length <= 214 && NPM_PACKAGE_NAME.test(value);
+}
+
 function isPackageRecord(value: unknown): value is PackageRecord {
-	return isRecord(value) && typeof value.version === "string";
+	return isRecord(value) && typeof value.version === "string" && (value.name === undefined || isPackageName(value.name));
 }
 
 function isLockfile(value: unknown): value is Lockfile {
@@ -94,6 +99,7 @@ export function lockPackages(lock: Lockfile): PackageIndex {
 		const marker = location.lastIndexOf("node_modules/");
 		if (marker === -1) continue;
 		const name = location.slice(marker + "node_modules/".length);
+		if (!isPackageName(name)) throw new TypeError(`package-lock entry ${location} must contain a valid package name`);
 		if (name.startsWith(OWNED_SCOPE)) continue;
 		if (!isPackageRecord(value)) throw new TypeError(`package-lock entry ${location} must contain a version`);
 		validateDependencyFields(value, `package-lock entry ${location}`);
@@ -101,6 +107,21 @@ export function lockPackages(lock: Lockfile): PackageIndex {
 		byName.get(name)?.set(value.version, value);
 	}
 	return byName;
+}
+
+/**
+ * Returns the lockfile-owned package identity npm must fetch.
+ *
+ * An npm alias is indexed by its dependency/installation name, but lockfile
+ * v3 records the resolved package name in `name`. Fetching the index name for
+ * an alias asks npm for a package that does not exist (for example,
+ * `@typescript/old@6.0.3` instead of `typescript@6.0.3`). Ordinary entries do
+ * not carry `name`, so their index name remains the fetch identity.
+ */
+export function packageFetchIdentity(indexName: string, record: PackageRecord): { name: string; version: string } {
+	if (!isPackageName(indexName) || !isPackageRecord(record))
+		throw new TypeError("package-lock entry must contain a valid package name and version");
+	return { name: record.name ?? indexName, version: record.version };
 }
 
 /**
@@ -131,6 +152,7 @@ export function consumerDependencyClosure(byName: PackageIndex, manifests: reado
 		}
 	}
 	const visited = new Set<string>();
+	const fetched = new Set<string>();
 	const closure: Array<{ name: string; version: string }> = [];
 	const missing: string[] = [];
 	while (queue.length > 0) {
@@ -145,8 +167,14 @@ export function consumerDependencyClosure(byName: PackageIndex, manifests: reado
 		}
 		// Walk every pinned version: each carries its own dependency edges, so
 		// taking one version's edges for another's would miss packages entirely.
-		for (const [version, record] of versions) {
-			closure.push({ name, version });
+		for (const [, record] of versions) {
+			const identity = packageFetchIdentity(name, record);
+			if (identity.name.startsWith(OWNED_SCOPE)) continue;
+			const identityKey = `${identity.name}\0${identity.version}`;
+			if (!fetched.has(identityKey)) {
+				fetched.add(identityKey);
+				closure.push(identity);
+			}
 			for (const dependency of dependencyNames(record)) {
 				if (!dependency.startsWith(OWNED_SCOPE)) queue.push(dependency);
 			}
