@@ -621,15 +621,20 @@ test("the abort settles before teardown, so destroy's own error cannot become th
 // costs the timeout — which makes that number a standing gate cost rather than a
 // safety margin to round up. It is sized from the fixed arm's measured work
 // instead: the child parks for 100ms, `closeReadable` answers in single-digit
-// milliseconds, and the fixed arm finishes well inside half a second. A read
-// that has parked never un-parks, so anything past the fixed arm's own cost
-// distinguishes the two, and a longer wait buys nothing but gate time. The first
-// version spent five seconds here, 89% of this file.
-const SHUTDOWN_ARM_TIMEOUT_MS = 1_500;
+// milliseconds, and the fixed arm normally finishes well inside half a second.
+// The real-child watchdog starts at spawn, though, so coverage's concurrent
+// process load can spend more than that before the imported module reaches the
+// transport. A 1.5s bound therefore classified scheduler pressure as a shutdown
+// failure. Keep the hanging control arm's cost at 1.5s, while giving the real
+// shutdown arm a bounded startup allowance; a successful arm still returns as
+// soon as the transport is done. The first version spent five seconds here, 89%
+// of this file.
+const SHUTDOWN_ARM_TIMEOUT_MS = 5_000;
+const BLOCKING_CONTROL_TIMEOUT_MS = 1_500;
 
 test("a parked read on an inherited socketpair does not keep the worker alive", () => {
 	const transport = `file://${path.join(DIST, "private-worker-transport.js")}`;
-	const run = (open) =>
+	const run = (open: string, timeout: number) =>
 		spawnSync(
 			process.execPath,
 			[
@@ -648,10 +653,10 @@ test("a parked read on an inherited socketpair does not keep the worker alive", 
 			],
 			// No `process.exit` in the child on purpose: whether Node's loop drains
 			// is the whole question, and an explicit exit would answer it falsely.
-			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", "pipe"], encoding: "utf8", timeout: SHUTDOWN_ARM_TIMEOUT_MS },
+			{ stdio: ["ignore", "pipe", "inherit", "ignore", "ignore", "pipe"], encoding: "utf8", timeout },
 		);
 
-	const fixed = run("m.openInheritedReadable(fd)");
+	const fixed = run("m.openInheritedReadable(fd)", SHUTDOWN_ARM_TIMEOUT_MS);
 	assert.equal(fixed.stdout, "shutdown-returned", "the shutdown await settles");
 	assert.equal(fixed.signal, null, `the process exited on its own, saw signal ${fixed.signal}`);
 	assert.equal(fixed.status, 0, `child exited ${fixed.status}`);
@@ -660,7 +665,10 @@ test("a parked read on an inherited socketpair does not keep the worker alive", 
 	// to see the defect and the three assertions above have stopped meaning
 	// anything. A crash or a bad fixture gives `signal: null` with a non-zero
 	// status, so this cannot pass by failing early.
-	const blocking = run('(await import("node:fs")).createReadStream("/dev/null", { fd, autoClose: true, highWaterMark: 4096 })');
+	const blocking = run(
+		'(await import("node:fs")).createReadStream("/dev/null", { fd, autoClose: true, highWaterMark: 4096 })',
+		BLOCKING_CONTROL_TIMEOUT_MS,
+	);
 	assert.notEqual(blocking.signal, null, "the control arm must hang, or this test cannot fail");
 });
 

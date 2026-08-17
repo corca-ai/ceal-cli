@@ -262,7 +262,7 @@
           "TS2532": 1,
           "TS2769": 3,
           "TS7005": 17,
-          "TS7006": 27,
+          "TS7006": 26,
           "TS7034": 14
         },
         "packages/ceal-worker-cli/test/leased-consumer-v5-candidate.test.ts": {
