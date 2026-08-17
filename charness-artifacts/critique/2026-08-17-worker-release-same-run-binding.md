@@ -17,6 +17,7 @@ procedure without changing the public command or protocol shape. The existing
 
 - `.github/workflows/ceal-release.yml`
 - `.github/workflows/ceal-worker-stable-rollback.yml`
+- `CHANGELOG.md`
 - `test/contract/repo-gates.test.ts`
 - `docs/operator-acceptance.md`
 - `docs/handoff.md`

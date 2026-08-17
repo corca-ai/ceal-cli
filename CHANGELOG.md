@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.78.1 (`ceal-v0.78.1`)
+
+This patch removes per-release digest and commit entry from the Worker release
+Environment. An authorized maintainer's canonical tag push selects the
+candidate; the privileged publish and rollback lanes bind the commit, artifact
+handoff, and signed inventory to their same workflow run while the Environment
+holds only stable release-origin credentials.
+
+The rollback lane also binds the selected pointer tag and installer checksum to
+the verified immutable handoff. The public Worker command and Protocol shapes
+are unchanged. This tag proves the Worker release workflow and signed artifact
+contract, not Gateway selection, provider execution, or installed-host
+readbacks.
+
 ## 0.77.0 (`ceal-v0.77.0`)
 
 This release consumes the signed Gateway Protocol handoff v0.72.21 and moves

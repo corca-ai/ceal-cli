@@ -97,6 +97,12 @@ separately approved boundaries.
   configuration is still a release blocker until that Environment has its
   deployment rules and owns those credentials; a maintainer's canonical tag push
   selects the release.
+- The local Worker release candidate is `0.78.1` (`ceal-v0.78.1`), a patch
+  version for the release-boundary repair. The old `ceal-v0.78.0` tag is not
+  reused. The live Environment still carries the old approval variables until
+  the workflow change is pushed and a one-time GitHub configuration cleanup is
+  explicitly authorized; no release-time variable entry is part of the new
+  procedure.
 - `npm run check:unit` is the aggregate development iteration gate. Its one
   checkout build is followed by the internal `test:contract:built` lane, while
   package behavior tests and `npm run check:protocol-dev` provide no-build
@@ -142,10 +148,11 @@ separately approved boundaries.
    proofs, plus the `ceal-cli#13` capability-specific target-selector and empty
    match provenance contract; converge frozen tree, dependency, lock, pin,
    generated contracts, and workflow input in one commit.
-3. Run the ordinary release gates and tag-resolved `0.76.1` installer crossing plus explicit
-   guide-register proof. Ask before choosing a version, pushing, tagging,
-   publishing, or installing the new release. Before any tag, close the external
-   `ceal-cli-release` Environment protection/secret move named in operator acceptance.
+3. Run the ordinary release gates and tag-resolved `0.78.1` installer crossing
+   plus explicit guide-register proof. Push, tag, publish, and install remain
+   separately approved external boundaries. Do not enter per-release digest or
+   commit variables; after the workflow change lands, remove the legacy
+   approval variables once as GitHub configuration maintenance.
 4. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
    dogfood remains a proof opportunity after serving, not a separately scheduled
    worker slice. Do not invent future Protocol or Gateway-owned fields in this repo.
