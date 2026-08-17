@@ -10,6 +10,12 @@ export const CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA = "ceal.leas
 export const CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA = "ceal.leased_consumer_capability_control_response.v4" as const;
 export const CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA = "ceal.gateway_leased_agent_capability_result.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_search_arguments.v1" as const;
+/**
+ * Versioned continuation input for message.search. v1 remains the legacy
+ * one-page contract; v2 makes the continuation state an explicit, opaque
+ * Gateway-owned action instead of silently dropping the native cursor.
+ */
+export const CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA = "ceal.gateway_leased_agent_message_search_arguments.v2" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_get_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_conversation_thread_get_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_create_arguments.v1" as const;
@@ -18,6 +24,9 @@ export const CEAL_LEASED_CONSUMER_MESSAGE_DELETE_ARGUMENTS_SCHEMA = "ceal.gatewa
 export const CEAL_LEASED_CONSUMER_RESOURCE_RESOLVE_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_resource_resolve_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA = "ceal.gateway_leased_agent_resource_read_data.v2" as const;
+/** Message-search pages have their own output grammar so continuation cannot
+ * be mistaken for a generic resource-read truncation flag. */
+export const CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA = "ceal.gateway_leased_agent_message_search_data.v1" as const;
 export const CEAL_LEASED_CONSUMER_PRESENTATION_ACTIVITY_DATA_SCHEMA = "ceal.gateway_leased_agent_presentation_activity_data.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_ARGUMENTS_SCHEMA = "ceal.gateway_leased_agent_message_reaction_arguments.v1" as const;
 export const CEAL_LEASED_CONSUMER_MESSAGE_REACTION_DATA_SCHEMA = "ceal.gateway_leased_agent_message_reaction_data.v1" as const;
@@ -39,4 +48,6 @@ export const CEAL_LEASED_CONSUMER_ARTIFACT_CHUNK_MAX_BYTES = 12 * 1024;
 export const CEAL_LEASED_CONSUMER_WRITE_MESSAGE_HANDLE_LIMIT = 16;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES = 8 * 1024;
 export const CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES = 32 * 1024;
+/** Maximum opaque handles in one v4 capability result; handle-bearing pages inherit this ABI bound. */
+export const CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_HANDLE_LIMIT = 32;
 export const CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES = 24 * 1024;

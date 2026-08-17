@@ -12,7 +12,11 @@ import {
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
 	CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA,
+	CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES,
+	CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES,
 	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA,
+	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_GET_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_CONVERSATION_THREAD_GET_ARGUMENTS_SCHEMA,
 	CEAL_LEASED_CONSUMER_MESSAGE_CREATE_ARGUMENTS_SCHEMA,
@@ -150,8 +154,8 @@ test("capability control v4 carries generic read and write results through exact
 		// The merged message read (2026-08-12) is a RESOLVE-family result: each row
 		// carries a handle_index into the message handles it just minted, which is
 		// what the retired `message.enumerate` was worth keeping for.
-		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "message", ref: `message:${"c".repeat(64)}` }], data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "2026-07-15T00:00:00.000Z", handle_index: 0, text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
-		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.get", effect: "read", result_ref: `result:${"9".repeat(64)}`, handles: [], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
+		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.search", effect: "read", result_ref: `result:${"b".repeat(64)}`, handles: [{ kind: "message", ref: `message:${"c".repeat(64)}` }], data: { schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "2026-07-15T00:00:00.000Z", handle_index: 0, text: "bounded", reply_count: 40, author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
+		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.get", effect: "read", result_ref: `result:${"9".repeat(64)}`, handles: [], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", reply_count: 40, author: { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice", actor_kind: "human" } }] } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.update", effect: "write", result_ref: `result:${"d".repeat(64)}`, handles: [{ kind: "target", ref: `target:${"e".repeat(64)}` }, { kind: "message", ref: `message:${"f".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_WRITE_DATA_SCHEMA, terminal: "readback_confirmed", text: "updated" } },
 		{ schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id: "message.delete", effect: "write", result_ref: `result:${"f".repeat(64)}`, handles: [{ kind: "message", ref: `message:${"7".repeat(64)}` }], data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_DELETE_DATA_SCHEMA, terminal: "readback_confirmed" } },
 	]) {
@@ -359,6 +363,99 @@ test("capability control v4 carries generic read and write results through exact
 	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse({
 		...projection, result: { ...projection.result, requester: { ...projection.result.requester, provider_identity } },
 	}), TypeError);
+});
+
+test("reply_count is message-only leased metadata with a strict nonnegative integer rule", () => {
+	const response = (capability_id: "message.search" | "message.get", data: unknown) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "call",
+		result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA, capability_id, effect: "read", result_ref: `result:${"a".repeat(64)}`,
+			handles: [], data,
+		} },
+	});
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response("message.search", {
+		schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "thread", reply_count: 40 }],
+	})).operation, "call");
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(response("message.get", {
+		schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "thread", reply_count: 40 }],
+	})).operation, "call");
+	for (const data of [
+		{ schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "identity", display_name: "Alice", reply_count: 1 }] },
+		{ schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "thread", reply_count: -1 }] },
+		{ schema_version: "ceal.gateway_leased_agent_resource_read_data.v2", items: [{ kind: "message", display_name: "thread", reply_count: 1.5 }] },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "thread", reply_count: -1 }] },
+	]) assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(response(data.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA ? "message.get" : "message.search", data)), TypeError);
+});
+
+test("message.search v2 exposes an opaque continuation with exact completion invariants", () => {
+	const continuation = "enumeration:123e4567-e89b-12d3-a456-426614174000";
+	const handle = { kind: "message", ref: `message:${"b".repeat(64)}` };
+	const item = { kind: "message", display_name: "message", handle_index: 0, text: "bounded" };
+	const response = (data: unknown) => decodeCealLeasedConsumerCapabilityControlResponse({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "call",
+		result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA,
+			capability_id: "message.search", effect: "read", result_ref: `result:${"a".repeat(64)}`,
+			handles: [handle], data,
+		} },
+	});
+	assert.equal(response({ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "complete", items: [item] }).operation, "call");
+	const available = response({
+		schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "continuation_available", items: [item],
+		next_action: { capability_id: "message.search", target_ref: `target:${"c".repeat(64)}`, arguments: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, continuation } },
+	});
+	assert.equal(available.operation, "call");
+	for (const invalid of [
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "complete", items: [item], next_action: {} },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "continuation_available", items: [item] },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "continuation_available", items: [item], next_action: { capability_id: "message.search", target_ref: `target:${"c".repeat(64)}`, arguments: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, continuation: "provider:cursor" } } },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA, completeness: "complete", items: [item], extra: true },
+	]) assert.throws(() => response(invalid), TypeError);
+
+	const call = (arguments_: unknown) => decodeCealLeasedConsumerCapabilityControlRequest({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,
+		operation: "call",
+		input: { schema_version: "ceal.gateway_leased_consumer_call_request.v1", ...leaseInput, capability_id: "message.search", target_ref: `target:${"c".repeat(64)}`, purpose: "find messages", arguments: arguments_ },
+	});
+	assert.equal(call({ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, query: "bounded", include_replies: false }).operation, "call");
+	assert.equal(call({ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, continuation }).operation, "call");
+	for (const invalid of [
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, continuation, query: "changed" },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, include_replies: true },
+		{ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, continuation: "enumeration:not-a-uuid" },
+	]) assert.throws(() => call(invalid), TypeError);
+	// The old wire remains a valid one-page request during the rollout.
+	assert.equal(call({ schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA, query: "bounded" }).operation, "call");
+});
+
+test("leased capability custody pins the nested result byte boundary independently of the carrier", () => {
+	const makeResponse = (textLengths: readonly number[]) => ({
+		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_RESPONSE_SCHEMA,
+		operation: "call",
+		result: { status: "result", result: {
+			schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_RESULT_SCHEMA,
+			capability_id: "message.search", effect: "read", result_ref: `result:${"a".repeat(64)}`,
+			handles: [
+				{ kind: "message", ref: `message:${"b".repeat(64)}` },
+				{ kind: "message", ref: `message:${"c".repeat(64)}` },
+			],
+			data: {
+				schema_version: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_DATA_SCHEMA,
+				completeness: "complete",
+				items: textLengths.map((length, handle_index) => ({ kind: "message", display_name: "m", handle_index, text: "x".repeat(length) })),
+			},
+		} },
+	});
+	const exact = makeResponse([11_959, 11_959]);
+	assert.equal(Buffer.byteLength(JSON.stringify(exact.result.result), "utf8"), CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES);
+	assert.ok(Buffer.byteLength(JSON.stringify(exact), "utf8") < CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES);
+	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(exact).operation, "call");
+
+	const oversized = makeResponse([11_959, 11_960]);
+	assert.equal(Buffer.byteLength(JSON.stringify(oversized.result.result), "utf8"), CEAL_LEASED_CONSUMER_DELEGATED_READ_RESULT_MAX_BYTES + 1);
+	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(oversized), TypeError);
 });
 
 test("capability control v4 rejects provider-shaped handles and custody fields", () => {

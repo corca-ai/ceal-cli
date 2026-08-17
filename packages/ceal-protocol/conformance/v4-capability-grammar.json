@@ -1,7 +1,7 @@
 {
   "schema_version": "ceal.v4_capability_grammar_fixture.v1",
   "source": "packages/ceal-protocol/src/leased-consumer-control.ts",
-  "generator": "scripts/generate-v4-capability-grammar-fixture.mjs",
+  "generator": "scripts/generate-v4-capability-grammar-fixture.ts",
   "read_capability_ids": [
     "message.search",
     "message.get",

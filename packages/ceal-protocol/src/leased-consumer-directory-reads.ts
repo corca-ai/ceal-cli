@@ -8,7 +8,7 @@
 /**
  * One generic read item. `handle_index` is present only when the item minted a
  * handle; `subject_ref`/`actor_kind` are identity-only descriptive fields,
- * `author` is message-only, and `filename`/`mimetype`/`size_bytes` are
+ * `author` and `reply_count` are message-only, and `filename`/`mimetype`/`size_bytes` are
  * file-only. Consumers program against this shape, so a field the decoder
  * admits must appear here or it is invisible to them.
  *
@@ -31,6 +31,7 @@ export interface CealLeasedConsumerResourceReadItem {
 	display_name: string;
 	handle_index?: number;
 	text?: string;
+	reply_count?: number;
 	subject_ref?: string;
 	actor_kind?: "human" | "bot" | "app" | "unknown";
 	author?: { author_ref: string; display_name?: string; actor_kind: "human" | "bot" | "app" | "unknown"; subject_ref?: string };
@@ -102,10 +103,17 @@ export function validCealLeasedConsumerReadItemDetail(
 	validAuthor: (value: unknown) => boolean,
 ): boolean {
 	return (value.text === undefined || safeReplyText(value.text))
+		&& (value.reply_count === undefined || value.kind === "message")
+		&& validCealLeasedConsumerMessageReplyCount(value.reply_count)
 		&& validCealLeasedConsumerReadItemHandleIndex(value.handle_index, handleCount)
 		&& validCealLeasedConsumerIdentityDetail(value)
 		&& (value.author === undefined || (value.kind === "message" && validAuthor(value.author)))
 		&& validCealLeasedConsumerFileDetail(value);
+}
+
+/** A reply count is descriptive message metadata, never a provider locator. */
+export function validCealLeasedConsumerMessageReplyCount(value: unknown): boolean {
+	return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 0);
 }
 
 const READ_ITEM_ACTOR_KINDS: readonly string[] = ["human", "bot", "app", "unknown"];

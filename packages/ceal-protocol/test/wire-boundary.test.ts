@@ -65,7 +65,7 @@ test("Gateway request decoder accepts the four exact semantic operations", () =>
 });
 
 test("Gateway request decoder rejects malformed, extra, unsafe, and authority-bearing input without echoing it", () => {
-	const secret = ["xoxb", "secret-material"].join("-");
+	const secret = ["xoxb", "secret", "material"].join("-");
 	const invalid = [
 		{ ...envelope("discover", {}), extra: true },
 		envelope("discover", { unexpected: true }),

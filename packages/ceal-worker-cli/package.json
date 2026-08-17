@@ -33,7 +33,7 @@
 	},
 	"dependencies": {
 		"@corca-ai/ceal": "0.77.0",
-		"@corca-ai/ceal-protocol": "0.72.21",
+		"@corca-ai/ceal-protocol": "0.73.0",
 		"yaml": "2.9.0"
 	},
 	"devDependencies": {

@@ -21,11 +21,12 @@
  * with nothing in the grammar to distinguish them. A declared, off-by-default
  * row is what puts that in front of the caller.
  *
- * Deliberately absent: a provider page/cursor argument. Continuation is the
- * carrier's own concern and each capability owns whether it issues an opaque
- * Ceal continuation or an ordinal, so putting it in the FILTER vocabulary would
- * conflate narrowing with paging.
+ * Deliberately absent from the shared filter vocabulary: a provider page/cursor
+ * argument. The message.search v2 contract admits a separate opaque Gateway
+ * continuation field, but it is not a filter and may not be combined with one.
  */
+import { CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA, CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA } from "./leased-consumer-control-schemas.ts";
+
 export const CEAL_LEASED_CONSUMER_SEARCH_MAX_QUERY_BYTES = 512;
 /**
  * `message.search` keeps the 4096-byte ceiling it had BEFORE the merge.
@@ -169,7 +170,8 @@ export const decodeCealLeasedConsumerFileSearchArguments: (value: unknown) => vo
  * so, since the real bound is the carrier's byte budget and not the row count
  * (corca-ai/ceal#702).
  *
- * ## OPEN — does this argument set deserve a `.v2`? (recorded 2026-08-12)
+ * ## Value compatibility and continuation versioning (recorded 2026-08-12,
+ * continuation v2 added 2026-08-17)
  *
  * Left as a record rather than a chat log, because the answer turns on a fact
  * the question as usually asked does not mention.
@@ -194,10 +196,10 @@ export const decodeCealLeasedConsumerFileSearchArguments: (value: unknown) => vo
  *   (`CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_MAX_QUERY_BYTES`), which leaves the
  *   remaining change purely additive and needs no new name.
  *
- * Operator decision, 2026-08-12: restore the ceiling rather than mint `.v2`. A
- * `.v2` the Gateway serves ALONE re-creates the refusal it was minted to avoid,
- * so the only version scheme that buys anything is one accepting both names
- * during transition — a cost with no remaining benefit once the ceiling is back.
+ * Operator decision, 2026-08-12: restore the value ceiling rather than mint a
+ * value-only `.v2`. The 2026-08-17 `.v2` is different: it is only for an
+ * explicit Gateway continuation action and does not narrow or reinterpret any
+ * v1 filter value. The decoder accepts both names during the transition.
  *
  * ONE narrowing deliberately survives: an all-whitespace `query` is refused
  * where `.v1` once accepted it. `query` is now OPTIONAL, so the way to express
@@ -209,6 +211,71 @@ export const CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS = Object.freeze({
 	optional: Object.freeze(["query", "limit", "since", "until", "author_ref", "include_replies"]) as readonly CealLeasedConsumerSearchFilter[],
 	maxQueryBytes: CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_MAX_QUERY_BYTES,
 });
+
+/**
+ * Gateway-issued continuation references are opaque to the consumer and to
+ * the provider connector. The syntax is bounded here so malformed values fail
+ * before a provider call; existence, expiry, route binding, and lease binding
+ * remain Gateway-owned checks.
+ */
+export function validCealLeasedConsumerMessageSearchContinuation(value: unknown): value is string {
+	return typeof value === "string" && /^enumeration:[0-9a-f-]{36}$/u.test(value);
+}
+
+/**
+ * The additive v2 input has two intentionally disjoint forms. A continuation
+ * resumes Gateway-owned state and therefore cannot carry filters; an initial
+ * request carries filters but no continuation. Runtime decoding remains the
+ * authority for the opaque continuation's syntax and existence.
+ */
+export type CealLeasedConsumerMessageSearchArgumentsV2 =
+	| {
+		schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA;
+		continuation: string;
+	}
+	| {
+		schema_version: typeof CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA;
+		continuation?: never;
+		query?: string;
+		limit?: number;
+		since?: string;
+		until?: string;
+		author_ref?: string;
+		include_replies?: false;
+	};
+
+const decodeLegacyMessageSearchArguments = cealLeasedConsumerSearchArgumentsDecoder(
+	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA,
+	CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS,
+);
+
+/**
+ * Accepts the frozen v1 page request and the additive v2 continuation request.
+ * A v2 continuation carries the original question in Gateway state, so adding
+ * any filter beside it is a protocol error rather than a new search.
+ */
+export function decodeCealLeasedConsumerMessageSearchArguments(value: unknown): void {
+	if (!record(value)) invalid();
+	const candidate = value as Record<string, unknown>;
+	if (candidate.schema_version === CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_SCHEMA) {
+		decodeLegacyMessageSearchArguments(value);
+		return;
+	}
+	if (candidate.schema_version !== CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_ARGUMENTS_V2_SCHEMA || !validMessageSearchV2Arguments(candidate)) invalid();
+}
+
+function validMessageSearchV2Arguments(candidate: Record<string, unknown>): boolean {
+	const allowed = ["schema_version", "author_ref", "continuation", "include_replies", "limit", "query", "since", "until"];
+	if (!Object.keys(candidate).every((key) => allowed.includes(key))) return false;
+	if (Object.hasOwn(candidate, "continuation")) {
+		return validCealLeasedConsumerMessageSearchContinuation(candidate.continuation)
+			&& Object.keys(candidate).every((key) => ["schema_version", "continuation"].includes(key));
+	}
+	return CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_FILTERS.optional.every((name) => candidate[name] === undefined
+		|| validFilter(name, candidate[name], CEAL_LEASED_CONSUMER_MESSAGE_SEARCH_MAX_QUERY_BYTES))
+		&& candidate.include_replies !== true
+		&& (candidate.since === undefined || candidate.until === undefined || Date.parse(String(candidate.since)) < Date.parse(String(candidate.until)));
+}
 
 function daysInMonth(year: number, month: number): number {
 	const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);

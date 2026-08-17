@@ -40,10 +40,10 @@
 	},
 	"gateway_protocol_handoff": {
 		"lock_file": "gateway-protocol-handoff-lock.json",
-		"gateway_tag": "gateway-protocol-handoff-v0.72.21",
-		"gateway_commit": "aa4bc9f65c88a445f957cd33f105894e8df2f814",
-		"protocol_tree": "e20497d4ebe25a675012c676448e14eea4da891c",
-		"archive_sha256": "1312b7d439a3e7e17aab022a40383d7ed5f9bc3f9aa9d9cf44c21026bec079b7"
+		"gateway_tag": "gateway-protocol-handoff-v0.73.0",
+		"gateway_commit": "eb79b2310edcd4587756358975c2b5e4b40f0491",
+		"protocol_tree": "cfee89e25f0724484a5df2e8cb15346c6697c743",
+		"archive_sha256": "d3e77ada3d35f09007f7ae115e634870e7b7eb2a8a3b54a30faa8aac43ae9f5a"
 	},
 	"non_claims": [
 		"This private contract is not a public ceal command or an Agent effect API.",
