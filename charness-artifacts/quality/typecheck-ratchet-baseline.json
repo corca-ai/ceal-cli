@@ -129,7 +129,6 @@
     "tests": {
       "config": "tsconfig.tests.json",
       "files": [
-        "packages/ceal-protocol/test/leased-consumer-attachment-stream.test.ts",
         "packages/ceal-worker-cli/test/agent-guide.test.ts",
         "packages/ceal-worker-cli/test/bounded-process.test.ts",
         "packages/ceal-worker-cli/test/capability-target-renderer.test.ts",
@@ -152,10 +151,6 @@
         "packages/ceal-worker-cli/test/stable-update.test.ts"
       ],
       "diagnosticsByFile": {
-        "packages/ceal-protocol/test/leased-consumer-attachment-stream.test.ts": {
-          "TS2339": 6,
-          "TS2345": 1
-        },
         "packages/ceal-worker-cli/test/agent-guide.test.ts": {
           "TS18048": 34,
           "TS2339": 5,
