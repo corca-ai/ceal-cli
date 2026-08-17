@@ -63,5 +63,40 @@ unaccepted family still blocks.
 
 ## Remaining proof
 
+## Signed-handoff follow-up
+
+The signed Gateway Protocol handoff moved the Worker candidate to 0.73.0 and
+surfaced 19 duplicate-ratchet fingerprints after the no-verify integration
+pushes. The primary review read every reported member span. They are intentional
+families: standalone release-script scaffolding, independent signed-contract
+validators, buffered-versus-streaming transport symmetry, typed error boundaries,
+and independent test proof setup. No family had a second extractable policy
+owner, so no production extraction was made.
+
+All 19 are recorded as `intentional` in `charness-artifacts/quality/dup-review.json`:
+
+`09160c8604330f55`, `1524c488b1cf0ee3`, `1fa237a6896f7029`,
+`3b3090020d5a010c`, `589504182394f96c`, `5a9f19ed23824d91`,
+`64f6bd9144767c86`, `71a74b8d343056cc`, `7ef4c3cbe3e5f5a4`,
+`7f929ff74c7d36fd`, `81872ac3500b3ccb`, `8b8f3bc7c6841fad`,
+`9e0547b37a4d383e`, `abc7cb50323ff928`, `ad866e02b38a3677`,
+`b502b2be3c2e9778`, `cc4305affab231cb`, `d81d53b4c9c06a16`,
+`f468f4609a7e7f89`.
+
+The gate was re-run through the repository front door with:
+
+`node scripts/check-dup-ratchet.ts`
+
+and returned `OK: no new fixable-eligible families; fixable_ceiling=0 <=
+floor_F=0`. The existing 146-family baseline was not replaced and no broad
+`--write-baseline` was used.
+
+The Worker release proof bundle itself passed at
+`/tmp/ceal-proof-jobs/worker-release-check/result.check-20260817-03.json`
+(exit 0, 610328 ms). The later ordinary pre-push unit/iteration gate also
+passed; its duplicate-ratchet arm was the only arm that needed this overlay.
+
+## Remaining proof
+
 The final ordinary pre-push, normal `git push`, remote SHA readback, and CI result
-must be recorded after this artifact and the refreshed baselines are committed.
+must be recorded after this artifact and the ratchet overlay are committed.

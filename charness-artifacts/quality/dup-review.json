@@ -1063,6 +1063,139 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-13",
 			"note": "Re-key of client session refresh/enrollment/logout public result projections. Their common YAML frame is the public schema style; status, revocation, local-removal, retry, and recovery truth differ by lifecycle boundary, so a parameterized writer would hide the state transition each output exists to expose."
+		},
+		{
+			"surface": "code",
+			"id": "09160c8604330f55",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "ByteQueue.peek and ByteQueue.take intentionally repeat the underflow guard while making the semantic difference visible: one copies without consuming and the other advances the queue. A helper would parameterize the public operation rather than centralize a second fact owner."
+		},
+		{
+			"surface": "code",
+			"id": "1524c488b1cf0ee3",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Re-key of the whole-file Protocol consumer verifier versus Worker release-package builder, the class previously reviewed at 71110b17dd4f06b0 and 4e437a213994e8b8. The verifier proves an isolated packed install; the builder stages a hermetic release package. Their shared executable-script frame is not a shared trust decision."
+		},
+		{
+			"surface": "code",
+			"id": "1fa237a6896f7029",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The git-object predicates in the attachment-stream runtime generator and Protocol-vendor-pin verifier validate independent signed source records. The shape is a portable boundary idiom; importing one standalone release script into the other would add coupling without creating one owner for either record."
+		},
+		{
+			"surface": "code",
+			"id": "3b3090020d5a010c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Broad detector overlap between the handoff-runtime and attachment-stream-runtime generators. They are independently generated trust surfaces with different source contracts and output schemas; the shared standalone-generator frame and local JSON/hash predicates do not represent one mutable policy."
+		},
+		{
+			"surface": "code",
+			"id": "589504182394f96c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The staged-control-session projector and the two generated runtime scripts share executable-module tails and structured error handling. Each CLI owns a different projection or generated contract, so extracting the import.meta guard would create a dependency while leaving all release policy at the callers."
+		},
+		{
+			"surface": "code",
+			"id": "5a9f19ed23824d91",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "sameKeys is kept local in the attachment-stream carrier contract reader and stdin entrypoint decoder. The identical exact-key predicate protects different schemas and failure boundaries; the local closures keep each fail-closed contract visible instead of turning schema policy into a callback."
+		},
+		{
+			"surface": "code",
+			"id": "64f6bd9144767c86",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The exact-key checks in the handoff generator, call-result projection, and attachment-runtime generator serve different public and signed schemas. Their common object-shape idiom has no shared domain fact; parameterizing it would hide which boundary rejects an added field."
+		},
+		{
+			"surface": "code",
+			"id": "71a74b8d343056cc",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The family combines plain-record, safe-reference, and adjacent boundary predicates across runtime stores, release scripts, and tests. These are independently owned grammar and trust checks; a shared utility would couple package and release lifecycles without centralizing mutable policy."
+		},
+		{
+			"surface": "code",
+			"id": "7ef4c3cbe3e5f5a4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The two private-worker-transport windows belong to buffered JSON POST and streaming POST. They intentionally differ in response delivery, body lifetime, and pre-header error handling; sharing the repeated request frame would parameterize the transport semantics rather than remove a duplicate policy owner."
+		},
+		{
+			"surface": "code",
+			"id": "7f929ff74c7d36fd",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Embedded contract digest checks in the attachment-stream carrier and the older leased-consumer carrier protect different signed contracts and route identities. Keeping the checks at each boundary preserves fail-closed ownership; a cross-module helper would hide which contract failed."
+		},
+		{
+			"surface": "code",
+			"id": "81872ac3500b3ccb",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The attachment-runtime generator's source-object/hash predicates and the handoff-archive parser's lock-field predicates serve different artifact inputs and failure vocabularies. They are standard boundary grammar, not a second implementation of one release decision."
+		},
+		{
+			"surface": "code",
+			"id": "8b8f3bc7c6841fad",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Detector self-overlap inside private-worker-transport spans the buffered request and streaming response implementations. The common close/deadline/error vocabulary is shaped by two different response contracts; there is no second fact owner to extract."
+		},
+		{
+			"surface": "code",
+			"id": "9e0547b37a4d383e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The whole-file test-family detector window covers independent repo-gates and legacy-mjs-conversion contracts. Their Node setup is ordinary test scaffolding; one owns repository gate inventory while the other owns conversion planning and transaction proof, so no shared semantic fixture exists."
+		},
+		{
+			"surface": "code",
+			"id": "abc7cb50323ff928",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Broad family of three-line SHA/object predicates and adjacent error-boundary idioms across worker runtime, release scripts, and tests. This is the existing cross-boundary primitive class reviewed at aa51a81553945867, 40e06511f93f62bc, and 2c4224859ea718e0; importing built worker code into standalone release scripts would add build-order coupling."
+		},
+		{
+			"surface": "code",
+			"id": "ad866e02b38a3677",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The adjacent abortRequest and deadlineRequest closures in private-worker-transport deliberately preserve two distinct error causes and both close the same request safely. A parameterized callback would make the failure identity less visible without centralizing a second implementation."
+		},
+		{
+			"surface": "code",
+			"id": "b502b2be3c2e9778",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Typed error constructors in the attachment-stream carrier, entrypoint, and stream decoder share language scaffolding but expose different public code vocabularies and caller boundaries. Keeping each class local preserves the failure contract instead of introducing a generic error base."
+		},
+		{
+			"surface": "code",
+			"id": "cc4305affab231cb",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "The family groups ordinary record, content-type, hash, and error-shape predicates across stores, transports, generators, and release-input readers. The surrounding schemas and anomaly policies are distinct; the shared JavaScript idiom is below a useful extraction boundary."
+		},
+		{
+			"surface": "code",
+			"id": "d81d53b4c9c06a16",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "sameArray checks in the generated runtime, call-result output, and release-input parser validate different ordered schema fields. The array contents are the contract-specific fact, so a shared helper would only move all policy into parameters."
+		},
+		{
+			"surface": "code",
+			"id": "f468f4609a7e7f89",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Broad release-script overlap between raw handoff-input layout validation and lock-bound archive validation. One accepts a complete file tuple; the other validates a packaged Gateway lock and archive. Their similar guards preserve different trust boundaries and must not be collapsed."
 		}
 	],
 	"fixable_ceiling": 0,
