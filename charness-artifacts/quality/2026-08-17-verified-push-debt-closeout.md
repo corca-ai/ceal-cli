@@ -57,8 +57,8 @@ unaccepted family still blocks.
   `/tmp/ceal-proof-jobs/worker-verified-push-gate/result.20260817-worker-prepush-5.json`
   and its `output.log`
 - Focused hook proof: exit propagation 1/1; concurrency and signal cleanup 4/4.
-- Current advisory: exact owned roots, `status: clean`, no new family.
-- Current blocking gate: `OK: no new fixable-eligible families;
+- At the initial closeout: exact owned roots, `status: clean`, no new family.
+- At the initial closeout, the blocking gate returned `OK: no new fixable-eligible families;
   fixable_ceiling=0 <= floor_F=0`.
 
 ## Remaining proof
@@ -73,7 +73,7 @@ validators, buffered-versus-streaming transport symmetry, typed error boundaries
 and independent test proof setup. No family had a second extractable policy
 owner, so no production extraction was made.
 
-All 19 are recorded as `intentional` in `charness-artifacts/quality/dup-review.json`:
+Those initial 19 are recorded as `intentional` in `charness-artifacts/quality/dup-review.json`:
 
 `09160c8604330f55`, `1524c488b1cf0ee3`, `1fa237a6896f7029`,
 `3b3090020d5a010c`, `589504182394f96c`, `5a9f19ed23824d91`,
@@ -98,5 +98,28 @@ passed; its duplicate-ratchet arm was the only arm that needed this overlay.
 
 ## Remaining proof
 
-The final ordinary pre-push, normal `git push`, remote SHA readback, and CI result
-must be recorded after this artifact and the ratchet overlay are committed.
+## Package symlink fix follow-up
+
+The first actual Worker release dry-run (`32031183249`) failed in every platform
+matrix because npm workspace `.bin` symlinks under the omitted `node_modules`
+trees were rejected before the release packager applied its omission filter. The
+fix keeps retained source symlinks fail-closed, but validates only bytes that can
+enter the staged package. A focused package test creates `.bin` symlinks in both
+owned package fixtures and passes (`6/6`); `npm run lint:types:tools` also passed.
+
+The fix commit is `beddb7d`. Its ordinary pre-push reached the duplicate ratchet
+after the iteration gate passed, where three fingerprints were re-keyed by the
+package-builder edit:
+
+`03c013ed0047190a`, `9447cb0b3bbdb5b3`, `a12ae38c4319b217`.
+
+The primary review read each reported span. They are intentional re-keys of the
+already reviewed independent version resolvers, the whole-file verifier-versus-
+builder pair, and distinct asset/package directory guards. They are now recorded
+as `intentional` in `dup-review.json`; no production extraction or broad baseline
+rewrite was made. The direct detail command was:
+
+`python3 /home/ubuntu/.agents/src/charness/plugins/charness/skills/quality/scripts/check_dup_ratchet.py --repo-root /home/ubuntu/ceal-cli --detail`
+
+The ratchet must be re-run through the Worker front door before the normal push
+is retried. The dry-run, remote SHA, release tag, and CI result remain open.

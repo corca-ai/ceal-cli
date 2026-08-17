@@ -1196,6 +1196,27 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-17",
 			"note": "Broad release-script overlap between raw handoff-input layout validation and lock-bound archive validation. One accepts a complete file tuple; the other validates a packaged Gateway lock and archive. Their similar guards preserve different trust boundaries and must not be collapsed."
+		},
+		{
+			"surface": "code",
+			"id": "03c013ed0047190a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Re-key of the independently runnable package and native release version resolvers. Both must prove that the Worker and client package versions agree before their distinct artifact builders proceed; the input types and downstream trust boundaries differ, and importing one builder's resolver into the other would couple package and executable release paths."
+		},
+		{
+			"surface": "code",
+			"id": "9447cb0b3bbdb5b3",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Re-key of the previously reviewed whole-file Protocol consumer verifier versus Worker release-package builder family. The verifier proves an isolated packed install; the builder stages a hermetic release package. The omitted-workspace-symlink fix changed the builder fingerprint but did not create a shared trust decision, so their orchestration remains intentionally separate."
+		},
+		{
+			"surface": "code",
+			"id": "a12ae38c4319b217",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Re-key of two boundary-local regular-directory guards: asset merge inputs and Worker package staging. They use different error vocabularies and mark different release objects; the package-side omitted-directory change altered only its fingerprint, not the ownership decision. A shared helper would hide the distinct release boundaries."
 		}
 	],
 	"fixable_ceiling": 0,
