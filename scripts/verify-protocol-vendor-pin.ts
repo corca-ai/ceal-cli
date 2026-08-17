@@ -46,7 +46,61 @@ const VENDORED_PATH = "packages/ceal-protocol";
 const SOURCE_REPOSITORY = "corca-ai/ceal";
 const LOCK_FILE = "gateway-protocol-handoff-lock.json";
 const QUARANTINE_RECORD = "docs/protocol-quarantine.md";
-const STATUSES = new Set(["agreed", "diverged"]);
+type ProtocolVendorPinStatus = "agreed" | "diverged";
+
+interface ProtocolVendorPinSource {
+	readonly repository: typeof SOURCE_REPOSITORY;
+	readonly package_path: typeof VENDORED_PATH;
+	readonly commit: string;
+	readonly tree: string;
+}
+
+interface ProtocolVendorPinShipped {
+	readonly lock_file: typeof LOCK_FILE;
+	readonly status: ProtocolVendorPinStatus;
+	readonly gateway_commit: string;
+	readonly protocol_tree: string;
+	readonly reason?: string;
+	readonly disposition_owner?: string;
+	readonly disposition_request?: string;
+}
+
+interface ProtocolVendorPin {
+	readonly schema_version: typeof SCHEMA;
+	readonly vendored_path: typeof VENDORED_PATH;
+	readonly source: ProtocolVendorPinSource;
+	readonly shipped: ProtocolVendorPinShipped;
+	readonly non_claims: readonly string[];
+}
+
+interface GatewayHandoffLock {
+	readonly gateway?: {
+		readonly commit?: unknown;
+		readonly protocol_tree?: unknown;
+	};
+}
+
+interface ValidateProtocolVendorPinOptions {
+	readonly repoRoot?: string;
+	readonly pin?: unknown;
+	readonly lock?: GatewayHandoffLock;
+	readonly vendoredTree?: string;
+	readonly vendoredDirty?: readonly string[];
+	readonly vendoredHidden?: readonly string[];
+	readonly requestTracked?: boolean;
+}
+
+interface ProtocolVendorPinValidationResult {
+	readonly schema_version: typeof SCHEMA;
+	readonly vendored_path: typeof VENDORED_PATH;
+	readonly source: ProtocolVendorPinSource;
+	readonly vendored: { readonly tree: string };
+	readonly shipped: ProtocolVendorPinShipped;
+	readonly diverged: boolean;
+	readonly non_claims: readonly string[];
+}
+
+const STATUSES: ReadonlySet<ProtocolVendorPinStatus> = new Set(["agreed", "diverged"]);
 
 export const ProtocolVendorPinError = codedErrorClass("ProtocolVendorPinError");
 
@@ -67,7 +121,7 @@ export function validateProtocolVendorPin({
 	vendoredDirty,
 	vendoredHidden,
 	requestTracked,
-} = {}) {
+}: ValidateProtocolVendorPinOptions = {}): ProtocolVendorPinValidationResult {
 	const root = path.resolve(repoRoot);
 	const candidate = pin ?? readJson(root, PIN_PATH, "invalid_protocol_vendor_pin");
 	assertPinShape(candidate);
@@ -233,7 +287,7 @@ export function validateProtocolVendorPin({
  * clearance, so every one of those paths calls this rather than trusting that
  * some test command ran.
  */
-export function assertShippableProtocolVendorPin(options = {}) {
+export function assertShippableProtocolVendorPin(options: ValidateProtocolVendorPinOptions = {}): ProtocolVendorPinValidationResult {
 	const result = validateProtocolVendorPin(options);
 	if (!result.diverged) return result;
 	throw new ProtocolVendorPinError(
@@ -246,28 +300,16 @@ export function assertShippableProtocolVendorPin(options = {}) {
 	);
 }
 
-function assertPinShape(pin) {
+function assertPinShape(pin: unknown): asserts pin is ProtocolVendorPin {
 	if (!isRecord(pin) || pin.schema_version !== SCHEMA || pin.vendored_path !== VENDORED_PATH) {
 		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin is missing or does not match its schema.");
 	}
 	const source = pin.source;
-	if (
-		!isRecord(source) ||
-		source.repository !== SOURCE_REPOSITORY ||
-		source.package_path !== VENDORED_PATH ||
-		!isGitObject(source.commit) ||
-		!isGitObject(source.tree)
-	) {
+	if (!isProtocolVendorPinSource(source)) {
 		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin does not record a complete source identity.");
 	}
 	const shipped = pin.shipped;
-	if (
-		!isRecord(shipped) ||
-		shipped.lock_file !== LOCK_FILE ||
-		!STATUSES.has(shipped.status) ||
-		!isGitObject(shipped.gateway_commit) ||
-		!isGitObject(shipped.protocol_tree)
-	) {
+	if (!isProtocolVendorPinShipped(shipped)) {
 		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin does not record a complete shipped identity.");
 	}
 	// Only demanded for a divergence: an `agreed` pin has no open question to
@@ -286,14 +328,14 @@ function assertPinShape(pin) {
 	}
 }
 
-function readVendoredTree(root, vendoredPath) {
+function readVendoredTree(root: string, vendoredPath: string): string {
 	return git(root, ["rev-parse", `HEAD:${vendoredPath}`], "the vendored protocol tree hash");
 }
 
 // `git ls-files -v` prefixes each path with its index state. A lowercase letter
 // means assume-unchanged; `S` means skip-worktree. Anything else is a file Git is
 // still watching.
-function readVendoredHidden(root, vendoredPath) {
+function readVendoredHidden(root: string, vendoredPath: string): string[] {
 	return git(root, ["ls-files", "-v", "--", vendoredPath], "the vendored protocol index flags")
 		.split("\n")
 		.map((line) => line.trim())
@@ -305,14 +347,14 @@ function readVendoredHidden(root, vendoredPath) {
 		.map((line) => line.slice(1).trim());
 }
 
-function readVendoredDirty(root, vendoredPath) {
+function readVendoredDirty(root: string, vendoredPath: string): string[] {
 	return git(root, ["status", "--porcelain", "--", vendoredPath], "the vendored protocol worktree status")
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(Boolean);
 }
 
-function isTracked(root, relativePath) {
+function isTracked(root: string, relativePath: string): boolean {
 	try {
 		execFileSync("git", ["ls-files", "--error-unmatch", "--", relativePath], { cwd: root, stdio: "ignore" });
 		return true;
@@ -324,7 +366,7 @@ function isTracked(root, relativePath) {
 // Deliberately not "this needs a Git work tree": a work tree with no commits yet
 // fails here too, and blaming the wrong thing sends the reader looking for a
 // missing repository that is right in front of them.
-function git(root, args, what) {
+function git(root: string, args: readonly string[], what: string): string {
 	try {
 		return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 	} catch {
@@ -335,7 +377,7 @@ function git(root, args, what) {
 	}
 }
 
-function readJson(root, relativePath, code) {
+function readJson<T>(root: string, relativePath: string, code: string): T {
 	const file = assertRegularFile(root, relativePath, code);
 	try {
 		return JSON.parse(readFileSync(file, "utf8"));
@@ -344,7 +386,7 @@ function readJson(root, relativePath, code) {
 	}
 }
 
-function assertRegularFile(root, relativePath, code) {
+function assertRegularFile(root: string, relativePath: string, code: string): string {
 	if (typeof relativePath !== "string" || relativePath.length === 0 || path.isAbsolute(relativePath)) {
 		throw new ProtocolVendorPinError(code, "Protocol vendor pin paths must be non-empty relative paths.");
 	}
@@ -357,14 +399,38 @@ function assertRegularFile(root, relativePath, code) {
 	return target;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-function isGitObject(value) {
+function isGitObject(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
 }
-function isNonEmptyString(value) {
+function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
+}
+
+function isProtocolVendorPinStatus(value: unknown): value is ProtocolVendorPinStatus {
+	return typeof value === "string" && STATUSES.has(value as ProtocolVendorPinStatus);
+}
+
+function isProtocolVendorPinSource(value: unknown): value is ProtocolVendorPinSource {
+	return (
+		isRecord(value) &&
+		value.repository === SOURCE_REPOSITORY &&
+		value.package_path === VENDORED_PATH &&
+		isGitObject(value.commit) &&
+		isGitObject(value.tree)
+	);
+}
+
+function isProtocolVendorPinShipped(value: unknown): value is ProtocolVendorPinShipped {
+	return (
+		isRecord(value) &&
+		value.lock_file === LOCK_FILE &&
+		isProtocolVendorPinStatus(value.status) &&
+		isGitObject(value.gateway_commit) &&
+		isGitObject(value.protocol_tree)
+	);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -392,13 +458,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 				2,
 			),
 		);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error(
 			JSON.stringify({
 				schema_version: "ceal.protocol_vendor_pin_error.v1",
 				ok: false,
 				error_code: error instanceof ProtocolVendorPinError ? error.code : "protocol_vendor_pin_verification_failed",
-				message: error.message,
+				message: error instanceof Error ? error.message : String(error),
 			}),
 		);
 		process.exitCode = 2;

@@ -15,7 +15,6 @@
         "scripts/lib/protocol-provenance.ts",
         "scripts/materialize-signed-gateway-protocol-source.ts",
         "scripts/project-staged-worker-control-session.ts",
-        "scripts/verify-protocol-vendor-pin.ts",
         "test/contract/one-fact-one-home.test.ts",
         "test/contract/pre-push-lock.test.ts",
         "test/contract/probe-surface.test.ts",
@@ -49,11 +48,6 @@
         "scripts/project-staged-worker-control-session.ts": {
           "TS7031": 4,
           "TS7036": 1
-        },
-        "scripts/verify-protocol-vendor-pin.ts": {
-          "TS18046": 1,
-          "TS2339": 6,
-          "TS7006": 21
         },
         "test/contract/one-fact-one-home.test.ts": {
           "TS7006": 6
