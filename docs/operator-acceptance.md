@@ -102,15 +102,18 @@ they have access pays a version number to learn it. Check first.
 
 The worker release lane fires on `ceal-v*.*.*` and drives
 `.github/workflows/ceal-release.yml`. Its `ceal-cli-release` Environment must be
-protected before release and must own the release-origin identity and credential:
+configured before release and must own the release-origin identity and credential.
+This is one-time environment configuration, not a per-release digest entry:
 
 ```
-gh variable list -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_ACCOUNT_ID plus the two CEAL_CLI_APPROVED_* variables
+gh variable list -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_ACCOUNT_ID
 gh secret list   -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_API_TOKEN
 ```
 
-The workflow re-checks them at run time and fails the job by name if either is
-empty, so a missing Environment value costs the tag.
+The workflow reads these stable credentials only from the privileged jobs. A
+canonical maintainer tag push selects the release, and the workflow binds the
+commit and assembled inventory automatically to that same run; no release-time
+Environment variable update is required.
 
 The proof/ship state no longer needs a separate look to avoid a wasted tag: it is
 a gate failure. A green `npm run check` already means the protocol bytes this
@@ -131,14 +134,18 @@ not be cited as release or installed-worker evidence. `docs/gates.md` says what
 the check does and does not cover.
 
 Signing is keyless, but publishing is privileged. The `sign-and-publish` and
-rollback activation jobs use the `ceal-cli-release` Environment, whose approved
-commit and SHA256SUMS digest are rechecked before signing or release-origin
-mutation. Distinct `CEAL_ENV_*` names make missing Environment credentials fail
-closed instead of falling back to legacy repository-wide values.
+rollback activation jobs use the `ceal-cli-release` Environment for their
+release-origin credentials. The release lane compares the assemble output with
+the exact artifact downloaded by the privileged job; rollback does the same
+with the immutable tag's verified handoff. Distinct `CEAL_ENV_*` names make
+missing Environment credentials fail closed instead of falling back to legacy
+repository-wide values. These same-run checks prove artifact identity, not a
+separate human review of the generated digest.
 
-The repository's unprotected `main` policy does not authorize an unprotected
-release boundary. Before spending a tag, verify the Environment has a real
-protection rule and inspect tag rules rather than trusting the workflow comment:
+The repository's unprotected `main` policy does not authorize an unreviewed
+source change to publish by itself. Before spending a tag, inspect the
+Environment's deployment policy and repository tag policy rather than trusting
+the workflow comment:
 
 ```
 gh api repos/corca-ai/ceal-cli/environments/ceal-cli-release --jq '{protection_rules, deployment_branch_policy}'
@@ -148,14 +155,15 @@ gh secret list -R corca-ai/ceal-cli --env ceal-cli-release
 gh secret list -R corca-ai/ceal-cli
 ```
 
-Expect `CEAL_CLI_APPROVED_COMMIT`,
-`CEAL_CLI_APPROVED_SHA256SUMS_SHA256`, and
-`CEAL_ENV_CLOUDFLARE_ACCOUNT_ID` in the Environment variables, and
-`CEAL_ENV_CLOUDFLARE_API_TOKEN` in its secrets. Do not release while the
-Environment has no protection rule, while any expected value is absent, or while
-a legacy `CEAL_RELEASE_*` credential remains configured. Also confirm no
-Cloudflare token is available repository-wide. A tag is a candidate input;
-Environment approval is the privileged release decision.
+Expect only `CEAL_ENV_CLOUDFLARE_ACCOUNT_ID` in the Environment variables and
+`CEAL_ENV_CLOUDFLARE_API_TOKEN` in its secrets after the one-time configuration
+cleanup. Do not release while the deployment policy is unexpectedly absent,
+either credential is absent, or a legacy `CEAL_RELEASE_*` credential remains
+configured. Also confirm no Cloudflare token is available repository-wide. No
+per-release approval variable or human digest approval is required: an
+authorized maintainer's canonical tag push is the release decision; the
+Environment supplies credentials and the workflow proves same-run artifact
+identity.
 
 You also need push and tag rights on `corca-ai/ceal-cli`. Verify without
 spending anything:

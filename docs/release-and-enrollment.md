@@ -114,6 +114,27 @@ earlier, and no `check.yml` leg is arm64, so nothing else could have caught it.
 
 `CHANGELOG.md` owns which tags are burned and why.
 
+## Stable rollback
+
+To move the stable pointer back to a previously published, known-good worker
+tag, run the rollback workflow with the literal confirmation:
+
+```
+gh workflow run ceal-worker-stable-rollback.yml --ref main \
+  -f tag=ceal-v<known-good-version> \
+  -f confirmation=ROLLBACK
+```
+
+The workflow re-verifies the selected immutable tag's signed inventory, then
+binds the verified bootstrap and pointer to the same rollback run before the
+release-origin update. No per-release environment variable entry is part of
+rollback. After the run, read the public pointer back and confirm its tag:
+
+```
+curl --fail --silent --show-error \
+  https://ceal.borca.ai/releases/worker/stable/ceal-worker-stable-release.json
+```
+
 ## Employee verified-email device adoption
 
 For a consenting employee device, the preferred flow is verified-email

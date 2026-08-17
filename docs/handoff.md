@@ -89,11 +89,14 @@ separately approved boundaries.
   that cut. The signed lock, release workflow, and installed worker remain on
   `0.72.13`, so ship-facing builders and acceptance stay correctly refused.
 - The release workflows now keep checkout/source proof outside privileged jobs
-  and require the existing `ceal-cli-release` approval identity before worker
-  publish or rollback activation. Distinct `CEAL_ENV_*` credential names prevent
-  fallback to legacy repository-level values. GitHub configuration is still a
-  release blocker until that Environment has protection rules and owns those
-  values; a tag alone is not approval.
+  and use the `ceal-cli-release` Environment only for release-origin credentials
+  before worker publish or rollback activation. Same-run `github.sha` artifact
+  names and assemble/verify digests bind the privileged handoff automatically;
+  no per-release identity variables are required. Distinct `CEAL_ENV_*`
+  credential names prevent fallback to legacy repository-level values. GitHub
+  configuration is still a release blocker until that Environment has its
+  deployment rules and owns those credentials; a maintainer's canonical tag push
+  selects the release.
 - `npm run check:unit` is the aggregate development iteration gate. Its one
   checkout build is followed by the internal `test:contract:built` lane, while
   package behavior tests and `npm run check:protocol-dev` provide no-build

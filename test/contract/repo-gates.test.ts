@@ -214,15 +214,21 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 	assert.equal(publish.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
 	assert.equal(publish.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(publish, "the OIDC-capable worker publish job");
-	assertRunContains(namedStep(publish, "Require approved worker release identity"), [
-		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
-		'[ "$APPROVED_SHA256SUMS_SHA256" = "$ASSEMBLED_SHA256SUMS_SHA256" ]',
+	assertRunContains(namedStep(publish, "Verify same-run worker release binding"), [
+		'[ "$GITHUB_REF_TYPE" = "tag" ]',
+		'[ "$GITHUB_REF" = "refs/tags/$TAG" ]',
+		'[ -n "$GITHUB_SHA" ]',
+		'[ -n "$ASSEMBLED_SHA256SUMS_SHA256" ]',
 	]);
 	assertRunContains(namedStep(publish, "Verify the assembled worker inventory"), [
-		'[ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ]',
 		'[ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ]',
 		"sha256sum -c SHA256SUMS",
 	]);
+	assert.equal(
+		namedStep(publish, "Download exact assembled release handoff").with.name,
+		"ceal-worker-release-${{ github.sha }}",
+		"worker publish must download only this run's assembled handoff",
+	);
 
 	assert.equal(rollback.jobs.verify.environment, undefined, "checked-out rollback verifier must stay unprivileged");
 	const activate = rollback.jobs.activate;
@@ -231,14 +237,21 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 	assert.equal(activate.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
 	assert.equal(activate.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(activate, "the release-origin rollback job");
-	assertRunContains(namedStep(activate, "Require approved rollback workflow identity"), [
-		'[ "$APPROVED_COMMIT" = "$GITHUB_SHA" ]',
-		'[ "$APPROVED_SHA256SUMS_SHA256" = "$VERIFIED_SHA256SUMS_SHA256" ]',
+	assertRunContains(namedStep(activate, "Verify same-run rollback binding"), [
+		'[ -n "$GITHUB_SHA" ]',
+		'[ -n "$VERIFIED_SHA256SUMS_SHA256" ]',
 	]);
-	assertRunContains(namedStep(activate, "Require the approved rollback identity"), [
+	assert.equal(
+		namedStep(activate, "Download the verified rollback handoff").with.name,
+		"ceal-worker-rollback-${{ github.sha }}",
+		"rollback activation must download only this run's verified handoff",
+	);
+	assertRunContains(namedStep(activate, "Verify the downloaded rollback handoff"), [
 		"sha256sum stable/SHA256SUMS",
 		"awk '$2 == \"install-ceal.sh\" { print $1 }' stable/SHA256SUMS",
 		"sha256sum stable/install-ceal.sh",
+		'[ "$pointer_tag" = "$TAG" ]',
+		'[ "$VERIFIED_SHA256SUMS_SHA256" = "$observed_digest" ]',
 		'[ "$expected_installer" = "$observed_installer" ]',
 	]);
 	assert.ok(
@@ -1249,24 +1262,106 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 	assert.ok(gateJobs > 0, "no workflow job runs the final gate; the offline-cache prerequisite check became vacuous");
 });
 
-test("privileged release jobs consume only approved unprivileged handoffs", () => {
+test("privileged release jobs consume only same-run unprivileged handoffs", () => {
 	const workflows = {
 		worker: parse(read(".github/workflows/ceal-release.yml")),
 		rollback: parse(read(".github/workflows/ceal-worker-stable-rollback.yml")),
 	};
 	assertPrivilegedReleaseBoundaries(workflows);
 
-	const withoutCommitComparison = structuredClone(workflows);
-	namedStep(withoutCommitComparison.worker.jobs["sign-and-publish"], "Require approved worker release identity").run = "true";
-	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutCommitComparison));
-
-	const withoutRollbackBootstrapBinding = structuredClone(workflows);
-	namedStep(withoutRollbackBootstrapBinding.rollback.jobs.activate, "Require the approved rollback identity").run = "true";
-	assert.throws(() => assertPrivilegedReleaseBoundaries(withoutRollbackBootstrapBinding));
+	const removeRunFragment = (step: { run?: string }, fragment: string) => {
+		const source = step.run ?? "";
+		assert.ok(source.includes(fragment), `mutation fixture is missing: ${fragment}`);
+		step.run = source.replace(fragment, "true");
+	};
+	const mutationCases: Array<{ name: string; apply: (candidate: typeof workflows) => void }> = [
+		{
+			name: "worker tag-type binding",
+			apply: (candidate) =>
+				removeRunFragment(
+					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify same-run worker release binding"),
+					'[ "$GITHUB_REF_TYPE" = "tag" ]',
+				),
+		},
+		{
+			name: "worker tag-ref binding",
+			apply: (candidate) =>
+				removeRunFragment(
+					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify same-run worker release binding"),
+					'[ "$GITHUB_REF" = "refs/tags/$TAG" ]',
+				),
+		},
+		{
+			name: "worker artifact binding",
+			apply: (candidate) => {
+				namedStep(candidate.worker.jobs["sign-and-publish"], "Download exact assembled release handoff").with.name =
+					"ceal-worker-release-mutated";
+			},
+		},
+		{
+			name: "worker assembled digest binding",
+			apply: (candidate) =>
+				removeRunFragment(
+					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify the assembled worker inventory"),
+					'[ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ]',
+				),
+		},
+		{
+			name: "rollback artifact binding",
+			apply: (candidate) => {
+				namedStep(candidate.rollback.jobs.activate, "Download the verified rollback handoff").with.name = "ceal-worker-rollback-mutated";
+			},
+		},
+		{
+			name: "rollback pointer-tag binding",
+			apply: (candidate) =>
+				removeRunFragment(namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"), '[ "$pointer_tag" = "$TAG" ]'),
+		},
+		{
+			name: "rollback verified digest binding",
+			apply: (candidate) =>
+				removeRunFragment(
+					namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"),
+					'[ "$VERIFIED_SHA256SUMS_SHA256" = "$observed_digest" ]',
+				),
+		},
+		{
+			name: "rollback installer binding",
+			apply: (candidate) =>
+				removeRunFragment(
+					namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"),
+					'[ "$expected_installer" = "$observed_installer" ]',
+				),
+		},
+	];
+	for (const mutation of mutationCases) {
+		const candidate = structuredClone(workflows);
+		mutation.apply(candidate);
+		assert.throws(() => assertPrivilegedReleaseBoundaries(candidate), mutation.name);
+	}
 
 	const withCheckedOutSource = structuredClone(workflows);
 	withCheckedOutSource.worker.jobs["sign-and-publish"].steps.unshift({ uses: "actions/checkout@deadbeef" });
 	assert.throws(() => assertPrivilegedReleaseBoundaries(withCheckedOutSource));
+});
+
+test("release approval uses the authorized trigger, not mutable per-release identity variables", () => {
+	const workflowPaths = [
+		".github/workflows/ceal-release.yml",
+		".github/workflows/ceal-worker-stable-rollback.yml",
+		"docs/operator-acceptance.md",
+		"docs/handoff.md",
+		"docs/release-and-enrollment.md",
+	];
+	for (const workflowPath of workflowPaths) {
+		const source = read(workflowPath);
+		assert.match(source, workflowPath.startsWith(".github/") ? /ceal-cli-release/u : /release/u, `${workflowPath} is not a positive control`);
+		assert.doesNotMatch(
+			source,
+			/CEAL_CLI_APPROVED_(?:COMMIT|SHA256SUMS_SHA256)/u,
+			`${workflowPath} retains a mutable per-release approval variable`,
+		);
+	}
 });
 
 // A mutable action ref resolves to whatever the tag points at when the lane runs,

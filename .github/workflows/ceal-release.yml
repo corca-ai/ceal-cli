@@ -6,11 +6,12 @@ name: Ceal worker release
 # release path now. GitHub supplies source and OIDC signing identity, never release
 # artifact storage or the stable channel resolver.
 #
-# A tag push selects a candidate; it is not sufficient approval by itself.
-# The privileged job also requires the `ceal-cli-release` Environment, which the
-# operator must protect before release, and its exact approved commit/inventory
-# digest. The immutable versioned object set is fully read back and verified
-# before the stable bootstrap and pointer advance.
+# A maintainer's canonical tag push selects and approves the release candidate.
+# The privileged job uses the `ceal-cli-release` Environment only for the
+# release-origin credentials and deployment boundary; the exact commit and
+# inventory are bound automatically to this run's tag, assemble output, and
+# downloaded handoff. The immutable versioned object set is fully read back and
+# verified before the stable bootstrap and pointer advance.
 #
 # `workflow_dispatch` is a DRY RUN and can never publish. It exists because a
 # release tag cannot be reused, so before this trigger the first execution of any
@@ -287,18 +288,19 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}
     steps:
-      - name: Require approved worker release identity
+      - name: Verify same-run worker release binding
         env:
-          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
-          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
           ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          [ -n "$APPROVED_COMMIT" ] && [ "$APPROVED_COMMIT" = "$GITHUB_SHA" ] \
-            || { echo "::error::ceal-cli-release has not approved commit $GITHUB_SHA"; exit 1; }
-          [ -n "$APPROVED_SHA256SUMS_SHA256" ] \
-            && [ "$APPROVED_SHA256SUMS_SHA256" = "$ASSEMBLED_SHA256SUMS_SHA256" ] \
-            || { echo "::error::ceal-cli-release has not approved the assembled SHA256SUMS"; exit 1; }
+          [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF" = "refs/tags/$TAG" ] \
+            || { echo "::error::Worker publish must run from the pushed tag ref"; exit 1; }
+          [[ "$TAG" =~ ^ceal-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::Worker release tags must be canonical ceal-vMAJOR.MINOR.PATCH"; exit 1; }
+          [ -n "$GITHUB_SHA" ] || { echo "::error::Worker publish is missing the source commit"; exit 1; }
+          [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] \
+            || { echo "::error::Unprivileged assembly did not produce a SHA256SUMS digest"; exit 1; }
       - name: Download exact assembled release handoff
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -306,17 +308,13 @@ jobs:
           path: dist
       - name: Verify the assembled worker inventory
         env:
-          APPROVED_COMMIT: ${{ vars.CEAL_CLI_APPROVED_COMMIT }}
-          APPROVED_SHA256SUMS_SHA256: ${{ vars.CEAL_CLI_APPROVED_SHA256SUMS_SHA256 }}
           ASSEMBLED_SHA256SUMS_SHA256: ${{ needs.assemble.outputs.sha256sums_sha256 }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           observed="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
-          [ -n "$APPROVED_SHA256SUMS_SHA256" ] && [ "$APPROVED_SHA256SUMS_SHA256" = "$observed" ] \
-            || { echo "::error::ceal-cli-release has not approved SHA256SUMS $observed"; exit 1; }
           [ -n "$ASSEMBLED_SHA256SUMS_SHA256" ] && [ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ] \
-            || { echo "Downloaded handoff does not match unprivileged assembly" >&2; exit 1; }
+            || { echo "::error::Downloaded handoff does not match this run's unprivileged assembly" >&2; exit 1; }
           [ "$(find dist -maxdepth 1 -type f -not -name '.*' -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = \
             "SHA256SUMS THIRD_PARTY_NOTICES.txt ceal-darwin-arm64 ceal-guide-SKILL.md ceal-linux-amd64 ceal-linux-arm64 ceal-worker-release-manifest-darwin-arm64.json ceal-worker-release-manifest-linux-amd64.json ceal-worker-release-manifest-linux-arm64.json install-ceal.sh " ] \
             || { echo "Unexpected worker release inventory" >&2; exit 1; }
@@ -487,7 +485,7 @@ jobs:
             echo
             echo "- tag: $TAG"
             echo "- commit/workflow source: $GITHUB_SHA"
-            echo "- approved SHA256SUMS digest: $(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+            echo "- assembled SHA256SUMS digest: $(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
             echo "- remote primary bytes: exact local match"
             echo "- remote signature identity: verified"
             echo "- stable signed-inventory pointer: advanced after immutable artifact verification"
