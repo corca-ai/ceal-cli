@@ -14,7 +14,10 @@ import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256,
 } from "../dist/generated/leased-consumer-attachment-stream-contract.js";
 import { consumeLeasedConsumerAttachmentStream } from "../dist/leased-consumer-attachment-stream-carrier.js";
-import { runLeasedConsumerAttachmentStreamEntrypoint, serializeLeasedConsumerAttachmentStreamResult } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
+import {
+	runLeasedConsumerAttachmentStreamEntrypoint,
+	serializeLeasedConsumerAttachmentStreamResult,
+} from "../dist/leased-consumer-attachment-stream-entrypoint.js";
 import { postUnixSocketStream } from "../dist/private-worker-transport.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.ts";
 
@@ -380,7 +383,7 @@ test("candidate carrier closes an invalid response and cleans partial handoffs o
 		},
 	];
 	for (const current of cases) {
-		let created;
+		let created: string | undefined;
 		let responseCloses = 0;
 		await assert.rejects(
 			consumeLeasedConsumerAttachmentStream(
@@ -533,7 +536,7 @@ async function collect(stream) {
 function runPrivateProcess(binary, argv, input) {
 	return new Promise((resolve, reject) => {
 		const devNull = openSync("/dev/null", "r");
-		let child;
+		let child: ReturnType<typeof spawn>;
 		try {
 			child = spawn(process.execPath, [binary, argv], { stdio: ["pipe", "pipe", "pipe", devNull, devNull] });
 		} finally {

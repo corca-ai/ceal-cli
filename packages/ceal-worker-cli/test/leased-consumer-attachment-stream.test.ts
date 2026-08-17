@@ -76,7 +76,7 @@ test("Worker rejects binding, ordering, digest, terminal, truncation, and budget
 		["truncated", (manifest) => ({ manifest, omit_terminal: true }), "incomplete_attachment_stream"],
 	];
 	for (const [name, mutate, code] of cases) {
-		let created;
+		let created: string | undefined;
 		const manifest = completeManifest();
 		const options = mutate(manifest);
 		await assert.rejects(
@@ -125,7 +125,7 @@ test("Worker rejects binding, ordering, digest, terminal, truncation, and budget
 
 test("Worker removes a fresh handoff root when an attachment or final manifest write fails", async () => {
 	for (const fault of ["attachment", "manifest"]) {
-		let created;
+		let created: string | undefined;
 		await assert.rejects(
 			receiveLeasedConsumerAttachmentStream({
 				stream: chunked(

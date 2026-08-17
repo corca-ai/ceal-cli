@@ -95,8 +95,8 @@ export function generateLeasedConsumerAttachmentStreamRuntime({ repoRoot = ROOT 
 }
 
 export function readCandidateAttachmentStreamConformance(file: string): ConformancePacketBytes {
-	let bytes;
-	let value;
+	let bytes: Buffer;
+	let value: unknown;
 	try {
 		bytes = readFileSync(file);
 		value = JSON.parse(bytes.toString("utf8"));
@@ -189,8 +189,8 @@ function validSource(value: unknown): value is Source {
 		gitObject(value.protocol_tree) &&
 		Array.isArray(value.inputs) &&
 		value.inputs.length === SOURCE_INPUT_PATHS.length &&
-			value.inputs.every(
-				(input: unknown, index: number) =>
+		value.inputs.every(
+			(input: unknown, index: number) =>
 				record(input) && exact(input, ["path", "sha256"]) && input.path === SOURCE_INPUT_PATHS[index] && sha256Value(input.sha256),
 		)
 	);
