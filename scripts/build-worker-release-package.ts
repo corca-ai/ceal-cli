@@ -31,6 +31,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-package";
 const MANIFEST_FILENAME = "ceal-worker-release-package-manifest.json";
 const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
+// These trees are deliberately omitted by `stageOwnedPackage`. Validate the
+// bytes that can enter the staged package, while allowing npm's workspace
+// `.bin` links to exist in the checkout that supplies them.
+const OMITTED_OWNED_PACKAGE_DIRECTORIES = Object.freeze(["dist", "node_modules"]);
 type JsonRecord = Record<string, unknown>;
 type ReleaseOptions = {
 	repoRoot?: string;
@@ -233,7 +237,7 @@ function projectWorkerControlSession({
 
 function stageOwnedPackage(repoRoot: string, packageRoot: string, relativePath: string): string {
 	const source = path.join(repoRoot, relativePath);
-	assertRegularTree(source, "unsafe_owned_source");
+	assertRegularTree(source, "unsafe_owned_source", OMITTED_OWNED_PACKAGE_DIRECTORIES);
 	const destination = path.join(packageRoot, path.basename(relativePath));
 	cpSync(source, destination, {
 		recursive: true,
@@ -579,14 +583,15 @@ function resolveVersion(repoRoot: string, inputs: ReleaseInputs): string {
 	return version;
 }
 
-function assertRegularTree(root: string, code: string): void {
+function assertRegularTree(root: string, code: string, omittedDirectories: readonly string[] = []): void {
 	if (!existsSync(root) || !lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink())
 		fail(code, "Worker package input directory is unsafe.");
 	for (const name of readdirSync(root)) {
+		if (omittedDirectories.includes(name)) continue;
 		const entry = path.join(root, name);
 		const stat = lstatSync(entry);
 		if (stat.isSymbolicLink()) fail(code, "Worker package input cannot contain symbolic links.");
-		if (stat.isDirectory()) assertRegularTree(entry, code);
+		if (stat.isDirectory()) assertRegularTree(entry, code, omittedDirectories);
 	}
 }
 

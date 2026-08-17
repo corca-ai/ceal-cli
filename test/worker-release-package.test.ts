@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -39,6 +39,14 @@ test("worker package build stages recursive dependencies, consumes a packed Prot
 		writeFileSync(packageJsonPath, original);
 		rmSync(nestedPackage, { recursive: true, force: true });
 	});
+	// npm workspaces create `.bin` links under each package. They are excluded
+	// from the staged release package, so their presence must not make a clean
+	// checkout un-packable; symlinks in retained source remain forbidden.
+	for (const packagePath of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
+		const binDirectory = path.join(fixture.repoRoot, packagePath, "node_modules", ".bin");
+		mkdirSync(binDirectory, { recursive: true });
+		symlinkSync(path.join(fixture.repoRoot, "package.json"), path.join(binDirectory, "fixture-link"));
+	}
 	mkdirSync(nestedPackage, { recursive: true });
 	writeFileSync(path.join(nestedPackage, "package.json"), `${JSON.stringify({ name: "ceal-release-fixture-nested", version: "1.0.0" })}\n`);
 	const compilerManifest = readJsonRecord(original);
