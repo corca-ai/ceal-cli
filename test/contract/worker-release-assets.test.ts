@@ -277,6 +277,9 @@ test("native source verification refuses a stale generated control-session contr
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
 	mkdirSync(generated, { recursive: true });
+	const protocolManifest = path.join(root, "packages", "ceal-protocol", "package.json");
+	mkdirSync(path.dirname(protocolManifest), { recursive: true });
+	writeFileSync(protocolManifest, readFileSync(path.join(REPO_ROOT, "packages", "ceal-protocol", "package.json")));
 	writeFileSync(
 		path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json"),
 		CONTROL_SESSION_CONTRACT_BYTES,
@@ -299,6 +302,9 @@ test("private control-session release input accepts only the signed v6 dispositi
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const contractPath = path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
 	mkdirSync(path.dirname(contractPath), { recursive: true });
+	const protocolManifestPath = path.join(root, "packages", "ceal-protocol", "package.json");
+	mkdirSync(path.dirname(protocolManifestPath), { recursive: true });
+	writeFileSync(protocolManifestPath, readFileSync(path.join(REPO_ROOT, "packages", "ceal-protocol", "package.json")));
 	const generatedPath = path.join(root, "packages", "ceal-worker-cli", "src", "generated", "leased-consumer-control-session-contract.ts");
 	mkdirSync(path.dirname(generatedPath), { recursive: true });
 	writeFileSync(
@@ -318,6 +324,15 @@ test("private control-session release input accepts only the signed v6 dispositi
 	assert.equal(accepted.gateway.routes.materialization, "/api/ceal/agent/v1/control/materialization");
 	assert.equal(accepted.gateway.routes.notification_receipt, "/api/ceal/agent/v1/control/notification-receipt");
 	assert.deepEqual(accepted.gateway.operation_deadline_bounds_ms, { minimum: 30000, maximum: 600000 });
+	const mismatchedProtocolManifest = JSON.parse(readFileSync(protocolManifestPath, "utf8"));
+	mismatchedProtocolManifest.version = "0.72.20";
+	writeFileSync(protocolManifestPath, `${JSON.stringify(mismatchedProtocolManifest, null, 2)}\n`);
+	assert.throws(
+		() => readControlSessionContract(contractPath, { repoRoot: root }),
+		/invalid_control_session_contract/u,
+		"the signed handoff lock cannot drift from the vendored Protocol manifest",
+	);
+	writeFileSync(protocolManifestPath, readFileSync(path.join(REPO_ROOT, "packages/ceal-protocol/package.json")));
 	const legacyDeadline = structuredClone(current);
 	legacyDeadline.gateway.operation_deadline_ms = 30000;
 	delete legacyDeadline.gateway.operation_deadline_bounds_ms;

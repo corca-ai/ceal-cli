@@ -9,6 +9,7 @@ import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";
 const HANDOFF_PATH = "vendor/gateway-leased-consumer-call/gateway-leased-consumer-call-conformance.json";
+const PROTOCOL_MANIFEST_PATH = "packages/ceal-protocol/package.json";
 const OUTPUT_PATH = "packages/ceal-worker-cli/src/generated/leased-consumer-handoff.ts";
 const CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const CARRIER_CONTRACT_OUTPUT_PATH = "packages/ceal-worker-cli/src/generated/leased-consumer-carrier-contract.ts";
@@ -308,6 +309,10 @@ export function readControlSessionContract(
 	} catch {
 		throw new Error("invalid_control_session_contract");
 	}
+	// The signed handoff lock and the vendored package manifest are two sides of
+	// one release input. Compare them here so a new handoff cannot be consumed
+	// by a stale vendored Protocol copy, or vice versa.
+	const protocolVersion = readProtocolPackageVersion(repoRoot);
 	const current =
 		exact(value, [
 			"schema_version",
@@ -330,7 +335,7 @@ export function readControlSessionContract(
 		routeEntries.length === 7 &&
 		lock?.archive?.control_routes_sha256 === sha256ControlRoutes(value.gateway.routes) &&
 		fixedRoutes &&
-		lock?.protocol?.version === "0.72.21";
+		lock?.protocol?.version === protocolVersion;
 	if (
 		!current ||
 		!Array.isArray(value.argv) ||
@@ -474,6 +479,22 @@ function readJsonContract(file: string, errorCode: string): { bytes: Buffer; val
 		return { bytes, value: JSON.parse(bytes.toString("utf8")) };
 	} catch {
 		throw new Error(errorCode);
+	}
+}
+
+function readProtocolPackageVersion(repoRoot: string): string {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path.join(repoRoot, PROTOCOL_MANIFEST_PATH), "utf8"));
+		if (
+			!isRecord(parsed) ||
+			parsed.name !== "@corca-ai/ceal-protocol" ||
+			typeof parsed.version !== "string" ||
+			!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(parsed.version)
+		)
+			throw new Error("invalid_protocol_manifest");
+		return parsed.version;
+	} catch {
+		throw new Error("invalid_control_session_contract");
 	}
 }
 
