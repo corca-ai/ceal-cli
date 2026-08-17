@@ -28,7 +28,7 @@ over the tree that held the two guards slice 2 found by hand.
 ## Acceptance
 
 **Deleting any guard call must turn something red.** That is the whole goal in one
-sentence, and it is testable *in a test* — `worker-release-inputs.test.mjs` does it
+sentence, and it is testable *in a test* — `worker-release-inputs.test.ts` does it
 for the protocol pin by reaching the guard, not by deleting one for real, and the
 same shape works for the rest. A slice that ends with a
 guard still only pinned by a regex has not finished.
@@ -36,7 +36,7 @@ guard still only pinned by a regex has not finished.
 ## Slice 1 — cover `scripts/` — done
 
 The third `c8` target: `.c8rc.scripts.json`, `npm run coverage:scripts`, and
-`scripts/coverage-scripts.mjs`. Floors at 80 / 72 / 89 / 80, set from measurements
+`scripts/coverage-scripts.ts`. Floors at 80 / 72 / 89 / 80, set from measurements
 on `linux-arm64` and `linux-x64` that differ on branches — gates.md carries both
 numbers and why the difference is load-bearing.
 [gates.md](gates.md#the-third-target-scripts) owns the reasoning — read it before
@@ -51,7 +51,7 @@ before choosing, for every item below and not only the first.
 
 Start here, because slice 1 named it and nothing on this list explains it:
 
-- **`scripts/worker-acceptance-packet.mjs` at 52.64% statements and 53.33%
+- **`scripts/worker-acceptance-packet.ts` at 52.64% statements and 53.33%
   functions** — half the file, including everything from `:407` to the end. The
   largest unproven surface in the release lane. Find out whether that is untested
   code or unreachable code before deciding which fix it needs.
@@ -89,7 +89,7 @@ then. Both landed in `d08faab`, and the analysis below is kept as the reasoning
 the change carries, not as an open question.
 
 Proof level reached: `npm run check:unit` green locally, with the workflow's new
-shape pinned by `test/contract/worker-release-assets.test.mjs` and the merge
+shape pinned by `test/contract/worker-release-assets.test.ts` and the merge
 assertion falsified by two negative cases (`merge_protocol_provenance_disagreement`,
 `merge_protocol_provenance_incomplete`). **Neither has run in a release lane** —
 no tag has been cut since, so the arm64 leg's real cost on a `ubuntu-24.04-arm`
@@ -114,7 +114,7 @@ runner lost its toolchain.
 
 Measured before deciding, on a `linux-arm64` host: `npm run test:release` runs
 there and passes — 23 tests, 22 pass, 1 skip, about a minute. The consumer proof is not platform-gated
-(only `test/worker-release-installer.test.mjs` imports `test/platform-proof.mjs`),
+(only `test/worker-release-installer.test.ts` imports `test/platform-proof.ts`),
 so the tier buys the missing proof on arm64 rather than skipping itself.
 
 | option | buys | costs |
@@ -132,7 +132,7 @@ reused**. That minute was measured on a development machine, not a
 ### B. Nothing re-asserts the pin before the artifact is signed — resolved
 
 The pin was asserted inside `withWorkerReleaseInputs*`
-(`scripts/worker-release-inputs.mjs:67`) while each platform built. Afterwards
+(`scripts/worker-release-inputs.ts:67`) while each platform built. Afterwards
 nothing asked again: `sign-and-publish`'s inventory verification
 (`ceal-release.yml:263-277`) checked digests, the exact file list, and that each
 manifest carried the right `version` and `platform` — bytes and shape, never
@@ -140,7 +140,7 @@ manifest carried the right `version` and `platform` — bytes and shape, never
 
 **The comparison already existed and failed closed.** The manifest recorded the
 protocol producer's `repository`, `commit` and `tree`, and
-`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.mjs:136`) compared
+`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.ts:136`) compared
 them against the lock, failing `protocol_provenance_disagreement` at `:162`.
 The acceptance-packet fixture carries a real one. So this was wiring, not design. The then-open missing-client-package hole was separate; the
 current merge now validates exact client provenance beside the Protocol check.
@@ -153,7 +153,7 @@ release tag cannot be reused**.
 It went into the `merge` the `assemble` job runs, rather than into a new step
 beside it: `mergeWorkerReleaseAssetSets` already holds all three manifests and
 already runs three cross-platform manifest checks, so this is a fourth beside
-them. The rule itself moved to `scripts/lib/protocol-provenance.mjs` so the
+them. The rule itself moved to `scripts/lib/protocol-provenance.ts` so the
 installed-release caller and the pre-signing caller cannot answer it
 differently. The original reasoning for the job choice follows.
 
@@ -216,13 +216,13 @@ distribution is the finding: only one of six was dead code.
   and the reason is the trap this goal keeps meeting. Its four would-be call
   sites write the schema as a literal on purpose, because the gate proving every
   declared result schema is actually emitted scans the source text for
-  `schema_version: "..."` (`packages/ceal-worker-cli/test/cli.test.mjs:338`).
+  `schema_version: "..."` (`packages/ceal-worker-cli/test/cli.test.ts:338`).
   Routing them through the constant would pass `tsc` and turn that gate vacuous.
   A constant no emitter may use is not a constant.
 - **Two were wired into the real path**, and each was a live defect rather than
   tidiness:
   - `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES` exists, by its own comment, for "the
-    probe guard pinning them inside a throwaway HOME". `scripts/probe-surface.mjs`
+    probe guard pinning them inside a throwaway HOME". `scripts/probe-surface.ts`
     named two of them by hand instead — the stale hand-kept copy the comment
     warns about, whose failure mode is a probe writing to the operator's real
     agent configuration directory. The guard derives the set now.
@@ -259,7 +259,7 @@ Excluding tests from `entry` to force the question turns every test file into an
 entries would report every `scripts/*.mjs` as an unused file instead.
 
 **The check exists — `npm run lint:reachability`**, in both gates and in
-`test/contract/production-reachability.test.mjs`. It walks the production graph
+`test/contract/production-reachability.test.ts`. It walks the production graph
 only: entries are the `node scripts/*.mjs` invocations declared in the manifest,
 in the lanes, and in the hook; edges are static relative imports; and a release
 lane's inline `node --input-type=module` step counts as a caller. Tests are not
@@ -290,5 +290,5 @@ What it does not cover, stated so a green run is not read as more than it is: on
 `scripts/`, only static imports — a dynamic `import()` is deliberately not an edge,
 because treating an unresolvable specifier as one would widen the graph until
 nothing could be unreachable — and a `@testOnly` export is exempt by declaration.
-That exemption is checked rather than trusted: `repo-gates.test.mjs` fails when a
+That exemption is checked rather than trusted: `repo-gates.test.ts` fails when a
 tagged export is reached by no suite.

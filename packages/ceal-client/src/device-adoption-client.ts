@@ -36,17 +36,17 @@ export interface CreateCealDeviceAdoptionClientOptions {
 
 export class CealDeviceAdoptionClientError extends Error {
 	override readonly name = "CealDeviceAdoptionClientError";
-	constructor(
-		readonly code:
-			| "invalid_configuration"
-			| "request_timeout"
-			| "request_failed"
-			| "invalid_response"
-			| "adoption_not_available"
-			| "gateway_unavailable"
-			| "rate_limited",
-	) {
+	readonly code:
+		| "invalid_configuration"
+		| "request_timeout"
+		| "request_failed"
+		| "invalid_response"
+		| "adoption_not_available"
+		| "gateway_unavailable"
+		| "rate_limited";
+	constructor(code: CealDeviceAdoptionClientError["code"]) {
 		super(`Ceal device adoption ${code.replaceAll("_", " ")}.`);
+		this.code = code;
 	}
 }
 

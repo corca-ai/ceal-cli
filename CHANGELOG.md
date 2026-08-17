@@ -524,7 +524,7 @@ that ships the Protocol/Client pair as a pair.
 Adds `ceal acceptance emit`, so an installed release can produce its own
 acceptance evidence.
 
-Until now that record came from `scripts/worker-acceptance-packet.mjs`, which
+Until now that record came from `scripts/worker-acceptance-packet.ts`, which
 means a source checkout — and the Gateway lane's ingress contract refuses a
 source checkout as an input, while a colleague on a fresh machine has no
 checkout to run it from. Producing evidence therefore required cloning the
@@ -626,7 +626,7 @@ plus the two fixes that burn taught. `0.66.0` never published: it failed in
 One clean run per tag is the contract, so the tag was burned rather than
 re-pushed.
 
-- `test/contract/safe-output-path.test.mjs` built its fixtures under `tmpdir()`,
+- `test/contract/safe-output-path.test.ts` built its fixtures under `tmpdir()`,
   which on macOS is below `/var/folders/...` where `/var` is a link to
   `/private/var`. A guard whose entire job is to refuse symlink components
   therefore refused the fixture path itself, so the two accept-cases failed —

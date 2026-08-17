@@ -2,6 +2,27 @@
 	"entries": [
 		{
 			"surface": "code",
+			"id": "b0f4fcbcd202f0ef",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Detector window spans independent contract-test modules whose only shared material is ordinary Node test, process, and filesystem setup imports. repo-gates owns package gate inventory and ordering mutations; legacy-mjs-conversion owns converter policy and conversion behavior. They have no shared semantic fact owner, and extracting the setup would couple unrelated test contracts."
+		},
+		{
+			"surface": "code",
+			"id": "d5c64bddf40b26ab",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Detector window spans independent lock tests whose shared material is ordinary Node child-process, filesystem, path, and test setup imports. repo-build owns the dist-build mutex and process lifecycle; pre-push-lock owns concurrent hook admission. Their lock domains and proof boundaries differ, so a shared helper would erase ownership rather than remove duplicated policy."
+		},
+		{
+			"surface": "code",
+			"id": "cb15aaff0319d8ce",
+			"class": "intentional",
+			"reviewed_at": "2026-08-17",
+			"note": "Detector window around the pre-existing isStringMap record predicate in the independently runnable signed-handoff generator and offline-cache prewarmer, re-keyed when adjacent package-name validation was added. The predicate carries no mutable domain policy; sharing it would couple a release trust-schema generator to cold-host npm cache bootstrap without removing a fact owner. The alias-resolution and package-name rules remain local to the prewarmer and are not duplicated."
+		},
+		{
+			"surface": "code",
 			"id": "2062194b2d2585d0",
 			"class": "intentional",
 			"reviewed_at": "2026-08-13",

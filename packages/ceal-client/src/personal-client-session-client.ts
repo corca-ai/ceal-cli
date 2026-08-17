@@ -23,8 +23,10 @@ export interface CreateCealPersonalClientSessionClientOptions {
 
 export class CealPersonalClientSessionError extends Error {
 	override readonly name = "CealPersonalClientSessionError";
-	constructor(readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response") {
+	readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response";
+	constructor(code: CealPersonalClientSessionError["code"]) {
 		super(`Ceal personal-client session ${code.replaceAll("_", " ")}.`);
+		this.code = code;
 	}
 }
 

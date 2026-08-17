@@ -1,10 +1,12 @@
 {
 	"compilerOptions": {
 		"target": "ES2022",
+		"lib": ["ES2022"],
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
 		"rewriteRelativeImportExtensions": true,
 		"strict": true,
+		"types": ["node"],
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
 		"resolveJsonModule": true,
@@ -12,10 +14,9 @@
 		"noEmit": true,
 		"incremental": true,
 		"tsBuildInfoFile": "./node_modules/.cache/ceal-typecheck.tsbuildinfo",
-		"baseUrl": ".",
 		"paths": {
-			"@corca-ai/ceal-protocol": ["packages/ceal-protocol/src/index.ts"],
-			"@corca-ai/ceal": ["packages/ceal-client/src/index.ts"]
+			"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
+			"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"]
 		}
 	},
 	"include": ["packages/*/src/**/*.ts"],

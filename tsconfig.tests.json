@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.typecheck.json",
+	"compilerOptions": {
+		"lib": ["ES2022", "DOM"],
+		"strict": true,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"allowImportingTsExtensions": true,
+		"types": ["node"],
+		"noEmit": true,
+		"incremental": true,
+		"tsBuildInfoFile": "./node_modules/.cache/ceal-tests-typecheck.tsbuildinfo"
+	},
+	"include": ["packages/*/test/**/*.ts"],
+	"exclude": ["dist", "node_modules"]
+}

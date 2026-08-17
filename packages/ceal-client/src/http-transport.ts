@@ -25,12 +25,13 @@ export type CealHttpTransportErrorCode =
 
 export class CealHttpTransportError extends Error {
 	override readonly name = "CealHttpTransportError";
+	readonly code: CealHttpTransportErrorCode;
+	readonly http_status: number | null;
 
-	constructor(
-		readonly code: CealHttpTransportErrorCode,
-		readonly http_status: number | null = null,
-	) {
+	constructor(code: CealHttpTransportErrorCode, http_status: number | null = null) {
 		super(transportErrorMessage(code));
+		this.code = code;
+		this.http_status = http_status;
 	}
 }
 

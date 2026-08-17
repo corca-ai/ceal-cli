@@ -84,6 +84,14 @@ concept_paths:
   - docs/debt.md
   - docs/operator-acceptance.md
   - charness-artifacts/quality/latest.md
+# Keep the advisory inventory on the exact same owned corpus as the blocking
+# ratchet below. Without this the portable skill falls back to its own
+# scripts/skills defaults and the two baselines cannot stay in lockstep.
+nose_inventory_paths:
+  - scripts
+  - packages/ceal-client/src
+  - packages/ceal-worker-cli/src
+  - test
 # Boy-scout duplicate ratchet. The hard arm blocks a NEW fixable clone family;
 # the boy-scout arm nudges the reviewed ceiling down. Scope is the code this repo
 # actually owns — `packages/ceal-protocol` is a vendored copy this lane may not

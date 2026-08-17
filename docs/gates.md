@@ -11,12 +11,13 @@ paragraph, and that a future session will otherwise re-derive or undo.
 is `check` rather than `lint` deliberately, so an unformatted commit fails rather
 than merely drifting. `npm run lint:fix` applies every safe fix.
 
-`npm run lint:types` is the terminating source-only TypeScript gate. It runs the
-explicit package-source owner (`lint:types:packages`) and the strict tools owner
-(`lint:types:tools`). The package NodeNext program covers every tracked
+`npm run lint:types` is the terminating source-only TypeScript gate. It runs three
+explicit owners: package source (`lint:types:packages`), tools and contract tests
+(`lint:types:tools`), and client/package tests (`lint:types:tests`). The package
+NodeNext program covers every tracked
 `packages/*/src/**/*.ts` file and maps workspace package names to their editable
 source entrypoints, so it does not need checkout `dist` or invoke
-`test/repo-build.mjs`. The tools program covers tracked `scripts/**/*.ts` and
+`test/repo-build.ts`. The tools program covers tracked `scripts/**/*.ts` and
 `test/**/*.ts`, allows exact `.ts` imports under NodeNext, and uses a dedicated
 incremental cache. `lint:types:watch` watches package sources and
 `lint:types:tools:watch` watches tools; they are intentionally separate watchers,
@@ -27,10 +28,9 @@ each with its own `node_modules/.cache` build-info path.
 intentionally with `npm run write:no-legacy-mjs-baseline`, then review the full
 list. Both `check:unit` and `check` run the ratchet before slower gates, so a
 new or removed legacy file fails without rebuilding or running a suite twice.
-The inventory observes tracked files and staged additions; an untracked or
-unstaged new `.mjs` is not part of the checked state until it is staged or
-tracked, while staged additions are already included by the tracked index
-query.
+The inventory includes files present in the current worktree when they are
+tracked or non-ignored untracked, plus staged additions, renames, and copies;
+it also excludes staged deletions and worktree paths that no longer exist.
 
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
@@ -44,7 +44,7 @@ Gateway-owned.
 There is no third suite any more. `test:legacy-compatibility` audited the frozen
 `cealctl` and dual-release material, and that material was deleted once
 `corca-ai/ceal` had moved past the copies kept here — so every test file now
-belongs to `test:contract` or `test:release`, and `repo-gates.test.mjs` fails if
+belongs to `test:contract` or `test:release`, and `repo-gates.test.ts` fails if
 one belongs to neither.
 
 The signed Gateway Protocol source materializer is an explicit operator entry:
@@ -102,10 +102,10 @@ Formatting-only commits belong in `.git-blame-ignore-revs`, which
 ### Source-authoritative behavior and isolated package artifacts
 
 Protocol, client, and Worker behavior tests execute `src/**/*.ts` through
-`test/source-loader.mjs`.
+`test/source-loader.ts`.
 The loader owns both direct workspace paths and bare workspace package names;
 it redirects either form to the editable TypeScript source and refuses a
-workspace `dist` resolution that has no source authority. `test/run-source-tests.mjs`
+workspace `dist` resolution that has no source authority. `test/run-source-tests.ts`
 also installs that loader through `NODE_OPTIONS`, so Worker CLI subprocesses
 inherit the same authority instead of silently returning to checkout `dist`.
 The client and Worker `test` and `coverage` scripts therefore have no build
@@ -121,8 +121,8 @@ pay for a second build. A green contract lane is local emitted-surface proof;
 it is not installed-worker, release, or live-serving proof.
 
 Emitted declarations, package exports, and executable JavaScript are a
-different proof purpose. `test/client-artifact.test.mjs` asks
-`test/artifact-workspace.mjs` to copy only source/config/manifest inputs into a
+different proof purpose. `test/client-artifact.test.ts` asks
+`test/artifact-workspace.ts` to copy only source/config/manifest inputs into a
 fresh temporary workspace, emit Protocol, client, and Worker packages there,
 and load their exact public exports and Worker executable against those
 temporary dependencies. The proof binds source and artifact digests and
@@ -141,7 +141,7 @@ building there at once can let a third pack a half-written `dist`. Serializing
 the whole tier hid that race behind a 74s wall clock.
 
 The pin is gone and the race is closed at its source instead. `dist` now has one
-writer: `ensurePackageBuilt` in `test/repo-build.mjs`, an inter-process mutex —
+writer: `ensurePackageBuilt` in `test/repo-build.ts`, an inter-process mutex —
 `mkdir` as the atomic test-and-set — plus an in-process memo. A fixture that
 needs a current `dist` asks for it there rather than building its own.
 
@@ -157,14 +157,14 @@ so a clean cannot turn a stale compiler record into a missing release tree.
 Three things keep this honest, and none of them is the tier passing, because a
 race that loses is silent:
 
-- `test/contract/repo-build.test.mjs` proves the mutex by running six *concurrent*
+- `test/contract/repo-build.test.ts` proves the mutex by running six *concurrent*
   holders and asserting their enter/exit journal never interleaves. Spawn them
   synchronously and the assertion goes vacuous — that is how it was first
   written, and removing the mutex did not turn it red.
 - The same file forbids any other fixture under `test/` from invoking
   `npm run build` itself, because a new one that did would reintroduce exactly
   this race and pass its own tests.
-- `repo-gates.test.mjs` binds the root build and coverage routes, while
+- `repo-gates.test.ts` binds the root build and coverage routes, while
   `repo-build.test.mjs` proves standalone package behavior tests have no
   checkout-dist hooks. Keeping those assertions at both consumer boundaries
   prevents a behavior lane from silently reacquiring artifact authority.
@@ -179,8 +179,8 @@ infrastructure. `test/release-process-bounds.ts` imports the editable
 `packages/ceal-worker-cli/src/bounded-process.ts`, and its supervisor invokes
 that same source module; these tests therefore provide fresh source feedback,
 not direct proof of an emitted `dist/bounded-process.js`. Emitted/package proof
-lives in `test/client-artifact.test.mjs` and the release package/native suites
-(`test/worker-release-package.test.mjs`, `test/worker-native-artifact.test.mjs`)
+lives in `test/client-artifact.test.ts` and the release package/native suites
+(`test/worker-release-package.test.ts`, `test/worker-native-artifact.test.ts`)
 through their isolated build and artifact checks. On Darwin, platform-gated
 Linux-only checks report their unproved Linux scope; a green Darwin release run
 does not claim that the Linux executable lane was exercised.
@@ -201,7 +201,7 @@ about which: the copy drifting from *its own record*. The copy falling behind th
 remote, and this check never reaches one.
 
 `protocol-vendor-pin.json` names three identities and
-`scripts/verify-protocol-vendor-pin.mjs` binds them offline, reading local files,
+`scripts/verify-protocol-vendor-pin.ts` binds them offline, reading local files,
 the Git index, and the working tree:
 
 - **source** — the Gateway commit and `packages/ceal-protocol` subtree this copy
@@ -214,7 +214,7 @@ The frozen package suite is part of `test:contract`. One owner test imports
 `scripts/test-support/base64url.mjs`, which sits outside the pinned package
 subtree in the Gateway repository. This repository copies that test-only helper
 at the same path; `protocol-vendor-pin.json` records its owner blob and
-`protocol-vendor-pin.test.mjs` hashes the local file against it. The helper is
+`protocol-vendor-pin.test.ts` hashes the local file against it. The helper is
 not production or release input, but leaving it unbound would make the exact
 frozen suite silently depend on a second freehand implementation.
 
@@ -264,7 +264,7 @@ the pin and shipment lock converge.
 The refusal does not depend on which test command ran. `worker-release-inputs.mjs`
 asserts shippability inside `resolveWorkerReleaseDevelopmentInputs`, the single
 chokepoint every release, packing, and native-artifact path funnels through, and
-`worker-acceptance-packet.mjs` asserts it before it resolves the installed binary
+`worker-acceptance-packet.ts` asserts it before it resolves the installed binary
 — a packet describing a real install is the most convincing possible evidence for
 bytes the lock does not bind, so the refusal comes before anything is measured.
 
@@ -278,17 +278,17 @@ own compose step — left every gate green, because the regex still matched the
 call inside `assertShippableProtocolVendorPinFor`, the error-translating wrapper
 that nothing then called. Reproduced on 2026-08-08.
 
-`worker-release-inputs.test.mjs` now falsifies it behaviourally. A scratch
+`worker-release-inputs.test.ts` now falsifies it behaviourally. A scratch
 `repoRoot` reaches the guard and fails for a pin reason; with the call removed the
 same input walks past it and fails on the next argument check instead. The
 acceptance suite has the sibling proof: its deliberately divergent scratch pin
 must fail before an absent binary is resolved. Two distinguishable outcomes are
 all a falsification needs. The divergence verdicts stay in
-`protocol-vendor-pin.test.mjs`, which owns them properly, while the shared
+`protocol-vendor-pin.test.ts`, which owns them properly, while the shared
 converged fixture owns the repeated contract setup.
 
-The source-shape gate in `repo-gates.test.mjs` stays, because it still catches the
-easy case in `worker-acceptance-packet.mjs`. Do not treat it as the guard's
+The source-shape gate in `repo-gates.test.ts` stays, because it still catches the
+easy case in `worker-acceptance-packet.ts`. Do not treat it as the guard's
 protection: it reads text, and text cannot tell a live call from a dead one.
 
 Two things then expire the declaration, and it is worth naming them exactly
@@ -386,7 +386,7 @@ node_modules/c8/lib/parse-args.js`. This paragraph used to state a single
 the moment nobody can re-derive it.
 
 `check-coverage: true` is what makes a breach an exit code rather than a printed
-number, and `repo-gates.test.mjs` asserts the properties — that each floor is
+number, and `repo-gates.test.ts` asserts the properties — that each floor is
 declared, plus `all` and `check-coverage` — so the gate cannot be quietly
 softened into a report. It asserts the floors are *present*, not what they equal:
 a test holding a second copy of the numbers cannot tell a right floor from a
@@ -407,7 +407,7 @@ Now the first reads as `0` on every run.
 
 `npm run coverage:scripts` is the front door and `.c8rc.scripts.json` the config.
 The three properties that carry the other two targets carry this one — `all`, the
-floor, and `check-coverage` — and `repo-gates.test.mjs` asserts each, plus the
+floor, and `check-coverage` — and `repo-gates.test.ts` asserts each, plus the
 `include`/`src`/`extension` scoping and the single named exclusion.
 
 **It needs both tiers, so it belongs to `npm run check` and not to
@@ -417,7 +417,7 @@ where the composers and native-artifact paths actually run.
 **Why a runner script rather than a `c8` prefix in the npm script.** Two reasons,
 and the first is the load-bearing one. A floor only holds against the proof set
 it was measured on. `platformProofSkip` decides from `process.platform` and
-`process.arch` alone (`test/platform-proof.mjs:16-17`), so the macOS leg of
+`process.arch` alone (`test/platform-proof.ts:16-17`), so the macOS leg of
 `check.yml` skips the installed-binary and installer proofs whatever
 `CEAL_REQUIRE_PLATFORM_PROOFS` is set to — that variable turns an
 already-decided skip into a failure, it does not cause one. The scripts those
@@ -426,7 +426,7 @@ floor would fail that leg for skipping what it is right to skip, which is the
 shape that burned `ceal-v0.67.0`. So macOS runs the tiers plainly and prints the
 measurement it is not carrying. The second reason is mechanical: `test:contract`
 and `test:release` must keep starting with `node --test` because
-`repo-gates.test.mjs` reads their file inventories, so the wrapper cannot sit in
+`repo-gates.test.ts` reads their file inventories, so the wrapper cannot sit in
 front of them.
 
 The pre-push hook admits only one gate per repository at a time. Build output,
@@ -446,13 +446,13 @@ a changed cwd would therefore leave this gate green while measuring nothing, and
 the printed report would not look wrong — the exact failure the `src`/`dist`
 remap notes above call the worst of them. After a passing measured run the runner
 reads `coverage/scripts/coverage-summary.json` and fails unless it names every
-`.mjs` the config claims. `repo-gates.test.mjs` asserts that check is both
+`.ts` the config claims. `repo-gates.test.ts` asserts that check is both
 declared and called.
 
 **Where the floor applies.** It is enforced on `linux-arm64` and `linux-x64`.
 arm64 is there because it is the maintainer host, and a gate no maintainer can
 run before pushing is one CI discovers for them; x64 is there because it carries
-every platform proof, and `repo-gates.test.mjs` asserts `PLATFORM_PROOF_PLATFORM`
+every platform proof, and `repo-gates.test.ts` asserts `PLATFORM_PROOF_PLATFORM`
 stays in that list. The floor is the lower reading of the two, and it lives in
 `.c8rc.scripts.json` alone — `npm run coverage:scripts` on each is how to move
 it.
@@ -461,22 +461,21 @@ it.
 are measured.** The floor began as an arm64 measurement applied to x64 on the
 argument that x64 runs strictly more proofs and so must measure at or above: the
 arm64 run skips proofs that only *add* coverage there, and the whole
-arch-conditional surface under `scripts/` is one ternary at
-`build-worker-native-artifact.mjs:372` whose covered and uncovered branch counts
+arch-conditional surface under `scripts/` is one ternary in
+`build-worker-native-artifact.ts` whose covered and uncovered branch counts
 are symmetric. Measuring x64 (run `31263490521`) gave the same figures on three
 ratios and a *lower* branch ratio than arm64. The floor held because it sat
 under, not because the reasoning was right. Re-measure both before moving it;
 do not re-derive one from the other.
 
-**What the report already says, and one thing it does not.** `lint-shell.mjs` at
-0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not
-invoke. `check-dup-ratchet.mjs` is hook-only in the same way and yet reads about
-49%, because `repo-gates.test.mjs:730` runs the hook itself; hook-only does not
-imply zero here. And `install-git-hooks.mjs` at 0% is not a reachability finding
-at all: `repo-gates.test.mjs` runs it, but against a throwaway clone, so the
-coverage lands under a temp path that remaps to nothing. A zero is therefore a
-question, not a verdict — the reachability claim needs the same positive control
-any absence claim needs.
+**What the report already says, and one thing it does not.** `lint-shell.ts` and
+`check-dup-ratchet.ts` at 0% are honest — they run from `.githooks/pre-push`,
+which `npm run check` does not invoke. The hook contract uses a throwaway clone
+with stubbed gate commands so it proves exit propagation without re-entering the
+real checkout lock. `install-git-hooks.ts` is likewise exercised against a
+throwaway clone, so its coverage lands under a temp path that remaps to nothing.
+A zero is therefore a question, not a verdict — the reachability claim needs the
+same positive control any absence claim needs.
 
 **The cost is real, it is on `npm run check` only, and it is mostly
 irreducible.** Timed on the maintainer host: both tiers plain about 1m11s, under
@@ -487,7 +486,7 @@ overhead is `NODE_V8_COVERAGE` inherited by every process the tiers touch, and
 the four slowest release proofs — which spawn `npm`, `tsc` and the SEA tooling,
 none of which can contribute `scripts/` coverage — accounted for about 75s of it
 by per-test timing. Clearing the variable at
-`verify-gateway-protocol-consumer.mjs`'s `run()` helper, the single largest of
+`verify-gateway-protocol-consumer.ts`'s `run()` helper, the single largest of
 those, recovered **about 9 seconds of 52** on the tiers alone and cost no
 coverage (that file went 82.20% to 82.59%, from the added comment; nothing else
 moved). On the full gate it does not surface at all: three timed runs gave
@@ -515,7 +514,7 @@ gates therefore run from `.githooks/pre-push` instead:
   accepted baseline and the reviewed overlay are tracked under
   `charness-artifacts/quality/` rather than gitignored `.charness/`, because the
   boy-scout arm measures stagnation from the commit that last touched the
-  overlay — an untracked overlay has no anchor. `scripts/check-dup-ratchet.mjs`
+  overlay — an untracked overlay has no anchor. `scripts/check-dup-ratchet.ts`
   is the repo-owned front door: it resolves the skill rather than hardcoding one
   maintainer's home directory, and `CEAL_SKIP_DUP_RATCHET=1` bypasses it.
 - `npm run lint:shell` runs `shellcheck -s sh --severity=warning` over
@@ -606,7 +605,7 @@ as a delete-list would have deleted working code. What closed them:
   [release-guard-reachability.md](release-guard-reachability.md) records those
   three, because two of them were live defects rather than tidiness.
 
-`@testOnly` is a claim the tool obeys, so it is checked: `repo-gates.test.mjs`
+`@testOnly` is a claim the tool obeys, so it is checked: `repo-gates.test.ts`
 fails when a tagged export is reached by no suite. Without that, tagging a symbol
 nothing uses silences `knip` exactly as well as tagging one a suite needs.
 
@@ -614,12 +613,12 @@ The reachability blind spot survives all of this and is why the zero is not the
 audit. `knip` reports nothing under `scripts/`, and two separate mechanisms
 produce that silence — both checked with a planted export:
 
-- The 20 top-level `scripts/*.mjs` are declared `entry`, and `knip` does not
+- The top-level `scripts/*.ts` owners are declared `entry`, and `knip` does not
   report exports in an entry file. A planted export in
-  `scripts/worker-release-inputs.mjs` goes unreported.
+  `scripts/worker-release-inputs.ts` goes unreported.
 - Under `scripts/lib/`, which is not entry, an export *is* reported — until a
   test imports it, which every one of them does. Those suites import
-  `scripts/*.mjs` directly rather than a built copy, so unlike the TypeScript
+  `scripts/*.ts` directly rather than a built copy, so unlike the TypeScript
   packages there is no compile step separating a test consumer from a production
   one.
 
@@ -629,8 +628,8 @@ Either mechanism alone would have hidden both guards slice 2 deleted by hand.
 ## Production Reachability Under `scripts/`
 
 `npm run lint:reachability` answers the question the section above ends on, and
-runs in both gates. `scripts/lib/production-reachability.mjs` walks the
-production graph and nothing else: entries are the `node scripts/*.mjs`
+runs in both gates. `scripts/lib/production-reachability.ts` walks the
+production graph and nothing else: entries are the `node scripts/*.ts`
 invocations the manifest, the lanes, and the hook declare; edges are static
 relative imports; a release lane's inline `node --input-type=module` step is a
 caller. Suites are not in the graph, which is the entire mechanism — a guard only
@@ -665,14 +664,14 @@ Three properties are worth keeping when this is edited:
 - **A dynamic `import()` is not an edge.** It cannot be resolved without running
   the program, and treating an unresolvable specifier as an edge widens the graph
   until nothing can be unreachable.
-- **`@testOnly` exempts, and the exemption is checked.** `repo-gates.test.mjs`
+- **`@testOnly` exempts, and the exemption is checked.** `repo-gates.test.ts`
   fails when a tagged export is reached by no suite, in `scripts/` and in the
   packages alike.
 
-The suite proves it on fixtures whose answer is known before it runs, and then on
-the real thing: it reconstructs `0cce9f9^` with `git archive` and requires the
-analyzer to name both guards slice 2 deleted by hand. On a clone without that
-commit it skips and says so rather than passing.
+The suite proves the analyzer on fixtures whose answer is known before it runs,
+then runs the same analyzer over the current repository. The current-tree case
+requires a non-vacuous entry/module census and no unreachable file or export; it
+does not retain a migration-only dependency on a historical JavaScript tree.
 
 ## The Two Checks That Arm `One Fact, One Home`
 
@@ -684,12 +683,12 @@ was enforced exactly where the fact had already been made a symbol with an edge,
 and nowhere else. Every survivor of every sweep in that range lived in the
 complement of that set. These two checks read the complement. Both run in
 `npm run check` and `npm run check:unit`, and
-`test/contract/one-fact-one-home.test.mjs` proves each on fixtures whose answer
+`test/contract/one-fact-one-home.test.ts` proves each on fixtures whose answer
 is known before it runs.
 
 ### `lint:store-lock` — enumerate a resource's writers
 
-`scripts/check-store-lock-census.mjs` reports every writer that reaches a
+`scripts/check-store-lock-census.ts` reports every writer that reaches a
 lock-guarded local store without the module's lock. The rule is narrow on
 purpose: it says nothing about whether a module *should* own a lock, only that
 inside a module which has already declared one by calling a `with…Lock` helper,
@@ -713,7 +712,7 @@ protection against the worse failure, a lock helper renamed out of the shape and
 the whole check silently reporting zero over nothing.
 
 That protection has a bound worth naming, because the fresh-eye review named it.
-`test/contract/one-fact-one-home.test.mjs` pins `receipt-spool.ts` and
+`test/contract/one-fact-one-home.test.ts` pins `receipt-spool.ts` and
 `profile-store.ts` into the has-a-lock set *by name*, so renaming either store's
 real primitive goes red. A **third** store introduced later with a misnamed
 wrapper from day one has no such pin and would be skipped in silence. Add its
@@ -722,7 +721,7 @@ notice, and only if you read it.
 
 ### `lint:duplicate-literal` — one grammar, one home
 
-`scripts/check-duplicate-literal.mjs` reports every non-trivial regex literal
+`scripts/check-duplicate-literal.ts` reports every non-trivial regex literal
 spelled in two or more owned modules. `check:duplication` cannot answer this and
 it is worth being exact about why, because for a day a review file said the
 opposite: that ratchet's unit is a repeated *block*, so it read the
@@ -734,7 +733,7 @@ so the reviewed note ratified the duplicate it was dismissing — which is the
 failure `AGENTS.md` names, a claim in prose that no gate checks.
 
 The unit is therefore the literal. The triviality floor lives in
-`scripts/lib/duplicate-literal.mjs` as the single home for that number and was
+`scripts/lib/duplicate-literal.ts` as the single home for that number and was
 measured rather than chosen: below it the population is language idiom, above it
 every group is a grammar with a domain. Restricting it to regex literals was
 also measured — extending the same walk to strings and numbers takes the report
@@ -765,7 +764,7 @@ The blind spot is worth stating because it is the inverse of the check's own
 purpose: it matches literal text exactly, so it sees the duplication and not the
 drift that follows. Edit one of two copies and the group disappears. That is why
 the second homes are additionally bound by assertion in
-`test/contract/one-fact-one-home.test.mjs`, reading three separate modules so
+`test/contract/one-fact-one-home.test.ts`, reading three separate modules so
 the binding cannot be vacuous the way a fixture compared against its own
 producer was.
 

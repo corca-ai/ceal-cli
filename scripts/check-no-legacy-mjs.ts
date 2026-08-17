@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Exact-list ratchet for the repository's remaining legacy MJS files. */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -78,7 +78,19 @@ export function trackedLegacyMjs(repoRoot: string, runGit: GitRunner = gitBytes)
 }
 
 function trackedLegacyMjsAtRoot(repoRoot: string, runGit: GitRunner): string[] {
-	const tracked = nulLines(runGit(["ls-files", "-z", "--cached", "--", "*.mjs"], repoRoot));
+	const trackedCandidates = nulLines(runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.mjs"], repoRoot));
+	trackedCandidates.forEach((file) => {
+		assertPath(file, "git output");
+	});
+	const tracked = trackedCandidates.filter((file) => {
+		try {
+			lstatSync(path.join(repoRoot, file));
+			return true;
+		} catch (error) {
+			if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
+			throw error;
+		}
+	});
 	const staged = nulLines(runGit(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--", "*.mjs"], repoRoot));
 	const files = [...new Set([...tracked, ...staged])];
 	files.forEach((file) => {

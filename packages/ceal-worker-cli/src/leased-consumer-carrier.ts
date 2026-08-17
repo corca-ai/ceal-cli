@@ -106,10 +106,8 @@ export async function runLeasedConsumerCarrier(
 	requestBytes: Uint8Array,
 	runtime: LeasedConsumerCarrierRuntime = {},
 ): Promise<LeasedConsumerCarrierResult> {
-	let closeChannel = onceAsync(async () => {});
+	let closeChannel = onceAsync(runtime.closeChannel ?? (async () => {}));
 	try {
-		const fd4 = runtime.readChannel ? null : createFd4Channel();
-		closeChannel = onceAsync(runtime.closeChannel ?? (() => fd4?.close() ?? Promise.resolve()));
 		let handoff: CarrierHandoff;
 		try {
 			handoff = runtime.loadHandoff?.() ?? verifyEmbeddedHandoff();
@@ -122,6 +120,10 @@ export async function runLeasedConsumerCarrier(
 		} catch {
 			return localFailure("invalid_request");
 		}
+		// Classify the bounded request before touching inherited FD4. On hosts
+		// without the control pipe, malformed input must still report invalid_request.
+		const fd4 = runtime.readChannel ? null : createFd4Channel();
+		closeChannel = onceAsync(runtime.closeChannel ?? (() => fd4?.close() ?? Promise.resolve()));
 		const channelBytes = await readChannelBeforeDeadline({
 			...runtime,
 			readChannel: runtime.readChannel ?? (() => fd4?.read() ?? Promise.reject(new Error("missing_channel"))),

@@ -15,8 +15,10 @@ export interface CreateCealEnrollmentClientOptions {
 
 export class CealEnrollmentClientError extends Error {
 	override readonly name = "CealEnrollmentClientError";
-	constructor(readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response") {
+	readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response";
+	constructor(code: CealEnrollmentClientError["code"]) {
 		super(`Ceal enrollment ${code.replaceAll("_", " ")}.`);
+		this.code = code;
 	}
 }
 

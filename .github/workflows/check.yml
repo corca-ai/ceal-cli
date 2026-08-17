@@ -27,7 +27,7 @@ name: Check
 # again: `scope` used to be a cost optimisation with an unconditional leg behind
 # it, and is now the only thing between a code change and no CI at all. The
 # allowlist is therefore asserted against real code paths in
-# `test/contract/repo-gates.test.mjs`, and any edit to this file is itself
+# `test/contract/repo-gates.test.ts`, and any edit to this file is itself
 # classified as code, so widening it cannot ship without the full lane running on
 # the commit that widens it.
 #
@@ -174,10 +174,10 @@ jobs:
       # unprewarmed runner fails them as ENOTCACHED rather than as a defect.
       # The release lane does this too; both must, or they are not the same gate.
       - name: Prewarm the offline packed-consumer cache
-        run: node scripts/prewarm-offline-consumer-cache.mjs
+        run: node scripts/prewarm-offline-consumer-cache.ts
 
       # The hook installer is proven inside this gate by
-      # test/contract/repo-gates.test.mjs, against a throwaway clone rather than
+      # test/contract/repo-gates.test.ts, against a throwaway clone rather than
       # this checkout, so there is no separate CI step re-proving the same seam.
       - name: Run the full gate
         run: npm run check
@@ -190,7 +190,7 @@ jobs:
   # for changes that cannot move any code the release builds.
   #
   # The steps below are duplicated from `check` on purpose. Three gates in
-  # test/contract/repo-gates.test.mjs read `job.steps` literally — that the gate
+  # test/contract/repo-gates.test.ts read `job.steps` literally — that the gate
   # runs `npm run check`, that the prewarm precedes it, and that the requirement
   # comes from the matrix. Folding these into a local composite action would move
   # the steps out of the parsed job and make all three silently vacuous.
@@ -224,7 +224,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Prewarm the offline packed-consumer cache
-        run: node scripts/prewarm-offline-consumer-cache.mjs
+        run: node scripts/prewarm-offline-consumer-cache.ts
 
       - name: Run the full gate
         run: npm run check

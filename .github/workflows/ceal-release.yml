@@ -95,7 +95,7 @@ jobs:
       # `linux-arm64` leg reaches it through the release tier below rather than
       # the gate, and without the cache those proofs fail as `ENOTCACHED`.
       - name: Prewarm the offline packed-consumer cache
-        run: node scripts/prewarm-offline-consumer-cache.mjs
+        run: node scripts/prewarm-offline-consumer-cache.ts
       # The gate is the same one check.yml runs, so it must be asked for the
       # same proofs. Without this the linux runners silently skip the
       # release-artifact and installer proofs, and the release lane — the one
@@ -116,7 +116,7 @@ jobs:
       #
       # This does not weaken what the skipped legs prove about themselves. The
       # composition below is self-sufficient: it stages an isolated consumer and
-      # runs its own `tsc` (scripts/build-worker-release-package.mjs), then
+      # runs its own `tsc` (scripts/build-worker-release-package.ts), then
       # builds the SEA and runs its native smoke test. A leg that skips the gate
       # still compiles, links, and executes its own binary.
       - name: Build and test source
@@ -175,7 +175,7 @@ jobs:
             version="$(node -p 'require("./package.json").version')"
           fi
           for output in dist-a dist-b; do
-            node scripts/build-worker-release-assets.mjs compose \
+            node scripts/build-worker-release-assets.ts compose \
               --out "$RUNNER_TEMP/$output" \
               --gateway-handoff-archive "$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE" \
               --version "$version" \
@@ -245,7 +245,7 @@ jobs:
         id: release-set
         run: |
           set -euo pipefail
-          node scripts/build-worker-release-assets.mjs merge \
+          node scripts/build-worker-release-assets.ts merge \
             --out "$RUNNER_TEMP/dist" \
             --input "$PWD/handoff/linux-arm64" \
             --input "$PWD/handoff/linux-amd64" \

@@ -25,8 +25,8 @@ test("converter dry-run is bounded, policy-selected, and non-mutating", () => {
 	assert.equal(result.status, 0, result.stderr);
 	const plan = JSON.parse(result.stdout) as { dry_run: boolean; converted: string[] };
 	assert.equal(plan.dry_run, true);
-	assert.equal(plan.converted.length, 1);
-	assert.match(plan.converted[0], /^scripts\/.+\.mjs$/u);
+	assert.ok(plan.converted.length === 0 || plan.converted.length === 1);
+	if (plan.converted.length === 1) assert.match(plan.converted[0], /^scripts\/.+\.mjs$/u);
 	assert.equal(readFileSync("config/no-legacy-mjs.json", "utf8"), policy);
 });
 
@@ -194,6 +194,17 @@ test("static templates and path.join references are planned like the real agent-
 		'const joined = join("scripts", "convert.ts");\nconst templated = `scripts/convert.ts`;\n',
 	);
 	assert.deepEqual(plan.unresolvedReferences, []);
+});
+
+test("static selected paths in code comments move with their converted owner", (context) => {
+	const root = fixture();
+	writeFileSync(join(root, "scripts/reference.ts"), "// Keep parity with convert.mjs when this fixture changes.\n");
+	execFileSync("git", ["-C", root, "add", "-A"]);
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const plan = planConversion(root, "scripts", 1);
+	const reference = plan.references.find((entry) => entry.file === "scripts/reference.ts");
+	assert.equal(reference?.rewrites, 1);
+	assert.equal(reference?.after.toString("utf8"), "// Keep parity with convert.ts when this fixture changes.\n");
 });
 
 test("the exact policy authority is never treated as a reference", (context) => {

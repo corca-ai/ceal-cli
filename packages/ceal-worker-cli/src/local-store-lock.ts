@@ -69,6 +69,8 @@ export interface LocalStoreLockOptions {
 	onAcquired?: (waitedMs: number) => void;
 	/** @testOnly Monotonic deadline source; production uses performance.now. */
 	monotonicNow?: () => number;
+	/** @testOnly Process-liveness probe; production uses `process.kill(pid, 0)`. */
+	processProbe?: (pid: number) => void;
 }
 
 /**
@@ -305,7 +307,8 @@ function readSafeLockDirectory(options: LocalStoreLockOptions): Stats | null {
 
 function processMissing(pid: number, options: LocalStoreLockOptions): boolean {
 	try {
-		process.kill(pid, 0);
+		if (options.processProbe) options.processProbe(pid);
+		else process.kill(pid, 0);
 		return false;
 	} catch (error) {
 		if (nodeErrorCode(error) === "ESRCH") return true;

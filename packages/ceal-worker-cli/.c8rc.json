@@ -6,9 +6,11 @@
 		".ts"
 	],
 	"exclude": [
+		"test/**",
 		"**/generated/**",
 		"**/cli-runtime.*"
 	],
+	"exclude-after-remap": true,
 	"reporter": [
 		"text",
 		"json-summary"

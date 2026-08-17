@@ -1,6 +1,6 @@
 // Installed-client acceptance record, emitted by the installed release itself.
 //
-// `scripts/worker-acceptance-packet.mjs` answers the same question from a source
+// `scripts/worker-acceptance-packet.ts` answers the same question from a source
 // checkout, and that is exactly its limit: the Gateway lane's ingress contract
 // refuses a source checkout as an input, and a colleague on a fresh machine has
 // no checkout to run it from. So the evidence a real installation can return had
