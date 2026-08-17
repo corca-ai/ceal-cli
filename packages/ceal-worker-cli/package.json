@@ -1,6 +1,6 @@
 {
 	"name": "@corca-ai/ceal-worker-cli",
-	"version": "0.77.0",
+	"version": "0.78.0",
 	"private": true,
 	"license": "MIT",
 	"description": "Credential-separated worker-facing Ceal CLI",
@@ -32,7 +32,7 @@
 		"coverage": "c8 node ../../test/run-source-tests.ts test/*.test.ts"
 	},
 	"dependencies": {
-		"@corca-ai/ceal": "0.77.0",
+		"@corca-ai/ceal": "0.78.0",
 		"@corca-ai/ceal-protocol": "0.73.0",
 		"yaml": "2.9.0"
 	},
