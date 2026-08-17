@@ -8,6 +8,11 @@ the candidate; the privileged jobs use the `ceal-cli-release` Environment only
 for stable release-origin credentials and deployment routing, and bind the
 commit, artifact name, and signed inventory to the same workflow run.
 
+Release target: `0.78.1` (`ceal-v0.78.1`), a patch bump from `0.78.0`. The bump
+is justified because this slice repairs release validation and operator
+procedure without changing the public command or protocol shape. The existing
+`ceal-v0.78.0` tag is immutable and cannot be reused.
+
 ## Scope
 
 - `.github/workflows/ceal-release.yml`
