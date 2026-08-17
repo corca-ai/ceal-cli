@@ -8,7 +8,12 @@ import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { LEASED_CONSUMER_CARRIER_ARGV, readLeasedConsumerRequest, runLeasedConsumerCarrier } from "../dist/leased-consumer-carrier.js";
+import {
+	LEASED_CONSUMER_CARRIER_ARGV,
+	type LeasedConsumerCarrierRuntime,
+	readLeasedConsumerRequest,
+	runLeasedConsumerCarrier,
+} from "../dist/leased-consumer-carrier.js";
 import { postUnixSocket } from "../dist/private-worker-transport.js";
 
 const handoff = JSON.parse(
@@ -360,6 +365,19 @@ test("bad request bytes and every protected-channel failure make zero HTTP reque
 	}
 });
 
+test("request classification precedes inherited channel acquisition", async () => {
+	const malformed = await runLeasedConsumerCarrier(encoder.encode("not-json"));
+	assert.equal(malformed.error_code, "invalid_request");
+
+	const validWithoutChannel = await runLeasedConsumerCarrier(requestBytes, {
+		readChannel: async () => {
+			throw new Error("missing_channel");
+		},
+		closeChannel: async () => {},
+	});
+	assert.equal(validWithoutChannel.error_code, "service_channel_unavailable");
+});
+
 test("the protected channel has an exact injected monotonic 2,000ms deadline and is closed once", async () => {
 	let timerMs = null;
 	let closed = 0;
@@ -385,19 +403,30 @@ test("the protected channel has an exact injected monotonic 2,000ms deadline and
 });
 
 test("every pre-channel failure closes the one-shot descriptor and cannot fetch", async () => {
-	for (const runtime of [
-		{},
+	const cases: ReadonlyArray<{
+		readonly runtime: LeasedConsumerCarrierRuntime;
+		readonly expected: "invalid_request" | "service_call_failed";
+	}> = [
+		{ runtime: {}, expected: "invalid_request" },
 		{
-			loadHandoff: () => {
-				throw new Error("invalid embedded handoff");
+			runtime: {
+				loadHandoff: () => {
+					throw new Error("invalid embedded handoff");
+				},
 			},
+			expected: "service_call_failed",
 		},
-	]) {
+	];
+	for (const { runtime, expected } of cases) {
 		let closed = 0;
+		let reads = 0;
 		let calls = 0;
 		const result = await runLeasedConsumerCarrier(encoder.encode("not-json"), {
 			...runtime,
-			readChannel: async () => channel,
+			readChannel: async () => {
+				reads += 1;
+				return channel;
+			},
 			closeChannel: async () => {
 				closed += 1;
 			},
@@ -406,9 +435,10 @@ test("every pre-channel failure closes the one-shot descriptor and cannot fetch"
 				throw new Error("must not fetch");
 			},
 		});
+		assert.equal(result.error_code, expected);
+		assert.equal(reads, 0);
 		assert.equal(calls, 0);
 		assert.equal(closed, 1);
-		assert.ok(result.error_code === "invalid_request" || result.error_code === "service_call_failed");
 	}
 });
 
@@ -483,6 +513,19 @@ test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", a
 		ok: false,
 		status: "unavailable",
 		error_code: "service_channel_unavailable",
+	});
+
+	const malformed = await runCarrierProcess(binary, "not-json");
+	assert.deepEqual(malformed, {
+		status: 2,
+		stdout:
+			JSON.stringify({
+				schema_version: "ceal.leased_consumer_call_result.v1",
+				ok: false,
+				status: "error",
+				error_code: "invalid_request",
+			}) + "\n",
+		stderr: "",
 	});
 });
 
