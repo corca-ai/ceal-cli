@@ -704,7 +704,13 @@ function assertNoProtocolFallbackSource(root: string): void {
 	for (const relative of ["src", "tsconfig.json", "tsconfig.build.json"]) {
 		const target = path.join(root, relative);
 		if (!existsSync(target)) continue;
-		for (const file of regularFiles(target)) {
+		const files = regularFiles(target).filter((file) => {
+			// Generated private contracts carry signed producer input paths as
+			// provenance data; those literals are not module-resolution fallbacks.
+			// The generated modules are verified separately before bundling.
+			return relative !== "src" || path.relative(target, file).split(path.sep)[0] !== "generated";
+		});
+		for (const file of files) {
 			const text = readFileSync(file, "utf8");
 			if (/workspace:|packages\/ceal-protocol|@corca-ai\/ceal-protocol\/(?:src|dist)/u.test(text)) {
 				throw new GatewayProtocolConsumerError(

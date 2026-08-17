@@ -309,7 +309,6 @@ test("sync release supervisor budgets the fixture-ready deadline before the comm
 			timeoutStartDeadlineMs: 500,
 		},
 		10,
-		0,
 	);
 	assert.equal(result.timedOut, true);
 	assert.match(String(result.stdout), /ready/u);
