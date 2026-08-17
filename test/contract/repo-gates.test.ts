@@ -300,6 +300,15 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 			assert.ok(config[ratio] > 80, `${ownerPackage} ${ratio} floor is ${config[ratio]}; a floor under what is measured catches nothing`);
 		}
 	}
+	const workerCoverage = JSON.parse(read("packages/ceal-worker-cli/.c8rc.json"));
+	assert.equal(workerCoverage.src, "src", "Worker coverage must inventory production source, not tests or emitted artifacts");
+	assert.deepEqual(workerCoverage.extension, [".ts"], "Worker coverage must count the editable TypeScript authority");
+	assert.ok(workerCoverage.exclude.includes("test/**"), "Worker coverage must not count its test harness as production");
+	assert.equal(
+		workerCoverage["exclude-after-remap"],
+		true,
+		"Worker exclusions must apply to TypeScript source paths after source-map remapping",
+	);
 	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
 	assert.match(workerPackage.scripts.build, /^tsc -p tsconfig\.build\.json\b/u);
 	// A trailing `|| true` would make every type error a green build, which is the
@@ -1451,22 +1460,26 @@ test("the pre-push hook is checked in and its installer reports honestly", () =>
 test("the pre-push hook propagates the gate's exit code and never blocks on its own bookkeeping", (context) => {
 	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-hook-exit-"));
 	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const checkout = path.join(scratch, "repo");
+	mkdirSync(path.join(checkout, ".githooks"), { recursive: true });
+	cpSync(path.join(ROOT, ".githooks/pre-push"), path.join(checkout, ".githooks/pre-push"));
+	execFileSync("git", ["init", "--quiet", checkout], { stdio: "pipe" });
 	// The gate commands are the one thing that must not really run here, so the
 	// harness puts a stand-in `npm` ahead of the real one on PATH.
 	const bin = path.join(scratch, "bin");
 	mkdirSync(bin, { recursive: true });
 	const stub = path.join(bin, "npm");
+	const nodeStub = path.join(bin, "node");
 	const timingLog = path.join(scratch, "timing", "command-timing.jsonl");
 	const runHook = (refLine, exitCode) => {
 		writeFileSync(stub, `#!/bin/sh\nexit ${exitCode}\n`, { mode: 0o755 });
-		// `cwd: ROOT`, because git runs a pre-push hook from the top of the working
-		// tree and the hook's relative paths depend on it — running it from a scratch
-		// directory tested a situation that cannot happen. Isolation comes from the
-		// environment instead: a stub `npm` ahead on PATH, the ratchet's own skip
-		// switch (the scratch tree is not a repo it could scan), and a timing log
-		// redirected out of the maintainer's own.
-		return spawnSync("sh", [path.join(ROOT, ".githooks/pre-push"), "origin", "git@example.invalid:x/y.git"], {
-			cwd: ROOT,
+		writeFileSync(nodeStub, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+		// Git runs a hook from the checkout root, so exercise the checked-in bytes in
+		// a throwaway repository. Re-entering this checkout from its own pre-push
+		// suite would correctly collide with the real concurrency lock and test the
+		// outer push instead of exit propagation.
+		return spawnSync("sh", [path.join(checkout, ".githooks/pre-push"), "origin", "git@example.invalid:x/y.git"], {
+			cwd: checkout,
 			input: refLine,
 			encoding: "utf8",
 			env: {

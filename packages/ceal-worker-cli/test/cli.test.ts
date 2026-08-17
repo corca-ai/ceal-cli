@@ -1686,6 +1686,17 @@ test("an observational acceptance read does not require a durable refresh quaran
 	});
 });
 
+test("acceptance readback carries the last Gateway timing from its receipt projection", async () => {
+	await withGateway(async ({ endpoint }: { endpoint: string }) => {
+		const payload = await yamlRun(["acceptance", "emit", "--request-ref", "narnia:call:1:call"], 0, {
+			readStoredSession: async () => storedSession(endpoint),
+			readInstalledReleaseFacts: installedReleaseReading,
+		});
+		assert.equal(payload.status, "emitted");
+		assert.equal(payload.bounded_capability_call.receipt.gateway_elapsed_ms, 42);
+	});
+});
+
 test("typed Gateway refresh denial requires reenrollment instead of retry", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
@@ -5296,6 +5307,21 @@ test("--timing separates local lock, refresh, and revoke phases", async () => {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
+});
+
+test("private entrypoints fail closed on malformed carrier input and absent control fd", async () => {
+	const carrier = await runBin(["--internal-leased-consumer-carrier"], "not-json");
+	assert.equal(carrier.code, 2);
+	assert.deepEqual(JSON.parse(carrier.stdout), {
+		schema_version: "ceal.leased_consumer_call_result.v1",
+		ok: false,
+		status: "error",
+		error_code: "invalid_request",
+	});
+
+	const control = await runBin(["--internal-leased-consumer-control-session"], "");
+	assert.equal(control.code, 3);
+	assert.equal(control.stdout, "");
 });
 
 function timingEvents(stderr) {
