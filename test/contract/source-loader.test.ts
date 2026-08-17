@@ -4,14 +4,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 const LOADER = new URL("../source-loader.ts", import.meta.url);
 
 function fixture() {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-source-loader-"));
 	const packageRoot = path.join(root, "packages", "ceal-client");
-	mkdirSync(path.join(packageRoot, "src"), { recursive: true });
+	for (const directory of ["ceal-protocol", "ceal-client", "ceal-worker-cli"]) {
+		mkdirSync(path.join(root, "packages", directory, "src"), { recursive: true });
+	}
 	mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+	mkdirSync(path.join(root, "scripts"), { recursive: true });
 	writeFileSync(path.join(packageRoot, "src", "index.ts"), 'export const authority: string = "source-v1";\n');
 	writeFileSync(path.join(packageRoot, "dist", "index.js"), 'export const authority = "poison-dist";\n');
 	return { root, packageRoot };
@@ -43,6 +47,26 @@ function importResult(root, specifier) {
 	});
 }
 
+test("source-test loader delegates TypeScript outside package source to native Node loading", () => {
+	const { root } = fixture();
+	try {
+		const nativeOnly = path.join(root, "scripts", "native-only.ts");
+		writeFileSync(nativeOnly, "enum NativeOnly { value = 1 }\nconsole.log(NativeOnly.value);\n");
+		const result = importResult(root, pathToFileURL(nativeOnly).href);
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /TypeScript enum is not supported in strip-only mode/u);
+
+		const prefixSibling = path.join(root, "packages", "ceal-client", "src2", "native-only.ts");
+		mkdirSync(path.dirname(prefixSibling), { recursive: true });
+		writeFileSync(prefixSibling, "enum NativeOnly { value = 2 }\nconsole.log(NativeOnly.value);\n");
+		const siblingResult = importResult(root, `${pathToFileURL(prefixSibling).href}?cache-bust=1`);
+		assert.notEqual(siblingResult.status, 0);
+		assert.match(siblingResult.stderr, /TypeScript enum is not supported in strip-only mode/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("source-test resolver ignores poisoned dist for direct and bare workspace imports", () => {
 	const { root, packageRoot } = fixture();
 	try {
@@ -57,8 +81,12 @@ test("source-test resolver observes an editable-source mutation without a build"
 	const { root, packageRoot } = fixture();
 	try {
 		assert.equal(readAuthority(root, "@corca-ai/ceal"), "source-v1");
-		writeFileSync(path.join(packageRoot, "src", "index.ts"), 'export const authority: string = "source-v2";\n');
+		writeFileSync(
+			path.join(packageRoot, "src", "index.ts"),
+			'enum SourceOnly { value = "source-v2" }\nexport const authority: string = SourceOnly.value;\n',
+		);
 		assert.equal(readAuthority(root, "@corca-ai/ceal"), "source-v2");
+		assert.equal(readAuthority(root, `${pathToFileURL(path.join(packageRoot, "src", "index.ts")).href}?cache-bust=1`), "source-v2");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

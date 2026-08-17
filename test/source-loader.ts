@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, join, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { transformSync } from "esbuild";
 import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.ts";
@@ -19,6 +19,20 @@ if (
 	WORKSPACE_PACKAGE_DIRECTORIES.some((directory) => !packageDirectories.has(directory))
 ) {
 	throw new Error("source-test package names drifted from workspace source authority");
+}
+const PACKAGE_SOURCE_ROOTS = WORKSPACE_PACKAGE_DIRECTORIES.map((directory) =>
+	realpathSync(resolvePath(REPO_ROOT, "packages", directory, "src")),
+);
+
+function isEditablePackageSource(url: string): boolean {
+	if (!url.startsWith("file:")) return false;
+	const requested = fileURLToPath(url);
+	if (!requested.endsWith(".ts")) return false;
+	const file = realpathSync(requested);
+	return PACKAGE_SOURCE_ROOTS.some((root) => {
+		const relative = relativePath(root, file);
+		return relative !== "" && relative !== ".." && !relative.startsWith(`..${sep}`) && !isAbsolute(relative);
+	});
 }
 
 function packageSource(packageName, relativeSource = "index.ts") {
@@ -67,7 +81,7 @@ registerHooks({
 		return resolved;
 	},
 	load(url, context, nextLoad) {
-		if (!url.endsWith(".ts")) return nextLoad(url, context);
+		if (!isEditablePackageSource(url)) return nextLoad(url, context);
 		const source = readFileSync(fileURLToPath(url), "utf8");
 		const transformed = transformSync(source, {
 			format: "esm",

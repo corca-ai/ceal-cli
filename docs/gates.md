@@ -446,7 +446,7 @@ a changed cwd would therefore leave this gate green while measuring nothing, and
 the printed report would not look wrong — the exact failure the `src`/`dist`
 remap notes above call the worst of them. After a passing measured run the runner
 reads `coverage/scripts/coverage-summary.json` and fails unless it names every
-`.mjs` the config claims. `repo-gates.test.ts` asserts that check is both
+`.ts` the config claims. `repo-gates.test.ts` asserts that check is both
 declared and called.
 
 **Where the floor applies.** It is enforced on `linux-arm64` and `linux-x64`.
@@ -461,22 +461,21 @@ it.
 are measured.** The floor began as an arm64 measurement applied to x64 on the
 argument that x64 runs strictly more proofs and so must measure at or above: the
 arm64 run skips proofs that only *add* coverage there, and the whole
-arch-conditional surface under `scripts/` is one ternary at
-`build-worker-native-artifact.mjs:372` whose covered and uncovered branch counts
+arch-conditional surface under `scripts/` is one ternary in
+`build-worker-native-artifact.ts` whose covered and uncovered branch counts
 are symmetric. Measuring x64 (run `31263490521`) gave the same figures on three
 ratios and a *lower* branch ratio than arm64. The floor held because it sat
 under, not because the reasoning was right. Re-measure both before moving it;
 do not re-derive one from the other.
 
-**What the report already says, and one thing it does not.** `lint-shell.mjs` at
-0% is honest — it runs from `.githooks/pre-push`, which `npm run check` does not
-invoke. `check-dup-ratchet.mjs` is hook-only in the same way and yet reads about
-49%, because `repo-gates.test.ts:730` runs the hook itself; hook-only does not
-imply zero here. And `install-git-hooks.mjs` at 0% is not a reachability finding
-at all: `repo-gates.test.ts` runs it, but against a throwaway clone, so the
-coverage lands under a temp path that remaps to nothing. A zero is therefore a
-question, not a verdict — the reachability claim needs the same positive control
-any absence claim needs.
+**What the report already says, and one thing it does not.** `lint-shell.ts` and
+`check-dup-ratchet.ts` at 0% are honest — they run from `.githooks/pre-push`,
+which `npm run check` does not invoke. The hook contract uses a throwaway clone
+with stubbed gate commands so it proves exit propagation without re-entering the
+real checkout lock. `install-git-hooks.ts` is likewise exercised against a
+throwaway clone, so its coverage lands under a temp path that remaps to nothing.
+A zero is therefore a question, not a verdict — the reachability claim needs the
+same positive control any absence claim needs.
 
 **The cost is real, it is on `npm run check` only, and it is mostly
 irreducible.** Timed on the maintainer host: both tiers plain about 1m11s, under
@@ -487,7 +486,7 @@ overhead is `NODE_V8_COVERAGE` inherited by every process the tiers touch, and
 the four slowest release proofs — which spawn `npm`, `tsc` and the SEA tooling,
 none of which can contribute `scripts/` coverage — accounted for about 75s of it
 by per-test timing. Clearing the variable at
-`verify-gateway-protocol-consumer.mjs`'s `run()` helper, the single largest of
+`verify-gateway-protocol-consumer.ts`'s `run()` helper, the single largest of
 those, recovered **about 9 seconds of 52** on the tiers alone and cost no
 coverage (that file went 82.20% to 82.59%, from the added comment; nothing else
 moved). On the full gate it does not surface at all: three timed runs gave
@@ -614,12 +613,12 @@ The reachability blind spot survives all of this and is why the zero is not the
 audit. `knip` reports nothing under `scripts/`, and two separate mechanisms
 produce that silence — both checked with a planted export:
 
-- The 20 top-level `scripts/*.mjs` are declared `entry`, and `knip` does not
+- The top-level `scripts/*.ts` owners are declared `entry`, and `knip` does not
   report exports in an entry file. A planted export in
   `scripts/worker-release-inputs.ts` goes unreported.
 - Under `scripts/lib/`, which is not entry, an export *is* reported — until a
   test imports it, which every one of them does. Those suites import
-  `scripts/*.mjs` directly rather than a built copy, so unlike the TypeScript
+  `scripts/*.ts` directly rather than a built copy, so unlike the TypeScript
   packages there is no compile step separating a test consumer from a production
   one.
 
@@ -630,7 +629,7 @@ Either mechanism alone would have hidden both guards slice 2 deleted by hand.
 
 `npm run lint:reachability` answers the question the section above ends on, and
 runs in both gates. `scripts/lib/production-reachability.ts` walks the
-production graph and nothing else: entries are the `node scripts/*.mjs`
+production graph and nothing else: entries are the `node scripts/*.ts`
 invocations the manifest, the lanes, and the hook declare; edges are static
 relative imports; a release lane's inline `node --input-type=module` step is a
 caller. Suites are not in the graph, which is the entire mechanism — a guard only
