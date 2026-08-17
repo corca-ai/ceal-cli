@@ -1,29 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	utimesSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import test, { type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
-import { ensurePackageBuilt, processIsGone, REPO_ROOT, withDistLock } from "../repo-build.ts";
+import { ensurePackageBuilt, processIsGone, REPO_ROOT } from "../repo-build.ts";
 import { scratchDir } from "../scratch-dir.ts";
 
-const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const HELPER = path.join(REPO_ROOT, "test", "repo-build.ts");
 const SUPERVISOR = path.join(REPO_ROOT, "test", "repo-build-supervisor.ts");
 type HolderResult = { code: number | null; signal: string | null; stdout: string; stderr: string };
+type InjectedRepoBuildOptions = { waitTimeoutMs?: number };
 
 // `test:release` runs `test/*.test.mjs` in parallel, and the release fixtures both
 // write and read the checked-out `packages/<name>/dist`. That tree is the state
@@ -35,13 +23,14 @@ type HolderResult = { code: number | null; signal: string | null; stdout: string
 // `test:contract`, whose sibling tests spawn `packages/*/dist/bin.js`, so a test
 // that rebuilt `dist` here would make the pre-push gate itself flaky.
 
-test("the dist lock serializes concurrent holders across processes", async () => {
-	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-dist-lock-probe-"));
+test("the dist lock serializes concurrent holders across processes", async (context) => {
+	const scratch = scratchDir(context, "ceal-dist-lock-probe-");
 	const journal = path.join(scratch, "journal");
 	writeFileSync(journal, "");
+	const helper = injectedRepoBuild(scratch, undefined, undefined, { waitTimeoutMs: 5_000 });
 	const holder = `
 		import { appendFileSync } from "node:fs";
-		import { withDistLock } from ${JSON.stringify(HELPER)};
+		import { withDistLock } from ${JSON.stringify(helper)};
 		withDistLock(() => {
 			appendFileSync(${JSON.stringify(journal)}, "enter\\n");
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
@@ -60,21 +49,27 @@ test("the dist lock serializes concurrent holders across processes", async () =>
 		assert.equal(events[index], "enter");
 		assert.equal(events[index + 1], "exit");
 	}
-	rmSync(scratch, { recursive: true, force: true });
 });
 
-test("a live holder is not reclaimed, however long it holds", async () => {
+test("a live holder is not reclaimed, however long it holds", async (context) => {
 	// The reclaim rule is process liveness, not elapsed time. A wall clock cannot
 	// tell a slow compile on a loaded runner from a dead holder, and breaking a live
 	// holder recreates the double-writer state the lock exists to prevent. This
 	// asserts the direction that keeps the mutex sound; the test below asserts the
 	// direction that keeps it from deadlocking.
+	const scratch = scratchDir(context, "ceal-dist-lock-live-");
+	const helper = injectedRepoBuild(scratch, undefined, undefined, { waitTimeoutMs: 5_000 });
+	const journal = path.join(scratch, "journal");
+	writeFileSync(journal, "");
 	const slow = spawnHolder(
 		`
-		import { withDistLock } from ${JSON.stringify(HELPER)};
+		import { appendFileSync } from "node:fs";
+		import { withDistLock } from ${JSON.stringify(helper)};
 		withDistLock(() => {
+			appendFileSync(${JSON.stringify(journal)}, "slow-enter\\n");
 			console.log("slow-ready");
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+			appendFileSync(${JSON.stringify(journal)}, "slow-exit\\n");
 		});
 		console.log("slow-done");
 	`,
@@ -84,13 +79,18 @@ test("a live holder is not reclaimed, however long it holds", async () => {
 	// let a loaded host start the waiter first and pass without exercising reclaim.
 	await slow.ready;
 	const waiter = await runHolder(`
-		import { withDistLock } from ${JSON.stringify(HELPER)};
-		withDistLock(() => console.log("waiter-entered"));
+		import { appendFileSync } from "node:fs";
+		import { withDistLock } from ${JSON.stringify(helper)};
+		withDistLock(() => {
+			appendFileSync(${JSON.stringify(journal)}, "waiter-entered\\n");
+			console.log("waiter-entered");
+		});
 	`);
 	assert.equal(waiter.code, 0, waiter.stderr);
 	assert.equal((await slow.result).code, 0);
-	// If the waiter had reclaimed the live holder's lock it would still print this,
-	// so the real assertion is that it did not warn about reclaiming one.
+	assert.deepEqual(readFileSync(journal, "utf8").trim().split("\n"), ["slow-enter", "slow-exit", "waiter-entered"]);
+	// The journal proves mutual exclusion; this secondary check also rejects a
+	// misleading recovery signal on the healthy live-holder path.
 	assert.doesNotMatch(waiter.stderr, /reclaiming/u, "a live holder was reclaimed");
 });
 
@@ -180,17 +180,17 @@ test("a fresh owner-less legacy lock is not replaced before its grace expires", 
 	assert.equal(retained.ino, generation.ino);
 });
 
-test("a process cannot delete a lock it does not own", () => {
-	rmSync(LOCK, { recursive: true, force: true });
-	let observed = null;
-	withDistLock(() => {
+test("a process cannot delete a lock it does not own", async (context) => {
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-successor-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	const isolated = await import(`${pathToFileURL(scratch.modulePath).href}?successor=${Date.now()}`);
+	isolated.withDistLock(() => {
 		// Simulate the successor case: our lock is reclaimed and a second process
 		// takes it while we are still inside. Our release must not remove theirs.
-		writeFileSync(path.join(LOCK, "owner"), `1 ${"b".repeat(32)}\n`);
+		writeFileSync(path.join(lock, "owner"), `1 ${"b".repeat(32)}\n`);
 	});
-	observed = readFileSync(path.join(LOCK, "owner"), "utf8").trim();
+	const observed = readFileSync(path.join(lock, "owner"), "utf8").trim();
 	assert.equal(observed, `1 ${"b".repeat(32)}`, "the outgoing holder deleted its successor's lock");
-	rmSync(LOCK, { recursive: true, force: true });
 });
 
 test("release leaves a two-party successor when its marker disappears", async (context) => {
@@ -297,14 +297,16 @@ test("a stale non-empty unknown generation is refused without deletion", async (
 	);
 });
 
-test("the lock is released even when the guarded body throws", () => {
-	rmSync(LOCK, { recursive: true, force: true });
+test("the lock is released even when the guarded body throws", async (context) => {
+	const scratch = isolatedRepoBuild(context, "ceal-dist-lock-throws-");
+	const lock = path.join(scratch.root, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
+	const isolated = await import(`${pathToFileURL(scratch.modulePath).href}?throws=${Date.now()}`);
 	assert.throws(() => {
-		withDistLock(() => {
+		isolated.withDistLock(() => {
 			throw new Error("boom");
 		});
 	}, /boom/u);
-	assert.equal(existsSync(LOCK), false);
+	assert.equal(existsSync(lock), false);
 });
 
 test("ensurePackageBuilt runs the build exactly once per package per process", () => {
@@ -516,16 +518,20 @@ function spawnHolder(source: string, readyMarker?: string): { ready: Promise<voi
 	return { ready, result };
 }
 
-function injectedRepoBuild(root: string, anchor?: string, replacement?: string): string {
+function injectedRepoBuild(root: string, anchor?: string, replacement?: string, options: InjectedRepoBuildOptions = {}): string {
 	const directory = path.join(root, "test");
 	mkdirSync(directory, { recursive: true });
 	let source = readFileSync(HELPER, "utf8");
 	if (anchor) assert.ok(source.includes(anchor), `repo-build injection anchor missing: ${anchor}`);
 	const toolchainImport = new URL("../../scripts/lib/toolchain-env.ts", import.meta.url).href;
 	source = source.replace('from "../scripts/lib/toolchain-env.ts"', `from ${JSON.stringify(toolchainImport)}`);
-	source = source.replace("const WAIT_TIMEOUT_MS = 600_000;", "const WAIT_TIMEOUT_MS = 20;");
-	source = source.replace("const BUILD_TIMEOUT_MS = 600_000;", "const BUILD_TIMEOUT_MS = 500;");
-	source = source.replace("const BUILD_TERMINATION_GRACE_MS = 2_000;", "const BUILD_TERMINATION_GRACE_MS = 80;");
+	const waitTimeoutAnchor = "const WAIT_TIMEOUT_MS = 600_000;";
+	assert.ok(source.includes(waitTimeoutAnchor), "repo-build wait-timeout injection anchor missing");
+	source = source.replace(waitTimeoutAnchor, `const WAIT_TIMEOUT_MS = ${options.waitTimeoutMs ?? 20};`);
+	// Keep production's termination grace and a startup-safe timeout here: on an
+	// arbitrary machine, scheduler load can otherwise delay the fake npm until
+	// after the fixture expires but before its TERM trap is installed.
+	source = source.replace("const BUILD_TIMEOUT_MS = 600_000;", "const BUILD_TIMEOUT_MS = 2_000;");
 	source = source.replace("const BUILD_POST_KILL_REPORT_MS = 1_000;", "const BUILD_POST_KILL_REPORT_MS = 80;");
 	if (anchor && replacement !== undefined) source = source.replace(anchor, replacement);
 	const modulePath = path.join(directory, "repo-build.ts");

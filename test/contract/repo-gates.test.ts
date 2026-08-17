@@ -83,12 +83,26 @@ function assertContractGateScriptShape(scripts) {
 	assert.equal((built.match(/\bnpm run build\b/gu) ?? []).length, 0, "the internal contract lane must not build");
 	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
 	assert.deepEqual(testFilesIn(built), [...WORKER_CONTRACT_TESTS].sort(), "the built lane must own the complete contract inventory once");
-	assert.equal(
-		scripts["check:unit"],
-		"npm run lint && npm run lint:no-legacy-mjs && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run build && npm run test:unit && npm run test:contract:built",
-		"check:unit must reuse its one build through the internal contract lane",
-	);
-	assert.equal((scripts["check:unit"].match(/\bnpm run build\b/gu) ?? []).length, 1, "check:unit must build exactly once");
+	const commonPhases = [
+		"npm run lint",
+		"npm run lint:no-legacy-mjs",
+		"npm run lint:types",
+		"npm run lint:unused",
+		"npm run lint:reachability",
+		"npm run lint:store-lock",
+		"npm run lint:duplicate-literal",
+	];
+	const gateDefinitions: Array<[name: "check" | "check:unit", tail: string[]]> = [
+		["check", ["npm test"]],
+		["check:unit", ["npm run test:unit", "npm run test:contract:built"]],
+	];
+	for (const [name, tail] of gateDefinitions) {
+		const commands = scripts[name].split(" && ");
+		assert.equal(commands.filter((command: string) => command === "npm run build").length, 1, `${name} must build exactly once`);
+		assert.ok(commands.indexOf("npm run build") < commands.indexOf("npm run lint:types"), `${name} must build before typecheck`);
+		const withoutBuild = commands.filter((command: string) => command !== "npm run build");
+		assert.deepEqual(withoutBuild, [...commonPhases, ...tail], `${name} must preserve every non-build phase once`);
+	}
 }
 
 function assertTestInventoryCoverage(declared, actual) {
@@ -1644,8 +1658,18 @@ test("contract gate ownership rejects build and inventory mutations", () => {
 	assert.throws(() => assertContractGateScriptShape(publicBuildMoved), /public contract feedback/u);
 	const internalBuildAdded = { ...scripts, "test:contract:built": `npm run build && ${scripts["test:contract:built"]}` };
 	assert.throws(() => assertContractGateScriptShape(internalBuildAdded), /internal contract lane must not build/u);
-	const duplicateBuild = { ...scripts, "check:unit": `${scripts["check:unit"]} && npm run build` };
-	assert.throws(() => assertContractGateScriptShape(duplicateBuild), /check:unit must reuse/u);
+	const gateNames: Array<"check" | "check:unit"> = ["check", "check:unit"];
+	for (const gate of gateNames) {
+		const duplicateBuild = { ...scripts, [gate]: `${scripts[gate]} && npm run build` };
+		assert.throws(() => assertContractGateScriptShape(duplicateBuild), /must build exactly once/u);
+		const omittedBuild = { ...scripts, [gate]: scripts[gate].replace("npm run build && ", "") };
+		assert.throws(() => assertContractGateScriptShape(omittedBuild), /must build exactly once/u);
+		const typecheckBeforeBuild = {
+			...scripts,
+			[gate]: scripts[gate].replace("npm run build && ", "").replace("npm run lint:types && ", "npm run lint:types && npm run build && "),
+		};
+		assert.throws(() => assertContractGateScriptShape(typecheckBeforeBuild), /must build before typecheck/u);
+	}
 	const omittedTest = { ...scripts, "test:contract:built": scripts["test:contract:built"].replace(` ${PROJECTION_TEST}`, "") };
 	assert.throws(() => assertContractGateScriptShape(omittedTest), /exactly once|complete contract inventory/u);
 });
