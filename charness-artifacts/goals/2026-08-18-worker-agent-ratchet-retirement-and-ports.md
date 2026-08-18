@@ -11,10 +11,10 @@ activation command.
 
 - Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
-  import hard-failure gate, Worker/Agent Secretlint gates, and Agent-local duplicate
-  detector have implementation, targeted proof, and local commits. The full Gateway
-  loader-rewrite ratchet remains deliberately unported; D1 is complete and Lane B is
-  the next dependency-safe slice.
+  import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
+  detector, and the Lane B `noImplicitOverride` slice have implementation, targeted
+  proof, and local commits. The full Gateway loader-rewrite ratchet remains deliberately
+  unported; the remaining Lane B options are the next dependency-safe work.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -32,7 +32,7 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: begin Lane B compiler-option measurement and source repair, keeping the
+- Next action: continue Lane B with the remaining six compiler options, keeping the
   A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
@@ -254,7 +254,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | --- | --- | --- | --- |
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
-| B | Enable seven measured compiler options | config diff, source repairs, raw proof | pending |
+| B | Enable seven measured compiler options | config diff, source repairs, raw proof | in progress — noImplicitOverride complete; six options remain |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
@@ -520,6 +520,40 @@ compiler replacement proof.
   remote-CI, release, and runtime proof remain non-claims. D1 is complete;
   Lane B is the next local slice.
 
+### Slice 8: Lane B — enable noImplicitOverride
+
+- Objective: Enable the first compiler-owned Lane B option in every Worker and
+  Agent raw typecheck project and repair the source diagnostics without a
+  baseline or a custom exception.
+- Why this approach: The raw probe found one Worker package diagnostic and two
+  Worker test diagnostics; Agent's current build source had no diagnostic for
+  this option, but its effective tools/test config still needed the option so
+  the setting could not silently vary by lane.
+- Commits: Worker `2dba633` (`typecheck: enable Worker implicit override`);
+  Agent `2dd743d` (`typecheck: enable Agent implicit override`); no push or
+  external boundary.
+- What changed: Worker enabled `noImplicitOverride` in `tsconfig.typecheck.json`
+  and `tsconfig.tools.json`, added `override` to the pre-provider Error cause
+  and two test Error names, and asserted the option in the typecheck contract.
+  Agent enabled it in `tsconfig.build.json` and generated tools/test parent
+  config, and asserted both effective configs in the quality contract. The
+  existing Agent hook-order assertion was repaired when its actual D1
+  import/duplicate/Secretlint entries exposed stale expected output.
+- Targeted verification: Worker `npm run lint:types:raw:packages`,
+  `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and
+  `node --test test/contract/typecheck-source-gate.test.ts` passed. Agent
+  `npm run lint:types:source`, `npm run lint:types:tools`, and
+  `npm run test:source -- test/public/quality-gates.test.ts` passed. Both
+  commit hooks passed their local staged gates.
+- Alternatives rejected: No non-null assertion, baseline regeneration,
+  diagnostic ratchet, or option-specific suppression was added. The first raw
+  probe's global `tsc` exit 127 was classified as a command-ownership error and
+  corrected to the declared local `npm exec --no -- tsc` route before measuring
+  diagnostics.
+- Off-goal findings: No Gateway source edit, push, CI watch, release,
+  apply/restart, live readback, issue creation, or duplicate #671. The remaining
+  six Lane B options are not claimed complete; continue with narrow raw probes.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -672,4 +706,5 @@ improvement as applied or a tracked issue.
 | Agent duplicate implementation received a fresh-eye critique and repair | Gateway `charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`, commit `67afbec6a42451490e9a22f0c9896c15c870eda6`; Agent reviewer window `/tmp/d1-duplicate-agent-20260819.json` | from `/Users/ted/codes/ceal`: run `python3 scripts/validate_critique_artifacts.py --repo-root . --paths charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`; recheck the matching reviewer window with `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify --repo-root /Users/ted/codes/ceal-agent --before /tmp/d1-duplicate-agent-20260819.json --window-id d1-duplicate-agent-20260819` and record parent-attributed post-review edits rather than claiming them as reviewer drift |
 | Lane B Worker raw typecheck ownership is three explicit root projects | Worker `/Users/ted/codes/ceal-cli/package.json:29-39`, `tsconfig.typecheck.json:2-23`, `tsconfig.tools.json:2-20`, and `tsconfig.tests.json:2-15` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, and `npm run lint:types:raw:tests`; inspect each command's `-p` config before changing compiler options |
 | Lane B Agent raw typecheck ownership is the build project plus generated tools/test configs | Agent `/Users/ted/codes/ceal-agent/package.json:56-63`, `tsconfig.build.json:2-25`, `tsconfig.tools-tests.json:2-24`, and `scripts/typecheck-tools-tests.ts:126-145` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source` and `npm run lint:types:tools`; inspect `typecheck-tools-tests.ts` generated config and its `extends` target before changing compiler options |
-| Lane B seven options are currently absent from the owning raw configs, while strict/skipLibCheck are present | Worker and Agent tsconfig sources above; positive controls `strict` and `skipLibCheck` in each file | from Gateway: run `rg -n '"(noFallthroughCasesInSwitch|noImplicitReturns|noImplicitOverride|noUnusedLocals|noUnusedParameters|noUncheckedIndexedAccess|exactOptionalPropertyTypes)"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json` and a positive-control `rg -n '"strict"|"skipLibCheck"'` before enabling any option; re-run the absence search after each committed option set |
+| Lane B remaining six options are absent from the owning raw configs, while strict/skipLibCheck and noImplicitOverride are present | Worker and Agent tsconfig sources above; positive controls `strict`, `skipLibCheck`, and the committed noImplicitOverride entries | from Gateway: run `rg -n '"(noFallthroughCasesInSwitch|noImplicitReturns|noUnusedLocals|noUnusedParameters|noUncheckedIndexedAccess|exactOptionalPropertyTypes)"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json` and a positive-control `rg -n '"strict"|"skipLibCheck"|"noImplicitOverride"'`; re-run after each committed option set |
+| Lane B noImplicitOverride is compiler-owned in every raw Worker/Agent route | Worker/Agent `tsconfig.typecheck.json`, `tsconfig.tools.json`, `tsconfig.build.json`, and `tsconfig.tools-tests.json`; Worker/Agent contract tests | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline update route |
