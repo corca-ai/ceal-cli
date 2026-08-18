@@ -33,8 +33,11 @@ function compile(packageName: string, artifactRoot: string, paths?: Record<strin
 			{
 				extends: join(sourceRoot, "tsconfig.build.json"),
 				compilerOptions: {
+					// Artifact builds execute under Node; keep the temporary program to ES2022 and Node types.
 					outDir: join(packageRoot, "dist"),
 					tsBuildInfoFile: join(artifactRoot, ".cache", `${packageName}.tsbuildinfo`),
+					lib: ["ES2022"],
+					skipLibCheck: true,
 					typeRoots: [join(REPO_ROOT, "node_modules", "@types")],
 					types: ["node"],
 					...(paths ? { paths } : {}),

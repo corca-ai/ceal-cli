@@ -9,9 +9,9 @@ activation command.
 
 ## Active Operating Frame
 
-- Current disposition: active; Lane A implementation, raw compiler proof,
-  mutation/restore proof, and fresh-eye review are complete; local closeout is
-  in progress.
+- Current disposition: active; Lane A and the orthogonal temporary-TypeScript-fixture
+  performance slice have implementation, targeted proof, and fresh-eye review complete;
+  the two sibling commits are the immediate local closeout boundary.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -29,9 +29,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: commit Lane A locally, then inspect and repair the user-reported
-  temporary-tsconfig fixture cost in Worker and Agent as an orthogonal quality
-  slice before D1; keep the A → D1 → B → C → D2 → E dependency order intact.
+- Next action: commit the Worker and Agent fixture-performance slices locally, then begin
+  D1's raw compiler-route closure; keep the A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -262,9 +261,10 @@ approved work. Do not create or duplicate #671.
 
 ## Slice Log
 
-Lane A implementation and proof are recorded in Slice 1 below. The Worker
-commit hook's historical diagnostic output was used as a lead, not treated as
-raw compiler replacement proof.
+Lane A implementation and proof are recorded in Slice 1 below. The temporary
+TypeScript fixture performance slice is recorded in Slice 2. The Worker commit
+hook's historical diagnostic output was used as a lead, not treated as raw
+compiler replacement proof.
 
 ### Slice 1: Lane A — retire Worker typecheck diagnostic ratchet
 
@@ -279,6 +279,20 @@ raw compiler replacement proof.
 - Off-goal findings: No push, CI watch, release, apply/restart, live readback, issue creation, or Gateway/Agent source edit. Issue #671 was not duplicated.
 - Lessons carried forward: Raw compiler routes must be proven directly before deleting a diagnostic manager; mutation restore must use the current snapshot rather than HEAD. Keep the retired ratchet's diagnostic-shape loss explicit as a non-claim. Next locally decidable slice is the user-supplied temporary-tsconfig fixture performance inventory in Worker and Agent, kept orthogonal to D1.
 - Metrics: Raw routes and targeted contracts were sub-second to low-single-digit seconds; repo-gates completed in 2.76s and pre-commit completed successfully. No broad verification-lock or external proof was run.
+
+### Slice 2: Temporary TypeScript fixture compiler scope in Worker and Agent
+
+- Objective: Reduce ambient TypeScript library work only in temporary fixture programs that validate artifact or tools/test compilation, while preserving production declaration checking and source diagnostics.
+- Why this approach: The Gateway measurement identified a large createProgram cost from unconstrained default libs and ambient packages. The sibling trace found one Worker artifact helper and one Agent tools/test lane that own temporary configs; their class does not assert declaration-file internals or arbitrary ambient packages.
+- Commits: Local commits are pending: one Worker fixture/quality/goal-record commit and one Agent fixture/quality commit; no push or external boundary.
+- What changed: Worker test/artifact-workspace.ts now constrains the temporary compiler to lib ES2022, skipLibCheck, and Node types. Agent tsconfig.tools-tests.json now declares lib ES2022; its public quality test asserts lib/skipLibCheck/types/include, and src/codex-responses.ts adds an explicit type-only node:stream/web adapter for the dependency exposed by the narrower lib.
+- Alternatives rejected: Rejected a repo-wide skipLibCheck or lib change, types: [] (the fixture needs Node ambient types), lib.dom, baseline regeneration, and a new benchmark harness. Production tsconfig.build.json files and existing diagnostic baselines were not changed.
+- Targeted verification: Worker: npm run lint:types:raw:tools exit 0; node --test test/client-artifact.test.ts exit 0 with 4/4; git diff --check exit 0. Agent: npm run lint:types:source, npm run lint:types:tools, npm run lint:types:ts6, and npm run test:quality all exit 0; the quality suite is 9/9, both compiler lanes retain equal 279/100 diagnostic counts, and git diff --check exits 0. Agent's first narrowed-lib run was red with TS2304 for ReadableStreamReadResult; the explicit type-only import restored both lanes green. Fresh-eye round 1 plus counterweight and round 2 found no Act Before Ship blocker; Worker and Agent reviewer-boundary verifies returned ok: true, verdict: clean, drift: [].
+- Test duplication pressure: The Worker retained artifact test family was reused rather than duplicated. The Agent existing public quality-gate test was extended to pin the temporary-config contract. No baseline or ratchet was regenerated.
+- Critique: Parent-delegated fresh-eye covered fixture boundary, runtime economics, and type portability, followed by a separate counterweight and a repaired-proof round 2. The only actionable finding was wording precision in the Worker comment; it now states ES2022 and Node types rather than implying Node ambient types are absent. The Agent assertions were confirmed to read the tools/test config, not production config.
+- Off-goal findings: No Gateway source edit, push, CI watch, release, apply/restart, live readback, or issue creation. The Agent quality-adapter bootstrap conflict was preserved without migration because it is unrelated to this slice. No claim is made for compiler-only timing, other OS/Node versions, browser/DOM fixtures, CI, release, or a diagnostic-count reduction.
+- Lessons carried forward: Fixture class must be established before narrowing compiler libraries: Node-owned artifact/tools tests can use ES2022 plus explicit Node types, while production typecheck must keep its declaration-checking policy. A narrower lib is also a useful proof pressure because it exposes ambient source dependencies that should become typed adapters.
+- Metrics: Single local /usr/bin/time observations (directional, not a benchmark): Worker node --test test/client-artifact.test.ts real 1.27s before to 1.16s after, test duration about 1241ms to 1107ms; Agent npm run lint:types:tools real 2.94s before to 2.65s after repair. These include setup/orchestration and assertions, not just createProgram. Next goal slice remains D1 after this orthogonal quality slice is closed.
 
 ## Context Sources
 
@@ -346,10 +360,12 @@ issue #671 as an upstream follow-up rather than a local fix claim.
 
 Lane A local verification completed on 2026-08-19: all three raw TypeScript
 routes, targeted source/gate contracts, the mutation-red/restore-green proof,
-and the Worker pre-commit gate passed. The overall goal remains active; D1,
-the user-reported fixture-performance slice, later compiler/linter lanes, and
-final verification are still pending. No runtime, push, release, or remote
-proof is claimed.
+and the Worker pre-commit gate passed. The temporary fixture slice also passed
+its Worker artifact test, Agent source/tools/TS6 type lanes, Agent quality tests,
+quality-artifact validators, and round-2 boundary checks. The two fixture slice
+commits are the remaining local closeout action; the overall goal remains active
+for D1 and later compiler/linter lanes. No compiler-only timing, runtime,
+push, release, or remote proof is claimed.
 
 ## User Verification Instructions
 
@@ -363,8 +379,9 @@ proof is claimed.
 
 ## Auto-Retro
 
-Retro not run — Lane A has now closed as a local implementation unit, but the
-goal continues into the fixture-performance and planned gate/compiler lanes.
+Retro not run — Lane A and the temporary fixture slice are closed as local
+implementation units, but the goal continues into the planned gate/compiler
+lanes. The quality artifacts record the validator correction and its disposition.
 Run `charness:retro` at goal closeout and disposition every surfaced
 improvement as applied or a tracked issue.
 
@@ -379,6 +396,10 @@ improvement as applied or a tracked issue.
 | Lane A raw routes are green after ratchet deletion | Worker `package.json:29-36`, raw compiler projects, Slice 1 proof | from `../ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and read each direct exit code |
 | Lane A mutation guard is real and restored without losing intended work | retained `test/contract/repo-gates.test.ts` plus `/tmp/ceal-lane-a-closeout-snapshot.jGxPox` | mutate `test/contract/repo-gates.test.ts`, require `npm run lint:types:raw:tools` nonzero, restore from the snapshot, require the same route green, and compare SHA-256 |
 | pre-commit labels the type gate as raw compiler ownership | Worker `.githooks/pre-commit:9,45,73` | `rg -n -i "type ratchet|raw TypeScript compiler|type checks" ../ceal-cli/.githooks/pre-commit` |
+| Worker temporary artifact compiler is constrained without changing production typecheck | `../ceal-cli/test/artifact-workspace.ts:29-50`; `../ceal-cli/test/client-artifact.test.ts:14-19` | from `../ceal-cli`: run `npm run lint:types:raw:tools` and `node --test test/client-artifact.test.ts`; read the temporary config producer and retained 4-test setup |
+| Agent temporary tools/test compiler is constrained and explicitly asserted | `../ceal-agent/scripts/typecheck-tools-tests.ts:132-150`; `../ceal-agent/tsconfig.tools-tests.json:15-24`; `../ceal-agent/test/public/quality-gates.test.ts:40-45` | from `../ceal-agent`: run `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:quality`; inspect `evaluateLane()` and the quality contract |
+| Agent source dependency exposed by `lib: ["ES2022"]` is explicit and type-only | `../ceal-agent/src/codex-responses.ts:1,90-94` | from `../ceal-agent`: run `npm run lint:types:source`; remove the adapter in a disposable mutation only if a future slice names that proof |
+| fixture timing is directional end-to-end observation, not compiler-only proof | Slice 2 metrics; quality artifacts under `../ceal-cli/charness-artifacts/quality/` and `../ceal-agent/charness-artifacts/quality/` | repeat `/usr/bin/time -p` around the same commands; do not generalize one sample without a structured timing capture |
 | compiler/linter owns source diagnostics | Worker/Agent configs and raw routes | inspect owning configs; run each declared raw typecheck/lint route and read direct exit codes |
 | noNonNullAssertion rationale is live before Lane C | `../ceal-cli/biome.json:30`, `../ceal-cli/docs/gates.md:103-107` | read both, enable the rule, rerun Biome, reread the owner doc |
 | every port is receiving-owned and reachable | source closure plus receiving package/gate contracts | inspect package/check/hook reachability; run retained-input mutation red and snapshot-restore green |
