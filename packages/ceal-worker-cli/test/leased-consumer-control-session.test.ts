@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
+import type { LeasedConsumerControlSessionRuntime, LeasedConsumerNotificationRuntime } from "../dist/leased-consumer-control-session.js";
 import {
 	isInheritedNotificationChannelFd,
 	openLeasedConsumerControlSession,
@@ -16,6 +17,25 @@ import {
 	writeLeasedConsumerAgentFrame,
 } from "../dist/leased-consumer-control-session.js";
 import { deferred, deferredVoid } from "./deferred-test-support.ts";
+
+type JsonRecord = Record<string, unknown>;
+type ControlSession = Readonly<{ dispatch: (frame: Uint8Array, signal?: AbortSignal) => Promise<Uint8Array> }>;
+type FrameEmitter = (frame: Uint8Array, signal?: AbortSignal) => void | Promise<void>;
+type NotificationDecoder = NonNullable<LeasedConsumerNotificationRuntime["decodeNotification"]>;
+type RequestUnixSocketInput = Parameters<NonNullable<LeasedConsumerControlSessionRuntime["requestUnixSocket"]>>[0];
+type TestAbortableWritable = {
+	write: (frame: Uint8Array, callback?: (error?: Error | null) => void) => boolean;
+	destroy: () => void;
+};
+
+const passNotification: NotificationDecoder = (value) => {
+	assert.ok(isJsonRecord(value));
+	return value;
+};
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const EMBEDDED_CONTRACT = path.join("generated", "leased-consumer-control-session-contract.js");
@@ -38,7 +58,7 @@ test("the embedded control-session contract is refused when its digest does not 
 	// Two independent copies rather than one file rewritten between imports: the
 	// generated module is imported by path with no query, so Node's module cache
 	// would hand the second import the first copy's already-evaluated digest.
-	const entryIn = (name) => {
+	const entryIn = (name: string) => {
 		cpSync(DIST, path.join(scratch, name), { recursive: true });
 		return path.join(scratch, name, "leased-consumer-control-session.js");
 	};
@@ -71,7 +91,7 @@ const RESPONSE_SCHEMA = "ceal.leased_consumer_capability_control_response.v6";
 const sessionPath = "/run/user/1001/ceal/leased-consumer-control-v1.sock";
 const session = sessionFor(sessionPath);
 
-function sessionFor(socketPath) {
+function sessionFor(socketPath: string) {
 	return encoder.encode(
 		JSON.stringify({
 			schema_version: "ceal.leased_consumer_control_session.v1",
@@ -116,7 +136,7 @@ const frames = [
 ];
 
 test("private control session carries exactly the seven signed v6 operations over Gateway-issued UDS routes", async () => {
-	const calls = [];
+	const calls: RequestUnixSocketInput[] = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
 		closeProtectedSession: async () => {},
@@ -126,11 +146,16 @@ test("private control session carries exactly the seven signed v6 operations ove
 			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(responseFor(request.operation))) };
 		},
 	});
-	const output = [];
+	const output: JsonRecord[] = [];
 	async function* input() {
 		yield encoder.encode(`${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`);
 	}
-	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))), true);
+	assert.equal(
+		await runControlSessionForTest(input(), carrier, (frame) => {
+			output.push(JSON.parse(new TextDecoder().decode(frame)));
+		}),
+		true,
+	);
 	assert.deepEqual(
 		calls.map((call) => ({ socketPath: call.socketPath, path: call.path, credential: call.credential })),
 		[
@@ -208,7 +233,7 @@ test("one control session relays an undeclared safe capability and then a declar
 			},
 		},
 	};
-	const calls = [];
+	const calls: JsonRecord[] = [];
 	const carrier = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => session,
 		closeProtectedSession: async () => {},
@@ -219,11 +244,16 @@ test("one control session relays an undeclared safe capability and then a declar
 			return { status: 200, contentType: "application/json", bytes: encoder.encode(JSON.stringify(response)) };
 		},
 	});
-	const output = [];
+	const output: JsonRecord[] = [];
 	async function* input() {
 		yield encoder.encode(`${JSON.stringify(unknownFrame)}\n${JSON.stringify(frames[0])}\n`);
 	}
-	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(JSON.parse(new TextDecoder().decode(frame)))), true);
+	assert.equal(
+		await runControlSessionForTest(input(), carrier, (frame) => {
+			output.push(JSON.parse(new TextDecoder().decode(frame)));
+		}),
+		true,
+	);
 	assert.deepEqual(
 		calls.map((frame) => frame.operation),
 		["call", "acquire"],
@@ -233,8 +263,8 @@ test("one control session relays an undeclared safe capability and then a declar
 
 test("candidate notifications are protocol-decoded and forwarded as bounded canonical Agent frames", async () => {
 	const notification = notificationFixture();
-	const emitted = [];
-	const decodeNotification = (value) => {
+	const emitted: string[] = [];
+	const decodeNotification: NotificationDecoder = (value) => {
 		assert.deepEqual(value, notification);
 		return value;
 	};
@@ -244,9 +274,15 @@ test("candidate notifications are protocol-decoded and forwarded as bounded cano
 		yield encoder.encode(`${Array.from({ length: 20 }, () => JSON.stringify(notification)).join("\n")}\n`);
 	}
 	assert.equal(
-		await runNotificationStreamForTest(input(), (frame) => emitted.push(new TextDecoder().decode(frame)), {
-			decodeNotification,
-		}),
+		await runNotificationStreamForTest(
+			input(),
+			(frame) => {
+				emitted.push(new TextDecoder().decode(frame));
+			},
+			{
+				decodeNotification,
+			},
+		),
 		true,
 	);
 	assert.equal(emitted.length, 20);
@@ -267,6 +303,7 @@ test("notification input stops reading until the prior Agent stdout frame drains
 		{
 			decodeNotification: (value) => {
 				decoded += 1;
+				assert.ok(isJsonRecord(value));
 				return value;
 			},
 		},
@@ -285,14 +322,20 @@ test("malformed, duplicate-key, oversized, and unterminated notification frames 
 		JSON.stringify(notificationFixture()),
 	];
 	for (const frame of cases) {
-		const emitted = [];
+		const emitted: Uint8Array[] = [];
 		async function* input() {
 			yield encoder.encode(frame);
 		}
 		assert.equal(
-			await runNotificationStreamForTest(input(), (value) => emitted.push(value), {
-				decodeNotification: (value) => value,
-			}),
+			await runNotificationStreamForTest(
+				input(),
+				(value) => {
+					emitted.push(value);
+				},
+				{
+					decodeNotification: passNotification,
+				},
+			),
 			false,
 		);
 		assert.deepEqual(emitted, []);
@@ -302,7 +345,7 @@ test("malformed, duplicate-key, oversized, and unterminated notification frames 
 test("FD5 notification forwarding does not consume or wait for the pending serial Agent response", async () => {
 	const pendingDispatch = deferred<Uint8Array>();
 	const notificationsClosed = deferredVoid();
-	const output = [];
+	const output: JsonRecord[] = [];
 	async function* agentInput() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
@@ -313,10 +356,12 @@ test("FD5 notification forwarding does not consume or wait for the pending seria
 	const running = runLeasedConsumerControlTransport(
 		agentInput(),
 		{ dispatch: () => pendingDispatch.promise },
-		(frame) => output.push(JSON.parse(new TextDecoder().decode(frame))),
+		(frame) => {
+			output.push(JSON.parse(new TextDecoder().decode(frame)));
+		},
 		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
-		{ decodeNotification: (value) => value },
+		{ decodeNotification: passNotification },
 	);
 	await new Promise((resolve) => setImmediate(resolve));
 	assert.deepEqual(
@@ -351,7 +396,7 @@ test("the shared emitter stays failed after its first output failure", async () 
 		},
 		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
-		{ decodeNotification: (value) => value },
+		{ decodeNotification: passNotification },
 	);
 	await new Promise((resolve) => setImmediate(resolve));
 	firstWrite.reject(new Error("stdout_failed"));
@@ -375,7 +420,7 @@ test("FD5 ending before Agent stdin closes the pair and cannot be reported clean
 			() => {},
 			{ stream: notificationInput(), close: async () => {} },
 			async () => agentClosed.resolve(),
-			{ decodeNotification: (value) => value },
+			{ decodeNotification: passNotification },
 		),
 		false,
 	);
@@ -395,14 +440,16 @@ test("FD5 ending aborts an outstanding Gateway request before its operation dead
 	async function* notificationInput() {
 		yield new Uint8Array();
 	}
-	const output = [];
+	const output: Uint8Array[] = [];
 	const running = runLeasedConsumerControlTransport(
 		agentInput(),
 		carrier,
-		(frame) => output.push(frame),
+		(frame) => {
+			output.push(frame);
+		},
 		{ stream: notificationInput(), close: async () => {} },
 		async () => agentClosed.resolve(),
-		{ decodeNotification: (value) => value },
+		{ decodeNotification: passNotification },
 	);
 	const result = await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("deadline_not_cancelled"), 100))]);
 	assert.equal(result, false);
@@ -443,7 +490,7 @@ test("Agent shutdown cleanly aborts a notification write stalled on stdout backp
 		(frame, signal) => writeLeasedConsumerAgentFrame(stalledStdout, frame, signal),
 		{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 		async () => {},
-		{ decodeNotification: (value) => value },
+		{ decodeNotification: passNotification },
 	);
 	assert.equal(await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("stdout_not_cancelled"), 100))]), true);
 	assert.equal(destroyed, 1);
@@ -451,7 +498,7 @@ test("Agent shutdown cleanly aborts a notification write stalled on stdout backp
 
 test("the real inherited notification socket distinguishes owned shutdown from FD5-first EOF", async () => {
 	const entry = `file://${path.join(DIST, "leased-consumer-control-session.js")}`;
-	const runArm = async (fd5EndsFirst) => {
+	const runArm = async (fd5EndsFirst: boolean) => {
 		const child = spawn(
 			process.execPath,
 			[
@@ -477,9 +524,13 @@ test("the real inherited notification socket distinguishes owned shutdown from F
 		);
 		let stdout = "";
 		let stderr = "";
-		child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
-		child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
-		if (fd5EndsFirst) child.stdio[5].end();
+		assert.ok(child.stdout);
+		assert.ok(child.stderr);
+		child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+		child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+		const fd5 = child.stdio.at(5);
+		assert.ok(fd5 && typeof fd5 === "object" && "end" in fd5 && typeof fd5.end === "function");
+		if (fd5EndsFirst) fd5.end();
 		const timeout = setTimeout(() => child.kill("SIGKILL"), SHUTDOWN_ARM_TIMEOUT_MS);
 		const [code, signal] = await once(child, "close");
 		clearTimeout(timeout);
@@ -510,8 +561,7 @@ test("owned shutdown does not accept the premature-close message with another er
 			// Human text is not the classifier. Broadening the production helper to
 			// accept every Error turns this test RED with `true !== false`; the exact
 			// Node error code is the guard this oracle falsifies.
-			const error = new Error("Premature close");
-			error.code = "ERR_UNRELATED_STREAM_FAILURE";
+			const error = Object.assign(new Error("Premature close"), { code: "ERR_UNRELATED_STREAM_FAILURE" });
 			throw error;
 		},
 	};
@@ -522,17 +572,17 @@ test("owned shutdown does not accept the premature-close message with another er
 			() => assert.fail("no notification frame expected"),
 			{ stream: notificationInput, close: async () => notificationReleased.resolve() },
 			async () => {},
-			{ decodeNotification: (value) => value },
+			{ decodeNotification: passNotification },
 		),
 		false,
 	);
 });
 
 test("the shipped Agent writer destroys a backpressured stdout stream and rejects exactly once on abort", async () => {
-	let callback: ((error?: Error) => void) | undefined;
+	let callback: ((error?: Error | null) => void) | undefined;
 	let destroys = 0;
-	const stream = {
-		write: (_frame, next) => {
+	const stream: TestAbortableWritable = {
+		write: (_frame: Uint8Array, next?: (error?: Error | null) => void) => {
 			callback = next;
 			return false;
 		},
@@ -541,7 +591,7 @@ test("the shipped Agent writer destroys a backpressured stdout stream and reject
 		},
 	};
 	const abort = new AbortController();
-	const writing = writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal);
+	const writing = Promise.resolve(writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal));
 	abort.abort();
 	await assert.rejects(writing, /control_aborted/u);
 	assert.equal(destroys, 1);
@@ -571,18 +621,18 @@ test("the shipped Agent writer destroys a backpressured stdout stream and reject
 // teardown's error would turn every clean shutdown into exit 3 — and the stub
 // with the empty `destroy` above cannot tell the two orderings apart.
 test("the abort settles before teardown, so destroy's own error cannot become the rejection", async () => {
-	let callback: ((error?: Error) => void) | undefined;
-	const stream = {
-		write: (_frame, next) => {
+	let callback: ((error?: Error | null) => void) | undefined;
+	const stream: TestAbortableWritable = {
+		write: (_frame: Uint8Array, next?: (error?: Error | null) => void) => {
 			callback = next;
 			return false;
 		},
 		destroy: () => callback?.(new Error("ERR_STREAM_DESTROYED")),
 	};
 	const abort = new AbortController();
-	const writing = writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal);
+	const writing = Promise.resolve(writeLeasedConsumerAgentFrame(stream, encoder.encode("frame"), abort.signal));
 	abort.abort();
-	await assert.rejects(writing, (error) => error.name === "ControlAbortedError");
+	await assert.rejects(writing, (error: unknown) => error instanceof Error && error.name === "ControlAbortedError");
 });
 
 // Asked of descriptors a real parent INHERITED to a real child, not of a
@@ -676,7 +726,7 @@ test("FD5 accepts the inherited kinds Gateway and a supervisor supply, and refus
 	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-fd5-kind-"));
 	context.after(() => rmSync(scratch, { recursive: true, force: true }));
 	const entry = path.join(DIST, "leased-consumer-control-session.js");
-	const askChild = (fd5) => {
+	const askChild = (fd5: "pipe" | number) => {
 		const child = spawnSync(
 			process.execPath,
 			[
@@ -718,7 +768,7 @@ test("FD5 accepts the inherited kinds Gateway and a supervisor supply, and refus
 
 test("each carrier binds only the socket path in its own protected session", async () => {
 	const paths = ["/run/user/1001/ceal/one.sock", "/run/user/1001/ceal/two.sock"];
-	const observed = [];
+	const observed: string[] = [];
 	for (const socketPath of paths) {
 		const carrier = await openLeasedConsumerControlSession({
 			readProtectedSession: async () => sessionFor(socketPath),
@@ -759,11 +809,16 @@ test("invalid protected session and malformed Agent frames make zero control req
 			throw new Error("must not run");
 		},
 	});
-	const output = [];
+	const output: Uint8Array[] = [];
 	async function* malformed() {
 		yield encoder.encode(`{"bad":true}\n{"schema_version":"${REQUEST_SCHEMA}","operation":"acquire","input":{}}\n`);
 	}
-	assert.equal(await runControlSessionForTest(malformed(), carrier, (frame) => output.push(frame)), false);
+	assert.equal(
+		await runControlSessionForTest(malformed(), carrier, (frame) => {
+			output.push(frame);
+		}),
+		false,
+	);
 	assert.equal(calls, 0);
 	assert.deepEqual(output, []);
 });
@@ -810,11 +865,16 @@ test("legacy and unknown private control grammars make zero control requests and
 				throw new Error("must not run");
 			},
 		});
-		const output = [];
+		const output: Uint8Array[] = [];
 		async function* input() {
 			yield encoder.encode(`${JSON.stringify(frame)}\n`);
 		}
-		assert.equal(await runControlSessionForTest(input(), carrier, (value) => output.push(value)), false);
+		assert.equal(
+			await runControlSessionForTest(input(), carrier, (value) => {
+				output.push(value);
+			}),
+			false,
+		);
 		assert.equal(calls, 0);
 		assert.deepEqual(output, []);
 	}
@@ -867,11 +927,16 @@ test("a Gateway control operation that never answers is bounded and emits no Age
 		clearTimer: () => {},
 		requestUnixSocket: () => new Promise(() => {}),
 	});
-	const output = [];
+	const output: Uint8Array[] = [];
 	async function* input() {
 		yield encoder.encode(`${JSON.stringify(frames[0])}\n`);
 	}
-	assert.equal(await runControlSessionForTest(input(), carrier, (frame) => output.push(frame)), false);
+	assert.equal(
+		await runControlSessionForTest(input(), carrier, (frame) => {
+			output.push(frame);
+		}),
+		false,
+	);
 	assert.deepEqual(output, []);
 });
 
@@ -916,8 +981,8 @@ test("an invalid injected operation deadline refuses the session before any prot
 });
 
 test("an in-bounds injected operation deadline bounds every Gateway control operation", async () => {
-	const deadlines = [];
-	const timers = [];
+	const deadlines: number[] = [];
+	const timers: number[] = [];
 	const carrier = await openLeasedConsumerControlSession({
 		env: { CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "120000" },
 		readProtectedSession: async () => session,
@@ -992,11 +1057,15 @@ function slowWriteClock() {
 	return () => (calls++ < 3 ? 0 : 35_000);
 }
 
-function runControlSessionForTest(stream, control, emit) {
+function runControlSessionForTest(stream: AsyncIterable<Uint8Array>, control: ControlSession, emit: FrameEmitter) {
 	return runLeasedConsumerControlTransport(stream, control, emit, undefined, async () => {});
 }
 
-async function runNotificationStreamForTest(stream, emit, runtime) {
+async function runNotificationStreamForTest(
+	stream: AsyncIterable<Uint8Array>,
+	emit: FrameEmitter,
+	runtime: LeasedConsumerNotificationRuntime,
+) {
 	const agentFinished = deferredVoid();
 	const notificationsClosed = deferredVoid();
 	const sourceFinished = deferredVoid();
@@ -1047,7 +1116,7 @@ function notificationReceiptInput() {
 	const { schema_version: _schemaVersion, ...input } = notificationFixture();
 	return input;
 }
-function responseFor(operation) {
+function responseFor(operation: string) {
 	const base = { schema_version: RESPONSE_SCHEMA, operation };
 	if (operation === "acquire") return { ...base, result: { status: "leased", lease: lease() } };
 	if (operation === "projection")
@@ -1128,9 +1197,9 @@ test("the shipped Unix-socket POST keeps the error names that reach stderr", asy
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-control-shipped-post-"));
 	const socketPath = path.join(root, "control.sock");
 	const server = createNetServer((socket) => socket.destroy());
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(socketPath, resolve);
+		server.listen(socketPath, () => resolve());
 	});
 	t.after(async () => {
 		await new Promise((resolve) => server.close(resolve));

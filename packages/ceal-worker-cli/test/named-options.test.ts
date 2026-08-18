@@ -5,7 +5,7 @@ import { parseNamedOptions, unknownNamedOption } from "../dist/named-options.js"
 const VALUE_OPTIONS = new Set(["--target", "--profile"]);
 const FLAG_OPTIONS = new Set(["--fresh", "--detail"]);
 
-function normalized(options) {
+function normalized(options: readonly string[]) {
 	const parsed = parseNamedOptions(options, VALUE_OPTIONS, FLAG_OPTIONS);
 	return (
 		parsed && {

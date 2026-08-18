@@ -22,6 +22,17 @@ const REAL_BINARY_SMOKES = {
 	cold_capabilities: { args: ["capabilities"], expectedStatus: 3 },
 };
 
+type Route = { name: string; description: string };
+type SmokeName = keyof typeof REAL_BINARY_SMOKES;
+type CommandResult = { code: number; stdout: string; stderr: string };
+type ColdStartStatus = {
+	command: "ceal";
+	status: "unavailable";
+	proof_level: "surface";
+	live_gateway_checked: false;
+	non_claims: string[];
+};
+
 test.after(() => rmSync(ISOLATED_HOME, { recursive: true, force: true }));
 
 // The worker release lane declares its own guide asset in `worker-release-inputs.json`
@@ -87,7 +98,7 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
 	assert.deepEqual(documents[0].errors, []);
-	const value = documents[0].toJS();
+	const value: ColdStartStatus = documents[0].toJS();
 	assert.equal(value.command, "ceal");
 	assert.equal(value.status, "unavailable");
 	assert.equal(value.proof_level, "surface");
@@ -171,7 +182,7 @@ test("the worker guide refuses a missing matching binary without a guessed fallb
 	assert.doesNotMatch(guide, /\bcealctl\s+(?!--help\b)[a-z][a-z-]*/u, "ceal-guide must not show a runnable cealctl fallback");
 });
 
-function runBinarySmoke(name) {
+function runBinarySmoke(name: SmokeName) {
 	const smoke = REAL_BINARY_SMOKES[name];
 	assert.ok(smoke, `unknown real-binary smoke: ${name}`);
 	const bin = path.join(BINARY_ROOT, "packages", WORKER.packageDir, "dist", "bin.js");
@@ -192,7 +203,7 @@ function readCapabilityGuide() {
 	return `${readFileSync(path.join(GUIDE_ROOT, "SKILL.md"), "utf8")}\n${readFileSync(CAPABILITY_WORKFLOW, "utf8")}`;
 }
 
-async function runCommand(args) {
+async function runCommand(args: readonly string[]): Promise<CommandResult> {
 	let stdout = "";
 	let stderr = "";
 	const code = await runCealCommand(args, {
@@ -204,11 +215,11 @@ async function runCommand(args) {
 	return { code, stdout, stderr };
 }
 
-function parseSubcommands(help) {
+function parseSubcommands(help: string): string[] {
 	const lines = help.split("\n");
 	const start = lines.indexOf("Subcommands:");
 	if (start < 0) return [];
-	const rows = [];
+	const rows: string[] = [];
 	for (const line of lines.slice(start + 1)) {
 		if (line === "") break;
 		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
@@ -217,8 +228,8 @@ function parseSubcommands(help) {
 	return rows;
 }
 
-function parseRoutes(help) {
-	return help.split("\n").flatMap((line) => {
+function parseRoutes(help: string): Route[] {
+	return help.split("\n").flatMap((line): Route[] => {
 		const match = /^ {2}([a-z][a-z0-9-]*)\s{2,}(.+)$/u.exec(line);
 		return match ? [{ name: match[1], description: match[2] }] : [];
 	});

@@ -15,8 +15,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { CealStableUpdateProgressStage, CealWorkerPlatform } from "../dist/cli-runtime.js";
 import { sha256 } from "../dist/sha256.js";
+import type { CealStableUpdateDeadlines } from "../dist/stable-update.js";
 import { createCealStableUpdateRunner } from "../dist/stable-update.js";
 
 test("stable updater only launches a current managed worker generation and reads back its replacement", async (context) => {
@@ -37,7 +39,7 @@ test("stable updater only launches a current managed worker generation and reads
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
 
-	const stages = [];
+	const stages: CealStableUpdateProgressStage[] = [];
 	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })({
 		onProgress: (stage) => stages.push(stage),
 	});
@@ -85,6 +87,7 @@ test("stable updater names the detected host without attempting guide registrati
 	const install = installedGeneration(root, "exit 0\n");
 	const result = await createCealStableUpdateRunner(install, { PATH: process.env.PATH, CODEX_THREAD_ID: "thread" })();
 	assert.equal(result.status, "unchanged");
+	assert.ok(result.guide);
 	assert.match(result.guide.next_action, /ceal guide register codex/u);
 	assert.equal(result.guide.status, "registration_not_attempted");
 });
@@ -94,9 +97,10 @@ test("stable updater fails closed for an unmanaged or tampered staged installer"
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const binary = path.join(root, "ceal-linux-amd64");
 	writeWorkerBinary(binary, "0.65.0");
-	const stages = [];
+	const stages: CealStableUpdateProgressStage[] = [];
 	const unmanaged = await createCealStableUpdateRunner(binary, { PATH: process.env.PATH })({ onProgress: (stage) => stages.push(stage) });
 	assert.equal(unmanaged.status, "unavailable");
+	assert.ok(unmanaged.error);
 	assert.equal(unmanaged.error.kind, "update_unavailable");
 	assert.deepEqual(stages, ["check"]);
 });
@@ -117,11 +121,12 @@ test("stable updater rejects a verified installer result that would downgrade th
 	symlinkSync(path.join("releases", path.basename(first)), path.join(worker, "current"));
 	mkdirSync(install, { recursive: true });
 	symlinkSync(".ceal-cli/worker/current/ceal-linux-amd64", path.join(install, "ceal"));
-	const stages = [];
+	const stages: CealStableUpdateProgressStage[] = [];
 	const result = await createCealStableUpdateRunner(path.join(install, "ceal"), { PATH: process.env.PATH })({
 		onProgress: (stage) => stages.push(stage),
 	});
 	assert.equal(result.status, "unavailable");
+	assert.ok(result.error);
 	assert.equal(result.error.kind, "update_failed");
 	assert.deepEqual(stages, ["check", "download_install"]);
 });
@@ -171,6 +176,7 @@ test("a staged installer that never finishes is stopped and reported, not waited
 	const elapsed = Date.now() - started;
 
 	assert.equal(result.status, "unavailable");
+	assert.ok(result.error);
 	assert.equal(result.error.kind, "update_failed");
 	// The message has to say the deadline stopped it. "did not complete" would
 	// send an operator to reinstall a release that is very likely fine.
@@ -224,6 +230,7 @@ test("an installer that ignores SIGTERM is killed rather than waited out", { tim
 	const result = await createCealStableUpdateRunner(install, { PATH: process.env.PATH }, deadlines({ installerMs: 150 }))();
 	const elapsed = Date.now() - started;
 
+	assert.ok(result.error);
 	assert.equal(result.error.kind, "update_failed");
 	assert.ok(elapsed < 5_000, `the update took ${elapsed}ms; SIGTERM was ignored and nothing escalated`);
 	const pid = Number(readFileSync(pidFile, "utf8").trim());
@@ -247,6 +254,7 @@ test("a version readback that hangs is bounded and reported as a failed readback
 	const result = await createCealStableUpdateRunner(install, { PATH: process.env.PATH }, deadlines({ versionReadbackMs: 150 }))();
 	const elapsed = Date.now() - started;
 
+	assert.ok(result.error);
 	assert.equal(result.error.kind, "update_readback_failed");
 	assert.ok(elapsed < 5_000, `the readback took ${elapsed}ms; its deadline did not bound it`);
 });
@@ -284,11 +292,17 @@ test("the update process exits once it has its answer", { timeout: DEADLINE_TEST
 
 // Short kill clocks as well as short deadlines: the real ones are seconds, and a
 // test that waited them out five times over would not stay in the iteration gate.
-function deadlines(overrides) {
-	return { terminationGraceMs: 100, postKillReportMs: 50, ...overrides };
+function deadlines(overrides: Partial<CealStableUpdateDeadlines>): CealStableUpdateDeadlines {
+	return {
+		versionReadbackMs: 30_000,
+		installerMs: 30 * 60_000,
+		terminationGraceMs: 100,
+		postKillReportMs: 50,
+		...overrides,
+	};
 }
 
-async function waitUntil(predicate, timeoutMs = 2_000) {
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!predicate()) {
 		if (Date.now() >= deadline) throw new Error("stable update fixture did not reach its postcondition before the test deadline");
@@ -296,18 +310,18 @@ async function waitUntil(predicate, timeoutMs = 2_000) {
 	}
 }
 
-function processAlive(pid) {
+function processAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
 	} catch (error) {
 		// EPERM means it exists under another user, which for a fixture this
 		// process spawned would itself be a surprise worth failing on.
-		return error.code === "EPERM";
+		return error instanceof Error && "code" in error && error.code === "EPERM";
 	}
 }
 
-function scratch(context, label) {
+function scratch(context: TestContext, label: string): string {
 	const root = mkdtempSync(path.join(tmpdir(), `ceal-stable-update-${label}-`));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	return root;
@@ -316,7 +330,7 @@ function scratch(context, label) {
 // One managed generation whose installer and worker binary are whatever the
 // caller needs them to be, wired through the same digest inventory the real
 // layout requires.
-function installedGeneration(root, installerBody, workerBody = null) {
+function installedGeneration(root: string, installerBody: string, workerBody: string | null = null): string {
 	const install = path.join(root, "prefix");
 	const worker = path.join(install, ".ceal-cli", "worker");
 	const stagedGeneration = path.join(worker, "releases", ".first");
@@ -337,7 +351,7 @@ function installedGeneration(root, installerBody, workerBody = null) {
 	return path.join(install, "ceal");
 }
 
-function updateScript(nextGeneration, version = "0.65.1", binaryName = "ceal-linux-amd64") {
+function updateScript(nextGeneration: string, version = "0.65.1", binaryName = "ceal-linux-amd64"): string {
 	return `#!/usr/bin/env sh
 set -eu
 [ "$CEAL_VERSION" = stable ]
@@ -372,7 +386,7 @@ exit 1
 `;
 }
 
-function writeWorkerBinary(file, version) {
+function writeWorkerBinary(file: string, version: string): void {
 	writeFileSync(
 		file,
 		`#!/usr/bin/env sh
@@ -386,19 +400,19 @@ exit 2
 	chmodSync(file, 0o755);
 }
 
-function writeInventory(generation, installerName = "install.sh") {
+function writeInventory(generation: string, installerName = "install.sh"): void {
 	const installer = readFileSync(path.join(generation, installerName));
 	writeFileSync(path.join(generation, "SHA256SUMS"), `${sha256(installer)}  ${installerName}\n`);
 }
 
-function finalizeGeneration(stagedGeneration, version, platform) {
+function finalizeGeneration(stagedGeneration: string, version: string, platform: CealWorkerPlatform): string {
 	const inventory = readFileSync(path.join(stagedGeneration, "SHA256SUMS"));
 	const generation = path.join(path.dirname(stagedGeneration), `${version}-${platform}-${sha256(inventory)}`);
 	renameSync(stagedGeneration, generation);
 	return generation;
 }
 
-function nextGenerationPath(worker, version, platform) {
+function nextGenerationPath(worker: string, version: string, platform: CealWorkerPlatform): string {
 	const installer = "#!/usr/bin/env sh\nexit 0\n";
 	const inventory = `${sha256(installer)}  install.sh\n`;
 	return path.join(worker, "releases", `${version}-${platform}-${sha256(inventory)}`);

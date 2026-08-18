@@ -3,18 +3,33 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { SuiteContext, TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
-import { createProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
-import { releasePackageRecord } from "./release-package-record.ts";
+import { createProtocolArtifactFixture, type ProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
+import { type ReleasePackageRecordInput, releasePackageRecord } from "./release-package-record.ts";
 import { withBuiltPackages } from "./repo-build.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export function packedProtocolFixture(context) {
+type PackedPackage = ReleasePackageRecordInput & { tarball: string; shasum: string };
+type PackedProtocolFixture = Pick<ProtocolArtifactFixture<PackedPackage>, "provenance"> & {
+	root: string;
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	expectedHandoffSha256: string;
+};
+
+type FixtureCleanupContext = TestContext | SuiteContext;
+
+export function packedProtocolFixture(context: FixtureCleanupContext): PackedProtocolFixture {
+	if (!("after" in context)) throw new TypeError("packed protocol fixtures require a test context");
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	// Snapshot the shared Protocol `dist` into the converged fixture while the
@@ -69,7 +84,7 @@ export function packedProtocolFixture(context) {
 	};
 }
 
-function packPackage(root, repoRoot, sourcePath, declaredExports) {
+function packPackage(root: string, repoRoot: string, sourcePath: string, declaredExports: string[]): PackedPackage {
 	const packageDirectory = path.join(repoRoot, sourcePath);
 	// This reads only the fixture-owned `dist` snapshot. Its caller copied that
 	// snapshot while holding the workspace build lock.

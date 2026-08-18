@@ -3,9 +3,9 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CealSessionStoreError, createCealSessionStore } from "../dist/profile-store.js";
+import { CealSessionStoreError, type CealStoredSession, createCealSessionStore } from "../dist/profile-store.js";
 
-const SESSION = {
+const SESSION: CealStoredSession = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
 	profileRef: "profile:narnia",
 	membershipRef: "membership:narnia",
@@ -40,7 +40,7 @@ test("session store writes owner-only issued material and reads it back", async 
 test("session store durably quarantines an ambiguous one-time refresh without changing bearer material", async () => {
 	await withHome(async (home) => {
 		const store = createCealSessionStore(home);
-		const quarantined = { ...SESSION, renewalBlockedReason: "outcome_unknown" };
+		const quarantined: CealStoredSession = { ...SESSION, renewalBlockedReason: "outcome_unknown" };
 		await store.save(quarantined);
 		assert.deepEqual(await store.load(), quarantined);
 		const persisted = JSON.parse(readFileSync(path.join(home, ".ceal", "client-session.json"), "utf8"));
@@ -54,7 +54,7 @@ test("session store fails closed when renewable material is incomplete", async (
 	await withHome(async (home) => {
 		const store = createCealSessionStore(home);
 		const incomplete = { ...SESSION };
-		delete incomplete.refreshToken;
+		Reflect.deleteProperty(incomplete, "refreshToken");
 		await assert.rejects(store.save(incomplete), hasCode("invalid_store"));
 	});
 });
@@ -75,11 +75,11 @@ test("session store fails closed on unsafe permissions and symlinks", async () =
 	});
 });
 
-function hasCode(code) {
-	return (error) => error instanceof CealSessionStoreError && error.code === code;
+function hasCode(code: ConstructorParameters<typeof CealSessionStoreError>[0]) {
+	return (error: unknown) => error instanceof CealSessionStoreError && error.code === code;
 }
 
-async function withHome(callback) {
+async function withHome(callback: (home: string) => Promise<void>): Promise<void> {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-profile-store-"));
 	try {
 		await callback(home);

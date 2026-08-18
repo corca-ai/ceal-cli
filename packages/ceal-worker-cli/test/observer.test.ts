@@ -5,10 +5,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
+import type { CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
+import type { CealObserverRuntime } from "../dist/observer.js";
 import { buildObserverState, OBSERVER_DATA_SOURCES } from "../dist/observer.js";
+import type { CealStoredSession } from "../dist/profile-store.js";
 import { createCealSessionStore } from "../dist/profile-store.js";
+import type { CealReceiptSpoolEntry } from "../dist/receipt-spool.js";
 import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
 import { createCealSessionCapability } from "../dist/session-capability.js";
 
@@ -16,12 +20,48 @@ const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;
 const TEST_SPOOL_IDENTITY = "a".repeat(64);
 type ObserverHandle = { url: string; close: () => Promise<void> };
+type ObserverSuggestion = { kind: string; evidence: unknown; next_action: string };
+type ObserverState = {
+	schema_version: string;
+	session: { status: string; secrets: string; access_token?: unknown; profile_ref: string };
+	discovery_cache: {
+		status: string;
+		capability_count?: number;
+		capabilities?: unknown;
+		within_ttl: boolean;
+		age_ms: number;
+		target_catalog?: unknown;
+	};
+	install: { status: string };
+	guide: { status: string; hosts: Array<{ agent: string; status: string }> };
+	receipts: {
+		status: string;
+		coverage?: string;
+		entry_count?: number;
+		entries: Array<{ request_ref: string; [key: string]: unknown }>;
+		non_claim: string;
+		dropped_appends: number;
+		dropped_appends_capped: boolean;
+		dropped_appends_are_a_floor: boolean;
+		note: string;
+	};
+	agent_activity: { status: string; adapters: Array<Record<string, unknown>>; non_claims: string[] };
+	suggestions: { status: string; entries: ObserverSuggestion[]; non_claim: string };
+	privacy: {
+		status: string;
+		gateway_forwarding: string;
+		provider_contact: string;
+		receipt_spool_retention?: unknown;
+		local_sources: string[];
+		transcript_handling: string;
+	};
+};
 
-function createCealReceiptSpoolStore(home, now = Date.now) {
+function createCealReceiptSpoolStore(home: string, now: () => number = Date.now) {
 	const store = createRawReceiptSpoolStore(home, now);
 	return {
 		load: () => store.load(TEST_SPOOL_IDENTITY),
-		append: (value) => store.append(TEST_SPOOL_IDENTITY, value),
+		append: (value: CealReceiptSpoolEntry) => store.append(TEST_SPOOL_IDENTITY, value),
 		recordDrop: () => store.recordDrop(TEST_SPOOL_IDENTITY),
 		remove: () => store.remove(),
 	};
@@ -88,7 +128,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	});
 
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	const handleReady = new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			session: createCealSessionCapability({ store: sessionStore }),
@@ -157,7 +197,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 				};
 			},
 			inspectAgentGuide: () => ({
-				status: "staged",
+				status: "available",
 				agent: "codex",
 				guide_id: "ceal-guide",
 				update_safe: true,
@@ -180,7 +220,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	await handleReady;
 	context.after(async () => {
 		try {
-			await handle.close();
+			await closeObserverHandle(handle);
 		} catch {
 			/* already closed */
 		}
@@ -197,7 +237,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(stateResponse.headers.get("cache-control"), "no-store");
 	const stateBody = await stateResponse.text();
 	assert.doesNotMatch(stateBody, /ceal_personal_|ceal_refresh_/u);
-	const state = JSON.parse(stateBody);
+	const state: ObserverState = JSON.parse(stateBody);
 	assert.equal(state.schema_version, "ceal.observer_state.v1");
 	assert.equal(state.session.status, "present");
 	assert.equal(state.session.secrets, "redacted");
@@ -218,7 +258,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.equal(state.discovery_cache.age_ms, 60_000);
 	assert.deepEqual(state.discovery_cache.target_catalog, { target_count: 0, returned_count: 0, complete: true });
 	assert.equal(state.install.status, "unmanaged");
-	assert.equal(state.guide.status, "staged");
+	assert.equal(state.guide.status, "available");
 	// The scalar projection names one host, so the per-host list is what a
 	// supervisor reads to see the other host's registration.
 	assert.deepEqual(
@@ -285,8 +325,12 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 
 	const page = await fetch(doc.url);
 	assert.equal(page.status, 200);
-	assert.match(page.headers.get("content-type"), /text\/html/u);
-	assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
+	const contentType = page.headers.get("content-type");
+	const contentSecurityPolicy = page.headers.get("content-security-policy");
+	assert.ok(contentType);
+	assert.ok(contentSecurityPolicy);
+	assert.match(contentType, /text\/html/u);
+	assert.match(contentSecurityPolicy, /default-src 'none'/u);
 	const html = await page.text();
 	assert.match(html, /Ceal Workbench/u);
 	// A second registered host must be visible to a human supervisor, not only in
@@ -343,7 +387,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	const missing = await fetch(`${doc.url}unknown`);
 	assert.equal(missing.status, 404);
 
-	await handle.close();
+	await closeObserverHandle(handle);
 	await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.equal(io.exitCode, 0);
 });
@@ -356,7 +400,7 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	const spoolStore = createCealReceiptSpoolStore(home, () => Date.parse("2026-07-24T00:01:00.000Z"));
 
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: () => spoolStore.load(),
@@ -368,16 +412,16 @@ test("ceal observe renders a corrupt receipt spool as unreadable, not an empty h
 	});
 	context.after(async () => {
 		try {
-			await handle.close();
+			await closeObserverHandle(handle);
 		} catch {
 			/* already closed */
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(state.receipts.status, "unreadable");
 	assert.equal("entries" in state.receipts, false);
-	await handle.close();
+	await closeObserverHandle(handle);
 });
 
 test("every ~/.ceal file this client reads is named in the privacy projection", async (context) => {
@@ -467,7 +511,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 	);
 
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			onObserverListening: (value) => {
@@ -480,13 +524,13 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 	// instead of reporting which file went undeclared.
 	context.after(async () => {
 		try {
-			await handle.close();
+			await closeObserverHandle(handle);
 		} catch {
 			/* already closed */
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const declared = (await (await fetch(`${doc.url}api/observer/v1/state`)).json()).privacy.local_sources.join("\n");
+	const declared = (await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`))).privacy.local_sources.join("\n");
 	assert.deepEqual(
 		[...stateFiles].filter((name) => !declared.includes(name)),
 		[],
@@ -499,7 +543,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 	const envelope = parse(io.stdout.join(""));
 	assert.deepEqual(envelope.data_sources, [...OBSERVER_DATA_SOURCES]);
 	assert.ok(envelope.data_sources.includes("receipt_spool_metadata"));
-	await handle.close();
+	await closeObserverHandle(handle);
 });
 
 test("an empty retention window is not reported as every receipt having been lost", async (context) => {
@@ -509,7 +553,7 @@ test("an empty retention window is not reported as every receipt having been los
 	// client tried to record was lost" there would swap the false claim this
 	// counter removed for an equally false one pointing the other way.
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: async () => ({
@@ -526,13 +570,13 @@ test("an empty retention window is not reported as every receipt having been los
 	});
 	context.after(async () => {
 		try {
-			await handle.close();
+			await closeObserverHandle(handle);
 		} catch {
 			/* already closed */
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(state.receipts.status, "absent");
 	assert.equal(state.receipts.dropped_appends, 2);
 	assert.match(state.receipts.note, /within the retention window/u);
@@ -554,7 +598,7 @@ test("an empty retention window is not reported as every receipt having been los
 	const emptyHistoryBranch = /else if \(s\.receipts\.note\)\s*\{([\s\S]*?)\n {2}\}/u.exec(page);
 	assert.ok(emptyHistoryBranch, "the page must still have an empty-history branch to check");
 	assert.match(emptyHistoryBranch[1], /dropped_appends/u, "the empty-history branch must render the drop count, not only the note");
-	await handle.close();
+	await closeObserverHandle(handle);
 });
 
 test("ceal observe says the receipt history is incomplete rather than short", async (context) => {
@@ -570,7 +614,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 	await spoolStore.recordDrop();
 
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			loadReceiptSpool: () => spoolStore.load(),
@@ -582,13 +626,13 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 	});
 	context.after(async () => {
 		try {
-			await handle.close();
+			await closeObserverHandle(handle);
 		} catch {
 			/* already closed */
 		}
 	});
 	const doc = parse(io.stdout.join(""));
-	const absent = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const absent = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(absent.receipts.status, "absent");
 	assert.equal(absent.receipts.dropped_appends, 2);
 	assert.equal(absent.receipts.dropped_appends_capped, false);
@@ -605,7 +649,7 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 		evidence: "readback_verified",
 		auditRefs: [],
 	});
-	const spooled = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const spooled = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(spooled.receipts.status, "spooled");
 	assert.equal(spooled.receipts.entry_count, 1);
 	assert.equal(spooled.receipts.dropped_appends, 2);
@@ -620,15 +664,15 @@ test("ceal observe says the receipt history is incomplete rather than short", as
 		evidence: "readback_verified",
 		auditRefs: [],
 	});
-	const clean = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const clean = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(clean.receipts.status, "spooled");
 	assert.equal("dropped_appends" in clean.receipts, false);
-	await handle.close();
+	await closeObserverHandle(handle);
 });
 
 test("ceal observe reports absent stores and rejects invalid ports without serving", async () => {
 	const io = collectingIo();
-	let handle: ObserverHandle;
+	let handle: ObserverHandle | undefined;
 	await new Promise((resolve) => {
 		void runCealCommand(["observe", "--port", "0"], io, {
 			onObserverListening: (value) => {
@@ -638,7 +682,7 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 		});
 	});
 	const doc = parse(io.stdout.join(""));
-	const state = await (await fetch(`${doc.url}api/observer/v1/state`)).json();
+	const state = await readJson<ObserverState>(await fetch(`${doc.url}api/observer/v1/state`));
 	assert.equal(state.session.status, "unavailable");
 	assert.equal(state.discovery_cache.status, "unavailable");
 	assert.equal(state.install.status, "unavailable");
@@ -647,7 +691,7 @@ test("ceal observe reports absent stores and rejects invalid ports without servi
 	assert.equal(state.agent_activity.status, "unavailable");
 	assert.equal(state.privacy.status, "declared");
 	assert.equal("receipt_spool_retention" in state.privacy, false);
-	await handle.close();
+	await closeObserverHandle(handle);
 
 	const invalid = collectingIo();
 	assert.equal(await runCealCommand(["observe", "--port", "80"], invalid, {}), 2);
@@ -682,10 +726,11 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		refreshTokenAbsoluteExpiresAt: "2099-10-14T00:00:00.000Z",
 	});
 	const spoolStore = createCealReceiptSpoolStore(home, () => NOW);
-	for (const [requestRef, evidence, offset] of [
+	const failedReceipts: Array<[string, "not_read_back" | "outcome_unknown", number]> = [
 		["narnia:sugg:1:call", "not_read_back", 120_000],
 		["narnia:sugg:2:call", "outcome_unknown", 60_000],
-	]) {
+	];
+	for (const [requestRef, evidence, offset] of failedReceipts) {
 		await spoolStore.append({
 			recordedAt: NOW - offset,
 			requestRef,
@@ -696,7 +741,7 @@ test("local suggestions fire deterministically and stay linked to observed evide
 			targetRef: "target:team-inbox",
 		});
 	}
-	const runtime = {
+	const runtime: CealObserverRuntime = {
 		loadStoredSession: () => sessionStore.load(),
 		// No cached catalog at all: the genuinely missing case.
 		loadDiscoveryCache: async () => null,
@@ -711,7 +756,7 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		}),
 		now: () => NOW,
 	};
-	const state = await buildObserverState(runtime);
+	const state = materializeObserverState(await buildObserverState(runtime));
 	const byKind = new Map(state.suggestions.entries.map((entry) => [entry.kind, entry]));
 	assert.deepEqual([...byKind.keys()].sort(), [
 		"missing_cache_opportunity",
@@ -720,44 +765,51 @@ test("local suggestions fire deterministically and stay linked to observed evide
 		"unknown_outcome_receipt",
 	]);
 	// Only the stale collector fires; an inactive (unused) runtime is not advice.
-	assert.deepEqual(byKind.get("stale_collector").evidence, { runtime: "claude", root: "~/.claude", health: "stale" });
-	assert.deepEqual(byKind.get("missing_cache_opportunity").evidence, {
+	const staleCollector = byKind.get("stale_collector");
+	const missingCache = byKind.get("missing_cache_opportunity");
+	const repeatedFailedWork = byKind.get("repeated_failed_work");
+	const unknownOutcome = byKind.get("unknown_outcome_receipt");
+	assert.ok(staleCollector && missingCache && repeatedFailedWork && unknownOutcome);
+	assert.deepEqual(staleCollector.evidence, { runtime: "claude", root: "~/.claude", health: "stale" });
+	assert.deepEqual(missingCache.evidence, {
 		session: "present",
 		discovery_cache: "absent",
 	});
-	assert.match(byKind.get("missing_cache_opportunity").next_action, /ceal capabilities/u);
+	assert.match(missingCache.next_action, /ceal capabilities/u);
 	// Rendered entries are newest-first, so the latest failure leads the refs
 	// and anchors the receipt lookup.
-	assert.deepEqual(byKind.get("repeated_failed_work").evidence, {
+	assert.deepEqual(repeatedFailedWork.evidence, {
 		capability: "message.search",
 		request_refs: ["narnia:sugg:2:call", "narnia:sugg:1:call"],
 	});
-	assert.match(byKind.get("repeated_failed_work").next_action, /ceal receipt show narnia:sugg:2:call/u);
-	assert.deepEqual(byKind.get("unknown_outcome_receipt").evidence, {
+	assert.match(repeatedFailedWork.next_action, /ceal receipt show narnia:sugg:2:call/u);
+	assert.deepEqual(unknownOutcome.evidence, {
 		request_ref: "narnia:sugg:2:call",
 		capability: "message.search",
 	});
 	// Deterministic: the same local state yields the same suggestions.
-	const rerun = await buildObserverState(runtime);
+	const rerun = materializeObserverState(await buildObserverState(runtime));
 	assert.deepEqual(rerun.suggestions, state.suggestions);
 
 	// A merely expired cache self-heals on the next discovery: routine TTL
 	// expiry must not keep the suggestion permanently on.
-	const expired = await buildObserverState({
-		...runtime,
-		loadDiscoveryCache: async () => ({
-			key: {
-				gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
-				profileRef: "profile:suggestion-fixture",
-				membershipRef: "membership:suggestion-fixture",
-				negotiatedProtocolVersion: "1.3.0",
-			},
-			// Expressed relative to the shared default rather than as a literal, so
-			// this fixture stays genuinely expired when the window is retuned.
-			cachedAt: NOW - DEFAULT_DISCOVERY_CACHE_TTL_MS - 60_000,
-			discovery: { capabilities: [], targets: [] },
+	const expired = materializeObserverState(
+		await buildObserverState({
+			...runtime,
+			loadDiscoveryCache: async () => ({
+				key: {
+					gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
+					profileRef: "profile:suggestion-fixture",
+					membershipRef: "membership:suggestion-fixture",
+					negotiatedProtocolVersion: "1.3.0",
+				},
+				// Expressed relative to the shared default rather than as a literal, so
+				// this fixture stays genuinely expired when the window is retuned.
+				cachedAt: NOW - DEFAULT_DISCOVERY_CACHE_TTL_MS - 60_000,
+				discovery: { capabilities: [], targets: [] },
+			}),
 		}),
-	});
+	);
 	assert.equal(expired.discovery_cache.within_ttl, false);
 	assert.equal(
 		expired.suggestions.entries.some((entry) => entry.kind === "missing_cache_opportunity"),
@@ -790,29 +842,31 @@ test("observer binds its session and receipt projections to one session snapshot
 		instanceRef: "instance:new",
 	};
 	let sessionReads = 0;
-	const state = await buildObserverState({
-		// If the observer reads twice, this models enrollment replacing the session
-		// between the receipt projection and the visible session projection.
-		loadStoredSession: async () => (++sessionReads === 1 ? oldSession : replacement),
-		loadReceiptSpool: async (session) => {
-			assert.equal(session, oldSession, "the receipt loader must receive the exact projected session snapshot");
-			return {
-				entries: [
-					{
-						recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
-						requestRef: "narnia:old:receipt",
-						status: "completed",
-						evidence: "readback_verified",
-						auditRefs: [],
-					},
-				],
-				bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
-				drops: { count: 0, atLeast: false },
-				spoolPresent: true,
-			};
-		},
-		now: () => Date.parse("2026-07-24T00:01:00.000Z"),
-	});
+	const state = materializeObserverState(
+		await buildObserverState({
+			// If the observer reads twice, this models enrollment replacing the session
+			// between the receipt projection and the visible session projection.
+			loadStoredSession: async () => (++sessionReads === 1 ? oldSession : replacement),
+			loadReceiptSpool: async (session) => {
+				assert.equal(session, oldSession, "the receipt loader must receive the exact projected session snapshot");
+				return {
+					entries: [
+						{
+							recordedAt: Date.parse("2026-07-24T00:00:30.000Z"),
+							requestRef: "narnia:old:receipt",
+							status: "completed",
+							evidence: "readback_verified",
+							auditRefs: [],
+						},
+					],
+					bounds: { maxEntries: 200, retentionMs: 30 * 24 * 60 * 60 * 1000 },
+					drops: { count: 0, atLeast: false },
+					spoolPresent: true,
+				};
+			},
+			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
+		}),
+	);
 
 	assert.equal(sessionReads, 1);
 	assert.equal(state.session.profile_ref, "profile:old");
@@ -832,15 +886,17 @@ test("observer refuses to attribute another session's discovery cache to the cur
 		membershipRef: "membership:previous",
 		negotiatedProtocolVersion: "1.3.0",
 	};
-	const state = await buildObserverState({
-		loadStoredSession: async () => current,
-		loadDiscoveryCache: async () => ({
-			key: foreignKey,
-			cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
-			discovery: { capabilities: [{ capability_id: "must.not.surface" }], targets: [] },
+	const state = materializeObserverState(
+		await buildObserverState({
+			loadStoredSession: async () => current,
+			loadDiscoveryCache: async () => ({
+				key: foreignKey,
+				cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
+				discovery: { capabilities: [{ capability_id: "must.not.surface" }], targets: [] },
+			}),
+			now: () => Date.parse("2026-07-24T00:01:00.000Z"),
 		}),
-		now: () => Date.parse("2026-07-24T00:01:00.000Z"),
-	});
+	);
 	assert.equal(state.session.profile_ref, "profile:current");
 	assert.deepEqual(state.discovery_cache, { status: "not_current_session" });
 	assert.equal(JSON.stringify(state).includes("must.not.surface"), false);
@@ -890,12 +946,14 @@ test("the observer and the discovery cache agree on freshness, including a backw
 	];
 	for (const scenario of cases) {
 		const entry = { key, cachedAt: scenario.cachedAt, discovery };
-		const state = await buildObserverState({
-			loadStoredSession: async () => sessionForCacheKey(key),
-			loadDiscoveryCache: async () => entry,
-			discoveryCacheTtlMs: ttl,
-			now: () => now,
-		});
+		const state = materializeObserverState(
+			await buildObserverState({
+				loadStoredSession: async () => sessionForCacheKey(key),
+				loadDiscoveryCache: async () => entry,
+				discoveryCacheTtlMs: ttl,
+				now: () => now,
+			}),
+		);
 		assert.equal(
 			state.discovery_cache.within_ttl,
 			discoveryCacheEntryUsable(entry, key, now, ttl),
@@ -934,11 +992,13 @@ test("the observer falls back to the SAME default window as the cli", async () =
 	// Inside the shared default, outside the former 5-minute one.
 	const cachedAt = now - DEFAULT_DISCOVERY_CACHE_TTL_MS + 60_000;
 	const entry = { key, cachedAt, discovery };
-	const state = await buildObserverState({
-		loadStoredSession: async () => sessionForCacheKey(key),
-		loadDiscoveryCache: async () => entry,
-		now: () => now,
-	});
+	const state = materializeObserverState(
+		await buildObserverState({
+			loadStoredSession: async () => sessionForCacheKey(key),
+			loadDiscoveryCache: async () => entry,
+			now: () => now,
+		}),
+	);
 	assert.equal(
 		state.discovery_cache.within_ttl,
 		discoveryCacheEntryUsable(entry, key, now, DEFAULT_DISCOVERY_CACHE_TTL_MS),
@@ -947,7 +1007,7 @@ test("the observer falls back to the SAME default window as the cli", async () =
 	assert.equal(state.discovery_cache.within_ttl, true);
 });
 
-function sessionForCacheKey(key) {
+function sessionForCacheKey(key: CealDiscoveryCacheKey): CealStoredSession {
 	return {
 		gatewayEndpoint: key.gatewayEndpoint,
 		profileRef: key.profileRef,
@@ -964,7 +1024,7 @@ function sessionForCacheKey(key) {
 	};
 }
 
-function rawRequest(baseUrl, requestPath, headers) {
+function rawRequest(baseUrl: string, requestPath: string, headers: Record<string, string>): Promise<{ status: number | undefined }> {
 	const port = Number(new URL(baseUrl).port);
 	return new Promise((resolve, reject) => {
 		const request = httpRequest({ host: "127.0.0.1", port, path: requestPath, method: "GET", headers, setHost: false }, (response) => {
@@ -977,10 +1037,10 @@ function rawRequest(baseUrl, requestPath, headers) {
 }
 
 function collectingIo() {
-	const io = { stdout: [], stderr: [], exitCode: undefined };
+	const io: { stdout: string[]; stderr: string[]; exitCode: number | undefined } = { stdout: [], stderr: [], exitCode: undefined };
 	return {
-		stdout: { write: (chunk) => io.stdout.push(String(chunk)), join: (separator) => io.stdout.join(separator ?? "") },
-		stderr: { write: (chunk) => io.stderr.push(String(chunk)), join: (separator) => io.stderr.join(separator ?? "") },
+		stdout: { write: (chunk: string) => io.stdout.push(String(chunk)), join: (separator: string = "") => io.stdout.join(separator) },
+		stderr: { write: (chunk: string) => io.stderr.push(String(chunk)), join: (separator: string = "") => io.stderr.join(separator) },
 		get exitCode() {
 			return io.exitCode;
 		},
@@ -988,4 +1048,17 @@ function collectingIo() {
 			io.exitCode = value;
 		},
 	};
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+	return JSON.parse(await response.text());
+}
+
+function materializeObserverState(value: Record<string, unknown>): ObserverState {
+	return JSON.parse(JSON.stringify(value));
+}
+
+async function closeObserverHandle(handle: ObserverHandle | undefined): Promise<void> {
+	assert.ok(handle, "observer server did not report a listening handle");
+	await handle.close();
 }

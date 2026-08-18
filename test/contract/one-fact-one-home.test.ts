@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { TestContext } from "node:test";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -22,7 +23,7 @@ import { scratchTree } from "../scratch-dir.ts";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PACKAGE = "packages/ceal-worker-cli/src";
 
-const fixture = (context, files) => scratchTree(context, "ceal-one-fact-", files);
+const fixture = (context: TestContext, files: Record<string, string>): string => scratchTree(context, "ceal-one-fact-", files);
 
 const GUARDED_STORE = `import { withLocalStoreLock } from "./local-store-lock.js";
 
@@ -232,7 +233,7 @@ test("the Worker direct proof-ref defense agrees with Protocol safe refs", async
 });
 
 test("the Worker direct retry ceiling is bound to the Protocol decoder", () => {
-	const limitExpression = (relative, name) => {
+	const limitExpression = (relative: string, name: string): string => {
 		const source = readFileSync(path.join(ROOT, relative), "utf8");
 		const match = new RegExp(`const ${name} = (?<expression>[^;]+);`, "u").exec(source);
 		assert.ok(match?.groups?.expression, `${relative} declares ${name} — re-aim this binding if ownership moves`);
@@ -270,7 +271,7 @@ test("@separateGrammar covers the statement it sits above and not every literal 
 	// not a region. Written first with the tag on a sibling statement, which
 	// could not fail — the walk never reached it from there either way.
 	const other = "/^[0-9]{4}-[0-9]{2}-[0-9]{2}T$/u";
-	const body = (literalA, literalB) =>
+	const body = (literalA: string, literalB: string): string =>
 		`// @separateGrammar: about the date, not the ref.\nexport function f() {\n\tconst d = ${literalA};\n\tconst r = ${literalB};\n\treturn [d, r];\n}\n`;
 	const root = fixture(context, {
 		[`${PACKAGE}/a.ts`]: body(other, LONG),

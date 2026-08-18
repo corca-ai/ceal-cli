@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -13,12 +14,13 @@ import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ENTRYPOINT_ARGV,
 	LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256,
 } from "../dist/generated/leased-consumer-attachment-stream-contract.js";
+import type { LeasedConsumerAttachmentStreamCarrierRuntime } from "../dist/leased-consumer-attachment-stream-carrier.js";
 import { consumeLeasedConsumerAttachmentStream } from "../dist/leased-consumer-attachment-stream-carrier.js";
 import {
 	runLeasedConsumerAttachmentStreamEntrypoint,
 	serializeLeasedConsumerAttachmentStreamResult,
 } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
-import { postUnixSocketStream } from "../dist/private-worker-transport.js";
+import { postUnixSocketStream, type UnixSocketErrorNames } from "../dist/private-worker-transport.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.ts";
 
 const encoder = new TextEncoder();
@@ -33,7 +35,7 @@ test("embedded candidate contract is refused when its digest is tampered", async
 	const dist = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 	const scratch = mkdtempSync(join(dist, "..", "ceal-attachment-contract-"));
 	t.after(() => rmSync(scratch, { recursive: true, force: true }));
-	const copyEntry = (name) => {
+	const copyEntry = (name: string) => {
 		const copy = join(scratch, name);
 		cpSync(dist, copy, { recursive: true });
 		return join(copy, "leased-consumer-attachment-stream-carrier.js");
@@ -54,7 +56,7 @@ test("private candidate carrier derives its fixed route and produces the Agent h
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-carrier-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const socketPath = "/run/user/1001/ceal/gateway-candidate.sock";
-	const calls = [];
+	const calls: AttachmentStreamRequest[] = [];
 	let sessionCloses = 0;
 	let responseCloses = 0;
 	let rootCalls = 0;
@@ -205,7 +207,7 @@ test("private attachment-stream entrypoint returns only the verified Agent hando
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-entrypoint-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	let stdout = "";
-	const calls = [];
+	const calls: AttachmentStreamRequest[] = [];
 	const code = await runLeasedConsumerAttachmentStreamEntrypoint(
 		chunked(
 			encoder.encode(
@@ -303,7 +305,7 @@ test("candidate carrier refuses request or protected-session drift before any ne
 			},
 			runtime,
 		),
-		(error) => error?.code === "request_binding_mismatch",
+		(error) => hasErrorCode(error) && error.code === "request_binding_mismatch",
 	);
 	assert.equal(protectedReads, 0);
 	assert.equal(networkCalls, 0);
@@ -321,7 +323,7 @@ test("candidate carrier refuses request or protected-session drift before any ne
 			},
 			{ ...runtime, env: { CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS: "1" } },
 		),
-		(error) => error?.code === "invalid_operation_deadline",
+		(error) => hasErrorCode(error) && error.code === "invalid_operation_deadline",
 	);
 	assert.equal(protectedReads, 0);
 
@@ -340,7 +342,7 @@ test("candidate carrier refuses request or protected-session drift before any ne
 				readProtectedSession: async () => encoder.encode(JSON.stringify({ schema_version: "wrong" })),
 			},
 		),
-		(error) => error?.code === "session_unavailable",
+		(error) => hasErrorCode(error) && error.code === "session_unavailable",
 	);
 	assert.equal(protectedReads, 0);
 	assert.equal(networkCalls, 0);
@@ -409,7 +411,7 @@ test("candidate carrier closes an invalid response and cleans partial handoffs o
 					}),
 				},
 			),
-			(error) => error?.code === current.code,
+			(error) => hasErrorCode(error) && error.code === current.code,
 		);
 		assert.equal(responseCloses, 1, `${current.name} must release the response`);
 		if (created !== undefined) await assert.rejects(stat(created), { code: "ENOENT" }, `${current.name} must remove partial handoff`);
@@ -419,7 +421,7 @@ test("candidate carrier closes an invalid response and cleans partial handoffs o
 test("raw Unix-socket stream adapter returns body chunks and enforces its wall deadline", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-transport-"));
 	const socketPath = join(root, "attachment-stream.sock");
-	const connections = [];
+	const connections: Socket[] = [];
 	const server = createServer((incoming, response) => {
 		assert.equal(incoming.url, "/fixed-candidate-route");
 		assert.equal(incoming.headers.authorization, "Bearer private-service-credential");
@@ -428,7 +430,7 @@ test("raw Unix-socket stream adapter returns body chunks and enforces its wall d
 		response.end(Buffer.from([3, 4]));
 	});
 	server.on("connection", (socket) => connections.push(socket));
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(socketPath, resolve);
 	});
@@ -452,15 +454,15 @@ test("raw Unix-socket stream adapter returns body chunks and enforces its wall d
 
 	const trickleRoot = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-trickle-"));
 	const tricklePath = join(trickleRoot, "attachment-stream.sock");
-	const intervals = [];
-	const trickleConnections = [];
+	const intervals: ReturnType<typeof setInterval>[] = [];
+	const trickleConnections: Socket[] = [];
 	const trickleServer = createServer((_incoming, trickleResponse) => {
 		trickleResponse.writeHead(200, { "content-type": "application/octet-stream" });
 		trickleResponse.write(Buffer.from([0]));
 		intervals.push(setInterval(() => trickleResponse.write(Buffer.from([0])), 20));
 	});
 	trickleServer.on("connection", (socket) => trickleConnections.push(socket));
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		trickleServer.once("error", reject);
 		trickleServer.listen(tricklePath, resolve);
 	});
@@ -506,7 +508,7 @@ test("the shipped bin dispatches the attachment-stream private token before publ
 	});
 });
 
-function sessionBytes(socketPath) {
+function sessionBytes(socketPath: string): Uint8Array {
 	return encoder.encode(
 		JSON.stringify({
 			schema_version: "ceal.leased_consumer_control_session.v1",
@@ -517,7 +519,7 @@ function sessionBytes(socketPath) {
 	);
 }
 
-function transportErrors() {
+function transportErrors(): UnixSocketErrorNames {
 	return {
 		aborted: "stream_aborted",
 		deadlineExceeded: "stream_deadline",
@@ -527,13 +529,17 @@ function transportErrors() {
 	};
 }
 
-async function collect(stream) {
-	const chunks = [];
+async function collect(stream: AsyncIterable<Uint8Array>): Promise<Buffer> {
+	const chunks: Buffer[] = [];
 	for await (const chunk of stream) chunks.push(Buffer.from(chunk));
 	return Buffer.concat(chunks);
 }
 
-function runPrivateProcess(binary, argv, input) {
+function runPrivateProcess(
+	binary: string,
+	argv: string,
+	input: string,
+): Promise<{ readonly status: number | null; readonly stdout: string; readonly stderr: string }> {
 	return new Promise((resolve, reject) => {
 		const devNull = openSync("/dev/null", "r");
 		let child: ReturnType<typeof spawn>;
@@ -542,18 +548,24 @@ function runPrivateProcess(binary, argv, input) {
 		} finally {
 			closeSync(devNull);
 		}
+		assert.ok(child.stdout);
+		assert.ok(child.stderr);
+		assert.ok(child.stdin);
+		const childStdout = child.stdout;
+		const childStderr = child.stderr;
+		const childStdin = child.stdin;
 		let stdout = "";
 		let stderr = "";
 		const timeout = setTimeout(() => {
 			child.kill("SIGKILL");
 			reject(new Error("leased consumer attachment-stream child timed out"));
 		}, 5_000);
-		child.stdout.setEncoding("utf8");
-		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", (chunk) => {
+		childStdout.setEncoding("utf8");
+		childStderr.setEncoding("utf8");
+		childStdout.on("data", (chunk: string) => {
 			stdout += chunk;
 		});
-		child.stderr.on("data", (chunk) => {
+		childStderr.on("data", (chunk: string) => {
 			stderr += chunk;
 		});
 		child.once("error", (error) => {
@@ -564,8 +576,14 @@ function runPrivateProcess(binary, argv, input) {
 			clearTimeout(timeout);
 			resolve({ status: exitCode, stdout, stderr });
 		});
-		child.stdin.end(input);
+		childStdin.end(input);
 	});
+}
+
+type AttachmentStreamRequest = Parameters<NonNullable<LeasedConsumerAttachmentStreamCarrierRuntime["requestUnixSocketStream"]>>[0];
+
+function hasErrorCode(error: unknown): error is { readonly code: string } {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
 }
 
 assert.equal(LEASED_CONSUMER_ATTACHMENT_STREAM_ROUTE_SHA256.length, 64);

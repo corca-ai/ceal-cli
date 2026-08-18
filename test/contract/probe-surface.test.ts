@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,7 +16,10 @@ import { isAgentHostEnvironmentVariables, isSplitSubcommandResult, lookupProbeBi
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GUARD = path.join(ROOT, "scripts", "probe-surface.ts");
 
-function probe(args) {
+type ProbeResult = SpawnSyncReturns<string>;
+type Probe = (args: string[], environment?: NodeJS.ProcessEnv) => ProbeResult;
+
+function probe(args: string[]): ProbeResult {
 	return spawnSync(process.execPath, [GUARD, ...args], { encoding: "utf8", cwd: ROOT });
 }
 
@@ -30,7 +33,7 @@ function probe(args) {
  * held two isolation assertions that could not fail. Staging the executable is
  * what makes the registration path exist to be asserted about.
  */
-function withStagedRelease(run) {
+function withStagedRelease(run: (probe: Probe) => void): void {
 	const cache = path.join(ROOT, "node_modules", ".cache");
 	mkdirSync(cache, { recursive: true });
 	const stage = mkdtempSync(path.join(cache, "ceal-probe-release-"));
@@ -48,13 +51,16 @@ function withStagedRelease(run) {
 			copyFileSync(process.execPath, binary);
 			chmodSync(binary, 0o755);
 		}
-		run((args, environment) => spawnSync(binary, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }));
+		run(
+			(args: string[], environment?: NodeJS.ProcessEnv): ProbeResult =>
+				spawnSync(binary, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }),
+		);
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
 	}
 }
 
-function registrationPaths(stdout) {
+function registrationPaths(stdout: string): string[] {
 	return [...stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]);
 }
 
@@ -115,10 +121,11 @@ test("help and read-only routes run, always in a throwaway HOME", () => {
 	// An isolated HOME has no session, which is the proof it did not read the
 	// operator's own state.
 	assert.match(readOnly.stdout, /^status: unconfigured$/mu);
-	for (const [args, schema] of [
+	const readOnlyRoutes: Array<[string[], string]> = [
 		[["ceal", "receipt", "show", "ceal:prior:call"], "ceal.receipt.v1"],
 		[["ceal", "acceptance", "emit"], "ceal.worker_acceptance_result.v2"],
-	]) {
+	];
+	for (const [args, schema] of readOnlyRoutes) {
 		const result = probe(args);
 		assert.match(result.stderr, /effect: read_only.*throwaway HOME/u, args.join(" "));
 		assert.match(result.stdout, new RegExp(`^schema_version: ${schema.replaceAll(".", "\\.")}$`, "mu"), args.join(" "));
@@ -155,10 +162,11 @@ test("the child's own declared effect decides, not the parent's", () => {
 	// Bare aliases are not a second dispatch-only fact: both parents declare
 	// status as their default leaf, so the sanctioned probe reaches the same
 	// read-only route the binary does.
-	for (const [args, schema] of [
+	const bareRoutes: Array<[string[], string]> = [
 		[["ceal", "guide"], "ceal.guide.v1"],
 		[["ceal", "session"], "ceal.client_session.v1"],
-	]) {
+	];
+	for (const [args, schema] of bareRoutes) {
 		const bare = probe(args);
 		assert.notEqual(bare.status, 2, bare.stderr);
 		assert.match(bare.stderr, /effect: read_only.*throwaway HOME/u);
@@ -169,7 +177,7 @@ test("the child's own declared effect decides, not the parent's", () => {
 test("the escape hatch is explicit and still isolated", () => {
 	const refused = probe(["ceal", "guide", "register", "codex"]);
 	assert.equal(refused.status, 2);
-	withStagedRelease((run) => {
+	withStagedRelease((run: Probe) => {
 		const allowed = run(["--allow-effect", "local_write", "ceal", "guide", "register", "codex"]);
 		assert.match(allowed.stderr, /effect: local_write.*throwaway HOME/u);
 		assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu);
@@ -196,7 +204,7 @@ test("an inherited agent-host override cannot aim a probed write at real state",
 	assert.ok(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.length > 0);
 	const overrides = Object.fromEntries(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.map((variable) => [variable, sentinel]));
 	try {
-		withStagedRelease((run) => {
+		withStagedRelease((run: Probe) => {
 			// Only the agent-host overrides are set. The guard also pins
 			// XDG_RUNTIME_DIR, but no guide route reads it, so including it here
 			// would assert nothing while looking like coverage — the exact shape of

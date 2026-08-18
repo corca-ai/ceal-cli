@@ -21,7 +21,7 @@ function fixture() {
 	return { root, packageRoot };
 }
 
-function readAuthority(root, specifier) {
+function readAuthority(root: string, specifier: string): string {
 	const result = spawnSync(
 		process.execPath,
 		[
@@ -40,7 +40,7 @@ function readAuthority(root, specifier) {
 	return result.stdout;
 }
 
-function importResult(root, specifier) {
+function importResult(root: string, specifier: string) {
 	return spawnSync(process.execPath, ["--import", LOADER.href, "--input-type=module", "--eval", `import(${JSON.stringify(specifier)})`], {
 		encoding: "utf8",
 		env: { ...process.env, CEAL_SOURCE_TEST_REPO_ROOT: root },

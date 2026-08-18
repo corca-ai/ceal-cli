@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -16,14 +16,30 @@ import {
 } from "../dist/leased-consumer-carrier.js";
 import { postUnixSocket } from "../dist/private-worker-transport.js";
 
-const handoff = JSON.parse(
+type HandoffFixture = { vectors: Array<{ id: string; request_body: Record<string, unknown> }> };
+type FetchCall = {
+	url: string;
+	method: string | undefined;
+	headers: HeadersInit | undefined;
+	body: BodyInit | null | undefined;
+	redirect: RequestRedirect | undefined;
+	aborts: boolean;
+};
+type UnixSocketCall = Omit<Parameters<NonNullable<LeasedConsumerCarrierRuntime["requestUnixSocket"]>>[0], "signal"> & {
+	signal: boolean;
+};
+type CarrierProcessResult = { status: number | null; stdout: string; stderr: string };
+
+const handoff: HandoffFixture = JSON.parse(
 	readFileSync(
 		new URL("../../../vendor/gateway-leased-consumer-call/gateway-leased-consumer-call-conformance.json", import.meta.url),
 		"utf8",
 	),
 );
 const carrierContract = JSON.parse(readFileSync(new URL("../leased-consumer-carrier-contract.json", import.meta.url), "utf8"));
-const request = handoff.vectors.find((vector) => vector.id === "admitted-owner-result-is-unavailable-external-response").request_body;
+const requestVector = handoff.vectors.find((vector) => vector.id === "admitted-owner-result-is-unavailable-external-response");
+assert.ok(requestVector);
+const request = requestVector.request_body;
 const encoder = new TextEncoder();
 const requestBytes = encoder.encode(JSON.stringify(request));
 const channel = encoder.encode(
@@ -35,11 +51,12 @@ const channel = encoder.encode(
 );
 
 test("private carrier derives its one POST from the embedded handoff and decodes only the unavailable vector", async () => {
-	const calls = [];
+	const calls: FetchCall[] = [];
 	const result = await runLeasedConsumerCarrier(requestBytes, {
 		readChannel: async () => channel,
 		closeChannel: async () => {},
 		fetchFn: async (url, init) => {
+			assert.ok(init);
 			calls.push({
 				url: String(url),
 				method: init.method,
@@ -83,7 +100,7 @@ test("v2 protected channel uses only its fixed Unix socket path and never falls 
 		}),
 	);
 	let fetchCalls = 0;
-	const calls = [];
+	const calls: UnixSocketCall[] = [];
 	const result = await runLeasedConsumerCarrier(requestBytes, {
 		readChannel: async () => localChannel,
 		closeChannel: async () => {},
@@ -126,7 +143,13 @@ test("v2 protected channel uses only its fixed Unix socket path and never falls 
 test("v2 shipped transport performs the bounded fixed-route post over a Unix socket", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-socket-"));
 	const socketPath = join(root, "leased-consumer-call-v2.sock");
-	let observed = null;
+	let observed: {
+		method: string | undefined;
+		path: string | undefined;
+		authorization: string | undefined;
+		contentType: string | string[] | undefined;
+		body: string;
+	} | null = null;
 	const server = createServer(async (incoming, response) => {
 		let body = "";
 		for await (const chunk of incoming) body += String(chunk);
@@ -140,12 +163,12 @@ test("v2 shipped transport performs the bounded fixed-route post over a Unix soc
 		response.writeHead(503, { "content-type": "application/json" });
 		response.end(JSON.stringify({ ok: false, error_code: "leased_consumer_call_unavailable" }));
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(socketPath, resolve);
 	});
 	t.after(async () => {
-		await new Promise((resolve) => server.close(resolve));
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await rm(root, { recursive: true, force: true });
 	});
 	const localChannel = encoder.encode(
@@ -176,17 +199,17 @@ test("v2 shipped transport performs the bounded fixed-route post over a Unix soc
 test("a service that accepts and never answers loses the call to the deadline instead of hanging the worker", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-stall-"));
 	const socketPath = join(root, "leased-consumer-call-v2.sock");
-	const sockets = [];
+	const sockets: import("node:net").Socket[] = [];
 	// Accepts the connection, reads the request, and never writes a response.
 	const server = createServer(() => {});
 	server.on("connection", (socket) => sockets.push(socket));
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(socketPath, resolve);
 	});
 	t.after(async () => {
 		for (const socket of sockets) socket.destroy();
-		await new Promise((resolve) => server.close(resolve));
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await rm(root, { recursive: true, force: true });
 	});
 	const localChannel = encoder.encode(
@@ -200,6 +223,7 @@ test("a service that accepts and never answers loses the call to the deadline in
 	// Only the service-call deadline is collapsed; the FD4 channel read keeps its own.
 	const serviceCallDeadlineMs = carrierContract.service_call.deadline_ms;
 	let firedServiceCallTimer = false;
+	const timers = new Set<ReturnType<typeof setTimeout>>();
 	const carrier = runLeasedConsumerCarrier(requestBytes, {
 		readChannel: async () => localChannel,
 		closeChannel: async () => {},
@@ -207,18 +231,26 @@ test("a service that accepts and never answers loses the call to the deadline in
 			throw new Error("v2 must not fetch");
 		},
 		setTimer: (callback, ms) => {
-			if (ms !== serviceCallDeadlineMs) return setTimeout(callback, ms);
-			return setTimeout(() => {
-				firedServiceCallTimer = true;
-				callback();
-			}, 0);
+			const timer = setTimeout(
+				() => {
+					firedServiceCallTimer = true;
+					callback();
+				},
+				ms === serviceCallDeadlineMs ? 0 : ms,
+			);
+			timers.add(timer);
+			return timer;
 		},
-		clearTimer: (timer) => clearTimeout(timer),
+		clearTimer: () => {
+			for (const timer of timers) clearTimeout(timer);
+			timers.clear();
+		},
 	});
 	const stillHanging = Symbol("still_hanging");
-	const guard = new Promise((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
+	const guard = new Promise<typeof stillHanging>((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
 	const result = await Promise.race([carrier, guard]);
 	assert.notEqual(result, stillHanging, "the outbound service call never settled — its deadline is not applied");
+	if (result === stillHanging) throw new Error("the outbound service call never settled");
 	assert.equal(firedServiceCallTimer, true);
 	assert.deepEqual(result, {
 		schema_version: "ceal.leased_consumer_call_result.v1",
@@ -231,8 +263,8 @@ test("a service that accepts and never answers loses the call to the deadline in
 test("the Unix-socket deadline is absolute even while a peer trickles response bytes", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-v2-trickle-"));
 	const socketPath = join(root, "leased-consumer-call-v2.sock");
-	const sockets = [];
-	const intervals = [];
+	const sockets: import("node:net").Socket[] = [];
+	const intervals: ReturnType<typeof setInterval>[] = [];
 	const server = createServer((_incoming, response) => {
 		response.writeHead(200, { "content-type": "application/json" });
 		response.write(" ");
@@ -240,14 +272,14 @@ test("the Unix-socket deadline is absolute even while a peer trickles response b
 		intervals.push(interval);
 	});
 	server.on("connection", (socket) => sockets.push(socket));
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(socketPath, resolve);
 	});
 	t.after(async () => {
 		for (const interval of intervals) clearInterval(interval);
 		for (const socket of sockets) socket.destroy();
-		await new Promise((resolve) => server.close(resolve));
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await rm(root, { recursive: true, force: true });
 	});
 	await assert.rejects(
@@ -273,32 +305,45 @@ test("the Unix-socket deadline is absolute even while a peer trickles response b
 
 test("an https service that never answers loses the call to the same deadline", async () => {
 	const serviceCallDeadlineMs = carrierContract.service_call.deadline_ms;
-	let observedSignal = null;
+	const observed: { signal?: AbortSignal } = {};
 	let firedServiceCallTimer = false;
+	const timers = new Set<ReturnType<typeof setTimeout>>();
 	const carrier = runLeasedConsumerCarrier(requestBytes, {
 		readChannel: async () => channel,
 		closeChannel: async () => {},
 		// Never resolves on its own; only the deadline's abort can end this call.
 		fetchFn: (_url, init) =>
 			new Promise((_resolve, reject) => {
-				observedSignal = init.signal;
+				assert.ok(init);
+				assert.ok(init.signal);
+				observed.signal = init.signal;
 				init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
 			}),
 		setTimer: (callback, ms) => {
-			if (ms !== serviceCallDeadlineMs) return setTimeout(callback, ms);
-			return setTimeout(() => {
-				firedServiceCallTimer = true;
-				callback();
-			}, 0);
+			const timer = setTimeout(
+				() => {
+					firedServiceCallTimer = true;
+					callback();
+				},
+				ms === serviceCallDeadlineMs ? 0 : ms,
+			);
+			timers.add(timer);
+			return timer;
 		},
-		clearTimer: (timer) => clearTimeout(timer),
+		clearTimer: () => {
+			for (const timer of timers) clearTimeout(timer);
+			timers.clear();
+		},
 	});
 	const stillHanging = Symbol("still_hanging");
-	const guard = new Promise((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
+	const guard = new Promise<typeof stillHanging>((resolve) => setTimeout(() => resolve(stillHanging), 5_000).unref());
 	const result = await Promise.race([carrier, guard]);
 	assert.notEqual(result, stillHanging, "the https service call never settled — its deadline is not applied");
+	if (result === stillHanging) throw new Error("the https service call never settled");
 	assert.equal(firedServiceCallTimer, true);
-	assert.equal(observedSignal?.aborted, true, "expiry must abort the fetch, not only lose the race");
+	const signal = observed.signal;
+	assert.ok(signal);
+	assert.equal(signal.aborted, true, "expiry must abort the fetch, not only lose the race");
 	assert.equal(result.error_code, "service_call_failed");
 });
 
@@ -529,14 +574,16 @@ test("the shipped private mode rejects a non-pipe FD 4 without a libuv abort", a
 	});
 });
 
-function runCarrierProcess(binary, input) {
-	return new Promise((resolve, reject) => {
+function runCarrierProcess(binary: string, input: string): Promise<CarrierProcessResult> {
+	return new Promise<CarrierProcessResult>((resolve, reject) => {
 		const devNull = openSync("/dev/null", "r");
-		let child: ChildProcessWithoutNullStreams;
+		const child = spawn(process.execPath, [binary, LEASED_CONSUMER_CARRIER_ARGV], {
+			stdio: ["pipe", "pipe", "pipe", devNull, devNull],
+		});
 		try {
-			child = spawn(process.execPath, [binary, LEASED_CONSUMER_CARRIER_ARGV], {
-				stdio: ["pipe", "pipe", "pipe", devNull, devNull],
-			});
+			assert.ok(child.stdin);
+			assert.ok(child.stdout);
+			assert.ok(child.stderr);
 		} finally {
 			closeSync(devNull);
 		}

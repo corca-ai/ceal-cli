@@ -12,11 +12,32 @@ import {
 	receiptSpoolEntryFromCallResult,
 } from "../dist/receipt-spool.js";
 import { changedSessionIdentityBindings, sessionIdentityDiscriminator } from "../dist/session-identity.js";
+import type { CealStoredSession } from "../src/profile-store.js";
+import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "../src/receipt-spool.js";
 
 const BASE_TIME = Date.parse("2026-07-24T12:00:00.000Z");
 const TEST_IDENTITY = "a".repeat(64);
 
-function createCealReceiptSpoolStore(home, now = Date.now, identity = TEST_IDENTITY) {
+type TestReceiptSpoolStore = {
+	load: () => Promise<CealReceiptSpoolState | null>;
+	append: (value: CealReceiptSpoolEntry) => Promise<void>;
+	recordDrop: () => Promise<void>;
+	remove: () => Promise<void>;
+};
+
+type ProcessGateResult = { code: number | null; stdout: string; stderr: string; timedOut: boolean };
+
+async function requireState(load: () => Promise<CealReceiptSpoolState | null>): Promise<CealReceiptSpoolState> {
+	const state = await load();
+	assert.ok(state);
+	return state;
+}
+
+function createCealReceiptSpoolStore(
+	home: string | undefined,
+	now: () => number = Date.now,
+	identity = TEST_IDENTITY,
+): TestReceiptSpoolStore {
 	const store = createRawReceiptSpoolStore(home, now);
 	return {
 		load: () => store.load(identity),
@@ -26,7 +47,7 @@ function createCealReceiptSpoolStore(home, now = Date.now, identity = TEST_IDENT
 	};
 }
 
-function entry(overrides = {}) {
+function entry(overrides: Partial<CealReceiptSpoolEntry> = {}): CealReceiptSpoolEntry {
 	return {
 		recordedAt: BASE_TIME,
 		requestRef: "narnia:call:1:call",
@@ -45,7 +66,7 @@ test("receipt spool appends owner-only and reads entries back", async () => {
 		assert.equal(await store.load(), null);
 		await store.remove();
 		await store.append(entry());
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.deepEqual(state.entries, [entry()]);
 		assert.deepEqual(state.bounds, { maxEntries: RECEIPT_SPOOL_MAX_ENTRIES, retentionMs: RECEIPT_SPOOL_RETENTION_MS });
 		const file = spoolFile(home);
@@ -75,7 +96,7 @@ test("receipt spool never attributes delayed old-session state to its replacemen
 
 		await raw.append(newIdentity, entry({ requestRef: "narnia:call:new:call" }));
 		await raw.recordDrop(newIdentity);
-		const current = await raw.load(newIdentity);
+		const current = await requireState(() => raw.load(newIdentity));
 		assert.deepEqual(
 			current.entries.map((value) => value.requestRef),
 			["narnia:call:new:call"],
@@ -104,10 +125,13 @@ test("receipt spool enforces entry-count and retention bounds on append", async 
 		for (let index = 0; index <= RECEIPT_SPOOL_MAX_ENTRIES; index += 1) {
 			await store.append(entry({ recordedAt: BASE_TIME + index, requestRef: `narnia:call:${index}` }));
 		}
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.equal(state.entries.length, RECEIPT_SPOOL_MAX_ENTRIES);
+		assert.ok(state.entries[0]);
 		assert.equal(state.entries[0].requestRef, "narnia:call:1");
-		assert.equal(state.entries.at(-1).requestRef, `narnia:call:${RECEIPT_SPOOL_MAX_ENTRIES}`);
+		const lastEntry = state.entries.at(-1);
+		assert.ok(lastEntry);
+		assert.equal(lastEntry.requestRef, `narnia:call:${RECEIPT_SPOOL_MAX_ENTRIES}`);
 		assert.equal(
 			state.entries.some((item) => item.requestRef === "narnia:call:expired"),
 			false,
@@ -120,7 +144,7 @@ test("receipt spool applies retention on read and drops far-future entries", asy
 		await createCealReceiptSpoolStore(home, () => BASE_TIME).append(entry());
 		// A dormant client past the retention window serves nothing, even though
 		// no append ran to trim the file.
-		const dormant = await createCealReceiptSpoolStore(home, () => BASE_TIME + RECEIPT_SPOOL_RETENTION_MS + 1).load();
+		const dormant = await requireState(createCealReceiptSpoolStore(home, () => BASE_TIME + RECEIPT_SPOOL_RETENTION_MS + 1).load);
 		assert.deepEqual(dormant.entries, []);
 	});
 	await withHome(async (home) => {
@@ -137,7 +161,7 @@ test("receipt spool applies retention on read and drops far-future entries", asy
 			audit_refs: [],
 		});
 		writeFileSync(file, JSON.stringify(parsed), { mode: 0o600 });
-		const state = await createCealReceiptSpoolStore(home, () => BASE_TIME).load();
+		const state = await requireState(createCealReceiptSpoolStore(home, () => BASE_TIME).load);
 		assert.deepEqual(state.entries, [entry()]);
 	});
 });
@@ -166,7 +190,7 @@ test("separate ceal processes each keep their receipt when they append at once",
 		// The count is exact because the priors plus concurrent entries stay under
 		// the entry cap: a lock that kept the new entries by clobbering priors would pass
 		// a membership-only assertion.
-		const spooled = new Set((await store.load()).entries.map((item) => item.requestRef));
+		const spooled = new Set((await requireState(store.load)).entries.map((item) => item.requestRef));
 		assert.deepEqual(
 			[...priors, ...refs].filter((ref) => !spooled.has(ref)),
 			[],
@@ -175,7 +199,7 @@ test("separate ceal processes each keep their receipt when they append at once",
 	});
 });
 
-function appendInChildProcess(home, requestRef, readyFile, goFile) {
+function appendInChildProcess(home: string, requestRef: string, readyFile: string, goFile: string): Promise<ProcessGateResult> {
 	const source = `
 		const { existsSync, writeFileSync } = await import("node:fs");
 		const { createCealReceiptSpoolStore } = await import(${JSON.stringify(new URL("../dist/receipt-spool.js", import.meta.url).href)});
@@ -197,7 +221,7 @@ function appendInChildProcess(home, requestRef, readyFile, goFile) {
 	});
 }
 
-function recordDropInChildProcess(home, readyFile, goFile) {
+function recordDropInChildProcess(home: string, readyFile: string, goFile: string): Promise<ProcessGateResult> {
 	const source = `
 		const { existsSync, writeFileSync } = await import("node:fs");
 		const { createCealReceiptSpoolStore } = await import(${JSON.stringify(new URL("../dist/receipt-spool.js", import.meta.url).href)});
@@ -217,7 +241,7 @@ function lockTimingSource() {
 	});
 }
 
-function spawnProcessGateChild(home, source, overrides = {}) {
+function spawnProcessGateChild(home: string, source: string, overrides: Record<string, string> = {}): Promise<ProcessGateResult> {
 	const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
 		env: processGateEnv(home, overrides),
 		stdio: ["ignore", "pipe", "pipe"],
@@ -250,17 +274,22 @@ function spawnProcessGateChild(home, source, overrides = {}) {
 // These subprocesses prove cross-process exclusion, not script coverage. c8's
 // inherited collector instruments every contender and can consume the tiny
 // production lock budget itself, turning the proof into a coverage-I/O race.
-function processGateEnv(home, overrides) {
+function processGateEnv(home: string, overrides: Record<string, string>): NodeJS.ProcessEnv {
 	return { ...process.env, NODE_V8_COVERAGE: "", HOME: home, ...overrides };
 }
 
-async function recordConcurrentDrops(home, writers) {
+async function recordConcurrentDrops(home: string, writers: number): Promise<ProcessGateResult[]> {
 	return runAtProcessGate(home, "drop", Array.from({ length: writers }), (_value, readyFile, goFile) =>
 		recordDropInChildProcess(home, readyFile, goFile),
 	);
 }
 
-async function runAtProcessGate(home, label, values, launch) {
+async function runAtProcessGate<T>(
+	home: string,
+	label: string,
+	values: T[],
+	launch: (value: T, readyFile: string, goFile: string) => Promise<ProcessGateResult>,
+): Promise<ProcessGateResult[]> {
 	const gate = path.join(home, `${label}-gate-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 	mkdirSync(gate);
 	const goFile = path.join(gate, "go");
@@ -280,15 +309,15 @@ test("a lost receipt is counted so the observer can say the history is incomplet
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		// Nothing lost yet: the counter must not exist merely because the spool does.
 		await store.append(entry());
-		assert.deepEqual((await store.load()).drops, { count: 0, atLeast: false });
+		assert.deepEqual((await requireState(store.load)).drops, { count: 0, atLeast: false });
 		await store.recordDrop();
 		await store.recordDrop();
-		assert.deepEqual((await store.load()).drops, { count: 2, atLeast: false });
+		assert.deepEqual((await requireState(store.load)).drops, { count: 2, atLeast: false });
 		assert.equal(statSync(dropsFile(home)).mode & 0o777, 0o600);
 		// Drops survive an append, because the append that succeeded says nothing
 		// about the ones that did not.
 		await store.append(entry({ requestRef: "narnia:call:2:call" }));
-		assert.equal((await store.load()).drops.count, 2);
+		assert.equal((await requireState(store.load)).drops.count, 2);
 		// Clearing the spool clears its drop record too: an empty history cannot
 		// carry a warning about entries it no longer claims to have had.
 		await store.remove();
@@ -305,7 +334,7 @@ test("concurrent first drops are retained and the counter never races past its c
 			assert.equal(result.code, 0, result.stderr);
 		}
 		assert.equal(
-			(await createCealReceiptSpoolStore(home).load()).drops.count,
+			(await requireState(createCealReceiptSpoolStore(home).load)).drops.count,
 			writers,
 			`drop bytes: ${readFileSync(dropsFile(home), "utf8").length}; errors: ${results.map((result) => result.stderr).join(" | ")}`,
 		);
@@ -315,7 +344,7 @@ test("concurrent first drops are retained and the counter never races past its c
 		writeFileSync(dropsFile(home), `ceal.receipt_spool_drops.v2 ${TEST_IDENTITY}\n${".".repeat(4090)}`, { mode: 0o600 });
 		const store = createCealReceiptSpoolStore(home);
 		for (let count = 4090; count < 4096; count += 1) await store.recordDrop();
-		assert.deepEqual((await store.load()).drops, { count: 4096, atLeast: true });
+		assert.deepEqual((await requireState(store.load)).drops, { count: 4096, atLeast: true });
 		assert.equal(readFileSync(dropsFile(home), "utf8").split("\n")[1].length, 4096);
 	});
 });
@@ -384,7 +413,7 @@ test("production append and drop lock budgets settle with their documented outco
 	});
 });
 
-function writeLiveLock(home, name, nonceCharacter) {
+function writeLiveLock(home: string, name: string, nonceCharacter: string): void {
 	const lockPath = path.join(home, ".ceal", name);
 	mkdirSync(lockPath, { mode: 0o700 });
 	writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: process.pid, nonce: nonceCharacter.repeat(32) })}\n`, {
@@ -402,7 +431,7 @@ test("the drop counter is bounded and never becomes a failure of its own", async
 		// receipt this client tried to record was lost. Reporting that as "no
 		// calls yet" would be the strongest false claim this page can make, so the
 		// store answers with an empty history that still carries its drop count.
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.deepEqual(state.entries, []);
 		assert.deepEqual(state.drops, { count: 4096, atLeast: true }, "past the cap the count is reported as a floor, not grown further");
 	});
@@ -415,7 +444,7 @@ test("the drop counter is bounded and never becomes a failure of its own", async
 		await store.recordDrop();
 		// The spool still reads, and the uncountable drop reads as no count rather
 		// than as a thrown store error that would take `ceal observe` down.
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.deepEqual(state.entries, [entry()]);
 		assert.deepEqual(state.drops, { count: 0, atLeast: false });
 	});
@@ -443,7 +472,7 @@ test("the drop counter refuses a symlinked path and survives a drifted mode", as
 		await store.recordDrop();
 		chmodSync(dropsFile(home), 0o644);
 		await store.recordDrop();
-		assert.equal((await store.load()).drops.count, 2, "a mode-drifted counter must keep counting rather than go silent");
+		assert.equal((await requireState(store.load)).drops.count, 2, "a mode-drifted counter must keep counting rather than go silent");
 		assert.equal(statSync(dropsFile(home)).mode & 0o777, 0o600, "and must be repaired to owner-only");
 	});
 	await withHome(async (home) => {
@@ -457,7 +486,7 @@ test("the drop counter refuses a symlinked path and survives a drifted mode", as
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await store.recordDrop();
 		chmodSync(path.join(home, ".ceal"), 0o755);
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.equal(state.drops.count, 1, "a widened store directory must not silently zero the drop count");
 		assert.equal(state.spoolPresent, false);
 	});
@@ -470,7 +499,7 @@ test("a real spool emptied by retention is not reported as a spool that never ex
 		await store.recordDrop();
 		// Same file, read far enough in the future that every entry has aged out.
 		const dormant = createCealReceiptSpoolStore(home, () => BASE_TIME + RECEIPT_SPOOL_RETENTION_MS + 1);
-		const state = await dormant.load();
+		const state = await requireState(dormant.load);
 		assert.deepEqual(state.entries, []);
 		assert.equal(state.drops.count, 1);
 		assert.equal(state.spoolPresent, true, "the spool file exists; only its window is empty");
@@ -478,7 +507,7 @@ test("a real spool emptied by retention is not reported as a spool that never ex
 	await withHome(async (home) => {
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await store.recordDrop();
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.deepEqual(state.entries, []);
 		assert.equal(state.spoolPresent, false, "no spool file was ever written, which is the far stronger claim");
 	});
@@ -487,7 +516,7 @@ test("a real spool emptied by retention is not reported as a spool that never ex
 test("receipt spool load reports a present-but-unusable file while append still soft-misses", async () => {
 	// load throws so the observer can render `unreadable` instead of an empty
 	// history; append treats the same anomaly as a miss and keeps recording.
-	const anomalies = [
+	const anomalies: Array<[string, number]> = [
 		["{ not json", 0o600],
 		[JSON.stringify({ schema_version: "wrong", entries: [] }), 0o600],
 		[JSON.stringify({ schema_version: "ceal.receipt_spool.v1", entries: [] }), 0o644],
@@ -503,7 +532,7 @@ test("receipt spool load reports a present-but-unusable file while append still 
 		writeFileSync(spoolFile(home), "{ not json", { mode: 0o600 });
 		const store = createCealReceiptSpoolStore(home, () => BASE_TIME);
 		await store.append(entry());
-		assert.deepEqual((await store.load()).entries, [entry()]);
+		assert.deepEqual((await requireState(store.load)).entries, [entry()]);
 	});
 });
 
@@ -531,12 +560,20 @@ test("a safe legacy spool is never attributed to the current session", async () 
 
 		const current = entry({ requestRef: "narnia:current:receipt" });
 		await store.append(current);
-		assert.deepEqual((await store.load()).entries, [current]);
-		const persisted = JSON.parse(readFileSync(spoolFile(home), "utf8"));
+		assert.deepEqual((await requireState(store.load)).entries, [current]);
+		const persisted: unknown = JSON.parse(readFileSync(spoolFile(home), "utf8"));
+		assert.ok(typeof persisted === "object" && persisted !== null);
+		assert.ok("schema_version" in persisted);
+		assert.ok("identity" in persisted);
+		assert.ok("entries" in persisted && Array.isArray(persisted.entries));
 		assert.equal(persisted.schema_version, "ceal.receipt_spool.v2");
 		assert.equal(persisted.identity, TEST_IDENTITY);
 		assert.deepEqual(
-			persisted.entries.map((value) => value.request_ref),
+			persisted.entries.map((value) => {
+				assert.ok(typeof value === "object" && value !== null);
+				assert.ok("request_ref" in value && typeof value.request_ref === "string");
+				return value.request_ref;
+			}),
 			[current.requestRef],
 		);
 	});
@@ -558,14 +595,14 @@ test("a repairable mode on the spool does not cost the history it holds", async 
 		const appended = entry({ requestRef: "req-d" });
 		await store.append(appended);
 		assert.deepEqual(
-			(await store.load()).entries.map((item) => item.requestRef),
+			(await requireState(store.load)).entries.map((item) => item.requestRef),
 			[...earlier.map((item) => item.requestRef), appended.requestRef],
 			"the earlier receipts were discarded over a mode bit",
 		);
 		// And the write repaired the anomaly rather than propagating it, so `load`
 		// stops reporting the file as unusable.
 		assert.equal(statSync(spoolFile(home)).mode & 0o777, 0o600);
-		assert.equal((await store.load()).drops.count, 0, "no drop was recorded, so a silent loss here would be invisible");
+		assert.equal((await requireState(store.load)).drops.count, 0, "no drop was recorded, so a silent loss here would be invisible");
 	});
 });
 
@@ -590,7 +627,7 @@ test("receipt spool drops individually invalid entries without losing the rest",
 			audit_refs: [],
 		});
 		writeFileSync(file, JSON.stringify(parsed), { mode: 0o600 });
-		const state = await store.load();
+		const state = await requireState(store.load);
 		assert.deepEqual(state.entries, [entry()]);
 	});
 });
@@ -706,7 +743,7 @@ test("call-result projection keeps only allowlisted metadata and skips receipt-l
 	);
 });
 
-function storedIdentitySession() {
+function storedIdentitySession(): CealStoredSession {
 	return {
 		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
 		profileRef: "profile:test",
@@ -723,16 +760,16 @@ function storedIdentitySession() {
 	};
 }
 
-function dropsFile(home) {
+function dropsFile(home: string): string {
 	return path.join(home, ".ceal", "receipt-spool-drops");
 }
 
-function spoolFile(home) {
+function spoolFile(home: string): string {
 	mkdirSync(path.join(home, ".ceal"), { mode: 0o700, recursive: true });
 	return path.join(home, ".ceal", "receipt-spool.json");
 }
 
-async function withHome(callback) {
+async function withHome(callback: (home: string) => Promise<void>): Promise<void> {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-receipt-spool-"));
 	try {
 		await callback(home);

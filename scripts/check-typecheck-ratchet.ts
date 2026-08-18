@@ -13,6 +13,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isStringArray } from "./lib/string-array.ts";
 
 export type ProjectName = "packages" | "tools" | "tests";
 
@@ -65,6 +66,7 @@ export function isKnownContinuation(line: string): boolean {
 		new RegExp(`^Property ${IDENTIFIER} does not exist on type ${TYPE_EXPRESSION}[.]$`, "u"),
 		/^Target signature provides too few arguments[.] Expected \d+ or more, but got \d+[.]$/u,
 		/^The last overload gave the following error[.]$/u,
+		new RegExp(`^Type ${TYPE_EXPRESSION} is missing the following properties from type ${TYPE_EXPRESSION}: [^\\r\\n]+$`, "u"),
 		new RegExp(`^The types of (?:property ${IDENTIFIER}|${IDENTIFIER}) are incompatible(?: between these types)?[.]$`, "u"),
 		/^The types returned by [^\r\n]+ are incompatible(?: between these types)?[.]$/u,
 		new RegExp(
@@ -184,10 +186,6 @@ function validateProject(value: unknown, config: string, name: ProjectName): Bas
 		diagnosticsByFile[file] = diagnostics;
 	}
 	return { config, files, diagnosticsByFile };
-}
-
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function emptyBaseline(): TypecheckBaseline {

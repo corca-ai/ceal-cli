@@ -40,6 +40,8 @@ const WORKER_CONTRACT_TESTS = [
 	"test/contract/probe-surface.test.ts",
 	"test/contract/production-reachability.test.ts",
 	"test/contract/protocol-vendor-pin.test.ts",
+	"test/contract/read-json.test.ts",
+	"test/contract/release-helpers.test.ts",
 	"test/contract/repo-build.test.ts",
 	"test/contract/repo-gates.test.ts",
 	"test/contract/safe-output-path.test.ts",
@@ -64,7 +66,90 @@ const WORKER_RELEASE_TESTS = [
 	"test/worker-release-package.test.ts",
 ];
 
-function testFilesIn(script) {
+type JsonRecord = Record<string, unknown>;
+type ScriptMap = Record<string, string>;
+type WorkflowWith = JsonRecord & { name?: string; "node-version"?: string; "node-version-file"?: string };
+type WorkflowStep = { name?: string; run?: string; uses?: string; with?: WorkflowWith; env?: JsonRecord };
+type WorkflowMatrixEntry = {
+	runner?: string;
+	os?: string;
+	require_platform_proofs?: string;
+	platform?: string;
+	validate_source?: string;
+};
+type WorkflowJob = {
+	steps: WorkflowStep[];
+	environment?: string;
+	env?: JsonRecord;
+	if?: string;
+	needs?: string | string[];
+	strategy?: { matrix?: { include?: WorkflowMatrixEntry[] } };
+	"runs-on"?: string;
+	"timeout-minutes"?: number;
+};
+type WorkflowTriggers = {
+	push?: { branches?: string[]; tags?: string[] };
+	pull_request?: { branches?: string[] };
+	workflow_dispatch?: unknown;
+};
+type Workflow = { jobs: Record<string, WorkflowJob>; on?: WorkflowTriggers };
+type WorkflowBundle = { worker: Workflow; rollback: Workflow };
+type PackageLockEntry = { optionalDependencies?: Record<string, string> };
+type PackageLock = { packages: Record<string, PackageLockEntry> };
+type ClassifierEnv = { EVENT?: string; BEFORE?: string; HEAD_SHA?: string; BASE_REF?: string };
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isJsonRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isWorkflow(value: unknown): value is Workflow {
+	if (!isJsonRecord(value) || !isJsonRecord(value.jobs)) return false;
+	return Object.values(value.jobs).every(
+		(job) =>
+			isJsonRecord(job) &&
+			Array.isArray(job.steps) &&
+			job.steps.every((step) => isJsonRecord(step)) &&
+			(!job.if || typeof job.if === "string") &&
+			(!job.needs || typeof job.needs === "string" || (Array.isArray(job.needs) && job.needs.every((need) => typeof need === "string"))),
+	);
+}
+
+function isWorkflowBundle(value: unknown): value is WorkflowBundle {
+	return isJsonRecord(value) && isWorkflow(value.worker) && isWorkflow(value.rollback);
+}
+
+function parseWorkflow(source: string): Workflow {
+	const value = parse(source);
+	if (!isWorkflow(value)) throw new TypeError("workflow must contain typed jobs");
+	return value;
+}
+
+function parsePackageLock(source: string): PackageLock {
+	const value: unknown = JSON.parse(source);
+	if (!isJsonRecord(value) || !isJsonRecord(value.packages)) throw new TypeError("package-lock.json must contain packages");
+	const packages: Record<string, PackageLockEntry> = {};
+	for (const [name, entry] of Object.entries(value.packages)) {
+		if (!isJsonRecord(entry)) throw new TypeError(`package-lock entry is not an object: ${name}`);
+		const optionalDependencies = entry.optionalDependencies;
+		if (optionalDependencies !== undefined && !isStringRecord(optionalDependencies)) {
+			throw new TypeError(`package-lock optionalDependencies is not an object: ${name}`);
+		}
+		packages[name] = { optionalDependencies };
+	}
+	return { packages };
+}
+
+function requireValue<T>(value: T | undefined, message: string): T {
+	assert.ok(value, message);
+	if (value === undefined) throw new TypeError(message);
+	return value;
+}
+
+function testFilesIn(script: string | undefined): string[] {
 	return (script ?? "")
 		.split(/\s+/u)
 		.filter((token) => token.endsWith(".test.mjs") || token.endsWith(".test.ts"))
@@ -74,7 +159,7 @@ function testFilesIn(script) {
 const CONTRACT_LANE_DELIMITER = " && node --test ";
 const PROJECTION_TEST = "test/contract/leased-consumer-control-conformance-projection.test.ts";
 
-function assertSourceLaneTestOwnership(script, testFile) {
+function assertSourceLaneTestOwnership(script: string, testFile: string): void {
 	const segments = script.split(CONTRACT_LANE_DELIMITER);
 	assert.equal(segments.length, 2, "test:contract must have exactly one source/artifact lane delimiter");
 	const occurrences = testFilesIn(script).filter((file) => file === testFile);
@@ -83,7 +168,7 @@ function assertSourceLaneTestOwnership(script, testFile) {
 	assert.ok(!testFilesIn(segments[1]).includes(testFile), `${testFile} must not execute through plain node`);
 }
 
-function assertContractGateScriptShape(scripts) {
+function assertContractGateScriptShape(scripts: ScriptMap): void {
 	assert.equal(
 		scripts["test:contract"],
 		"npm run build && npm run test:contract:built",
@@ -115,11 +200,11 @@ function assertContractGateScriptShape(scripts) {
 	}
 }
 
-function assertTestInventoryCoverage(declared, actual) {
+function assertTestInventoryCoverage(declared: readonly string[], actual: readonly string[]): void {
 	assert.deepEqual([...declared].sort(), [...actual].sort());
 }
 
-function searchableWorktreeFiles(repoRoot) {
+function searchableWorktreeFiles(repoRoot: string): string[] {
 	return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
 		cwd: repoRoot,
 		encoding: "buffer",
@@ -131,7 +216,7 @@ function searchableWorktreeFiles(repoRoot) {
 		.filter((file) => existsSync(path.join(repoRoot, file)));
 }
 
-function read(relative) {
+function read(relative: string): string {
 	return readFileSync(path.join(ROOT, relative), "utf8");
 }
 
@@ -145,7 +230,7 @@ function read(relative) {
  * the filter and the accumulator — which is exactly the difference this
  * parameter is.
  */
-function filesUnder(directory, matches) {
+function filesUnder(directory: string, matches: (name: string) => boolean): string[] {
 	if (!existsSync(path.join(ROOT, directory))) return [];
 	const found = [];
 	for (const entry of readdirSync(path.join(ROOT, directory), { withFileTypes: true })) {
@@ -163,13 +248,13 @@ function runnerSource() {
 	return read("scripts/coverage-scripts.ts");
 }
 
-function workflowPaths() {
+function workflowPaths(): string[] {
 	return readdirSync(path.join(ROOT, ".github/workflows"))
 		.filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
 		.map((name) => path.join(".github/workflows", name));
 }
 
-function checkedWorkflowPaths() {
+function checkedWorkflowPaths(): string[] {
 	const paths = workflowPaths();
 	assert.ok(paths.length >= 3, `only ${paths.length} workflows found; the scan is not reaching .github/workflows`);
 	return paths;
@@ -180,22 +265,22 @@ function checkedWorkflowPaths() {
 // `run:` — to export one env var, say — then made one of them vacuous and the
 // other fail claiming the lane does not run the gate at all. One line-wise
 // predicate, so the two can no longer disagree about what they are looking at.
-function runsFinalGate(step) {
+function runsFinalGate(step: WorkflowStep): boolean {
 	return (step.run ?? "").split("\n").some((line) => line.trim() === "npm run check");
 }
 
-function namedStep(job, name) {
+function namedStep(job: WorkflowJob, name: string): WorkflowStep {
 	const step = (job.steps ?? []).find((candidate) => candidate.name === name);
 	assert.ok(step, `missing workflow step: ${name}`);
 	return step;
 }
 
-function assertRunContains(step, fragments) {
+function assertRunContains(step: WorkflowStep, fragments: readonly string[]): void {
 	const source = step.run ?? "";
 	for (const fragment of fragments) assert.ok(source.includes(fragment), `${step.name} must contain: ${fragment}`);
 }
 
-function assertNoCheckedOutSource(job, label) {
+function assertNoCheckedOutSource(job: WorkflowJob, label: string): void {
 	assert.equal(
 		(job.steps ?? []).some((step) => (step.uses ?? "").startsWith("actions/checkout")),
 		false,
@@ -208,11 +293,13 @@ function assertNoCheckedOutSource(job, label) {
 	);
 }
 
-function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
+function assertPrivilegedReleaseBoundaries(input: unknown): void {
+	if (!isWorkflowBundle(input)) throw new TypeError("release workflows must contain typed jobs");
+	const { worker, rollback } = input;
 	const publish = worker.jobs["sign-and-publish"];
 	assert.equal(publish.environment, "ceal-cli-release");
-	assert.equal(publish.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
-	assert.equal(publish.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assert.equal(publish.env?.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(publish.env?.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(publish, "the OIDC-capable worker publish job");
 	assertRunContains(namedStep(publish, "Verify same-run worker release binding"), [
 		'[ "$GITHUB_REF_TYPE" = "tag" ]',
@@ -225,7 +312,7 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 		"sha256sum -c SHA256SUMS",
 	]);
 	assert.equal(
-		namedStep(publish, "Download exact assembled release handoff").with.name,
+		namedStep(publish, "Download exact assembled release handoff").with?.name,
 		"ceal-worker-release-${{ github.sha }}",
 		"worker publish must download only this run's assembled handoff",
 	);
@@ -234,15 +321,15 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 	const activate = rollback.jobs.activate;
 	assert.equal(activate.environment, "ceal-cli-release");
 	assert.equal(activate.needs, "verify");
-	assert.equal(activate.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
-	assert.equal(activate.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assert.equal(activate.env?.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(activate.env?.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(activate, "the release-origin rollback job");
 	assertRunContains(namedStep(activate, "Verify same-run rollback binding"), [
 		'[ -n "$GITHUB_SHA" ]',
 		'[ -n "$VERIFIED_SHA256SUMS_SHA256" ]',
 	]);
 	assert.equal(
-		namedStep(activate, "Download the verified rollback handoff").with.name,
+		namedStep(activate, "Download the verified rollback handoff").with?.name,
 		"ceal-worker-rollback-${{ github.sha }}",
 		"rollback activation must download only this run's verified handoff",
 	);
@@ -265,7 +352,7 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }) {
 test("workflows that exercise release proofs retain historical tags", () => {
 	let exercisingJobs = 0;
 	for (const workflowPath of workflowPaths()) {
-		const workflow = parse(read(workflowPath));
+		const workflow = parseWorkflow(read(workflowPath));
 		for (const [jobName, job] of Object.entries(workflow.jobs)) {
 			const steps = job.steps ?? [];
 			const exercisesReleaseProof = steps.some(
@@ -368,7 +455,7 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	assert.equal(workerPackage.scripts.pretest, undefined);
 	assert.equal(workerPackage.scripts.precoverage, undefined);
 	assertContractGateScriptShape(manifest.scripts);
-	for (const file of filesUnder("packages/ceal-client/test", (name) => name.endsWith(".test.ts"))) {
+	for (const file of filesUnder("packages/ceal-client/test", (name: string) => name.endsWith(".test.ts"))) {
 		assert.doesNotMatch(read(file), /["'][.][.]\/dist\//u, `${file} must import editable source, not checkout dist`);
 	}
 	const artifactBuilder = read("test/artifact-workspace.ts");
@@ -487,8 +574,8 @@ test("the lockfile carries a toolchain for every platform the lanes run on", () 
 	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
 	const runners = new Set(
 		workflows.flatMap((name) =>
-			Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {}).flatMap((job) =>
-				[job["runs-on"], ...(job.strategy?.matrix?.include ?? []).map((entry) => entry.runner ?? entry.os)]
+			Object.values(parseWorkflow(read(path.join(".github", "workflows", name))).jobs).flatMap((job) =>
+				[job["runs-on"], ...(job.strategy?.matrix?.include ?? []).map((entry: WorkflowMatrixEntry) => entry.runner ?? entry.os)]
 					.filter((value) => typeof value === "string" && !value.includes("${{"))
 					.map(String),
 			),
@@ -506,7 +593,7 @@ test("the lockfile carries a toolchain for every platform the lanes run on", () 
 	);
 	assert.ok(required.size >= 2, `only ${required.size} platform derived from ${runners.size} runners; this check would be near-vacuous`);
 
-	const lock = JSON.parse(read("package-lock.json"));
+	const lock = parsePackageLock(read("package-lock.json"));
 	const present = new Set(Object.keys(lock.packages));
 	// Every optional dependency any package declares whose *name* carries one of
 	// those platforms. The name is what npm resolves against, so a missing entry
@@ -542,7 +629,7 @@ test("the linter and formatter both run, and both exclude the frozen package", (
 	// a removed exclusion.
 	const frozen = "packages/ceal-protocol";
 	assert.ok(
-		biome.files.includes.some((pattern) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
+		biome.files.includes.some((pattern: string) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
 		`biome.json must exclude the frozen package ${frozen}`,
 	);
 });
@@ -604,7 +691,7 @@ const HARMLESS_PIPE_PRODUCER = /^(printf|echo|cat|ls|find|yes|seq|sort)$/u;
 // a command named `a[@]}"` — so an argument could decide whether its own command
 // counted as harmless. `$(` still splits, because what follows it really is a
 // fresh command.
-function lastCommand(segment) {
+function lastCommand(segment: string): string {
 	const tail = segment.split(/\$\(|&&|\|\||;|(?<!\$)\{|(?<!\$)\(/u).pop() ?? "";
 	return tail.trim().split(/\s+/u)[0] ?? "";
 }
@@ -614,12 +701,12 @@ function lastCommand(segment) {
  * here so they cannot come to disagree about what a run block is, and each half
  * supplies only the per-line judgement that is actually its own.
  */
-function forEachWorkflowRunBlock(visit) {
+function forEachWorkflowRunBlock(visit: (step: WorkflowStep, where: string) => void): void {
 	const workflows = readdirSync(path.join(ROOT, ".github", "workflows")).filter((name) => name.endsWith(".yml"));
 	assert.ok(workflows.length >= 3, `only ${workflows.length} workflows scanned; the sweep is not reaching .github/workflows`);
 	let scanned = 0;
 	for (const name of workflows) {
-		for (const job of Object.values(parse(read(path.join(".github", "workflows", name))).jobs ?? {})) {
+		for (const job of Object.values(parseWorkflow(read(path.join(".github", "workflows", name))).jobs)) {
 			for (const step of job.steps ?? []) {
 				if (typeof step.run !== "string") continue;
 				scanned += 1;
@@ -631,7 +718,7 @@ function forEachWorkflowRunBlock(visit) {
 }
 
 test("every workflow run block that reads a pipeline's status asks for pipefail", () => {
-	const offenders = [];
+	const offenders: string[] = [];
 	forEachWorkflowRunBlock((step, where) => {
 		// Only a pipe whose LEFT side can fail meaningfully matters. A `printf`
 		// or `find` on the left cannot, which is why the two workflows that
@@ -646,7 +733,8 @@ test("every workflow run block that reads a pipeline's status asks for pipefail"
 		// sits — a producer that cannot meaningfully fail carries no status to
 		// lose, and it is just as often inside `$( )` as at the start of a
 		// line. Reading only the line start exempted the wrong things.
-		const risky = step.run
+		const run = requireValue(step.run, `${where} has no run script`);
+		const risky = run
 			.split("\n")
 			.filter((line) => !/^\s*#/u.test(line))
 			.filter((line) =>
@@ -656,7 +744,7 @@ test("every workflow run block that reads a pipeline's status asks for pipefail"
 					.some((left) => !HARMLESS_PIPE_PRODUCER.test(lastCommand(left))),
 			);
 		if (risky.length === 0) return;
-		if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(step.run)) {
+		if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(run)) {
 			offenders.push(`${where} :: ${risky[0].trim()}`);
 		}
 	});
@@ -678,8 +766,8 @@ test("every workflow run block that reads a pipeline's status asks for pipefail"
 // pipeline, using the pipe sweep's own harmless-producer vocabulary, so
 // `<(printf x | node …)` is an offender even though its head is harmless.
 /** Every process-substitution body in one run block, each read to its matching paren. */
-function processSubstitutions(run) {
-	const bodies = [];
+function processSubstitutions(run: string): string[] {
+	const bodies: string[] = [];
 	for (let index = run.indexOf("<("); index !== -1; index = run.indexOf("<(", index + 2)) {
 		if (/^\s*#/u.test(run.slice(run.lastIndexOf("\n", index) + 1, index))) continue;
 		let depth = 1;
@@ -695,9 +783,9 @@ function processSubstitutions(run) {
 }
 
 test("no workflow run block reads a producer's output through a process substitution", () => {
-	const offenders = [];
+	const offenders: string[] = [];
 	forEachWorkflowRunBlock((step, where) => {
-		for (const body of processSubstitutions(step.run)) {
+		for (const body of processSubstitutions(requireValue(step.run, `${where} has no run script`))) {
 			const stages = body.split(" | ").map((stage) => lastCommand(stage));
 			if (stages.every((stage) => HARMLESS_PIPE_PRODUCER.test(stage))) continue;
 			offenders.push(`${where} :: ${body.split("\n")[0].trim()}`);
@@ -728,9 +816,12 @@ test("no workflow run block reads a producer's output through a process substitu
 // Release workflows trigger on tags only, so without this lane the first CI run
 // for a change is its release run — and a failed release tag cannot be reused.
 test("a non-tag CI lane runs the full gate on main", () => {
-	const workflow = parse(read(".github/workflows/check.yml"));
-	assert.deepEqual(workflow.on.push.branches, ["main"]);
-	assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+	const workflow = parseWorkflow(read(".github/workflows/check.yml"));
+	const triggers = requireValue(workflow.on, "check workflow has no triggers");
+	const push = requireValue(triggers.push, "check workflow has no push trigger");
+	const pullRequest = requireValue(triggers.pull_request, "check workflow has no pull_request trigger");
+	assert.deepEqual(push.branches, ["main"]);
+	assert.deepEqual(pullRequest.branches, ["main"]);
 	assert.ok(
 		Object.values(workflow.jobs).some((job) => job.steps.some(runsFinalGate)),
 		"the check workflow must run the same npm run check maintainers run",
@@ -739,7 +830,7 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	// fixture path that is symlinked on macOS and not on Linux therefore first
 	// failed in the tagged run that burned ceal-v0.66.0.
 	const runners = Object.values(workflow.jobs).flatMap((job) => (job.strategy?.matrix?.include ?? []).map((entry) => entry.runner));
-	const releaseRunners = Object.values(parse(read(".github/workflows/ceal-release.yml")).jobs).flatMap((job) =>
+	const releaseRunners = Object.values(parseWorkflow(read(".github/workflows/ceal-release.yml")).jobs).flatMap((job) =>
 		(job.strategy?.matrix?.include ?? []).map((entry) => entry.runner ?? entry.os),
 	);
 	for (const family of ["ubuntu", "macos"]) {
@@ -758,7 +849,8 @@ test("a non-tag CI lane runs the full gate on main", () => {
 	// runner is correct to skip them.
 	const entries = Object.values(workflow.jobs).flatMap((job) => job.strategy?.matrix?.include ?? []);
 	const linux = entries.find((entry) => String(entry.runner).includes("ubuntu"));
-	assert.equal(linux.require_platform_proofs, "1", "the linux gate must require the platform-gated proofs to actually run");
+	const linuxEntry = requireValue(linux, "the check workflow has no ubuntu matrix entry");
+	assert.equal(linuxEntry.require_platform_proofs, "1", "the linux gate must require the platform-gated proofs to actually run");
 	for (const entry of entries.filter((candidate) => !String(candidate.runner).includes("ubuntu"))) {
 		assert.equal(entry.require_platform_proofs, "0", `${entry.runner} cannot build the linux-x64 proofs, so it must not be asked to`);
 	}
@@ -783,7 +875,7 @@ test("a non-tag CI lane runs the full gate on main", () => {
 // protection. So the allowlist is asserted against real paths, not merely
 // asserted to exist.
 test("the check lane may skip a gate only for documentation-only changes", () => {
-	const workflow = parse(read(".github/workflows/check.yml"));
+	const workflow = parseWorkflow(read(".github/workflows/check.yml"));
 	const conditional = Object.entries(workflow.jobs).filter(([, job]) => typeof job.if === "string");
 	// The classifier itself must not be conditional, or the answer every other job
 	// depends on could go unasked.
@@ -792,7 +884,11 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 	for (const [name, job] of conditional) {
 		// The condition must be the classifier's answer rather than anything a
 		// commit message, an actor, or a label could set.
-		assert.match(job.if, /^needs\.scope\.outputs\.code == 'true'$/u, `'${name}' must run on exactly the scope job's verdict`);
+		assert.match(
+			requireValue(job.if, `${name} has no condition`),
+			/^needs\.scope\.outputs\.code == 'true'$/u,
+			`'${name}' must run on exactly the scope job's verdict`,
+		);
 		assert.ok([job.needs].flat().includes("scope"), `'${name}' must depend on the scope job it reads`);
 	}
 	// Every leg that runs the gate has to be reachable on a code change. A job
@@ -814,6 +910,7 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 	// contain the right characters, so this runs it against real paths instead.
 	const pattern = /grep -vE '\^\(([^']+)\)'/u.exec(classify);
 	assert.ok(pattern, "the scope job must exclude documentation with one readable allowlist pattern");
+	if (!pattern) throw new TypeError("scope classifier allowlist was not captured");
 	const documentation = new RegExp(`^(${pattern[1]})`, "u");
 	for (const file of ["docs/handoff.md", "charness-artifacts/x.md", "README.md", "CLAUDE.md"]) {
 		assert.ok(documentation.test(file), `${file} is documentation and should not force the macOS gate`);
@@ -836,10 +933,13 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 	// is the case that makes this worth deriving rather than listing — it is
 	// markdown, and it is a signed release asset.
 	const releaseInputs = JSON.parse(read("worker-release-inputs.json"));
-	const sourcePaths = JSON.stringify(releaseInputs).match(/"source_path":\s*"([^"]+)"/gu) ?? [];
+	const sourcePaths: string[] = JSON.stringify(releaseInputs).match(/"source_path":\s*"([^"]+)"/gu) ?? [];
 	assert.ok(sourcePaths.length > 0, "no release source paths found; this check would be vacuous");
 	for (const entry of sourcePaths) {
-		const source = /"source_path":\s*"([^"]+)"/u.exec(entry)[1];
+		const sourceMatch = /"source_path":\s*"([^"]+)"/u.exec(entry);
+		assert.ok(sourceMatch, `release input has no source_path: ${entry}`);
+		if (!sourceMatch) throw new TypeError(`release input has no source_path: ${entry}`);
+		const source = sourceMatch[1];
 		assert.ok(!documentation.test(source), `${source} is a release input, so a change to it must never be classified as documentation`);
 	}
 	// Fail-open would be the expensive mistake here; fail-closed is the dangerous
@@ -867,7 +967,7 @@ test("the check lane may skip a gate only for documentation-only changes", () =>
 // It is the script text from the YAML, not a copy: a paraphrase here would pass
 // while the lane did something else.
 test("the scope classifier answers documentation-only, code, and every uncertain case", (context) => {
-	const classify = (parse(read(".github/workflows/check.yml")).jobs.scope?.steps ?? []).map((step) => step.run ?? "").join("\n");
+	const classify = (parseWorkflow(read(".github/workflows/check.yml")).jobs.scope?.steps ?? []).map((step) => step.run ?? "").join("\n");
 	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-scope-"));
 	context.after(() => rmSync(scratch, { recursive: true, force: true }));
 	const clone = path.join(scratch, "repo");
@@ -879,19 +979,20 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 	// that ignores `*.mjs` would otherwise get a red gate describing their own
 	// machine rather than this repository.
 	const environment = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
-	const git = (...args) => execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: "pipe", env: environment }).trim();
+	const git = (...args: string[]): string =>
+		execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: "pipe", env: environment }).trim();
 	mkdirSync(path.join(clone, "docs"), { recursive: true });
 	mkdirSync(path.join(clone, "scripts"), { recursive: true });
 	execFileSync("git", ["init", "--quiet", "-b", "main", clone], { stdio: "pipe", env: environment });
 	// Identity on the command line rather than in the config: a CI runner has no
 	// global git identity, and `commit` refuses without one.
-	const commit = (message) => {
+	const commit = (message: string): string => {
 		git("add", "-A");
 		git("-c", "user.email=gate@example.invalid", "-c", "user.name=gate", "commit", "--quiet", "-m", message);
 		return git("rev-parse", "HEAD");
 	};
-	const writeProse = (text) => writeFileSync(path.join(clone, "docs", "handoff.md"), text);
-	const writeCode = (text) => writeFileSync(path.join(clone, "scripts", "build.mjs"), text);
+	const writeProse = (text: string): void => writeFileSync(path.join(clone, "docs", "handoff.md"), text);
+	const writeCode = (text: string): void => writeFileSync(path.join(clone, "scripts", "build.mjs"), text);
 	writeProse("one\n");
 	writeCode("one\n");
 	const seed = commit("seed");
@@ -904,7 +1005,7 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 	writeProse("three\n");
 	const proseAfterCode = commit("docs only, after code");
 
-	const classifyRange = (env) => {
+	const classifyRange = (env: ClassifierEnv): { verdict: string; reason: string } => {
 		const output = path.join(scratch, "github-output");
 		writeFileSync(output, "");
 		const run = spawnSync("bash", [script], {
@@ -959,7 +1060,7 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 
 	// Fail-closed, one arm at a time, each pinned to the reason its own guard
 	// prints. Every one of these is a case the classifier cannot answer.
-	for (const [reason, env] of [
+	const uncertainCases: ReadonlyArray<readonly [RegExp, ClassifierEnv]> = [
 		[/no previous commit to diff against/u, { EVENT: "push", BEFORE: "0".repeat(40), HEAD_SHA: code }],
 		[/the previous commit is not in this clone/u, { EVENT: "push", BEFORE: "d".repeat(40), HEAD_SHA: code }],
 		[/workflow_dispatch carries no diff range/u, { EVENT: "workflow_dispatch", HEAD_SHA: code }],
@@ -968,7 +1069,8 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 		// An empty range should not be reachable, and that is the reason to pin it:
 		// the arm exists to make "should not happen" run the lane rather than skip it.
 		[/the range reports no files/u, { EVENT: "push", BEFORE: code, HEAD_SHA: code }],
-	]) {
+	];
+	for (const [reason, env] of uncertainCases) {
 		const decided = classifyRange(env);
 		assert.equal(decided.verdict, "true", `${reason}: an unclassifiable change must run the gate`);
 		assert.match(decided.reason, reason, "the guard that fired must be the one that owns this case");
@@ -1011,8 +1113,8 @@ test("searchable inventory ignores deleted index paths and includes their untrac
 // a finding without being checked is the vacuous guard this repository keeps
 // removing, so the tag is only allowed where it is true.
 test("every @testOnly export is actually reached by a suite", () => {
-	const isSource = (name) => /\.(ts|mjs)$/u.test(name) && !name.endsWith(".d.ts");
-	const sources = [];
+	const isSource = (name: string): boolean => /\.(ts|mjs)$/u.test(name) && !name.endsWith(".d.ts");
+	const sources: string[] = [];
 	for (const workspace of manifest.workspaces) {
 		if (!existsSync(path.join(ROOT, workspace, "src"))) continue;
 		sources.push(...filesUnder(path.join(workspace, "src"), isSource));
@@ -1031,7 +1133,7 @@ test("every @testOnly export is actually reached by a suite", () => {
 	// regex that silently stopped matching would otherwise turn this test green.
 	assert.ok(tagged.length > 0, "no @testOnly exports found; either the tag is gone or this scan stopped matching");
 
-	const isSuite = (name) => /[.]test[.](?:mjs|ts)$/u.test(name);
+	const isSuite = (name: string): boolean => /[.]test[.](?:mjs|ts)$/u.test(name);
 	const suiteFiles = [...filesUnder("test", isSuite)];
 	for (const workspace of manifest.workspaces) suiteFiles.push(...filesUnder(path.join(workspace, "test"), isSuite));
 	const suites = suiteFiles.map((file) => read(file));
@@ -1148,12 +1250,12 @@ test("the shipped version is derived from the manifests, not retyped into source
 	// AGENTS.md says "nothing else carries the version", so the sweep has to reach
 	// everything that could: it covered only the two `src` trees, which left the
 	// release scripts, the installer, and the workflows free to retype it.
-	const scanned = [];
+	const scanned: string[] = [];
 	for (const root of ["packages/ceal-client/src", "packages/ceal-worker-cli/src", "scripts", ".github/workflows"]) {
 		const directory = path.join(ROOT, root);
-		for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true })) {
+		for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true, encoding: "utf8" })) {
 			if (!entry.isFile() || /[.](?:map|d[.]ts)$/u.test(entry.name)) continue;
-			scanned.push(path.join(root, path.relative(directory, path.join(entry.parentPath ?? entry.path, entry.name))));
+			scanned.push(path.join(root, path.relative(directory, path.join(entry.parentPath, entry.name))));
 		}
 	}
 	scanned.push("install-ceal.sh");
@@ -1172,7 +1274,7 @@ test("the shipped version is derived from the manifests, not retyped into source
 // invariant, not a nicety: a single-shot fetch here spends a tag on a 503.
 test("the release lane retries its public readbacks instead of burning the tag", () => {
 	const release = read(".github/workflows/ceal-release.yml");
-	const script = Object.values(parse(release).jobs)
+	const script = Object.values(parseWorkflow(release).jobs)
 		.flatMap((job) => job.steps ?? [])
 		.map((step) => step.run ?? "")
 		.find((run) => run.includes("fetch_public()"));
@@ -1204,7 +1306,7 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 	// Recursive: this scanned only the top level, so `test/contract/` was never
 	// covered — and a suite moving down there (guide-contract did) walked out of the
 	// gate silently, into the tier where new tests are most likely to land.
-	const suites = readdirSync(path.join(ROOT, "test"), { recursive: true }).filter((name) => name.endsWith(".test.ts"));
+	const suites = readdirSync(path.join(ROOT, "test"), { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".test.ts"));
 	assert.ok(
 		suites.some((suite) => path.dirname(suite) === "contract"),
 		"the scan must reach test/contract/, which is where cheap suites live",
@@ -1230,7 +1332,7 @@ test("every platform-gated proof declares its gap through the shared helper", ()
 // is weaker than a behavioural test and is here because it is the only thing that
 // fails when the call is removed.
 test("every release, packing, and acceptance path still asserts protocol shippability", () => {
-	const read = (relativePath) => readFileSync(path.join(ROOT, relativePath), "utf8");
+	const read = (relativePath: string): string => readFileSync(path.join(ROOT, relativePath), "utf8");
 	for (const [file, why] of [
 		["scripts/worker-release-inputs.ts", "the chokepoint every release, packing, and native-artifact path funnels through"],
 		["scripts/worker-acceptance-packet.ts", "acceptance-candidate emission"],
@@ -1246,7 +1348,7 @@ test("every release, packing, and acceptance path still asserts protocol shippab
 test("every CI lane that runs the gate prewarms the offline consumer cache first", () => {
 	let gateJobs = 0;
 	for (const file of workflowPaths()) {
-		for (const [jobName, job] of Object.entries(parse(read(file)).jobs)) {
+		for (const [jobName, job] of Object.entries(parseWorkflow(read(file)).jobs)) {
 			const steps = job.steps ?? [];
 			const gate = steps.findIndex(runsFinalGate);
 			if (gate === -1) continue;
@@ -1263,9 +1365,9 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 });
 
 test("privileged release jobs consume only same-run unprivileged handoffs", () => {
-	const workflows = {
-		worker: parse(read(".github/workflows/ceal-release.yml")),
-		rollback: parse(read(".github/workflows/ceal-worker-stable-rollback.yml")),
+	const workflows: WorkflowBundle = {
+		worker: parseWorkflow(read(".github/workflows/ceal-release.yml")),
+		rollback: parseWorkflow(read(".github/workflows/ceal-worker-stable-rollback.yml")),
 	};
 	assertPrivilegedReleaseBoundaries(workflows);
 
@@ -1294,8 +1396,9 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 		{
 			name: "worker artifact binding",
 			apply: (candidate) => {
-				namedStep(candidate.worker.jobs["sign-and-publish"], "Download exact assembled release handoff").with.name =
-					"ceal-worker-release-mutated";
+				const handoff = namedStep(candidate.worker.jobs["sign-and-publish"], "Download exact assembled release handoff").with;
+				assert.ok(handoff);
+				handoff.name = "ceal-worker-release-mutated";
 			},
 		},
 		{
@@ -1309,7 +1412,9 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 		{
 			name: "rollback artifact binding",
 			apply: (candidate) => {
-				namedStep(candidate.rollback.jobs.activate, "Download the verified rollback handoff").with.name = "ceal-worker-rollback-mutated";
+				const handoff = namedStep(candidate.rollback.jobs.activate, "Download the verified rollback handoff").with;
+				assert.ok(handoff);
+				handoff.name = "ceal-worker-rollback-mutated";
 			},
 		},
 		{
@@ -1400,7 +1505,7 @@ test("every workflow pins every action to a full commit SHA", () => {
 test("every workflow job this lane owns bounds its own runtime", () => {
 	let bounded = 0;
 	for (const workflowPath of checkedWorkflowPaths()) {
-		const jobs = Object.entries(parse(read(workflowPath)).jobs ?? {});
+		const jobs = Object.entries(parseWorkflow(read(workflowPath)).jobs);
 		const name = path.basename(workflowPath);
 		// A file that parses to zero jobs would satisfy the loop trivially, which
 		// is how this kind of sweep goes quietly vacuous after a restructure.
@@ -1423,7 +1528,7 @@ test("every workflow job this lane owns bounds its own runtime", () => {
 // not, so the lane those proofs exist to describe was the weaker gate of the two
 // — and its failures are the ones that burn a tag.
 test("the release lane demands the platform proofs its own artifacts depend on", () => {
-	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	const workflow = parseWorkflow(read(".github/workflows/ceal-release.yml"));
 	const gate = Object.values(workflow.jobs)
 		.flatMap((job) => job.steps ?? [])
 		.find(runsFinalGate);
@@ -1447,9 +1552,11 @@ test("the release lane demands the platform proofs its own artifacts depend on",
 // like a successful run. Both halves are asserted: which jobs are push-only, and
 // that no other job reaches a publishing tool.
 test("the release lane's dispatch is a dry run that cannot sign, upload, or move stable", () => {
-	const workflow = parse(read(".github/workflows/ceal-release.yml"));
-	assert.ok(workflow.on.workflow_dispatch !== undefined, "the release lane must keep a dispatch that can be exercised without a tag");
-	assert.deepEqual(workflow.on.push.tags, ["ceal-v*.*.*"], "the publishing trigger stays tag-only");
+	const workflow = parseWorkflow(read(".github/workflows/ceal-release.yml"));
+	const triggers = requireValue(workflow.on, "release workflow has no triggers");
+	assert.ok(triggers.workflow_dispatch !== undefined, "the release lane must keep a dispatch that can be exercised without a tag");
+	const push = requireValue(triggers.push, "release workflow has no push trigger");
+	assert.deepEqual(push.tags, ["ceal-v*.*.*"], "the publishing trigger stays tag-only");
 
 	const pushOnly = Object.entries(workflow.jobs).filter(([, job]) => String(job.if ?? "").includes("github.event_name == 'push'"));
 	const dispatchable = Object.entries(workflow.jobs).filter(([name]) => !pushOnly.some(([guarded]) => guarded === name));
@@ -1484,7 +1591,7 @@ test("the release lane's dispatch is a dry run that cannot sign, upload, or move
 // either one without any run turning red, because a skipped step reports
 // success. Both are asserted here rather than left to the comment.
 test("the release lane still validates its source on the platforms that can prove it", () => {
-	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	const workflow = parseWorkflow(read(".github/workflows/ceal-release.yml"));
 	const entries = Object.values(workflow.jobs).flatMap((job) => job.strategy?.matrix?.include ?? []);
 	const validating = entries.filter((entry) => String(entry.validate_source) === "1");
 	assert.ok(validating.length > 0, "at least one release leg must run the full gate; a tag is otherwise built from unproven source");
@@ -1528,15 +1635,16 @@ test("the check lane and the release lane pin the same Node", () => {
 	assert.match(pinned, /^\d+\.\d+\.\d+$/u);
 	assert.match(manifest.engines.node, /^>=/u);
 
-	const checkSetup = Object.values(parse(read(".github/workflows/check.yml")).jobs)
+	const checkSetup = Object.values(parseWorkflow(read(".github/workflows/check.yml")).jobs)
 		.flatMap((job) => job.steps ?? [])
 		.find((step) => (step.uses ?? "").startsWith("actions/setup-node"));
-	assert.equal(checkSetup.with["node-version-file"], ".nvmrc");
+	const setup = requireValue(checkSetup, "check workflow has no setup-node step");
+	assert.equal(requireValue(setup.with, "check setup-node step has no with block")["node-version-file"], ".nvmrc");
 
-	const releaseVersions = Object.values(parse(read(".github/workflows/ceal-release.yml")).jobs)
+	const releaseVersions = Object.values(parseWorkflow(read(".github/workflows/ceal-release.yml")).jobs)
 		.flatMap((job) => job.steps ?? [])
 		.filter((step) => (step.uses ?? "").startsWith("actions/setup-node"))
-		.map((step) => String(step.with["node-version"]));
+		.map((step) => String(requireValue(step.with, "release setup-node step has no with block")["node-version"]));
 	assert.ok(releaseVersions.length > 0, "the release lane must pin a Node version");
 	for (const version of releaseVersions) {
 		assert.equal(version, pinned, "ceal-release.yml and .nvmrc must pin the same Node");
@@ -1603,7 +1711,7 @@ test("the pre-push hook propagates the gate's exit code and never blocks on its 
 	const stub = path.join(bin, "npm");
 	const nodeStub = path.join(bin, "node");
 	const timingLog = path.join(scratch, "timing", "command-timing.jsonl");
-	const runHook = (refLine, exitCode) => {
+	const runHook = (refLine: string, exitCode: number) => {
 		writeFileSync(stub, `#!/bin/sh\nexit ${exitCode}\n`, { mode: 0o755 });
 		writeFileSync(nodeStub, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 		// Git runs a hook from the checkout root, so exercise the checked-in bytes in
@@ -1677,10 +1785,11 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 	// Which files each suite runs is the claim; the argument order and spacing of
 	// the `node --test` line are not. Exact equality made a reporter flag or a
 	// reordering fail as if a suite had lost coverage.
-	for (const [suite, declared] of [
+	const suites: ReadonlyArray<readonly [string, readonly string[]]> = [
 		["test:contract", WORKER_CONTRACT_TESTS],
 		["test:release", WORKER_RELEASE_TESTS],
-	]) {
+	];
+	for (const [suite, declared] of suites) {
 		const suiteScript = suite === "test:contract" ? scripts["test:contract:built"] : scripts[suite];
 		// The file set is the claim, but both lanes still have to use the Node test
 		// runner. Contract behavior begins in the source-authoritative wrapper;
@@ -1707,13 +1816,14 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 	// anything *called* it — only what it was — so deleting it from `test` took
 	// both packages' coverage floors out of `npm run check`, and out of
 	// `check.yml`, with every gate green.
-	for (const [hop, reaches] of [
+	const hops: ReadonlyArray<readonly [string, RegExp]> = [
 		["test", /npm run test:unit\b/u],
 		["test", /npm run coverage:scripts/u],
 		["coverage:scripts", /^node scripts\/coverage-scripts[.]ts$/u],
 		["test:tiers", /npm run test:contract/u],
 		["test:tiers", /npm run test:release/u],
-	]) {
+	];
+	for (const [hop, reaches] of hops) {
 		assert.match(scripts[hop], reaches, `${hop} must still reach ${reaches.source}, or the final gate stops running a suite`);
 	}
 	// Joined with `&&`, so a red suite stops the chain. A `;` or `||` join would

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { isStringArray } from "./lib/string-array.ts";
 import { isStringMap } from "./lib/string-map.ts";
 import { writeIfChanged } from "./lib/write-if-changed.ts";
 import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-consumer-call-handoff.ts";
@@ -81,10 +82,6 @@ type ProjectionContract = JsonRecord & {
 	gateway: JsonRecord & { routes: Record<string, string> };
 	gateway_protocol_handoff?: JsonRecord;
 };
-
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((entry): entry is string => typeof entry === "string");
-}
 
 function isContractEnvelope(value: unknown): value is ContractEnvelope {
 	return isJsonRecord(value) && typeof value.schema_version === "string" && isStringArray(value.argv) && isStringArray(value.non_claims);

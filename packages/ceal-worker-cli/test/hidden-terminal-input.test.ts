@@ -2,50 +2,93 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import test from "node:test";
 import { readHiddenTerminalEnrollmentCode } from "../dist/hidden-terminal-input.js";
+import type { HiddenInputStatusStream, HiddenInputStream } from "../src/hidden-terminal-input.js";
+
+type DataListener = (chunk: string | Buffer) => void;
+type EndListener = () => void;
+type FakeTtyOverrides = Partial<Pick<HiddenInputStream, "isTTY" | "isRaw">>;
+
+interface FakeTtyCalls {
+	resume: number;
+	pause: number;
+	setRawMode: boolean[];
+}
+
+interface FakeTty extends HiddenInputStream {
+	_calls: FakeTtyCalls;
+	_listeners: { data: DataListener[]; end: EndListener[] };
+	emit(event: "data", ...args: [string | Buffer]): void;
+	emit(event: "end"): void;
+}
+
+function isDataListener(event: "data" | "end", listener: DataListener | EndListener): listener is DataListener {
+	return event === "data";
+}
 
 // A structural stand-in for a raw-mode TTY stream that records the lifecycle
 // calls a real `process.stdin` would receive, so the handle-release contract is
 // testable without allocating a pseudo-terminal.
-function fakeTty(overrides = {}) {
-	const listeners = { data: [], end: [] };
-	const calls = { resume: 0, pause: 0, setRawMode: [] };
-	return {
-		isTTY: true,
-		isRaw: false,
-		setRawMode(mode) {
-			calls.setRawMode.push(mode);
-			this.isRaw = mode;
-		},
-		resume() {
-			calls.resume += 1;
-		},
-		pause() {
-			calls.pause += 1;
-		},
-		on(event, fn) {
-			listeners[event].push(fn);
-		},
-		once(event, fn) {
-			listeners[event].push(fn);
-		},
-		off(event, fn) {
-			listeners[event] = listeners[event].filter((listener) => listener !== fn);
-		},
-		emit(event, ...args) {
-			for (const fn of [...listeners[event]]) fn(...args);
-		},
-		_calls: calls,
-		_listeners: listeners,
-		...overrides,
-	};
+class FakeTtyStream implements FakeTty {
+	isTTY = true;
+	isRaw = false;
+	readonly _calls: FakeTtyCalls = { resume: 0, pause: 0, setRawMode: [] };
+	readonly _listeners: FakeTty["_listeners"] = { data: [], end: [] };
+
+	constructor(overrides: FakeTtyOverrides = {}) {
+		if (overrides.isTTY !== undefined) this.isTTY = overrides.isTTY;
+		if (overrides.isRaw !== undefined) this.isRaw = overrides.isRaw;
+	}
+
+	setRawMode(mode: boolean): void {
+		this._calls.setRawMode.push(mode);
+		this.isRaw = mode;
+	}
+
+	resume(): void {
+		this._calls.resume += 1;
+	}
+
+	pause(): void {
+		this._calls.pause += 1;
+	}
+
+	on(event: "data", fn: DataListener): void;
+	on(event: "end", fn: EndListener): void;
+	on(event: "data" | "end", fn: DataListener | EndListener): void {
+		if (isDataListener(event, fn)) this._listeners.data.push(fn);
+		else this._listeners.end.push(fn);
+	}
+
+	once(_event: "end", fn: EndListener): void {
+		this._listeners.end.push(fn);
+	}
+
+	off(event: "data", fn: DataListener): void;
+	off(event: "end", fn: EndListener): void;
+	off(event: "data" | "end", fn: DataListener | EndListener): void {
+		if (isDataListener(event, fn)) this._listeners.data = this._listeners.data.filter((listener) => listener !== fn);
+		else this._listeners.end = this._listeners.end.filter((listener) => listener !== fn);
+	}
+
+	emit(event: "data", ...args: [string | Buffer]): void;
+	emit(event: "end"): void;
+	emit(event: "data" | "end", ...args: [string | Buffer] | []): void {
+		if (event === "data" && args.length === 1) for (const fn of [...this._listeners.data]) fn(args[0]);
+		else for (const fn of [...this._listeners.end]) fn();
+	}
 }
 
-function fakeStatus() {
+function fakeTty(overrides: FakeTtyOverrides = {}): FakeTty {
+	return new FakeTtyStream(overrides);
+}
+
+function fakeStatus(): HiddenInputStatusStream & { writes: string[] } {
+	const writes: string[] = [];
 	return {
 		isTTY: true,
-		writes: [],
-		write(chunk) {
-			this.writes.push(chunk);
+		writes,
+		write(chunk: string): void {
+			writes.push(chunk);
 		},
 	};
 }

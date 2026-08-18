@@ -4,12 +4,34 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type {
+	CealLeasedConsumerDispositionControlRequest,
+	CealLeasedConsumerDispositionControlResponse,
+} from "../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
 import { contractModule, controlSessionContractFromVerifiedConformance } from "./generate-leased-consumer-handoff-runtime.ts";
+import type { JsonRecord } from "./lib/json-record.ts";
 
 export const PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH = fileURLToPath(import.meta.url);
 
-export async function projectStagedWorkerControlSession({ workerStage, protocolModule, controlConformance, handoff }) {
-	const protocol = await import(pathToFileURL(protocolModule));
+type ProtocolModule = {
+	decodeCealLeasedConsumerDispositionControlRequest: (value: unknown) => CealLeasedConsumerDispositionControlRequest;
+	decodeCealLeasedConsumerDispositionControlResponse: (value: unknown) => CealLeasedConsumerDispositionControlResponse;
+};
+
+type ProjectStagedWorkerControlSessionOptions = {
+	workerStage: string;
+	protocolModule: string;
+	controlConformance: string;
+	handoff: JsonRecord;
+};
+
+export async function projectStagedWorkerControlSession({
+	workerStage,
+	protocolModule,
+	controlConformance,
+	handoff,
+}: ProjectStagedWorkerControlSessionOptions) {
+	const protocol: ProtocolModule = await import(pathToFileURL(protocolModule).href);
 	const contractPath = path.join(workerStage, "leased-consumer-control-session-contract.json");
 	const generatedPath = path.join(workerStage, "src/generated/leased-consumer-control-session-contract.ts");
 	const projected = controlSessionContractFromVerifiedConformance(

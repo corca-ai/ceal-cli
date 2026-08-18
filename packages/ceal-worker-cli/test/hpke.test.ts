@@ -21,7 +21,19 @@ const VECTOR = {
 	plaintext: "4265617574792069732074727574682c20747275746820626561757479",
 };
 
-const hex = (value) => new Uint8Array(Buffer.from(value, "hex"));
+interface HpkeMessage {
+	recipientPrivateKey: Uint8Array;
+	enc: Uint8Array;
+	ciphertext: Uint8Array;
+	info: Uint8Array;
+	aad: Uint8Array;
+}
+
+type HpkeMalformedOverride = Omit<Partial<HpkeMessage>, "recipientPrivateKey"> & {
+	recipientPrivateKey?: Uint8Array | string;
+};
+
+const hex = (value: string): Uint8Array => new Uint8Array(Buffer.from(value, "hex"));
 const vectorMessage = () => ({
 	recipientPrivateKey: hex(VECTOR.recipientPrivateKey),
 	enc: hex(VECTOR.enc),
@@ -42,14 +54,15 @@ test("the published RFC 9180 vector for this exact suite opens", () => {
 // an implementation that dropped either would still pass the test above if the
 // vector happened to use empty values, and this one does not.
 test("altering any authenticated input of the vector fails the open", () => {
-	for (const [name, mutate] of [
+	const mutations: Array<readonly [string, (message: HpkeMessage) => HpkeMessage]> = [
 		["ciphertext", (message) => ({ ...message, ciphertext: flipLastBit(message.ciphertext) })],
 		["tag", (message) => ({ ...message, ciphertext: flipFirstTagBit(message.ciphertext) })],
 		["aad", (message) => ({ ...message, aad: flipLastBit(message.aad) })],
 		["info", (message) => ({ ...message, info: flipLastBit(message.info) })],
 		["encapsulated key", (message) => ({ ...message, enc: flipLastBit(message.enc) })],
 		["recipient key", (message) => ({ ...message, recipientPrivateKey: flipLastBit(message.recipientPrivateKey) })],
-	]) {
+	];
+	for (const [name, mutate] of mutations) {
 		assert.throws(
 			() => openCealHpkeMessage(mutate(vectorMessage())),
 			(error) => error instanceof CealHpkeError && error.code === "hpke_open_failed",
@@ -73,11 +86,12 @@ test("a sealed message opens only under its own key, info, and associated data",
 	const base = { recipientPrivateKey: recipient.privateKey, enc: sealed.enc, ciphertext: sealed.ciphertext, info, aad };
 	assert.deepEqual(openCealHpkeMessage(base), new Uint8Array(plaintext));
 
-	for (const [name, override] of [
+	const overrides: Array<readonly [string, Partial<HpkeMessage>]> = [
 		["another recipient", { recipientPrivateKey: other.privateKey }],
 		["a different info", { info: Buffer.from("ceal.device_enrollment_hpke_info.v2", "utf8") }],
 		["different associated data", { aad: Buffer.from("ceal.device_enrollment_hpke_aad.v2", "utf8") }],
-	]) {
+	];
+	for (const [name, override] of overrides) {
 		assert.throws(
 			() => openCealHpkeMessage({ ...base, ...override }),
 			(error) => error instanceof CealHpkeError && error.code === "hpke_open_failed",
@@ -122,7 +136,7 @@ test("generated key pairs are raw 32-byte X25519 values that agree with each oth
 // what keeps the opaque code meaningful.
 test("malformed key material and truncated messages are refused by name", () => {
 	const valid = vectorMessage();
-	const cases = [
+	const cases: Array<readonly [string, HpkeMalformedOverride]> = [
 		["hpke_invalid_recipient_key", { recipientPrivateKey: new Uint8Array(31) }],
 		["hpke_invalid_recipient_key", { recipientPrivateKey: new Uint8Array(32) }],
 		["hpke_invalid_recipient_key", { recipientPrivateKey: "not bytes" }],
@@ -131,8 +145,10 @@ test("malformed key material and truncated messages are refused by name", () => 
 		["hpke_open_failed", { ciphertext: new Uint8Array(16) }],
 	];
 	for (const [code, override] of cases) {
+		const malformed = { ...valid };
+		Object.assign(malformed, override);
 		assert.throws(
-			() => openCealHpkeMessage({ ...valid, ...override }),
+			() => openCealHpkeMessage(malformed),
 			(error) => error instanceof CealHpkeError && error.code === code,
 			`${JSON.stringify(Object.keys(override))} must fail as ${code}`,
 		);
@@ -150,13 +166,13 @@ test("malformed key material and truncated messages are refused by name", () => 
 	);
 });
 
-function flipLastBit(value) {
+function flipLastBit(value: Uint8Array): Uint8Array {
 	const copy = new Uint8Array(value);
 	copy[copy.length - 1] ^= 0x01;
 	return copy;
 }
 
-function flipFirstTagBit(value) {
+function flipFirstTagBit(value: Uint8Array): Uint8Array {
 	const copy = new Uint8Array(value);
 	copy[copy.length - 16] ^= 0x01;
 	return copy;

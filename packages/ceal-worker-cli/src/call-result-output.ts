@@ -151,7 +151,7 @@ export function writeCallCompleted(
 	events: unknown,
 	requestId: string,
 	io: ResultIo,
-	session: CealStoredSession,
+	session: CealStoredSession | null,
 	parsed: CealParsedCapabilityCall,
 	record?: CealCallResultRecorder,
 ): number {
@@ -212,7 +212,7 @@ export function writeCallIncomplete(
 	requestId: string,
 	reason: string,
 	io: ResultIo,
-	session: CealStoredSession,
+	session: CealStoredSession | null,
 	parsed: CealParsedCapabilityCall,
 	record?: CealCallResultRecorder,
 ): number {

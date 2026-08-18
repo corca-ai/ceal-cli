@@ -23,6 +23,7 @@ import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { type NpmPackMetadata, parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import { isStringArray } from "./lib/string-array.ts";
 import { toolchainEnv } from "./lib/toolchain-env.ts";
 
 type PackageManifest = {
@@ -102,9 +103,6 @@ function property(value: object, key: string): unknown {
 }
 function isString(value: unknown): value is string {
 	return typeof value === "string";
-}
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every(isString);
 }
 function objectProperty(value: unknown, key: string): unknown {
 	return isJsonRecord(value) ? property(value, key) : undefined;

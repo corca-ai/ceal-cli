@@ -1,6 +1,7 @@
 import type { CealCommandDefinition } from "../packages/ceal-worker-cli/src/command-definitions.ts";
 import type { CealSubcommandDefinition } from "../packages/ceal-worker-cli/src/subcommands.ts";
 import { isObjectRecord } from "./lib/object-record.ts";
+import { isStringArray } from "./lib/string-array.ts";
 
 export type ProbeCommandDefinition = Pick<
 	CealCommandDefinition,
@@ -24,10 +25,6 @@ export type ProbeModule = {
 
 export function lookupProbeBinary<T>(binaries: Readonly<Record<string, T>>, name: string | undefined): T | undefined {
 	return typeof name === "string" && Object.hasOwn(binaries, name) ? binaries[name] : undefined;
-}
-
-function isStringArray(value: unknown): value is readonly string[] {
-	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isEffect(value: unknown): value is CealCommandDefinition["effect"] {
