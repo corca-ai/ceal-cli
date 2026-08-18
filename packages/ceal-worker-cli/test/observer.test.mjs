@@ -586,17 +586,17 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	// the JSON projection.
 	assert.match(html, /Agent hosts/u);
 	assert.match(html, /guide\.hosts/u);
-	assert.match(html, /Sessions observed in the selected local window/u);
+	assert.match(html, /What happened in each observed session/u);
 	assert.match(html, /Setup & privacy/u);
 	assert.match(html, /Attention/u);
 	assert.match(html, /Usage.*Sessions.*Access.*Evidence/su);
-	assert.match(html, /Local runtime evidence/u);
+	assert.match(html, /Days with locally observed Agent sessions/u);
 	assert.match(html, /Runtime accounting stays partitioned/u);
 	assert.match(html, /estimated_cost/u);
 	assert.match(html, /Missing evidence is not rendered as zero/u);
-	assert.match(html, /Twenty rows per page/u);
+	assert.match(html, /Task titles appear only when a privacy-safe producer supplies them/u);
 	assert.match(html, /data-page/u);
-	assert.match(html, /Gateway-observed capability summary/u);
+	assert.match(html, /What this Profile can do through Ceal/u);
 	assert.match(html, /Request access/u);
 	assert.match(html, /Unavailable in this version/u);
 	assert.match(html, /role='img' aria-label=/u);

@@ -794,7 +794,7 @@ function respondAgentSession(response: ServerResponse, runtime: CealObserverRunt
 // relationship the producers do not supply. One embedded document over the
 // one state endpoint; no router, no build step.
 const OBSERVER_PAGE = `<!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -846,10 +846,15 @@ const OBSERVER_PAGE = `<!doctype html>
   .section-head h2 { margin:0; font-size:1.25rem; }
   .activity-grid { display:grid; grid-template-rows:repeat(7,13px); grid-auto-flow:column; grid-auto-columns:13px; gap:4px; overflow:auto; padding:1.2rem 0 .8rem; scrollbar-width:thin; }
   .day { width:13px; height:13px; border-radius:3px; background:var(--soft); }
-  .day.level-1 { background:color-mix(in srgb,var(--accent) 35%,var(--soft)); }
-  .day.level-2 { background:color-mix(in srgb,var(--accent) 65%,var(--soft)); }
+  .day.level-0 { border:1px solid var(--line); }
+  .day.unavailable { border:1px dashed var(--muted); background:repeating-linear-gradient(135deg,transparent 0 3px,var(--line) 3px 5px); }
+  .day.level-1 { background:color-mix(in srgb,var(--accent) 30%,var(--soft)); }
+  .day.level-2 { background:color-mix(in srgb,var(--accent) 62%,var(--soft)); }
   .day.level-3 { background:var(--accent); }
   .legend { display:flex; gap:.5rem; align-items:center; color:var(--muted); font-size:.72rem; }
+  .legend-scale { display:flex; gap:3px; }
+  .legend-scale .day { display:inline-block; }
+  .heatmap-caption { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
   .support-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:2rem; }
   .unsupported { border:1px dashed var(--line); background:color-mix(in srgb,var(--panel) 80%,var(--soft)); padding:1rem; border-radius:8px; }
   .unsupported strong { display:block; margin-bottom:.3rem; }
@@ -868,6 +873,18 @@ const OBSERVER_PAGE = `<!doctype html>
   .runtime-tabs { display:flex; max-width:34rem; margin:0; }
   .runtime-tabs button { flex:1; padding:.7rem 1rem; box-shadow:none; }
   .session-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem; }
+  .session-card strong { font-size:1rem; color:var(--ink); }
+  .session-meta { display:flex; justify-content:space-between; gap:.75rem; color:var(--muted); font-size:.75rem; margin:.35rem 0 .7rem; }
+  .session-metrics { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .session-metrics span { background:var(--soft); border-radius:5px; padding:.22rem .4rem; font-size:.72rem; }
+  .capability-list { display:grid; gap:.55rem; }
+  .capability-row { display:grid; grid-template-columns:minmax(11rem,1.1fr) minmax(15rem,2fr) auto; gap:1rem; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1rem; }
+  .capability-row h3 { margin:0 0 .2rem; font-size:1rem; color:var(--ink); }
+  .capability-row p { margin:0; }
+  .capability-kind { justify-self:end; text-align:right; }
+  .receipt-list { display:grid; gap:.55rem; margin-top:1rem; }
+  .receipt-row { display:grid; grid-template-columns:minmax(10rem,1fr) auto auto; gap:1rem; align-items:center; padding:.75rem 0; border-bottom:1px solid var(--line); }
+  .receipt-row:last-child { border-bottom:0; }
   .pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin:1.5rem 0; }
   .pagination button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px; padding:.45rem .7rem; }
   .pagination button:disabled { opacity:.45; }
@@ -877,11 +894,11 @@ const OBSERVER_PAGE = `<!doctype html>
   :root[data-theme="terminal"] body, :root[data-theme="terminal"] .hero h2, :root[data-theme="terminal"] .section-head h2 { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.025em; }
   :root[data-theme="terminal"] .card, :root[data-theme="terminal"] .unsupported, :root[data-theme="terminal"] select, :root[data-theme="terminal"] button { border-radius:2px; }
   :root[data-theme="terminal"] .day { border-radius:1px; }
-  @media (max-width:700px) { body{padding:0 1rem 4rem}.topbar{padding:.7rem 0}.topbar nav { order:3; width:100%; overflow:auto; margin:0; } .controls{margin-left:auto}.support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .runtime-tabs{display:flex}.hero { padding-top:1.6rem; } .boundary{font-size:.78rem} }
+  @media (max-width:700px) { body{padding:0 1rem 4rem}.topbar{padding:.7rem 0}.topbar nav { order:3; width:100%; overflow:auto; margin:0; } .controls{margin-left:auto}.support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .runtime-tabs{display:flex}.hero { padding-top:1.6rem; } .boundary{font-size:.78rem}.capability-row,.receipt-row{grid-template-columns:1fr}.capability-kind{justify-self:start;text-align:left} }
 </style>
 </head>
 <body>
-<header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
+<header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
 <p class="boundary" id="boundary">Personal Ceal view. Loading this page reads the current Gateway handshake and capability catalog when a client session is available; it never calls a provider. Local evidence remains separately labeled.</p>
 <div id="root">Loading Ceal and local evidence…</div>
 <dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
@@ -895,12 +912,24 @@ const rows = (pairs) => "<table>" + pairs
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const section = (title, body) => "<h2>" + esc(title) + "</h2>" + body;
 const list = (items, className) => "<ul>" + items.map((n) => "<li class=\\"" + className + "\\">" + esc(n) + "</li>").join("") + "</ul>";
+let language = navigator.language && navigator.language.toLowerCase().startsWith("ko") ? "ko" : "en";
+let observationTimezone;
+const tx = (english, korean) => language === "ko" ? korean : english;
+const VIEW_LABELS = {
+  "Usage": ["Usage", "사용량"],
+  "Sessions": ["Sessions", "세션"],
+  "Access": ["Access", "권한"],
+  "Evidence": ["Evidence", "데이터 근거"],
+  "Setup & privacy": ["Setup & privacy", "설정 및 개인정보"]
+};
+const viewLabel = (view) => language === "ko" ? VIEW_LABELS[view][1] : VIEW_LABELS[view][0];
+const formatTime = (instant) => new Intl.DateTimeFormat(language === "ko" ? "ko-KR" : "en-US", { dateStyle:"medium", timeStyle:"short", timeZone:observationTimezone }).format(new Date(instant));
 const sessionSummary = (events) => {
   if (events === undefined) return "Event evidence not scanned";
   if (events === "unreadable") return "Event evidence unreadable";
   return "Scan " + fmt(events.scan) + " · " + fmt(events.event_count) + " events";
 };
-const VIEWS = ["Usage", "Sessions", "Access", "Evidence", "Setup & privacy"];
+const VIEWS = ["Usage", "Sessions", "Access", "Evidence"];
 const SUGGESTION_DESTINATIONS = {
   stale_collector: ["Evidence", "Agent adapter"],
   missing_cache_opportunity: ["Setup & privacy", "Discovery cache"],
@@ -983,21 +1012,35 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
 
   const dashboards = Array.isArray(s.local_usage_dashboards) ? s.local_usage_dashboards : [s.local_usage_dashboard];
   let dashboard = dashboards.find((entry) => entry.sources[0]?.runtime === "codex") || dashboards[0];
-  const metricLabels = { sessions: "Sessions", agent_tool_calls: "Agent tool calls", tokens: "Tokens", estimated_cost: "Estimated cost" };
-  const metricUnits = { sessions: "sessions", agent_tool_calls: "tool-call events", tokens: "tokens", estimated_cost: "estimated cost" };
+  observationTimezone = dashboard.timezone;
+  const metricLabels = { sessions: ["Sessions", "세션"], agent_tool_calls: ["Agent tool calls", "도구 호출"], tokens: ["Tokens", "토큰"], estimated_cost: ["Estimated cost", "예상 비용"] };
+  const metricUnits = { sessions: ["sessions", "세션"], agent_tool_calls: ["tool-call events", "도구 호출"], tokens: ["tokens", "토큰"], estimated_cost: ["estimated cost", "예상 비용"] };
+  const metricDescriptions = {
+    sessions: ["Days with locally observed Agent sessions.", "로컬에서 관측된 Agent 세션 수를 날짜별로 표시합니다."],
+    agent_tool_calls: ["Structurally classified tool-call events, not Ceal or provider calls.", "구조적으로 분류된 도구 호출 이벤트입니다. Ceal 호출이나 Provider 호출 수가 아닙니다."],
+    tokens: ["Runtime-reported token observations for the selected partition.", "선택한 런타임이 기록한 토큰 관측값입니다."],
+    estimated_cost: ["Local estimate from covered tokens and an accepted pricing snapshot; not billed cost.", "관측된 토큰과 로컬 가격표로 계산한 추정치이며 실제 청구액이 아닙니다."]
+  };
+  const metricLabel = (metric) => metricLabels[metric][language === "ko" ? 1 : 0];
+  const metricUnit = (metric) => metricUnits[metric][language === "ko" ? 1 : 0];
+  const metricDescription = (metric) => metricDescriptions[metric][language === "ko" ? 1 : 0];
   let selectedMetric = "sessions";
   let sessionPage = 1;
   const sessionPageSize = 20;
+  const observationStateLabel = (value) => {
+    const labels = { complete:["complete","완전 관측"], partial:["partial","부분 관측"], observed_empty:["observed empty","관측 결과 없음"], unavailable:["unavailable","확인 불가"], unreadable:["unreadable","읽기 실패"], unsupported:["unsupported","미지원"] }[value] || [value,"상태 미확인"];
+    return labels[language === "ko" ? 1 : 0];
+  };
   const coverageCopy = (metric) => {
     const coverage = dashboard.metric_coverage[metric];
-    const denominator = coverage.denominator === null ? "unknown eligible population" : coverage.denominator + " eligible sessions";
-    return coverage.observation_state + " · " + coverage.numerator + " observed of " + denominator + " · " + coverage.comparability_group;
+    const denominator = coverage.denominator === null ? tx("eligible population unknown", "전체 대상 수 미확인") : language === "ko" ? "전체 " + coverage.denominator + "개 세션" : coverage.denominator + " eligible sessions";
+    return observationStateLabel(coverage.observation_state) + " · " + coverage.numerator + tx(" observed of ", "개 관측 / ") + denominator + " · " + coverage.comparability_group;
   };
   const metricValue = (metric) => {
     const value = dashboard.totals[metric];
-    if (value === null) return "Unavailable";
+    if (value === null) return tx("Unavailable", "확인 불가");
     if (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed") return dashboard.pricing.currency + " " + value;
-    return new Intl.NumberFormat().format(value);
+    return new Intl.NumberFormat(language === "ko" ? "ko-KR" : "en-US").format(value);
   };
   const usageOverview = () => {
     const metric = selectedMetric;
@@ -1006,31 +1049,44 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const cells = dashboard.daily.map((day) => {
       const value = day[metric];
       const level = value === null || value === 0 ? 0 : value / max < .34 ? 1 : value / max < .67 ? 2 : 3;
-      const label = day.date + " · " + (value === null ? "unavailable" : value + " " + metricUnits[metric]);
-      return "<span class='day level-" + level + "' title='" + esc(label) + "' role='img' aria-label='" + esc(label) + "'></span>";
+      const label = day.date + " · " + (value === null ? tx("unavailable", "확인 불가") : value + " " + metricUnit(metric));
+      return "<span class='day level-" + level + (value === null ? " unavailable" : "") + "' title='" + esc(label) + "' role='img' aria-label='" + esc(label) + "'></span>";
     }).join("");
     const identity = dashboard.identity.state === "available"
-      ? "<div class='identity'><div><p class='eyebrow'>LOCAL PROFILE</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>Instance " + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>Local profile</span></div>"
-      : "<div class='unsupported'><strong>Local Profile unavailable</strong><p>No identity is inferred.</p></div>";
-    const axes = Object.keys(metricLabels).map((key) => "<button type='button' data-metric='" + key + "' aria-pressed='" + String(key === metric) + "'><span>" + esc(metricLabels[key]) + "</span><strong>" + esc(metricValue(key)) + "</strong></button>").join("");
+      ? "<div class='identity'><div><p class='eyebrow'>" + tx("LOCAL PROFILE", "로컬 프로필") + "</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>" + tx("Instance ", "인스턴스 ") + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>" + tx("Local profile", "로컬 프로필") + "</span></div>"
+      : "<div class='unsupported'><strong>" + tx("Local Profile unavailable", "로컬 프로필 확인 불가") + "</strong><p>" + tx("No identity is inferred.", "프로필 정보를 추측하지 않습니다.") + "</p></div>";
+    const axes = Object.keys(metricLabels).map((key) => "<button type='button' data-metric='" + key + "' aria-pressed='" + String(key === metric) + "'><span>" + esc(metricLabel(key)) + "</span><strong>" + esc(metricValue(key)) + "</strong></button>").join("");
     const runtimeAxes = dashboards.map((entry) => { const runtime = entry.sources[0]?.runtime || "unknown"; return "<button type='button' data-runtime='" + esc(runtime) + "' aria-pressed='" + String(entry === dashboard) + "'>" + esc(runtime === "codex" ? "Codex" : "Claude") + "</button>"; }).join("");
     const availability = coverage.observation_state === "unsupported" || coverage.observation_state === "unavailable" || coverage.observation_state === "unreadable"
-      ? "<div class='unsupported'><strong>" + esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "</strong><p>Missing evidence is not rendered as zero.</p></div>"
-      : "<div class='activity-grid' aria-label='Daily " + esc(metricLabels[metric]) + "'>" + cells + "</div>";
+      ? "<div class='unsupported'><strong>" + esc(metricLabel(metric)) + " · " + esc(observationStateLabel(coverage.observation_state)) + "</strong><p>" + tx("Missing evidence is not rendered as zero.", "없는 데이터는 0으로 표시하지 않습니다.") + "</p></div>"
+      : "<div class='activity-grid' aria-label='" + esc(tx("Daily " + metricLabel(metric), metricLabel(metric) + " 일별 분포")) + "'>" + cells + "</div>";
     const headline = dashboard.totals[metric] === null
-      ? esc(metricLabels[metric]) + " is " + esc(coverage.observation_state) + "."
-      : "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnits[metric]) + " observed.";
-    const suggestionCard = (entry, index) => "<article class='card'><span class='pill'>" + esc(entry.analyzer.analyzer_id + " v" + entry.analyzer.version) + "</span><h3>" + esc(entry.recommendation) + "</h3><p>" + esc(entry.rationale) + "</p><p class='muted'>Evidence: " + esc(entry.evidence.metric) + (entry.evidence.session_refs.length ? " · " + entry.evidence.session_refs.length + " referenced session" : " · aggregate coverage") + "</p><button type='button' class='next-action' data-suggestion-action='" + index + "'>" + esc(entry.next_action.label) + "</button></article>";
+      ? esc(metricLabel(metric)) + " · " + esc(observationStateLabel(coverage.observation_state))
+      : language === "ko" ? "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnit(metric)) + "이 관측되었습니다." : "<em>" + esc(metricValue(metric)) + "</em> " + esc(metricUnit(metric)) + " observed.";
+    const suggestionKorean = (entry) => {
+      const percent = entry.rationale.match(/([0-9]+)%/u)?.[1];
+      if (entry.suggestion_id === "token_concentration") return ["토큰 사용이 한 세션에 집중되어 있습니다.", "완전히 관측된 세션 중 하나가 전체 토큰의 " + (percent ? percent + "%" : "절반 이상") + "를 차지합니다. 생산성 평가는 아닙니다."];
+      if (entry.suggestion_id === "tool_concentration") return ["도구 호출이 한 세션에 집중되어 있습니다.", "완전히 관측된 세션 중 하나가 도구 호출의 " + (percent ? percent + "%" : "절반 이상") + "를 차지합니다. 반복 작업이나 낭비를 뜻하지 않습니다."];
+      if (entry.suggestion_id === "token_coverage_gap") return ["토큰 합계는 관측된 일부 세션만 반영합니다.", "토큰 근거가 없는 세션은 합계에서 제외되어 있습니다."];
+      if (entry.suggestion_id === "tool_coverage_gap") return ["현재 도구 호출 합계만으로 사용 방식을 판단하지 마세요.", "일부 세션의 도구 이벤트 근거가 완전하지 않습니다."];
+      return ["비용을 계산할 근거가 아직 부족합니다.", "가격 또는 모델 근거가 준비되기 전까지 토큰 사용량을 참고하세요."];
+    };
+    const suggestionCard = (entry, index) => {
+      const localized = language === "ko" ? suggestionKorean(entry) : [entry.recommendation, entry.rationale];
+      const actionLabel = language === "ko" ? (entry.next_action.kind === "inspect_sessions" ? "근거 세션 보기" : "데이터 근거 보기") : entry.next_action.label;
+      return "<article class='card'><span class='pill'>" + esc(entry.analyzer.analyzer_id + " v" + entry.analyzer.version) + "</span><h3>" + esc(localized[0]) + "</h3><p>" + esc(localized[1]) + "</p><p class='muted'>" + tx("Evidence", "근거") + ": " + esc(entry.evidence.metric) + (entry.evidence.session_refs.length ? " · " + entry.evidence.session_refs.length + tx(" referenced session", "개 세션") : " · " + tx("aggregate coverage", "집계 범위")) + "</p><button type='button' class='next-action' data-suggestion-action='" + index + "'>" + esc(actionLabel) + "</button></article>";
+    };
     const primarySuggestions = dashboard.suggestions.slice(0, 2).map(suggestionCard).join("");
     const remainingSuggestions = dashboard.suggestions.slice(2);
     const usageSuggestions = dashboard.suggestions.length
-      ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + " more suggestions</summary>" + remainingSuggestions.map((entry, index) => suggestionCard(entry, index + 2)).join("") + "</details>" : "")
-      : "<div class='card'><strong>No deterministic usage suggestions</strong><p class='muted'>This is not a completeness or productivity claim.</p></div>";
+      ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + tx(" more suggestions", "개의 제안 더 보기") + "</summary>" + remainingSuggestions.map((entry, index) => suggestionCard(entry, index + 2)).join("") + "</details>" : "")
+      : "<div class='card'><strong>" + tx("No deterministic usage suggestions", "현재 표시할 사용 제안이 없습니다") + "</strong><p class='muted'>" + tx("This is not a completeness or productivity claim.", "상태가 완전하거나 생산성이 높다는 뜻은 아닙니다.") + "</p></div>";
+    const legend = "<div class='heatmap-caption'><span>" + tx("Each square is one date present in the local observation window. Color intensity is relative to the busiest observed day; omitted dates are not inferred as zero.", "한 칸은 로컬 관측 범위에 포함된 날짜 하나입니다. 색은 관측된 가장 높은 날과 비교한 상대값이며, 표시되지 않은 날짜를 0으로 추정하지 않습니다.") + "</span><div class='legend'><span>" + tx("Observed zero", "관측값 0") + "</span><span class='legend-scale'><i class='day level-0'></i><i class='day level-1'></i><i class='day level-2'></i><i class='day level-3'></i></span><span>" + tx("Higher", "높음") + "</span><i class='day unavailable'></i><span>" + tx("Unavailable", "확인 불가") + "</span></div></div>";
     return identity
-      + "<div class='metric-tabs runtime-tabs' role='group' aria-label='Runtime partition'>" + runtimeAxes + "</div><section class='hero'><p class='eyebrow'>LOCAL USAGE · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>Local runtime evidence in " + esc(dashboard.timezone) + ". Runtime accounting stays partitioned; missing values are never treated as zero.</p></section>"
-      + "<div class='metric-tabs' role='group' aria-label='Usage metric'>" + axes + "</div>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>ACTIVITY FIELD</p><h2>When you worked</h2></div></div>" + availability + "<p class='evidence-line'>Source: " + esc(coverage.source_refs.join(", ")) + " <span>·</span> Coverage: " + esc(coverageCopy(metric)) + (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed" ? " <span>·</span> Estimated locally; not billed cost" : "") + "</p></section>"
-      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>SUGGESTIONS</p><h2>Ways to use Ceal better</h2></div></div>" + usageSuggestions + "<p class='warn'>Deterministic local rules over the canonical dataset; not model judgment or a productivity score.</p></section>";
+      + "<div class='metric-tabs runtime-tabs' role='group' aria-label='" + tx("Runtime partition", "런타임 구분") + "'>" + runtimeAxes + "</div><section class='hero'><p class='eyebrow'>" + tx("LOCAL USAGE", "로컬 사용량") + " · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>" + esc(metricDescription(metric)) + " " + tx("Runtime accounting stays partitioned; missing values are never treated as zero.", "런타임별 집계는 분리되며 없는 값은 0으로 간주하지 않습니다.") + "</p></section>"
+      + "<div class='metric-tabs' role='group' aria-label='" + tx("Usage metric", "사용량 지표") + "'>" + axes + "</div>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("ACTIVITY FIELD", "활동 분포") + "</p><h2>" + tx("When and how much you worked", "언제 얼마나 사용했는지") + "</h2></div></div>" + availability + legend + "<p class='evidence-line'>" + tx("Source", "출처") + ": " + esc(coverage.source_refs.join(", ")) + " <span>·</span> " + tx("Coverage", "관측 범위") + ": " + esc(coverageCopy(metric)) + (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed" ? " <span>·</span> " + tx("Estimated locally; not billed cost", "로컬 추정치이며 실제 청구액이 아님") : "") + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("SUGGESTIONS", "제안") + "</p><h2>" + tx("Ways to use Ceal better", "사용 패턴에서 확인할 점") + "</h2></div></div>" + usageSuggestions + "<p class='warn'>" + tx("Deterministic local rules over the canonical dataset; not model judgment or a productivity score.", "정규화된 로컬 데이터에 적용한 고정 규칙이며 모델 판단이나 생산성 점수가 아닙니다.") + "</p></section>";
   };
   const sessionsView = () => {
     const total = dashboard.sessions.length;
@@ -1039,24 +1095,57 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     sessionPage = Math.min(sessionPage, pageCount);
     const start = (sessionPage - 1) * sessionPageSize;
     const visible = dashboard.sessions.slice(start, start + sessionPageSize);
-    const cards = visible.length ? visible.map((entry) => "<button class='card attention canonical-session' data-session-ref='" + esc(entry.session_ref) + "'><strong>" + esc(entry.runtime) + " session</strong><span>" + esc(entry.last_activity_at) + "</span><p class='muted'>" + (entry.agent_tool_calls === null ? "Tool calls unavailable" : entry.agent_tool_calls + " tool calls") + " · " + (entry.tokens === null ? "Tokens unavailable" : new Intl.NumberFormat().format(entry.tokens) + " tokens") + " · " + (entry.model_key === null ? "Model unavailable" : "Model " + esc(entry.model_key)) + "</p></button>").join("") : coverage.observation_state === "observed_empty" ? "<div class='unsupported'><strong>No sessions observed in the selected window</strong><p>The bounded source was readable and observed empty.</p></div>" : "<div class='unsupported'><strong>Session inventory is " + esc(coverage.observation_state) + "</strong><p>No zero-session claim is made.</p></div>";
-    const population = coverage.eligible === null ? total + " returned sessions; eligible total unknown" : total + " of " + coverage.eligible + " eligible sessions returned";
-    const pagination = pageCount > 1 ? "<div class='pagination' aria-label='Session pages'><button type='button' data-page='" + (sessionPage - 1) + "'" + (sessionPage === 1 ? " disabled" : "") + ">Previous</button><span role='status' aria-live='polite'>Page " + sessionPage + " of " + pageCount + " · " + population + "</span><button type='button' data-page='" + (sessionPage + 1) + "'" + (sessionPage === pageCount ? " disabled" : "") + ">Next</button></div>" : "<p class='evidence-line' role='status'>" + population + " · " + esc(coverageCopy("sessions")) + "</p>";
-    const title = coverage.observation_state === "complete" || coverage.observation_state === "observed_empty" ? "Sessions observed in the selected local window." : "Returned sessions from " + coverage.observation_state + " local evidence.";
-    return "<section class='hero compact'><p class='eyebrow'>SESSIONS</p><h2>" + esc(title) + "</h2><p class='hero-summary'>Twenty rows per page keeps the returned list usable when local history grows beyond one hundred sessions.</p></section><div class='session-list'>" + cards + "</div>" + pagination;
+    const demoTasksKo = ["API 인증 흐름 구현", "대시보드 사용량 화면 개선", "권한 모델 검토", "테스트 실패 원인 분석", "CLI 배포 절차 정리", "데이터 계약 리팩터링"];
+    const demoTasksEn = ["Implement API authentication", "Improve usage dashboard", "Review access model", "Investigate test failure", "Document CLI release flow", "Refactor data contract"];
+    const cards = visible.length ? visible.map((entry, index) => {
+      const absoluteIndex = start + index;
+      const task = isSyntheticDemo ? (language === "ko" ? demoTasksKo : demoTasksEn)[absoluteIndex % demoTasksKo.length] : tx("Work details unavailable", "작업 내용 미확인");
+      const taskNote = isSyntheticDemo ? tx("Synthetic task label", "합성 작업명") : tx("No privacy-safe task title was produced", "안전하게 표시할 작업명이 생성되지 않음");
+      const tools = entry.agent_tool_calls === null ? tx("Tools unknown", "도구 호출 미확인") : entry.agent_tool_calls + tx(" tool calls", "회 도구 호출");
+      const tokens = entry.tokens === null ? tx("Tokens unknown", "토큰 미확인") : new Intl.NumberFormat(language === "ko" ? "ko-KR" : "en-US").format(entry.tokens) + tx(" tokens", " 토큰");
+      const model = entry.model_key === null ? tx("Model unknown", "모델 미확인") : entry.model_key;
+      return "<button class='card attention canonical-session session-card' data-session-ref='" + esc(entry.session_ref) + "'><span class='pill'>" + esc(entry.runtime) + "</span><strong>" + esc(task) + "</strong><div class='session-meta'><span>" + esc(taskNote) + "</span><time>" + esc(formatTime(entry.last_activity_at)) + "</time></div><div class='session-metrics'><span>" + esc(tools) + "</span><span>" + esc(tokens) + "</span><span>" + esc(model) + "</span></div></button>";
+    }).join("") : coverage.observation_state === "observed_empty" ? "<div class='unsupported'><strong>" + tx("No sessions observed in the selected window", "선택한 기간에 관측된 세션이 없습니다") + "</strong><p>" + tx("The bounded source was readable and observed empty.", "데이터 소스는 읽을 수 있었으며 결과가 비어 있었습니다.") + "</p></div>" : "<div class='unsupported'><strong>" + tx("Session inventory", "세션 목록") + " · " + esc(observationStateLabel(coverage.observation_state)) + "</strong><p>" + tx("No zero-session claim is made.", "세션이 0개라고 단정하지 않습니다.") + "</p></div>";
+    const population = coverage.eligible === null ? (language === "ko" ? total + "개 반환 · 전체 대상 수 미확인" : total + " returned sessions; eligible total unknown") : (language === "ko" ? "전체 " + coverage.eligible + "개 중 " + total + "개 반환" : total + " of " + coverage.eligible + " eligible sessions returned");
+    const pagination = pageCount > 1 ? "<div class='pagination' aria-label='" + tx("Session pages", "세션 페이지") + "'><button type='button' data-page='" + (sessionPage - 1) + "'" + (sessionPage === 1 ? " disabled" : "") + ">" + tx("Previous", "이전") + "</button><span role='status' aria-live='polite'>" + (language === "ko" ? sessionPage + " / " + pageCount + " 페이지 · " : "Page " + sessionPage + " of " + pageCount + " · ") + population + "</span><button type='button' data-page='" + (sessionPage + 1) + "'" + (sessionPage === pageCount ? " disabled" : "") + ">" + tx("Next", "다음") + "</button></div>" : "<p class='evidence-line' role='status'>" + population + " · " + esc(coverageCopy("sessions")) + "</p>";
+    const title = coverage.observation_state === "complete" || coverage.observation_state === "observed_empty" ? tx("What happened in each observed session", "각 세션에서 어떤 작업이 있었는지") : tx("Sessions returned from incomplete local evidence", "일부 로컬 근거에서 확인된 세션");
+    return "<section class='hero compact'><p class='eyebrow'>" + tx("SESSIONS", "세션") + "</p><h2>" + esc(title) + "</h2><p class='hero-summary'>" + tx("Task titles appear only when a privacy-safe producer supplies them. The demo uses explicit synthetic labels; real evidence is never guessed.", "작업명은 안전한 데이터 생산자가 제공할 때만 표시합니다. 데모의 작업명은 합성 데이터이며 실제 작업 내용은 추측하지 않습니다.") + "</p></section><div class='session-list'>" + cards + "</div>" + pagination;
   };
   const accessView = () => {
     const access = dashboard.access;
+    const capabilityDescription = (capability) => {
+      const action = capability.effect === "write" ? tx("Can change external state", "외부 상태를 변경할 수 있음") : tx("Reads information without changing it", "정보를 변경하지 않고 조회함");
+      const target = capability.target_requirement === "required" ? tx("A resource target is required", "대상 리소스를 지정해야 함") : capability.target_requirement === "optional" ? tx("A resource target is optional", "대상 리소스는 선택 사항") : tx("No resource target is needed", "대상 리소스가 필요하지 않음");
+      return action + " · " + target;
+    };
     const capabilityCards = access.observation_state === "available" && access.capabilities.length
-      ? "<section><p class='eyebrow'>CAPABILITY CATALOG</p><div class='session-list'>" + access.capabilities.map((capability) => "<article class='card'><span class='pill'>" + esc(capability.effect) + "</span><h3>" + esc(capability.label) + "</h3><p class='mono'>" + esc(capability.capability_id) + "</p><p class='muted'>Resource target: " + esc(capability.target_requirement) + " · Audit evidence: " + esc(capability.evidence_requirement) + "</p></article>").join("") + "</div></section>"
+      ? "<section><p class='eyebrow'>" + tx("CAPABILITY CATALOG", "사용 가능한 기능") + "</p><div class='capability-list'>" + access.capabilities.map((capability) => "<article class='capability-row'><div><h3>" + esc(capability.label) + "</h3><p class='mono muted'>" + esc(capability.capability_id) + "</p></div><p>" + esc(capabilityDescription(capability)) + "</p><div class='capability-kind'><span class='pill'>" + esc(capability.effect === "write" ? tx("WRITE", "변경") : tx("READ", "조회")) + "</span><p class='muted'>" + tx("Audit", "감사 근거") + ": " + esc(capability.evidence_requirement) + "</p></div></article>").join("") + "</div></section>"
       : access.observation_state === "available"
-        ? "<div class='unsupported'><strong>No capabilities returned</strong><p>The Gateway returned an observed-empty capability catalog.</p></div>"
+        ? "<div class='unsupported'><strong>" + tx("No capabilities returned", "사용 가능한 기능이 없습니다") + "</strong><p>" + tx("The Gateway returned an observed-empty capability catalog.", "Gateway가 비어 있는 기능 목록을 반환했습니다.") + "</p></div>"
         : "";
     const summary = access.observation_state === "available"
-      ? "<div class='metric-strip'><div class='card'><h3>AVAILABLE CAPABILITIES</h3><strong>" + access.capability_count + "</strong></div><div class='card'><h3>READ</h3><strong>" + access.read_capability_count + "</strong></div><div class='card'><h3>WRITE</h3><strong>" + access.write_capability_count + "</strong></div></div><p class='evidence-line'>Gateway authority · observed " + esc(access.observed_at) + "</p>"
-      : "<div class='unsupported'><strong>Capability access unavailable</strong><p>No access count is inferred.</p></div>";
-    const accessTitle = dashboard.identity.state === "available" ? "Gateway-observed access for this local Profile." : "Gateway-observed capability summary.";
-    return "<section class='hero compact'><p class='eyebrow'>ACCESS</p><h2>" + accessTitle + "</h2><p class='hero-summary'>Gateway authority is independent from local Profile observation. This catalog describes capabilities, not a complete resource inventory.</p></section>" + summary + capabilityCards + "<div class='unsupported'><strong>Need access to something else?</strong><p>The resource catalog and request workflow still need an Admin-owned contract.</p><button type='button' disabled aria-describedby='access-reason'>Request access</button><span id='access-reason' class='muted'> Unavailable in this version</span></div>";
+      ? "<div class='metric-strip'><div class='card'><h3>" + tx("AVAILABLE", "전체") + "</h3><strong>" + access.capability_count + "</strong></div><div class='card'><h3>" + tx("READ", "조회") + "</h3><strong>" + access.read_capability_count + "</strong></div><div class='card'><h3>" + tx("WRITE", "변경") + "</h3><strong>" + access.write_capability_count + "</strong></div></div><p class='evidence-line'>Gateway · " + tx("observed", "관측 시각") + " " + esc(formatTime(access.observed_at)) + "</p>"
+      : "<div class='unsupported'><strong>" + tx("Capability access unavailable", "권한 정보를 확인할 수 없습니다") + "</strong><p>" + tx("No access count is inferred.", "권한 개수를 추측하지 않습니다.") + "</p></div>";
+    const accessTitle = tx("What this Profile can do through Ceal", "이 프로필로 Ceal에서 할 수 있는 일");
+    return "<section class='hero compact'><p class='eyebrow'>" + tx("ACCESS", "권한") + "</p><h2>" + accessTitle + "</h2><p class='hero-summary'>" + tx("Gateway-observed capabilities are grouped by whether they read or change state. This is not a complete resource inventory.", "Gateway가 확인한 기능을 조회와 변경으로 구분합니다. 접근 가능한 모든 리소스의 목록은 아닙니다.") + "</p></section>" + summary + capabilityCards + "<div class='unsupported'><strong>" + tx("Need access to something else?", "다른 리소스가 필요한가요?") + "</strong><p>" + tx("The resource catalog and request workflow still need an Admin-owned contract.", "리소스 목록과 접근 요청 방식은 아직 Admin 계약이 필요합니다.") + "</p><button type='button' disabled aria-describedby='access-reason'>" + tx("Request access", "접근 요청") + "</button><span id='access-reason' class='muted'> " + tx("Unavailable in this version", "현재 버전에서는 사용할 수 없음") + "</span></div>";
+  };
+  const evidenceView = () => {
+    const receipt = s.receipts || {};
+    const retained = typeof receipt.entry_count === "number" ? receipt.entry_count : null;
+    const retentionDays = typeof receipt.bounds?.retention_ms === "number" ? Math.round(receipt.bounds.retention_ms / 86400000) : null;
+    const dropped = typeof receipt.dropped_appends === "number" ? receipt.dropped_appends : null;
+    const receiptState = receipt.status === "spooled" ? tx("Readable local history", "읽을 수 있는 로컬 기록") : receipt.status === "absent" ? tx("No retained local history", "보관된 로컬 기록 없음") : tx("Local history unavailable", "로컬 기록 확인 불가");
+    const recent = Array.isArray(receipt.entries) ? receipt.entries.slice(0, 6) : [];
+    const outcomeLabel = (value) => ({ completed:["Completed","완료"], blocked:["Blocked before completion","완료 전 차단"], error:["Ended with an error","오류로 종료"] }[value] || [value,"결과 상태 미확인"])[language === "ko" ? 1 : 0];
+    const evidenceLabel = (value) => ({ readback_verified:["Verified by Gateway readback","Gateway 조회로 확인"], not_read_back:["Gateway readback was not performed","Gateway 조회를 수행하지 않음"], readback_unavailable:["Gateway readback was unavailable","Gateway 조회 불가"], outcome_unknown:["Final outcome is unknown","최종 결과 미확인"] }[value] || [value,"근거 상태 미확인"])[language === "ko" ? 1 : 0];
+    const sourceStateLabel = (value) => ({ complete:["Complete","완전 관측"], partial:["Partial","부분 관측"], observed_empty:["Observed empty","관측 결과 없음"], unreadable:["Unreadable","읽기 실패"], unavailable:["Unavailable","확인 불가"] }[value] || [value,"상태 미확인"])[language === "ko" ? 1 : 0];
+    const recentRows = recent.length ? "<div class='receipt-list'>" + recent.map((entry) => "<article class='receipt-row'><div><strong>" + esc(entry.capability || tx("Ceal call", "Ceal 호출")) + "</strong><p class='muted'>" + esc(formatTime(entry.recorded_at)) + "</p></div><span class='pill'>" + esc(outcomeLabel(entry.status)) + "</span><span class='muted'>" + esc(evidenceLabel(entry.evidence)) + "</span></article>").join("") + "</div>" : "<div class='unsupported'><strong>" + tx("No recent receipt detail", "최근 영수증 상세가 없습니다") + "</strong><p>" + tx("This does not prove that no Ceal call occurred.", "Ceal 호출이 없었다는 뜻은 아닙니다.") + "</p></div>";
+    const sourceCards = dashboard.sources.map((source) => "<div class='card'><h3>" + esc(source.root_display) + "</h3><strong>" + esc(sourceStateLabel(source.observation_state)) + "</strong><p class='muted'>" + tx("Technical source: ", "기술 출처: ") + esc(source.source_ref) + "</p></div>").join("");
+    const loss = dropped === null ? tx("No local loss counter is available.", "로컬 유실 카운터를 확인할 수 없습니다.") : language === "ko" ? "최소 " + dropped + "개의 기록 추가가 유실되었습니다. 이 기록은 완전하지 않습니다." : "At least " + dropped + " receipt appends were lost. This history is incomplete.";
+    return "<section class='hero compact'><p class='eyebrow'>" + tx("EVIDENCE", "데이터 근거") + "</p><h2>" + tx("How much of this dashboard can be trusted", "이 대시보드의 숫자를 어디까지 믿을 수 있는지") + "</h2><p class='hero-summary'>" + tx("This page explains data sources, observation coverage, and known gaps. It is not a raw diagnostics dump.", "이 페이지는 데이터 출처와 관측 범위, 알려진 누락을 설명합니다. 내부 진단값을 그대로 나열하지 않습니다.") + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("USAGE SOURCES", "사용량 출처") + "</p><h2>" + tx("Runtime evidence currently in view", "현재 화면에 반영된 런타임 근거") + "</h2></div></div><div class='metric-strip'>" + sourceCards + "</div><p class='evidence-line'>" + tx("Selected session coverage", "선택한 세션 관측 범위") + ": " + esc(coverageCopy("sessions")) + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("LOCAL CALL HISTORY", "로컬 호출 기록") + "</p><h2>" + receiptState + "</h2></div></div><div class='metric-strip'><div class='card'><h3>" + tx("RETAINED OUTCOMES", "보관된 결과") + "</h3><strong>" + (retained === null ? tx("Unknown", "미확인") : retained) + "</strong></div><div class='card'><h3>" + tx("RETENTION", "보관 기간") + "</h3><strong>" + (retentionDays === null ? tx("Unknown", "미확인") : retentionDays + tx(" days", "일")) + "</strong></div><div class='card'><h3>" + tx("KNOWN LOST APPENDS", "확인된 유실") + "</h3><strong>" + (dropped === null ? tx("Unknown", "미확인") : tx("At least ", "최소 ") + dropped) + "</strong></div></div><p class='warn'>" + esc(loss) + "</p>" + recentRows + "<p class='evidence-line'>" + tx("Gateway receipt readback remains authoritative for an individual call outcome.", "개별 호출 결과는 Gateway 영수증 조회가 최종 근거입니다.") + "</p></section>"
+      + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("KNOWN LIMITS", "알려진 한계") + "</p><h2>" + tx("What this dashboard does not claim", "이 대시보드가 단정하지 않는 것") + "</h2></div></div>" + list([tx("Local history is not the complete Gateway audit ledger.", "로컬 기록은 전체 Gateway 감사 로그가 아닙니다."), tx("Runtime token accounting is not comparable across partitions unless explicitly grouped.", "명시적으로 같은 그룹이 아닌 런타임 토큰 값은 서로 비교하지 않습니다."), tx("Session task names are not inferred from prompts or transcript content.", "프롬프트나 대화 내용으로 세션 작업명을 추측하지 않습니다."), tx("Missing evidence is never treated as zero.", "없는 근거를 0으로 간주하지 않습니다.")], "muted") + "</section>";
   };
 
   const usageEntries = [];
@@ -1093,7 +1182,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   privacyView += list(s.non_claims, "warn");
   const privacyBody = setupBody + section("Privacy & retention (" + (privacy.status ?? "unavailable") + ")", privacyView);
 
-  const bodies = { "Evidence": cealBody, "Setup & privacy": privacyBody };
+  const bodies = { "Setup & privacy": privacyBody };
   const nav = document.getElementById("nav");
   const root = document.getElementById("root");
   const detail = document.getElementById("detail");
@@ -1114,22 +1203,24 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   let currentView = VIEWS[0];
   const show = (view, focusSelector) => {
     currentView = view;
-    root.innerHTML = view === "Usage" ? usageOverview() : view === "Sessions" ? sessionsView() : view === "Access" ? accessView() : bodies[view];
+    root.innerHTML = view === "Usage" ? usageOverview() : view === "Sessions" ? sessionsView() : view === "Access" ? accessView() : view === "Evidence" ? evidenceView() : bodies[view];
     for (const button of nav.querySelectorAll("button")) {
-      button.setAttribute("aria-current", String(button.textContent === view));
+      button.setAttribute("aria-current", String(button.dataset.view === view));
     }
     if (focusSelector) root.querySelector(focusSelector)?.focus();
   };
   for (const view of VIEWS) {
     const button = document.createElement("button");
-    button.textContent = view;
+    button.dataset.view = view;
+    button.textContent = viewLabel(view);
     button.addEventListener("click", () => show(view));
     nav.appendChild(button);
   }
   const openCanonicalSession = (origin) => {
     const entry = dashboard.sessions.find((candidate) => candidate.session_ref === origin.dataset.sessionRef);
     if (!entry) return false;
-    openDetail(origin, "Agent session evidence", rows(Object.entries(entry)) + "<p class='warn'>Local structural evidence only; no prompt or transcript content is rendered.</p>");
+    const detail = "<div class='metric-strip'><div class='card'><h3>" + tx("LAST ACTIVITY", "최근 활동") + "</h3><strong>" + esc(formatTime(entry.last_activity_at)) + "</strong></div><div class='card'><h3>" + tx("TOOL CALLS", "도구 호출") + "</h3><strong>" + (entry.agent_tool_calls ?? tx("Unknown", "미확인")) + "</strong></div><div class='card'><h3>" + tx("TOKENS", "토큰") + "</h3><strong>" + (entry.tokens ?? tx("Unknown", "미확인")) + "</strong></div></div><p class='evidence-line'>" + tx("Session reference", "세션 참조") + ": " + esc(entry.session_ref) + " · " + tx("Model", "모델") + ": " + esc(entry.model_key || tx("unknown", "미확인")) + "</p><p class='warn'>" + tx("Local structural evidence only; no prompt or transcript content is rendered.", "로컬 구조 정보만 표시하며 프롬프트나 대화 내용은 보여주지 않습니다.") + "</p>";
+    openDetail(origin, tx("Agent session evidence", "Agent 세션 근거"), detail);
     return true;
   };
   // Per-session drill-down: an explicit owner click fetches the bounded scan
@@ -1140,6 +1231,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       const next = dashboards.find((entry) => entry.sources[0]?.runtime === runtimeButton.dataset.runtime);
       if (!next) return;
       dashboard = next;
+      observationTimezone = dashboard.timezone;
       sessionPage = 1;
       show(currentView, "button[data-runtime='" + runtimeButton.dataset.runtime + "']");
       return;
@@ -1152,10 +1244,10 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     }
     const pageButton = event.target.closest ? event.target.closest("button[data-page]") : null;
     if (pageButton && !pageButton.disabled) {
-      const direction = pageButton.textContent;
+      const previousPage = sessionPage;
       sessionPage = Number(pageButton.dataset.page);
       const lastPage = Math.max(1, Math.ceil(dashboard.sessions.length / sessionPageSize));
-      const focusSelector = direction === "Previous" || sessionPage === lastPage ? ".pagination button:first-child" : ".pagination button:last-child";
+      const focusSelector = sessionPage < previousPage || sessionPage === lastPage ? ".pagination button:first-child" : ".pagination button:last-child";
       show("Sessions", focusSelector);
       return;
     }
@@ -1175,7 +1267,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       }
       if (entry.next_action.kind === "review_evidence") {
         show("Evidence");
-        Array.from(nav.querySelectorAll("button")).find((button) => button.textContent === "Evidence")?.focus();
+        nav.querySelector("button[data-view='Evidence']")?.focus();
       }
       return;
     }
@@ -1237,6 +1329,23 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   document.getElementById("theme").addEventListener("change", (event) => {
     document.documentElement.dataset.theme = event.target.value;
   });
+  const languageControl = document.getElementById("language");
+  languageControl.value = language;
+  const updateChrome = () => {
+    document.documentElement.lang = language;
+    for (const button of nav.querySelectorAll("button[data-view]")) button.textContent = viewLabel(button.dataset.view);
+    const modeLabels = language === "ko" ? ["자동", "라이트", "다크"] : ["Auto", "Light", "Dark"];
+    Array.from(document.querySelectorAll(".mode [data-mode]")).forEach((button, index) => { button.textContent = modeLabels[index]; });
+    document.getElementById("detail-close").textContent = tx("Close", "닫기");
+    document.getElementById("boundary").innerHTML = isSyntheticDemo
+      ? "<strong>" + tx("Synthetic demo data", "합성 데모 데이터") + "</strong> · " + tx("Fixed presentation evidence only. No personal transcripts, credentials, provider payloads, or production usage are shown.", "화면 검토용 합성 근거만 사용합니다. 개인 대화, 인증정보, Provider 응답, 실제 운영 사용량은 표시하지 않습니다.")
+      : tx("Personal Ceal view. Gateway and local evidence remain separately labeled; this page never calls a provider.", "개인 Ceal 화면입니다. Gateway 근거와 로컬 근거를 구분해 표시하며 Provider를 직접 호출하지 않습니다.");
+  };
+  languageControl.addEventListener("change", (event) => {
+    language = event.target.value === "ko" ? "ko" : "en";
+    updateChrome();
+    show(currentView);
+  });
   for (const button of document.querySelectorAll(".mode [data-mode]")) button.addEventListener("click", () => {
     if (button.dataset.mode === "system") delete document.documentElement.dataset.mode;
     else document.documentElement.dataset.mode = button.dataset.mode;
@@ -1245,6 +1354,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     }
   });
   document.documentElement.dataset.theme = "developer";
+  updateChrome();
   show(VIEWS[0]);
 }).catch(() => { document.getElementById("root").textContent = "Could not read Workbench state."; });
 </script>

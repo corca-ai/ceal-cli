@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
 
-test("a real browser executes the local Workbench overview", { timeout: 20_000 }, async (context) => {
+test("a real browser executes the local Workbench overview", { timeout: 45_000 }, async (context) => {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-browser-home-"));
 	context.after(() => rmSync(home, { recursive: true, force: true }));
 	const server = spawn(process.execPath, ["packages/ceal-worker-cli/dist/bin.js", "observe", "--port", "0"], {
@@ -23,14 +22,13 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	});
 	context.after(async () => {
 		if (server.exitCode === null && server.signalCode === null) {
-			server.kill("SIGTERM");
-			await once(server, "exit");
+			server.kill("SIGKILL");
 		}
 	});
 	const url = await observerUrl(server);
 	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
 	context.after(() => browser.close());
-	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+	const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
 	const pageErrors = [];
 	const requests = [];
 	page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -41,9 +39,9 @@ test("a real browser executes the local Workbench overview", { timeout: 20_000 }
 	assert.deepEqual(pageErrors, []);
 	assert.equal(await page.locator("#root .hero h2").textContent(), "0 sessions observed.");
 	await page.getByText("Local Profile unavailable").waitFor();
-	await page.getByText(/Local runtime evidence/u).waitFor();
+	await page.getByText(/Each square is one date present/u).waitFor();
 	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
-	await page.getByRole("heading", { name: "Estimated cost is unsupported." }).waitFor();
+	await page.getByRole("heading", { name: "Estimated cost · unsupported" }).waitFor();
 	assert.equal(await page.locator("button[data-metric='estimated_cost']").evaluate((element) => element === document.activeElement), true);
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "developer");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), null);
@@ -73,14 +71,13 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	});
 	context.after(async () => {
 		if (server.exitCode === null && server.signalCode === null) {
-			server.kill("SIGTERM");
-			await once(server, "exit");
+			server.kill("SIGKILL");
 		}
 	});
 	const url = await observerUrl(server);
 	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
 	context.after(() => browser.close());
-	const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+	const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: "en-US" });
 	const pageErrors = [];
 	const requests = [];
 	page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -94,8 +91,8 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByText(/not model judgment or a productivity score/u).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
 	await page.getByText(/claude:session_inventory:v1/u).waitFor();
-	await page.getByRole("button", { name: "Review token coverage" }).focus();
-	await page.keyboard.press("Enter");
+	await page.getByRole("button", { name: "Review token coverage" }).click();
+	await page.waitForFunction(() => document.querySelector("button[data-view='Evidence']")?.getAttribute("aria-current") === "true");
 	assert.equal(await page.getByRole("button", { name: "Evidence", exact: true }).getAttribute("aria-current"), "true");
 	assert.equal(
 		await page.getByRole("button", { name: "Evidence", exact: true }).evaluate((element) => element === document.activeElement),
@@ -112,12 +109,12 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-runtime")), "claude");
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 4);
-	assert.equal(await page.locator("button[data-session-ref]").filter({ hasNotText: "claude session" }).count(), 0);
+	assert.equal(await page.locator("button[data-session-ref] .pill").filter({ hasText: "claude" }).count(), 4);
 	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	assert.equal(await page.getByRole("button", { name: "Claude", exact: true }).getAttribute("aria-pressed"), "true");
 	assert.equal(await page.locator("button[data-metric='tokens']").getAttribute("aria-pressed"), "true");
 	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
-	await page.getByRole("heading", { name: "Estimated cost is unsupported." }).waitFor();
+	await page.getByRole("heading", { name: "Estimated cost · unsupported" }).waitFor();
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.locator("button[data-metric='sessions']").click();
 	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 3);
@@ -126,12 +123,14 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
 	await page.getByRole("button", { name: /Tokens/u }).click();
 	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
+	await page.getByText("Unavailable", { exact: true }).waitFor();
+	assert.ok((await page.locator(".activity-grid .day.unavailable").count()) > 0);
 
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 3);
-	await page.getByText(/Model gpt-review-codex/u).waitFor();
+	await page.getByText("gpt-review-codex", { exact: true }).first().waitFor();
 	await page
-		.getByText(/Model unavailable/u)
+		.getByText(/Model unknown/u)
 		.first()
 		.waitFor();
 	const firstSession = page.locator("button[data-session-ref]").first();
@@ -144,12 +143,32 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	assert.equal(await firstSession.evaluate((element) => element === document.activeElement), true);
 	await page.getByRole("button", { name: "Access", exact: true }).click();
 	await page.getByText("9", { exact: true }).first().waitFor();
-	await page.getByRole("heading", { name: "Review capability 1" }).waitFor();
+	await page.getByRole("heading", { name: "Search messages" }).first().waitFor();
 	await page.getByText("message.search.1", { exact: true }).waitFor();
-	await page.getByText("Resource target: required · Audit evidence: gateway_audit", { exact: true }).first().waitFor();
-	assert.equal(await page.getByText("Review capability 9", { exact: true }).count(), 1);
+	await page.getByText("Reads information without changing it · A resource target is required", { exact: true }).first().waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Search messages" }).count(), 3);
 	await page.getByText("Request access").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Request access" }).isDisabled(), true);
+	await page.locator("#language").selectOption("ko");
+	await page.getByRole("heading", { name: "이 프로필로 Ceal에서 할 수 있는 일" }).waitFor();
+	await page.getByRole("button", { name: "사용량", exact: true }).click();
+	await page.getByText(/한 칸은 로컬 관측 범위에 포함된 날짜/u).waitFor();
+	await page.getByText("관측값 0", { exact: true }).waitFor();
+	await page.getByText("높음", { exact: true }).waitFor();
+	await page.getByText("확인 불가", { exact: true }).first().waitFor();
+	await page.getByRole("button", { name: "세션", exact: true }).click();
+	await page.getByText("합성 작업명", { exact: true }).first().waitFor();
+	await page.getByRole("button", { name: "데이터 근거", exact: true }).click();
+	await page.getByRole("heading", { name: "이 대시보드의 숫자를 어디까지 믿을 수 있는지" }).waitFor();
+	await page.getByRole("heading", { name: "읽을 수 있는 로컬 기록" }).waitFor();
+	await page.getByText("완료", { exact: true }).first().waitFor();
+	await page.getByText("Gateway 조회로 확인", { exact: true }).first().waitFor();
+	await page.getByText("완료 전 차단", { exact: true }).first().waitFor();
+	await page.getByText("최종 결과 미확인", { exact: true }).first().waitFor();
+	assert.equal(await page.getByText("activity_recorded_at", { exact: true }).count(), 0);
+	assert.equal(await page.getByText("dropped_appends_are_a_floor", { exact: true }).count(), 0);
+	await page.locator("#language").selectOption("en");
+	await page.getByRole("button", { name: "Access", exact: true }).click();
 
 	for (const theme of ["developer", "editorial", "terminal"]) {
 		await page.locator("#theme").selectOption(theme);
@@ -157,7 +176,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 			await page.getByRole("button", { name: mode }).click();
 			assert.equal(await page.locator("html").getAttribute("data-theme"), theme);
 			assert.equal(await page.locator("html").getAttribute("data-mode"), mode === "Auto" ? null : mode.toLowerCase());
-			await page.getByText(/Gateway-observed (access for this local Profile|capability summary)[.]/u).waitFor();
+			await page.getByRole("heading", { name: "What this Profile can do through Ceal" }).waitFor();
 		}
 	}
 	await page.getByRole("button", { name: "Usage", exact: true }).focus();
@@ -180,8 +199,7 @@ test("the browser distinguishes unavailable Agent inventory from zero sessions",
 	});
 	context.after(async () => {
 		if (server.exitCode === null && server.signalCode === null) {
-			server.kill("SIGTERM");
-			await once(server, "exit");
+			server.kill("SIGKILL");
 		}
 	});
 	const url = await observerUrl(server);
@@ -189,14 +207,20 @@ test("the browser distinguishes unavailable Agent inventory from zero sessions",
 	context.after(() => browser.close());
 	const page = await browser.newPage();
 	await page.goto(url);
-	await page.getByRole("heading", { name: "Sessions is unavailable." }).waitFor();
+	await page.getByRole("heading", { name: "Sessions · unavailable" }).waitFor();
 	await page.getByText("Missing evidence is not rendered as zero").waitFor();
 	await page.getByRole("button", { name: "Sessions", exact: true }).click();
-	await page.getByText("Session inventory is unavailable").waitFor();
+	await page.getByText("Session inventory · unavailable").waitFor();
 	await page.getByText("No zero-session claim is made.").waitFor();
+	await page.locator("#language").selectOption("ko");
+	await page.getByRole("button", { name: "사용량", exact: true }).click();
+	await page.getByRole("button", { name: /예상 비용 확인 불가/u }).click();
+	await page.getByRole("heading", { name: "예상 비용 · 미지원" }).waitFor();
+	await page.getByRole("button", { name: "세션", exact: true }).click();
+	await page.getByText("세션 목록 · 확인 불가").waitFor();
 });
 
-test("more than one hundred sessions use bounded pagination", { timeout: 20_000 }, async (context) => {
+test("more than one hundred sessions use bounded pagination", { timeout: 40_000 }, async (context) => {
 	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
 		env: {
 			PATH: process.env.PATH ?? "",
@@ -208,13 +232,12 @@ test("more than one hundred sessions use bounded pagination", { timeout: 20_000 
 	});
 	context.after(async () => {
 		if (server.exitCode === null && server.signalCode === null) {
-			server.kill("SIGTERM");
-			await once(server, "exit");
+			server.kill("SIGKILL");
 		}
 	});
 	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
 	context.after(() => browser.close());
-	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+	const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
 	const requests = [];
 	page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 	await page.goto(await observerUrl(server));

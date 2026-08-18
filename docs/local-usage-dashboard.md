@@ -110,11 +110,18 @@ partition retained at `local_usage_dashboard` for compatibility. Consumers
 reject fixture provenance or a missing production discriminator.
 
 The Workbench now renders that canonical dataset through separate Usage,
-Sessions, and Access tabs. Usage switches among Sessions, Agent tool calls,
-Tokens, and Estimated cost without changing evidence semantics. Sessions uses
-twenty-row pagination so a history over one hundred rows does not turn into one
-unbounded scroll. Access renders the bounded Gateway-owned capability catalog
-and summary while keeping the unowned request workflow disabled.
+Sessions, Access, and Evidence tabs, with an in-page Korean/English selector.
+Usage switches among Sessions, Agent tool calls, Tokens, and Estimated cost
+without changing evidence semantics; its activity field explicitly defines one
+cell as one local calendar day and uses a visible relative-intensity legend.
+Sessions uses task-first rows and twenty-row pagination so a history over one
+hundred rows does not turn into one unbounded scroll. Synthetic demo task names
+are visibly labeled as synthetic; production observations never infer work
+content from timing or counts. Access uses a capability-specific list rather
+than session cards and explains effect and target requirements while keeping the
+unowned request workflow disabled. Evidence is the human-readable provenance,
+coverage, retention, and known-loss explanation for the other views; raw DTO
+field dumps are not part of that presentation surface.
 
 ## Fixed Decisions
 

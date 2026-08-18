@@ -7,7 +7,7 @@ const evidence = ["readback_verified", "readback_verified", "not_read_back", "ou
 const capabilities = ["message.search", "file.read", "calendar.list", "message.send"];
 const accessCapabilities = Array.from({ length: 9 }, (_, index) => ({
 	capability_id: `${capabilities[index % capabilities.length]}.${index + 1}`,
-	label: `Review capability ${index + 1}`,
+	label: ["Search messages", "Read files", "View calendars", "Send messages"][index % capabilities.length],
 	effect: index < 6 ? "read" : "write",
 	target_requirement: "required",
 	evidence_requirement: "gateway_audit",
