@@ -59,7 +59,6 @@ import process from "node:process";
 export const GATE_ATTESTATION_SCHEMA = "ceal.gate_attestation.v1";
 export const GATE_ATTESTATION_PATH = ".charness/quality/gate-attestation.json";
 export const ATTESTATION_ARTIFACT_PREFIX = "ceal-gate-attestation-";
-/** @testOnly production reads it through `resolveRunnerIdentity`. */
 export const RUNNER_IDENTITY_ENV = "CEAL_GATE_RUNNER_IDENTITY";
 export const ATTESTED_PROFILE = "check";
 const INSTALL_FINGERPRINT_FILE = "node_modules/.package-lock.json";

@@ -69,10 +69,19 @@ copies agreed. That proved nothing about the tree, and it hid a real defect:
 neither list and no root gate ran it. What the gate checks now is the tree:
 every globbed token matches at least one file, every explicitly named path
 exists, no file is claimed by two tiers, `test/` holds exactly those three
-directories, and every `*.test.ts` in the repository has exactly one owner —
-either a glob suite the root chain provably reaches (BOTH halves read: the root
-call AND the package script, which is what tells `ceal-protocol` apart from
+directories, and every suite file in the worktree has exactly one owner — either
+a glob suite the root chain provably reaches (BOTH halves read: the root call
+AND the package script, which is what tells `ceal-protocol` apart from
 `ceal-client`) or an explicit tier entry.
+
+"Every suite file in the worktree" is `git ls-files`, not a walk of the
+directories somebody remembered. That distinction is the whole check: a walk
+answers "is everything I looked at owned", and the first version of it was wrong
+four ways at once — a subdirectory inside a glob-owned workspace (the package
+globs are `test/*.test.ts`, which does not recurse), a suite outside `test/` and
+`packages/<name>/test/`, a nested workspace layout, and a `.test.mjs` file.
+Workspace membership is not ownership either: the file has to sit directly in
+the directory the non-recursive glob covers.
 
 The property the lists were protecting still holds, and it is worth naming
 because a glob is what broke it before: a suite must be PLACED, not swept in. A
@@ -622,6 +631,17 @@ Three consumers, and they fail in opposite directions on purpose:
   because failing the job on a lookup error would trade a saved gate for a
   burned tag. When it does answer `reuse=true`, the skipped `npm run check` is
   replaced by `npm run build`, since the gate was also that leg's build.
+
+Two things about that lane are easy to get wrong and are therefore asserted
+rather than trusted. The reuse verdict is built from the LOOKUP step's
+environment while the proof it skips is the GATE step's, in two separately
+edited `env:` blocks — hardcode the lookup's runner identity and the macOS leg
+asks for an ubuntu receipt, finds the real one, and skips with no macOS proof
+anywhere, which is exactly what `ceal-v0.66.0` burned on. `repo-gates.test.ts`
+requires the two blocks to resolve identically. And because every failure here
+is silent by design, a lane that quietly stops reusing would cost the whole
+saving with nothing turning red; the lookup writes one line into the run summary
+saying which of the two happened.
 
 `record` is the one that must never fail: it runs inside a gate that has just
 passed, so a full disk or an unwritable `.charness/` costs a later re-run rather

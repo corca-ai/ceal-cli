@@ -33,10 +33,18 @@ const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"
 // something the copy never could, namely that every declared path exists and
 // every suite on disk has exactly one owner.
 //
-// The property the copy was protecting is NOT the copy. It is that a file added
-// under test/ must be PLACED, not swept in — a glob once pulled frozen `cealctl`
-// and legacy dual-release proofs back into the worker gate. That property lives
-// in the exhaustiveness assertion, and it survives untouched.
+// What is honestly LOST, stated because the first draft of this comment claimed
+// the opposite and a reviewer caught it: the arrays required an explicit edit to
+// put a suite into the gate, and nothing requires one now. A file dropped into
+// `test/contract/` joins the gate silently, so the incident this shape comes
+// from — a glob pulling frozen `cealctl` and legacy dual-release proofs back into
+// the worker gate — would recur silently if that material were re-placed under a
+// lane directory.
+//
+// What replaces it is narrower, and worth naming precisely rather than glossing:
+// the set of PLACES is closed and asserted (three lane directories under `test/`,
+// and nothing else), and every suite outside one must be named. That is the
+// guard. It is not the old property.
 function workerTierFiles(scripts: Record<string, string>, tier: string) {
 	return testFilesIn(tier === "test:contract" ? scripts["test:contract:built"] : scripts[tier]);
 }
@@ -112,6 +120,21 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 
 function assertTestInventoryCoverage(declared, actual) {
 	assert.deepEqual([...declared].sort(), [...actual].sort());
+}
+
+/**
+ * Every suite file in the worktree, asked of git rather than derived from a list
+ * of directories somebody remembered. Tracked and untracked-but-not-ignored, so
+ * a suite added and not yet committed is still owned by somebody.
+ */
+function trackedSuiteFiles(): string[] {
+	return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.test.ts", "*.test.mjs"], {
+		cwd: ROOT,
+		encoding: "utf8",
+	})
+		.split("\0")
+		.filter(Boolean)
+		.sort();
 }
 
 function searchableWorktreeFiles(repoRoot) {
@@ -1617,6 +1640,20 @@ test("the release lane's gate reuse is one decision with both outcomes wired", (
 
 	const gate = (build.steps ?? []).find(runsFinalGate);
 	assert.ok(String(gate.if).includes(`${verdict} != 'true'`), "the gate must run whenever the lookup did not positively answer 'reuse'");
+	// The reuse verdict is built from the LOOKUP step's environment; the proof it
+	// skips is the GATE step's. Two independently-edited `env:` blocks, and until
+	// this assertion nothing tied them together — so hardcoding the lookup's
+	// runner identity while leaving the gate's on `matrix.runner` would make the
+	// macOS leg ask for an ubuntu receipt, find the real one, and skip with no
+	// macOS proof anywhere. That is the break `ceal-v0.66.0` burned on, reachable
+	// by a one-line edit that no other gate in this repository would notice.
+	const withoutToken = (env: Record<string, string> | undefined) =>
+		Object.fromEntries(Object.entries(env ?? {}).filter(([key]) => key !== "GITHUB_TOKEN"));
+	assert.deepEqual(
+		withoutToken(lookup.env),
+		withoutToken(gate.env),
+		"the lookup and the gate must resolve every attested environment value identically, or the receipt describes a proof the lane did not want",
+	);
 	const reusing = (build.steps ?? []).filter((step: WorkflowStep) => String(step.if ?? "").includes(`${verdict} == 'true'`));
 	assert.equal(reusing.length, 1, "exactly one step may stand in for the skipped gate");
 	assert.equal(
@@ -1781,9 +1818,14 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 	assert.equal(check().status, 0);
 });
 
-// A glob once put frozen `cealctl` and legacy dual-release proofs back into the
-// worker pre-push/CI gate. The two worker tiers stay explicit inventories so that
-// a suite has to be placed deliberately rather than swept in.
+// The population is `git ls-files`, not a walk of two known directories. A walk
+// answers "is everything I looked at owned", which is weaker than the title
+// claims and which this test got wrong in four ways at once: a subdirectory
+// inside a glob-owned workspace (the package globs are `test/*.test.ts`, which
+// does not recurse), a suite outside `test/` and `packages/<name>/test/`, a
+// nested workspace layout like `packages/connectors/github/test/`, and a
+// `.test.mjs` file, which the script parser accepts and the walk did not collect.
+// Asking git for every suite file in the worktree has none of those edges.
 test("every test file in this repository has exactly one owner that the gate reaches", () => {
 	const scripts = manifest.scripts;
 	assertContractGateScriptShape(scripts);
@@ -1857,16 +1899,12 @@ test("every test file in this repository has exactly one owner that the gate rea
 	// chain calls. `leased-consumer-source-import.test.ts` sat there passing in no
 	// gate at all until this walk was widened.
 	const globOwners = globOwnedWorkspaces(scripts);
-	const explicitOnly = filesUnder("test", (name: string) => name.endsWith(".test.ts"));
-	const packaged = readdirSync(path.join(ROOT, "packages"), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.flatMap((entry) =>
-			filesUnder(path.join("packages", entry.name, "test"), (name: string) => name.endsWith(".test.ts")).map((file: string) => [
-				entry.name,
-				file,
-			]),
-		);
-	assert.ok(packaged.length > 0 && explicitOnly.length > 0, "the suite walk found nothing; it is not reaching the tree");
+	const tracked = trackedSuiteFiles();
+	const explicitOnly = tracked.filter((file) => file.startsWith("test/"));
+	assert.ok(
+		tracked.length > explicitOnly.length && explicitOnly.length > 0,
+		"the suite scan found nothing outside test/; it is not reaching the tree",
+	);
 
 	assertTestInventoryCoverage(
 		declared.filter((file) => file.startsWith("test/")),
@@ -1886,10 +1924,17 @@ test("every test file in this repository has exactly one owner that the gate rea
 	// `ceal-worker-cli`'s attachment-stream carrier is deliberately in both — its
 	// root-cwd contract run and its package-cwd coverage run are different
 	// environments — so being glob-owned does not forbid an explicit entry.
-	for (const [workspace, file] of packaged) {
+	//
+	// The workspace glob is `test/*.test.ts`, which does NOT recurse, so workspace
+	// membership alone is not ownership: the file has to sit directly in that
+	// directory. A suite one level deeper is found by git, matched by no glob, and
+	// executed by nothing, which is what this shape exists to catch.
+	const GLOB_OWNED = /^packages\/([\w-]+)\/test\/[^/]+\.test\.ts$/u;
+	for (const file of tracked) {
+		const owner = GLOB_OWNED.exec(file);
 		assert.ok(
-			globOwners.has(workspace) || declared.includes(file),
-			`${file} runs in no gate: ${workspace} has no root-reached glob suite, so the file must be named by a worker tier`,
+			declared.includes(file) || (owner !== null && globOwners.has(owner[1])),
+			`${file} runs in no gate: no worker tier names it, and it is not directly inside a workspace test/ directory whose own suite the root chain reaches`,
 		);
 	}
 

@@ -19,12 +19,30 @@
 // The whole RUN must be green, not just its gate job. A release is cut from a
 // commit whose check lane passed; if `check-native` is red for this commit, the
 // question of whether to skip the amd64 gate is not the one that needs
-// answering.
+// answering. And only a PUSH run counts: a pull_request run executes the
+// workflow definition from the PR, so a PR could choose which artifact name its
+// run publishes without running the gate. That is not exploitable in a way that
+// matters -- for the name to be consulted the PR head must become the release
+// commit, and by then the attacker owns the source the gate would have run over
+// -- but the filter costs one query parameter, so there is no reason to leave
+// the shape lying around.
+//
+// A refused reuse is written to the step summary as well as the log. The whole
+// point of this script can evaporate silently: if the two lanes ever stop
+// agreeing on a field, every release simply pays the gate again and no gate
+// anywhere turns red. One line in the run summary is what makes that visible.
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { ATTESTATION_ARTIFACT_PREFIX, ATTESTED_PROFILE, attestationArtifactName, buildGateAttestation } from "./lib/gate-attestation.ts";
+import {
+	ATTESTATION_ARTIFACT_PREFIX,
+	ATTESTED_PROFILE,
+	attestationArtifactName,
+	buildGateAttestation,
+	RUNNER_IDENTITY_ENV,
+} from "./lib/gate-attestation.ts";
 import { isMainModule } from "./lib/is-main-module.ts";
 
 const PREFIX = "resolve-gate-attestation";
@@ -96,7 +114,7 @@ export async function resolveAttestationReuse(options: ReuseLookupOptions = {}):
 	const api = (env.GITHUB_API_URL ?? DEFAULT_API).replace(/\/+$/u, "");
 
 	try {
-		const runsUrl = `${api}/repos/${repository}/actions/workflows/${SOURCE_WORKFLOW_FILE}/runs?head_sha=${encodeURIComponent(headSha)}&status=success&per_page=${RUN_PAGE_SIZE}`;
+		const runsUrl = `${api}/repos/${repository}/actions/workflows/${SOURCE_WORKFLOW_FILE}/runs?head_sha=${encodeURIComponent(headSha)}&status=success&event=push&per_page=${RUN_PAGE_SIZE}`;
 		const runs = listOf(await getJson(runsUrl, token, fetchImpl), "workflow_runs");
 		if (runs.length === 0) return refuse("no_green_check_run", artifactName, [`no successful ${SOURCE_WORKFLOW_FILE} run for ${headSha}`]);
 
@@ -112,7 +130,10 @@ export async function resolveAttestationReuse(options: ReuseLookupOptions = {}):
 				if (typeof artifact.name !== "string" || !artifact.name.startsWith(ATTESTATION_ARTIFACT_PREFIX)) continue;
 				// An expired artifact is a name with nothing behind it; treating it
 				// as proof would make reuse depend on retention rather than on source.
-				if (artifact.expired === true) continue;
+				// `!== false`, not `=== true`: an artifact whose `expired` key is
+				// absent has not told us it is live, and every other refusal here
+				// costs a gate run rather than a wrong skip.
+				if (artifact.expired !== false) continue;
 				observed.push(`run ${runId}: ${artifact.name}`);
 				if (artifact.name === artifactName) {
 					return { reuse: true, reason: "attested_green", artifactName, detail: [`run ${runId} already proved this record`] };
@@ -129,8 +150,34 @@ export async function resolveAttestationReuse(options: ReuseLookupOptions = {}):
 	}
 }
 
+/**
+ * One line in the run summary, so a reuse that quietly stopped happening is
+ * visible without opening a step log. Best effort by design: a summary that
+ * cannot be written must not fail a release job.
+ */
+function appendStepSummary(verdict: AttestationReuse, env: NodeJS.ProcessEnv, appendFile: typeof appendFileSync): void {
+	const summaryPath = env.GITHUB_STEP_SUMMARY;
+	if (!summaryPath) return;
+	const identity = env[RUNNER_IDENTITY_ENV] ?? "unset";
+	try {
+		appendFile(
+			summaryPath,
+			verdict.reuse
+				? `- gate on \`${identity}\`: reused an attested-green run, not re-proved\n`
+				: `- gate on \`${identity}\`: re-proved from scratch (${verdict.reason}) — reuse is not happening here\n`,
+			"utf8",
+		);
+	} catch {
+		// evidence, not a gate
+	}
+}
+
 export async function main(
-	options: ReuseLookupOptions & { stdout?: (text: string) => void; stderr?: (text: string) => void } = {},
+	options: ReuseLookupOptions & {
+		stdout?: (text: string) => void;
+		stderr?: (text: string) => void;
+		appendFile?: typeof appendFileSync;
+	} = {},
 ): Promise<number> {
 	const stdout = options.stdout ?? ((text: string) => process.stdout.write(text));
 	const stderr = options.stderr ?? ((text: string) => process.stderr.write(text));
@@ -142,6 +189,7 @@ export async function main(
 	stdout(`artifact_name=${verdict.artifactName ?? ""}\n`);
 	stderr(`${PREFIX}: ${verdict.reuse ? "reusing" : "running"} the gate — ${verdict.reason}\n`);
 	for (const line of verdict.detail) stderr(`  ${line}\n`);
+	appendStepSummary(verdict, options.env ?? process.env, options.appendFile ?? appendFileSync);
 	return 0;
 }
 

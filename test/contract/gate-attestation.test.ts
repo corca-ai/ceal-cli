@@ -9,6 +9,7 @@
 // nothing at all.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import type { appendFileSync } from "node:fs";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -385,6 +386,59 @@ test("every way the lookup can come up short answers 'run the gate' instead of f
 	const dirty = await resolveAttestationReuse({ repoRoot: root, env: ciEnv(root), fetchImpl: fakeFetch([]) });
 	assert.equal(dirty.reason, "dirty_checkout");
 	assert.equal(dirty.artifactName, null);
+});
+
+test("a green run is not enough on its own: the query and the artifact both have to be trustworthy", async (context) => {
+	const root = fixtureRepo(context);
+	const name = attestationArtifactName(build(root, ciEnv(root)));
+	const calls: string[] = [];
+	const runs: [string, unknown] = [`workflows/${SOURCE_WORKFLOW_FILE}/runs`, { workflow_runs: [{ id: 11 }] }];
+
+	// A pull_request run executes the workflow definition from the PR, so a PR
+	// could pick the artifact name its run publishes without running the gate.
+	// Only a push run is asked for.
+	await resolveAttestationReuse({
+		repoRoot: root,
+		env: ciEnv(root),
+		fetchImpl: fakeFetch([runs, ["runs/11/artifacts", { artifacts: [{ name, expired: false }] }]], calls),
+	});
+	assert.match(calls[0], /[?&]event=push(&|$)/u, "a pull_request run must not be able to supply the receipt");
+
+	// An artifact that has not said it is live has not said it is live. Every
+	// other refusal here costs a gate run; trusting a missing field would not.
+	const silentExpiry = await resolveAttestationReuse({
+		repoRoot: root,
+		env: ciEnv(root),
+		fetchImpl: fakeFetch([runs, ["runs/11/artifacts", { artifacts: [{ name }] }]]),
+	});
+	assert.equal(silentExpiry.reuse, false);
+	assert.equal(silentExpiry.reason, "no_matching_attestation");
+});
+
+// The whole point of the lookup can evaporate silently: if the two lanes ever
+// stop agreeing on a field, every release just pays the gate again and no gate
+// anywhere turns red. The run summary is what makes that visible.
+test("the lookup says in the run summary whether reuse actually happened", async (context) => {
+	const root = fixtureRepo(context);
+	const name = attestationArtifactName(build(root, ciEnv(root)));
+	const runs: [string, unknown] = [`workflows/${SOURCE_WORKFLOW_FILE}/runs`, { workflow_runs: [{ id: 11 }] }];
+	const summaries: string[] = [];
+	const appendFile = ((_path: string, text: string) => summaries.push(String(text))) as unknown as typeof appendFileSync;
+	const env = ciEnv(root, { GITHUB_STEP_SUMMARY: "/dev/null" });
+	const lookup = (lookupEnv: NodeJS.ProcessEnv, routes: Array<[string, unknown]>) =>
+		resolverMain({ repoRoot: root, env: lookupEnv, appendFile, fetchImpl: fakeFetch(routes), stdout: () => {}, stderr: () => {} });
+	const noRuns: Array<[string, unknown]> = [[`workflows/${SOURCE_WORKFLOW_FILE}/runs`, { workflow_runs: [] }]];
+
+	await lookup(env, [runs, ["runs/11/artifacts", { artifacts: [{ name, expired: false }] }]]);
+	await lookup(env, noRuns);
+	assert.match(summaries[0], /reused an attested-green run/u);
+	assert.match(summaries[1], /re-proved from scratch \(no_green_check_run\)/u);
+	for (const line of summaries) assert.match(line, new RegExp(RUNNER, "u"), "the summary must name the runner the verdict is about");
+
+	// No summary file, no summary, and no failure either.
+	summaries.length = 0;
+	await lookup(ciEnv(root), noRuns);
+	assert.deepEqual(summaries, []);
 });
 
 test("the lookup writes one line per key and always exits zero", async (context) => {

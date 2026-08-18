@@ -1273,6 +1273,13 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-18",
 			"note": "Re-key of the whole-file overlap between two independent hook/build fixtures: repo-build.test.ts (dist mutex) and pre-push-lock.test.ts (pre-push lock). Re-keyed because pre-push-lock.test.ts gained a stub-node case this session -- the hook's tag branch now asks gate-attestation.ts whether the full gate can be skipped, and a stub answering 0 to everything would have left that suite proving the lock around lint:shell instead of around the long gate. Both files spawn processes and assert lock/journal behavior, which is the shared shape; neither owns the other's resource."
+		},
+		{
+			"surface": "code",
+			"id": "6124f2f99f0d78c0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Fifth re-key of the same whole-file pair (f7c1d7bcf80fe9c3, b0f4fcbcd202f0ef, a70ee3fec1da8cbe and the third recorded above): repo-gates.test.ts against legacy-mjs-conversion.test.ts. Re-keyed a second time this session because repo-gates grew the fresh-eye repairs -- the lookup/gate environment binding and the git ls-files suite population. Ownership is unchanged and the shared material is still ordinary Node test scaffolding. The DEBT is now loud enough to name as the next move rather than a someday: this file re-keys on EVERY growth, it is past 2200 lines, and splitting the gate-contract and suite-ownership block into its own contract-lane file is what stops the re-key treadmill."
 		}
 	],
 	"fixable_ceiling": 0,
