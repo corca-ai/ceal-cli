@@ -21,7 +21,7 @@ interface FakeTty extends HiddenInputStream {
 	emit(event: "end"): void;
 }
 
-function isDataListener(event: "data" | "end", listener: DataListener | EndListener): listener is DataListener {
+function isDataListener(event: "data" | "end", _listener: DataListener | EndListener): _listener is DataListener {
 	return event === "data";
 }
 
