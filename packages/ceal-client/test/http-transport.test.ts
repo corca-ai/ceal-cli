@@ -363,7 +363,7 @@ test("HTTP transport identifies an incomplete discovery target page without a co
 		...response,
 		value: {
 			...response.value,
-			target_catalog: { target_count: 0, returned_count: 0, complete: false },
+			target_catalog: { target_count: 373, returned_count: 0, complete: false },
 		},
 	};
 	const transport = createCealHttpTransport({
@@ -382,7 +382,7 @@ test("HTTP transport identifies an incomplete discovery target page without a co
 	});
 });
 
-test("HTTP transport leaves a non-empty incomplete discovery page as generic protocol invalid", async () => {
+test("HTTP transport leaves a partially returned discovery page as generic protocol invalid", async () => {
 	const discoveryRequest: DiscoverInput = {
 		request_id: "request:discover:nonempty-shape-001",
 		operation: "discover",
@@ -410,7 +410,35 @@ test("HTTP transport leaves a non-empty incomplete discovery page as generic pro
 	});
 });
 
-test("HTTP transport identifies an empty discovery page with a null continuation cursor", async () => {
+test("HTTP transport leaves a zero-target incomplete discovery page as generic protocol invalid", async () => {
+	const discoveryRequest: DiscoverInput = {
+		request_id: "request:discover:zero-target-shape-001",
+		operation: "discover",
+		profile_ref: "profile:test",
+		body: {},
+	};
+	const response = discoveryResponse(discoveryRequest);
+	const zeroTargetIncompleteCatalog = {
+		...response,
+		value: {
+			...response.value,
+			target_catalog: { target_count: 0, returned_count: 0, complete: false },
+		},
+	};
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(zeroTargetIncompleteCatalog),
+	});
+	await assert.rejects(createCealClient(transport).request(discoveryRequest), (error) => {
+		assert.ok(error instanceof CealHttpTransportError);
+		assert.equal(error.response_kind, "protocol_invalid");
+		assert.equal(error.response_shape_issue, undefined);
+		return true;
+	});
+});
+
+test("HTTP transport identifies an incomplete discovery page with a null continuation cursor", async () => {
 	const discoveryRequest: DiscoverInput = {
 		request_id: "request:discover:null-cursor-001",
 		operation: "discover",
@@ -422,7 +450,7 @@ test("HTTP transport identifies an empty discovery page with a null continuation
 		...response,
 		value: {
 			...response.value,
-			target_catalog: { target_count: 0, returned_count: 0, complete: false, next_cursor: null },
+			target_catalog: { target_count: 373, returned_count: 0, complete: false, next_cursor: null },
 		},
 	};
 	const transport = createCealHttpTransport({

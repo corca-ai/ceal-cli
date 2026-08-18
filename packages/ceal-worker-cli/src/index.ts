@@ -1887,7 +1887,7 @@ function gatewayUnavailableNextAction(
 	}
 	if (observation.phase === "discovery" && observation.protocol_handshake_verified) {
 		if (observation.response_shape_issue === "discovery_target_catalog_incomplete_without_cursor")
-			return "The Gateway returned an incomplete discovery target page without a continuation cursor. Repair the Gateway/proxy target-catalog response producer so an empty page is complete, then retry; do not refresh again, and capability access is unproven.";
+			return "The Gateway returned an incomplete discovery target catalog without a continuation cursor. Repair the Gateway/proxy target-catalog response producer so it returns a complete page or supplies a continuation cursor, then retry; do not refresh again, and capability access is unproven.";
 		return observation.http_status === 200 && observation.response_kind === "protocol_invalid"
 			? `The Gateway handshake succeeded, but discovery returned HTTP 200 without a valid Ceal response for client protocol ${PROTOCOL_VERSION}. Check Gateway/proxy protocol compatibility; do not refresh again, and capability access is unproven.`
 			: "The Gateway handshake succeeded, but capability discovery did not return a valid Ceal response. Check the Gateway discovery route and protocol version, then retry; capability access is unproven.";

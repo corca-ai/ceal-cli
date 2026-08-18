@@ -4771,7 +4771,7 @@ test("capabilities identifies a stale incomplete target page after one refresh w
 			assert.equal(payload.gateway_observation.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 			assert.equal(refreshCalls(), 1);
 			assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
-			assert.match(payload.error.next_action, /incomplete discovery target page/u);
+			assert.match(payload.error.next_action, /incomplete discovery target catalog/u);
 			assert.match(payload.error.next_action, /continuation cursor/u);
 			assert.doesNotMatch(payload.error.next_action, /Gateway\/proxy protocol compatibility/u);
 			assert.doesNotMatch(JSON.stringify(payload), /selection_required|target_count|safe-token/u);
@@ -4783,7 +4783,7 @@ test("capabilities identifies a stale incomplete target page after one refresh w
 					...response,
 					value: {
 						...response.value,
-						target_catalog: { target_count: 0, returned_count: 0, complete: false },
+						target_catalog: { target_count: 373, returned_count: 0, complete: false },
 					},
 				};
 			},
