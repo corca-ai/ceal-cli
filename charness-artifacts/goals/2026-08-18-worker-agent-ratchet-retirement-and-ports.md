@@ -13,9 +13,9 @@ activation command.
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
   detector, and all seven Lane B compiler-option slices across Worker and Agent have
-  implementation, targeted proof, and local commits. The full Gateway loader-rewrite
-  ratchet remains deliberately unported; Lane C `noNonNullAssertion` and
-  `no-explicit-any` is next.
+  implementation, targeted proof, and local commits. Lane C
+  `noNonNullAssertion` and `no-explicit-any` is implemented and locally proven;
+  the full Gateway loader-rewrite ratchet remains deliberately unported.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -33,8 +33,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: continue with Lane C `noNonNullAssertion` and `no-explicit-any`,
-  keeping the A → D1 → B → C → D2 → E dependency order intact.
+- Next action: continue with D2, keeping the A → D1 → B → C → D2 → E
+  dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -256,7 +256,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
-| C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | in progress — inventory captured; Worker has 17 assertions and Agent has 9 explicit-any diagnostics |
+| C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
 | Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | pending |
@@ -733,7 +733,7 @@ compiler replacement proof.
   Protocol-quarantine claims. No source or baseline mutation was made by the
   review.
 
-### Slice 13: Lane C — disabled lint-rule inventory
+### Slice 13: Lane C — enable disabled lint rules
 
 - Objective: Measure the disabled Worker `noNonNullAssertion` and Agent source
   `@typescript-eslint/no-explicit-any` rules before enabling either, then repair
@@ -752,9 +752,33 @@ compiler replacement proof.
   findings in `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`,
   and `src/tools/runtime.ts`; the captured output is at
   `/tmp/ceal-agent-lanec-no-explicit-any-final.log`.
-- Disposition: inventory is complete and implementation is next. The exact
-  findings are compiler/linter-owned source work; no ignore, baseline, or
-  count-only exception is authorized.
+- Implementation: Worker commit `099e1e8` removed the `biome.json`
+  `noNonNullAssertion: "off"` exception, repaired all 17 findings with
+  checked locals/runtime guards, and aligned `docs/gates.md` to the two
+  remaining disabled rules. Agent commit `332c5f5` changed the source
+  `@typescript-eslint/no-explicit-any` rule to `error` and replaced all 9
+  findings with `unknown` boundaries, record guards, and typed runtime
+  selection adapters. Neither commit changes a diagnostic baseline or adds a
+  lint suppression.
+- Worker proof: the pre-enable override above exited 1; after the repair,
+  `npm exec --no -- biome check --only=style/noNonNullAssertion
+  --error-on-warnings .` exited 0. The owned `npm run lint`,
+  `npm run lint:types`, `npm run lint:types:ts6`, and `npm run lint:markdown`
+  routes exited 0. The targeted source suite exited 0 with 222/222 tests
+  passing, and the commit hook passed.
+- Agent proof: the pre-enable source override above exited 1; after the
+  repair, the same override exited 0. The owned `npm run lint:eslint`,
+  `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`,
+  `npm run lint:types:ts6`, and `npm run test:contributor` routes exited 0.
+  The TS7/TS6 tools summaries remained `source_behavior: 279 diagnostics in
+  22 files; equal` and `immutable_artifact: 100 diagnostics in 14 files;
+  equal`. The direct source-only runner is Linux-scoped and returned
+  `linux_runtime_requires_linux` on this macOS host; no platform bypass or
+  green claim is made for that route.
+- Disposition: Lane C is complete. The repaired source remains compiler/linter-
+  owned; no ignore, baseline, count-only exception, or production
+  `skipLibCheck` broadening was introduced. D2 may proceed; E remains blocked
+  only on D2's receiving-closure and mutation/restore proof.
 
 ## Context Sources
 
@@ -929,3 +953,6 @@ improvement as applied or a tracked issue.
 | Lane B exact-option cross-surface review found no blocker and corrected one evidence wording issue | bounded fresh-eye review notification for frozen Worker `53b2c4a`, Agent `283b0c9`, and goal `ef34329`; primary re-read of Worker parent diff and Agent exact helpers | re-run the exact raw/TS6/lint commands in the compiler-owned row above; inspect `git diff 53b2c4a^ 53b2c4a -- tsconfig.typecheck.json tsconfig.tools.json` and the Agent parent diff; require no baseline paths in either commit |
 | Lane C Worker noNonNullAssertion inventory is the disabled-rule source census | Worker `biome.json:25-34`; `/tmp/ceal-worker-lanec-noNonNullAssertion.log` records 17 findings across 7 files | from `/Users/ted/codes/ceal-cli`: run `npm exec --no -- biome check --only=style/noNonNullAssertion --error-on-warnings .`; require direct exit 1 before enabling and rerun the same command after source repair with exit 0 |
 | Lane C Agent source no-explicit-any inventory is the disabled-rule source census | Agent `eslint.config.ts:30-40`; `/tmp/ceal-agent-lanec-no-explicit-any-final.log` records 9 findings in 3 files; positive control `eslint.config.ts:47-50` keeps scripts/tests on the rule | from `/Users/ted/codes/ceal-agent`: run `npm exec --no -- eslint src --rule '@typescript-eslint/no-explicit-any:error' --max-warnings 0`; require direct exit 1 before enabling and rerun the owned `npm run lint:eslint` route after source repair with exit 0 |
+| Lane C Worker noNonNullAssertion is compiler/linter-owned after source repair | Worker commit `099e1e8`; `biome.json:25-33`, `docs/gates.md`, and the seven inventoried source files | from `/Users/ted/codes/ceal-cli`: run the direct Biome override plus `npm run lint`, `npm run lint:types`, `npm run lint:types:ts6`, `npm run lint:markdown`, and the targeted 222-test source command; require direct exit 0 and inspect the commit path set |
+| Lane C Agent source no-explicit-any is linter-owned after typed-adapter repair | Agent commit `332c5f5`; `eslint.config.ts:30-50`, `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`, and `src/tools/runtime.ts` | from `/Users/ted/codes/ceal-agent`: run the direct ESLint override plus `npm run lint:eslint`, `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:contributor`; require direct exit 0, unchanged TS7/TS6 summaries, and no baseline path in the commit |
+| Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: inspect `git show 099e1e8 --` and `git show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
