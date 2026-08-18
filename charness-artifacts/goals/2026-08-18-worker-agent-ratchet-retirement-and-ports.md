@@ -33,8 +33,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: continue with E, keeping the A → D1 → B → C → D2 → E
-  dependency order intact.
+- Next action: complete E's zero-entry baseline cleanup, keeping the A → D1 →
+  B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -258,7 +258,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | completed — native Worker/Agent lint ownership and mutation/restore proof |
-| E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
+| E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | in progress — zero-entry inventory captured; baseline edit and post-edit proof pending |
 | Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | pending |
 
 Order is A → D1 → B → C → D2 → E. If Lane A fails, dependent
@@ -820,6 +820,32 @@ compiler replacement proof.
   diagnostic baselines are unchanged.
 - Disposition: D2 is complete. E may proceed; no external-boundary action is
   implied by this local proof.
+- Fresh-eye: a second bounded review ran only after the final inputs were
+  frozen at Gateway `67afbec`, Worker `84f9854`, and Agent `0abdfcc`; all three
+  checkouts were clean and the verdict was `clean`. It rechecked the native
+  lint reachability, Lane C repairs, D2 mutation SHA records, unchanged
+  baselines/ratchet files, unchanged production `skipLibCheck` policy, and the
+  D2-complete/E-pending ordering. The earlier review attempt remains
+  explicitly discarded as invalid drift evidence.
+
+### Slice 15: Lane E — remove paid zero entries from Agent baselines
+
+- Objective: remove only zero-valued diagnostic entries from
+  `config/typecheck-baseline.json` and `config/typecheck-baseline-ts6.json`;
+  preserve every positive entry, lane distinction, schema, and the current
+  raw-checker behavior. Do not run an update/min-merge route.
+- Inventory before edit: TS7 has 105 zero / 74 positive entries in
+  `source_behavior` (279 paid diagnostics) and 31 zero / 40 positive entries
+  in `immutable_artifact` (100 paid diagnostics). TS6 has 106 zero / 73
+  positive entries in `source_behavior` (279 paid diagnostics) and 31 zero /
+  40 positive entries in `immutable_artifact` (100 paid diagnostics). Positive
+  controls are `scripts/inventory-dual-implementation.ts::TS7006` in
+  source-behavior and `scripts/service-runtime-resolution-target.ts::TS2322`
+  in immutable-artifact for both compiler baselines.
+- Disposition before edit: the zero-key inventory is the only authorized
+  removal set. The exact keys will be recorded in Agent-owned quality evidence;
+  non-zero key sets and counts will be compared before and after, then TS7,
+  TS6, quality-contract, and baseline-boundary tests will be rerun.
 
 ## Context Sources
 
@@ -998,3 +1024,4 @@ improvement as applied or a tracked issue.
 | Lane C Agent source no-explicit-any is linter-owned after typed-adapter repair | Agent commit `332c5f5`; `eslint.config.ts:30-50`, `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`, and `src/tools/runtime.ts` | from `/Users/ted/codes/ceal-agent`: run the direct ESLint override plus `npm run lint:eslint`, `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:contributor`; require direct exit 0, unchanged TS7/TS6 summaries, and no baseline path in the commit |
 | Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: run `git -C /Users/ted/codes/ceal-cli show 099e1e8 --` and `git -C /Users/ted/codes/ceal-agent show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
 | D2 native explicit-any ownership is receiving-local with mutation proof | Worker commit `3c63f36` (`biome.json`, `docs/gates.md`, source contract); Agent commit `0abdfcc` (quality contract); snapshots `/tmp/ceal-worker-d2-explicit-any-proof.gvkhYP` and `/tmp/ceal-agent-d2-explicit-any-proof.ltamLX` | from the explicit roots: run Worker `npm exec --no -- biome check --only=suspicious/noExplicitAny --error-on-warnings .` and Agent `npm run lint:eslint`; require the recorded red mutation, snapshot SHA equality, restored green result, and no Gateway ratchet/baseline path |
+| E zero-entry inventory is current raw-checker debt and positive entries are paid | Agent `config/typecheck-baseline.json`, `config/typecheck-baseline-ts6.json`, `scripts/typecheck-tools-tests.ts:124-149`; pre-edit inventory is TS7 `105/74` and `31/40` zero/positive by lane, TS6 `106/73` and `31/40`, with paid totals `279/100` | from `/Users/ted/codes/ceal-agent`: run the read-only baseline histogram inventory with positive controls, then `npm run lint:types:tools`, `npm run lint:types:ts6`, `npm run test:quality`, and the baseline-boundary tests; before edit require only zero-valued keys in the removal set, no update/min-merge route, and exact removed-key evidence |
