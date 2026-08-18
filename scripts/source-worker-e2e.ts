@@ -22,6 +22,7 @@ const BUILD_TIMEOUT_MS = 120_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const MAX_CAPTURED_OUTPUT = 512 * 1024;
 const SAFE_PROFILE = /^profile:[a-z0-9][a-z0-9._-]*$/u;
+const TIMED_WORKER_COMMANDS = new Set(["capabilities", "targets", "call", "receipt", "session_refresh"]);
 
 export type SourceWorkerE2eOptions = {
 	help: boolean;
@@ -353,7 +354,33 @@ async function runProcess(command: string, args: readonly string[], timeoutMs: n
 }
 
 function commandSummary(result: CommandResult, kind: string): RecordValue {
-	return { ...summarizeYaml(result.stdout, kind), exit_code: result.exit_code, elapsed_ms: result.elapsed_ms, timed_out: result.timed_out };
+	const timing = summarizeTimingStderr(result.stderr);
+	return {
+		...summarizeYaml(result.stdout, kind),
+		exit_code: result.exit_code,
+		elapsed_ms: result.elapsed_ms,
+		timed_out: result.timed_out,
+		...(timing.length > 0 ? { timing } : {}),
+	};
+}
+
+/** Keep only the Worker timing contract; never forward arbitrary stderr. */
+export function summarizeTimingStderr(stderr: string): RecordValue[] {
+	const events: RecordValue[] = [];
+	for (const line of stderr.split(/\r?\n/u)) {
+		let value: unknown;
+		try {
+			value = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (!isRecord(value) || value.schema_version !== "ceal.timing.v1" || value.event !== "finish") continue;
+		if (typeof value.stage !== "string" || !/^[a-z][a-z0-9_]{0,63}$/u.test(value.stage)) continue;
+		if (typeof value.elapsed_ms !== "number" || !Number.isFinite(value.elapsed_ms) || value.elapsed_ms < 0) continue;
+		if (value.outcome !== "ok" && value.outcome !== "error") continue;
+		events.push({ stage: value.stage, elapsed_ms: value.elapsed_ms, outcome: value.outcome });
+	}
+	return events;
 }
 
 async function main(): Promise<number> {
@@ -455,7 +482,11 @@ async function main(): Promise<number> {
 			options.json,
 		);
 	const worker = (args: readonly string[], kind: string) =>
-		runProcess(process.execPath, [WORKER_ENTRYPOINT, ...args], COMMAND_TIMEOUT_MS).then((result) => {
+		runProcess(
+			process.execPath,
+			[WORKER_ENTRYPOINT, ...(TIMED_WORKER_COMMANDS.has(kind) ? ["--timing"] : []), ...args],
+			COMMAND_TIMEOUT_MS,
+		).then((result) => {
 			const summary = commandSummary(result, kind);
 			commands.push(summary);
 			return { result, summary };

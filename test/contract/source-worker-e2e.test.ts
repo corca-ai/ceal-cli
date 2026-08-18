@@ -4,6 +4,7 @@ import {
 	parseSourceWorkerE2eArgs,
 	sourceWorkerE2eHelp,
 	sourceWorkerE2ePlan,
+	summarizeTimingStderr,
 	summarizeYaml,
 	targetRefReturned,
 } from "../../scripts/source-worker-e2e.ts";
@@ -79,6 +80,37 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 	assert.equal(summary.failure_stage, "gateway_discovery");
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
+});
+
+test("source-worker-e2e preserves only bounded Worker finish timings from stderr", () => {
+	const timing = summarizeTimingStderr(
+		[
+			JSON.stringify({ schema_version: "ceal.timing.v1", event: "start", stage: "gateway_discovery" }),
+			JSON.stringify({
+				schema_version: "ceal.timing.v1",
+				event: "finish",
+				stage: "gateway_handshake",
+				elapsed_ms: 12.5,
+				outcome: "ok",
+				token: "secret",
+			}),
+			JSON.stringify({
+				schema_version: "ceal.timing.v1",
+				event: "finish",
+				stage: "gateway_discovery",
+				elapsed_ms: 345.75,
+				outcome: "error",
+				response_body: "provider payload",
+			}),
+			JSON.stringify({ schema_version: "ceal.timing.v1", event: "finish", stage: "bad stage", elapsed_ms: 1, outcome: "ok" }),
+			"not json",
+		].join("\n"),
+	);
+	assert.deepEqual(timing, [
+		{ stage: "gateway_handshake", elapsed_ms: 12.5, outcome: "ok" },
+		{ stage: "gateway_discovery", elapsed_ms: 345.75, outcome: "error" },
+	]);
+	assert.doesNotMatch(JSON.stringify(timing), /secret|provider payload/u);
 });
 
 test("source-worker-e2e help distinguishes fixture tests from the live source-built lane", () => {
