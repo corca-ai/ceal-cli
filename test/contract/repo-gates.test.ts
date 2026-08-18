@@ -475,8 +475,11 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 });
 
 test("Protocol, client, and worker behavior execute editable source while emitted surfaces stay in the artifact lane", () => {
+	const protocolPackage = JSON.parse(read("packages/ceal-protocol/package.json"));
 	const clientPackage = JSON.parse(read("packages/ceal-client/package.json"));
 	const workerPackage = JSON.parse(read("packages/ceal-worker-cli/package.json"));
+	assert.equal(protocolPackage.scripts.test, "npm run build && node ../../test/run-source-tests.ts test/*.test.ts");
+	assert.equal(protocolPackage.scripts.pretest, undefined);
 	assert.match(clientPackage.scripts.test, /--import [.][.]\/[.][.]\/test\/source-loader[.]ts/u);
 	assert.match(clientPackage.scripts.coverage, /--import [.][.]\/[.][.]\/test\/source-loader[.]ts/u);
 	assert.equal(clientPackage.scripts.pretest, undefined);

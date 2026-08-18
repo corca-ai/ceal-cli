@@ -35,7 +35,7 @@
 	"scripts": {
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
-		"test": "npm run build && node --import tsx --test test/*.test.ts",
+		"test": "npm run build && node ../../test/run-source-tests.ts test/*.test.ts",
 		"prepack": "npm run clean && npm run build"
 	},
 	"devDependencies": {
