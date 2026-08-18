@@ -3,8 +3,17 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { isSha256Digest, sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import { isRegularNonSymlinkDirectory } from "../../scripts/lib/regular-directory.ts";
 import { resolveMatchingWorkerClientVersion } from "../../scripts/lib/release-version.ts";
+
+test("sha256 owner preserves one digest across text and byte inputs", () => {
+	const text = "ceal-worker-sha256-contract";
+	const digest = sha256(text);
+	assert.equal(sha256(new TextEncoder().encode(text)), digest);
+	assert.equal(isSha256Digest(digest), true);
+	assert.equal(isSha256Digest("not-a-sha256-digest"), false);
+});
 
 test("release owners preserve matching versions and reject mismatch or symlinked directories", () => {
 	const repoRoot = mkdtempSync(path.join(tmpdir(), "ceal-release-version-"));

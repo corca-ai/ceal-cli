@@ -240,6 +240,61 @@ def _is_small_test_setup_family(repo_root: Path, family: dict) -> bool:
     return True
 
 
+def _scan_families_preserving_raw(scan: object, repo_root: Path, scope_paths: list[str]) -> tuple[list[object] | None, str | None, str]:
+    """Read the packaged collector before its public seam normalizes malformed entries.
+
+    The portable scan helper currently filters non-dict families before returning them.
+    That is safe for its ordinary report, but it would let a mixed malformed payload
+    disappear before this repository's fail-closed adapter can inspect it. The raw
+    collector is still the skill-owned scanner and constants; this adapter only keeps
+    its result shape intact at the Worker boundary. Test-only injected scanners use the
+    public seam as a fallback.
+    """
+    nose_report = getattr(scan, "_nose_report", None)
+    inventory = getattr(scan, "_inventory", None)
+    collect_families = getattr(nose_report, "collect_families", None)
+    resolve_nose_bin = getattr(inventory, "resolve_nose_bin", None)
+    if callable(collect_families) and callable(resolve_nose_bin):
+        nose_bin = resolve_nose_bin()
+        if nose_bin is None:
+            return None, "nose binary not found; code clone scan skipped", ""
+        default_paths = getattr(inventory, "DEFAULT_PATHS", ())
+        paths = [str(path) for path in (scope_paths or default_paths)]
+        mode = getattr(inventory, "DEFAULT_MODE", None)
+        minimum_size = getattr(scan, "FULL_SCAN_MIN_SIZE", None)
+        top = getattr(scan, "FULL_SCAN_TOP", None)
+        if not isinstance(mode, str) or not isinstance(minimum_size, int) or not isinstance(top, int):
+            return None, "packaged duplicate scan constants are malformed", ""
+        try:
+            result = collect_families(
+                repo_root,
+                nose_bin,
+                paths,
+                mode=mode,
+                min_size=minimum_size,
+                top=top,
+                sort="extractability",
+            )
+        except Exception as error:  # pragma: no cover - the collector owns the error taxonomy
+            return None, f"nose code scan error: {error}", ""
+        if not isinstance(result, dict):
+            return None, "packaged duplicate scan returned a malformed result", ""
+        live_version = result.get("tool_version", "")
+        if not isinstance(live_version, str):
+            return None, "packaged duplicate scan returned a malformed tool version", ""
+        if result.get("status") == "error":
+            return None, f"nose code scan error: {result.get('stderr', '')[:160]}", live_version
+        scanned = result.get("families")
+        if not isinstance(scanned, list):
+            return None, "packaged duplicate scan returned a malformed family list", live_version
+        return scanned, None, live_version
+
+    scan_families = getattr(scan, "scan_families", None)
+    if not callable(scan_families):
+        return None, "packaged duplicate scan seam is unavailable", ""
+    return scan_families(repo_root, scope_paths)
+
+
 def _coalesce_content_fingerprint_collisions(
     repo_root: Path, module: dict, families: list[dict]
 ) -> tuple[list[dict], str | None]:
@@ -311,10 +366,7 @@ def _coalesce_content_fingerprint_collisions(
 
 def _collect_code_families(repo_root: Path, module: dict, scope_paths: list[str]) -> tuple[list[dict], str | None, str]:
     scan = module.get("_scan")
-    scan_families = getattr(scan, "scan_families", None)
-    if not callable(scan_families):
-        return [], "packaged duplicate scan seam is unavailable", ""
-    scanned, reason, live_version = scan_families(repo_root, scope_paths)
+    scanned, reason, live_version = _scan_families_preserving_raw(scan, repo_root, scope_paths)
     if reason or scanned is None:
         return [], reason or "packaged duplicate scan returned no inventory", live_version
     if not isinstance(scanned, list):

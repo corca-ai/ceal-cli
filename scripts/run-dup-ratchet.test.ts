@@ -156,9 +156,27 @@ try:
         @staticmethod
         def scan_families(repo_root, scope_paths):
             return [None, malformed_identity], None, "0.20.0"
+    class RawInventory:
+        DEFAULT_PATHS = []
+        DEFAULT_MODE = "default"
+        @staticmethod
+        def resolve_nose_bin():
+            return "nose"
+    class RawNoseReport:
+        @staticmethod
+        def collect_families(repo_root, nose_bin, paths, **options):
+            return {"tool_version": "0.20.0", "families": [None, whole]}
+    class RawScan:
+        _inventory = RawInventory()
+        _nose_report = RawNoseReport()
+        FULL_SCAN_MIN_SIZE = 24
+        FULL_SCAN_TOP = 1000000
     collected, reason, version = module["_collect_code_families"](root, {"_scan": Scan()}, ["src"])
     malformed_collected, malformed_reason, malformed_version = module["_collect_code_families"](
         root, {"_scan": MalformedScan()}, ["src"]
+    )
+    raw_malformed_collected, raw_malformed_reason, raw_malformed_version = module["_collect_code_families"](
+        root, {"_scan": RawScan()}, ["src"]
     )
     print(json.dumps({
         "reason": reason,
@@ -183,6 +201,7 @@ try:
         "small_test_setup": module["_is_small_test_setup_family"](root, small_test_setup),
         "small_test_setup_control": module["_is_small_test_setup_family"](root, small_test_setup_control),
         "malformed_scan": malformed_collected == [] and malformed_reason is not None and malformed_version == "0.20.0",
+        "malformed_packaged_scan": raw_malformed_collected == [] and raw_malformed_reason is not None and raw_malformed_version == "0.20.0",
     }))
 finally:
     shutil.rmtree(root)
@@ -225,5 +244,6 @@ finally:
 		small_test_setup: true,
 		small_test_setup_control: false,
 		malformed_scan: true,
+		malformed_packaged_scan: true,
 	});
 });

@@ -57,17 +57,18 @@ detector groups them as one shallow family.
   scripts/materialize-signed-gateway-protocol-source.ts: passed.
 - npm run lint:types:tools: passed after the deliberate baseline reduction for
   two repaired fixture surfaces, exact result
-  /tmp/ceal-proof-jobs/worker-lint-types-tools-current/result.20260818-worker-lint-types-tools-current-02.json
+  /tmp/ceal-proof-jobs/worker-lint-types-tools-current/result.20260818-worker-lint-types-tools-current-04.json
   (exit_code: 0; no `baseline_reduction_required` output). Its printed
   diagnostics are the remaining ratcheted repository baseline, not a claim
   that the whole tools tree is diagnostic-free.
-- The focused historical owner proof passed 58/58 tests, exact result
-  /tmp/ceal-proof-jobs/worker-sha256-focused/result.20260818-worker-sha256-focused-01.json
-  (exit_code: 0), covering release-process supervision, release inputs/assets,
-  handoff bootstrap/call, package build, and native artifact behavior.
+- The focused historical owner proof passed 60/60 tests, exact result
+  /tmp/ceal-proof-jobs/worker-sha256-focused/result.20260818-worker-sha256-focused-03.json
+  (exit_code: 0; it includes the direct SHA-256 owner contract), covering
+  release-helper, release-process supervision, release inputs/assets, handoff
+  bootstrap/call, package build, and native artifact behavior.
 - The current historical ratchet-shaped scan passed with 132 families after
   the ArchiveLock owner extraction, exact result
-  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-06.json
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-07.json
   (tool version 0.20.0). This is a measured reduction, not historical closure.
 - Focused retained-path source tests: 109/109 passed, including release
   helpers, package/carrier/cache/spool behavior, handoff contracts, and
@@ -78,8 +79,11 @@ detector groups them as one shallow family.
 - node --test scripts/run-dup-ratchet.test.ts: passed with positive and
   negative controls for whole-file, shallow, import-header, helper-detector,
   zero-overlap, repeated-JSON-guard, and small-test-setup rules.
-- npm run check:duplication: passed with
-  fixable_ceiling=0 <= floor_F=0.
+- npm run check:duplication: passed through the Worker proof route with
+  fixable_ceiling=0 <= floor_F=0, exact result
+  /tmp/ceal-proof-jobs/worker-dup-gate-current/result.20260818-worker-dup-gate-current-02.json
+  (exit_code: 0). The adapter contract also passes its positive, negative,
+  and packaged-scan malformed-input controls.
 - npm run lint, ruff check scripts/run_dup_ratchet.py, and git diff --check:
   passed.
 - Verification level: local Worker source, contract, duplicate-gate, and
@@ -95,6 +99,12 @@ detector groups them as one shallow family.
   and entrypoint-guard families were resolved by owner extraction. The
   shallow detector margin is now an explicit 8:1 rule with a 13/108 positive
   boundary and 14/108 retained control; it is not a baseline exemption.
+- The packaged scanner's public `scan_families` seam normalizes malformed
+  entries before returning. The Worker adapter now calls the skill-owned raw
+  collector when available, preserves its family list, and fails closed before
+  filtering; the adapter contract models a raw collector returning
+  `[None, valid_family]` and proves that it is refused. Charness/plugin source
+  was not edited.
 - Historical family 02290b95d0fcd055 was resolved by importing the existing
   `ArchiveLock` type owner; no new type or runtime dependency was introduced.
 - Whole-file and large shallow families are filtered only when the adapter
@@ -106,8 +116,9 @@ detector groups them as one shallow family.
   filters each require their exact metadata and evidence. Non-list scan output,
   malformed family entries, invalid content identity, and missing spans remain
   gate failures rather than becoming an empty clean inventory.
-- The post-commit historical Worker scan still reports 134 families
-  (result /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-04.json).
+- The authoritative current historical Worker scan reports 132 families after
+  commits c6b1bc1 and 7cb0393 and the packaged-scan boundary/test follow-up
+  (result /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-07.json).
   The highest-value
   successor candidates include SHA-256 helper ownership
   (abc7cb50323ff928), ArchiveLock declarations (02290b95d0fcd055), readJson
@@ -137,6 +148,15 @@ applied.
   additional blocker and required the exact 109-test proof binding, now
   recorded above. No critique packet was required because the Worker adapter
   declares no packet sections.
+- Historical-owner fresh-eye: three bounded read-only reviewers read frozen
+  Worker HEAD 7cb0393. The type/runtime reviewer found no retained-behavior
+  blocker but required current proof rebinding; the counterweight marked the
+  mixed owner families as a valid-but-defer grouping concern and required
+  direct SHA input proof; the duplicate-precision reviewer found a real
+  packaged-scan normalization hole. The raw-collector boundary and direct
+  SHA-256 contract test were added, then the 60-test, type-ratchet, duplicate
+  gate, lint, and 132-family recount proofs were rerun. Reviewer reports were
+  signals; the primary re-read the scanner and adapter source before repair.
 
 ## Deliberately Not Doing
 
