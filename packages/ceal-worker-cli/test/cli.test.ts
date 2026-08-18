@@ -4740,6 +4740,8 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 			assert.equal(payload.live_gateway_checked, true);
 			assert.equal(payload.gateway_observation.http_status, 200);
 			assert.equal(payload.gateway_observation.response_kind, "protocol_invalid");
+			assert.equal(payload.gateway_observation.response_protocol_version, null);
+			assert.equal(payload.gateway_observation.response_schema_version, null);
 			assert.equal(payload.gateway_observation.protocol_handshake_verified, true);
 			assert.match(payload.error.next_action, /HTTP 200/u);
 			assert.match(payload.error.next_action, /1\.3\.0/u);

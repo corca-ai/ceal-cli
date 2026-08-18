@@ -267,6 +267,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			status: 401,
 			contentType: "text/plain",
 			kind: "content_type_invalid",
+			protocolVersion: undefined,
+			schemaVersion: undefined,
 		},
 		{
 			label: "malformed json",
@@ -274,13 +276,24 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			status: 502,
 			contentType: "application/json",
 			kind: "body_malformed",
+			protocolVersion: undefined,
+			schemaVersion: undefined,
 		},
 		{
 			label: "protocol schema mismatch",
-			response: () => globalThis.Response.json({ ok: true, request_id: "request:wrong", protocol_version: "1.3.0", value: {} }),
+			response: () =>
+				globalThis.Response.json({
+					ok: true,
+					request_id: "request:wrong",
+					protocol_version: "1.3.0",
+					schema_version: "ceal.gateway_discovery.v2",
+					value: {},
+				}),
 			status: 200,
 			contentType: "application/json",
 			kind: "protocol_invalid",
+			protocolVersion: "1.3.0",
+			schemaVersion: "ceal.gateway_discovery.v2",
 		},
 		{
 			label: "unexpected success status",
@@ -288,6 +301,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			status: 502,
 			contentType: "application/json",
 			kind: "unexpected_success_status",
+			protocolVersion: undefined,
+			schemaVersion: undefined,
 		},
 	];
 	for (const item of cases) {
@@ -303,6 +318,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			assert.equal(error.operation, request.operation, item.label);
 			assert.equal(error.response_content_type, item.contentType, item.label);
 			assert.equal(error.response_kind, item.kind, item.label);
+			assert.equal(error.response_protocol_version, item.protocolVersion, item.label);
+			assert.equal(error.response_schema_version, item.schemaVersion, item.label);
 			assert.doesNotMatch(error.message, /proxy unauthorized|safe-token/u, item.label);
 			return true;
 		});

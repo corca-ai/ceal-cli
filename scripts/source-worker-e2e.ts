@@ -256,8 +256,8 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 	if (isRecord(value.gateway))
 		summary.gateway = pick(value.gateway, ["instance_ref", "profile_ref", "negotiated_protocol_version", "host_decision"]);
 	if (isRecord(value.error)) summary.error = pick(value.error, ["kind", "next_action"]);
-	if (isRecord(value.gateway_observation))
-		summary.gateway_observation = pick(value.gateway_observation, [
+	if (isRecord(value.gateway_observation)) {
+		const observation = pick(value.gateway_observation, [
 			"phase",
 			"operation",
 			"network_reached",
@@ -267,7 +267,13 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 			"http_status",
 			"response_content_type",
 			"response_kind",
+			"response_protocol_version",
+			"response_schema_version",
 		]);
+		for (const key of ["response_protocol_version", "response_schema_version"])
+			if (value.gateway_observation[key] === null) observation[key] = null;
+		summary.gateway_observation = observation;
+	}
 	if (Array.isArray(value.capabilities)) summary.capability_count = value.capabilities.length;
 	if (Array.isArray(value.targets)) summary.target_count = value.targets.length;
 	if (isRecord(value.receipt))
@@ -451,7 +457,7 @@ async function main(): Promise<number> {
 			return { result, summary };
 		});
 	const version = await worker(["version"], "version");
-	const guide = await worker(["guide", "status"], "guide");
+	await worker(["guide", "status"], "guide");
 	const session = await worker(["session", "status"], "session");
 	const help = await worker(["capabilities", "--help"], "capabilities_help");
 	const autoRefreshRequired = help.result.stdout.includes("Session effect: refresh_if_needed");

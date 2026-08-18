@@ -36,6 +36,8 @@ export interface CealHttpTransportErrorDetails {
 	operation?: CealGatewayRequest["operation"] | null;
 	response_content_type?: string | null;
 	response_kind?: CealHttpResponseKind | null;
+	response_protocol_version?: string | null;
+	response_schema_version?: string | null;
 }
 
 export class CealHttpTransportError extends Error {
@@ -46,6 +48,8 @@ export class CealHttpTransportError extends Error {
 	readonly operation: CealGatewayRequest["operation"] | null;
 	readonly response_content_type: string | null;
 	readonly response_kind: CealHttpResponseKind | null;
+	readonly response_protocol_version: string | null | undefined;
+	readonly response_schema_version: string | null | undefined;
 
 	constructor(code: CealHttpTransportErrorCode, http_status: number | null = null, details: CealHttpTransportErrorDetails = {}) {
 		super(transportErrorMessage(code));
@@ -55,6 +59,8 @@ export class CealHttpTransportError extends Error {
 		this.operation = details.operation ?? null;
 		this.response_content_type = details.response_content_type ?? null;
 		this.response_kind = details.response_kind ?? null;
+		this.response_protocol_version = details.response_protocol_version;
+		this.response_schema_version = details.response_schema_version;
 	}
 }
 
@@ -230,10 +236,11 @@ function decodeResponse<R extends CealGatewayRequest>(
 	} catch {
 		throw invalidResponseError(request, status, contentType, "body_malformed");
 	}
+	const metadata = captureResponseMetadata(value);
 	try {
 		return decodeCealClientResponse<R>(value, request);
 	} catch {
-		throw invalidResponseError(request, status, contentType, "protocol_invalid");
+		throw invalidResponseError(request, status, contentType, "protocol_invalid", metadata);
 	}
 }
 
@@ -242,13 +249,40 @@ function invalidResponseError(
 	status: number,
 	contentType: string | null,
 	responseKind: CealHttpResponseKind,
+	metadata: ResponseMetadata = {},
 ): CealHttpTransportError {
 	return new CealHttpTransportError("invalid_response", status, {
 		request_id: request.request_id,
 		operation: request.operation,
 		response_content_type: contentType,
 		response_kind: responseKind,
+		...metadata,
 	});
+}
+
+type ResponseMetadata = {
+	response_protocol_version?: string | null;
+	response_schema_version?: string | null;
+};
+
+function captureResponseMetadata(value: unknown): ResponseMetadata {
+	const protocolVersion = safeResponseMetadata(value, ["protocol_version", "negotiated_protocol_version"]);
+	const schemaVersion = safeResponseMetadata(value, ["schema_version"]);
+	return {
+		...(protocolVersion === undefined ? {} : { response_protocol_version: protocolVersion }),
+		...(schemaVersion === undefined ? {} : { response_schema_version: schemaVersion }),
+	};
+}
+
+function safeResponseMetadata(value: unknown, keys: readonly string[]): string | null | undefined {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	for (const key of keys) {
+		const candidate = record[key];
+		if (candidate === undefined) continue;
+		return typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(candidate) ? candidate : null;
+	}
+	return null;
 }
 
 function validateAccessToken(value: string): string {

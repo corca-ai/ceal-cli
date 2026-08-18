@@ -61,11 +61,15 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 			"gateway_observation:",
 			"  http_status: 401",
 			"  response_kind: protocol_invalid",
+			"  response_protocol_version: 1.2.0",
+			"  response_schema_version: null",
 		].join("\n"),
 		"capabilities",
 	);
 	assert.equal((summary.error as Record<string, unknown>).kind, "invalid_response");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_kind, "protocol_invalid");
+	assert.equal((summary.gateway_observation as Record<string, unknown>).response_protocol_version, "1.2.0");
+	assert.equal((summary.gateway_observation as Record<string, unknown>).response_schema_version, null);
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
 });
 

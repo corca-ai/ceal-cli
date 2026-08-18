@@ -22,6 +22,8 @@ export interface CealGatewayObservation {
 	http_status?: number;
 	response_content_type?: string | null;
 	response_kind?: CealGatewayObservationResponseKind;
+	response_protocol_version?: string | null;
+	response_schema_version?: string | null;
 }
 
 export function gatewayTransportObservation(
@@ -49,6 +51,10 @@ export function gatewayTransportObservation(
 			? { response_content_type: transport?.response_content_type == null ? null : safeContentType(transport.response_content_type) }
 			: {}),
 		...(transport?.response_kind ? { response_kind: transport.response_kind } : {}),
+		...(transport?.response_protocol_version !== undefined
+			? { response_protocol_version: safeMetadata(transport.response_protocol_version) }
+			: {}),
+		...(transport?.response_schema_version !== undefined ? { response_schema_version: safeMetadata(transport.response_schema_version) } : {}),
 	};
 }
 
@@ -76,4 +82,8 @@ function safeHttpStatus(value: number | null | undefined): number | undefined {
 
 function safeContentType(value: string): string {
 	return /^[\u0020-\u007e]{1,128}$/u.test(value) ? value.toLowerCase() : "unavailable";
+}
+
+function safeMetadata(value: string | null | undefined): string | null {
+	return value === null ? null : typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value) ? value : "unavailable";
 }
