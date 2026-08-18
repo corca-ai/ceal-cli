@@ -24,6 +24,12 @@ runs the activation command.
   git -C ../ceal-cli rev-parse --show-toplevel and
   git -C ../ceal-agent rev-parse --show-toplevel; do not execute this goal
   from an independently-running Worker session.
+- Preparation identities (2026-08-18): Gateway source checkout
+  52353035cb6e9ca860b0e5d48c21e1ebfc73f861; Worker source before this control
+  artifact 8ff82bf991528590e1136f859e393528dd7dadcd; prior preparation control
+  commit fdcf940d459fbf040cc069844ed982d26d06118b; Agent
+  47b68bc1e780efce8091606f9d7df8f583fcf7f0. These are preparation identities,
+  not activation-time freeze values; re-record them before implementation.
 - Current slice: none started. The first implementation slice is the Worker
   ratchet retirement pilot because it is the only lane measured at one file
   from zero and it tests whether raw compiler checks can replace hand-managed
@@ -410,7 +416,9 @@ was prepared:
 
 No implementation slice has started. Preparation only: the original draft was
 fresh-eye reviewed, the portability issue was filed upstream, and this artifact
-is being reshaped while it remains Status: draft.
+is being reshaped while it remains Status: draft. The Worker commit hook also
+printed the known typecheck diagnostics from Lane A while returning exit 0;
+that signal is tracked by Lane A, not treated as proof of a green replacement.
 
 ## Context Sources
 
