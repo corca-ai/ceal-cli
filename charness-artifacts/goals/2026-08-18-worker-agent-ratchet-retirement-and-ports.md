@@ -37,8 +37,9 @@ activation command.
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
 - Next action: no further in-scope action; keep the A → D1 → B → C → D2 → E
-  dependency order intact for this completed local slice, and leave any
-  external boundary or deferred successor to separately approved work.
+  dependency order intact for this completed local slice, and leave the full
+  Gateway loader-rewrite ratchet, deferred successors, and any external
+  boundary to separately approved work.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -998,8 +999,9 @@ closeout artifact commits: Gateway `/Users/ted/codes/ceal` HEAD
 `27f5fc5b558712d1ba2b6911816b151c4c77b6cd`. These are the source/evidence
 roots for the completed implementation and proof, not a claim that the
 Worker-owned lifecycle artifact commit can contain its own future hash. The
-final review must verify these historical identities and the clean current
-roots separately.
+round-2 final review verified these historical identities and the clean
+current roots separately; the reviewed current roots are recorded in the
+claims artifact below.
 
 Retro: /Users/ted/codes/ceal-cli/charness-artifacts/retro/2026-08-19-session-retro.md
 Host log probe: /Users/ted/codes/ceal-cli/charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md
