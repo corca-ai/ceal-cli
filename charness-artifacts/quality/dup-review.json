@@ -1224,6 +1224,20 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-17",
 			"note": "Re-key of two boundary-local regular-directory guards: asset merge inputs and Worker package staging. They use different error vocabularies and mark different release objects; the package-side omitted-directory change altered only its fingerprint, not the ownership decision. A shared helper would hide the distinct release boundaries."
+		},
+		{
+			"surface": "code",
+			"id": "3ecf9c467b7fbb89",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Third re-key of the same already-reviewed whole-file pair (see f7c1d7bcf80fe9c3 and b0f4fcbcd202f0ef): repo-gates.test.ts against legacy-mjs-conversion.test.ts. The gate-contract parity assertions grew repo-gates.test.ts to ~2013 lines, which re-keyed the fingerprint without changing the ownership decision -- repo-gates owns gate inventory and ordering, legacy-mjs-conversion owns converter policy, and their only shared material is ordinary Node test/process/filesystem scaffolding. DEBT recorded rather than argued away: this file re-keys on every growth, and at 2013 lines a split of the gate-contract block into its own contract-lane file is the eventual answer. Not done here because the spec fixes repo-gates.test.ts as the single answer to \"what are the gates\", and moving it is a restructuring decision that deserves its own slice."
+		},
+		{
+			"surface": "code",
+			"id": "cbc048ddd83162e8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "The pan-repo isRecord type-guard idiom, 21 members spanning packages/ceal-worker-cli/src, scripts/, and test/. A three-line typeof-object/non-null/non-array narrowing that every JSON-boundary owner declares locally. Accepted because the FAMILY is cross-tree -- packages/ cannot import from scripts/ or test/ -- so no single owner can hold it; the ratchet reports every member but test/gate-contract-lib.ts as untouched, which is the citation for the family predating that file. DEBT, owner Worker: the ~10 members under scripts/ COULD share one guard module, and claiming otherwise would be false (the same claim was written and corrected in corca-ai/ceal this session). Recorded, not argued away."
 		}
 	],
 	"fixable_ceiling": 0,
