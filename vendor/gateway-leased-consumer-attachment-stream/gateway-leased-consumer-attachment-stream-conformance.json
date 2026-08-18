@@ -4,13 +4,13 @@
   "writes_external": false,
   "source": {
     "repository": "corca-ai/ceal",
-    "commit": "f5d25435a7d1e955bd2aa9bf59e3f9a78972bedf",
-    "tree": "629a11b1ba3b4ecc476362eaf1d6a3d8015bebe5",
-    "protocol_tree": "2e61271919bcca591867bf3d6a3963a85435196a",
+    "commit": "0c86df371799561d084cfa787c7a09dcc99f3b8e",
+    "tree": "186911497451da3b532eacce148804093eb69ea5",
+    "protocol_tree": "1e7196b02464471e8b951ae49c88071ad877a7e0",
     "inputs": [
       {
         "path": "packages/ceal-protocol/src/index.ts",
-        "sha256": "61ecc3fdf7702f932c8169e08eba9e8d92b0cc85c05567454d6a657853e5a805"
+        "sha256": "d70a3af2b160a27578662d3af9afe1809f8a4d1d5c439d8a0b59c839436ba824"
       },
       {
         "path": "packages/ceal-protocol/src/leased-consumer-attachment-stream.ts",
