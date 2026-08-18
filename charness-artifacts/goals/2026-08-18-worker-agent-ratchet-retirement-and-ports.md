@@ -688,10 +688,10 @@ compiler replacement proof.
   `/tmp/ceal-agent-laneb-exact-source.log`.
 - Worker implementation: commit `53b2c4a` (`typecheck: enforce Worker exact
   optional properties`) enables the option in `tsconfig.typecheck.json:15` and
-  `tsconfig.tools.json:14`. The tools/test config keeps its already-local
-  `skipLibCheck` at `tsconfig.tools.json:17`; this was needed for the
-  dependency-only `@types/node` TS2320 found by the inventory, while the
-  package config was not changed to add a new skip. Source, scripts, and test
+  `tsconfig.tools.json:14`. This commit adds `skipLibCheck` only to the
+  tools/test config at `tsconfig.tools.json:17`; it was needed for the
+  dependency-only `@types/node` TS2320 found by the inventory. The package
+  typecheck config was not changed by this slice. Source, scripts, and test
   fixtures use guards, conditional object spreads, and explicit `| undefined`
   adapter types. `test/contract/typecheck-source-gate.test.ts:60` asserts the
   package option. No baseline file changed.
@@ -725,6 +725,13 @@ compiler replacement proof.
   the raw compiler RED inventory and post-repair raw/TS6 GREEN routes are the
   evidence for this compiler-option slice. Lane A's required deletion proof is
   unchanged and complete.
+- Fresh-eye disposition: the bounded review found no blocker. It caught the
+  inaccurate “already-local” wording above; the primary re-read the parent diff
+  and corrected it to the actual tools/test-only addition. It also dismissed
+  the existing Agent `ctx!`/`thread!.ts!` assertions as pre-existing Lane C
+  concerns, and independently confirmed the baseline, raw-inventory, and
+  Protocol-quarantine claims. No source or baseline mutation was made by the
+  review.
 
 ## Context Sources
 
@@ -896,3 +903,4 @@ improvement as applied or a tracked issue.
 | Lane B `exactOptionalPropertyTypes` is compiler-owned in every Worker/Agent raw owner | Worker commit `53b2c4a`; `tsconfig.typecheck.json:9-20`, `tsconfig.tools.json:8-18`, and `test/contract/typecheck-source-gate.test.ts:54-60`; Agent commit `283b0c9`; `tsconfig.build.json:8-18`, `tsconfig.tools-tests.json:22-28`, and `test/public/quality-gates.test.ts:43-54,71-78` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types`, `npm run lint:types:ts6`, and `npm run lint`; from `/Users/ted/codes/ceal-agent`: run `npm run lint`, `npm run lint:types:ts6`, `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:contributor`; require direct exit 0, the TS7/TS6 unchanged diagnostic summaries, and no baseline/update route |
 | Lane B `exactOptionalPropertyTypes` pre-edit diagnostics remain an inventory, not baseline input | Worker raw projects and `/tmp/ceal-worker-laneb-exact-{package,tools,tests}.log`; Agent `tsconfig.build.json` and `/tmp/ceal-agent-laneb-exact-source.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` with no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: rerun `npm exec --no -- tsc -p tsconfig.typecheck.json --pretty false --exactOptionalPropertyTypes`, the same command with `tsconfig.tools.json` and `tsconfig.tests.json`; from `/Users/ted/codes/ceal-agent`: rerun `npm exec --no -- tsc -p tsconfig.build.json --noEmit --pretty false --exactOptionalPropertyTypes`; record direct exits and diagnostics before enabling the option, never regenerate either baseline |
 | Worker protocol vendor contract is pre-existing off-goal debt, not exact-option fallout | Worker `protocol-vendor-pin.json:7-19`, `docs/protocol-quarantine.md:3-17`, and `test/contract/protocol-vendor-pin.test.ts:130-135`; exact diff only widens fixture option fields | from `/Users/ted/codes/ceal-cli`: run `node --test test/contract/protocol-vendor-pin.test.ts test/contract/typecheck-source-gate.test.ts`; classify only the `e93e491a...` versus `cfee89e...` vendor-tree mismatch as the known red, do not re-pin or regenerate it in this goal |
+| Lane B exact-option cross-surface review found no blocker and corrected one evidence wording issue | bounded fresh-eye review notification for frozen Worker `53b2c4a`, Agent `283b0c9`, and goal `ef34329`; primary re-read of Worker parent diff and Agent exact helpers | re-run the exact raw/TS6/lint commands in the compiler-owned row above; inspect `git diff 53b2c4a^ 53b2c4a -- tsconfig.typecheck.json tsconfig.tools.json` and the Agent parent diff; require no baseline paths in either commit |
