@@ -60,11 +60,14 @@ export async function projectStagedWorkerControlSession({
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	try {
 		if (process.argv.length !== 6) throw new Error("invalid_arguments");
+		const [workerStage, protocolModule, controlConformance, handoffText] = process.argv.slice(2);
+		if (workerStage === undefined || protocolModule === undefined || controlConformance === undefined || handoffText === undefined)
+			throw new Error("invalid_arguments");
 		const result = await projectStagedWorkerControlSession({
-			workerStage: process.argv[2],
-			protocolModule: process.argv[3],
-			controlConformance: process.argv[4],
-			handoff: JSON.parse(process.argv[5]),
+			workerStage,
+			protocolModule,
+			controlConformance,
+			handoff: JSON.parse(handoffText),
 		});
 		console.log(JSON.stringify({ ok: true, sha256: result.sha256 }));
 	} catch {

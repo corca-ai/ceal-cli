@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
 import { runCealCommand } from "../../packages/ceal-worker-cli/dist/index.js";
+import { requiredCapture, required as requiredValue } from "../required.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");
@@ -97,8 +98,9 @@ test("a cold-start worker intent selects capabilities and preserves proof limits
 	const result = runBinarySmoke("cold_capabilities");
 	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
-	assert.deepEqual(documents[0].errors, []);
-	const value: ColdStartStatus = documents[0].toJS();
+	const document = requiredValue(documents[0], "cold_capabilities_document");
+	assert.deepEqual(document.errors, []);
+	const value: ColdStartStatus = document.toJS();
 	assert.equal(value.command, "ceal");
 	assert.equal(value.status, "unavailable");
 	assert.equal(value.proof_level, "surface");
@@ -223,7 +225,7 @@ function parseSubcommands(help: string): string[] {
 	for (const line of lines.slice(start + 1)) {
 		if (line === "") break;
 		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
-		if (match) rows.push(match[1]);
+		if (match) rows.push(requiredCapture(match, 1, "subcommand_name"));
 	}
 	return rows;
 }
@@ -231,6 +233,6 @@ function parseSubcommands(help: string): string[] {
 function parseRoutes(help: string): Route[] {
 	return help.split("\n").flatMap((line): Route[] => {
 		const match = /^ {2}([a-z][a-z0-9-]*)\s{2,}(.+)$/u.exec(line);
-		return match ? [{ name: match[1], description: match[2] }] : [];
+		return match ? [{ name: requiredCapture(match, 1, "route_name"), description: requiredCapture(match, 2, "route_description") }] : [];
 	});
 }

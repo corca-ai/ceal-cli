@@ -286,7 +286,7 @@ function assertPackageName(name: string, code: string): void {
 		!path.isAbsolute(name) &&
 		!name.includes("\\") &&
 		parts.every((part) => part.length > 0 && part !== "." && part !== "..") &&
-		(parts.length === 1 || (parts.length === 2 && parts[0].startsWith("@") && parts[0].length > 1));
+		(parts.length === 1 || (parts.length === 2 && parts[0] !== undefined && parts[0].startsWith("@") && parts[0].length > 1));
 	if (!valid) fail(code, "Worker dependency name is not a safe npm package name.");
 }
 

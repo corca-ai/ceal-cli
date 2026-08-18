@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { scanRepository } from "../../scripts/check-import-hard-failures.ts";
+import { required as requiredValue } from "../required.ts";
 
 const ROOT = process.cwd();
 
@@ -85,8 +86,8 @@ test("Worker package, check, hook, and contract expose the receiving import gate
 	const manifest = JSON.parse(readFileSync(`${ROOT}/package.json`, "utf8")) as { scripts: Record<string, string> };
 	assert.equal(manifest.scripts["lint:import-hard-failures"], "node scripts/check-import-hard-failures.ts --repo-root .");
 	assert.equal(manifest.scripts["lint:import-hard-failures:staged"], "node scripts/check-import-hard-failures.ts --repo-root . --staged");
-	assert.match(manifest.scripts.check, /npm run lint:import-hard-failures/u);
-	assert.match(manifest.scripts["check:unit"], /npm run lint:import-hard-failures/u);
+	assert.match(requiredValue(manifest.scripts.check, "check_script"), /npm run lint:import-hard-failures/u);
+	assert.match(requiredValue(manifest.scripts["check:unit"], "check_unit_script"), /npm run lint:import-hard-failures/u);
 	assert.match(
 		readFileSync(`${ROOT}/.githooks/pre-commit`, "utf8"),
 		/^run_gate "import hard failures" npm run lint:import-hard-failures:staged$/mu,

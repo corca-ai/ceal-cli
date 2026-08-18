@@ -38,27 +38,34 @@ export interface ScriptArgs {
 	options: Record<string, unknown>;
 }
 
+function requiredArgument(value: string | undefined, fail: ScriptFail, message: string): string {
+	if (value === undefined) fail("invalid_argument", message);
+	return value;
+}
+
 export function parseScriptArgs(argv: readonly string[], spec: ScriptArgSpec): ScriptArgs {
 	const { fail, values = {}, flags = {}, defaults = {}, valueMessage, unknownMessage } = spec;
 	const options = { ...defaults };
 	let json = false;
 	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
+		const arg = requiredArgument(argv[index], fail, unknownMessage);
 		if (arg === "--help" || arg === "-h") return { help: true, json, options };
 		if (arg === "--json") {
 			json = true;
 			continue;
 		}
-		if (Object.hasOwn(flags, arg)) {
-			options[flags[arg]] = true;
+		const flagKey = Object.hasOwn(flags, arg) ? flags[arg] : undefined;
+		if (flagKey !== undefined) {
+			options[flagKey] = true;
 			continue;
 		}
-		if (Object.hasOwn(values, arg)) {
+		const valueKey = Object.hasOwn(values, arg) ? values[arg] : undefined;
+		if (valueKey !== undefined) {
 			const value = argv[++index];
 			// A missing value must not silently consume the next option: reading
 			// `undefined` here is the whole reason this check exists.
 			if (typeof value !== "string") fail("invalid_argument", valueMessage);
-			options[values[arg]] = value;
+			options[valueKey] = value;
 			continue;
 		}
 		fail("invalid_argument", unknownMessage);

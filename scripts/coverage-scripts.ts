@@ -73,7 +73,9 @@ const MEASURED_PLATFORMS = Object.freeze(["linux-arm64", "linux-x64"]);
 
 function runTiers(prefix: readonly string[]) {
 	const argv = [...prefix, "npm", "run", TIERS];
-	return spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit" });
+	const command = argv[0];
+	if (command === undefined) throw new Error("coverage_command_missing");
+	return spawnSync(command, argv.slice(1), { cwd: ROOT, stdio: "inherit" });
 }
 
 const host = `${process.platform}-${process.arch}`;

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "../dist/agent-audit.js";
 import {
 	inspectAgentAudit as inspectAgentAuditWithRuntime,
@@ -85,8 +86,8 @@ test("agent audit inventories Claude sessions without reading transcript content
 		assert.equal(JSON.stringify(state).includes("transcript text"), false);
 		// Pin the honesty-critical non-claim wording: content is parsed locally,
 		// so the claim must be metadata-only surfacing, not "never read".
-		assert.match(state.nonClaims[0], /kind counts and re-serialized timestamps/u);
-		assert.match(state.nonClaims[0], /transcript content, prompts, tool arguments/u);
+		assert.match(requiredValue(state.nonClaims[0], "audit_non_claim_metadata"), /kind counts and re-serialized timestamps/u);
+		assert.match(requiredValue(state.nonClaims[0], "audit_non_claim_metadata"), /transcript content, prompts, tool arguments/u);
 		assert.equal(
 			state.nonClaims.some((claim) => claim.includes("never read")),
 			false,
@@ -574,9 +575,9 @@ test("token figures surface only when the runtime supplied usage, summed once pe
 	// The token non-claim is honesty-critical wording: runtime-supplied, not
 	// comparable across runtimes, no cost claim, and no latency figure.
 	const state = inspectAgentAudit(undefined, {}, NOW);
-	assert.match(state.nonClaims[2], /runtime-supplied/u);
-	assert.match(state.nonClaims[2], /not comparable across runtimes/u);
-	assert.match(state.nonClaims[2], /No latency figure/u);
+	assert.match(requiredValue(state.nonClaims[2], "audit_non_claim_tokens"), /runtime-supplied/u);
+	assert.match(requiredValue(state.nonClaims[2], "audit_non_claim_tokens"), /not comparable across runtimes/u);
+	assert.match(requiredValue(state.nonClaims[2], "audit_non_claim_tokens"), /No latency figure/u);
 });
 
 // The audit and `guide status` answer questions about the same directory, so a

@@ -370,6 +370,7 @@ function readDropFile(file: string): { identity: string; count: number } | null 
 	if (!dropsFileStat(file)) return null;
 	try {
 		const [header, body = ""] = readFileSync(file, "utf8").split("\n", 2);
+		if (header === undefined) return null;
 		const [schema, identity, ...extra] = header.split(" ");
 		if (schema !== DROPS_SCHEMA_VERSION || !validSessionIdentityDiscriminator(identity) || extra.length > 0 || !/^\.*$/u.test(body))
 			return null;

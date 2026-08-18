@@ -254,7 +254,9 @@ export function inspectAgentSessionEvents(
 	if (matches.length === 0) return { status: collected.partial ? "unreadable" : "not_found" };
 	// A duplicated ref across shards resolves to the newest transcript.
 	matches.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-	const { transcriptPath, ...session } = matches[0];
+	const newest = matches[0];
+	if (newest === undefined) return { status: collected.partial ? "unreadable" : "not_found" };
+	const { transcriptPath, ...session } = newest;
 	return { status: "scanned", session: { ...session, events: scanSessionEvents(transcriptPath, adapter.lines) } };
 }
 
@@ -355,13 +357,15 @@ function observeTranscriptAdapter(
 			index < EVENT_SCAN_SESSIONS ? { ...session, events: scanSessionEvents(transcriptPath, lines) } : session,
 		);
 	const scannedSessions = rendered.filter((session) => typeof session.events === "object").length;
+	const newest = sessions[0];
+	if (newest === undefined) return { ...base, ...partialFields };
 	return {
 		...base,
 		...partialFields,
 		// Depth reports what was achieved, not what was attempted: with every
 		// scan unreadable the adapter honestly stays at inventory depth.
 		depth: scannedSessions > 0 ? "session_events" : "session_inventory",
-		health: now - sessions[0].lastActivityAt < ACTIVE_WINDOW_MS ? "active" : "stale",
+		health: now - newest.lastActivityAt < ACTIVE_WINDOW_MS ? "active" : "stale",
 		sessionCount: sessions.length,
 		sessions: rendered,
 		eventScan: { scannedSessions, sessionLimit: EVENT_SCAN_SESSIONS },
@@ -710,8 +714,13 @@ function collectCodexSessions(sessionsRoot: string, monotonicNow: () => number):
 					continue;
 				}
 				if (stat.isSymbolicLink() || !stat.isFile()) continue;
+				const sessionRef = rollout[1];
+				if (sessionRef === undefined) {
+					walk.partial = true;
+					continue;
+				}
 				sessions.push({
-					sessionRef: rollout[1].toLowerCase(),
+					sessionRef: sessionRef.toLowerCase(),
 					lastActivityAt: stat.mtimeMs,
 					transcriptBytes: stat.size,
 					transcriptPath: rolloutPath,

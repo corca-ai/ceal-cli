@@ -29,6 +29,7 @@ import { inspectOutputDirectory, publishOutputDirectory } from "../../scripts/li
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
 import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.ts";
+import { required as requiredValue } from "../required.ts";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
 const CARRIER_CONTRACT_BYTES = readFileSync(CARRIER_CONTRACT_PATH);
@@ -450,7 +451,8 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	assert.equal(sums.length, 7);
 	for (const line of sums) assert.match(line.slice(66), INSTALLER_ALLOWLIST);
 
-	const platformManifest = path.join(inputs[1], "ceal-worker-release-manifest-linux-amd64.json");
+	const amd64Input = requiredValue(inputs[1], "linux_amd64_input");
+	const platformManifest = path.join(amd64Input, "ceal-worker-release-manifest-linux-amd64.json");
 	const originalManifest = readFileSync(platformManifest);
 	// One shape, five mutations. Each rewrites the linux-amd64 manifest, expects
 	// the merge to refuse with a named code, and restores — spelling that out five
@@ -489,7 +491,7 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	// different sets of inputs without anyone noticing.
 	const writeOneLeg = (body: string | Uint8Array): void => {
 		writeFileSync(platformManifest, body);
-		rewriteInventoryDigest(inputs[1], path.basename(platformManifest));
+		rewriteInventoryDigest(amd64Input, path.basename(platformManifest));
 	};
 	const writeEveryLeg = (body: string | Uint8Array): void => {
 		for (const input of inputs) {
@@ -560,20 +562,25 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 		rewriteInventoryDigest(input, path.basename(manifestPath));
 	}
 
-	writeFileSync(path.join(inputs[1], "ceal-guide-SKILL.md"), "drifted guide\n");
-	const driftedSums = readFileSync(path.join(inputs[1], "SHA256SUMS"), "utf8").replace(
+	writeFileSync(path.join(amd64Input, "ceal-guide-SKILL.md"), "drifted guide\n");
+	const driftedSums = readFileSync(path.join(amd64Input, "SHA256SUMS"), "utf8").replace(
 		/^[a-f0-9]{64}(?= {2}ceal-guide-SKILL[.]md$)/mu,
 		digest(Buffer.from("drifted guide\n")),
 	);
-	writeFileSync(path.join(inputs[1], "SHA256SUMS"), driftedSums);
+	writeFileSync(path.join(amd64Input, "SHA256SUMS"), driftedSums);
 	assert.throws(
 		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-drift"), inputs, repoRoot }),
 		hasCode("merge_shared_drift"),
 	);
 
-	rmSync(path.join(inputs[0], "ceal-worker-release-manifest-linux-arm64.json"));
+	rmSync(path.join(requiredValue(inputs[0], "linux_arm64_input"), "ceal-worker-release-manifest-linux-arm64.json"));
 	assert.throws(
-		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged-incomplete"), inputs: [inputs[0]], repoRoot }),
+		() =>
+			mergeWorkerReleaseAssetSets({
+				outputDirectory: path.join(root, "merged-incomplete"),
+				inputs: [requiredValue(inputs[0], "linux_arm64_input")],
+				repoRoot,
+			}),
 		hasCode("merge_input_incomplete"),
 	);
 });
@@ -733,8 +740,9 @@ test("worker release workflow builds, merges, and signs every platform it builds
 		rollbackSignature.indexOf("cosign verify-blob") < rollbackInventory.indexOf("parsePublishedWorkerReleaseInventory"),
 		"rollback must verify SHA256SUMS before parsing its asset names",
 	);
-	const manifestLoop = /for platform in ([^;]+); do/u.exec(inventory)?.[1].trim().split(/\s+/u);
-	assert.ok(manifestLoop);
+	const manifestLoopMatch = /for platform in ([^;]+); do/u.exec(inventory);
+	const manifestLoop = manifestLoopMatch?.[1]?.trim().split(/\s+/u);
+	if (manifestLoop === undefined) throw new Error("manifest_platform_loop_missing");
 
 	assert.deepEqual([...manifestLoop].sort(), [...platforms].sort(), "manifest check must cover every platform");
 	for (const platform of platforms) {
@@ -805,7 +813,9 @@ function runStepContaining(job: ReleaseJob, needle: string): string {
 function bashArray(script: string, name: string): string[] {
 	const body = new RegExp(`${name}=\\(([^)]*)\\)`, "u").exec(script);
 	assert.ok(body, `expected a ${name}=( ... ) array`);
-	return body[1].trim().split(/\s+/u);
+	const arrayBody = body?.[1];
+	if (arrayBody === undefined) throw new Error(`expected a ${name}=( ... ) array body`);
+	return arrayBody.trim().split(/\s+/u);
 }
 
 function publishedInventory(platforms: string[]): string {

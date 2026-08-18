@@ -440,7 +440,13 @@ export async function runInstalledCommand(
 // promised to keep stable.
 function scalar(stdout: string, key: string): string | undefined {
 	const match = new RegExp(`^\\s*${key}:[ ]+(.+)$`, "mu").exec(stdout);
-	return match ? match[1].trim() : undefined;
+	return match?.[1]?.trim();
+}
+
+function capture(match: RegExpExecArray, index: number): string {
+	const value = match[index];
+	if (value === undefined) throw new Error("acceptance_output_capture_missing");
+	return value;
 }
 
 export async function buildAcceptancePacket({
@@ -493,7 +499,7 @@ export async function buildAcceptancePacket({
 			// A `registration_path` is present for every host whose root merely
 			// resolved, so counting paths reported registration this host never
 			// performed. `registered` is the state that says it did.
-			resolved_host_paths: [...guide.stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => match[1]),
+			resolved_host_paths: [...guide.stdout.matchAll(/^\s*registration_path: (.+)$/gmu)].map((match) => capture(match, 1)),
 			registered_host_count: (guide.stdout.match(/^\s*registered: true$/gmu) ?? []).length,
 		},
 		gateway_session: {
@@ -526,7 +532,7 @@ export async function buildAcceptancePacket({
 				provider_state_readback: scalar(shown.stdout, "provider_state_readback"),
 				outcome: scalar(shown.stdout, "outcome"),
 				authorization: scalar(shown.stdout, "authorization"),
-				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => match[1]),
+				audit_refs: [...shown.stdout.matchAll(/^\s*- ref: (.+)$/gmu)].map((match) => capture(match, 1)),
 				gateway_elapsed_ms: Number.isFinite(Number(scalar(shown.stdout, "gateway_elapsed_ms")))
 					? Number(scalar(shown.stdout, "gateway_elapsed_ms"))
 					: null,
@@ -689,6 +695,7 @@ function parseArgs(argv: readonly string[]): ParsedOptions {
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const token = argv[index];
+		if (token === undefined) fail("unknown_argument", "Unknown argument.");
 		if (token === "--json") {
 			options.json = true;
 		} else if (token === "--sanitized") {
@@ -696,14 +703,14 @@ function parseArgs(argv: readonly string[]): ParsedOptions {
 			// file another lane reads by digest, not to be eyeballed.
 			options.sanitized = true;
 			options.json = true;
-		} else if (valued[token]) {
+		} else {
+			const optionKey = valued[token];
+			if (optionKey === undefined) fail("unknown_argument", `Unknown argument: ${token}`);
 			index += 1;
 			if (index >= argv.length) fail("missing_argument_value", `${token} needs a value.`);
 			const value = argv[index];
 			if (value === undefined) fail("missing_argument_value", `${token} needs a value.`);
-			options[valued[token]] = value;
-		} else {
-			fail("unknown_argument", `Unknown argument: ${token}`);
+			options[optionKey] = value;
 		}
 	}
 	if (Boolean(options.capability) !== Boolean(options.target)) {

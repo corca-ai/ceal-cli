@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.ts";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	type CealAgentGuideHost,
 	type CealAgentGuideState,
@@ -671,7 +672,8 @@ test("embedded guide decoder refuses traversal, duplicate paths, links, and dama
 			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { type: 0x32 }),
 			(bytes) => rewriteTarHeader(bytes, "references/workflow.md", { mode: 0o600 }),
 			(bytes) => {
-				bytes[0] ^= 1;
+				const first = requiredValue(bytes[0], "guide_bundle_first_byte");
+				bytes[0] = first ^ 1;
 			},
 		] satisfies Array<(bytes: Buffer) => void>) {
 			const hostile = Buffer.from(fixture.bundle.bytes);

@@ -12,6 +12,7 @@ import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bu
 import { toolchainEnv } from "../../scripts/lib/toolchain-env.ts";
 import { GatewayProtocolConsumerError } from "../../scripts/verify-gateway-protocol-consumer.ts";
 import { assertCliFailureChannels } from "../cli-failure-channels.ts";
+import { required as requiredValue } from "../required.ts";
 
 const ScriptArgumentError = codedErrorClass("ScriptArgumentError");
 
@@ -137,7 +138,7 @@ test("a coded error keeps its name, code, and instanceof", () => {
 	assert.ok(!(error instanceof Beta), "distinct classes must not be interchangeable");
 	assert.equal(Alpha.name, "AlphaError", "the class itself must be named for readable stacks");
 	if (typeof stack !== "string") throw new TypeError("expected a stack trace");
-	assert.match(stack.split("\n")[0], /^AlphaError: boom$/u);
+	assert.match(requiredValue(stack.split("\n")[0], "error_stack_first_line"), /^AlphaError: boom$/u);
 });
 
 test("declared extra fields are assigned and default to null", () => {

@@ -7,6 +7,7 @@ import {
 	type CealDeviceEnrollmentPollRequest,
 	type CealDeviceEnrollmentStartRequest,
 } from "@corca-ai/ceal-protocol";
+import { required as requiredValue } from "../../../test/required.ts";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
 import { close, json, listen, readBody, serverPort } from "./client-response-test-support.ts";
 
@@ -66,8 +67,8 @@ test("start and poll reach their own routes and return decoded Protocol values",
 	);
 	assert.ok(seen.every((entry) => entry.method === "POST" && entry.contentType === "application/json"));
 	assert.ok(seen.every((entry) => entry.decodeGeneration === undefined));
-	assert.equal(JSON.parse(seen[0].body).email, "employee@example.test");
-	assert.deepEqual(JSON.parse(seen[1].body), {
+	assert.equal(JSON.parse(requiredValue(seen[0], "adoption_start_request").body).email, "employee@example.test");
+	assert.deepEqual(JSON.parse(requiredValue(seen[1], "adoption_poll_request").body), {
 		schema_version: "ceal.device_enrollment_poll.v1",
 		registration_ref: "registration:1",
 		nonce_ref: "nonce:1",

@@ -43,6 +43,7 @@ import { parse } from "yaml";
 
 import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { isMainModule } from "../scripts/lib/is-main-module.ts";
+import { required as requiredValue } from "./required.ts";
 
 export const GATE_CONTRACT_SCHEMA = "ceal.gate_contract.v1";
 export const GATE_CONTRACT_PATH = "config/gate-contract.json";
@@ -78,7 +79,7 @@ const QUIET_HEADS = new Set(["echo", "printf"]);
 function joinInvocation(tokens: readonly string[]): string {
 	const end = tokens.findIndex((token) => REDIRECTION.test(token));
 	const kept = [...(end < 0 ? tokens : tokens.slice(0, end))];
-	while (kept.length > 0 && /^["']+$/u.test(kept[kept.length - 1])) kept.pop();
+	while (kept.length > 0 && /^["']+$/u.test(requiredValue(kept[kept.length - 1], "shell_token"))) kept.pop();
 	return kept.join(" ");
 }
 
@@ -153,8 +154,10 @@ function jobRunners(job: Record<string, unknown>): string[] {
 		if (typeof value !== "string") return [];
 		const reference = /^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$/u.exec(value.trim());
 		if (!reference) return [value];
-		const listed = Array.isArray(matrix[reference[1]]) ? (matrix[reference[1]] as unknown[]) : [];
-		const values = [...listed, ...include.map((entry) => entry[reference[1]])].filter((entry): entry is string => typeof entry === "string");
+		const matrixKey = reference[1];
+		if (matrixKey === undefined) return [value];
+		const listed = Array.isArray(matrix[matrixKey]) ? (matrix[matrixKey] as unknown[]) : [];
+		const values = [...listed, ...include.map((entry) => entry[matrixKey])].filter((entry): entry is string => typeof entry === "string");
 		return values.length > 0 ? values : [value];
 	});
 	return [...new Set(resolved)].sort();
@@ -282,7 +285,11 @@ function resolvableCommandViolations(repoRoot: string, commands: readonly string
 	const scripts = (JSON.parse(read(repoRoot, "package.json")).scripts ?? {}) as Record<string, string>;
 	return commands.flatMap((command) => {
 		const npmRun = /^npm run ([\w:-]+)/u.exec(command);
-		if (npmRun) return npmRun[1] in scripts ? [] : [`${field} names ${command}, but package.json has no ${npmRun[1]} script`];
+		if (npmRun) {
+			const script = npmRun[1];
+			if (script === undefined) return [`${field} names ${command}, but its npm script name is missing`];
+			return script in scripts ? [] : [`${field} names ${command}, but package.json has no ${script} script`];
+		}
 		const nodeScript = command.split(/\s+/u).find((token) => SCRIPT_FILE.test(token));
 		if (nodeScript && existsSync(path.join(repoRoot, nodeScript))) return [];
 		return [`${field} names ${command}, which resolves to no package script and no file on disk`];

@@ -316,8 +316,13 @@ function verifySignature({
 	}
 	const matches = [...text.matchAll(/https:\/\/github\.com\/corca-ai\/ceal\/actions\/runs\/(\d+)\/attempts\/1/gu)];
 	if (matches.length !== 1) fail("gateway_signature_invalid", "Gateway handoff certificate has an ambiguous Actions run identity.");
-	const actionsRunId = Number(matches[0][1]);
-	return { actionsRunId, runInvocationUri: matches[0][0] };
+	const match = matches[0];
+	const runId = match?.[1];
+	const runInvocationUri = match?.[0];
+	if (runId === undefined || runInvocationUri === undefined)
+		fail("gateway_signature_invalid", "Gateway handoff certificate has no usable Actions run identity.");
+	const actionsRunId = Number(runId);
+	return { actionsRunId, runInvocationUri };
 }
 
 function decodedCertificate(value: string): string {

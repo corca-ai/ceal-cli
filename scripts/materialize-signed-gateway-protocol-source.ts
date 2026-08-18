@@ -91,13 +91,16 @@ function assertRegularTree(root: string): void {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	try {
 		if (process.argv.length !== 6) throw new Error("invalid_arguments");
+		const [tag, commit, protocolTree, outputDirectory] = process.argv.slice(2);
+		if (tag === undefined || commit === undefined || protocolTree === undefined || outputDirectory === undefined)
+			throw new Error("invalid_arguments");
 		console.log(
 			JSON.stringify(
 				materializeSignedGatewayProtocolSource({
-					tag: process.argv[2],
-					commit: process.argv[3],
-					protocolTree: process.argv[4],
-					outputDirectory: process.argv[5],
+					tag,
+					commit,
+					protocolTree,
+					outputDirectory,
 				}),
 			),
 		);

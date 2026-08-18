@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { secretlintRunGroups, secretlintTargetFiles, syntheticSecretlintConfig } from "../../scripts/run-secretlint.ts";
+import { required as requiredValue } from "../required.ts";
 
 const ROOT = process.cwd();
 
@@ -56,8 +57,8 @@ test("Worker package, check, hook, and declarative contract expose secretlint", 
 	const scripts = manifest.scripts as Record<string, string>;
 	assert.equal(scripts["lint:secrets"], "node scripts/run-secretlint.ts");
 	assert.equal(scripts["lint:secrets:staged"], "node scripts/run-secretlint.ts --staged");
-	assert.match(scripts.check, /npm run lint:secrets/u);
-	assert.match(scripts["check:unit"], /npm run lint:secrets/u);
+	assert.match(requiredValue(scripts.check, "check_script"), /npm run lint:secrets/u);
+	assert.match(requiredValue(scripts["check:unit"], "check_unit_script"), /npm run lint:secrets/u);
 	const hook = readFileSync(`${ROOT}/.githooks/pre-commit`, "utf8");
 	assert.match(hook, /^run_gate "secrets" npm run lint:secrets:staged$/mu);
 	const contract = readJson("config/gate-contract.json");

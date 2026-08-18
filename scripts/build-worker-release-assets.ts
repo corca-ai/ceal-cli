@@ -113,7 +113,11 @@ export function parsePublishedWorkerReleaseInventory(bytes: Uint8Array | string)
 	const entries = lines.map((line): RegExpExecArray | null => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
 	if (entries.some((entry) => entry === null)) fail("published_inventory_malformed", "Published worker SHA256SUMS is malformed.");
 	const validEntries = entries.filter((entry): entry is RegExpExecArray => entry !== null);
-	const names = validEntries.map((entry) => entry[2]);
+	const names = validEntries.map((entry) => {
+		const name = entry[2];
+		if (name === undefined) fail("published_inventory_malformed", "Published worker SHA256SUMS has an entry without an asset name.");
+		return name;
+	});
 	if (new Set(names).size !== names.length) fail("published_inventory_malformed", "Published worker SHA256SUMS contains duplicate entries.");
 	const named = new Set(names);
 	for (const shared of SHARED_ASSETS)
@@ -448,9 +452,9 @@ function embeddedGuideIdentity(bytes: Buffer, sourceGuide: GuideBundle): void {
 
 function platformOfAsset(name: string): string | null {
 	const binary = /^ceal-((?:linux|darwin)-(?:arm64|amd64))$/u.exec(name);
-	if (binary) return binary[1];
+	if (binary) return binary[1] ?? null;
 	const manifest = /^ceal-worker-release-manifest-((?:linux|darwin)-(?:arm64|amd64))[.]json$/u.exec(name);
-	return manifest ? manifest[1] : null;
+	return manifest?.[1] ?? null;
 }
 
 function clientProvenanceIdentity(bytes: Buffer, expectedVersion: string): string {
@@ -507,7 +511,15 @@ function readInventory(directory: AssetDirectory): AssetInventory {
 	const entries = lines.map((line): RegExpExecArray | null => /^([a-f0-9]{64}) {2}(\S+)$/u.exec(line));
 	if (lines.length === 0 || entries.some((entry) => entry === null))
 		fail("merge_input_incomplete", "Composed worker asset inventory is malformed.");
-	return entries.filter((entry): entry is RegExpExecArray => entry !== null).map((entry) => [entry[2], entry[1]]);
+	return entries
+		.filter((entry): entry is RegExpExecArray => entry !== null)
+		.map((entry) => {
+			const name = entry[2];
+			const digest = entry[1];
+			if (name === undefined || digest === undefined)
+				fail("merge_input_incomplete", "Composed worker asset inventory has an incomplete entry.");
+			return [name, digest];
+		});
 }
 
 function carrierContractIdentity(bytes: Buffer, sourceCarrierContract: ContractSource): string {
@@ -634,6 +646,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let json = false;
 	for (let index = 0; index < rest.length; index += 1) {
 		const arg = rest[index];
+		if (arg === undefined) fail("invalid_argument", "Unexpected worker release assets argument.");
 		if (arg === "--help" || arg === "-h") return { help: true, json, mode, options };
 		if (arg === "--json") {
 			json = true;

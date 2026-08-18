@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import { TextEncoder } from "node:util";
 import { URL } from "node:url";
 import {
@@ -89,6 +90,6 @@ test("consumer mismatches and errors are deterministic report failures", async (
 	});
 	assert.equal(report.passed, false);
 	assert.equal(report.failed_count, 2);
-	assert.match(report.results[0].error ?? "", /adapter rejected case/u);
-	assert.match(report.results[1].error ?? "", /did not match/u);
+	assert.match(requiredValue(report.results[0], "conformance_rejected_result").error ?? "", /adapter rejected case/u);
+	assert.match(requiredValue(report.results[1], "conformance_mismatch_result").error ?? "", /did not match/u);
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import { CealHpkeError, generateCealHpkeKeyPair, openCealHpkeMessage, sealCealHpkeMessage } from "../dist/hpke.js";
 
 // A round-trip proves only that this module agrees with itself, and a key
@@ -168,12 +169,14 @@ test("malformed key material and truncated messages are refused by name", () => 
 
 function flipLastBit(value: Uint8Array): Uint8Array {
 	const copy = new Uint8Array(value);
-	copy[copy.length - 1] ^= 0x01;
+	const index = copy.length - 1;
+	copy[index] = requiredValue(copy[index], "hpke_last_byte") ^ 0x01;
 	return copy;
 }
 
 function flipFirstTagBit(value: Uint8Array): Uint8Array {
 	const copy = new Uint8Array(value);
-	copy[copy.length - 16] ^= 0x01;
+	const index = copy.length - 16;
+	copy[index] = requiredValue(copy[index], "hpke_tag_byte") ^ 0x01;
 	return copy;
 }

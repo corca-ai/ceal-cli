@@ -344,7 +344,7 @@ function readVendoredHidden(root: string, vendoredPath: string): string[] {
 		.filter(Boolean)
 		.filter((line) => {
 			const marker = line[0];
-			return marker === "S" || (marker >= "a" && marker <= "z");
+			return marker !== undefined && (marker === "S" || (marker >= "a" && marker <= "z"));
 		})
 		.map((line) => line.slice(1).trim());
 }

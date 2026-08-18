@@ -14,6 +14,7 @@ import { asJsonRecord } from "../scripts/lib/json-record.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { assertCliFailureChannels } from "./cli-failure-channels.ts";
 import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
+import { required as requiredValue } from "./required.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.ts";
 
 let packedFixture: {
@@ -62,7 +63,7 @@ test("worker package build stages recursive dependencies, consumes a packed Prot
 				compilerCalls += 1;
 				const typeRootsIndex = args.indexOf("--typeRoots");
 				assert.ok(typeRootsIndex >= 0);
-				const typeRoots = args[typeRootsIndex + 1];
+				const typeRoots = requiredValue(args[typeRootsIndex + 1], "type_roots_argument");
 				assert.equal(typeof typeRoots, "string");
 				const dependencyRoot = path.dirname(typeRoots);
 				assert.equal(

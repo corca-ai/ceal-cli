@@ -315,7 +315,7 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 // header is not a length, `response_too_large` means it is one and it does not fit.
 test("HTTP transport tells a malformed content-length from an oversized one", async () => {
 	const body = { ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: {} };
-	const cases = [
+	const cases: Array<[string, string]> = [
 		["not-a-number", "invalid_response"],
 		["-5", "invalid_response"],
 		["12.5", "invalid_response"],

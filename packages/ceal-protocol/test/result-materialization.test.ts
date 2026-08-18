@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	CEAL_RESULT_MATERIALIZATION_FRAME_SCHEMA,
 	CEAL_RESULT_MATERIALIZATION_MANIFEST_SCHEMA,
@@ -33,7 +34,7 @@ test("result materialization protocol accepts only its own manifest and frame sc
 		kind: "manifest", manifest, manifest_sha256: digest,
 	});
 	assert.equal(frame.kind, "manifest");
-	assert.equal(decodeCealResultMaterializationManifest(manifest).files[0].path, "document.md");
+	assert.equal(requiredValue(decodeCealResultMaterializationManifest(manifest).files[0], "materialization_file").path, "document.md");
 	assert.equal(cealResultMaterializationSlotPath(0), "document.md");
 	assert.equal(cealResultMaterializationSlotPath(1), "media/file-001.bin");
 	assert.equal(cealResultMaterializationSlotPath(15), "media/file-015.bin");

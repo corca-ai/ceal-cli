@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	CealReceiptSpoolStoreError,
 	createCealReceiptSpoolStore as createRawReceiptSpoolStore,
@@ -294,7 +295,7 @@ async function runAtProcessGate<T>(
 	mkdirSync(gate);
 	const goFile = path.join(gate, "go");
 	const readyFiles = values.map((_value, index) => path.join(gate, `ready-${index}`));
-	const pending = values.map((value, index) => launch(value, readyFiles[index], goFile));
+	const pending = values.map((value, index) => launch(value, requiredValue(readyFiles[index], "writer_ready_file"), goFile));
 	const deadline = Date.now() + 10_000;
 	while (!readyFiles.every(existsSync)) {
 		assert.ok(Date.now() < deadline, `${label} writers did not reach the shared gate`);
@@ -345,7 +346,7 @@ test("concurrent first drops are retained and the counter never races past its c
 		const store = createCealReceiptSpoolStore(home);
 		for (let count = 4090; count < 4096; count += 1) await store.recordDrop();
 		assert.deepEqual((await requireState(store.load)).drops, { count: 4096, atLeast: true });
-		assert.equal(readFileSync(dropsFile(home), "utf8").split("\n")[1].length, 4096);
+		assert.equal(requiredValue(readFileSync(dropsFile(home), "utf8").split("\n")[1], "drop_body").length, 4096);
 	});
 });
 

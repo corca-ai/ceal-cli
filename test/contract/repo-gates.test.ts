@@ -20,6 +20,7 @@ import {
 	readContract,
 	writeDerivedContract,
 } from "../gate-contract-lib.ts";
+import { requiredCapture, required as requiredValue } from "../required.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -93,7 +94,7 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 		"npm run build && npm run test:contract:built",
 		"public contract feedback must build once before the built lane",
 	);
-	const built = scripts["test:contract:built"];
+	const built = requiredValue(scripts["test:contract:built"], "built_contract_script");
 	assert.equal((built.match(/\bnpm run build\b/gu) ?? []).length, 0, "the internal contract lane must not build");
 	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
 	const commonPhases = [
@@ -112,7 +113,7 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 		["check:unit", ["npm run test:unit", "npm run test:contract:built"]],
 	];
 	for (const [name, tail] of gateDefinitions) {
-		const commands = scripts[name].split(" && ");
+		const commands = requiredValue(scripts[name], `${name}_script`).split(" && ");
 		assert.equal(commands.filter((command: string) => command === "npm run build").length, 1, `${name} must build exactly once`);
 		assert.ok(commands.indexOf("npm run build") < commands.indexOf("npm run lint:types"), `${name} must build before typecheck`);
 		const withoutBuild = commands.filter((command: string) => command !== "npm run build");
@@ -193,7 +194,9 @@ function filesUnder(directory: string, matches: (name: string) => boolean): stri
  */
 function globOwnedWorkspaces(scripts: Record<string, string>): Set<string> {
 	const owners = new Set<string>();
-	for (const [, workspace, script] of scripts.coverage.matchAll(/--prefix packages\/([\w-]+) run ([\w:-]+)/gu)) {
+	for (const match of requiredValue(scripts.coverage, "coverage_script").matchAll(/--prefix packages\/([\w-]+) run ([\w:-]+)/gu)) {
+		const workspace = requiredCapture(match, 1, "coverage_workspace");
+		const script = requiredCapture(match, 2, "coverage_script_name");
 		const packaged = JSON.parse(read(path.join("packages", workspace, "package.json")));
 		if (/(?:^|\s)test\/\*\.test\.ts(?:\s|$)/u.test(packaged.scripts?.[script] ?? "")) owners.add(workspace);
 	}
@@ -279,13 +282,15 @@ function parseWorkflow(source: string): WorkflowDocument {
 }
 
 function requiredWith(step: WorkflowStep): Record<string, unknown> {
-	assert.ok(step.with, `${step.name ?? "workflow step"} must declare with`);
-	return step.with;
+	const withValue = step.with;
+	if (withValue === undefined) throw new Error(`${step.name ?? "workflow step"}_with_missing`);
+	return withValue;
 }
 
 function requiredSteps(job: WorkflowJob): WorkflowStep[] {
-	assert.ok(job.steps, "workflow job must declare steps");
-	return job.steps;
+	const steps = job.steps;
+	if (steps === undefined) throw new Error("workflow_job_steps_missing");
+	return steps;
 }
 
 function runsFinalGate(step: WorkflowStep) {
@@ -294,7 +299,7 @@ function runsFinalGate(step: WorkflowStep) {
 
 function namedStep(job: WorkflowJob, name: string): WorkflowStep {
 	const step = (job.steps ?? []).find((candidate) => candidate.name === name);
-	assert.ok(step, `missing workflow step: ${name}`);
+	if (step === undefined) throw new Error(`missing workflow step: ${name}`);
 	return step;
 }
 
@@ -317,11 +322,11 @@ function assertNoCheckedOutSource(job: WorkflowJob, label: string) {
 }
 
 function assertPrivilegedReleaseBoundaries({ worker, rollback }: { worker: WorkflowDocument; rollback: WorkflowDocument }) {
-	const publish = worker.jobs["sign-and-publish"];
+	const publish = requiredValue(worker.jobs["sign-and-publish"], "worker_publish_job");
+	const publishEnv = requiredValue(publish.env, "worker_publish_environment");
 	assert.equal(publish.environment, "ceal-cli-release");
-	assert.ok(publish.env, "the worker publish job must declare its release environment");
-	assert.equal(publish.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
-	assert.equal(publish.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assert.equal(publishEnv.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(publishEnv.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(publish, "the OIDC-capable worker publish job");
 	assertRunContains(namedStep(publish, "Verify same-run worker release binding"), [
 		'[ "$GITHUB_REF_TYPE" = "tag" ]',
@@ -339,13 +344,14 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }: { worker: Workf
 		"worker publish must download only this run's assembled handoff",
 	);
 
-	assert.equal(rollback.jobs.verify.environment, undefined, "checked-out rollback verifier must stay unprivileged");
-	const activate = rollback.jobs.activate;
+	const verify = requiredValue(rollback.jobs.verify, "rollback_verify_job");
+	assert.equal(verify.environment, undefined, "checked-out rollback verifier must stay unprivileged");
+	const activate = requiredValue(rollback.jobs.activate, "rollback_activate_job");
+	const activateEnv = requiredValue(activate.env, "rollback_activate_environment");
 	assert.equal(activate.environment, "ceal-cli-release");
 	assert.equal(activate.needs, "verify");
-	assert.ok(activate.env, "the rollback activation job must declare its release environment");
-	assert.equal(activate.env.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
-	assert.equal(activate.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
+	assert.equal(activateEnv.CLOUDFLARE_ACCOUNT_ID, "${{ vars.CEAL_ENV_CLOUDFLARE_ACCOUNT_ID }}");
+	assert.equal(activateEnv.CLOUDFLARE_API_TOKEN, "${{ secrets.CEAL_ENV_CLOUDFLARE_API_TOKEN }}");
 	assertNoCheckedOutSource(activate, "the release-origin rollback job");
 	assertRunContains(namedStep(activate, "Verify same-run rollback binding"), [
 		'[ -n "$GITHUB_SHA" ]',
@@ -365,7 +371,7 @@ function assertPrivilegedReleaseBoundaries({ worker, rollback }: { worker: Workf
 		'[ "$expected_installer" = "$observed_installer" ]',
 	]);
 	assert.ok(
-		(rollback.jobs.verify.steps ?? []).some(
+		(verify.steps ?? []).some(
 			(step) => step.name === "Re-verify an immutable worker release" && (step.run ?? "").includes('cp "$readback_dir/SHA256SUMS"'),
 		),
 		"rollback handoff must carry the verified inventory that binds its bootstrap",
@@ -567,14 +573,15 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 	// list would leave the floor enforced only on hosts that prove less.
 	const proofPlatform = read("test/platform-proof.ts").match(/PLATFORM_PROOF_PLATFORM = "([^"]+)"/u);
 	const enforced = runnerSource().match(/MEASURED_PLATFORMS = Object\.freeze\(\[([^\]]*)\]\)/u);
-	assert.ok(proofPlatform && enforced, "the proof helper and the coverage runner must each name their platforms in one place");
+	const proofPlatformName = requiredValue(proofPlatform?.[1], "proof_platform");
+	const enforcedPlatforms = requiredValue(enforced?.[1], "enforced_platforms");
 	assert.ok(
-		enforced[1].includes(`"${proofPlatform[1]}"`),
-		`the coverage floor must be enforced on ${proofPlatform[1]}, the host that carries every platform proof`,
+		enforcedPlatforms.includes(`"${proofPlatformName}"`),
+		`the coverage floor must be enforced on ${proofPlatformName}, the host that carries every platform proof`,
 	);
 	// And nowhere the proofs cannot run. Adding `darwin` here is the `ceal-v0.67.0`
 	// shape the runner exists to avoid, and it would look like widening coverage.
-	assert.doesNotMatch(enforced[1], /darwin|win32/u, "the floor may only be enforced where the platform proofs run");
+	assert.doesNotMatch(enforcedPlatforms, /darwin|win32/u, "the floor may only be enforced where the platform proofs run");
 });
 
 // `npm ci` installs a platform binary only if `package-lock.json` carries that
@@ -781,7 +788,7 @@ test("every workflow run block that reads a pipeline's status asks for pipefail"
 			);
 		if (risky.length === 0) return;
 		if (!/\bset\s+-[a-z]*o?\s*pipefail\b|\bset\s+-o\s+pipefail\b/u.test(step.run)) {
-			offenders.push(`${where} :: ${risky[0].trim()}`);
+			offenders.push(`${where} :: ${requiredValue(risky[0], "risky_pipeline").trim()}`);
 		}
 	});
 	assert.deepEqual(offenders, [], "a run block pipes into a command and would report the wrong exit status");
@@ -824,7 +831,7 @@ test("no workflow run block reads a producer's output through a process substitu
 		for (const body of processSubstitutions(step.run)) {
 			const stages = body.split(" | ").map((stage) => lastCommand(stage));
 			if (stages.every((stage) => HARMLESS_PIPE_PRODUCER.test(stage))) continue;
-			offenders.push(`${where} :: ${body.split("\n")[0].trim()}`);
+			offenders.push(`${where} :: ${requiredValue(body.split("\n")[0], "process_substitution_line").trim()}`);
 		}
 	});
 	// Positive controls: both spellings are seen, a body that runs onto later lines
@@ -1048,7 +1055,7 @@ test("the scope classifier answers documentation-only, code, and every uncertain
 		assert.equal(run.status, 0, `the classifier must always decide, not fail: ${run.stderr}`);
 		const decided = /^code=(true|false)$/mu.exec(readFileSync(output, "utf8"));
 		assert.ok(decided, `the classifier wrote no verdict: ${readFileSync(output, "utf8")}`);
-		return { verdict: decided[1], reason: run.stdout };
+		return { verdict: requiredValue(decided[1], "classifier_verdict"), reason: run.stdout };
 	};
 
 	// The skip itself, over a range rather than a tip commit.
@@ -1369,7 +1376,11 @@ test("every release, packing, and acceptance path still asserts protocol shippab
 		["scripts/worker-release-inputs.ts", "the chokepoint every release, packing, and native-artifact path funnels through"],
 		["scripts/worker-acceptance-packet.ts", "acceptance-candidate emission"],
 	]) {
-		assert.match(read(file), /assertShippableProtocolVendorPin\(/u, `${file} must assert shippability: ${why}`);
+		assert.match(
+			read(requiredValue(file, "shippability_source_file")),
+			/assertShippableProtocolVendorPin\(/u,
+			`${file} must assert shippability: ${why}`,
+		);
 	}
 });
 
@@ -1389,7 +1400,8 @@ test("every CI lane that runs the gate prewarms the offline consumer cache first
 			assert.notEqual(prewarm, -1, `${file} ${jobName} runs the gate without prewarming the offline cache`);
 			const sameStepInOrder =
 				prewarm === gate &&
-				(steps[gate].run ?? "").indexOf("prewarm-offline-consumer-cache.ts") < (steps[gate].run ?? "").indexOf("npm run check");
+				(requiredValue(steps[gate], "final_gate_step").run ?? "").indexOf("prewarm-offline-consumer-cache.ts") <
+					(requiredValue(steps[gate], "final_gate_step").run ?? "").indexOf("npm run check");
 			assert.ok(prewarm < gate || sameStepInOrder, `${file} ${jobName} must prewarm the offline cache before running the gate`);
 		}
 	}
@@ -1413,7 +1425,7 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 			name: "worker tag-type binding",
 			apply: (candidate) =>
 				removeRunFragment(
-					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify same-run worker release binding"),
+					namedStep(requiredValue(candidate.worker.jobs["sign-and-publish"], "worker_publish_job"), "Verify same-run worker release binding"),
 					'[ "$GITHUB_REF_TYPE" = "tag" ]',
 				),
 		},
@@ -1421,42 +1433,47 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 			name: "worker tag-ref binding",
 			apply: (candidate) =>
 				removeRunFragment(
-					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify same-run worker release binding"),
+					namedStep(requiredValue(candidate.worker.jobs["sign-and-publish"], "worker_publish_job"), "Verify same-run worker release binding"),
 					'[ "$GITHUB_REF" = "refs/tags/$TAG" ]',
 				),
 		},
 		{
 			name: "worker artifact binding",
 			apply: (candidate) => {
-				requiredWith(namedStep(candidate.worker.jobs["sign-and-publish"], "Download exact assembled release handoff")).name =
-					"ceal-worker-release-mutated";
+				requiredWith(
+					namedStep(requiredValue(candidate.worker.jobs["sign-and-publish"], "worker_publish_job"), "Download exact assembled release handoff"),
+				).name = "ceal-worker-release-mutated";
 			},
 		},
 		{
 			name: "worker assembled digest binding",
 			apply: (candidate) =>
 				removeRunFragment(
-					namedStep(candidate.worker.jobs["sign-and-publish"], "Verify the assembled worker inventory"),
+					namedStep(requiredValue(candidate.worker.jobs["sign-and-publish"], "worker_publish_job"), "Verify the assembled worker inventory"),
 					'[ "$ASSEMBLED_SHA256SUMS_SHA256" = "$observed" ]',
 				),
 		},
 		{
 			name: "rollback artifact binding",
 			apply: (candidate) => {
-				requiredWith(namedStep(candidate.rollback.jobs.activate, "Download the verified rollback handoff")).name =
-					"ceal-worker-rollback-mutated";
+				requiredWith(
+					namedStep(requiredValue(candidate.rollback.jobs.activate, "rollback_activate_job"), "Download the verified rollback handoff"),
+				).name = "ceal-worker-rollback-mutated";
 			},
 		},
 		{
 			name: "rollback pointer-tag binding",
 			apply: (candidate) =>
-				removeRunFragment(namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"), '[ "$pointer_tag" = "$TAG" ]'),
+				removeRunFragment(
+					namedStep(requiredValue(candidate.rollback.jobs.activate, "rollback_activate_job"), "Verify the downloaded rollback handoff"),
+					'[ "$pointer_tag" = "$TAG" ]',
+				),
 		},
 		{
 			name: "rollback verified digest binding",
 			apply: (candidate) =>
 				removeRunFragment(
-					namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"),
+					namedStep(requiredValue(candidate.rollback.jobs.activate, "rollback_activate_job"), "Verify the downloaded rollback handoff"),
 					'[ "$VERIFIED_SHA256SUMS_SHA256" = "$observed_digest" ]',
 				),
 		},
@@ -1464,7 +1481,7 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 			name: "rollback installer binding",
 			apply: (candidate) =>
 				removeRunFragment(
-					namedStep(candidate.rollback.jobs.activate, "Verify the downloaded rollback handoff"),
+					namedStep(requiredValue(candidate.rollback.jobs.activate, "rollback_activate_job"), "Verify the downloaded rollback handoff"),
 					'[ "$expected_installer" = "$observed_installer" ]',
 				),
 		},
@@ -1476,7 +1493,9 @@ test("privileged release jobs consume only same-run unprivileged handoffs", () =
 	}
 
 	const withCheckedOutSource = structuredClone(workflows);
-	requiredSteps(withCheckedOutSource.worker.jobs["sign-and-publish"]).unshift({ uses: "actions/checkout@deadbeef" });
+	requiredSteps(requiredValue(withCheckedOutSource.worker.jobs["sign-and-publish"], "worker_publish_job")).unshift({
+		uses: "actions/checkout@deadbeef",
+	});
 	assert.throws(() => assertPrivilegedReleaseBoundaries(withCheckedOutSource));
 });
 
@@ -1508,7 +1527,9 @@ test("release approval uses the authorized trigger, not mutable per-release iden
 test("every workflow pins every action to a full commit SHA", () => {
 	let pinned = 0;
 	for (const workflowPath of checkedWorkflowPaths()) {
-		const uses = [...read(workflowPath).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) => match[1]);
+		const uses = [...read(workflowPath).matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gmu)].map((match) =>
+			requiredCapture(match, 1, "workflow_action"),
+		);
 		const name = path.basename(workflowPath);
 		// A zero-match file would satisfy the loop below trivially, which is how a
 		// reformat or a flow-style `uses` key turns this kind of sweep vacuous.
@@ -1714,19 +1735,21 @@ test("the check lane uploads a receipt from every leg that earns one", () => {
 // until a tag is cut from a binary nothing compiled.
 test("the release lane's gate reuse is one decision with both outcomes wired", () => {
 	const workflow = parseWorkflow(read(".github/workflows/ceal-release.yml"));
-	const build = workflow.jobs.build;
-	assert.ok(build.permissions, "the release build job must declare permissions");
+	const build = requiredValue(workflow.jobs.build, "release_build_job");
+	const permissions = requiredValue(build.permissions, "release_build_permissions");
 	assert.deepEqual(
-		[build.permissions.contents, build.permissions.actions],
+		[permissions.contents, permissions.actions],
 		["read", "read"],
 		"without actions: read the lookup can only ever answer lookup_failed, and the saving disappears with no failure to notice",
 	);
-	const lookup = (build.steps ?? []).find((step: WorkflowStep) => /resolve-gate-attestation\.ts/u.test(step.run ?? ""));
-	assert.ok(lookup?.id, "the lookup step must carry an id for the branches below to read");
-	const verdict = `steps.${lookup.id}.outputs.reuse`;
+	const lookup = requiredValue(
+		(build.steps ?? []).find((step: WorkflowStep) => /resolve-gate-attestation\.ts/u.test(step.run ?? "")),
+		"attestation_lookup_step",
+	);
+	const lookupId = requiredValue(lookup.id, "attestation_lookup_id");
+	const verdict = `steps.${lookupId}.outputs.reuse`;
 
-	const gate = (build.steps ?? []).find(runsFinalGate);
-	assert.ok(gate, "the release build job must carry a final gate step");
+	const gate = requiredValue((build.steps ?? []).find(runsFinalGate), "release_final_gate_step");
 	assert.ok(String(gate.if).includes(`${verdict} != 'true'`), "the gate must run whenever the lookup did not positively answer 'reuse'");
 	// The reuse verdict is built from the LOOKUP step's environment; the proof it
 	// skips is the GATE step's. Two independently-edited `env:` blocks, and until
@@ -1744,15 +1767,13 @@ test("the release lane's gate reuse is one decision with both outcomes wired", (
 	);
 	const reusing = (build.steps ?? []).filter((step: WorkflowStep) => String(step.if ?? "").includes(`${verdict} == 'true'`));
 	assert.equal(reusing.length, 1, "exactly one step may stand in for the skipped gate");
-	const reuse = reusing[0];
-	assert.ok(reuse, "the gate reuse branch must carry one build step");
+	const reuse = requiredValue(reusing[0], "gate_reuse_step");
 	assert.equal(
 		reuse.run?.trim(),
 		"npm run build",
 		"the gate is also this leg's build, and the composition below reads dist/, so the skip has to put the build back",
 	);
 	for (const step of [lookup, gate, reuse]) {
-		assert.ok(step, "each gate reuse step must exist");
 		assert.match(
 			String(step.if),
 			/matrix\.validate_source == '1'/u,
@@ -2173,8 +2194,9 @@ test("every test file in this repository has exactly one owner that the gate rea
 	const GLOB_OWNED = /^packages\/([\w-]+)\/test\/[^/]+\.test\.ts$/u;
 	for (const file of tracked) {
 		const owner = GLOB_OWNED.exec(file);
+		const ownerName = owner?.[1];
 		assert.ok(
-			declared.includes(file) || (owner !== null && globOwners.has(owner[1])),
+			declared.includes(file) || (ownerName !== undefined && globOwners.has(ownerName)),
 			`${file} runs in no gate: no worker tier names it, and it is not directly inside a workspace test/ directory whose own suite the root chain reaches`,
 		);
 	}
@@ -2347,7 +2369,7 @@ test("a workflow's runners resolve through both matrix spellings", (context) => 
 			"",
 		].join("\n"),
 	);
-	const [workflow] = deriveWorkflows(scratch);
+	const workflow = requiredValue(deriveWorkflows(scratch)[0], "derived_workflow");
 	assert.deepEqual(workflow.triggers, ["pull_request"], "a list-form `on:` must not be read as string indices");
 	assert.deepEqual(
 		workflow.jobs.map((job) => [job.id, job.runners]),

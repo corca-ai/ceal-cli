@@ -18,6 +18,7 @@ import {
 	DUPLICATE_LITERAL_MIN_BODY_LENGTH,
 } from "../../scripts/lib/duplicate-literal.ts";
 import { analyzeStoreLockCensus } from "../../scripts/lib/store-lock-census.ts";
+import { required as requiredValue } from "../required.ts";
 import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -165,7 +166,7 @@ test("@separateGrammar must be claimed at every site, not one", (context) => {
 	});
 	const report = analyzeDuplicateLiterals({ repoRoot: partial, roots: [PACKAGE] });
 	assert.equal(report.findings.length, 1, "tagging one member may not silence the group");
-	assert.equal(report.findings[0].partiallyTagged, true);
+	assert.equal(requiredValue(report.findings[0], "partial_duplicate_finding").partiallyTagged, true);
 
 	const both = fixture(context, {
 		[`${PACKAGE}/a.ts`]: `// @separateGrammar: a coincidence.\nexport const A = ${LONG};\n`,
@@ -259,8 +260,13 @@ test("the refresh-token grammar agrees across the Protocol, the worker and the c
 		return { relative, literal: match[0] };
 	});
 	const [first, ...rest] = found;
+	const firstFound = requiredValue(first, "refresh_grammar_declaration");
 	for (const other of rest) {
-		assert.equal(other.literal, first.literal, `${other.relative} disagrees with ${first.relative} about the refresh-token grammar`);
+		assert.equal(
+			other.literal,
+			firstFound.literal,
+			`${other.relative} disagrees with ${firstFound.relative} about the refresh-token grammar`,
+		);
 	}
 });
 

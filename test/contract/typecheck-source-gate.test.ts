@@ -56,6 +56,7 @@ test("source typecheck resolves workspace packages to exact editable source entr
 	assert.equal(typecheckConfig.compilerOptions.noImplicitReturns, true);
 	assert.equal(typecheckConfig.compilerOptions.noUnusedLocals, true);
 	assert.equal(typecheckConfig.compilerOptions.noUnusedParameters, true);
+	assert.equal(typecheckConfig.compilerOptions.noUncheckedIndexedAccess, true);
 });
 
 test("terminating and watch typecheck modes use distinct cache writers", () => {
@@ -134,6 +135,7 @@ test("tools typecheck is strict, source-only, and owns tracked tool TypeScript",
 	assert.equal(toolsTypecheckConfig.compilerOptions.noImplicitReturns, true);
 	assert.equal(toolsTypecheckConfig.compilerOptions.noUnusedLocals, true);
 	assert.equal(toolsTypecheckConfig.compilerOptions.noUnusedParameters, true);
+	assert.equal(toolsTypecheckConfig.compilerOptions.noUncheckedIndexedAccess, true);
 	assert.equal(toolsTypecheckConfig.compilerOptions.allowImportingTsExtensions, true);
 	assert.deepEqual(toolsTypecheckConfig.compilerOptions.types, ["node"]);
 	assert.deepEqual(toolsTypecheckConfig.include, ["scripts/**/*.ts", "test/**/*.ts", "types/**/*.d.ts"]);

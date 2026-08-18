@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	CealProtocolValidationError,
 	decodeCealGatewayRequest,
@@ -153,17 +154,18 @@ test("discovery target catalogs make bounded selection and continuation explicit
 		complete: false,
 		next_cursor: "cursor:continuation_001",
 	};
-	paged.value.targets[0].connector_kind = "google-workspace";
-	paged.value.targets[0].target_kind = "drive.folder";
+	const pagedTarget = requiredValue(paged.value.targets[0], "paged_target");
+	pagedTarget.connector_kind = "google-workspace";
+	pagedTarget.target_kind = "drive.folder";
 	assert.deepEqual(decodeClientResponse(paged, request), paged);
 
 	for (const mutate of [
 		(value: JsonRecord) => { value.value.target_catalog.returned_count = 2; },
 		(value: JsonRecord) => { value.value.target_catalog.complete = true; },
 		(value: JsonRecord) => { value.value.target_catalog.next_cursor = "cursor:unsafe secret=material"; },
-		(value: JsonRecord) => { value.value.targets[0].capability_ids = []; },
-		(value: JsonRecord) => { value.value.targets[0].connector_kind = "provider:internal"; },
-		(value: JsonRecord) => { value.value.targets[0].target_kind = "provider:scope"; },
+		(value: JsonRecord) => { requiredValue(value.value.targets[0], "invalid_target").capability_ids = []; },
+		(value: JsonRecord) => { requiredValue(value.value.targets[0], "invalid_target").connector_kind = "provider:internal"; },
+		(value: JsonRecord) => { requiredValue(value.value.targets[0], "invalid_target").target_kind = "provider:scope"; },
 	]) {
 		const invalid = structuredClone(paged);
 		mutate(invalid);
@@ -180,9 +182,10 @@ test("bare discovery exposes callable target rows and rejects malformed paging",
 		capability_ids: ["message.search"], capability_access: [matureCapabilityAccess()],
 	});
 	const ungranted = structuredClone(bare);
-	ungranted.value.targets[0].access = "ungranted";
-	ungranted.value.targets[0].capability_ids = [];
-	ungranted.value.targets[0].capability_access = [];
+	const ungrantedTarget = requiredValue(ungranted.value.targets[0], "ungranted_target");
+	ungrantedTarget.access = "ungranted";
+	ungrantedTarget.capability_ids = [];
+	ungrantedTarget.capability_access = [];
 	assert.throws(() => decodeClientResponse(ungranted, request), hasCode("invalid_client_response"));
 	for (const mutate of [
 		(value: JsonRecord) => { value.value.target_catalog.unknown_catalog_field = true; },
@@ -257,7 +260,7 @@ test("multi-capability discovery rejects an unrequested capability or grant proj
 	const request = envelope("discover", { capability_ids: ["message.search"], match: "Team" });
 	const response = discoveryResponse(request);
 	response.value.targets = [{
-		...response.value.targets[0],
+		...firstTarget(response),
 		capability_ids: ["message.search", "message.get"],
 		capability_access: [
 			...firstTarget(response).capability_access,

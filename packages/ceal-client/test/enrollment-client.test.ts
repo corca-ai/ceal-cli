@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
+import { required as requiredValue } from "../../../test/required.ts";
 import { CealEnrollmentClientError, createCealEnrollmentClient } from "../src/index.ts";
 import {
 	abortingFetch,
@@ -41,13 +42,14 @@ test("enrollment client exchanges one code over the derived loopback route", asy
 		const result = await client.exchange("A".repeat(43));
 		assert.equal(result.ok, true);
 		assert.equal(result.profile_ref, "profile:narnia");
-		assert.equal(requests[0].url, "/api/ceal/v1/enroll");
-		assert.equal(requests[0].body.code, "A".repeat(43));
-		assert.equal(requests[0].decodeGeneration, undefined);
+		const request = requiredValue(requests[0], "enrollment_request");
+		assert.equal(request.url, "/api/ceal/v1/enroll");
+		assert.equal(request.body.code, "A".repeat(43));
+		assert.equal(request.decodeGeneration, undefined);
 		// Drift guard: the hardcoded client-identification version must track
 		// the client package manifest.
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
+		assert.deepEqual(request.body.client, { name: "ceal", version: manifest.version });
 	} finally {
 		await close(server);
 	}
@@ -128,7 +130,7 @@ test("construction refuses an unusable transport or timeout before any request",
 });
 
 test("the endpoint is refused before it can be dialled", () => {
-	const refused = [
+	const refused: Array<[string, string]> = [
 		["not a url", "an unparseable endpoint"],
 		["https://user:pw@gateway.example/api", "embedded credentials"],
 		["https://gateway.example/api?token=x", "a query string"],

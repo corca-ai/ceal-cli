@@ -29,7 +29,9 @@ function extractEntry(input: unknown): Record<string, unknown> {
 	if (typeof input !== "object" || input === null) throw new Error("npm pack metadata must be an array or package map");
 	const entries = Object.entries(input);
 	if (entries.length !== 1) throw new Error("npm pack metadata package map must contain exactly one entry");
-	const [key, value] = entries[0];
+	const entryPair = entries[0];
+	if (entryPair === undefined) throw new Error("npm pack metadata package map entry is missing");
+	const [key, value] = entryPair;
 	const entry = objectEntry(value);
 	if (entry.name !== key) throw new Error("npm pack metadata package key does not match name");
 	return entry;

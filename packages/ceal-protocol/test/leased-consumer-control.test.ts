@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	CEAL_LEASED_CONSUMER_CONTROL_REQUEST_SCHEMA,
 	CEAL_LEASED_CONSUMER_CONTROL_RESPONSE_SCHEMA,
@@ -297,14 +298,15 @@ test("capability control v4 carries generic read and write results through exact
 		data: { schema_version: CEAL_LEASED_CONSUMER_MESSAGE_READ_DATA_SCHEMA, items: [{ text: "bounded", author: { author_ref: "author:U0123456789", actor_kind: "human" } as Record<string, unknown> }] },
 	} } };
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
-	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice (U0123456789)", actor_kind: "human" };
+	const unsafeAuthorItem = requiredValue(unsafeAuthorResult.result.result.data.items[0], "unsafe_author_item");
+	unsafeAuthorItem.author = { author_ref: `author:${"1".repeat(64)}`, display_name: "Alice (U0123456789)", actor_kind: "human" };
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
 	// The addressable substitute crosses only in the opaque Gateway form; a
 	// provider-shaped one behind the prefix is a refused response, not a
 	// stripped key, because the author descriptor is exact-keyed.
-	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: "subject:U0123456789" };
+	unsafeAuthorItem.author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: "subject:U0123456789" };
 	assert.throws(() => decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult), TypeError);
-	unsafeAuthorResult.result.result.data.items[0].author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: `subject:${"2".repeat(64)}` };
+	unsafeAuthorItem.author = { author_ref: `author:${"1".repeat(64)}`, actor_kind: "human", subject_ref: `subject:${"2".repeat(64)}` };
 	assert.equal(decodeCealLeasedConsumerCapabilityControlResponse(unsafeAuthorResult).operation, "call");
 	assert.equal(decodeCealLeasedConsumerCapabilityControlRequest({
 		schema_version: CEAL_LEASED_CONSUMER_CAPABILITY_CONTROL_REQUEST_SCHEMA,

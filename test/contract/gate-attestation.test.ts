@@ -39,6 +39,7 @@ import {
 	main as resolverMain,
 	SOURCE_WORKFLOW_FILE,
 } from "../../scripts/resolve-gate-attestation.ts";
+import { required as requiredValue } from "../required.ts";
 import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -185,7 +186,11 @@ test("a record from a producer this run does not know is refused rather than par
 		["coverage_floor"],
 	);
 	for (const shape of [null, "receipt", 7, []]) {
-		assert.match(gateAttestationDifferences(attestation, shape)[0], /not a record/u, `${JSON.stringify(shape)} is not a record`);
+		assert.match(
+			requiredValue(gateAttestationDifferences(attestation, shape)[0], "attestation_difference"),
+			/not a record/u,
+			`${JSON.stringify(shape)} is not a record`,
+		);
 	}
 });
 
@@ -341,7 +346,7 @@ test("the release lane reuses a gate only when a green check run carries this ex
 	assert.equal(verdict.reason, "attested_green");
 	assert.equal(verdict.artifactName, name);
 	assert.ok(
-		calls[0].includes("status=success"),
+		requiredValue(calls[0], "artifact_lookup_call").includes("status=success"),
 		"only a green run may be asked for its artifacts; a red run's receipt describes a lane that failed",
 	);
 });
@@ -402,7 +407,11 @@ test("a green run is not enough on its own: the query and the artifact both have
 		env: ciEnv(root),
 		fetchImpl: fakeFetch([runs, ["runs/11/artifacts", { artifacts: [{ name, expired: false }] }]], calls),
 	});
-	assert.match(calls[0], /[?&]event=push(&|$)/u, "a pull_request run must not be able to supply the receipt");
+	assert.match(
+		requiredValue(calls[0], "push_lookup_call"),
+		/[?&]event=push(&|$)/u,
+		"a pull_request run must not be able to supply the receipt",
+	);
 
 	// An artifact that has not said it is live has not said it is live. Every
 	// other refusal here costs a gate run; trusting a missing field would not.
@@ -431,8 +440,8 @@ test("the lookup says in the run summary whether reuse actually happened", async
 
 	await lookup(env, [runs, ["runs/11/artifacts", { artifacts: [{ name, expired: false }] }]]);
 	await lookup(env, noRuns);
-	assert.match(summaries[0], /reused an attested-green run/u);
-	assert.match(summaries[1], /re-proved from scratch \(no_green_check_run\)/u);
+	assert.match(requiredValue(summaries[0], "reuse_summary"), /reused an attested-green run/u);
+	assert.match(requiredValue(summaries[1], "reproof_summary"), /re-proved from scratch \(no_green_check_run\)/u);
 	for (const line of summaries) assert.match(line, new RegExp(RUNNER, "u"), "the summary must name the runner the verdict is about");
 
 	// No summary file, no summary, and no failure either.

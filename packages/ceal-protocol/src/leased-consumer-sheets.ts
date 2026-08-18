@@ -96,9 +96,11 @@ export function validCealLeasedConsumerSheetsClearData(value: unknown): value is
 export function readCealLeasedConsumerSheetsRange(value: unknown): { range: string; rows: number; columns: number } | null {
 	if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > MAX_RANGE_BYTES || !wellFormed(value)) return null;
 	const match = /^(?:([^!\r\n]{1,80})!)?([A-Z]{1,2})([1-9]\d{0,5}):([A-Z]{1,2})([1-9]\d{0,5})$/u.exec(value);
-	if (match === null || !boundedSheetName(match[1])) return null;
-	const startColumn = columnIndex(match[2]); const endColumn = columnIndex(match[4]);
-	const rows = Number(match[5]) - Number(match[3]) + 1; const columns = endColumn - startColumn + 1;
+	if (match === null) return null;
+	const [sheetName, startColumnText, startRowText, endColumnText, endRowText] = match.slice(1);
+	if (startColumnText === undefined || startRowText === undefined || endColumnText === undefined || endRowText === undefined || !boundedSheetName(sheetName)) return null;
+	const startColumn = columnIndex(startColumnText); const endColumn = columnIndex(endColumnText);
+	const rows = Number(endRowText) - Number(startRowText) + 1; const columns = endColumn - startColumn + 1;
 	return boundedDimensions({ startColumn, endColumn, rows, columns }) ? { range: value, rows, columns } : null;
 }
 function boundedSheetName(value: string | undefined): boolean {

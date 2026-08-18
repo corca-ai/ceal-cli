@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
+import { requiredCapture, required as requiredValue } from "../../../test/required.ts";
 import type { CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
@@ -307,8 +308,8 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 		],
 		event_scan: { scanned_sessions: 1, session_limit: 3 },
 	});
-	assert.equal(state.agent_activity.adapters[1].coverage, "unsupported");
-	assert.match(state.agent_activity.non_claims[0], /never surfaced, copied, or forwarded/u);
+	assert.equal(requiredValue(state.agent_activity.adapters[1], "codex_agent_activity_adapter").coverage, "unsupported");
+	assert.match(requiredValue(state.agent_activity.non_claims[0], "agent_activity_non_claim"), /never surfaced, copied, or forwarded/u);
 	// A healthy fixture produces no suggestions: the rules stay silent instead
 	// of inventing advice without observed evidence.
 	assert.equal(state.suggestions.status, "evaluated");
@@ -498,7 +499,7 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 					/export (?:async )?(?:function|const|let) (createCeal\w*Store)/gu,
 				),
 			])
-			.map((match) => match[1]),
+			.map((match) => requiredCapture(match, 1, "store_factory")),
 	);
 	const exercised = new Set(["createCealSessionStore", "createCealDiscoveryCacheStore", "createCealReceiptSpoolStore"]);
 	// Registers guides into the agent host's own directory (~/.claude, ~/.codex),
@@ -597,7 +598,11 @@ test("an empty retention window is not reported as every receipt having been los
 	const page = await (await fetch(doc.url)).text();
 	const emptyHistoryBranch = /else if \(s\.receipts\.note\)\s*\{([\s\S]*?)\n {2}\}/u.exec(page);
 	assert.ok(emptyHistoryBranch, "the page must still have an empty-history branch to check");
-	assert.match(emptyHistoryBranch[1], /dropped_appends/u, "the empty-history branch must render the drop count, not only the note");
+	assert.match(
+		requiredValue(emptyHistoryBranch?.[1], "empty_history_branch"),
+		/dropped_appends/u,
+		"the empty-history branch must render the drop count, not only the note",
+	);
 	await closeObserverHandle(handle);
 });
 
@@ -870,7 +875,7 @@ test("observer binds its session and receipt projections to one session snapshot
 
 	assert.equal(sessionReads, 1);
 	assert.equal(state.session.profile_ref, "profile:old");
-	assert.equal(state.receipts.entries[0].request_ref, "narnia:old:receipt");
+	assert.equal(requiredValue(state.receipts.entries[0], "old_receipt").request_ref, "narnia:old:receipt");
 });
 
 test("observer refuses to attribute another session's discovery cache to the current session", async () => {

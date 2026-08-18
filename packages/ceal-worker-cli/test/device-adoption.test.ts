@@ -18,6 +18,7 @@ import {
 	deviceEnrollmentHpkeInfo,
 	deviceEnrollmentProofPayload,
 } from "@corca-ai/ceal-protocol";
+import { required as requiredValue } from "../../../test/required.ts";
 import type { CealCliIo, CealCommandRuntime } from "../dist/cli-runtime.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
@@ -50,8 +51,9 @@ test("a full adoption verifies the delivery, stores the session, and claims noth
 	assert.equal(result.subject_ref, "subject:employee");
 	assert.equal(result.raw_token_visible, false);
 	assert.equal(world.saved.length, 1);
-	assert.equal(world.saved[0].accessToken, "ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A");
-	assert.equal(world.saved[0].gatewayEndpoint, GATEWAY);
+	const saved = requiredValue(world.saved[0], "adopted_session");
+	assert.equal(saved.accessToken, "ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A");
+	assert.equal(saved.gatewayEndpoint, GATEWAY);
 	// The command cannot claim the mailbox check it did not perform.
 	assert.ok(result.non_claims.some((claim) => claim.includes("did not verify the mailbox")));
 });
@@ -836,8 +838,12 @@ function parseYamlish(text: string): TestResult {
 		if (!line.trim()) continue;
 		const indent = line.length - line.trimStart().length;
 		const trimmed = line.trim();
-		while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
-		const parent = stack[stack.length - 1].node;
+		while (stack.length > 1) {
+			const current = requiredValue(stack[stack.length - 1], "parser_stack_top");
+			if (indent > current.indent) break;
+			stack.pop();
+		}
+		const parent = requiredValue(stack[stack.length - 1], "parser_stack_parent").node;
 		if (trimmed.startsWith("- ")) {
 			if (!Array.isArray(parent.__list)) parent.__list = [];
 			parent.__list.push(scalar(trimmed.slice(2)));

@@ -41,8 +41,10 @@ function parseSummary(output: string): GraphSummary | undefined {
 	const connectedGraph = /^\/\/ ok connected_graph\b/u.test(summaryLine);
 	const values = new Map<string, string>();
 	for (const match of summaryLine.matchAll(/\b([a-z_]+)=([0-9]+(?:\.[0-9]+)?)\b/gu)) {
-		if (values.has(match[1])) return undefined;
-		values.set(match[1], match[2]);
+		const key = match[1];
+		const value = match[2];
+		if (key === undefined || value === undefined || values.has(key)) return undefined;
+		values.set(key, value);
 	}
 	const count = (name: string): number | undefined => {
 		const value = values.get(name);

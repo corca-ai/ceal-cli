@@ -9,6 +9,7 @@ import {
 	type CealLeasedConsumerAttachmentStreamManifest,
 	encodeCealLeasedConsumerAttachmentStreamRecord,
 } from "@corca-ai/ceal-protocol";
+import { required as requiredValue } from "../../../test/required.ts";
 
 type ManifestOverrides = Partial<CealLeasedConsumerAttachmentStreamManifest["limits"]>;
 type AttachmentPayload = readonly [slot: number, bytes: Uint8Array];
@@ -118,7 +119,7 @@ export async function* chunked(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
 	let offset = 0;
 	let index = 0;
 	while (offset < bytes.byteLength) {
-		const size = sizes[index % sizes.length];
+		const size = requiredValue(sizes[index % sizes.length], "attachment_chunk_size");
 		yield bytes.subarray(offset, offset + size);
 		offset += size;
 		index += 1;

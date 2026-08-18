@@ -62,7 +62,10 @@ export function parseProtocolVersion(value: unknown): ParsedProtocolVersion | nu
 
 function compareProtocolVersions(left: ParsedProtocolVersion, right: ParsedProtocolVersion): number {
 	for (let index = 0; index < left.length; index += 1) {
-		if (left[index] !== right[index]) return left[index] - right[index];
+		const leftPart = left[index];
+		const rightPart = right[index];
+		if (leftPart === undefined || rightPart === undefined) return 0;
+		if (leftPart !== rightPart) return leftPart - rightPart;
 	}
 	return 0;
 }

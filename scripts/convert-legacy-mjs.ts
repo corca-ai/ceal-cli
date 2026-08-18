@@ -641,9 +641,11 @@ function rollbackTransaction(
 	for (let index = 0; index < references.length; index += 1) {
 		try {
 			if (failRollback) throw new Error("injected_rollback_failure:reference");
+			const reference = references[index];
+			if (reference === undefined) throw new Error("conversion_reference_missing");
 			const backup = join(temporaryRoot, `backup-${index}`);
 			if (existsSync(backup))
-				writeAtomic(root, join(root, references[index].file), readFileSync(backup), temporaryRoot, references[index].mode, directorySync);
+				writeAtomic(root, join(root, reference.file), readFileSync(backup), temporaryRoot, reference.mode, directorySync);
 		} catch (error) {
 			errors.push(error instanceof Error ? error.message : String(error));
 		}
@@ -678,7 +680,9 @@ export function applyConversion(
 		const state = { count: 0 };
 		try {
 			for (let index = 0; index < references.length; index += 1) {
-				writeFileSync(join(temporaryRoot, `backup-${index}`), references[index].before, { mode: 0o600 });
+				const reference = references[index];
+				if (reference === undefined) throw new Error("conversion_reference_missing");
+				writeFileSync(join(temporaryRoot, `backup-${index}`), reference.before, { mode: 0o600 });
 			}
 			writeFileSync(join(temporaryRoot, "policy-backup"), policyBefore, { mode: 0o600 });
 			for (const reference of references) {

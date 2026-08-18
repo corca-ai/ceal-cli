@@ -12,6 +12,7 @@ import { fileURLToPath, URL } from "node:url";
 import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealGatewayDiscoveryCapability, CealGatewayTargetCatalog } from "@corca-ai/ceal-protocol";
 import { parseAllDocuments } from "yaml";
+import { requiredCapture, required as requiredValue } from "../../../test/required.ts";
 import {
 	buildAcceptanceRecord,
 	type CealAcceptanceRecordParts,
@@ -86,7 +87,7 @@ function advertisedSubcommands(help: string): string[] {
 	for (const line of lines.slice(start + 1)) {
 		if (line === "") break;
 		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
-		if (match) rows.push(match[1]);
+		if (match) rows.push(requiredCapture(match, 1, "advertised_subcommand"));
 	}
 	return rows;
 }
@@ -246,10 +247,7 @@ async function yamlRun(args: readonly string[], expectedCode = 0, runtime: TestR
 	const result = await run(args, runtime);
 	assert.equal(result.code, expectedCode, `${result.stderr}\n${result.stdout}`);
 	assert.equal(result.stderr, "");
-	const documents = parseAllDocuments(result.stdout, { uniqueKeys: true });
-	assert.equal(documents.length, 1, "stdout must contain exactly one YAML document");
-	assert.deepEqual(documents[0].errors, []);
-	return documents[0].toJS();
+	return parseYaml(result.stdout);
 }
 
 test("canonical registry is reachable through stable, read-only help", async () => {
@@ -493,7 +491,7 @@ test("advertised subcommand rows and declared routes stay in sync", async () => 
 
 test("parent session help advertises force for both replacement-capable routes", async () => {
 	const { stdout } = await run(["session", "--help"]);
-	const usage = stdout.split("\n")[0];
+	const usage = requiredValue(stdout.split("\n")[0], "session_help_usage");
 	assert.equal((usage.match(/\[--force\]/gu) ?? []).length, 2);
 });
 
@@ -501,7 +499,9 @@ test("parent session help advertises force for both replacement-capable routes",
 // leaf cannot advertise a `Result schema` no code produces.
 test("declared result schemas exist in the emitting package", () => {
 	const source = workerSource();
-	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
+	const emitted = new Set(
+		[...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => requiredCapture(match, 1, "emitted_schema")),
+	);
 	for (const definition of [...CEAL_COMMANDS, ...CEAL_SUBCOMMANDS]) {
 		const label = "name" in definition ? definition.name : definition.route.join(" ");
 		assert.ok(emitted.has(definition.result_schema), `${label}: ${definition.result_schema}`);
@@ -785,7 +785,7 @@ test("update reports bounded stable progress only to an interactive stderr surfa
 		},
 	});
 	assert.deepEqual(stages, ["check", "download_install", "verify", "installed_readback"]);
-	assert.deepEqual(parseAllDocuments(interactive.stdout, { uniqueKeys: true })[0].toJS().status, "unchanged");
+	assert.deepEqual(parseYaml(interactive.stdout).status, "unchanged");
 	assert.deepEqual(interactive.stderr.split("\n").filter(Boolean), [
 		"ceal update: checking the installed worker release",
 		"ceal update: downloading and installing the signed stable worker release",
@@ -803,7 +803,7 @@ test("update reports bounded stable progress only to an interactive stderr surfa
 		},
 	});
 	assert.equal(nonInteractive.stderr, "");
-	assert.equal(parseAllDocuments(nonInteractive.stdout, { uniqueKeys: true })[0].toJS().status, "unchanged");
+	assert.equal(parseYaml(nonInteractive.stdout).status, "unchanged");
 
 	let timingOutput = "";
 	const timed = await run(["update"], {
@@ -839,7 +839,7 @@ test("update reports bounded stable progress only to an interactive stderr surfa
 	});
 	assert.equal(committed, true);
 	assert.equal(hostileDiagnostic.code, 0, "an observation callback cannot reclassify a committed update as failed");
-	assert.equal(parseAllDocuments(hostileDiagnostic.stdout, { uniqueKeys: true })[0].toJS().status, "updated");
+	assert.equal(parseYaml(hostileDiagnostic.stdout).status, "updated");
 });
 
 test("guide status and per-host registration expose one update-safe local skill path", async () => {
@@ -1069,7 +1069,7 @@ test("every command answers one success predicate that agrees with its exit code
 		const runtime: TestRuntime =
 			command.name === "observe" ? { onObserverListening: (handle: { url: string; close: () => Promise<void> }) => void handle.close() } : {};
 		const { code, stdout } = await run(args, runtime);
-		const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+		const payload = parseYaml(stdout);
 		assert.equal(typeof payload.ok, "boolean", `${command.name} must carry ok`);
 		assert.equal(payload.ok, code === 0, `${command.name}: ok must agree with exit ${code}`);
 		if (payload.ok === false) {
@@ -2126,8 +2126,7 @@ test("call invokes one granted capability and independently reads back its audit
 			requests.map((item) => item.body.operation),
 			["call", "readback"],
 		);
-		const firstRequest = requests[0];
-		assert.ok(firstRequest);
+		const firstRequest = requiredValue(requests[0], "first_call_request");
 		const firstArguments = firstRequest.body.body.arguments;
 		assert.ok(firstArguments);
 		assert.equal(firstArguments.query, "launch");
@@ -2401,7 +2400,7 @@ test("call refuses to claim completion when audit readback has no verified event
 		},
 	);
 	assert.equal(code, 3);
-	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	const payload = parseYaml(stdout);
 	assert.equal(payload.status, "error");
 	assert.equal(payload.receipt.evidence, "readback_unavailable");
 	assert.deepEqual(payload.receipt.audit_refs, []);
@@ -2442,7 +2441,7 @@ test("a served call result carries the cache and redaction provenance a reader n
 			null,
 			{ ok: true, capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search" },
 		);
-		return parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+		return parseYaml(stdout);
 	};
 
 	const replay = render({
@@ -2515,7 +2514,7 @@ test("every call result names the issuing instance and the profile it used", asy
 			profileRef: "profile:kb-study",
 		},
 	);
-	const completed = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	const completed = parseYaml(stdout);
 	assert.deepEqual(completed.gateway, { instance_ref: "instance:ceal-prod", profile_ref: "profile:kb-study" });
 
 	// A failure path is where misattribution is most likely, so it carries the
@@ -2570,7 +2569,7 @@ test("compatibility result data passes through without a client-side message pro
 		},
 	);
 	assert.equal(code, 0);
-	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	const payload = parseYaml(stdout);
 	assert.deepEqual(payload, {
 		schema_version: "ceal.result.v2",
 		ok: true,
@@ -2640,7 +2639,7 @@ test("compatibility result data passes through without a client-side write proje
 		},
 	);
 	assert.equal(code, 0);
-	const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
+	const payload = parseYaml(stdout);
 	assert.deepEqual(payload.data, {
 		schema_version: "ceal.message_create_result.v1",
 		delivery: "verified",
@@ -3524,7 +3523,7 @@ test("compatibility link data passes through and unsafe input is left to the Gat
 					source: { provider: "slack", url: sourceUrl },
 				},
 			});
-			assert.deepEqual(requests[0].body.body.arguments, { url });
+			assert.deepEqual(requiredValue(requests[0], "resource_resolve_call").body.body.arguments, { url });
 		},
 		(request) =>
 			request.operation === "call"
@@ -3593,8 +3592,14 @@ test("call preserves one request identity across authentication refresh and fina
 				requests.map((item) => item.authorization),
 				[`Bearer ${"ceal_personal_"}${"P".repeat(43)}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
 			);
-			assert.equal(requests[0].body.request_id, requests[1].body.request_id);
-			assert.equal(requests[2].body.body.request_id, requests[1].body.request_id);
+			assert.equal(
+				requiredValue(requests[0], "first_retry_call").body.request_id,
+				requiredValue(requests[1], "second_retry_call").body.request_id,
+			);
+			assert.equal(
+				requiredValue(requests[2], "readback_call").body.body.request_id,
+				requiredValue(requests[1], "second_retry_call").body.request_id,
+			);
 		},
 		{ rejectFirstGateway: true },
 	);
@@ -3614,7 +3619,7 @@ test("call forwards a discovered provider-neutral capability without a CLI comma
 			assert.equal(payload.status, "completed");
 			assert.equal(payload.capability, "file.search");
 			assert.equal(payload.target, "target:workspace");
-			assert.deepEqual(requests[0].body.body.arguments, { query: "roadmap", kind: "document" });
+			assert.deepEqual(requiredValue(requests[0], "file_search_call").body.body.arguments, { query: "roadmap", kind: "document" });
 		},
 		(request) =>
 			request.operation === "call"
@@ -3708,11 +3713,11 @@ test("capabilities uses an enrolled session without endpoint or token options", 
 test("packaged bin exposes no partial session lifecycle when HOME is absent", async () => {
 	const status = await runBinWithoutHome(["session", "status"]);
 	assert.equal(status.code, 0);
-	assert.equal(parseAllDocuments(status.stdout)[0].toJS().status, "unconfigured");
+	assert.equal(parseYaml(status.stdout).status, "unconfigured");
 
 	const logout = await runBinWithoutHome(["session", "logout"]);
 	assert.equal(logout.code, 3);
-	const payload = parseAllDocuments(logout.stdout)[0].toJS();
+	const payload = parseYaml(logout.stdout);
 	assert.equal(payload.status, "unavailable");
 	assert.equal(payload.error.kind, "session_runtime_unavailable");
 });
@@ -4029,8 +4034,9 @@ test("capabilities negotiates and surfaces the eligible-Profile catalog for --pr
 		);
 		assert.equal(payload.status, "available");
 		// The transport declared the negotiation on the handshake request.
-		assert.equal(requests[0].body.operation, "handshake");
-		assert.equal(requests[0].profiles, "accept");
+		const handshake = requiredValue(requests[0], "capabilities_handshake");
+		assert.equal(handshake.body.operation, "handshake");
+		assert.equal(handshake.profiles, "accept");
 		// The currently selected Profile and the catalog of alternatives an agent
 		// may pass to `--profile` are both operator-visible.
 		assert.equal(payload.gateway.profile_ref, "profile:narnia");
@@ -4183,7 +4189,11 @@ test("a URL target match without a navigation declaration preserves the Gateway 
 		);
 		assert.equal(payload.status, "available");
 		assert.deepEqual(payload.targets, []);
-		assert.equal(requests[1].body.body.match, selector, "the test must exercise a real match request");
+		assert.equal(
+			requiredValue(requests[1], "catalog_match_request").body.body.match,
+			selector,
+			"the test must exercise a real match request",
+		);
 	}, responseFactory);
 });
 
@@ -5185,8 +5195,9 @@ async function waitForTestSignal(signal: Promise<unknown>, message: string): Pro
 function parseYaml(stdout: string): YamlValue {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
-	assert.deepEqual(documents[0].errors, []);
-	return documents[0].toJS();
+	const document = requiredValue(documents[0], "yaml_document");
+	assert.deepEqual(document.errors, []);
+	return document.toJS();
 }
 
 function escapeRegExp(value: string): string {

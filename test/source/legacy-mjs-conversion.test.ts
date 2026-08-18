@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { applyConversion, parseArgs, planConversion } from "../../scripts/convert-legacy-mjs.ts";
+import { required as requiredValue } from "../required.ts";
 
 test("converter dry-run is bounded, policy-selected, and non-mutating", () => {
 	const policy = readFileSync("config/no-legacy-mjs.json", "utf8");
@@ -26,7 +27,7 @@ test("converter dry-run is bounded, policy-selected, and non-mutating", () => {
 	const plan = JSON.parse(result.stdout) as { dry_run: boolean; converted: string[] };
 	assert.equal(plan.dry_run, true);
 	assert.ok(plan.converted.length === 0 || plan.converted.length === 1);
-	if (plan.converted.length === 1) assert.match(plan.converted[0], /^scripts\/.+\.mjs$/u);
+	if (plan.converted.length === 1) assert.match(requiredValue(plan.converted[0], "converted_path"), /^scripts\/.+\.mjs$/u);
 	assert.equal(readFileSync("config/no-legacy-mjs.json", "utf8"), policy);
 });
 

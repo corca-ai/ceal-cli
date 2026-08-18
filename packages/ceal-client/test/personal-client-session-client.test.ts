@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import test from "node:test";
 import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
+import { required as requiredValue } from "../../../test/required.ts";
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../src/index.ts";
 import type { JsonRecord } from "./client-response-test-support.ts";
 import {
@@ -52,13 +53,13 @@ test("personal-client session client rotates and revokes only through derived Ga
 			requests.map((item) => item.url),
 			["/api/ceal/v1/refresh", "/api/ceal/v1/revoke"],
 		);
-		assert.equal(requests[0].body.refresh_token, REFRESH);
-		assert.equal(requests[1].body.refresh_token, REFRESH);
+		assert.equal(requiredValue(requests[0], "refresh_request").body.refresh_token, REFRESH);
+		assert.equal(requiredValue(requests[1], "revoke_request").body.refresh_token, REFRESH);
 		assert.ok(requests.every((item) => item.decodeGeneration === undefined));
 		// Drift guard: the hardcoded client-identification version must track
 		// the client package manifest.
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-		assert.deepEqual(requests[0].body.client, { name: "ceal", version: manifest.version });
+		assert.deepEqual(requiredValue(requests[0], "refresh_request").body.client, { name: "ceal", version: manifest.version });
 	} finally {
 		await close(server);
 	}

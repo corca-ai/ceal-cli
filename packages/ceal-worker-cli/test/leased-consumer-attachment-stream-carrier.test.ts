@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_JSON,
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_SHA256,
@@ -95,22 +96,23 @@ test("private candidate carrier derives its fixed route and produces the Agent h
 	);
 
 	assert.equal(calls.length, 1);
-	assert.equal(calls[0].socketPath, socketPath);
-	assert.equal(calls[0].path, "/api/ceal/agent/v1/control/attachment-stream");
-	assert.equal(calls[0].path.length > 0, true);
-	assert.equal(calls[0].method, "POST");
-	assert.equal(calls[0].credential, "private-service-credential");
-	assert.equal(calls[0].body, JSON.stringify(request));
-	assert.doesNotMatch(calls[0].body, /credential|socket|provider|path/u);
-	assert.equal(calls[0].deadlineMs, 30_000);
+	const call = requiredValue(calls[0], "attachment_stream_call");
+	assert.equal(call.socketPath, socketPath);
+	assert.equal(call.path, "/api/ceal/agent/v1/control/attachment-stream");
+	assert.equal(call.path.length > 0, true);
+	assert.equal(call.method, "POST");
+	assert.equal(call.credential, "private-service-credential");
+	assert.equal(call.body, JSON.stringify(request));
+	assert.doesNotMatch(call.body, /credential|socket|provider|path/u);
+	assert.equal(call.deadlineMs, 30_000);
 	assert.ok(
-		calls[0].maximumResponseBytes >=
+		call.maximumResponseBytes >=
 			streamBytes(completeManifest(), [
 				[0, image],
 				[1, document],
 			]).byteLength,
 	);
-	assert.equal(calls[0].errors.responseTooLarge, "attachment_stream_response_too_large");
+	assert.equal(call.errors.responseTooLarge, "attachment_stream_response_too_large");
 	assert.equal(sessionCloses, 1);
 	assert.equal(responseCloses, 1);
 	assert.equal(rootCalls, 1);
@@ -253,8 +255,9 @@ test("private attachment-stream entrypoint returns only the verified Agent hando
 	assert.equal(result.handoff.manifest.schema_version, "ceal.agent.attachment_materialization.v1");
 	assert.ok(result.handoff.handoff_root.startsWith(root));
 	assert.equal(calls.length, 1);
-	assert.equal(calls[0].path, "/api/ceal/agent/v1/control/attachment-stream");
-	assert.equal(calls[0].body, JSON.stringify(request));
+	const call = requiredValue(calls[0], "attachment_stream_handoff_call");
+	assert.equal(call.path, "/api/ceal/agent/v1/control/attachment-stream");
+	assert.equal(call.body, JSON.stringify(request));
 	assert.doesNotMatch(stdout, /caller-selected|credential|provider/u);
 });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import { CealDeviceProofError, generateCealDeviceProofKeyPair, signCealDeviceProof, verifyCealDeviceProof } from "../dist/device-proof.js";
 
 // Ed25519 has published vectors too, but the property that matters for this
@@ -20,12 +21,13 @@ test("a signature verifies under the raw public key that was sent, and only over
 	assert.ok(verifyCealDeviceProof(pair.publicKey, payload, signature));
 
 	const flipped = new Uint8Array(payload);
-	flipped[flipped.length - 1] ^= 0x01;
+	const flippedIndex = flipped.length - 1;
+	flipped[flippedIndex] = requiredValue(flipped[flippedIndex], "flipped_payload_byte") ^ 0x01;
 	assert.ok(!verifyCealDeviceProof(pair.publicKey, flipped, signature), "a changed payload must not verify");
 	assert.ok(!verifyCealDeviceProof(generateCealDeviceProofKeyPair().publicKey, payload, signature), "another key must not verify");
 
 	const tampered = new Uint8Array(signature);
-	tampered[0] ^= 0x01;
+	tampered[0] = requiredValue(tampered[0], "tampered_signature_byte") ^ 0x01;
 	assert.ok(!verifyCealDeviceProof(pair.publicKey, payload, tampered), "a changed signature must not verify");
 });
 

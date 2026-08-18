@@ -139,7 +139,10 @@ const INVOCATION = /node\s+(?:[\w-]+=\S+\s+)*(scripts\/[\w./-]+\.ts)/gu;
 export function productionEntries(repoRoot: string): string[] {
 	const entries = new Set<string>();
 	const add = (text: string): void => {
-		for (const match of String(text).matchAll(INVOCATION)) entries.add(path.join(repoRoot, match[1]));
+		for (const match of String(text).matchAll(INVOCATION)) {
+			const script = match[1];
+			if (script !== undefined) entries.add(path.join(repoRoot, script));
+		}
 	};
 	const manifest = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 	for (const command of Object.values(manifest.scripts ?? {})) if (typeof command === "string") add(command);
@@ -177,10 +180,13 @@ export function workflowConsumers(repoRoot: string): WorkflowConsumer[] {
 		if (!name.endsWith(".yml") && !name.endsWith(".yaml")) continue;
 		const lines = readFileSync(path.join(directory, name), "utf8").split("\n");
 		for (let index = 0; index < lines.length; index += 1) {
-			if (!/--input-type=module\s+-e\s+'/u.test(lines[index])) continue;
+			const line = lines[index];
+			if (line === undefined || !/--input-type=module\s+-e\s+'/u.test(line)) continue;
 			const body: string[] = [];
-			for (let cursor = index + 1; cursor < lines.length && !lines[cursor].trimStart().startsWith("'"); cursor += 1) {
-				body.push(lines[cursor]);
+			for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+				const bodyLine = lines[cursor];
+				if (bodyLine === undefined || bodyLine.trimStart().startsWith("'")) break;
+				body.push(bodyLine);
 			}
 			for (const statement of parse(name, body.join("\n")).statements) {
 				if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;

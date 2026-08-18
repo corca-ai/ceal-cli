@@ -524,7 +524,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 	}
 	const drillDown = url === undefined ? null : AGENT_SESSION_ROUTE.exec(url);
 	if (drillDown) {
-		respondAgentSession(response, runtime, drillDown[1], drillDown[2]);
+		const adapterRuntime = drillDown[1];
+		const sessionRef = drillDown[2];
+		if (adapterRuntime === undefined || sessionRef === undefined) {
+			response.writeHead(404, { "content-type": "application/json" });
+			response.end(JSON.stringify({ ok: false, error: "not_found" }));
+			return;
+		}
+		respondAgentSession(response, runtime, adapterRuntime, sessionRef);
 		return;
 	}
 	if (url === "/") {

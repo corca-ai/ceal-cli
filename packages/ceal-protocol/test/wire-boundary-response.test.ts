@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	SAFE_JSON_MIN_BYTES_PER_NODE,
 	safeJsonNodeBudgetForBytes,
@@ -518,15 +519,15 @@ test("discovery decoder rejects drift, authority promotion, and target visibilit
 	cases.push(wrongProfile);
 
 	const duplicateTarget = structuredClone(exact);
-	duplicateTarget.value.targets.push(structuredClone(duplicateTarget.value.targets[0]));
+	duplicateTarget.value.targets.push(structuredClone(requiredValue(duplicateTarget.value.targets[0], "duplicate_target")));
 	cases.push(duplicateTarget);
 
 	const rawTarget = structuredClone(exact);
-	rawTarget.value.targets[0].target_ref = "slack:C123456789";
+	requiredValue(rawTarget.value.targets[0], "raw_target").target_ref = "slack:C123456789";
 	cases.push(rawTarget);
 
 	const missingAccess = structuredClone(exact);
-	delete missingAccess.value.targets[0].capability_access;
+	delete requiredValue(missingAccess.value.targets[0], "missing_access_target").capability_access;
 	cases.push(missingAccess);
 
 	const contradictoryAccess = structuredClone(exact);

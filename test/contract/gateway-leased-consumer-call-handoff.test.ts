@@ -9,6 +9,7 @@ import {
 	GatewayLeasedConsumerCallHandoffError,
 	verifyGatewayLeasedConsumerCallHandoff,
 } from "../../scripts/verify-gateway-leased-consumer-call-handoff.ts";
+import { required as requiredValue } from "../required.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";
@@ -74,7 +75,7 @@ test("handoff verifier refuses changed bytes, source identity, vector semantics,
 
 	const semanticDrift = await handoffFixture(t);
 	const changedRequest = await semanticDrift.readHandoff();
-	changedRequest.vectors[0].request_body.runner_ref = "runner:spoofed";
+	requiredValue(changedRequest.vectors[0], "semantic_drift_vector").request_body.runner_ref = "runner:spoofed";
 	await semanticDrift.writeHandoff(changedRequest);
 	assert.throws(() => verifyGatewayLeasedConsumerCallHandoff({ repoRoot: semanticDrift.root }), handoffError("invalid_handoff"));
 
