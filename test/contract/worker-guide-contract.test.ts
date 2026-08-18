@@ -60,7 +60,8 @@ test("the worker guide teaches help-driven discovery without command snapshots",
 	// The guide owns invariant navigation method, not the currently recommended
 	// route order. That order belongs to live Gateway guidance; leaf help remains
 	// the fallback contract when a development Gateway has not begun serving it.
-	assert.match(core, /Prefer ordered guidance returned by the\s+live Gateway when present/u);
+	assert.match(core, /Prefer ordered `recommended_next_steps`\s+returned by the live Gateway when present/u);
+	assert.match(core, /If that field is\s+absent, use the discovered capability order as the client fallback/u);
 	assert.match(core, /If neither surface identifies a next\s+move, stop/u);
 	assert.doesNotMatch(guide, /ceal capabilities targets|ceal call <capability-id>|ceal receipt show <request-ref>/u);
 	// Two non-claims the guide has to state, not two sentences it has to keep:

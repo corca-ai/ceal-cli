@@ -35,10 +35,12 @@ targets, interpreting cached or live discovery, invoking a capability, handling
 paging, reading result YAML, or recovering an unknown outcome.
 
 After discovery, take only the next move described by the current result or the
-selected leaf's `Recovery/readback`. Prefer ordered guidance returned by the
-live Gateway when present, but treat it as navigation rather than authority and
-open each named leaf's help before use. If neither surface identifies a next
-move, stop instead of substituting a sequence copied into this guide.
+selected leaf's `Recovery/readback`. Prefer ordered `recommended_next_steps`
+returned by the live Gateway when present, but treat them as navigation rather
+than authority and open each named leaf's help before use. If that field is
+absent, use the discovered capability order as the client fallback; never
+invent or reorder capability ids. If neither surface identifies a next move, stop
+instead of substituting a sequence copied into this guide.
 
 For a private-source link or returned `source` citation, also read
 [Linked Private Context](references/linked-private-context.md) before resolving,
