@@ -1816,6 +1816,152 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 	// Re-running is safe: an installed clone stays installed.
 	execFileSync(process.execPath, ["scripts/install-git-hooks.ts"], { cwd: clone, stdio: "pipe" });
 	assert.equal(check().status, 0);
+
+	// `core.hooksPath` alone is not enforcement, and with two hooks that stopped
+	// being a distinction without a difference: git skips a hook it cannot
+	// execute, saying so only under `advice.ignoredHook`, so a check that named
+	// pre-push would have reported this clone installed while its commit gate ran
+	// on nothing.
+	chmodSync(path.join(clone, ".githooks/pre-commit"), 0o644);
+	const unreadable = check();
+	assert.equal(unreadable.status, 1, "a hook git cannot execute must not report as installed");
+	assert.match(unreadable.stderr, /not executable: pre-commit/u);
+	execFileSync(process.execPath, ["scripts/install-git-hooks.ts"], { cwd: clone, stdio: "pipe" });
+	assert.equal(check().status, 0, "the installer must repair what its own check refused");
+});
+
+// S2 (corca-ai/ceal#717). This repository had no commit tier at all, so a type
+// error first surfaced at pre-push, after the commit that carried it was
+// written. What the tier must NOT become is the interesting assertion: it holds
+// its value only while it stays cheap, and the way it stops being cheap is
+// somebody adding the build or the test suite to it.
+test("the pre-commit hook is checked in and stays the cheap tier", () => {
+	assert.ok(existsSync(path.join(ROOT, ".githooks/pre-commit")), ".githooks/pre-commit must be checked in");
+	const hook = read(".githooks/pre-commit");
+	for (const gate of [
+		"npm run lint",
+		"npm run lint:types",
+		"npm run lint:no-legacy-mjs",
+		"node test/gate-contract-lib.ts",
+		"npm run lint:shell",
+	]) {
+		assert.match(
+			hook,
+			new RegExp(`^run_gate "[^"]*" ${gate.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"),
+			`the commit tier must still run ${gate}`,
+		);
+	}
+	// Every gate goes through `run_gate`, checked first, because everything below
+	// reasons about `run_gate` lines. A bare `npm run test:unit` on its own line
+	// is still a gate — `set -eu` makes it one — and would have been invisible to
+	// all of it.
+	const commandLines = hook
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => /^(npm|node|npx|\.\/|sh |bash )/u.test(line));
+	assert.deepEqual(
+		commandLines,
+		[],
+		`every gate must go through run_gate so the cheapness assertions can see it: ${commandLines.join(", ")}`,
+	);
+
+	// This started as `npm (run )?(test|build|check:unit)$`, anchored on the bare
+	// script names, and the anchor was the defect: `npm run build:worker`,
+	// `test:unit`, `test:contract` and `coverage` are all real scripts in this
+	// package that the alternation let straight through, while docs/gates.md
+	// promised this test refuses "a test or a build". Match the FAMILY, so a
+	// suffixed variant cannot slip past — `\b` before the suffix is what the
+	// pre-push assertion above had to learn, used here on purpose rather than by
+	// accident.
+	const heavy = /^run_gate "[^"]*" npm (run )?(test|build|coverage|check)\b/mu;
+	assert.doesNotMatch(hook, heavy, "the commit tier runs no test, no build, no coverage and no full gate; those belong to pre-push");
+	// A negative control on that pattern: the gates the tier DOES run must not
+	// match it, or the assertion above would be vacuously satisfiable by removing
+	// everything.
+	assert.doesNotMatch('run_gate "biome" npm run lint\nrun_gate "types" npm run lint:types\n', heavy);
+	assert.match('run_gate "x" npm run test:unit\n', heavy, "the pattern must catch a suffixed test script");
+	assert.match('run_gate "x" npm run build:worker\n', heavy, "the pattern must catch a suffixed build script");
+	assert.match('run_gate "x" npm run check:unit\n', heavy, "the pattern must catch the iteration gate");
+
+	// The strengthened `--check` exists to catch a clone that silently runs
+	// nothing, and it had no repo-owned entrypoint: the docs told the reader to
+	// type the raw node path, which is the "gate with no `npm run` owner" shape
+	// AGENTS.md records as a burn.
+	assert.equal(manifest.scripts["hooks:check"], "node scripts/install-git-hooks.ts --check");
+});
+
+// The regex matches above would pass just as happily against a hook that ran the
+// gates and then swallowed their exit codes — which is the whole difference
+// between a gate and a report.
+test("the pre-commit hook propagates the failing gate's exit code", (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-precommit-exit-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const checkout = path.join(scratch, "repo");
+	mkdirSync(path.join(checkout, ".githooks"), { recursive: true });
+	cpSync(path.join(ROOT, ".githooks/pre-commit"), path.join(checkout, ".githooks/pre-commit"));
+	execFileSync("git", ["init", "--quiet", checkout], { stdio: "pipe" });
+	// The gates must not really run here, so stand-ins for `npm` and `node` go
+	// ahead of the real ones on PATH.
+	const bin = path.join(scratch, "bin");
+	mkdirSync(bin, { recursive: true });
+	// Two codes, not one: `npm` carries the first gate and `node` carries the
+	// fourth, so they can be failed independently.
+	const runHook = (npmExit: number, nodeExit: number) => {
+		writeFileSync(path.join(bin, "npm"), `#!/bin/sh\nexit ${npmExit}\n`, { mode: 0o755 });
+		writeFileSync(path.join(bin, "node"), `#!/bin/sh\nexit ${nodeExit}\n`, { mode: 0o755 });
+		return spawnSync("sh", [path.join(checkout, ".githooks/pre-commit")], {
+			cwd: checkout,
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+		});
+	};
+
+	assert.equal(runHook(0, 0).status, 0, "a passing tier must let the commit through");
+	// Not 1: a flattened code hides which gate failed and how.
+	const first = runHook(42, 0);
+	assert.equal(first.status, 42, "the gate's own exit code must reach git");
+	assert.match(first.stderr, /COMMIT BLOCKED by biome/u, "the hook must name the gate that blocked, not just fail");
+
+	// Failing the FIRST gate proves one `run_gate` line. The tier has five, and a
+	// later one written wrong would not be reached above, so fail a gate the hook
+	// only gets to after four others have passed.
+	const later = runHook(0, 7);
+	assert.equal(later.status, 7, "a gate past the first must propagate its own code too");
+	assert.match(later.stderr, /COMMIT BLOCKED by gate contract/u, "the hook must name whichever gate blocked, not only the first");
+});
+
+// `lint-shell.ts` used to name its files. Adding a second hook made that
+// inventory's blind spot real: a hook added without being named would have been
+// the one shell file in the tree nobody linted, and silently. The population is
+// derived from `.githooks/` now, and this asserts the derivation against the
+// directory rather than against the source text — a comment claiming derivation
+// is not a derivation.
+test("the shell lint covers every checked-in hook, not a named subset", () => {
+	// The expectation comes from git, not from the `readdirSync` the module under
+	// test uses to build the same list. A fixture built the module's own way
+	// proves only that the module agrees with itself; "checked-in" is a claim
+	// about the repository, so ask the repository. It also means an untracked
+	// file sitting in the hook directory reddens this, which is the right answer:
+	// a gate directory is not a scratch directory.
+	const tracked = execFileSync("git", ["ls-files", "--", ".githooks"], { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean);
+	assert.ok(tracked.includes(".githooks/pre-push"), "positive control: git must report a hook we know is checked in");
+	const expected = ["install-ceal.sh", ...tracked].join(", ");
+
+	const result = spawnSync(process.execPath, ["scripts/lint-shell.ts"], { cwd: ROOT, encoding: "utf8" });
+	// The gate stands aside when shellcheck is absent, which is a different
+	// sentence and must not be read as a clean run.
+	if (/shellcheck is not installed/u.test(result.stderr)) {
+		assert.match(result.stderr, new RegExp(`${tracked.length + 1} shell files went unchecked`, "u"));
+		return;
+	}
+	assert.equal(result.status, 0, result.stderr);
+	// Identity, not arity: a derivation that produced the right NUMBER of wrong
+	// paths read identically under the count assertion this replaces.
+	assert.match(
+		result.stderr,
+		new RegExp(`shell files clean: ${expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\n`, "u"),
+		"the linted population must be install-ceal.sh plus every checked-in hook",
+	);
 });
 
 // The population is `git ls-files`, not a walk of two known directories. A walk

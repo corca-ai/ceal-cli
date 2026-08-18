@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Points this clone's core.hooksPath at the checked-in .githooks directory, so
-// the pre-push gate travels with the repository instead of living in one
+// the commit and push gates travel with the repository instead of living in one
 // maintainer's .git. Re-running is safe and reports what it changed.
 //
-// `--check` exits non-zero when the hook is not installed, so a gate can ask
-// "is this clone actually enforcing the hook?" without mutating anything.
+// `--check` exits non-zero when the hooks are not installed, so a gate can ask
+// "is this clone actually enforcing them?" without mutating anything.
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -55,18 +55,29 @@ if (checkOnly) {
 	// config key told a clone in that state that it was enforcing the only gate
 	// this repository actually enforces, and a release tag cut there would have
 	// run nothing.
-	const pushHook = path.join(HOOKS_DIR, "pre-push");
-	const executable = existsSync(pushHook) && (statSync(pushHook).mode & 0o100) !== 0;
-	if (current === RELATIVE_HOOKS_DIR && executable) {
-		console.log(`install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR} and pre-push is executable (installed).`);
+	//
+	// Every hook in the directory is checked, not a named one. When pre-push was
+	// the only hook, naming it and checking the executable bit were the same
+	// statement; with a commit tier beside it they are not, and a check that
+	// answers "installed" while the commit gate is unreadable is the same false
+	// clearance one level down.
+	const hooks = readdirSync(HOOKS_DIR).filter((entry) => statSync(path.join(HOOKS_DIR, entry)).isFile());
+	const notExecutable = hooks.filter((entry) => (statSync(path.join(HOOKS_DIR, entry)).mode & 0o100) === 0);
+	if (current === RELATIVE_HOOKS_DIR && hooks.length > 0 && notExecutable.length === 0) {
+		console.log(
+			`install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR} and all ${hooks.length} hooks are executable (installed): ${hooks.sort().join(", ")}.`,
+		);
 		process.exit(0);
 	}
 	console.error(
-		current === RELATIVE_HOOKS_DIR
-			? `install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR}, but ${RELATIVE_HOOKS_DIR}/pre-push is ${existsSync(pushHook) ? "not executable" : "missing"}.\n` +
-					"git skips a hook it cannot execute, so this clone does not run the pre-push gate. Repair it with: npm run hooks:install"
-			: `install-git-hooks: core.hooksPath is ${current === "" ? "unset" : current}, expected ${RELATIVE_HOOKS_DIR}.\n` +
-					"This clone does not run the pre-push gate. Install it with: npm run hooks:install",
+		current !== RELATIVE_HOOKS_DIR
+			? `install-git-hooks: core.hooksPath is ${current === "" ? "unset" : current}, expected ${RELATIVE_HOOKS_DIR}.\n` +
+					"This clone runs none of the checked-in gates. Install them with: npm run hooks:install"
+			: hooks.length === 0
+				? `install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR}, but ${RELATIVE_HOOKS_DIR}/ holds no hook files.\n` +
+					"This clone enforces nothing. Restore the checked-in hooks."
+				: `install-git-hooks: core.hooksPath is ${RELATIVE_HOOKS_DIR}, but these hooks are not executable: ${notExecutable.sort().join(", ")}.\n` +
+					"git skips a hook it cannot execute, so this clone does not run those gates. Repair it with: npm run hooks:install",
 	);
 	process.exit(1);
 }
@@ -89,5 +100,5 @@ configureBlameIgnore();
 console.log(
 	`install-git-hooks: set core.hooksPath=${RELATIVE_HOOKS_DIR}` +
 		(current === "" ? "." : ` (was ${current}).`) +
-		"\nPre-push now runs the iteration gate, or the full gate for a tag push.",
+		"\nPre-commit now runs the cheap lint/type tier; pre-push runs the iteration gate, or the full gate for a tag push.",
 );

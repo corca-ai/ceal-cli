@@ -1,0 +1,48 @@
+#!/bin/sh
+# Commit tier (three-repo release loop S2, corca-ai/ceal#717). This clone had no
+# pre-commit hook at all, so the first signal a type error gave was at pre-push,
+# after the commit it belonged to had already been written.
+#
+# Every gate here is whole-repo rather than staged-scoped, which departs from the
+# "cheap changed-file signal" docs/gates.md anticipated. The reason is measured
+# on the host in hand, not assumed: `biome check .` reads the whole tree in
+# ~0.45s wall and the type ratchet answers in ~1.6s, because both run on native
+# engines. A staged-file selector would have to restate biome's own include set
+# and tsc's project graph to save a fraction of that — more code, a second place
+# for the file set to drift, and no measurable win. Time the gates before
+# changing this trade; do not restore scoping on the strength of the word
+# "staged".
+#
+# What this tier is NOT: it does not replace pre-push or CI. It runs no test and
+# no build, so a commit that passes here can still fail `npm run check:unit`.
+# Staying under a few seconds is what keeps it installed — a commit gate that
+# costs a minute is a commit gate people pass `--no-verify`.
+#
+# It also reads the WORKING TREE, not the index. A partially staged file is
+# judged by the version on disk, so a commit can pass here and carry content
+# that never met the gate. Pre-push and CI read the committed tree and own that
+# case; this tier buys feedback speed, not authority.
+#
+# Installed by `npm run hooks:install`, which points core.hooksPath here.
+# Bypass deliberately and visibly with `git commit --no-verify`.
+set -eu
+
+# `rc`, not `status`: AGENTS.md bans `status` as a scratch variable because it is
+# tied to shell state under zsh, and a maintainer hits "read-only variable" long
+# before the gate runs.
+run_gate() {
+	gate_label="$1"
+	shift
+	rc=0
+	"$@" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		echo "pre-commit: COMMIT BLOCKED by $gate_label (exit $rc) — read the output above and rerun '$*'; do not retry blind." >&2
+		exit "$rc"
+	fi
+}
+
+run_gate "biome" npm run lint
+run_gate "type ratchet" npm run lint:types
+run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
+run_gate "gate contract" node test/gate-contract-lib.ts
+run_gate "shell lint" npm run lint:shell

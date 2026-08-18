@@ -11,6 +11,21 @@
 	],
 	"hook_tiers": [
 		{
+			"id": "pre-commit",
+			"commands": [
+				{
+					"name": ".githooks/pre-commit",
+					"gate_commands": [
+						"node test/gate-contract-lib.ts",
+						"npm run lint",
+						"npm run lint:no-legacy-mjs",
+						"npm run lint:shell",
+						"npm run lint:types"
+					]
+				}
+			]
+		},
+		{
 			"id": "pre-push",
 			"commands": [
 				{

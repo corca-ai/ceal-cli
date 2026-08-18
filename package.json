@@ -47,6 +47,7 @@
 		"postcheck": "node scripts/gate-attestation.ts record",
 		"check:protocol-dev": "node scripts/verify-protocol-vendor-pin.ts --development && npm --prefix packages/ceal-client test",
 		"hooks:install": "node scripts/install-git-hooks.ts",
+		"hooks:check": "node scripts/install-git-hooks.ts --check",
 		"probe": "node scripts/probe-surface.ts",
 		"check:duplication": "node scripts/check-dup-ratchet.ts",
 		"lint:shell": "node scripts/lint-shell.ts",

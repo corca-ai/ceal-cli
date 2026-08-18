@@ -44,8 +44,9 @@ history or full rationale.
   unprotected; do not change that tradeoff. A pusher owns reading
   `gh run list --workflow=check.yml` because CI reports but does not block.
 - Run `npm run hooks:install` once per clone and verify with
-  `node scripts/install-git-hooks.ts --check`. Pre-push runs the iteration gate,
-  or the full gate for a tag. Bypass visibly with `git push --no-verify`, never by editing the hook.
+  `npm run hooks:check`. Pre-commit runs the cheap
+  lint/type tier and no test or build; pre-push runs the iteration gate, or the
+  full gate for a tag. Bypass visibly with `--no-verify`, never by editing a hook.
 - `protocol-vendor-pin.json` binds the frozen copy. Proof/shipment divergence is
   fatal and blocks release, packing, and acceptance even when declared in the
   Protocol quarantine record; a declaration quarantines, never clears. `npm run check:unit`

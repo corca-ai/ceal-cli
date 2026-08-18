@@ -297,13 +297,35 @@ acceptance fails on an exact divergent fixture before resolving an installed
 binary. This keeps downstream contract branches observable without adding a
 production bypass or claiming that the live checkout is shippable.
 
-Feedback timing is intentionally asymmetric today: this clone has no checked-in
-`.githooks/pre-commit`; `npm run hooks:install` installs only `.githooks/pre-push`,
-and that hook runs `npm run check:unit` for ordinary pushes. Because
-`check:unit` owns `npm run lint:types`, a TypeScript error first appears at
-pre-push unless an operator runs the type gate directly. A future fast
-pre-commit check may improve the feedback loop, but it must remain a cheap
-changed-file signal and must not replace the full pre-push/CI gate.
+Feedback timing used to be asymmetric: there was no `.githooks/pre-commit`, so a
+TypeScript error first appeared at pre-push, after the commit that carried it had
+already been written. `.githooks/pre-commit` closes that gap with the five checks
+that answer in seconds — `npm run lint`, `npm run lint:types`,
+`npm run lint:no-legacy-mjs`, the gate-contract readback, and `npm run lint:shell`
+— and with no test and no build. Measured together on a developer host: ~3s.
+
+It is whole-repo, not changed-file, which is a deliberate reversal of what this
+document previously anticipated and the reason is measured rather than assumed.
+`biome check .` reads the whole tree in ~0.45s wall and the type ratchet answers
+in ~1.6s, both on native engines; a staged-file selector would have to restate
+biome's include set and tsc's project graph to save a fraction of that, which is
+more code, a second place for the file set to drift, and no measurable win. Time
+the gates before revisiting the trade.
+
+Two things this tier is not. It does not replace pre-push or CI: it runs no
+suite, so a commit that passes here can still fail `npm run check:unit`. And it
+reads the working tree rather than the index, so a partially staged file is
+judged by the version on disk; pre-push and CI read the committed tree and own
+that case. What keeps the tier valuable is that it stays cheap —
+`test/contract/repo-gates.test.ts` fails if a `test`, `build`, `coverage` or
+`check` script joins it (the family, so `build:worker` and `test:unit` cannot
+slip past a name-anchored pattern), and fails again if a gate is written outside
+`run_gate`, where none of that would see it. A commit gate that costs a minute
+is one people bypass.
+
+Verify a clone actually runs these with `npm run hooks:check`, which refuses
+both an unset `core.hooksPath` and a hook whose executable bit is missing — git
+skips a hook it cannot execute and announces it only under `advice.ignoredHook`.
 
 `npm run check:protocol-dev` is the narrower Protocol/client path. It runs the
 client suite plus `verify-protocol-vendor-pin.mjs --development`, which reports

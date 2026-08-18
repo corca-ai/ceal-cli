@@ -201,8 +201,11 @@ npm run test:release # release-artifact and native-binary suites only
 npm run lint         # biome check: lint + format + import order
 ```
 
-`npm run hooks:install` wires a `pre-push` hook that runs the iteration gate, or
-the full gate for a tag push — a failed release tag cannot be reused.
+`npm run hooks:install` wires two hooks. `pre-commit` is the cheap tier — biome,
+the type ratchet, the legacy-`.mjs` ratchet, the gate-contract readback and the
+shell lint, ~3s together on a developer host and no test or build. `pre-push`
+runs the iteration gate, or the full gate for a tag push — a failed release tag
+cannot be reused.
 `.github/workflows/check.yml` runs the full gate on every push and pull request
 to `main` that changes code; a documentation-only change runs no gate, because
 nothing its allowlist admits reaches a release input or a suite. The other
