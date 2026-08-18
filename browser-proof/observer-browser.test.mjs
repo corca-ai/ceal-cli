@@ -36,6 +36,7 @@ test("a real browser executes the local Workbench overview", { timeout: 45_000 }
 
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
+	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	assert.deepEqual(pageErrors, []);
 	assert.equal(await page.locator("#root .hero h2").textContent(), "0 sessions observed.");
 	await page.getByText("Local Profile unavailable").waitFor();
@@ -63,6 +64,27 @@ test("a real browser executes the local Workbench overview", { timeout: 45_000 }
 	assert.ok(requests.every(isLoopbackGet));
 });
 
+test("the All view preserves combined empty and unavailable states", { timeout: 40_000 }, async (context) => {
+	const browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true });
+	context.after(() => browser.close());
+	for (const [mode, heading] of [
+		["empty", "0 runtime-scoped session records observed."],
+		["unavailable", "Sessions · unavailable"],
+	]) {
+		const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
+			env: { PATH: process.env.PATH ?? "", TMPDIR: process.env.TMPDIR ?? tmpdir(), LANG: "C.UTF-8", CEAL_REVIEW_COMBINED_STATE: mode },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const url = await observerUrl(server);
+		const page = await browser.newPage();
+		await page.goto(url);
+		await page.getByRole("button", { name: "All", exact: true }).waitFor();
+		await page.getByRole("heading", { name: heading }).waitFor();
+		await page.close();
+		if (server.exitCode === null && server.signalCode === null) server.kill("SIGKILL");
+	}
+});
+
 test("a populated review fixture preserves density and evidence boundaries", { timeout: 40_000 }, async (context) => {
 	const server = spawn(process.execPath, ["browser-proof/populated-observer.mjs"], {
 		env: { PATH: process.env.PATH ?? "", TMPDIR: process.env.TMPDIR ?? tmpdir(), LANG: "C.UTF-8" },
@@ -84,6 +106,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 
 	await page.goto(url);
 	await page.locator("#root .hero").waitFor();
+	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	assert.equal(await page.locator("#root .hero h2").textContent(), "3 sessions observed.");
 	await page.getByText("profile:review-personal", { exact: true }).waitFor();
 	await page.getByText("ceal.local_usage_rules v2").first().waitFor();
@@ -217,6 +240,7 @@ test("the browser distinguishes unavailable Agent inventory from zero sessions",
 	context.after(() => browser.close());
 	const page = await browser.newPage();
 	await page.goto(url);
+	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.getByRole("heading", { name: "Sessions · unavailable" }).waitFor();
 	await page.getByText("Missing evidence is not rendered as zero").waitFor();
 	await page.getByText("Session inventory · unavailable").waitFor();
@@ -250,6 +274,10 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 	await page.goto(await observerUrl(server));
 	await page.getByText(/Synthetic demo data/u).waitFor();
+	await page.getByRole("heading", { name: "109 runtime-scoped session records observed." }).waitFor();
+	assert.equal(await page.getByRole("button", { name: /Tokens Select runtime/u }).isDisabled(), true);
+	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
+	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
 	await page.getByRole("button", { name: /Agent tool calls 508/u }).waitFor();
 	await page.getByText(/separate local sources and accounting semantics/u).waitFor();
@@ -292,13 +320,18 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.locator("select[data-session-sort]").selectOption("tokens");
 	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	await page.getByText(/highest tool-call concentration/u).waitFor();
-	await page.getByRole("button", { name: "Inspect the referenced session" }).first().focus();
+	await page.getByRole("button", { name: "Highlight this suggestion's evidence session" }).first().focus();
 	await page.keyboard.press("Enter");
-	await page.getByRole("dialog").waitFor();
-	await page.getByText("Agent session evidence").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Usage", exact: true }).getAttribute("aria-current"), "true");
 	const referencedSession = page.locator("button[data-session-ref='22222222-2222-3333-4444-000000000050']");
 	assert.equal(await referencedSession.count(), 1);
+	assert.equal(await referencedSession.getAttribute("data-session-runtime"), "codex");
+	assert.equal(await referencedSession.evaluate((element) => element.classList.contains("suggestion-evidence")), true);
+	await page.getByText("SUGGESTION EVIDENCE", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	await page.keyboard.press("Enter");
+	await page.getByRole("dialog").waitFor();
+	await page.getByText("Agent session evidence").waitFor();
 	await page.keyboard.press("Escape");
 	assert.equal(await referencedSession.evaluate((element) => element === document.activeElement), true);
 	await page.getByRole("button", { name: "Usage", exact: true }).click();

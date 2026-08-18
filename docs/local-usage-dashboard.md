@@ -129,6 +129,17 @@ unowned request workflow disabled. Evidence is the human-readable provenance,
 coverage, retention, and known-loss explanation for the other views; raw DTO
 field dumps are not part of that presentation surface.
 
+The runtime selector also has an All view when Profile, instance, timezone, and
+selected-period bounds align. It combines runtime-scoped session records on the
+shared calendar and in one recent-first detail list, but does not sum or rank
+token and cost observations across unlike runtime contracts. A combined daily
+cell is unavailable unless both runtimes provide numeric session evidence for
+that date. Token, cost, and evidence-bound suggestion controls require an
+explicit Codex or Claude selection. A suggestion that cites one session moves
+focus to the exact runtime-and-session row, marks it as suggestion evidence, and
+shows the localized rule rationale; the detail dialog opens only after the user
+activates the highlighted row.
+
 ## Fixed Decisions
 
 - Codex and Claude have separate production converters and comparability

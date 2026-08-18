@@ -13,6 +13,7 @@ const accessCapabilities = Array.from({ length: 9 }, (_, index) => ({
 	evidence_requirement: "gateway_audit",
 }));
 const demoMode = process.env.CEAL_REVIEW_DEMO === "1";
+const combinedStateMode = process.env.CEAL_REVIEW_COMBINED_STATE;
 const codexSessionCount = demoMode || process.env.CEAL_REVIEW_MANY_SESSIONS === "1" ? 105 : 3;
 const receipts = Array.from({ length: 35 }, (_, index) => ({
 	recordedAt: NOW - (29 - (index % 30)) * DAY - Math.floor(index / 30) * 3_600_000,
@@ -111,32 +112,60 @@ const server = createCealObserverServer({
 		: {
 				inspectAgentAudit: () => ({
 					schemaVersion: "ceal.agent_activity.v1",
-					adapters: [
-						{
-							runtime: "claude",
-							root: "review-fixture/claude",
-							health: "active",
-							coverage: "transcript-observed",
-							inventory: "partial",
-							depth: "session_events",
-							sessionCount: 4,
-							sessions: sessions("claude", 4, 0),
-							eventScan: { scannedSessions: 4, sessionLimit: 4 },
-						},
-						{
-							runtime: "codex",
-							root: "review-fixture/codex",
-							health: "stale",
-							coverage: "transcript-observed",
-							depth: "session_events",
-							sessionCount: codexSessionCount,
-							sessions: sessions("codex", codexSessionCount, 10),
-							eventScan: {
-								scannedSessions: demoMode ? codexSessionCount : Math.min(3, codexSessionCount),
-								sessionLimit: demoMode ? codexSessionCount : 3,
-							},
-						},
-					],
+					adapters:
+						combinedStateMode === "unavailable"
+							? []
+							: combinedStateMode === "empty"
+								? [
+										{
+											runtime: "claude",
+											root: "review-fixture/claude",
+											health: "active",
+											coverage: "transcript-observed",
+											inventory: "complete",
+											depth: "session_events",
+											sessionCount: 0,
+											sessions: [],
+											eventScan: { scannedSessions: 0, sessionLimit: 4 },
+										},
+										{
+											runtime: "codex",
+											root: "review-fixture/codex",
+											health: "active",
+											coverage: "transcript-observed",
+											inventory: "complete",
+											depth: "session_events",
+											sessionCount: 0,
+											sessions: [],
+											eventScan: { scannedSessions: 0, sessionLimit: 3 },
+										},
+									]
+								: [
+										{
+											runtime: "claude",
+											root: "review-fixture/claude",
+											health: "active",
+											coverage: "transcript-observed",
+											inventory: "partial",
+											depth: "session_events",
+											sessionCount: 4,
+											sessions: sessions("claude", 4, 0),
+											eventScan: { scannedSessions: 4, sessionLimit: 4 },
+										},
+										{
+											runtime: "codex",
+											root: "review-fixture/codex",
+											health: "stale",
+											coverage: "transcript-observed",
+											depth: "session_events",
+											sessionCount: codexSessionCount,
+											sessions: sessions("codex", codexSessionCount, 10),
+											eventScan: {
+												scannedSessions: demoMode ? codexSessionCount : Math.min(3, codexSessionCount),
+												sessionLimit: demoMode ? codexSessionCount : 3,
+											},
+										},
+									],
 					nonClaims: ["Synthetic fixed-vocabulary review evidence; no prompt or transcript content exists in this fixture."],
 				}),
 			}),
