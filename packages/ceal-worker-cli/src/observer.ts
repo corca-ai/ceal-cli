@@ -880,7 +880,9 @@ const OBSERVER_PAGE = `<!doctype html>
   .session-toolbar { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin:0 0 1rem; }
   .session-toolbar label { display:flex; align-items:center; gap:.55rem; color:var(--muted); }
   .session-card strong { font-size:1rem; color:var(--ink); }
-  .session-card.suggestion-evidence { border:2px solid var(--warn); box-shadow:inset 6px 0 var(--warn),0 0 0 4px color-mix(in srgb,var(--warn) 20%,transparent),var(--shadow); background:color-mix(in srgb,var(--warn) 14%,var(--panel)); }
+  .session-card.suggestion-evidence { border:2px solid var(--warn); box-shadow:inset 6px 0 var(--warn),0 0 0 4px color-mix(in srgb,var(--warn) 20%,transparent),var(--shadow); background:color-mix(in srgb,var(--warn) 14%,var(--panel)); animation:evidence-arrival .9s ease-out; }
+  @keyframes evidence-arrival { from { box-shadow:inset 6px 0 var(--warn),0 0 0 12px color-mix(in srgb,var(--warn) 35%,transparent),var(--shadow); } }
+  @media (prefers-reduced-motion:reduce) { .session-card.suggestion-evidence { animation:none; } }
   .session-meta { display:flex; justify-content:space-between; gap:.75rem; color:var(--muted); font-size:.75rem; margin:.35rem 0 .7rem; }
   .session-metrics { display:flex; flex-wrap:wrap; gap:.4rem; }
   .session-metrics span { background:var(--soft); border-radius:5px; padding:.22rem .4rem; font-size:.72rem; }
@@ -1383,8 +1385,11 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
         if (sessionIndex < 0) return;
         sessionPage = Math.floor(sessionIndex / sessionPageSize) + 1;
         const selector = "button[data-session-runtime='" + runtime + "'][data-session-ref='" + sessionRef + "']";
-        show("Usage", selector);
-        root.querySelector(selector)?.scrollIntoView({ behavior:"smooth", block:"center" });
+        show("Usage");
+        const evidenceSession = root.querySelector(selector);
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        evidenceSession?.scrollIntoView({ behavior:reducedMotion ? "auto" : "smooth", block:"center" });
+        evidenceSession?.focus({ preventScroll:true });
         return;
       }
       if (entry.next_action.kind === "review_evidence") {

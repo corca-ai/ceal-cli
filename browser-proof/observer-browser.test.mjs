@@ -329,13 +329,12 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	assert.equal(await referencedSession.count(), 1);
 	assert.equal(await referencedSession.getAttribute("data-session-runtime"), "codex");
 	assert.equal(await referencedSession.evaluate((element) => element.classList.contains("suggestion-evidence")), true);
-	assert.equal(
-		await referencedSession.evaluate((element) => {
-			const box = element.getBoundingClientRect();
-			return box.top >= 0 && box.bottom <= window.innerHeight;
-		}),
-		true,
-	);
+	await page.waitForFunction((selector) => {
+		const element = document.querySelector(selector);
+		if (!element) return false;
+		const box = element.getBoundingClientRect();
+		return box.top >= 0 && box.bottom <= window.innerHeight;
+	}, "button[data-session-runtime='codex'][data-session-ref='22222222-2222-3333-4444-000000000050']");
 	await page.getByText("SUGGESTION EVIDENCE", { exact: true }).waitFor();
 	assert.equal(await page.getByRole("dialog").count(), 0);
 	await page.keyboard.press("Enter");
