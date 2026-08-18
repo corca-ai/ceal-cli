@@ -1,6 +1,6 @@
 # Achieve Goal: Worker and Agent ratchet retirement and gate ports
 
-Status: active
+Status: complete
 Created: 2026-08-18
 Activation: /goal @../ceal-cli/charness-artifacts/goals/2026-08-18-worker-agent-ratchet-retirement-and-ports.md
 
@@ -9,15 +9,16 @@ activation command.
 
 ## Active Operating Frame
 
-- Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
+- Current disposition: complete; Lane A, the orthogonal temporary-TypeScript-fixture
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
   detector, and all seven Lane B compiler-option slices across Worker and Agent have
   implementation, targeted proof, and local commits. Lane C, D2 native
   explicit-any enforcement, and E's paid-zero baseline cleanup are implemented
   and locally proven; the full Gateway loader-rewrite ratchet remains deliberately
-  unported. Closeout artifacts are committed; a second frozen claims review is
-  the only remaining proof before the lifecycle flip.
+  unported. Closeout artifacts are committed; the final frozen claims review
+  returned clean with no findings, so the local-only lifecycle closeout is
+  complete.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -35,8 +36,9 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: complete the frozen claims review and lifecycle verification,
-  keeping the A → D1 → B → C → D2 → E dependency order intact.
+- Next action: no further in-scope action; keep the A → D1 → B → C → D2 → E
+  dependency order intact for this completed local slice, and leave any
+  external boundary or deferred successor to separately approved work.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -261,7 +263,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | completed — native Worker/Agent lint ownership and mutation/restore proof |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | completed — 273 zero-valued entries removed; positive keys/counts and TS7/TS6 lanes preserved |
-| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | in progress — claims review round 2 |
+| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | completed — round-2 claims review clean |
 
 Order is A → D1 → B → C → D2 → E. If Lane A fails, dependent
 implementation stops with a falsifiable Slice Log reason; no second deletion
@@ -971,6 +973,20 @@ The host-log result is retained at
 `charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md`;
 it reports thread-wide activity only because no goal metric window was present.
 
+Final claims review round 2 returned `clean` with no findings. It reviewed the
+round-4 frozen inputs and current roots recorded in
+`charness-artifacts/critique/2026-08-19-worker-agent-ratchet-retirement-and-ports-claims-review.md`,
+including Gateway `67afbec6a42451490e9a22f0c9896c15c870eda6` /
+`01f2389ac5e4ff9474595c4a8f1f4941eeb45e97`, Worker
+`a2192bae5b5b0d87df0627e57fae1a630b2266e8` /
+`60069ced4bda5d2b5dd94df49026fcec66d6d8e4`, Agent
+`0fff321111c8fd3953b54e7bd32da309b08bcc1c` /
+`27f5fc5b558712d1ba2b6911816b151c4c77b6cd`, and historical Worker
+substantive-proof boundary `ae4a955e7b371cee4ed778254688646861623377` /
+`44ca6df30cfa445b686fa1b258fdd11db4e32008`. The final status and review
+recording changes after that freeze are lifecycle-only artifact edits; they do
+not alter implementation or configuration proof.
+
 Substantive-proof boundary identities, frozen before the lifecycle-only
 closeout artifact commits: Gateway `/Users/ted/codes/ceal` HEAD
 `67afbec6a42451490e9a22f0c9896c15c870eda6` tree
@@ -1005,7 +1021,7 @@ Non-claims: no signed artifact, release tag, CI result, installed worker, runtim
 
 Retro completed and persisted at
 `charness-artifacts/retro/2026-08-19-session-retro.md`. It records the first
-reviewer's invalid drift, the corrected proof-identity wording, the pending
+reviewer's invalid drift, the corrected proof-identity wording, the clean
 follow-up frozen fresh-eye review, the baseline patch near miss, the
 unowned-runner selection finding, and the thread-wide host/telemetry
 non-claims. The adapter was initialized with explicit empty evidence and

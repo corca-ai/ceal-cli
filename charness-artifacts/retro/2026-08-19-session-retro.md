@@ -53,6 +53,11 @@ performed.
 - The closeout-telemetry miner found no readable local stream and therefore no
   recurrence finding. Historical rotation and cross-repo telemetry remain
   unknown; the Worker and Agent streams are not merged by this probe.
+- The final frozen claims review returned `clean` with no findings. Its exact
+  inputs and reviewed roots are recorded in
+  `charness-artifacts/critique/2026-08-19-worker-agent-ratchet-retirement-and-ports-claims-review.md`;
+  the review distinguished the historical Worker substantive-proof boundary
+  from the current lifecycle-only artifact root.
 
 ## Waste
 
@@ -142,7 +147,7 @@ goal's closeout record.
 
 ## Sibling Search
 
-- same layer: Worker goal closeout and the first delegated fresh-eye window | decision: same waste, fix now | proof: the first review drifted after goal edits; the substantive-proof identities were rebound to Worker `ae4a955` and a new frozen claims review is still pending at this retro correction | follow-up: active charness-artifacts/goals/2026-08-18-worker-agent-ratchet-retirement-and-ports.md#closeout-binding-plan
+- same layer: Worker goal closeout and the first delegated fresh-eye window | decision: same waste, fix now | proof: the first review drifted after goal edits; the round-2 frozen claims review later returned clean after the substantive-proof identities were rebound to Worker `ae4a955` | follow-up: completed charness-artifacts/goals/2026-08-18-worker-agent-ratchet-retirement-and-ports.md#closeout-binding-plan
 - abstraction up: Charness achieve/retro closeout shape and adapter bootstrap | decision: valid follow-up outside the slice | proof: planner/describe output exposed missing closeout lines only after the work was complete, and the repo had no adapter before this retro | follow-up: deferred charness:achieve closeout carrier and retro adapter contract
 - specialization down: Worker artifact fixture and Agent tools/test fixture plus baseline inventory | decision: same waste, fix now | proof: both fixture artifacts trace the temporary compiler owner; the Agent inventory and pre/post result artifacts preserve positive keys and lane counts
 - mental-model siblings: existing Agent quality artifacts and Gateway/Worker critique artifacts using reviewer-boundary fingerprints | decision: intentional boundary | proof: positive-control search found the existing owner-specific review/fingerprint pattern in all three trees; no competing cross-repo helper was introduced
