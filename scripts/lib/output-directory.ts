@@ -16,7 +16,7 @@
 // error class and its own marker filename, and neither belongs to a shared
 // module.
 
-import { existsSync, lstatSync, renameSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { assertNoSymlinkComponents } from "./safe-output-path.ts";
 
@@ -29,6 +29,10 @@ type OutputInspectionOptions = {
 	marker: string;
 	fail: OutputFailure;
 };
+
+export function createSiblingTemporaryDirectory(directory: string, label: string): string {
+	return mkdtempSync(path.join(path.dirname(directory), `.${path.basename(directory)}.${label}-`));
+}
 
 /**
  * Resolve and vet a composer's output directory.
@@ -65,6 +69,30 @@ export function inspectOutputDirectory(
  * destination.
  */
 export function publishOutputDirectory(staging: string, output: OutputInspection): void {
-	if (output.force) rmSync(output.directory, { recursive: true, force: true });
-	renameSync(staging, output.directory);
+	if (!output.force) {
+		renameSync(staging, output.directory);
+		return;
+	}
+	const backupPlaceholder = createSiblingTemporaryDirectory(output.directory, "ceal-output-backup");
+	rmSync(backupPlaceholder, { recursive: true, force: true });
+	let previousMoved = false;
+	let published = false;
+	try {
+		renameSync(output.directory, backupPlaceholder);
+		previousMoved = true;
+		renameSync(staging, output.directory);
+		published = true;
+	} catch (error) {
+		if (previousMoved && !existsSync(output.directory) && existsSync(backupPlaceholder)) {
+			try {
+				renameSync(backupPlaceholder, output.directory);
+				previousMoved = false;
+			} catch (restoreError) {
+				throw new Error(`Could not restore the previous output directory; backup retained at ${backupPlaceholder}.`, { cause: restoreError });
+			}
+		}
+		throw error;
+	} finally {
+		if (published || !previousMoved) rmSync(backupPlaceholder, { recursive: true, force: true });
+	}
 }

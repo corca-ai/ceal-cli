@@ -38,10 +38,26 @@ Date: 2026-08-18
 - Buffered and streaming Unix-socket transport paths now share one cleanup owner
   for timer and abort-listener release; response lifecycle and close/finally
   behavior remain in their respective transport functions.
+- The generic non-null object guard now has one `scripts/lib/object-record.ts`
+  owner. Its accepted set intentionally includes arrays, so it does not replace
+  the JSON-record guard that rejects arrays.
+- Probe command and subcommand validation now share only their common surface
+  fields; command name/lifecycle and subcommand parent/route/default validation
+  remain local to their respective definitions.
+- Compose and merge release-asset workflows now share one result-envelope
+  constructor and one staging/checksum/publish/cleanup owner. Their native asset
+  population, input validation, and workflow-specific result payloads remain
+  separate.
+- The shared output publisher now preserves a marked previous output during a
+  forced replacement and restores it when the staging rename fails. Sibling
+  temporary-directory construction is also one output-directory owner used by
+  rollback backup and by the release-assets, native-artifact, and
+  release-package staging composers.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
-  tested detector-only rules. The duplicate baseline was not expanded.
+  tested detector-only rules, including a regression contract for same-file
+  result-envelope segmentation. The duplicate baseline was not expanded.
 
 ## Capability Delivered
 
@@ -60,6 +76,15 @@ detector groups them as one shallow family.
 - Protocol fixture provenance: test/protocol-artifact-provenance.ts,
   test/contract/worker-release-inputs.test.ts, and
   test/worker-release-package-fixture.ts.
+- Generic object and probe contracts: scripts/lib/object-record.ts,
+  scripts/probe-surface-contract.ts, and test/contract/script-lib.test.ts.
+- Release-asset result/staging contracts: scripts/build-worker-release-assets.ts,
+  scripts/build-worker-native-artifact.ts, scripts/build-worker-release-package.ts,
+  and test/contract/worker-release-assets.test.ts.
+- Output replacement contract: scripts/lib/output-directory.ts and the forced
+  publish rollback test in test/contract/worker-release-assets.test.ts.
+- Repo-build scratch wiring: test/repo-build.ts and
+  test/contract/repo-build.test.ts.
 - Transport cleanup behavior: packages/ceal-worker-cli/src/private-worker-transport.ts
   and its leased-consumer transport tests.
 - Duplicate adapter: scripts/run_dup_ratchet.py and
@@ -122,9 +147,25 @@ detector groups them as one shallow family.
   boundary rules, including both removable-metric and non-overlap controls.
 - npm run check:duplication: passed through the Worker proof route with
   fixable_ceiling=0 <= floor_F=0, exact result
-  /tmp/ceal-proof-jobs/worker-dup-provenance/result.20260818-worker-dup-provenance-09.json
+  /tmp/ceal-proof-jobs/worker-dup-three-composer-final/result.20260818-worker-dup-three-composer-final-12.json
   (exit_code: 0). The adapter contract also passes its positive, negative,
   and packaged-scan malformed-input controls.
+- The object-record, probe-surface, repo-build, release-assets, and forced
+  output-rollback focused proof passed 68/68 tests at
+  /tmp/ceal-proof-jobs/worker-three-composer-staging-focused/result.20260818-worker-three-composer-staging-focused-10.json
+  (exit_code=0). The first two attempts exposed missing scratch-module mappings;
+  the repo-build harness now maps both the new object owner and its pre-existing
+  JSON-record supervisor owner to stable absolute imports.
+- The Worker tools and tests TypeScript ratchets passed with exit_code 0 at
+  /tmp/ceal-proof-jobs/worker-lint-types-three-composer-tools/result.20260818-worker-lint-types-three-composer-tools-08.json
+  and
+  /tmp/ceal-proof-jobs/worker-lint-types-three-composer-tests/result.20260818-worker-lint-types-three-composer-tests-09.json.
+  Both logs retain `error TS` diagnostics as positive controls and contain no
+  `baseline_reduction_required` failure; this is not a claim of zero residual
+  type debt.
+- The duplicate adapter contract passed 1/1 after the result-owner extraction,
+  and its exact result-envelope positive/negative controls remain in
+  scripts/run-dup-ratchet.test.ts.
 - npm run lint, ruff check scripts/run_dup_ratchet.py, and git diff --check:
   passed.
 - Verification level: local Worker source, contract, duplicate-gate, and
@@ -152,6 +193,39 @@ detector groups them as one shallow family.
   fixture provenance/marker/sidecar owner; the synthetic and built-package pack
   callbacks remain separate. The current scan has zero matches for that exact
   fingerprint, with `8c5ae173bd9d0063` retained as a positive control.
+- Historical family 8c5ae173bd9d0063 was resolved by the neutral
+  `isObjectRecord` owner. Its array-including semantics are directly tested, and
+  the existing `isJsonRecord` owner remains separate because it excludes arrays.
+- Historical family 7b59dc768ff177fd was resolved by
+  `hasProbeDefinitionFields`; command-specific and subcommand-specific fields
+  remain in their owning guards.
+- Historical family a63fc52b0fc88b75 was resolved by
+  `stageAndPublishWorkerReleaseAssets`; the compose and merge callbacks still
+  own distinct asset population and validation.
+- The re-segmented 126a9b71a039844c result-envelope family was not accepted as a
+  detector exemption. Its common local-state envelope is now owned by
+  `createWorkerReleaseAssetsResult`; the adapter's exact same-file rule and
+  positive/negative fixtures remain only as a fail-closed regression guard for
+  future detector re-segmentation.
+- The forced output replacement failure was fixed at the shared
+  `publishOutputDirectory` owner: a marked previous tree moves to a sibling
+  backup, staging is renamed into place, and the previous tree is restored when
+  that rename fails. The 68-test proof includes a missing-staging control.
+- The transient d40055414bbcc395 family exposed by the first rollback version
+  was resolved by `createSiblingTemporaryDirectory`; the final duplicate gate
+  reports no new fixable family and the final historical scan finds zero matches.
+- The later native/package staging-owner finding was resolved by changing both
+  `materializeOutput` callers to use `createSiblingTemporaryDirectory`; all three
+  release composers now share the same staging-path owner. The final focused
+  proof, type ratchets, duplicate gate, and historical recount were rerun after
+  this repair.
+- The source-backed result-envelope detector rule was strengthened after a
+  fresh-eye review: it now requires the source declaration and envelope markers
+  plus the actual `output_dir` line named by each `shared_subdag`. The first
+  overly narrow version exposed family `25dbc057a594dfa0` as a gate failure;
+  the corrected source witness classifies that current raw overlap as
+  detector-only, with a metadata/source negative control retained in the adapter
+  contract. The failed attempt is evidence of precision repair, not a bypass.
 - The repeated timer/listener cleanup in the buffered and streaming transport
   paths is now owned by `clearUnixSocketCleanup` at
   `packages/ceal-worker-cli/src/private-worker-transport.ts:244-251`.
@@ -160,6 +234,9 @@ detector groups them as one shallow family.
   exact overlap/shape/metric contract at `scripts/run_dup_ratchet.py:144-166`.
   The adapter test keeps both a removable-metric mismatch and a non-overlap
   geometry control visible.
+- The `_same_file_two_locations` adapter helper owns the repeated location
+  normalization used by the same-file rules; this prevents the adapter itself
+  from creating a new duplicate family.
 - Whole-file and large shallow families are filtered only when the adapter
   proves the exact detector shape, valid distinct locations, complete/large
   spans, distinct non-partial boundaries, and a low-overlap margin.
@@ -169,14 +246,15 @@ detector groups them as one shallow family.
   filters each require their exact metadata and evidence. Non-list scan output,
   malformed family entries, invalid content identity, and missing spans remain
   gate failures rather than becoming an empty clean inventory.
-- The authoritative current historical Worker scan reports 132 families after
-  the readJson owner slice and final reader contract test (result
-  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-10.json).
-  The next measured candidates include the test fixture family
-  (d95ac33768d18b97), exact `isRecord` helper ownership
-  (8c5ae173bd9d0063), and the remaining release merge/helper families recorded
-  by the current candidate payload. Historical debt is therefore not claimed
-  complete by this slice.
+- The current historical Worker scan reports 130 families after the object,
+  probe, staging, result-envelope, and harness slices at
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-17.json
+  (tool version 0.20.0). The exact former families 8c5ae173bd9d0063 and
+  126a9b71a039844c have zero matches, while positive-control family
+  a3048e1b0c675c4a remains present and the transient d40055414bbcc395 family
+  introduced during rollback repair is absent. Raw family 25dbc057a594dfa0
+  remains present once and is filtered only by the source-backed result-owner
+  detector contract; historical debt is therefore still open.
 
 ## Boundary Ownership
 
@@ -227,6 +305,19 @@ applied.
   existing timer/listener and stream close/finally lifecycle. It also confirmed
   the adapter's fail-closed identity checks and precise same-file boundary
   conditions. The suggested non-overlap geometry control was added and passed.
+- Object-record/result-envelope fresh-eye: Aquinas found no blocker after
+  re-reading the object guard, common probe fields, staging cleanup, scratch
+  mappings, and adapter controls. Its only risk—that the result envelope might
+  be hidden rather than owned—was addressed by extracting
+  `createWorkerReleaseAssetsResult`; the current scan confirms the former
+  126a9b71a039844c family is absent. The inherited Hilbert report was stale and
+  was not used as evidence. Euler then found that native and package staging
+  construction still had separate callers; those two callers were repaired to
+  use the shared sibling-directory owner. Euclid's final follow-up re-read the
+  source-backed result-owner witness, confirmed that the shared subdag correctly
+  points outside the composer spans to the extracted helper, and found no
+  remaining blocker. Its non-blocking concern is the intentional exact-source
+  contract coupling, which is now recorded in the next-slice risk.
 
 ## Deliberately Not Doing
 
@@ -248,9 +339,14 @@ change. No user-facing CLI, release, or runtime behavior changed.
 ## Next Slice
 
 Continue the historical Worker queue with one coherent owner family at a time,
-starting with the exact `isRecord` family `8c5ae173bd9d0063` confirmed by the
-current positive-control scan, followed by the remaining release/helper/type
-families. Recount the three-repository gates before moving to Agent work.
+starting with the next current candidate after positive-control family
+`a3048e1b0c675c4a`, while preserving the exact `8c5ae173bd9d0063` and
+`126a9b71a039844c` zero-hit controls. Recount the three-repository gates before
+moving to Agent work.
+Keep the result-envelope detector contract source-backed: if the helper
+declaration, envelope markers, or canonical owner line moves, update its adapter
+fixture and rerun the raw/gate positive controls in the same slice. Do not widen
+it into a blanket same-file exemption.
 Do not push, tag, publish, or apply a runtime from this local quality lane.
 
 ## Completion Categories

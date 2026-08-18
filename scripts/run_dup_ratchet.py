@@ -141,15 +141,55 @@ def _is_low_overlap_shallow_family(repo_root: Path, family: dict) -> bool:
     return minimum_span >= 100 and shared * 8 < minimum_span
 
 
-def _is_same_file_boundary_overlap_family(repo_root: Path, family: dict) -> bool:
-    """Filter a detector span that crosses into the next same-file helper."""
-    data = _matching_family_data(repo_root, family, extraction_shape="extract-method-from-block", surface="default", witness="copy-paste")
+def _same_file_two_locations(
+    repo_root: Path, family: dict, *, extraction_shape: str, surface: str, witness: str
+) -> tuple[int | float, tuple[str, int, int], tuple[str, int, int]] | None:
+    data = _matching_family_data(repo_root, family, extraction_shape=extraction_shape, surface=surface, witness=witness)
     if data is None:
-        return False
+        return None
     shared, locations = data
     if len(locations) != 2 or len({file for file, _start, _end in locations}) != 1:
-        return False
+        return None
     first, second = sorted(locations, key=lambda location: (location[1], location[2]))
+    return shared, first, second
+
+
+def _has_release_result_source_witness(
+    repo_root: Path, location: tuple[str, int, int], name: str, shared_subdag: list[int]
+) -> bool:
+    file, start, end = location
+    subdag_start, subdag_end = shared_subdag
+    try:
+        lines = ((repo_root.resolve() / file).resolve()).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    if not 1 <= subdag_start <= subdag_end <= len(lines):
+        return False
+    location_source = "\n".join(lines[start - 1 : end])
+    if f"function {name}(" not in location_source:
+        return False
+    owner_starts = [index + 1 for index, line in enumerate(lines) if "function createWorkerReleaseAssetsResult" in line]
+    output_lines = [index + 1 for index, line in enumerate(lines) if "output_dir: output.directory" in line]
+    if len(owner_starts) != 1 or len(output_lines) != 1 or shared_subdag != [output_lines[0], output_lines[0]]:
+        return False
+    owner_source = "\n".join(lines[owner_starts[0] - 1 : output_lines[0]])
+    required_markers = (
+        "schema_version: schemaVersion",
+        "ok: true",
+        "proof_level: \"local_state\"",
+        "writes_external: false",
+    )
+    return owner_starts[0] < output_lines[0] and all(marker in owner_source for marker in required_markers)
+
+
+def _is_same_file_boundary_overlap_family(repo_root: Path, family: dict) -> bool:
+    """Filter a detector span that crosses into the next same-file helper."""
+    data = _same_file_two_locations(
+        repo_root, family, extraction_shape="extract-method-from-block", surface="default", witness="copy-paste"
+    )
+    if data is None:
+        return False
+    shared, first, second = data
     if not (first[1] < second[1] <= first[2] < second[2]):
         return False
     overlap = first[2] - second[1] + 1
@@ -164,6 +204,73 @@ def _is_same_file_boundary_overlap_family(repo_root: Path, family: dict) -> bool
         return False
     first_span = first[2] - first[1] + 1
     return overlap <= 8 and first_span >= 50 and shared >= overlap and removable == shared and rep_lines == first_span
+
+
+def _is_same_file_release_result_envelope_family(repo_root: Path, family: dict) -> bool:
+    """Filter the two named release workflows' small result-envelope subdag."""
+    data = _same_file_two_locations(repo_root, family, extraction_shape="extract-helper", surface="default", witness="subdag")
+    if data is None or family.get("scope") != "prod" or family.get("files") != 1 or family.get("dirs") != 1:
+        return False
+    shared, first, second = data
+    if first[0] != "scripts/build-worker-release-assets.ts" or second[1] - first[2] != 2:
+        return False
+    raw_locations = family.get("locations")
+    if not isinstance(raw_locations, list) or len(raw_locations) != 2:
+        return False
+    raw_by_identity: dict[tuple[str, int, int], dict] = {}
+    for raw_location in raw_locations:
+        identity = _location_identity(raw_location)
+        if identity is None or identity in raw_by_identity or not isinstance(raw_location, dict):
+            return False
+        raw_by_identity[identity] = raw_location
+    raw_first = raw_by_identity.get(first)
+    raw_second = raw_by_identity.get(second)
+    if raw_first is None or raw_second is None:
+        return False
+    names: set[object] = set()
+    for raw_location in (raw_first, raw_second):
+        location = _location_identity(raw_location)
+        origin = raw_location.get("origin")
+        shared_subdag = raw_location.get("shared_subdag")
+        if (
+            location is None
+            or not isinstance(raw_location.get("name"), str)
+            or not isinstance(origin, dict)
+            or origin.get("body_kind") != "implementation"
+            or origin.get("subkind") != "function"
+            or not isinstance(shared_subdag, list)
+            or len(shared_subdag) != 2
+            or not all(isinstance(line, int) and not isinstance(line, bool) for line in shared_subdag)
+            or shared_subdag[0] > shared_subdag[1]
+        ):
+            return False
+        if not _has_release_result_source_witness(repo_root, location, raw_location["name"], shared_subdag):
+            return False
+        names.add(raw_location["name"])
+    if names != {"composeWorkerReleaseAssets", "mergeWorkerReleaseAssetSets"}:
+        return False
+    metrics = family.get("metrics")
+    removable = family.get("removable")
+    rep_lines = family.get("rep_lines")
+    if isinstance(metrics, dict):
+        if removable is None:
+            removable = metrics.get("removable")
+        if rep_lines is None:
+            rep_lines = metrics.get("rep_lines")
+    first_span = first[2] - first[1] + 1
+    return (
+        isinstance(shared, int)
+        and not isinstance(shared, bool)
+        and shared <= 12
+        and shared * 8 < first_span
+        and isinstance(removable, int)
+        and not isinstance(removable, bool)
+        and removable == shared
+        and isinstance(rep_lines, int)
+        and not isinstance(rep_lines, bool)
+        and rep_lines == first_span
+        and first_span >= 100
+    )
 
 
 def _is_import_header_span(repo_root: Path, file: str, start: int, end: int) -> bool:
@@ -425,6 +532,7 @@ def _collect_code_families(repo_root: Path, module: dict, scope_paths: list[str]
                 _is_low_overlap_whole_file_family(repo_root, family)
                 or _is_low_overlap_shallow_family(repo_root, family)
                 or _is_same_file_boundary_overlap_family(repo_root, family)
+                or _is_same_file_release_result_envelope_family(repo_root, family)
                 or _is_import_header_family(repo_root, family)
             or _is_similar_helper_family(repo_root, family, kind="validator")
             or _is_similar_helper_family(repo_root, family, kind="zero_overlap")

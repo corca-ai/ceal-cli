@@ -1,5 +1,6 @@
 import type { CealCommandDefinition } from "../packages/ceal-worker-cli/src/command-definitions.ts";
 import type { CealSubcommandDefinition } from "../packages/ceal-worker-cli/src/subcommands.ts";
+import { isObjectRecord } from "./lib/object-record.ts";
 
 export type ProbeCommandDefinition = Pick<
 	CealCommandDefinition,
@@ -25,16 +26,24 @@ export function lookupProbeBinary<T>(binaries: Readonly<Record<string, T>>, name
 	return typeof name === "string" && Object.hasOwn(binaries, name) ? binaries[name] : undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
 function isStringArray(value: unknown): value is readonly string[] {
 	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isEffect(value: unknown): value is CealCommandDefinition["effect"] {
 	return value === "read_only" || value === "local_write" || value === "read_only_or_local_write" || value === "remote_write";
+}
+
+function hasProbeDefinitionFields(value: unknown): value is Record<string, unknown> {
+	return (
+		isObjectRecord(value) &&
+		typeof value.description === "string" &&
+		typeof value.usage === "string" &&
+		isEffect(value.effect) &&
+		(value.evidence === "surface" || value.evidence === "surface_or_host_decision") &&
+		typeof value.result_schema === "string" &&
+		typeof value.recovery === "string"
+	);
 }
 
 function isCliRouteToken(value: unknown): value is string {
@@ -52,44 +61,32 @@ export function isAgentHostEnvironmentVariables(value: unknown): value is readon
 
 function isCommandDefinition(value: unknown): value is ProbeCommandDefinition {
 	return (
-		isRecord(value) &&
+		hasProbeDefinitionFields(value) &&
 		typeof value.name === "string" &&
-		typeof value.description === "string" &&
-		typeof value.usage === "string" &&
-		isEffect(value.effect) &&
-		(value.lifecycle === undefined || value.lifecycle === "until_interrupted") &&
-		(value.evidence === "surface" || value.evidence === "surface_or_host_decision") &&
-		typeof value.result_schema === "string" &&
-		typeof value.recovery === "string"
+		(value.lifecycle === undefined || value.lifecycle === "until_interrupted")
 	);
 }
 
 function isSubcommandDefinition(value: unknown, parent: string): value is ProbeSubcommandDefinition {
 	return (
-		isRecord(value) &&
+		hasProbeDefinitionFields(value) &&
 		value.parent === parent &&
 		isStringArray(value.route) &&
 		value.route.length > 0 &&
 		value.route.every(isCliRouteToken) &&
-		(value.default === undefined || value.default === true) &&
-		typeof value.description === "string" &&
-		typeof value.usage === "string" &&
-		isEffect(value.effect) &&
-		(value.evidence === "surface" || value.evidence === "surface_or_host_decision") &&
-		typeof value.result_schema === "string" &&
-		typeof value.recovery === "string"
+		(value.default === undefined || value.default === true)
 	);
 }
 
 export function isSplitSubcommandResult(value: unknown, parent: string): value is SplitSubcommandResult {
 	return (
-		isRecord(value) && (value.subcommand === undefined || isSubcommandDefinition(value.subcommand, parent)) && isStringArray(value.rest)
+		isObjectRecord(value) && (value.subcommand === undefined || isSubcommandDefinition(value.subcommand, parent)) && isStringArray(value.rest)
 	);
 }
 
 export function isProbeModule(value: unknown): value is ProbeModule {
 	return (
-		isRecord(value) &&
+		isObjectRecord(value) &&
 		Array.isArray(value.CEAL_COMMANDS) &&
 		value.CEAL_COMMANDS.every(isCommandDefinition) &&
 		isAgentHostEnvironmentVariables(value.CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES) &&

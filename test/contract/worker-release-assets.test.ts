@@ -24,7 +24,7 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
-import { inspectOutputDirectory } from "../../scripts/lib/output-directory.ts";
+import { inspectOutputDirectory, publishOutputDirectory } from "../../scripts/lib/output-directory.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.ts";
 
@@ -204,6 +204,18 @@ test("output directory refuses a relative path before resolving it", () => {
 			}),
 		/invalid_output/u,
 	);
+});
+
+test("forced publish restores the marked output when staging rename fails", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-output-publish-restore-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const output = path.join(root, "assets");
+	mkdirSync(output);
+	writeFileSync(path.join(output, ".ceal-worker-release-assets"), "marker\n");
+	writeFileSync(path.join(output, "previous.txt"), "previous\n");
+	assert.throws(() => publishOutputDirectory(path.join(root, "missing-staging"), { directory: output, force: true }), /ENOENT/u);
+	assert.equal(readFileSync(path.join(output, "previous.txt"), "utf8"), "previous\n");
+	assert.deepEqual(readdirSync(root), ["assets"]);
 });
 
 test("compose preserves a coded native-builder error", async (context) => {

@@ -20,7 +20,7 @@ import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
 import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
-import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { resolvePackageBin } from "./lib/package-bin.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createJsonReader } from "./lib/read-json.ts";
@@ -521,7 +521,7 @@ function materializeOutput({
 	version: string;
 	packed: ReturnType<typeof prepareWorkerReleaseConsumer>;
 }): void {
-	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-package-`));
+	const staging = createSiblingTemporaryDirectory(output.directory, "ceal-worker-package");
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release package output\n", { mode: 0o644 });
 		const artifactPath = path.join(staging, packed.worker.name);

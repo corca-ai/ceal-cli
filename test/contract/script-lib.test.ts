@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { codedErrorClass } from "../../scripts/lib/coded-error.ts";
+import { isObjectRecord } from "../../scripts/lib/object-record.ts";
 import { parseScriptArgs } from "../../scripts/lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
 import { toolchainEnv } from "../../scripts/lib/toolchain-env.ts";
@@ -29,6 +30,17 @@ const SPEC = {
 function parse(argv, overrides = {}) {
 	return parseScriptArgs(argv, { fail: thrower(), ...SPEC, ...overrides });
 }
+
+test("generic object record guard preserves non-null object semantics", () => {
+	assert.equal(isObjectRecord({}), true);
+	assert.equal(isObjectRecord([]), true);
+	assert.equal(isObjectRecord(null), false);
+	assert.equal(isObjectRecord("record"), false);
+	assert.equal(
+		isObjectRecord(() => undefined),
+		false,
+	);
+});
 
 test("help short-circuits and still reports the defaults", () => {
 	for (const flag of ["--help", "-h"]) {

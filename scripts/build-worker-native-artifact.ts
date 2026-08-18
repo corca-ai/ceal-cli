@@ -28,7 +28,7 @@ import {
 } from "./generate-leased-consumer-handoff-runtime.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
-import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { createJsonReader } from "./lib/read-json.ts";
 import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
@@ -561,7 +561,7 @@ function materializeOutput({
 	privateControlSessionContract: unknown;
 	privateCarrierHandoff: unknown;
 }): OutputManifest {
-	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-native-`));
+	const staging = createSiblingTemporaryDirectory(output.directory, "ceal-worker-native");
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
 		copyFileSync(artifact.path, path.join(staging, artifact.name));

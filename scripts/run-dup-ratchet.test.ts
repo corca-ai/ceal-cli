@@ -19,6 +19,18 @@ root = Path(tempfile.mkdtemp())
 try:
     source = root / "src"
     source.mkdir()
+    worker_scripts = root / "scripts"
+    worker_scripts.mkdir()
+    release_source = ["line;\\n"] * 120
+    release_source[0] = "function createWorkerReleaseAssetsResult(output, schemaVersion, details) {\\n"
+    release_source[1] = "schema_version: schemaVersion,\\n"
+    release_source[2] = "writes_external: false,\\n"
+    release_source[3] = "ok: true,\\n"
+    release_source[4] = 'proof_level: "local_state",\\n'
+    release_source[9] = "function composeWorkerReleaseAssets(output) {\\n"
+    release_source[101] = "function mergeWorkerReleaseAssetSets(output) {\\n"
+    release_source[65] = "output_dir: output.directory,\\n"
+    (worker_scripts / "build-worker-release-assets.ts").write_text("".join(release_source), encoding="utf-8")
     for name in ("validator-a.ts", "validator-b.ts", "validator-c.ts", "validator-d.ts", "validator-e.ts"):
         (source / name).write_text("function validate() {}\\n", encoding="utf-8")
     (source / "zero-a.ts").write_text("zero;\\n", encoding="utf-8")
@@ -76,6 +88,32 @@ try:
     same_file_overlap_geometry_control = {**same_file_overlap, "family_fingerprint": "same-file-overlap-geometry-control", "locations": [
         {"file": "src/same-file.ts", "start": 1, "end": 93},
         {"file": "src/same-file.ts", "start": 94, "end": 120},
+    ]}
+    same_file_result_envelope = {
+        "extraction_shape": "extract-helper",
+        "surface": "default",
+        "witness": "subdag",
+        "scope": "prod",
+        "files": 1,
+        "dirs": 1,
+        "family_fingerprint": "same-file-result-envelope",
+        "family_member_hashes": ["same-file-result-envelope-a", "same-file-result-envelope-b"],
+        "shared": 11,
+        "removable": 11,
+        "rep_lines": 100,
+        "metrics": {"dup_lines": 156, "removable": 11, "rep_lines": 100},
+        "locations": [
+            {"file": "scripts/build-worker-release-assets.ts", "start": 1, "end": 100, "name": "composeWorkerReleaseAssets", "origin": {"body_kind": "implementation", "subkind": "function"}, "shared_subdag": [66, 66]},
+            {"file": "scripts/build-worker-release-assets.ts", "start": 102, "end": 120, "name": "mergeWorkerReleaseAssetSets", "origin": {"body_kind": "implementation", "subkind": "function"}, "shared_subdag": [66, 66]},
+        ],
+    }
+    same_file_result_envelope_control = {**same_file_result_envelope, "family_fingerprint": "same-file-result-envelope-control", "locations": [
+        {**same_file_result_envelope["locations"][0]},
+        {**same_file_result_envelope["locations"][1], "name": "mergeOtherReleaseAssetSets"},
+    ]}
+    same_file_result_envelope_source_control = {**same_file_result_envelope, "family_fingerprint": "same-file-result-envelope-source-control", "locations": [
+        {**same_file_result_envelope["locations"][0], "shared_subdag": [67, 67]},
+        {**same_file_result_envelope["locations"][1], "shared_subdag": [67, 67]},
     ]}
     near_threshold = {
         **shallow,
@@ -169,7 +207,7 @@ try:
         @staticmethod
         def scan_families(repo_root, scope_paths):
             return [
-                whole, shallow, same_file_overlap, same_file_overlap_control, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
+                whole, shallow, same_file_overlap, same_file_overlap_control, same_file_result_envelope, same_file_result_envelope_control, same_file_result_envelope_source_control, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
                 validator, validator_control, zero_overlap, zero_overlap_control,
                 repeated_json, repeated_json_control, small_test_setup, small_test_setup_control,
             ], None, "0.20.0"
@@ -210,6 +248,9 @@ try:
         "same_file_overlap": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap),
         "same_file_overlap_control": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap_control),
         "same_file_overlap_geometry_control": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap_geometry_control),
+        "same_file_result_envelope": module["_is_same_file_release_result_envelope_family"](root, same_file_result_envelope),
+        "same_file_result_envelope_control": module["_is_same_file_release_result_envelope_family"](root, same_file_result_envelope_control),
+        "same_file_result_envelope_source_control": module["_is_same_file_release_result_envelope_family"](root, same_file_result_envelope_source_control),
         "near_threshold": module["_is_low_overlap_shallow_family"](root, near_threshold),
         "near_threshold_control": module["_is_low_overlap_shallow_family"](root, near_threshold_control),
         "imports": module["_is_import_header_family"](root, import_family),
@@ -246,6 +287,8 @@ finally:
 			"partial",
 			"repeated-json-control",
 			"same-file-overlap-control",
+			"same-file-result-envelope-control",
+			"same-file-result-envelope-source-control",
 			"shape",
 			"small-test-setup-control",
 			"validator-control",
@@ -257,6 +300,9 @@ finally:
 		same_file_overlap: true,
 		same_file_overlap_control: false,
 		same_file_overlap_geometry_control: false,
+		same_file_result_envelope: true,
+		same_file_result_envelope_control: false,
+		same_file_result_envelope_source_control: false,
 		near_threshold: true,
 		near_threshold_control: false,
 		imports: true,
