@@ -10,11 +10,10 @@ activation command.
 ## Active Operating Frame
 
 - Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
-  performance slice, D1a source-NUL gate port, and the Worker markdownlint receiving
-  gate have implementation, targeted proof, and fresh-eye review complete. The D1
-  import-resolution review is also complete: the full Gateway loader-rewrite ratchet
-  is not portable, so the remaining D1 work is a receiving-local hard-failure subset,
-  secretlint on both siblings, and Agent-local duplicate detection.
+  performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
+  import hard-failure gate, and Worker/Agent Secretlint gates have implementation,
+  targeted proof, and local commits. The full Gateway loader-rewrite ratchet remains
+  deliberately unported; the remaining D1 work is Agent-local duplicate detection.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -32,9 +31,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: implement the revised D1 receiving contracts, beginning with the
-  portable import hard-failure route and then the local secret/duplicate gates; keep
-  the A → D1 → B → C → D2 → E dependency order intact.
+- Next action: implement and prove Agent-local duplicate detection, then keep the
+  A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -254,7 +252,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | Slice | Objective | Expected evidence | Status |
 | --- | --- | --- | --- |
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
-| D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | pending |
+| D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | in progress — import hard failures and Secretlint complete; Agent duplicate pending |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | pending |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
@@ -375,7 +373,99 @@ compiler replacement proof.
 - Fresh-eye result: three unnamed parent-delegated reviewers independently rejected porting the full `loader_rewrite` ratchet, accepted a narrow hard-failure subset only after this contract revision, and recommended receiving-local secretlint plus Agent duplicate detection.
 - Boundary proof: the Gateway, Worker, and Agent reviewer windows all returned `ok: true`, `verdict: clean`, `drift: []` after reviewer delivery. The exact snapshots and re-check commands are recorded in the critique artifact.
 - Decision: rename the sibling route to `lint:import-hard-failures`; retain true unresolvable and invoked-path failures without a baseline; exclude Agent diagnostic-record JSON; defer `.js`/`.ts` loader migration to a separately proved emitted/runtime slice.
-- Next implementation: build and prove the local hard-failure route, then implement Worker/Agent secretlint and Agent duplicate detection with local scope, contract/hook/full-check reachability, and cache-independent mutation/restore evidence.
+- Next implementation: implement and prove Agent duplicate detection with local
+  scope, contract/hook/full-check reachability, and mutation/restore evidence.
+
+### Slice 5: D1 — receiving-owned Secretlint gates
+
+- Objective: Add a local secret scanner to Worker and Agent with explicit rules,
+  receiving scan roots, staged projection, package/check/hook reachability, and
+  mutation proof without a diagnostic baseline or success cache.
+- Why this approach: Secretlint is a linter-owned source policy, while Gateway's
+  fixture and allowlist shape is not a portable receiving contract. Each sibling
+  therefore owns its dependency, config, tracked/staged file projection, and test
+  fixture policy.
+- Commits: Worker `ae238fe25063ca35e2627744a982fd4cb1ec7155`; Agent
+  `868daa1645a8609d71aa513edcec3c1b23f92e8e`; no push or external boundary.
+- What changed: Added Secretlint and four local rule packages, `.secretlintrc.json`
+  and `.secretlintignore`, typed tracked/staged runners, focused contract tests,
+  package/check or lint reachability, staged pre-commit hooks, gate-contract entries,
+  and local documentation. Worker keeps its exact synthetic CLI Slack fixture
+  isolated; Agent keeps test files in the standard scan and has no synthetic bypass.
+  Knip config-driven dependency ownership was declared before the commits landed.
+- Alternatives rejected: Rejected a baseline, a success cache, a broad Slack
+  allowlist, ignoring tests, and copying Gateway's scope without checking the
+  receiving package and hook contracts.
+- Targeted verification: Worker and Agent `npm run lint:secrets` and staged routes
+  passed; Worker `npm run lint` and raw tools typecheck passed; Agent `npm run lint`
+  and raw tools typecheck passed. The combined import/Secretlint contract tests
+  passed 10/10 in each sibling, including staged projection and an isolated
+  live-shaped GitHub-token rejection.
+- Mutation/restore: Worker snapshot
+  `/tmp/ceal-worker-secretlint-proof.zQMJ1y/check-no-legacy-mjs.ts` had SHA-256
+  `fe8bf68a9814dfd979b91129820d0534ef6899215adf0ba7c4d6b6658ff6582d`; a live-shaped
+  token mutation made plain `npm run lint:secrets` exit 1, snapshot restoration
+  returned the same hash and exit 0. Agent snapshot
+  `/tmp/ceal-agent-secretlint-proof.sNDv1L/check-no-legacy-mjs.ts` had SHA-256
+  `cb14fb7ad3e0b6a50b5af8ad6e9148f2239762c9edea29853dade931470fe107`; the same
+  red/restore-green sequence passed. The earlier inert cache-variable wording was
+  removed from docs; the runner has no cache and the durable proof uses the plain
+  route.
+- Critique: The delivered fresh-eye review found missing staged-projection coverage
+  and an unsupported cache-proof claim; both were repaired in the contract tests and
+  docs before the final commits. The evidence is recorded in
+  `charness-artifacts/critique/2026-08-19-d1-secretlint-implementation-20260819.md`,
+  and the primary re-ran the receiving lint and mutation routes.
+- Off-goal findings: No Gateway source edit, push, CI watch, release, apply/restart,
+  live readback, issue creation, or duplicate #671. Worker commit output retained
+  three existing Knip configuration hints; disposition is deferred to the Worker
+  quality-cleanup owner, not hidden or used as a reason to bypass the gate.
+
+### Slice 6: D1 — receiving-local import hard-failure gate
+
+- Objective: Add a portable hard-failure-only import/reference check to Worker and
+  Agent while explicitly excluding Gateway loader-rewrite parity and diagnostic
+  baseline regeneration.
+- Why this approach: The Gateway checker reports `.js`→`.ts` loader-rewrite entries
+  as a future runtime migration ratchet. Worker and Agent already declare
+  NodeNext/rewrite-relative-import conventions, so the receiving route retains only
+  absent runtime-relative targets and receiving-owned `scripts/`/`bin/` declarations.
+- Commits: Worker `3125684` (`gate: add receiving import hard-failure check`), Agent
+  `1781068` (`gate: add receiving import hard-failure check`), and Gateway critique
+  record `6f24ba8f9`; no push or external boundary.
+- What changed: Added typed AST scanners with no baseline or `--fix`, diagnostic
+  baseline exclusion, normal and staged package routes, full-check/lint and hook
+  wiring, gate-contract entries, local docs, virtual behavior tests, and temporary
+  Git-index tests. The staged route enumerates the complete index and reads blobs
+  with `git cat-file`, so staged additions and staged target deletions cannot be
+  masked by working-tree content.
+- Alternatives rejected: Rejected porting the full Gateway loader-rewrite ratchet,
+  regenerating a baseline, scanning only changed path names in staged mode, and
+  accepting the first implementation's working-tree/index mixture.
+- Targeted verification: Both normal and staged import routes passed. Worker and
+  Agent import contract tests passed 6/6; full Worker and Agent lint passed; raw
+  tools typechecks passed; gate-contract checks passed; both sibling commits ran
+  their pre-commit staged routes successfully.
+- Mutation/restore: Final Worker snapshot
+  `/tmp/ceal-worker-import-hard-final-proof.MDvzrE/check-no-legacy-mjs.ts` had SHA-256
+  `fe8bf68a9814dfd979b91129820d0534ef6899215adf0ba7c4d6b6658ff6582d`; injecting a
+  missing `.mjs` import made `npm run lint:import-hard-failures` exit 1, restoring
+  the snapshot matched the hash and returned exit 0. Agent snapshot
+  `/tmp/ceal-agent-import-hard-final-proof.i135aO/check-no-legacy-mjs.ts` had SHA-256
+  `cb14fb7ad3e0b6a50b5af8ad6e9148f2239762c9edea29853dade931470fe107`; the same
+  red/restore-green result passed.
+- Critique: The first bounded fresh-eye review caught the staged false-green and
+  missing index tests. The repair was re-read, tested against staged additions and
+  deletions, and boundary fingerprints for the final attempted review window
+  returned `ok: true`, `verdict: clean`, and `drift: []`. The evidence and the
+  host-blocked post-repair retry are recorded in
+  `charness-artifacts/critique/2026-08-19-d1-import-hard-failures-implementation-20260819.md`;
+  the retry is recorded as non-evidence rather than claimed as a completed final
+  review.
+- Off-goal findings: Extensionless or dynamically assembled path references and a
+  future bare-runtime `.js` migration remain deferred; no full Gateway parity claim
+  is made. No push, CI watch, release, apply/restart, live readback, issue creation,
+  or duplicate #671 occurred.
 
 ## Context Sources
 
@@ -446,10 +536,11 @@ routes, targeted source/gate contracts, the mutation-red/restore-green proof,
 and the Worker pre-commit gate passed. The temporary fixture slice also passed
 its Worker artifact test, Agent source/tools/TS6 type lanes, Agent quality tests,
 quality-artifact validators, and round-2 boundary checks. D1a source-NUL gate
-port verification passed in both sibling checkouts; the overall goal remains
-active for the remaining D1 gates and later compiler/linter lanes. No
-compiler-only timing, Linux-only runtime, push, release, or remote proof is
-claimed.
+port verification passed in both sibling checkouts. D1 import hard-failure and
+Worker/Agent Secretlint gates now have local commits, contract reachability, and
+mutation/restore evidence; Agent duplicate detection and later compiler/linter
+lanes remain. No compiler-only timing, Linux-only runtime, push, release, or
+remote proof is claimed.
 
 ## User Verification Instructions
 
@@ -511,7 +602,13 @@ improvement as applied or a tracked issue.
 | Worker markdownlint API dependency is typed and reachable without an ignore or baseline | Worker `scripts/check-markdown.ts:14-16,44-67`, `types/markdownlint-cli2.d.ts:1-8`, `tsconfig.tools.json`, `package.json:84` | from `/Users/ted/codes/ceal-cli`: `npm run lint:types:raw:tools`; `npm run lint:reachability`; `node --test test/contract/check-markdown.test.ts` |
 | The broad Worker proof is green after repairing a retained global-environment test race | Worker `test/repo-build.ts:99-104,118-146`; `test/contract/repo-build.test.ts:327-364`; proof results under `/tmp/ceal-proof-jobs/worker-d1-markdown-check-unit/` and `/tmp/ceal-proof-jobs/worker-d1-markdown-check/` | from Gateway: `node scripts/run-proof-job.ts --name worker-d1-markdown-check-unit --run-id 20260819-markdown-attempt4 --cwd /Users/ted/codes/ceal-cli -- npm run check:unit`; `node scripts/run-proof-job.ts --name worker-d1-markdown-check --run-id 20260819-markdown-check-attempt1 --cwd /Users/ted/codes/ceal-cli -- npm run check`; read the exact result JSONs |
 | Current import-resolution sibling probes remain red for a semantic reason, not a missing search | Gateway `scripts/check-import-resolution.ts:20-44,491-535`, `config/import-resolution-policy.json`; Worker/Agent `rewriteRelativeImportExtensions` configs and positive `.js` source imports | from Gateway: `node scripts/check-import-resolution.ts --repo-root /Users/ted/codes/ceal-cli` and `node scripts/check-import-resolution.ts --repo-root /Users/ted/codes/ceal-agent`; record Worker 170 loader-rewrite and Agent 396 loader-rewrite plus 10 baseline-only dangling references; do not regenerate either policy |
-| D1 import hard-failure route is intentionally not full Gateway loader-rewrite parity | Goal `D1 import-resolution boundary` and critique `charness-artifacts/critique/2026-08-19-d1-import-gate-port-20260819.md`; Gateway checker `scripts/check-import-resolution.ts:20-44,106-115,500-515` | before implementation, define and test Worker/Agent `lint:import-hard-failures`; inject a missing source target and a receiving-owned invoked path for red proof, restore from a current snapshot, and require green; separately rerun the Gateway checker against both explicit sibling roots and record loader-rewrite as excluded |
+| D1 import hard-failure route is intentionally not full Gateway loader-rewrite parity | Goal `D1 import-resolution boundary` and critique `charness-artifacts/critique/2026-08-19-d1-import-gate-port-20260819.md`; Gateway checker `scripts/check-import-resolution.ts:20-44,106-115,500-515` | from Gateway rerun the checker against both explicit sibling roots and retain loader-rewrite as excluded; from each sibling run `npm run lint:import-hard-failures` plus its contract test and final mutation proof |
 | Agent typecheck baseline JSON is diagnostic data, not an invoked path surface | Agent `config/typecheck-baseline.json`, `config/typecheck-baseline-ts6.json`; critique F2 | from Gateway: run the receiving hard-failure route with a positive control path in a package/hook/config file and inspect that baseline JSON paths do not enter the scan; never use `--write-baseline` or update-baseline routes |
-| D1 secretlint and duplicate gates are local contracts, not copied Gateway scopes | critique F3 and D1 receiving-local secret/duplicate gate contract | before each implementation, inspect receiving dependency/lockfile, config, scan roots, fixture/allowlist, package/check/hook reachability, then prove cache-independent retained-input mutation red and snapshot-restore green |
+| D1 secretlint and duplicate gates are local contracts, not copied Gateway scopes | critique F3 and D1 receiving-local secret/duplicate gate contract | inspect each receiving dependency/lockfile, config, scan roots, fixture/allowlist, package/check/hook reachability; Secretlint is now proven, while Agent duplicate remains the next D1 slice |
 | D1 decision review is fresh-eye complete and boundary-clean | Gateway critique artifact and `/tmp/d1-decision-{gateway,worker,agent}-20260819.json` | run `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify` once per explicit root with its matching snapshot/window; require `ok: true`, `verdict: clean`, and `drift: []` |
+| Worker and Agent Secretlint are receiving-owned and reachable | Worker/Agent `scripts/run-secretlint.ts:8-139`, package scripts, `.githooks/pre-commit`, gate contracts, and contract tests | from `/Users/ted/codes/ceal-cli`: `npm run lint:secrets`, `npm run lint:secrets:staged`, `node --test test/contract/check-secretlint.test.ts`; from `/Users/ted/codes/ceal-agent`: same routes and `node --test test/public/check-secretlint.test.ts` |
+| Secretlint mutation proof is cache-independent and restored from current snapshots | Worker/Agent `test/*/check-secretlint.test.ts:69-93,65-85`; `/tmp/ceal-worker-secretlint-proof.zQMJ1y/check-no-legacy-mjs.ts`; `/tmp/ceal-agent-secretlint-proof.sNDv1L/check-no-legacy-mjs.ts` | mutate a retained source with an assembled live-shaped token, require plain `npm run lint:secrets` exit 1, restore with the named snapshot, compare the recorded SHA-256, and require the same route exit 0 |
+| Worker and Agent import hard-failure routes use receiving-owned AST checks and no baseline | Worker `scripts/check-import-hard-failures.ts:51-211`; Agent `scripts/check-import-hard-failures.ts:43-179`; package/hook/contract surfaces | from each explicit sibling root: `npm run lint:import-hard-failures`, `npm run lint:import-hard-failures:staged`, and the corresponding `node --test test/contract/check-import-hard-failures.test.ts` or `node --test test/public/check-import-hard-failures.test.ts` |
+| D1 staged import routes read the Git index and catch staged additions/deletions | Worker/Agent `scripts/check-import-hard-failures.ts:75-105,182-195` / `67-97,168-178`; staged projection tests at Worker `test/contract/check-import-hard-failures.test.ts:50-70` and Agent `test/public/check-import-hard-failures.test.ts:51-71` | run the two import contract tests; each creates a temporary Git index where working-tree content differs from the staged blob and where a target deletion is staged, requiring both failures |
+| D1 import mutation proof is final-code red/restore-green | Gateway critique `charness-artifacts/critique/2026-08-19-d1-import-hard-failures-implementation-20260819.md`; `/tmp/ceal-worker-import-hard-final-proof.MDvzrE/check-no-legacy-mjs.ts`; `/tmp/ceal-agent-import-hard-final-proof.i135aO/check-no-legacy-mjs.ts` | inject `import "./__ceal_missing_import_proof__.mjs";` into the retained script, require each plain `npm run lint:import-hard-failures` exit 1, restore from its snapshot, compare SHA-256, and require exit 0 |
+| D1 implementation boundary review and index repair are recorded honestly | Gateway critique `charness-artifacts/critique/2026-08-19-d1-import-hard-failures-implementation-20260819.md` F1-F4; Worker commit `3125684`; Agent commit `1781068` | run `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify` against `/tmp/d1-import-worker-final-20260819.json` and `/tmp/d1-import-agent-final-20260819.json`; require `ok: true`, `verdict: clean`, and `drift: []`; do not claim the host-blocked post-repair retry as a delivered review |
