@@ -16,7 +16,8 @@ activation command.
   implementation, targeted proof, and local commits. Lane C, D2 native
   explicit-any enforcement, and E's paid-zero baseline cleanup are implemented
   and locally proven; the full Gateway loader-rewrite ratchet remains deliberately
-  unported.
+  unported. Closeout artifacts are committed; a second frozen claims review is
+  the only remaining proof before the lifecycle flip.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -34,8 +35,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: enter closeout, keeping the A → D1 → B → C → D2 → E dependency
-  order intact.
+- Next action: complete the frozen claims review and lifecycle verification,
+  keeping the A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -260,7 +261,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | completed — native Worker/Agent lint ownership and mutation/restore proof |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | completed — 273 zero-valued entries removed; positive keys/counts and TS7/TS6 lanes preserved |
-| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | in progress |
+| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | in progress — claims review round 2 |
 
 Order is A → D1 → B → C → D2 → E. If Lane A fails, dependent
 implementation stops with a falsifiable Slice Log reason; no second deletion
@@ -970,15 +971,15 @@ The host-log result is retained at
 `charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md`;
 it reports thread-wide activity only because no goal metric window was present.
 
-Final repository identities at this verification point: Gateway
+Final repository identities after the closeout artifact commits: Gateway
 `/Users/ted/codes/ceal` HEAD `67afbec6a42451490e9a22f0c9896c15c870eda6` tree
 `01f2389ac5e4ff9474595c4a8f1f4941eeb45e97`; Worker
-`/Users/ted/codes/ceal-cli` HEAD `c02d5b4f8119bdb13f8e81b9c1deaaa5a680f31b` tree
-`c69a4ba2a74f2d2299f09aa754a362369180ee9b`; Agent
-`/Users/ted/codes/ceal-agent` HEAD `4ea79f4e4691526a482fdff13647bac9b80d5ff2` tree
-`4fb0a11408c96d1ee6c77a1f5f6e507eb35f9698`. These identities predate the
-closeout-only Worker artifact commits and will be rebound once those artifacts
-are committed.
+`/Users/ted/codes/ceal-cli` HEAD `27618458e998148350ddebfcff9038556aad6a9c` tree
+`bc15bde1bcc49d367846a40011e70fa265b9269d`; Agent
+`/Users/ted/codes/ceal-agent` HEAD `0fff321111c8fd3953b54e7bd32da309b08bcc1c` tree
+`27f5fc5b558712d1ba2b6911816b151c4c77b6cd`. The three checkouts were clean
+immediately after those commits; the goal and claims-review updates are the
+remaining Worker-owned closeout artifact changes.
 
 Retro: /Users/ted/codes/ceal-cli/charness-artifacts/retro/2026-08-19-session-retro.md
 Host log probe: /Users/ted/codes/ceal-cli/charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md
