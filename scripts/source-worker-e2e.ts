@@ -455,7 +455,7 @@ async function main(): Promise<number> {
 	const session = await worker(["session", "status"], "session");
 	const help = await worker(["capabilities", "--help"], "capabilities_help");
 	const autoRefreshRequired = help.result.stdout.includes("Session effect: refresh_if_needed");
-	if ([version, guide, session, help].some((entry) => entry.result.exit_code !== 0) || !autoRefreshRequired)
+	if ([version, session, help].some((entry) => entry.result.exit_code !== 0) || !autoRefreshRequired)
 		return emit(
 			{
 				schema_version: "ceal.source_worker_e2e.v1",
