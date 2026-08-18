@@ -847,7 +847,8 @@ const OBSERVER_PAGE = `<!doctype html>
   .activity-grid { display:grid; grid-template-rows:repeat(7,13px); grid-auto-flow:column; grid-auto-columns:13px; gap:4px; overflow:auto; padding:1.2rem 0 .8rem; scrollbar-width:thin; }
   .day { width:13px; height:13px; border-radius:3px; background:var(--soft); }
   button.day { appearance:none; padding:0; cursor:pointer; }
-  button.day:hover, button.day:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
+  button.day:hover { box-shadow:inset 0 0 0 1px var(--ink); }
+  button.day:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
   .day.level-0 { border:1px solid var(--line); }
   .day.unavailable { border:1px dashed var(--muted); background:repeating-linear-gradient(135deg,transparent 0 3px,var(--line) 3px 5px); }
   .day.level-1 { background:color-mix(in srgb,var(--accent) 30%,var(--soft)); }
@@ -933,7 +934,7 @@ const sessionSummary = (events) => {
   if (events === "unreadable") return "Event evidence unreadable";
   return "Scan " + fmt(events.scan) + " · " + fmt(events.event_count) + " events";
 };
-const VIEWS = ["Usage", "Sessions", "Access", "Evidence"];
+const VIEWS = ["Usage", "Access", "Evidence"];
 const SUGGESTION_DESTINATIONS = {
   stale_collector: ["Evidence", "Agent adapter"],
   missing_cache_opportunity: ["Setup & privacy", "Discovery cache"],
@@ -1049,6 +1050,16 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
           ? comparable(right, "agent_tool_calls") - comparable(left, "agent_tool_calls") || Date.parse(right.last_activity_at) - Date.parse(left.last_activity_at)
           : comparable(right, "tokens") - comparable(left, "tokens") || Date.parse(right.last_activity_at) - Date.parse(left.last_activity_at));
   };
+  const calendarDates = () => {
+    const dates = [];
+    const cursor = new Date(dashboard.window.start_date + "T00:00:00.000Z");
+    const end = new Date(dashboard.window.end_date + "T00:00:00.000Z");
+    while (cursor < end && dates.length < 366) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return dates;
+  };
   const observationStateLabel = (value) => {
     const labels = { complete:["complete","완전 관측"], partial:["partial","부분 관측"], observed_empty:["observed empty","관측 결과 없음"], unavailable:["unavailable","확인 불가"], unreadable:["unreadable","읽기 실패"], unsupported:["unsupported","미지원"] }[value] || [value,"상태 미확인"];
     return labels[language === "ko" ? 1 : 0];
@@ -1068,11 +1079,13 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const metric = selectedMetric;
     const coverage = dashboard.metric_coverage[metric];
     const max = Math.max(1, ...dashboard.daily.map((day) => day[metric] ?? 0));
-    const cells = dashboard.daily.map((day) => {
-      const value = day[metric];
+    const dailyByDate = new Map(dashboard.daily.map((day) => [day.date, day]));
+    const cells = calendarDates().map((date) => {
+      const day = dailyByDate.get(date);
+      const value = day ? day[metric] : null;
       const level = value === null || value === 0 ? 0 : value / max < .34 ? 1 : value / max < .67 ? 2 : 3;
-      const label = day.date + " · " + (value === null ? tx("unavailable", "확인 불가") : value + " " + metricUnit(metric));
-      return "<button type='button' class='day level-" + level + (value === null ? " unavailable" : "") + "' title='" + esc(label) + "' data-activity-date='" + esc(day.date) + "' aria-label='" + esc(label + tx("; view sessions", "; 세션 보기")) + "'></button>";
+      const label = date + " · " + (value === null ? tx("unavailable", "확인 불가") : value + " " + metricUnit(metric));
+      return "<button type='button' class='day level-" + level + (value === null ? " unavailable" : "") + "' title='" + esc(label) + "' data-activity-date='" + esc(date) + "' aria-label='" + esc(label + tx("; filter sessions below", "; 아래 세션 필터")) + "'></button>";
     }).join("");
     const identity = dashboard.identity.state === "available"
       ? "<div class='identity'><div><p class='eyebrow'>" + tx("LOCAL PROFILE", "로컬 프로필") + "</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>" + tx("Instance ", "인스턴스 ") + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>" + tx("Local profile", "로컬 프로필") + "</span></div>"
@@ -1103,14 +1116,15 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const usageSuggestions = dashboard.suggestions.length
       ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + tx(" more suggestions", "개의 제안 더 보기") + "</summary>" + remainingSuggestions.map((entry, index) => suggestionCard(entry, index + 2)).join("") + "</details>" : "")
       : "<div class='card'><strong>" + tx("No deterministic usage suggestions", "현재 표시할 사용 제안이 없습니다") + "</strong><p class='muted'>" + tx("This is not a completeness or productivity claim.", "상태가 완전하거나 생산성이 높다는 뜻은 아닙니다.") + "</p></div>";
-    const legend = "<div class='heatmap-caption'><span>" + tx("Each square is one date present in the local observation window. Color intensity is relative to the busiest observed day; omitted dates are not inferred as zero.", "한 칸은 로컬 관측 범위에 포함된 날짜 하나입니다. 색은 관측된 가장 높은 날과 비교한 상대값이며, 표시되지 않은 날짜를 0으로 추정하지 않습니다.") + "</span><div class='legend'><span>" + tx("Observed zero", "관측값 0") + "</span><span class='legend-scale'><i class='day level-0'></i><i class='day level-1'></i><i class='day level-2'></i><i class='day level-3'></i></span><span>" + tx("Higher", "높음") + "</span><i class='day unavailable'></i><span>" + tx("Unavailable", "확인 불가") + "</span></div></div>";
+    const legend = "<div class='heatmap-caption'><span>" + tx("Both runtimes use the same selected-period calendar. Each square is one date; missing daily evidence is unavailable, not zero. Intensity is relative within the selected runtime.", "두 런타임은 같은 선택 기간의 달력을 사용합니다. 한 칸은 날짜 하나이며, 일별 근거가 없으면 0이 아니라 확인 불가입니다. 색의 강도는 선택한 런타임 안에서 비교합니다.") + "</span><div class='legend'><span>" + tx("Observed zero", "관측값 0") + "</span><span class='legend-scale'><i class='day level-0'></i><i class='day level-1'></i><i class='day level-2'></i><i class='day level-3'></i></span><span>" + tx("Higher", "높음") + "</span><i class='day unavailable'></i><span>" + tx("Unavailable", "확인 불가") + "</span></div></div>";
     return identity
       + "<div class='metric-tabs runtime-tabs' role='group' aria-label='" + tx("Runtime partition", "런타임 구분") + "'>" + runtimeAxes + "</div><p class='evidence-line'>" + tx("Codex and Claude use separate local sources and accounting semantics, so their activity fields are not expected to have the same shape or scale.", "Codex와 Claude는 서로 다른 로컬 출처와 집계 방식을 사용하므로 활동 분포의 모양과 크기가 같을 필요가 없습니다.") + "</p><section class='hero'><p class='eyebrow'>" + tx("LOCAL USAGE", "로컬 사용량") + " · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>" + esc(metricDescription(metric)) + " " + tx("Runtime accounting stays partitioned; missing values are never treated as zero.", "런타임별 집계는 분리되며 없는 값은 0으로 간주하지 않습니다.") + "</p></section>"
       + "<div class='metric-tabs' role='group' aria-label='" + tx("Usage metric", "사용량 지표") + "'>" + axes + "</div>"
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("ACTIVITY FIELD", "활동 분포") + "</p><h2>" + tx("When and how much you worked", "언제 얼마나 사용했는지") + "</h2></div></div>" + availability + legend + "<p class='evidence-line'>" + tx("Source", "출처") + ": " + esc(coverage.source_refs.join(", ")) + " <span>·</span> " + tx("Coverage", "관측 범위") + ": " + esc(coverageCopy(metric)) + (metric === "estimated_cost" && dashboard.pricing.reason === "estimated_not_billed" ? " <span>·</span> " + tx("Estimated locally; not billed cost", "로컬 추정치이며 실제 청구액이 아님") : "") + "</p></section>"
+      + sessionsView(true)
       + "<section class='overview-section'><div class='section-head'><div><p class='eyebrow'>" + tx("SUGGESTIONS", "제안") + "</p><h2>" + tx("Ways to use Ceal better", "사용 패턴에서 확인할 점") + "</h2></div></div>" + usageSuggestions + "<p class='warn'>" + tx("Deterministic local rules over the canonical dataset; not model judgment or a productivity score.", "정규화된 로컬 데이터에 적용한 고정 규칙이며 모델 판단이나 생산성 점수가 아닙니다.") + "</p></section>";
   };
-  const sessionsView = () => {
+  const sessionsView = (embedded = false) => {
     const coverage = dashboard.session_detail_coverage;
     const ordered = orderedSessions();
     const total = ordered.length;
@@ -1135,7 +1149,11 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const filterControl = sessionDateFilter === null ? "" : "<button type='button' data-clear-session-date>" + tx("Clear date filter", "날짜 필터 해제") + "</button>";
     const dateCoverageNote = sessionDateFilter === null ? "" : "<p class='warn'>" + tx("Daily aggregates and returned session detail can have different coverage; this is not a complete count for the date.", "일별 집계와 반환된 세션 상세의 관측 범위는 다를 수 있으며, 이 숫자는 해당 날짜의 전체 세션 수가 아닙니다.") + "</p>";
     const toolbar = "<div class='session-toolbar'><p class='evidence-line'>" + population + "</p><label>" + tx("Sort", "정렬") + " <select data-session-sort><option value='tokens'" + (sessionSort === "tokens" ? " selected" : "") + ">" + tx("Most tokens", "토큰 많은 순") + "</option><option value='recent'" + (sessionSort === "recent" ? " selected" : "") + ">" + tx("Most recent", "최근 활동순") + "</option><option value='tools'" + (sessionSort === "tools" ? " selected" : "") + ">" + tx("Most tool calls", "도구 호출 많은 순") + "</option></select></label>" + filterControl + "</div>" + dateCoverageNote;
-    return "<section class='hero compact'><p class='eyebrow'>" + tx("SESSIONS", "세션") + "</p><h2>" + esc(title) + "</h2><p class='hero-summary'>" + tx("Sessions default to highest observed token use. Task titles appear only when a privacy-safe producer supplies them; demo labels are synthetic.", "세션은 관측된 토큰 사용량이 많은 순으로 시작합니다. 작업명은 안전한 생산자가 제공할 때만 표시하며 데모 작업명은 합성 데이터입니다.") + "</p></section>" + toolbar + "<div class='session-list'>" + cards + "</div>" + pagination;
+    const heading = embedded
+      ? "<div class='section-head'><div><p class='eyebrow'>" + tx("SESSIONS", "세션") + "</p><h2>" + esc(title) + "</h2><p class='hero-summary'>" + tx("Sessions default to highest observed token use. Select a day above to filter this list without leaving Usage.", "세션은 관측된 토큰 사용량이 많은 순으로 시작합니다. 위 날짜를 선택하면 사용량 화면을 벗어나지 않고 목록을 필터링합니다.") + "</p></div></div>"
+      : "<section class='hero compact'><p class='eyebrow'>" + tx("SESSIONS", "세션") + "</p><h2>" + esc(title) + "</h2><p class='hero-summary'>" + tx("Sessions default to highest observed token use. Task titles appear only when a privacy-safe producer supplies them; demo labels are synthetic.", "세션은 관측된 토큰 사용량이 많은 순으로 시작합니다. 작업명은 안전한 생산자가 제공할 때만 표시하며 데모 작업명은 합성 데이터입니다.") + "</p></section>";
+    const content = heading + toolbar + "<div class='session-list'>" + cards + "</div>" + pagination;
+    return embedded ? "<section class='overview-section sessions-section'>" + content + "</section>" : content;
   };
   const accessView = () => {
     const access = dashboard.access;
@@ -1229,7 +1247,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   let currentView = VIEWS[0];
   const show = (view, focusSelector) => {
     currentView = view;
-    root.innerHTML = view === "Usage" ? usageOverview() : view === "Sessions" ? sessionsView() : view === "Access" ? accessView() : view === "Evidence" ? evidenceView() : bodies[view];
+    root.innerHTML = view === "Usage" ? usageOverview() : view === "Access" ? accessView() : view === "Evidence" ? evidenceView() : bodies[view];
     for (const button of nav.querySelectorAll("button")) {
       button.setAttribute("aria-current", String(button.dataset.view === view));
     }
@@ -1256,14 +1274,14 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     if (activityDay) {
       sessionDateFilter = activityDay.dataset.activityDate;
       sessionPage = 1;
-      show("Sessions", "button[data-clear-session-date]");
+      show("Usage", "button[data-clear-session-date]");
       return;
     }
     const clearSessionDate = event.target.closest ? event.target.closest("button[data-clear-session-date]") : null;
     if (clearSessionDate) {
       sessionDateFilter = null;
       sessionPage = 1;
-      show("Sessions", "select[data-session-sort]");
+      show("Usage", "select[data-session-sort]");
       return;
     }
     const runtimeButton = event.target.closest ? event.target.closest("button[data-runtime]") : null;
@@ -1287,9 +1305,9 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     if (pageButton && !pageButton.disabled) {
       const previousPage = sessionPage;
       sessionPage = Number(pageButton.dataset.page);
-      const lastPage = Math.max(1, Math.ceil(dashboard.sessions.length / sessionPageSize));
+      const lastPage = Math.max(1, Math.ceil(orderedSessions().length / sessionPageSize));
       const focusSelector = sessionPage < previousPage || sessionPage === lastPage ? ".pagination button:first-child" : ".pagination button:last-child";
-      show("Sessions", focusSelector);
+      show("Usage", focusSelector);
       return;
     }
     const suggestionAction = event.target.closest ? event.target.closest("button[data-suggestion-action]") : null;
@@ -1302,7 +1320,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
         const sessionIndex = orderedSessions().findIndex((candidate) => candidate.session_ref === sessionRef);
         if (sessionIndex < 0) return;
         sessionPage = Math.floor(sessionIndex / sessionPageSize) + 1;
-        show("Sessions", "button[data-session-ref='" + sessionRef + "']");
+        show("Usage", "button[data-session-ref='" + sessionRef + "']");
         const sessionButton = root.querySelector("button[data-session-ref='" + sessionRef + "']");
         if (sessionButton) openCanonicalSession(sessionButton);
         return;
@@ -1373,7 +1391,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     if (!sortControl) return;
     sessionSort = ["tokens", "recent", "tools"].includes(sortControl.value) ? sortControl.value : "tokens";
     sessionPage = 1;
-    show("Sessions", "select[data-session-sort]");
+    show("Usage", "select[data-session-sort]");
   });
   document.getElementById("theme").addEventListener("change", (event) => {
     document.documentElement.dataset.theme = event.target.value;

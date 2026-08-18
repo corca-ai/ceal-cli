@@ -20,7 +20,7 @@ is the maintained local demo entry point; its fixture is synthetic and cannot
 be consumed as production evidence.
 
 The shell is complete for this slice when a presenter can open one loopback URL
-and demonstrate the Usage, Sessions, and Access journeys, switch runtime,
+and demonstrate the combined Usage/session, Access, and Evidence journeys, switch runtime,
 metric, theme, and color mode, inspect a session, and traverse a history above
 one hundred sessions without contradictory totals or unbounded scrolling.
 
@@ -109,14 +109,15 @@ The observer exposes the results as `local_usage_dashboards`, with the Codex
 partition retained at `local_usage_dashboard` for compatibility. Consumers
 reject fixture provenance or a missing production discriminator.
 
-The Workbench now renders that canonical dataset through separate Usage,
-Sessions, Access, and Evidence tabs, with an in-page Korean/English selector.
-Usage switches among Sessions, Agent tool calls, Tokens, and Estimated cost
-without changing evidence semantics; its activity field explicitly defines one
-cell as one local calendar day and uses a visible relative-intensity legend.
-Each rendered activity date opens the returned session details for that local
-date; the UI states when daily aggregates and returned detail have different
-coverage. Sessions uses task-first rows, defaults to highest observed token use,
+The Workbench now renders that canonical dataset through Usage, Access, and
+Evidence tabs, with an in-page Korean/English selector. Usage combines its
+activity field and bounded session detail in one page. It switches among
+Sessions, Agent tool calls, Tokens, and Estimated cost without changing
+evidence semantics; both runtime partitions render the same selected-period
+calendar scaffold, while missing daily evidence remains unavailable rather
+than zero. Each calendar cell filters the session detail below without changing
+tabs or browser history; the UI states when daily aggregates and returned detail
+have different coverage. Session detail uses task-first rows, defaults to highest observed token use,
 offers recent/tool-call alternatives, and keeps twenty-row pagination so a
 history over one hundred rows does not turn into one unbounded scroll. Synthetic
 demo task names are visibly labeled as synthetic; production observations never

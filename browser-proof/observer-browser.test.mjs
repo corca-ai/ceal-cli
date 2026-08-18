@@ -39,14 +39,13 @@ test("a real browser executes the local Workbench overview", { timeout: 45_000 }
 	assert.deepEqual(pageErrors, []);
 	assert.equal(await page.locator("#root .hero h2").textContent(), "0 sessions observed.");
 	await page.getByText("Local Profile unavailable").waitFor();
-	await page.getByText(/Each square is one date present/u).waitFor();
+	await page.getByText(/Both runtimes use the same selected-period calendar/u).waitFor();
 	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
 	await page.getByRole("heading", { name: "Estimated cost · unsupported" }).waitFor();
 	assert.equal(await page.locator("button[data-metric='estimated_cost']").evaluate((element) => element === document.activeElement), true);
 	assert.equal(await page.locator("html").getAttribute("data-theme"), "developer");
 	assert.equal(await page.locator("html").getAttribute("data-mode"), null);
 
-	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await page.getByText("No sessions observed in the selected window").waitFor();
 	await page.getByRole("button", { name: "Access", exact: true }).click();
 	await page.getByText("Capability access unavailable").waitFor();
@@ -90,7 +89,10 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByText("ceal.local_usage_rules v2").first().waitFor();
 	await page.getByText(/not model judgment or a productivity score/u).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
-	await page.getByText(/claude:session_inventory:v1/u).waitFor();
+	await page
+		.getByText(/claude:session_inventory:v1/u)
+		.first()
+		.waitFor();
 	await page.getByRole("button", { name: "Review token coverage" }).click();
 	await page.waitForFunction(() => document.querySelector("button[data-view='Evidence']")?.getAttribute("aria-current") === "true");
 	assert.equal(await page.getByRole("button", { name: "Evidence", exact: true }).getAttribute("aria-current"), "true");
@@ -99,34 +101,43 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 		true,
 	);
 	await page.getByRole("button", { name: "Usage", exact: true }).click();
-	await page.getByRole("button", { name: /Tokens/u }).click();
-	await page.getByText(/claude:event_usage_sum:v1/u).waitFor();
+	await page.locator("button[data-metric='tokens']").click();
+	await page
+		.getByText(/claude:event_usage_sum:v1/u)
+		.first()
+		.waitFor();
 	assert.equal(await page.locator("button[data-metric='tokens']").getAttribute("aria-pressed"), "true");
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
-	await page.getByText(/codex:runtime_cumulative_last:v1/u).waitFor();
+	await page
+		.getByText(/codex:runtime_cumulative_last:v1/u)
+		.first()
+		.waitFor();
 	assert.equal(await page.locator("button[data-metric='tokens']").getAttribute("aria-pressed"), "true");
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
 	assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-runtime")), "claude");
-	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 4);
 	assert.equal(await page.locator("button[data-session-ref] .pill").filter({ hasText: "claude" }).count(), 4);
-	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	assert.equal(await page.getByRole("button", { name: "Claude", exact: true }).getAttribute("aria-pressed"), "true");
 	assert.equal(await page.locator("button[data-metric='tokens']").getAttribute("aria-pressed"), "true");
 	await page.getByRole("button", { name: /Estimated cost Unavailable/u }).click();
 	await page.getByRole("heading", { name: "Estimated cost · unsupported" }).waitFor();
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.locator("button[data-metric='sessions']").click();
-	assert.equal(await page.locator(".activity-grid button[data-activity-date]").count(), 3);
+	assert.ok((await page.locator(".activity-grid button[data-activity-date]").count()) > 3);
 	await page.getByRole("button", { name: /Estimated cost USD/u }).click();
 	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
-	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
-	await page.getByRole("button", { name: /Tokens/u }).click();
-	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
+	await page
+		.getByText(/observed of 3 eligible sessions/u)
+		.first()
+		.waitFor();
+	await page.locator("button[data-metric='tokens']").click();
+	await page
+		.getByText(/observed of 3 eligible sessions/u)
+		.first()
+		.waitFor();
 	await page.getByText("Unavailable", { exact: true }).waitFor();
 	assert.ok((await page.locator(".activity-grid .day.unavailable").count()) > 0);
 
-	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 3);
 	await page.getByText("gpt-review-codex", { exact: true }).first().waitFor();
 	await page
@@ -152,11 +163,10 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.locator("#language").selectOption("ko");
 	await page.getByRole("heading", { name: "이 프로필로 Ceal에서 할 수 있는 일" }).waitFor();
 	await page.getByRole("button", { name: "사용량", exact: true }).click();
-	await page.getByText(/한 칸은 로컬 관측 범위에 포함된 날짜/u).waitFor();
+	await page.getByText(/두 런타임은 같은 선택 기간의 달력을 사용합니다/u).waitFor();
 	await page.getByText("관측값 0", { exact: true }).waitFor();
 	await page.getByText("높음", { exact: true }).waitFor();
 	await page.getByText("확인 불가", { exact: true }).first().waitFor();
-	await page.getByRole("button", { name: "세션", exact: true }).click();
 	await page.getByText("합성 작업명", { exact: true }).first().waitFor();
 	await page.getByRole("button", { name: "데이터 근거", exact: true }).click();
 	await page.getByRole("heading", { name: "이 대시보드의 숫자를 어디까지 믿을 수 있는지" }).waitFor();
@@ -209,14 +219,12 @@ test("the browser distinguishes unavailable Agent inventory from zero sessions",
 	await page.goto(url);
 	await page.getByRole("heading", { name: "Sessions · unavailable" }).waitFor();
 	await page.getByText("Missing evidence is not rendered as zero").waitFor();
-	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await page.getByText("Session inventory · unavailable").waitFor();
 	await page.getByText("No zero-session claim is made.").waitFor();
 	await page.locator("#language").selectOption("ko");
 	await page.getByRole("button", { name: "사용량", exact: true }).click();
 	await page.getByRole("button", { name: /예상 비용 확인 불가/u }).click();
 	await page.getByRole("heading", { name: "예상 비용 · 미지원" }).waitFor();
-	await page.getByRole("button", { name: "세션", exact: true }).click();
 	await page.getByText("세션 목록 · 확인 불가").waitFor();
 });
 
@@ -245,9 +253,20 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
 	await page.getByRole("button", { name: /Agent tool calls 508/u }).waitFor();
 	await page.getByText(/separate local sources and accounting semantics/u).waitFor();
+	const selectedWindow = await page.evaluate(
+		async () => (await (await fetch("/api/observer/v2/state")).json()).local_usage_dashboard.window,
+	);
+	const codexCalendarCellCount = await page.locator("button[data-activity-date]").count();
+	const lastIncludedDate = new Date(`${selectedWindow.end_date}T00:00:00.000Z`);
+	lastIncludedDate.setUTCDate(lastIncludedDate.getUTCDate() - 1);
+	assert.equal(await page.locator("button[data-activity-date]").first().getAttribute("data-activity-date"), selectedWindow.start_date);
+	assert.equal(
+		await page.locator("button[data-activity-date]").last().getAttribute("data-activity-date"),
+		lastIncludedDate.toISOString().slice(0, 10),
+	);
 	const activityDate = await page.locator("button[data-activity-date]").first().getAttribute("data-activity-date");
 	await page.locator("button[data-activity-date]").first().click();
-	assert.equal(await page.getByRole("button", { name: "Sessions", exact: true }).getAttribute("aria-current"), "true");
+	assert.equal(await page.getByRole("button", { name: "Usage", exact: true }).getAttribute("aria-current"), "true");
 	await page
 		.getByText(new RegExp(`${activityDate} · \\d+ returned session details`, "u"))
 		.first()
@@ -277,7 +296,7 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.keyboard.press("Enter");
 	await page.getByRole("dialog").waitFor();
 	await page.getByText("Agent session evidence").waitFor();
-	assert.equal(await page.getByRole("button", { name: "Sessions", exact: true }).getAttribute("aria-current"), "true");
+	assert.equal(await page.getByRole("button", { name: "Usage", exact: true }).getAttribute("aria-current"), "true");
 	const referencedSession = page.locator("button[data-session-ref='22222222-2222-3333-4444-000000000050']");
 	assert.equal(await referencedSession.count(), 1);
 	await page.keyboard.press("Escape");
@@ -286,11 +305,12 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.getByRole("button", { name: /Tokens 924,000/u }).waitFor();
 	await page.getByRole("button", { name: /Estimated cost USD 3[.]36/u }).click();
 	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
-	assert.equal(await page.locator(".activity-grid button[data-activity-date]").count(), 61);
+	assert.equal(await page.locator(".activity-grid button[data-activity-date]").count(), codexCalendarCellCount);
 	await page.getByText("profile:review-personal", { exact: true }).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
+	await page.locator("button[data-metric='sessions']").click();
+	assert.equal(await page.locator("button[data-activity-date]").count(), codexCalendarCellCount);
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
-	await page.getByRole("button", { name: "Sessions", exact: true }).click();
 	await page.getByText("Page 1 of 6 · 105 of 105 eligible sessions returned").waitFor();
 	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
 	await page.getByRole("button", { name: "Next" }).click();
