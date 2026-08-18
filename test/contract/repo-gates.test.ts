@@ -99,6 +99,8 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
 	const commonPhases = [
 		"npm run lint",
+		"npm run lint:secrets",
+		"npm run lint:import-hard-failures",
 		"npm run lint:no-legacy-mjs",
 		"npm run lint:source-nul-bytes",
 		"npm run lint:markdown",
