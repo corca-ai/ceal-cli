@@ -46,3 +46,23 @@ run_gate "type ratchet" npm run lint:types
 run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
 run_gate "gate contract" node test/gate-contract-lib.ts
 run_gate "shell lint" npm run lint:shell
+
+# Added 2026-08-18 on the measurement this file asks for, not on the argument
+# that they "feel cheap". Timed on this host with a warm tree: unused 1.2s,
+# reachability 1.0s, store-lock 0.9s, duplicate-literal 0.8s — 3.9s against a
+# prior tier of ~2.8s.
+#
+# They earn it by what they catch and WHEN. Merging the paused quality lane put a
+# dead export and a test file outside every lane directory into the tree; both are
+# answerable from source alone, both sat silent through five commits, and both
+# surfaced only when `npm run check` reached them at push — after the commits they
+# belonged to were already written. That is the rework this tier exists to stop.
+#
+# All four read source only: knip's entry/project globs in knip.json name src,
+# scripts, and test; the other three never open dist (checked, not assumed — the
+# one "dist" match in check-duplicate-literal.ts is the word "distinct"). So they
+# hold the tier's no-build promise. Re-time them before adding a fifth.
+run_gate "unused exports" npm run lint:unused
+run_gate "production reachability" npm run lint:reachability
+run_gate "store lock census" npm run lint:store-lock
+run_gate "duplicate literal" npm run lint:duplicate-literal

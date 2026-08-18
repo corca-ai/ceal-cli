@@ -18,9 +18,13 @@
 					"gate_commands": [
 						"node test/gate-contract-lib.ts",
 						"npm run lint",
+						"npm run lint:duplicate-literal",
 						"npm run lint:no-legacy-mjs",
+						"npm run lint:reachability",
 						"npm run lint:shell",
-						"npm run lint:types"
+						"npm run lint:store-lock",
+						"npm run lint:types",
+						"npm run lint:unused"
 					]
 				}
 			]

@@ -41,6 +41,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { isMainModule } from "../scripts/lib/is-main-module.ts";
 
 export const GATE_CONTRACT_SCHEMA = "ceal.gate_contract.v1";
@@ -191,10 +192,6 @@ export function deriveWorkflows(repoRoot: string): WorkflowTier[] {
 
 export function deriveContract(repoRoot: string) {
 	return { hook_tiers: deriveHookTiers(repoRoot), workflows: deriveWorkflows(repoRoot) };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** A list member's stable identity: its own name, or the string itself. */
