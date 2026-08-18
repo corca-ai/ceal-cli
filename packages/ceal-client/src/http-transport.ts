@@ -341,7 +341,7 @@ function responseShapeIssue(value: unknown, operation: CealGatewayRequest["opera
 		catalog?.target_count === 0
 		&& catalog.returned_count === 0
 		&& catalog.complete === false
-		&& catalog.next_cursor === undefined
+		&& (catalog.next_cursor === undefined || catalog.next_cursor === null)
 	) return "discovery_target_catalog_incomplete_without_cursor";
 	return undefined;
 }

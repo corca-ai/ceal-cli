@@ -410,6 +410,33 @@ test("HTTP transport leaves a non-empty incomplete discovery page as generic pro
 	});
 });
 
+test("HTTP transport identifies an empty discovery page with a null continuation cursor", async () => {
+	const discoveryRequest: DiscoverInput = {
+		request_id: "request:discover:null-cursor-001",
+		operation: "discover",
+		profile_ref: "profile:test",
+		body: {},
+	};
+	const response = discoveryResponse(discoveryRequest);
+	const nullCursorCatalog = {
+		...response,
+		value: {
+			...response.value,
+			target_catalog: { target_count: 0, returned_count: 0, complete: false, next_cursor: null },
+		},
+	};
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(nullCursorCatalog),
+	});
+	await assert.rejects(createCealClient(transport).request(discoveryRequest), (error) => {
+		assert.ok(error instanceof CealHttpTransportError);
+		assert.equal(error.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+		return true;
+	});
+});
+
 // The declared-length branch had no test on either side of the refactor that
 // moved it into request-bounds.ts, so nothing would have said if its two codes
 // swapped. They are different answers to the caller: `invalid_response` means the
