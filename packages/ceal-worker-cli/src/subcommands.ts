@@ -260,7 +260,10 @@ export function splitSubcommandRoute(
 	parent: CealCommandName,
 	options: readonly string[],
 ): { subcommand?: CealSubcommandDefinition; rest: readonly string[] } {
-	if (options.length === 0) return { subcommand: defaultSubcommand(parent), rest: options };
+	if (options.length === 0) {
+		const subcommand = defaultSubcommand(parent);
+		return subcommand === undefined ? { rest: options } : { subcommand, rest: options };
+	}
 	const leading: string[] = [];
 	for (const option of options) {
 		if (option.startsWith("-")) break;

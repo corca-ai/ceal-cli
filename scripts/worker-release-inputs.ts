@@ -65,14 +65,14 @@ const GATEWAY_PROTOCOL_REQUIREMENT = Object.freeze({
 
 type JsonRecord = Record<string, unknown>;
 type PathInputOptions = {
-	repoRoot?: string;
-	inventoryPath?: string;
-	protocolTarball?: string;
-	protocolProvenance?: string;
-	controlConformance?: string;
-	handoffManifest?: string;
-	expectedHandoffSha256?: string;
-	gatewayHandoffArchive?: string;
+	repoRoot?: string | undefined;
+	inventoryPath?: string | undefined;
+	protocolTarball?: string | undefined;
+	protocolProvenance?: string | undefined;
+	controlConformance?: string | undefined;
+	handoffManifest?: string | undefined;
+	expectedHandoffSha256?: string | undefined;
+	gatewayHandoffArchive?: string | undefined;
 };
 type RawInputs = {
 	repoRoot: string;

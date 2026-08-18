@@ -48,17 +48,17 @@ const REQUIRED_COMMANDS = Object.freeze(["update", "session", "guide", "capabili
 
 type JsonRecord = Record<string, unknown>;
 type NativeOptions = {
-	repoRoot?: string;
-	inventoryPath?: string;
-	outputDirectory?: string;
-	force?: boolean;
-	platform?: string;
-	gatewayHandoffArchive?: string;
-	protocolTarball?: string;
-	protocolProvenance?: string;
-	controlConformance?: string;
-	handoffManifest?: string;
-	expectedHandoffSha256?: string;
+	repoRoot?: string | undefined;
+	inventoryPath?: string | undefined;
+	outputDirectory?: string | undefined;
+	force?: boolean | undefined;
+	platform?: string | undefined;
+	gatewayHandoffArchive?: string | undefined;
+	protocolTarball?: string | undefined;
+	protocolProvenance?: string | undefined;
+	controlConformance?: string | undefined;
+	handoffManifest?: string | undefined;
+	expectedHandoffSha256?: string | undefined;
 };
 type ResolverInput = Parameters<typeof withWorkerReleaseInputsAsync>[1] extends (value: infer Value) => unknown ? Value : never;
 type NativeInputValue = ResolverInput;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { inspectAgentAudit, inspectAgentSessionEvents } from "./agent-audit.js";
 import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-guide.js";
+import type { CealCommandRuntime } from "./cli-runtime.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
 import { readEmbeddedCealGuideBundle } from "./embedded-guide.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
@@ -46,10 +47,10 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 	const session = timedSessionStore
 		? createCealSessionCapability({
 				store: timedSessionStore,
-				timing,
+				...(timing === undefined ? {} : { timing }),
 				now: Date.now,
-				removeDiscoveryCache: discoveryCache ? () => discoveryCache.remove() : undefined,
-				removeReceiptSpool: receiptSpool ? () => receiptSpool.remove() : undefined,
+				...(discoveryCache === undefined ? {} : { removeDiscoveryCache: () => discoveryCache.remove() }),
+				...(receiptSpool === undefined ? {} : { removeReceiptSpool: () => receiptSpool.remove() }),
 			})
 		: undefined;
 
@@ -63,6 +64,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 		readEmbeddedCealGuideBundle(),
 	);
 	const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
+	const discoveryCacheTtlMs = parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS);
 	finishCealTiming(prepareTiming, "ok");
 
 	return await runCealCommand(
@@ -72,17 +74,27 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 			stderr: process.stderr,
 		},
 		{
-			timing,
+			...(timing === undefined ? {} : { timing }),
 			readSecret: readStdinSecret,
 			promptEnrollmentCode: () => readHiddenTerminalEnrollmentCode(process.stdin, process.stderr),
 			isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stderr.isTTY && typeof process.stdin.setRawMode === "function"),
 			isOutputTerminal: () => Boolean(process.stderr.isTTY),
 			isInputTerminal: () => Boolean(process.stdin.isTTY),
-			session,
-			loadDiscoveryCache: discoveryCache ? () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()) : undefined,
-			saveDiscoveryCache: discoveryCache ? (entry) => discoveryCache.save(entry) : undefined,
-			inspectAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_inspect", () => agentGuide.inspect(agent)) : undefined,
-			registerAgentGuide: agentGuide ? (agent) => withCealTimingSync(timing, "guide_register", () => agentGuide.register(agent)) : undefined,
+			...(session === undefined ? {} : { session }),
+			...(discoveryCache === undefined
+				? {}
+				: {
+						loadDiscoveryCache: () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()),
+						saveDiscoveryCache: (entry: Parameters<NonNullable<CealCommandRuntime["saveDiscoveryCache"]>>[0]) => discoveryCache.save(entry),
+					}),
+			...(agentGuide === undefined
+				? {}
+				: {
+						inspectAgentGuide: (agent: Parameters<NonNullable<CealCommandRuntime["inspectAgentGuide"]>>[0]) =>
+							withCealTimingSync(timing, "guide_inspect", () => agentGuide.inspect(agent)),
+						registerAgentGuide: (agent: Parameters<NonNullable<CealCommandRuntime["registerAgentGuide"]>>[0]) =>
+							withCealTimingSync(timing, "guide_register", () => agentGuide.register(agent)),
+					}),
 			// The append takes the spool's cross-process lock, so it is genuinely
 			// async and is not awaited here: a spool write must not delay the call's
 			// own result, which is already on stdout before this runs.
@@ -96,24 +108,26 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 			// The .catch keeps a rejected or contended write from becoming an
 			// unhandled rejection. It leaves a drop trace so the observer reports an
 			// incomplete history rather than a quietly short one.
-			recordReceiptSpool: receiptSpool
-				? (identity, entry) => {
-						void withCealTiming(timing, "receipt_spool_append", () => receiptSpool.append(identity, entry)).catch(() =>
-							receiptSpool.recordDrop(identity),
-						);
-					}
-				: undefined,
-			recordReceiptSpoolDrop: receiptSpool
-				? (identity) => {
-						void receiptSpool.recordDrop(identity);
-					}
-				: undefined,
-			loadReceiptSpool:
-				receiptSpool && sessionStore
-					? async (session) => {
-							return session ? withCealTiming(timing, "receipt_spool_load", () => receiptSpool.load(sessionIdentityDiscriminator(session))) : null;
-						}
-					: undefined,
+			...(receiptSpool === undefined
+				? {}
+				: {
+						recordReceiptSpool: (identity: string, entry: Parameters<NonNullable<CealCommandRuntime["recordReceiptSpool"]>>[1]) => {
+							void withCealTiming(timing, "receipt_spool_append", () => receiptSpool.append(identity, entry)).catch(() =>
+								receiptSpool.recordDrop(identity),
+							);
+						},
+						recordReceiptSpoolDrop: (identity: string) => {
+							void receiptSpool.recordDrop(identity);
+						},
+						...(sessionStore === undefined
+							? {}
+							: {
+									loadReceiptSpool: async (storedSession: Parameters<NonNullable<CealCommandRuntime["loadReceiptSpool"]>>[0]) =>
+										storedSession
+											? withCealTiming(timing, "receipt_spool_load", () => receiptSpool.load(sessionIdentityDiscriminator(storedSession)))
+											: null,
+								}),
+					}),
 			inspectAgentAudit: () =>
 				withCealTimingSync(timing, "observer_transcript_scan", () => inspectAgentAudit(process.env.HOME, agentHostOverrides, Date.now())),
 			inspectAgentSession: (runtimeName, sessionRef) =>
@@ -122,7 +136,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 				),
 			runStableUpdate,
 			executablePath: process.execPath,
-			discoveryCacheTtlMs: parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS),
+			...(discoveryCacheTtlMs === undefined ? {} : { discoveryCacheTtlMs }),
 			nextRequestId: () => `ceal:${randomUUID()}`,
 		},
 	);

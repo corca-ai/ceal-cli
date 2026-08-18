@@ -22,9 +22,9 @@ type ProtocolVendorPinFixture = {
 		status: string;
 		gateway_commit: string;
 		protocol_tree: string;
-		reason?: string;
-		disposition_owner?: string;
-		disposition_request?: string;
+		reason?: string | undefined;
+		disposition_owner?: string | undefined;
+		disposition_request?: string | undefined;
 	};
 	non_claims: string[];
 };

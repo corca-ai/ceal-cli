@@ -48,9 +48,9 @@ type Environment = NodeJS.ProcessEnv;
 type FailureCode = string;
 
 interface ResolveBinaryOptions {
-	repoRoot?: string;
-	binary?: string;
-	env?: Environment;
+	repoRoot?: string | undefined;
+	binary?: string | undefined;
+	env?: Environment | undefined;
 }
 
 interface CommandBounds {
@@ -66,12 +66,12 @@ interface RunCommandOptions extends CommandBounds {
 }
 
 interface BuildPacketOptions {
-	repoRoot?: string;
-	binary?: string;
-	capability?: string;
-	target?: string;
-	env?: Environment;
-	commandBounds?: CommandBounds;
+	repoRoot?: string | undefined;
+	binary?: string | undefined;
+	capability?: string | undefined;
+	target?: string | undefined;
+	env?: Environment | undefined;
+	commandBounds?: CommandBounds | undefined;
 }
 
 interface ArtifactDescriptor {
@@ -112,11 +112,11 @@ interface CommandResult {
 
 interface ReceiptObservation {
 	[key: string]: unknown;
-	readback_status?: string;
-	gateway_audit_readback?: string;
-	provider_state_readback?: string;
-	outcome?: string;
-	authorization?: string;
+	readback_status?: string | undefined;
+	gateway_audit_readback?: string | undefined;
+	provider_state_readback?: string | undefined;
+	outcome?: string | undefined;
+	authorization?: string | undefined;
 	audit_refs: string[];
 	gateway_elapsed_ms: number | null;
 	exit_code: number;
@@ -126,10 +126,10 @@ interface ReceiptObservation {
 interface BoundedCapabilityCall {
 	capability: string;
 	target: string;
-	status?: string;
+	status?: string | undefined;
 	exit_code: number;
 	elapsed_ms: number;
-	evidence?: string;
+	evidence?: string | undefined;
 	request_ref: string | null;
 	receipt: ReceiptObservation | null;
 }
@@ -142,12 +142,12 @@ interface InstalledClient {
 	artifact_state: string;
 	manifest: string;
 	digest_agreement: string;
-	reported_version?: string;
-	client_protocol_version?: string;
+	reported_version?: string | undefined;
+	client_protocol_version?: string | undefined;
 }
 
 interface GuideObservation {
-	status?: string;
+	status?: string | undefined;
 	exit_code: number;
 	resolved_host_paths: string[];
 	registered_host_count: number;
@@ -157,11 +157,11 @@ interface GatewaySessionObservation {
 	reached: boolean;
 	exit_code: number;
 	elapsed_ms: number;
-	instance_ref?: string;
-	profile_ref?: string;
-	negotiated_protocol_version?: string;
-	host_decision?: string;
-	catalog_source?: string;
+	instance_ref?: string | undefined;
+	profile_ref?: string | undefined;
+	negotiated_protocol_version?: string | undefined;
+	host_decision?: string | undefined;
+	catalog_source?: string | undefined;
 	live_gateway_checked: boolean;
 	capability_count: number;
 }
@@ -196,10 +196,10 @@ interface SanitizableAcceptancePacket<GatewayProtocolInput extends object> {
 interface SanitizableBoundedCapabilityCall {
 	capability: string;
 	target: string;
-	status?: string;
+	status?: string | undefined;
 	exit_code: number;
 	elapsed_ms: number;
-	evidence?: string;
+	evidence?: string | undefined;
 	request_ref: string | null;
 	receipt: JsonRecord | null;
 }
@@ -217,30 +217,30 @@ interface SanitizedAcceptanceRecord<GatewayProtocolInput extends object> {
 		artifact_state: string;
 		manifest: string;
 		digest_agreement: string;
-		reported_version?: string;
-		client_protocol_version?: string;
+		reported_version?: string | undefined;
+		client_protocol_version?: string | undefined;
 	};
 	gateway_protocol_input: GatewayProtocolInput;
-	guide: { status?: string; exit_code: number; registered_host_count: number };
+	guide: { status?: string | undefined; exit_code: number; registered_host_count: number };
 	gateway_session: {
 		reached: boolean;
 		exit_code: number;
 		elapsed_ms: number;
-		instance_ref?: string;
-		profile_ref?: string;
-		negotiated_protocol_version?: string;
-		host_decision?: string;
-		catalog_source?: string;
+		instance_ref?: string | undefined;
+		profile_ref?: string | undefined;
+		negotiated_protocol_version?: string | undefined;
+		host_decision?: string | undefined;
+		catalog_source?: string | undefined;
 		live_gateway_checked: boolean;
 		capability_count: number;
 	};
 	bounded_capability_call: {
 		capability: string;
 		target: string;
-		status?: string;
+		status?: string | undefined;
 		exit_code: number;
 		elapsed_ms: number;
-		evidence?: string;
+		evidence?: string | undefined;
 		request_ref: string | null;
 		receipt: Record<string, unknown> | null;
 	} | null;

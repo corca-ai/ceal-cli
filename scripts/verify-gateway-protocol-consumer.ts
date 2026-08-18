@@ -90,10 +90,10 @@ type VerificationResult = {
 	workspace: string | null;
 };
 export type GatewayProtocolConsumerOptions = {
-	repoRoot?: string;
-	protocolTarball?: string;
-	protocolProvenance?: string;
-	keepWorkspace?: boolean;
+	repoRoot?: string | undefined;
+	protocolTarball?: string | undefined;
+	protocolProvenance?: string | undefined;
+	keepWorkspace?: boolean | undefined;
 };
 type ParsedArguments = { help: true } | { options: GatewayProtocolConsumerOptions };
 type SpawnResult = SpawnSyncReturns<string>;

@@ -28,7 +28,7 @@ interface CommandResult {
 	status: number | null;
 	stdout: string;
 	stderr: string;
-	error?: Error;
+	error?: Error | undefined;
 }
 
 interface RunOptions {

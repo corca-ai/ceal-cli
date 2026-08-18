@@ -11,8 +11,10 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
 		"erasableSyntaxOnly": true,
 		"types": ["node"],
+		"skipLibCheck": true,
 		"allowImportingTsExtensions": true,
 		"paths": {
 			"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],

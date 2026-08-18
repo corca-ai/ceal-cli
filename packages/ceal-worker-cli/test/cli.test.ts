@@ -164,11 +164,11 @@ function prepareRuntime(runtime: TestRuntime): CealCommandRuntime {
 		...commandRuntime,
 		session: createCealSessionCapability({
 			store,
-			timing: commandRuntime.timing,
-			now: commandRuntime.now,
-			removeDiscoveryCache,
-			removeReceiptSpool,
-			createClientSessionClient,
+			...(commandRuntime.timing === undefined ? {} : { timing: commandRuntime.timing }),
+			...(commandRuntime.now === undefined ? {} : { now: commandRuntime.now }),
+			...(removeDiscoveryCache === undefined ? {} : { removeDiscoveryCache }),
+			...(removeReceiptSpool === undefined ? {} : { removeReceiptSpool }),
+			...(createClientSessionClient === undefined ? {} : { createClientSessionClient }),
 		}),
 	};
 }
@@ -4251,10 +4251,13 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 	malformed.navigation.required_argument_source.issued_by = [];
 	assert.equal(classifyUnsupportedTargetSelector([malformed], selection), null, "malformed metadata cannot invent a refusal");
 	assert.equal(
-		classifyUnsupportedTargetSelector([{ ...capability, capability_id: "resource.resolve", navigation: undefined }], {
-			...selection,
-			body: { ...selection.body, capability_id: "resource.resolve" },
-		}),
+		classifyUnsupportedTargetSelector(
+			[{ ...(({ navigation: _navigation, ...withoutNavigation }) => withoutNavigation)(capability), capability_id: "resource.resolve" }],
+			{
+				...selection,
+				body: { ...selection.body, capability_id: "resource.resolve" },
+			},
+		),
 		null,
 		"a URL-capable selector without a refusal declaration remains available",
 	);
@@ -4288,7 +4291,7 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 			`Run 'ceal capabilities targets --capability message.search --profile profile:narnia --cursor ${selectedCatalog.next_cursor}'.`,
 		);
 
-		selectedCatalog = { target_count: 0, returned_count: 0, complete: true, next_cursor: undefined };
+		selectedCatalog = { target_count: 0, returned_count: 0, complete: true };
 		const matchedEmpty = await yamlRun(args, 0, runtime);
 		assert.match(matchedEmpty.next_action, /response alone does not prove the capability has no authorized targets/u);
 		assert.match(matchedEmpty.next_action, /--profile profile:narnia --limit 64/u);

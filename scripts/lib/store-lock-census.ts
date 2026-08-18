@@ -251,7 +251,7 @@ function analyzeModule(relative: string, source: ts.SourceFile): CensusModule | 
  * this check can only be trusted while it is looking at the modules it claims
  * to, and a renamed lock helper would otherwise empty it silently.
  */
-type StoreLockOptions = { repoRoot: string; roots?: readonly string[] };
+type StoreLockOptions = { repoRoot: string; roots?: readonly string[] | undefined };
 type StoreLockReport = { considered: string[]; guarded: CensusModule[]; skipped: string[]; findings: Finding[]; exempt: Exempt[] };
 
 export function analyzeStoreLockCensus({ repoRoot, roots }: StoreLockOptions): StoreLockReport {

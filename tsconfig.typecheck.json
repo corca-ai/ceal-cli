@@ -12,6 +12,7 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
 		"types": ["node"],
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,

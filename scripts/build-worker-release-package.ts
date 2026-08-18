@@ -42,11 +42,11 @@ const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
 // `.bin` links to exist in the checkout that supplies them.
 const OMITTED_OWNED_PACKAGE_DIRECTORIES = Object.freeze(["dist", "node_modules"]);
 type ReleaseOptions = {
-	repoRoot?: string;
-	outputDirectory?: string;
-	force?: boolean;
-	gatewayHandoffArchive?: string;
-	protocolTarball?: string;
+	repoRoot?: string | undefined;
+	outputDirectory?: string | undefined;
+	force?: boolean | undefined;
+	gatewayHandoffArchive?: string | undefined;
+	protocolTarball?: string | undefined;
 };
 type PackageIdentity = { package: string; source_path: string; command?: string };
 type ReleaseInputs = {

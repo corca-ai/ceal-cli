@@ -109,7 +109,7 @@ function patternBody(literal: string): string {
  * target: it is frozen, it hand-copies its own `SAFE_REF` three times, and a
  * finding there names a site no agent in this lane may edit.
  */
-type DuplicateOptions = { repoRoot: string; roots?: readonly string[] };
+type DuplicateOptions = { repoRoot: string; roots?: readonly string[] | undefined };
 type DuplicateReport = {
 	considered: string[];
 	scanned: number;

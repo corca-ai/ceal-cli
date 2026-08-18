@@ -454,7 +454,7 @@ async function dispatch(
 				deadlineMs: operationDeadlineMs,
 				maximumResponseBytes: MAX_FRAME_BYTES,
 				errors: SHIPPED_SOCKET_ERROR_NAMES,
-				signal,
+				...(signal === undefined ? {} : { signal }),
 			}),
 		signal,
 	);

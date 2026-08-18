@@ -88,16 +88,26 @@ type ContractDescriptor = { contract: unknown; sha256: string };
 type GuideBundle = { bytes: Buffer; files: Array<{ path: string; bytes: number; sha256: string; mode: number }>; sha256: string };
 type NativeBuild = typeof buildWorkerNativeArtifact;
 type ComposeOptions = {
-	repoRoot?: string;
-	outputDirectory?: string;
-	force?: boolean;
-	gatewayHandoffArchive?: string;
-	platform?: string;
-	version?: string;
+	repoRoot?: string | undefined;
+	outputDirectory?: string | undefined;
+	force?: boolean | undefined;
+	gatewayHandoffArchive?: string | undefined;
+	platform?: string | undefined;
+	version?: string | undefined;
 };
 type ComposeDependencies = { buildNative?: NativeBuild };
-type MergeOptions = { repoRoot?: string; outputDirectory?: string; force?: boolean; inputs?: unknown[] };
-type ParsedArgs = { help: boolean; json: boolean; mode?: string; options: ComposeOptions & { inputs: string[]; force: boolean } };
+type MergeOptions = {
+	repoRoot?: string | undefined;
+	outputDirectory?: string | undefined;
+	force?: boolean | undefined;
+	inputs?: unknown[] | undefined;
+};
+type ParsedArgs = {
+	help: boolean;
+	json: boolean;
+	mode?: string | undefined;
+	options: ComposeOptions & { inputs: string[]; force: boolean };
+};
 export const WorkerReleaseAssetsError = codedErrorClass("WorkerReleaseAssetsError");
 
 /**

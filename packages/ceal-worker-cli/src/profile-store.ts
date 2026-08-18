@@ -141,7 +141,7 @@ async function withStateLock<T>(directory: string, action: () => Promise<T>, onA
 			onBusy: () => {
 				throw new CealSessionStoreError("refresh_busy");
 			},
-			onAcquired,
+			...(onAcquired === undefined ? {} : { onAcquired }),
 		},
 		action,
 	);

@@ -181,7 +181,7 @@ export interface CealAgentGuideStore {
 }
 
 interface ResolvedGuideHost {
-	registrationPath?: string;
+	registrationPath: string | undefined;
 	rejectedOverride: boolean;
 }
 
@@ -614,10 +614,11 @@ function unavailableFromInspection(
 	agent: CealAgentGuideHost,
 	error: NonNullable<CealAgentGuideState["error"]>,
 ): CealAgentGuideState {
+	const hosts = withActingHostUnavailable(inspected, agent);
 	return {
 		...inspected,
 		status: "unavailable",
-		hosts: withActingHostUnavailable(inspected, agent),
+		...(hosts === undefined ? {} : { hosts }),
 		error,
 	};
 }

@@ -278,16 +278,17 @@ async function runObserve(options: readonly string[], io: CealCliIo, runtime: Ce
 		}
 		port = Number(rawPort);
 	}
+	const session = runtime.session;
 	const server = createCealObserverServer({
-		loadStoredSession: runtime.session ? () => runtime.session!.load() : undefined,
-		loadDiscoveryCache: runtime.loadDiscoveryCache,
-		loadReceiptSpool: runtime.loadReceiptSpool,
-		inspectAgentAudit: runtime.inspectAgentAudit,
-		inspectAgentSession: runtime.inspectAgentSession,
-		inspectAgentGuide: runtime.inspectAgentGuide,
-		executablePath: runtime.executablePath,
+		...(session === undefined ? {} : { loadStoredSession: () => session.load() }),
+		...(runtime.loadDiscoveryCache === undefined ? {} : { loadDiscoveryCache: runtime.loadDiscoveryCache }),
+		...(runtime.loadReceiptSpool === undefined ? {} : { loadReceiptSpool: runtime.loadReceiptSpool }),
+		...(runtime.inspectAgentAudit === undefined ? {} : { inspectAgentAudit: runtime.inspectAgentAudit }),
+		...(runtime.inspectAgentSession === undefined ? {} : { inspectAgentSession: runtime.inspectAgentSession }),
+		...(runtime.inspectAgentGuide === undefined ? {} : { inspectAgentGuide: runtime.inspectAgentGuide }),
+		...(runtime.executablePath === undefined ? {} : { executablePath: runtime.executablePath }),
 		discoveryCacheTtlMs: runtime.discoveryCacheTtlMs ?? DEFAULT_DISCOVERY_CACHE_TTL_MS,
-		now: runtime.now,
+		...(runtime.now === undefined ? {} : { now: runtime.now }),
 	});
 	try {
 		await new Promise<void>((resolveListen, rejectListen) => {
@@ -366,7 +367,7 @@ async function runUpdate(io: CealCliIo, runtime: CealCommandContext): Promise<nu
 						if (interactive && !runtime.timing) writeUpdateProgress(io, stage);
 					}
 				: undefined;
-		const result = await runtime.runStableUpdate({ onProgress });
+		const result = await runtime.runStableUpdate(onProgress === undefined ? undefined : { onProgress });
 		finishCealTiming(activeTiming, result.status === "unavailable" ? "error" : "ok");
 		return writeUpdate(io, result);
 	} catch {

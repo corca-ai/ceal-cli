@@ -20,7 +20,7 @@ const OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const TAG_PATTERN = /^gateway-protocol-handoff-v(\d+\.\d+\.\d+)$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 
-type BootstrapOptions = { repoRoot?: string; tag?: string };
+type BootstrapOptions = { repoRoot?: string | undefined; tag?: string | undefined };
 type SignatureInput = {
 	archive: string;
 	certificate: string;

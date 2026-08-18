@@ -584,11 +584,11 @@ function prepareRuntime(runtime: TestRuntime): CealCommandRuntime {
 				remove,
 				withStateLock: runWithLockedSession ?? ((action) => action(lockedStore)),
 			},
-			timing: commandRuntime.timing,
-			now: commandRuntime.now,
-			removeDiscoveryCache,
-			removeReceiptSpool,
-			createClientSessionClient,
+			...(commandRuntime.timing === undefined ? {} : { timing: commandRuntime.timing }),
+			...(commandRuntime.now === undefined ? {} : { now: commandRuntime.now }),
+			...(removeDiscoveryCache === undefined ? {} : { removeDiscoveryCache }),
+			...(removeReceiptSpool === undefined ? {} : { removeReceiptSpool }),
+			...(createClientSessionClient === undefined ? {} : { createClientSessionClient }),
 		}),
 	};
 }

@@ -457,7 +457,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 				endpoint: "https://gateway.example.test/client",
 				accessToken: token,
 				fetchFn: item.fetchFn,
-				maxResponseBytes: item.maxResponseBytes,
+				...(item.maxResponseBytes === undefined ? {} : { maxResponseBytes: item.maxResponseBytes }),
 			}),
 		);
 		await assert.rejects(client.request(request), (error) => {

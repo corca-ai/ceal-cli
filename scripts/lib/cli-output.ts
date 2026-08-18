@@ -4,7 +4,7 @@ type ScriptFailureRenderInput = Readonly<{
 	fallbackCode: string;
 	fallbackMessage: string;
 	json: boolean;
-	knownError?: ScriptFailureError;
+	knownError?: ScriptFailureError | undefined;
 	schemaVersion: string;
 }>;
 

@@ -169,18 +169,20 @@ test("Worker removes a fresh handoff root when an attachment or final manifest w
 					created = await mkdtemp(join(tmpdir(), `ceal-worker-attachment-fault-${fault}-`));
 					return created;
 				},
-				afterAttachmentWrite:
-					fault === "attachment"
-						? ({ slot }) => {
+				...(fault === "attachment"
+					? {
+							afterAttachmentWrite: ({ slot }: { readonly slot: number }) => {
 								if (slot === 0) throw new Error("simulated attachment write fault");
-							}
-						: undefined,
-				afterManifestWrite:
-					fault === "manifest"
-						? () => {
+							},
+						}
+					: {}),
+				...(fault === "manifest"
+					? {
+							afterManifestWrite: () => {
 								throw new Error("simulated manifest write fault");
-							}
-						: undefined,
+							},
+						}
+					: {}),
 			}),
 			(error) => hasErrorCode(error, "handoff_write_failed"),
 		);

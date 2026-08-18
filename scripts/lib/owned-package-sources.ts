@@ -16,8 +16,8 @@ const OWNED_PACKAGE_SOURCE_ROOTS = ["packages/ceal-worker-cli/src", "packages/ce
 
 type OwnedPackageSourceOptions = {
 	repoRoot: string;
-	roots?: readonly string[];
-	skipFile?: (name: string) => boolean;
+	roots?: readonly string[] | undefined;
+	skipFile?: ((name: string) => boolean) | undefined;
 };
 
 type OwnedSourceVisitor = (relative: string, source: ts.SourceFile) => void;

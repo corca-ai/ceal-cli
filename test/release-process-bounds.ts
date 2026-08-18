@@ -33,7 +33,7 @@ export interface ReleaseProcessResult {
 	stdout: string | Buffer;
 	stderr: string | Buffer;
 	output: [null, string | Buffer, string | Buffer];
-	error?: Error & { code?: string };
+	error?: (Error & { code?: string | undefined }) | undefined;
 	timedOut: boolean;
 	truncated: boolean;
 }
