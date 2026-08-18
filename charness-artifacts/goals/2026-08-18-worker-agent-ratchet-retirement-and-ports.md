@@ -791,6 +791,11 @@ compiler replacement proof.
   ownership surface, and the proof must show a live explicit-any mutation red
   followed by snapshot-restore green in each checkout. This is recorded in the
   Claim Ledger below before the config/contract edits.
+- Review disposition: the first Lane C fresh-eye attempt is invalid evidence.
+  The reviewer was given frozen refs, but this session changed the goal and
+  both sibling checkouts while it was reading them. Its code observations are
+  retained only as a signal; its blocker is fixed as a review-boundary repair,
+  and a new review will run only after the final slice inputs are frozen.
 
 ## Context Sources
 
@@ -967,5 +972,5 @@ improvement as applied or a tracked issue.
 | Lane C Agent source no-explicit-any inventory is the disabled-rule source census | Agent `eslint.config.ts:30-40`; `/tmp/ceal-agent-lanec-no-explicit-any-final.log` records 9 findings in 3 files; positive control `eslint.config.ts:47-50` keeps scripts/tests on the rule | from `/Users/ted/codes/ceal-agent`: run `npm exec --no -- eslint src --rule '@typescript-eslint/no-explicit-any:error' --max-warnings 0`; require direct exit 1 before enabling and rerun the owned `npm run lint:eslint` route after source repair with exit 0 |
 | Lane C Worker noNonNullAssertion is compiler/linter-owned after source repair | Worker commit `099e1e8`; `biome.json:25-33`, `docs/gates.md`, and the seven inventoried source files | from `/Users/ted/codes/ceal-cli`: run the direct Biome override plus `npm run lint`, `npm run lint:types`, `npm run lint:types:ts6`, `npm run lint:markdown`, and the targeted 222-test source command; require direct exit 0 and inspect the commit path set |
 | Lane C Agent source no-explicit-any is linter-owned after typed-adapter repair | Agent commit `332c5f5`; `eslint.config.ts:30-50`, `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`, and `src/tools/runtime.ts` | from `/Users/ted/codes/ceal-agent`: run the direct ESLint override plus `npm run lint:eslint`, `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:contributor`; require direct exit 0, unchanged TS7/TS6 summaries, and no baseline path in the commit |
-| Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: inspect `git show 099e1e8 --` and `git show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
+| Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: run `git -C /Users/ted/codes/ceal-cli show 099e1e8 --` and `git -C /Users/ted/codes/ceal-agent show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
 | D2 native explicit-any ownership is receiving-local before implementation | Worker `biome.json` and `package.json`/`check`/hook routes; Agent `eslint.config.ts:30-50` and `package.json`/`lint`/hook routes | from `/Users/ted/codes/ceal-cli` and `/Users/ted/codes/ceal-agent`: read the native rule declarations and every route that reaches them, then prove one inserted explicit-any annotation red and the exact snapshot restore green in each checkout; do not copy Gateway `scripts/check-explicit-any.ts` or create a baseline |
