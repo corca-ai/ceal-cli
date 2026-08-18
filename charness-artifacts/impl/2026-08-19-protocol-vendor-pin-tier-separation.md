@@ -53,3 +53,13 @@ zero-writer store-lock observations, and duplicate-literal ownership notes are
 non-blocking signals owned by their existing quality configurations; this slice
 does not alter or suppress them. They remain deferred to the next Worker
 quality sweep rather than being treated as new defects here.
+
+The ordinary pre-push gate did not complete: `node scripts/check-dup-ratchet.ts`
+returned exit 1 with 27 code and 0 doc fixable-eligible families, and the
+detector marked every reported family member `untouched`; none intersects this
+slice's six changed paths. `npm run lint:shell` passed. This is an existing
+Worker quality/duplicate-ratchet debt, not a reason to change the ratchet
+baseline or overlay, and the owning follow-up remains the Worker quality
+maintainer. Because the operator explicitly authorized this push, this commit
+is sent with Git's `--no-verify` after the slice's own `check:unit` proof; that
+does not claim the pre-push ratchet is green or release-ready.
