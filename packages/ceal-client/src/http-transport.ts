@@ -31,6 +31,12 @@ export type CealHttpResponseKind =
 	| "unexpected_success_status"
 	| "response_too_large";
 
+/** Bounded shape fact for a JSON response that failed Protocol validation. */
+export type CealHttpResponseEnvelopeKind = "success" | "failure" | "unknown";
+
+/** A known, bounded response-shape mismatch that needs Gateway-side repair. */
+export type CealHttpResponseShapeIssue = "discovery_target_catalog_incomplete_without_cursor";
+
 export interface CealHttpTransportErrorDetails {
 	request_id?: string | null;
 	operation?: CealGatewayRequest["operation"] | null;
@@ -38,6 +44,9 @@ export interface CealHttpTransportErrorDetails {
 	response_kind?: CealHttpResponseKind | null;
 	response_protocol_version?: string | null;
 	response_schema_version?: string | null;
+	response_envelope_kind?: CealHttpResponseEnvelopeKind;
+	response_error_code?: string | null;
+	response_shape_issue?: CealHttpResponseShapeIssue;
 }
 
 export class CealHttpTransportError extends Error {
@@ -50,6 +59,9 @@ export class CealHttpTransportError extends Error {
 	readonly response_kind: CealHttpResponseKind | null;
 	readonly response_protocol_version: string | null | undefined;
 	readonly response_schema_version: string | null | undefined;
+	readonly response_envelope_kind: CealHttpResponseEnvelopeKind | undefined;
+	readonly response_error_code: string | null | undefined;
+	readonly response_shape_issue: CealHttpResponseShapeIssue | undefined;
 
 	constructor(code: CealHttpTransportErrorCode, http_status: number | null = null, details: CealHttpTransportErrorDetails = {}) {
 		super(transportErrorMessage(code));
@@ -61,6 +73,9 @@ export class CealHttpTransportError extends Error {
 		this.response_kind = details.response_kind ?? null;
 		this.response_protocol_version = details.response_protocol_version;
 		this.response_schema_version = details.response_schema_version;
+		this.response_envelope_kind = details.response_envelope_kind;
+		this.response_error_code = details.response_error_code;
+		this.response_shape_issue = details.response_shape_issue;
 	}
 }
 
@@ -236,7 +251,7 @@ function decodeResponse<R extends CealGatewayRequest>(
 	} catch {
 		throw invalidResponseError(request, status, contentType, "body_malformed");
 	}
-	const metadata = captureResponseMetadata(value);
+	const metadata = captureResponseMetadata(value, request.operation);
 	try {
 		return decodeCealClientResponse<R>(value, request);
 	} catch {
@@ -263,14 +278,30 @@ function invalidResponseError(
 type ResponseMetadata = {
 	response_protocol_version?: string | null;
 	response_schema_version?: string | null;
+	response_envelope_kind?: CealHttpResponseEnvelopeKind;
+	response_error_code?: string | null;
+	response_shape_issue?: CealHttpResponseShapeIssue;
 };
 
-function captureResponseMetadata(value: unknown): ResponseMetadata {
+function captureResponseMetadata(value: unknown, operation: CealGatewayRequest["operation"]): ResponseMetadata {
 	const protocolVersion = safeResponseMetadata(value, ["protocol_version", "negotiated_protocol_version"]);
 	const schemaVersion = safeResponseMetadata(value, ["schema_version"]);
+	const nestedSchemaVersion = schemaVersion === undefined ? safeResponseMetadata(responseValue(value), ["schema_version"]) : undefined;
+	const record = responseRecord(value);
+	const hasError = record !== undefined && Object.hasOwn(record, "error");
+	const shapeIssue = responseShapeIssue(value, operation);
 	return {
-		...(protocolVersion === undefined ? {} : { response_protocol_version: protocolVersion }),
-		...(schemaVersion === undefined ? {} : { response_schema_version: schemaVersion }),
+		...(protocolVersion !== undefined
+			? { response_protocol_version: protocolVersion }
+			: record !== undefined ? { response_protocol_version: null } : {}),
+		...(schemaVersion !== undefined
+			? { response_schema_version: schemaVersion }
+			: nestedSchemaVersion !== undefined
+				? { response_schema_version: nestedSchemaVersion }
+				: record !== undefined ? { response_schema_version: null } : {}),
+		...(record ? { response_envelope_kind: responseEnvelopeKind(record) } : {}),
+		...(hasError ? { response_error_code: safeResponseMetadata(record.error, ["code"]) ?? null } : {}),
+		...(shapeIssue ? { response_shape_issue: shapeIssue } : {}),
 	};
 }
 
@@ -278,11 +309,34 @@ function safeResponseMetadata(value: unknown, keys: readonly string[]): string |
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const record = value as Record<string, unknown>;
 	for (const key of keys) {
+		if (!Object.hasOwn(record, key)) continue;
 		const candidate = record[key];
-		if (candidate === undefined) continue;
 		return typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(candidate) ? candidate : null;
 	}
-	return null;
+	return undefined;
+}
+
+function responseRecord(value: unknown): Record<string, unknown> | undefined {
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function responseValue(value: unknown): unknown {
+	return responseRecord(value)?.value;
+}
+
+function responseEnvelopeKind(record: Record<string, unknown>): CealHttpResponseEnvelopeKind {
+	if (record.ok === true) return "success";
+	if (record.ok === false) return "failure";
+	return "unknown";
+}
+
+function responseShapeIssue(value: unknown, operation: CealGatewayRequest["operation"]): CealHttpResponseShapeIssue | undefined {
+	if (operation !== "discover") return undefined;
+	const response = responseRecord(value);
+	const discovery = response?.ok === true ? responseRecord(response.value) : undefined;
+	const catalog = responseRecord(discovery?.target_catalog);
+	if (catalog?.complete === false && catalog.next_cursor === undefined) return "discovery_target_catalog_incomplete_without_cursor";
+	return undefined;
 }
 
 function validateAccessToken(value: string): string {

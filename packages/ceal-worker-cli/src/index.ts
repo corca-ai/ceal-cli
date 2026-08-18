@@ -1885,10 +1885,13 @@ function gatewayUnavailableNextAction(
 			? "The Gateway returned HTTP 401 after the worker ensured a current session. Check the Gateway route or session binding; no additional refresh was attempted, and capability access is unproven."
 			: "The Gateway returned HTTP 401. Check the Gateway route, proxy, or session binding; automatic refresh is only attempted when local access is expired, and capability access is unproven.";
 	}
-	if (observation.phase === "discovery" && observation.protocol_handshake_verified)
+	if (observation.phase === "discovery" && observation.protocol_handshake_verified) {
+		if (observation.response_shape_issue === "discovery_target_catalog_incomplete_without_cursor")
+			return "The Gateway returned an incomplete discovery target page without a continuation cursor. Repair the Gateway/proxy target-catalog response producer so an empty page is complete, then retry; do not refresh again, and capability access is unproven.";
 		return observation.http_status === 200 && observation.response_kind === "protocol_invalid"
 			? `The Gateway handshake succeeded, but discovery returned HTTP 200 without a valid Ceal response for client protocol ${PROTOCOL_VERSION}. Check Gateway/proxy protocol compatibility; do not refresh again, and capability access is unproven.`
 			: "The Gateway handshake succeeded, but capability discovery did not return a valid Ceal response. Check the Gateway discovery route and protocol version, then retry; capability access is unproven.";
+	}
 	if (observation.http_response_received)
 		return "The Gateway answered the handshake, but its response was not a valid Ceal protocol response. Check the Gateway route or proxy and retry; do not infer capability availability from this response.";
 	return "No HTTP response was received from the Gateway. Check network reachability and TLS, then retry.";

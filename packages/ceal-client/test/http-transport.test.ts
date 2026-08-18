@@ -269,6 +269,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			kind: "content_type_invalid",
 			protocolVersion: undefined,
 			schemaVersion: undefined,
+			envelopeKind: undefined,
+			errorCode: undefined,
 		},
 		{
 			label: "malformed json",
@@ -278,6 +280,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			kind: "body_malformed",
 			protocolVersion: undefined,
 			schemaVersion: undefined,
+			envelopeKind: undefined,
+			errorCode: undefined,
 		},
 		{
 			label: "protocol schema mismatch",
@@ -286,14 +290,31 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 					ok: true,
 					request_id: "request:wrong",
 					protocol_version: "1.3.0",
-					schema_version: "ceal.gateway_discovery.v2",
-					value: {},
+					value: { schema_version: "ceal.gateway_discovery.v2" },
 				}),
 			status: 200,
 			contentType: "application/json",
 			kind: "protocol_invalid",
 			protocolVersion: "1.3.0",
 			schemaVersion: "ceal.gateway_discovery.v2",
+			envelopeKind: "success",
+			errorCode: undefined,
+		},
+		{
+			label: "malformed failure envelope",
+			response: () => globalThis.Response.json({
+				ok: false,
+				request_id: request.request_id,
+				protocol_version: "1.3.0",
+				error: { code: "unsafe code", message: "safe" },
+			}, { status: 502 }),
+			status: 502,
+			contentType: "application/json",
+			kind: "protocol_invalid",
+			protocolVersion: "1.3.0",
+			schemaVersion: null,
+			envelopeKind: "failure",
+			errorCode: null,
 		},
 		{
 			label: "unexpected success status",
@@ -303,6 +324,8 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			kind: "unexpected_success_status",
 			protocolVersion: undefined,
 			schemaVersion: undefined,
+			envelopeKind: undefined,
+			errorCode: undefined,
 		},
 	];
 	for (const item of cases) {
@@ -320,10 +343,43 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 			assert.equal(error.response_kind, item.kind, item.label);
 			assert.equal(error.response_protocol_version, item.protocolVersion, item.label);
 			assert.equal(error.response_schema_version, item.schemaVersion, item.label);
+			assert.equal(error.response_envelope_kind, item.envelopeKind, item.label);
+			assert.equal(error.response_error_code, item.errorCode, item.label);
 			assert.doesNotMatch(error.message, /proxy unauthorized|safe-token/u, item.label);
 			return true;
 		});
 	}
+});
+
+test("HTTP transport identifies an incomplete discovery target page without a continuation cursor", async () => {
+	const discoveryRequest: DiscoverInput = {
+		request_id: "request:discover:shape-001",
+		operation: "discover",
+		profile_ref: "profile:test",
+		body: {},
+	};
+	const response = discoveryResponse(discoveryRequest);
+	const legacyTargetCatalog = {
+		...response,
+		value: {
+			...response.value,
+			target_catalog: { target_count: 0, returned_count: 0, complete: false, selection_required: true },
+		},
+	};
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(legacyTargetCatalog),
+	});
+	await assert.rejects(createCealClient(transport).request(discoveryRequest), (error) => {
+		assert.ok(error instanceof CealHttpTransportError);
+		assert.equal(error.response_kind, "protocol_invalid");
+		assert.equal(error.response_envelope_kind, "success");
+		assert.equal(error.response_schema_version, "ceal.gateway_discovery.v2");
+		assert.equal(error.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+		assert.doesNotMatch(error.message, /selection_required|target_count|safe-token/u);
+		return true;
+	});
 });
 
 // The declared-length branch had no test on either side of the refactor that

@@ -269,8 +269,11 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 			"response_kind",
 			"response_protocol_version",
 			"response_schema_version",
+			"response_envelope_kind",
+			"response_error_code",
+			"response_shape_issue",
 		]);
-		for (const key of ["response_protocol_version", "response_schema_version"])
+		for (const key of ["response_protocol_version", "response_schema_version", "response_error_code"])
 			if (value.gateway_observation[key] === null) observation[key] = null;
 		summary.gateway_observation = observation;
 	}

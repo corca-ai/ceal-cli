@@ -63,6 +63,9 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 			"  response_kind: protocol_invalid",
 			"  response_protocol_version: 1.2.0",
 			"  response_schema_version: null",
+			"  response_envelope_kind: failure",
+			"  response_error_code: authentication_failed",
+			"  response_shape_issue: discovery_target_catalog_incomplete_without_cursor",
 		].join("\n"),
 		"capabilities",
 	);
@@ -70,6 +73,9 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_kind, "protocol_invalid");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_protocol_version, "1.2.0");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_schema_version, null);
+	assert.equal((summary.gateway_observation as Record<string, unknown>).response_envelope_kind, "failure");
+	assert.equal((summary.gateway_observation as Record<string, unknown>).response_error_code, "authentication_failed");
+	assert.equal((summary.gateway_observation as Record<string, unknown>).response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
 });
 

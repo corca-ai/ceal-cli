@@ -33,7 +33,9 @@ export {
 } from "./enrollment-client.js";
 export type {
 	CealClientTransport,
+	CealHttpResponseEnvelopeKind,
 	CealHttpResponseKind,
+	CealHttpResponseShapeIssue,
 	CealHttpTransportErrorCode,
 	CealHttpTransportErrorDetails,
 	CreateCealHttpTransportOptions,

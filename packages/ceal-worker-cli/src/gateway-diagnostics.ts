@@ -1,4 +1,4 @@
-import { type CealHttpResponseKind, CealHttpTransportError } from "@corca-ai/ceal";
+import { type CealHttpResponseEnvelopeKind, type CealHttpResponseKind, type CealHttpResponseShapeIssue, CealHttpTransportError } from "@corca-ai/ceal";
 import { CEAL_SAFE_REQUEST_ID } from "./safe-ref.js";
 
 export type CealGatewayObservationPhase = "handshake" | "discovery";
@@ -24,6 +24,9 @@ export interface CealGatewayObservation {
 	response_kind?: CealGatewayObservationResponseKind;
 	response_protocol_version?: string | null;
 	response_schema_version?: string | null;
+	response_envelope_kind?: CealHttpResponseEnvelopeKind;
+	response_error_code?: string | null;
+	response_shape_issue?: CealHttpResponseShapeIssue;
 }
 
 export function gatewayTransportObservation(
@@ -55,6 +58,9 @@ export function gatewayTransportObservation(
 			? { response_protocol_version: safeMetadata(transport.response_protocol_version) }
 			: {}),
 		...(transport?.response_schema_version !== undefined ? { response_schema_version: safeMetadata(transport.response_schema_version) } : {}),
+		...(transport?.response_envelope_kind ? { response_envelope_kind: transport.response_envelope_kind } : {}),
+		...(transport?.response_error_code !== undefined ? { response_error_code: safeMetadata(transport.response_error_code) } : {}),
+		...(transport?.response_shape_issue ? { response_shape_issue: transport.response_shape_issue } : {}),
 	};
 }
 

@@ -4742,6 +4742,7 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 			assert.equal(payload.gateway_observation.response_kind, "protocol_invalid");
 			assert.equal(payload.gateway_observation.response_protocol_version, null);
 			assert.equal(payload.gateway_observation.response_schema_version, null);
+			assert.equal(payload.gateway_observation.response_envelope_kind, "unknown");
 			assert.equal(payload.gateway_observation.protocol_handshake_verified, true);
 			assert.match(payload.error.next_action, /HTTP 200/u);
 			assert.match(payload.error.next_action, /1\.3\.0/u);
@@ -4751,6 +4752,33 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 			);
 		},
 		(body) => (body.operation === "discover" ? {} : handshakeResponse(body)),
+	);
+});
+
+test("capabilities identifies a stale incomplete target page without refreshing", async () => {
+	await withGateway(
+		async ({ endpoint }) => {
+			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+				readStoredSession: async () => storedSession(endpoint),
+			});
+			assert.equal(payload.error.kind, "invalid_response");
+			assert.equal(payload.session_refresh, "none");
+			assert.equal(payload.gateway_observation.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+			assert.match(payload.error.next_action, /incomplete discovery target page/u);
+			assert.match(payload.error.next_action, /continuation cursor/u);
+			assert.doesNotMatch(payload.error.next_action, /Gateway\/proxy protocol compatibility/u);
+		},
+		(body) => {
+			if (body.operation === "handshake") return handshakeResponse(body);
+			const response = discoveryResponse(body);
+			return {
+				...response,
+				value: {
+					...response.value,
+					target_catalog: { target_count: 0, returned_count: 0, complete: false, selection_required: true },
+				},
+			};
+		},
 	);
 });
 
