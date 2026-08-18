@@ -13,9 +13,10 @@ activation command.
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
   detector, and the Lane B `noImplicitOverride`, control-flow, and unused-check
-  slices have implementation, targeted proof, and local commits. The full Gateway
-  loader-rewrite ratchet remains deliberately unported; the remaining Lane B options
-  are the next dependency-safe work.
+  slices plus the Worker half of `noUncheckedIndexedAccess` have implementation,
+  targeted proof, and local commits. The full Gateway loader-rewrite ratchet remains
+  deliberately unported; completing Agent `noUncheckedIndexedAccess` and then
+  `exactOptionalPropertyTypes` are the next dependency-safe work.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -589,6 +590,37 @@ compiler replacement proof.
   `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` options are not
   claimed complete; continue with narrow diagnostic inventories.
 
+### Slice 10: Lane B — Worker noUncheckedIndexedAccess
+
+- Objective: Enable `noUncheckedIndexedAccess` in the Worker package, tools, and
+  inherited test raw projects and repair every diagnostic with explicit guards or
+  typed test adapters.
+- Why this approach: The pre-edit census found 9 package diagnostics, 133 tools
+  diagnostics, and 94 test diagnostics. The raw compiler routes, rather than a
+  baseline or update command, remained the authority; the repair covered source
+  bounds, script argv/match captures, workflow/test fixtures, and a shared
+  `test/required.ts` guard that fails closed when a fixture element is absent.
+- Commit: Worker `a8b3b96` (`typecheck: enforce Worker indexed access checks`);
+  no push or external boundary.
+- What changed: Added `noUncheckedIndexedAccess` to `tsconfig.typecheck.json` and
+  `tsconfig.tools.json` (tests inherit the typecheck option), asserted both owning
+  config declarations in the typecheck contract, and replaced unchecked array,
+  regex-capture, argv, and workflow fixture reads with guards. No non-null
+  assertions, baseline update, or diagnostic suppression was added.
+- Targeted verification: `npm run lint:types:raw:packages`,
+  `npm run lint:types:raw:tools`, and `npm run lint:types:raw:tests` all exited 0;
+  `node --test test/contract/typecheck-source-gate.test.ts` passed 7/7; the
+  staged Worker hook passed. The first commit attempt was structurally blocked by
+  Biome import ordering/formatting; repo-local `npm exec --no -- biome check --write .`
+  repaired those paths, the exact staged set was rechecked, and the retry passed.
+- Alternatives rejected: No index assertions or baseline regeneration. The
+  shared test guard is explicit failure-on-missing-input behavior, not a way to
+  turn an absent fixture into a value.
+- Off-goal findings: No Gateway source edit, push, CI watch, release,
+  apply/restart, live readback, issue creation, or duplicate #671. Agent
+  `noUncheckedIndexedAccess` and both projects' `exactOptionalPropertyTypes` remain
+  incomplete.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -745,3 +777,4 @@ improvement as applied or a tracked issue.
 | Lane B noImplicitOverride is compiler-owned in every raw Worker/Agent route | Worker/Agent `tsconfig.typecheck.json`, `tsconfig.tools.json`, `tsconfig.build.json`, and `tsconfig.tools-tests.json`; Worker/Agent contract tests | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline update route |
 | Lane B control-flow and unused options are compiler-owned in every raw Worker/Agent route | Worker and Agent tsconfig sources, raw route scripts, and the committed Slice 9 source repairs | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline/update route |
 | Lane B `noUncheckedIndexedAccess` pre-edit diagnostics are the source-repair inventory, not a baseline input | Worker raw configs and pre-edit logs `/tmp/ceal-worker-laneb-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tools.json-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tests.json-noUncheckedIndexedAccess.log`; Agent `tsconfig.build.json`, generated tools/test route `scripts/typecheck-tools-tests.ts`, and `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log` | from `/Users/ted/codes/ceal-cli`: run `npm exec --no -- tsc -p tsconfig.typecheck.json --pretty false --noUncheckedIndexedAccess`, `npm exec --no -- tsc -p tsconfig.tools.json --pretty false --noUncheckedIndexedAccess`, and `npm exec --no -- tsc -p tsconfig.tests.json --pretty false --noUncheckedIndexedAccess`; from `/Users/ted/codes/ceal-agent`: run `npm exec --no -- tsc -p tsconfig.build.json --pretty false --noUncheckedIndexedAccess` and inspect the pre-edit generated-route log; require diagnostics to be repaired in source/configs, never recorded as baseline debt |
+| Worker `noUncheckedIndexedAccess` is compiler-owned across package, tools, and inherited test routes | Worker commit `a8b3b96`; `tsconfig.typecheck.json:8-19`, `tsconfig.tools.json:7-20`, `tsconfig.tests.json:2-15`, `test/contract/typecheck-source-gate.test.ts`, and `test/required.ts` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and `node --test test/contract/typecheck-source-gate.test.ts`; require direct exit 0, 7/7 contract tests, no baseline/update route, and a clean post-commit tree |
