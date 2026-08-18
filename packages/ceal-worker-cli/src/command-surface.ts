@@ -1,5 +1,10 @@
 import type { CealCliIo } from "./cli-runtime.js";
-import { CEAL_COMMANDS, CEAL_CREDENTIAL_CONTEXT, type CealCommandDefinition } from "./command-definitions.js";
+import {
+	CEAL_COMMANDS,
+	CEAL_CREDENTIAL_CONTEXT,
+	type CealCommandDefinition,
+	type CealSessionRefreshOutcome,
+} from "./command-definitions.js";
 import { writeHelp, writeYaml } from "./output.js";
 import { CEAL_SUBCOMMANDS, type CealSubcommandDefinition, splitSubcommandRoute, subcommandsOf } from "./subcommands.js";
 
@@ -57,6 +62,7 @@ export function writeCliError(
 	message: string,
 	io: CealCliIo,
 	nextAction = "Run 'ceal --help'.",
+	sessionRefresh?: CealSessionRefreshOutcome,
 ): number {
 	writeYaml(io.stdout, {
 		schema_version: "ceal.error.v1",
@@ -64,6 +70,7 @@ export function writeCliError(
 		ok: false,
 		status: "error",
 		credential_context: CEAL_CREDENTIAL_CONTEXT,
+		...(sessionRefresh === undefined ? {} : { session_refresh: sessionRefresh }),
 		error: { kind, message, next_action: nextAction },
 	});
 	return 2;
@@ -118,6 +125,7 @@ function commandHelp(command: CealCommandDefinition): string {
 		"Named options follow required positionals, are order-independent, and may be supplied once.",
 		"",
 		`Effect: ${command.effect}`,
+		...(command.session_effect ? [`Session effect: ${command.session_effect}`] : []),
 		...(command.lifecycle ? [`Lifecycle: ${command.lifecycle}`] : []),
 		`Evidence: ${command.evidence}`,
 		`Result schema: ${command.result_schema}`,
@@ -147,6 +155,7 @@ function subcommandHelp(subcommand: CealSubcommandDefinition): string {
 		"Named options follow required positionals, are order-independent, and may be supplied once.",
 		"",
 		`Effect: ${subcommand.effect}`,
+		...(subcommand.session_effect ? [`Session effect: ${subcommand.session_effect}`] : []),
 		`Evidence: ${subcommand.evidence}`,
 		`Result schema: ${subcommand.result_schema}`,
 		`Recovery/readback: ${subcommand.recovery}`,
@@ -204,6 +213,7 @@ function writeCommands(io: CealCliIo): number {
 			description: subcommand.description,
 			usage: subcommand.usage,
 			effect: subcommand.effect,
+			...("session_effect" in subcommand && subcommand.session_effect ? { session_effect: subcommand.session_effect } : {}),
 			evidence: subcommand.evidence,
 			result_schema: subcommand.result_schema,
 			recovery: subcommand.recovery,

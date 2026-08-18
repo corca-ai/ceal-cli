@@ -25,11 +25,12 @@ separately approved boundaries.
   carrier and names no fixed capability sequence. Installed-guide dogfood is
   still unproved, but the current cross-repo plan does not schedule it as a
   separate worker slice.
-- `ceal capabilities`, target selection, receipt readback, and acceptance use
-  observation mode and never rotate a stored session. Authentication failure
-  points to the explicit `ceal session refresh` remote-write route. This is
-  already enforced by the renewal-mode and CLI tests; the stale sibling-goal
-  claim must not cause a duplicate repair here.
+- `ceal capabilities` and target selection use `session_effect: refresh_if_needed`:
+  an expired stored session is renewed once before the Gateway read, while a
+  locally current or rejected token does not trigger a second refresh. Their
+  result reports `session_refresh`. Receipt readback and acceptance remain
+  observation-only and point to the explicit `ceal session refresh` route after
+  authentication failure. This is enforced by the renewal-mode and CLI tests.
 - The Worker-side half of `ceal-cli#13` is prepared but remains signed-handoff
   dependent. Target-selection
   results identify match, cursor, and unfiltered requests without copying the

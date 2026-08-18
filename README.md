@@ -235,9 +235,12 @@ This is checkout proof, not evidence about an installed or signed release.
 The effect vocabulary names remote change as well as local: `remote_write` is a
 route that may change the Gateway or a provider. It covers provider calls,
 explicit session refresh/revocation, and other state-changing session actions.
-`capabilities`, target discovery, `receipt`, and `acceptance` are observational:
-they use the stored bearer as-is and never rotate an expired or rejected
-credential. Their recovery tells the operator to run `ceal session refresh`.
+`capabilities` and target discovery are Gateway-read-only and declare
+`session_effect: refresh_if_needed`: an expired, refreshable stored session is
+renewed once before the read. A locally current or Gateway-rejected session is
+not refreshed again in that invocation. `receipt` and `acceptance` remain
+observational reads that use the stored bearer as-is; their recovery tells the
+operator to run `ceal session refresh`.
 `--allow-effect` refuses `remote_write`, because the throwaway `HOME` is what
 makes the hatch safe and it neutralizes local state only. It is what a route
 *may* do, not what one invocation does: `call` is `remote_write` even for a

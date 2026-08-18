@@ -22,12 +22,18 @@ export interface CealCommandDefinition {
 	 * can act on.
 	 */
 	effect: "read_only" | "local_write" | "read_only_or_local_write" | "remote_write";
+	/** Whether this route may renew the locally stored Gateway session as part of its work. */
+	session_effect?: CealSessionEffect;
 	/** Omitted commands settle on their own; this command serves until stopped. */
 	lifecycle?: "until_interrupted";
 	evidence: "surface" | "surface_or_host_decision";
 	result_schema: string;
 	recovery: string;
 }
+
+export type CealSessionEffect = "none" | "refresh_if_needed";
+
+export type CealSessionRefreshOutcome = "none" | "refreshed" | "refresh_failed" | "quarantined";
 
 export const CEAL_CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 
@@ -93,9 +99,11 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 		description: "Discover Gateway-issued capabilities and select bounded targets with connector/kind metadata and per-capability readiness.",
 		usage:
 			"ceal capabilities [--profile <profile-ref>] [--fresh] [--detail] | ceal capabilities targets [--profile <profile-ref>] --capability <id> [--match <selector> | --cursor <opaque>] [--limit <1-64>]",
-		// Discovery is read-only at the capability boundary. A stale stored access
-		// token is reported and the separate `session refresh` action owns rotation.
+		// Discovery remains read-only at the Gateway boundary, while a stale stored
+		// access token is renewed through the existing locked session path before
+		// the read begins. The two effects are intentionally independent.
 		effect: "read_only",
+		session_effect: "refresh_if_needed",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery: `${SESSION_SETUP_NEXT_ACTION} Then run 'ceal capabilities' and descend to a bounded target selection.`,

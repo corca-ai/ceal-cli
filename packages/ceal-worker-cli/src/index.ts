@@ -42,6 +42,7 @@ import {
 } from "./client-session.js";
 import {
 	type CealCommandDefinition,
+	type CealSessionRefreshOutcome,
 	CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT,
 	SESSION_SETUP_NEXT_ACTION,
 } from "./command-definitions.js";
@@ -87,6 +88,31 @@ export { renderPlainYamlDocument } from "./yaml.js";
 const DEFAULT_OBSERVER_PORT = 52897;
 
 type CatalogProvenance = { source: "live_discovery" } | { source: "cached_discovery"; cachedAt: number; expiresAt: number };
+
+const QUARANTINED_SESSION_REFRESH_CODES = new Set([
+	"session_renewal_unavailable",
+	"refresh_expired",
+	"refresh_invalid",
+	"refresh_replayed",
+	"refresh_revoked",
+	"reenrollment_required",
+	"binding_changed",
+]);
+
+interface CapabilityRenewalContext {
+	preflightAttempted: boolean;
+	outcome: CealSessionRefreshOutcome;
+	session?: CealStoredSession;
+}
+
+function createCapabilityRenewalContext(): CapabilityRenewalContext {
+	return { preflightAttempted: false, outcome: "none" };
+}
+
+function renewalOutcomeForError(error: unknown): CealSessionRefreshOutcome {
+	if (!(error instanceof CealClientSessionError)) return "refresh_failed";
+	return QUARANTINED_SESSION_REFRESH_CODES.has(error.code) ? "quarantined" : "refresh_failed";
+}
 
 // The first call received an explicit authentication rejection, so no provider
 // invocation happened. Keep a failed renewal distinct from a transport loss
@@ -168,7 +194,7 @@ async function emitAcceptanceRecord(rest: readonly string[], io: CealCliIo, runt
 
 	const startedAt = Date.now();
 	try {
-		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime, "observe");
+		const { client, handshake } = await requestCapabilityHandshake(access.value, runtime);
 		if (!handshake.ok) return writeAcceptanceGatewayFailure(handshake.error, io);
 		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
 			client.request({
@@ -556,15 +582,16 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	const effectiveOptions = routeOptions.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
 	const selection = policy.parse(effectiveOptions);
 	if (selection === null) return writeCapabilitiesArgumentError(options, policy, io);
+	const renewalContext = createCapabilityRenewalContext();
 	const resolved =
 		selection.kind === "targets"
-			? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
-			: await resolveGatewayAccess(effectiveOptions, io, runtime);
+			? await resolveStoredGatewayAccess(io, runtime, selection.profileRef, "renew", renewalContext)
+			: await resolveGatewayAccess(effectiveOptions, io, runtime, renewalContext);
 	if (!resolved.ok) return resolved.exitCode;
 	let gatewayPhase: CealGatewayObservationPhase = "handshake";
 	try {
 		const route = selection.kind === "targets" ? "ceal capabilities targets" : "ceal capabilities";
-		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime, "observe");
+		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime);
 		if (!handshake.ok) return writeCapabilitiesGatewayFailure(handshake, resolved.value, route, io, "handshake");
 		gatewayPhase = "discovery";
 		// The catalog case is the cacheable one: its live handshake stays the auth
@@ -583,12 +610,20 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		);
 		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io, "discovery");
 		const selectorRefusal = unsupportedTargetSelector(discovery.value.capabilities, selection);
-		if (selectorRefusal) {
-			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction);
-		}
-		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
+		if (selectorRefusal)
+			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction, renewalContext.outcome);
+		return writeCapabilitiesAvailable(
+			handshake,
+			discovery,
+			selection,
+			wantsDetail,
+			io,
+			{ source: "live_discovery" },
+			runtime,
+			renewalContext,
+		);
 	} catch (error) {
-		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
+		if (error instanceof CealClientSessionError) return writeCapabilitiesSessionUnavailable(error.code, renewalContext, io);
 		const requestId = `${resolved.value.requestId}:${gatewayPhase === "handshake" ? "handshake" : "discover"}`;
 		return writeGatewayUnavailable(
 			error,
@@ -598,6 +633,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 				operation: gatewayPhase === "handshake" ? "handshake" : "discover",
 				requestId,
 			}),
+			{ sessionRefresh: renewalContext.outcome },
 		);
 	}
 }
@@ -634,6 +670,7 @@ async function serveCapabilityCatalog(
 				io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
 				runtime,
+				access.renewalContext,
 			);
 		}
 	}
@@ -652,7 +689,16 @@ async function serveCapabilityCatalog(
 			.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> })
 			.catch(() => undefined);
 	}
-	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
+	return writeCapabilitiesAvailable(
+		handshake,
+		discovery,
+		selection,
+		wantsDetail,
+		io,
+		{ source: "live_discovery" },
+		runtime,
+		access.renewalContext,
+	);
 }
 
 type ParsedTargetCatalogOptions =
@@ -809,6 +855,7 @@ interface GatewayAccess {
 	requestId: string;
 	accessToken: string;
 	storedSession: CealStoredSession | null;
+	renewalContext: CapabilityRenewalContext;
 }
 
 type GatewayAccessResolution = { ok: true; value: GatewayAccess } | { ok: false; exitCode: number };
@@ -822,27 +869,32 @@ async function resolveGatewayAccess(
 	options: readonly string[],
 	io: CealCliIo,
 	runtime: CealCommandContext,
+	renewalContext: CapabilityRenewalContext,
 ): Promise<GatewayAccessResolution> {
 	const selectedProfile = storedProfileOption(options);
 	return selectedProfile
-		? resolveStoredGatewayAccess(io, runtime, selectedProfile)
+		? resolveStoredGatewayAccess(io, runtime, selectedProfile, "renew", renewalContext)
 		: options.length === 0
-			? resolveStoredGatewayAccess(io, runtime)
-			: resolveExplicitGatewayAccess(options, io, runtime);
+			? resolveStoredGatewayAccess(io, runtime, undefined, "renew", renewalContext)
+			: resolveExplicitGatewayAccess(options, io, runtime, renewalContext);
 }
 
 async function resolveStoredGatewayAccess(
 	io: CealCliIo,
 	runtime: CealCommandContext,
 	selectedProfile?: string,
+	sessionRenewalMode: CealSessionRenewalMode = "observe",
+	renewalContext: CapabilityRenewalContext = createCapabilityRenewalContext(),
 ): Promise<GatewayAccessResolution> {
-	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, "observe");
+	const resolution = await resolveStoredGatewayAccessResult(runtime, selectedProfile, sessionRenewalMode, renewalContext);
 	if (resolution.ok) return resolution;
 	const exitCode =
 		resolution.origin === "unconfigured"
-			? writeCapabilitiesUnavailable(io)
+			? writeCapabilitiesUnavailable(io, renewalContext.outcome)
 			: resolution.origin === "client_session"
-				? writeClientSessionUnavailable(resolution.reason, io)
+				? sessionRenewalMode === "renew"
+					? writeCapabilitiesSessionUnavailable(resolution.reason, renewalContext, io)
+					: writeClientSessionUnavailable(resolution.reason, io)
 				: writeGatewayUnavailable(resolution.reason, io);
 	return { ok: false, exitCode };
 }
@@ -851,11 +903,12 @@ async function resolveStoredGatewayAccessResult(
 	runtime: CealCommandContext,
 	selectedProfile: string | undefined,
 	sessionRenewalMode: CealSessionRenewalMode,
+	renewalContext?: CapabilityRenewalContext,
 ): Promise<StoredGatewayAccessResolution> {
 	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
 	if (!runtime.session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 	try {
-		const session = await loadStoredSessionForRenewalMode(runtime, mode);
+		const session = await loadStoredSessionForRenewalMode(runtime, mode, renewalContext);
 		if (!session) return { ok: false, origin: "unconfigured", reason: "session_unavailable" };
 		return {
 			ok: true,
@@ -864,6 +917,7 @@ async function resolveStoredGatewayAccessResult(
 				profileRef: selectedProfile ?? session.profileRef,
 				accessToken: session.accessToken,
 				storedSession: session,
+				renewalContext: renewalContext ?? createCapabilityRenewalContext(),
 				requestId: runtime.nextRequestId?.() ?? "ceal:capabilities",
 			},
 		};
@@ -877,21 +931,36 @@ async function resolveStoredGatewayAccessResult(
 async function loadStoredSessionForRenewalMode(
 	runtime: CealCommandContext,
 	mode: CealSessionRenewalMode,
+	renewalContext?: CapabilityRenewalContext,
 ): Promise<CealStoredSession | null> {
 	const loaded = await runtime.session?.load();
-	return loaded ? (mode === "renew" ? await ensureCurrentSession(loaded, runtime) : loaded) : null;
+	if (!loaded) return null;
+	if (mode !== "renew") return loaded;
+	if (!renewalContext) return ensureCurrentSession(loaded, runtime);
+	if (renewalContext.preflightAttempted) return renewalContext.session ?? loaded;
+	renewalContext.preflightAttempted = true;
+	try {
+		const current = await ensureCurrentSession(loaded, runtime);
+		renewalContext.session = current;
+		renewalContext.outcome = current.accessToken === loaded.accessToken ? "none" : "refreshed";
+		return current;
+	} catch (error) {
+		renewalContext.outcome = renewalOutcomeForError(error);
+		throw error;
+	}
 }
 
 async function resolveExplicitGatewayAccess(
 	options: readonly string[],
 	io: CealCliIo,
 	runtime: CealCommandContext,
+	renewalContext: CapabilityRenewalContext,
 ): Promise<GatewayAccessResolution> {
 	const parsed = parseGatewayOptions(options);
 	if (!parsed.ok) return { ok: false, exitCode: writeError("invalid_argument", parsed.message, io) };
 	if (!runtime.readSecret) return { ok: false, exitCode: writeGatewayUnavailable("credential_input_unavailable", io) };
 	try {
-		return { ok: true, value: { ...parsed, accessToken: await runtime.readSecret(), storedSession: null } };
+		return { ok: true, value: { ...parsed, accessToken: await runtime.readSecret(), storedSession: null, renewalContext } };
 	} catch {
 		return { ok: false, exitCode: writeGatewayUnavailable("credential_input_failed", io) };
 	}
@@ -912,15 +981,9 @@ function requestHandshake(
 	);
 }
 
-async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandContext, sessionRenewalMode: CealSessionRenewalMode) {
-	const mode = requireCealSessionRenewalMode(sessionRenewalMode);
-	let client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
-	let handshake = await requestHandshake(client, access, runtime);
-	const storedSession = access.storedSession;
-	if (mode !== "renew" || !shouldRetryAuthentication(handshake, storedSession)) return { client, handshake };
-	const session = await ensureCurrentSession(storedSession, runtime, true);
-	client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: session.accessToken }));
-	handshake = await requestHandshake(client, access, runtime);
+async function requestCapabilityHandshake(access: GatewayAccess, runtime: CealCommandContext) {
+	const client = createCealClient(createCealHttpTransport({ endpoint: access.endpoint, accessToken: access.accessToken }));
+	const handshake = await requestHandshake(client, access, runtime);
 	return { client, handshake };
 }
 
@@ -982,6 +1045,7 @@ function writeCapabilitiesAvailable(
 	io: CealCliIo,
 	provenance: CatalogProvenance,
 	runtime: CealCommandContext,
+	renewalContext: CapabilityRenewalContext,
 ): number {
 	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
 	const targets = renderCapabilityTargets(discovery.value.targets, discovery.value.capabilities);
@@ -994,6 +1058,7 @@ function writeCapabilitiesAvailable(
 		status: "available",
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
+		session_refresh: renewalContext.outcome,
 		gateway: {
 			profile_ref: handshake.value.profile_ref,
 			membership_ref: handshake.value.membership_ref,
@@ -1639,12 +1704,46 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 	return parsed;
 }
 
-function writeCapabilitiesUnavailable(io: CealCliIo): number {
+function writeCapabilitiesUnavailable(io: CealCliIo, sessionRefresh: CealSessionRefreshOutcome = "none"): number {
 	return writeGatewayUnavailable("client_session_unavailable", io, undefined, {
 		message: "No Gateway-issued client session is configured for this client.",
 		nextAction: commandRecovery("session"),
 		nonClaims: ["No live Gateway discovery, authorization, provider action, or audit readback was reached."],
+		sessionRefresh,
 	});
+}
+
+function writeCapabilitiesSessionUnavailable(reason: string, renewalContext: CapabilityRenewalContext, io: CealCliIo): number {
+	const failure =
+		reason === "session_unavailable"
+			? {
+					kind: "session_unavailable",
+					retryable: false,
+					message: "No Gateway-issued client session is configured for this client.",
+					nextAction: SESSION_SETUP_NEXT_ACTION,
+				}
+			: classifyClientSessionFailure(reason);
+	writeYaml(io.stdout, {
+		schema_version: "ceal.capabilities.v1",
+		command: "ceal",
+		ok: false,
+		status: "unavailable",
+		gateway_required: true,
+		credential_context: CREDENTIAL_CONTEXT,
+		capabilities: [],
+		session_refresh: renewalContext.outcome,
+		proof_level: "surface",
+		live_gateway_checked: false,
+		claims_allowed: [],
+		error: {
+			kind: failure.kind,
+			retryable: failure.retryable,
+			message: failure.message,
+			next_action: failure.nextAction,
+		},
+		non_claims: ["No live Gateway discovery, authorization, provider action, or audit readback was reached."],
+	});
+	return 3;
 }
 
 type ParsedGatewayOptions = { ok: true; endpoint: string; profileRef: string; requestId: string } | { ok: false; message: string };
@@ -1673,12 +1772,22 @@ function writeCapabilitiesGatewayFailure(
 	phase: CealGatewayObservationPhase,
 ): number {
 	const failure = classifyGatewayFailure(response.error);
+	const sessionRefresh = access.renewalContext.outcome;
 	return writeGatewayFailure(
 		response,
 		io,
-		failure.code === "authentication_failed" && access.storedSession ? explicitSessionRefreshNextAction(route) : undefined,
+		failure.code === "authentication_failed" && access.storedSession
+			? gatewayAuthenticationFailureNextAction(route, sessionRefresh)
+			: undefined,
 		typedGatewayObservation(phase, response),
+		sessionRefresh,
 	);
+}
+
+function gatewayAuthenticationFailureNextAction(route: string, sessionRefresh: CealSessionRefreshOutcome): string {
+	if (sessionRefresh === "refreshed")
+		return `The Gateway rejected the access token after the worker ensured a current session. Check the Gateway route or session binding; do not repeat refresh in this invocation, and do not infer capability access. Retry '${route}' only after correcting that boundary.`;
+	return `The Gateway rejected the current access token. No additional refresh was attempted because the stored session was locally current. Check the Gateway route or session binding, then retry '${route}'; capability access is unproven.`;
 }
 
 function explicitSessionRefreshNextAction(route: string): string {
@@ -1689,6 +1798,7 @@ type GatewayUnavailableDetails = {
 	message?: string;
 	nextAction?: string;
 	nonClaims?: readonly string[];
+	sessionRefresh?: CealSessionRefreshOutcome;
 };
 
 function writeGatewayFailure(
@@ -1696,6 +1806,7 @@ function writeGatewayFailure(
 	io: CealCliIo,
 	nextAction?: string,
 	observation?: CealGatewayObservation,
+	sessionRefresh: CealSessionRefreshOutcome = "none",
 ): number {
 	const failure = classifyGatewayFailure(response.error);
 	writeYaml(io.stdout, {
@@ -1706,6 +1817,7 @@ function writeGatewayFailure(
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
 		capabilities: [],
+		session_refresh: sessionRefresh,
 		proof_level: "host_decision",
 		live_gateway_checked: observation?.protocol_handshake_verified ?? true,
 		claims_allowed: [failure.denial ? "gateway_denial" : "gateway_rejection"],
@@ -1736,33 +1848,47 @@ function writeGatewayUnavailable(
 	details: GatewayUnavailableDetails = {},
 ): number {
 	const code = reason instanceof CealHttpTransportError ? reason.code : typeof reason === "string" ? reason : "request_failed";
+	const unauthorized = reason instanceof CealHttpTransportError && reason.http_status === 401;
+	const effectiveCode = unauthorized ? "authentication_failed" : code;
+	const sessionRefresh = details.sessionRefresh ?? "none";
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
 		ok: false,
-		status: "unavailable",
+		status: unauthorized ? "denied" : "unavailable",
 		gateway_required: true,
 		credential_context: CREDENTIAL_CONTEXT,
 		capabilities: [],
+		session_refresh: sessionRefresh,
 		proof_level: "surface",
 		live_gateway_checked: observation?.protocol_handshake_verified ?? false,
 		claims_allowed: observation?.protocol_handshake_verified ? ["gateway_handshake"] : [],
 		...(observation ? { gateway_observation: { ...observation } } : {}),
 		...(details.nonClaims !== undefined ? { non_claims: details.nonClaims } : {}),
 		error: {
-			kind: code,
+			kind: effectiveCode,
 			message: details.message ?? "The Gateway capability request could not be completed.",
-			next_action: details.nextAction ?? gatewayUnavailableNextAction(observation),
+			next_action: details.nextAction ?? gatewayUnavailableNextAction(observation, sessionRefresh),
 			...(observation ? { diagnostics: { ...observation } } : {}),
 		},
 	});
 	return 3;
 }
 
-function gatewayUnavailableNextAction(observation: CealGatewayObservation | undefined): string {
+function gatewayUnavailableNextAction(
+	observation: CealGatewayObservation | undefined,
+	sessionRefresh: CealSessionRefreshOutcome = "none",
+): string {
 	if (!observation) return "Check network reachability, TLS, and the Gateway-issued client session, then retry.";
+	if (observation.http_status === 401) {
+		return sessionRefresh === "refreshed"
+			? "The Gateway returned HTTP 401 after the worker ensured a current session. Check the Gateway route or session binding; no additional refresh was attempted, and capability access is unproven."
+			: "The Gateway returned HTTP 401. Check the Gateway route, proxy, or session binding; automatic refresh is only attempted when local access is expired, and capability access is unproven.";
+	}
 	if (observation.phase === "discovery" && observation.protocol_handshake_verified)
-		return "The Gateway handshake succeeded, but capability discovery did not return a valid Ceal response. Check the Gateway discovery route and protocol version, then retry; capability access is unproven.";
+		return observation.http_status === 200 && observation.response_kind === "protocol_invalid"
+			? `The Gateway handshake succeeded, but discovery returned HTTP 200 without a valid Ceal response for client protocol ${PROTOCOL_VERSION}. Check Gateway/proxy protocol compatibility; do not refresh again, and capability access is unproven.`
+			: "The Gateway handshake succeeded, but capability discovery did not return a valid Ceal response. Check the Gateway discovery route and protocol version, then retry; capability access is unproven.";
 	if (observation.http_response_received)
 		return "The Gateway answered the handshake, but its response was not a valid Ceal protocol response. Check the Gateway route or proxy and retry; do not infer capability availability from this response.";
 	return "No HTTP response was received from the Gateway. Check network reachability and TLS, then retry.";

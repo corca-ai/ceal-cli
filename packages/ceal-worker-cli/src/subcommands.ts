@@ -1,4 +1,4 @@
-import { type CealCommandDefinition, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
+import { type CealCommandDefinition, type CealSessionEffect, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 
 export type CealCommandName = CealCommandDefinition["name"];
 
@@ -15,6 +15,7 @@ export interface CealSubcommandDefinition {
 	description: string;
 	usage: string;
 	effect: CealCommandDefinition["effect"];
+	session_effect?: CealSessionEffect;
 	evidence: CealCommandDefinition["evidence"];
 	result_schema: string;
 	recovery: string;
@@ -82,8 +83,8 @@ export const CEAL_SUBCOMMANDS = [
 		recovery: `${SESSION_SETUP_NEXT_ACTION} If a session is configured, retry 'ceal session refresh' after correcting the reported local state.`,
 		notes: [
 			"This is the only worker readback-adjacent action that explicitly rotates",
-			"the stored one-time refresh credential. Discovery routes never refresh it",
-			"implicitly; after a stale access token, run this action deliberately.",
+			"the stored one-time refresh credential. Capability discovery may renew an",
+			"expired stored access once before its read, while this route always forces it.",
 		],
 	},
 	{
@@ -161,14 +162,16 @@ export const CEAL_SUBCOMMANDS = [
 		usage:
 			"ceal capabilities targets --capability <id> [--profile <profile-ref>] [--match <selector> | --cursor <opaque>] [--limit <1-64>] [--detail]",
 		effect: "read_only",
+		session_effect: "refresh_if_needed",
 		evidence: "surface_or_host_decision",
 		result_schema: "ceal.capabilities.v1",
 		recovery:
 			"Run 'ceal capabilities' to re-read current capability ids, re-select for that same capability, and continue one page only with the 'target_catalog.next_cursor' this route returned.",
 		notes: [
 			"Returned targets identify their connector_kind and target_kind. Each target's capability_access row is joined to the catalog descriptor with effect, readiness, and writable; --detail changes capability input contracts only.",
-			"The target query and its session handling are read-only. A stale access",
-			"token is reported; run 'ceal session refresh' to rotate it explicitly.",
+			"The target query is Gateway-read-only. If the stored access is locally expired",
+			"and refreshable, it is renewed once before the query; current or rejected access",
+			"does not trigger another refresh. Read session_refresh in the result for the outcome.",
 			"An unfiltered page is permitted: omit --match to request the Gateway's own",
 			"bounded page, and constrain it with --limit <1-64>. The Gateway stays",
 			"authoritative: a complete page with zero targets is terminal and means no",

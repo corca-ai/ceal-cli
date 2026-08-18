@@ -58,11 +58,14 @@ npm run probe -- ceal commands
 npm run probe -- ceal session status   # expect status: unconfigured, exit 0
 ```
 
-`capabilities`, target discovery, `receipt`, and `acceptance` are declared
-`read_only` and must not rotate an expired or rejected Gateway session. Probe
-them through the guard; if the stored bearer is no longer usable, run the
-separately declared `remote_write` route `ceal session refresh`. `ceal call`
-remains `remote_write` and may renew before its already-write-capable operation.
+`capabilities` and target discovery are declared `read_only` with
+`session_effect: refresh_if_needed`: an expired, refreshable stored session is
+renewed once before the read, and the result reports the outcome. A locally
+current or rejected token does not trigger another refresh. `receipt` and
+`acceptance` remain read-only observation routes; after their stored bearer is
+rejected, use the separately declared `remote_write` route `ceal session
+refresh`. `ceal call` remains `remote_write` and may renew before its already-
+write-capable operation.
 
 The commands above prove the checkout-built surface in a throwaway HOME. A
 separate signed-install run of `ceal version` and `ceal guide status` proves the

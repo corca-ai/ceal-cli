@@ -278,6 +278,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(command.usage)}$`, "mu"));
 			assert.match(result.stdout, /Named options follow required positionals, are order-independent, and may be supplied once\./u);
 			assert.match(result.stdout, new RegExp(`^Effect: ${command.effect}$`, "mu"));
+			if (command.session_effect) assert.match(result.stdout, new RegExp(`^Session effect: ${command.session_effect}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Evidence: ${command.evidence}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Result schema: ${command.result_schema}$`, "mu"));
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
@@ -308,6 +309,7 @@ test("every declared subcommand renders its own four-field leaf help", async () 
 			assert.equal(result.stderr, "");
 			assert.match(result.stdout, new RegExp(`^Usage: ${escapeRegExp(subcommand.usage)}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Effect: ${subcommand.effect}$`, "mu"));
+			if ("session_effect" in subcommand) assert.match(result.stdout, new RegExp(`^Session effect: ${subcommand.session_effect}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Evidence: ${subcommand.evidence}$`, "mu"));
 			assert.match(result.stdout, new RegExp(`^Result schema: ${subcommand.result_schema}$`, "mu"));
 			assert.match(result.stdout, /^Recovery\/readback: /mu);
@@ -1574,35 +1576,32 @@ test("session refresh explicitly rotates an expiring stored session once and per
 	});
 });
 
-test("capabilities and target selection never rotate a stored session", async () => {
-	await withRenewingGateway(async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+test("capabilities renew an expired stored session once before catalog and target reads", async () => {
+	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests, refreshCalls }) => {
+		let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 		const runtime = {
-			readStoredSession: async () =>
-				storedSession(endpoint, {
-					expiresAt: "2020-01-01T00:00:00.000Z",
-					refreshToken: oldRefreshToken,
-				}),
-			writeStoredSession: async () => assert.fail("read-only discovery must not rotate the stored session"),
+			readStoredSession: async () => current,
+			writeStoredSession: async (session) => {
+				current = session;
+			},
 			now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 		};
-		for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
-			const payload = await yamlRun(args, 0, runtime);
-			assert.equal(payload.status, "available", args.join(" "));
-		}
-		assert.equal(refreshCalls(), 0);
+		const catalog = await yamlRun(["capabilities"], 0, runtime);
+		const targets = await yamlRun(["capabilities", "targets", "--capability", "message.search"], 0, runtime);
+		assert.equal(catalog.status, "available");
+		assert.equal(catalog.session_refresh, "refreshed");
+		assert.equal(targets.status, "available");
+		assert.equal(targets.session_refresh, "none");
+		assert.equal(refreshCalls(), 1);
+		assert.equal(current.accessToken, newAccessToken);
 		assert.deepEqual(
 			requests.map((item) => item.authorization),
-			[
-				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
-				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
-				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
-				`Bearer ${"ceal_personal_"}${"P".repeat(43)}`,
-			],
+			[`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
 		);
 	});
 });
 
-test("capabilities authentication failure names the explicit session refresh action", async () => {
+test("capabilities authentication failure reports a bounded 401 diagnostic without a refresh loop", async () => {
 	for (const args of [["capabilities"], ["capabilities", "targets", "--capability", "message.search"]]) {
 		await withRenewingGateway(
 			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
@@ -1611,7 +1610,9 @@ test("capabilities authentication failure names the explicit session refresh act
 				});
 				assert.equal(payload.error.kind, "authentication_failed");
 				assert.equal(payload.status, "denied");
-				assert.match(payload.error.next_action, /ceal session refresh/u);
+				assert.equal(payload.session_refresh, "none");
+				assert.match(payload.error.next_action, /No additional refresh|HTTP 401/u);
+				assert.doesNotMatch(payload.error.next_action, /ceal session refresh/u);
 				assert.equal(refreshCalls(), 0);
 				assert.deepEqual(
 					requests.map((item) => item.authorization),
@@ -1621,6 +1622,59 @@ test("capabilities authentication failure names the explicit session refresh act
 			{ rejectFirstGateway: true },
 		);
 	}
+});
+
+test("capabilities does not refresh again when preflight renewal is followed by auth rejection", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, newAccessToken, requests, refreshCalls }) => {
+			let current = storedSession(endpoint, {
+				expiresAt: "2020-01-01T00:00:00.000Z",
+				refreshToken: oldRefreshToken,
+			});
+			const payload = await yamlRun(["capabilities"], 3, {
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
+					current = session;
+				},
+				now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+			});
+			assert.equal(payload.error.kind, "authentication_failed");
+			assert.equal(payload.session_refresh, "refreshed");
+			assert.match(payload.error.next_action, /do not repeat refresh/u);
+			assert.doesNotMatch(payload.error.next_action, /ceal session refresh/u);
+			assert.equal(refreshCalls(), 1);
+			assert.deepEqual(
+				requests.map((item) => item.authorization),
+				[`Bearer ${newAccessToken}`],
+			);
+		},
+		{ rejectFirstGateway: true },
+	);
+});
+
+test("capabilities reports a non-quarantined preflight refresh failure without contacting the Gateway", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, refreshCalls, requests }) => {
+			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+				readStoredSession: async () =>
+					storedSession(endpoint, {
+						expiresAt: "2020-01-01T00:00:00.000Z",
+						refreshToken: oldRefreshToken,
+					}),
+				writeStoredSession: async () => {
+					throw new CealSessionStoreError("refresh_busy");
+				},
+				now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+			});
+			assert.equal(payload.schema_version, "ceal.capabilities.v1");
+			assert.equal(payload.session_refresh, "refresh_failed");
+			assert.equal(payload.error.kind, "refresh_busy");
+			assert.equal(payload.live_gateway_checked, false);
+			assert.equal(refreshCalls(), 0);
+			assert.deepEqual(requests, []);
+		},
+		{ refreshDeniedCode: "refresh_temporarily_unavailable" },
+	);
 });
 
 test("receipt and acceptance observation never retry auth or rotate a stale stored session", async () => {
@@ -1815,6 +1869,29 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 	);
 });
 
+test("capabilities reports a quarantined preflight refresh without contacting the Gateway", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, refreshCalls, requests }) => {
+			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
+			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
+					current = session;
+				},
+				now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+			});
+			assert.equal(payload.schema_version, "ceal.capabilities.v1");
+			assert.equal(payload.session_refresh, "quarantined");
+			assert.equal(payload.error.kind, "session_renewal_unavailable");
+			assert.equal(payload.live_gateway_checked, false);
+			assert.equal(current.renewalBlockedReason, "outcome_unknown");
+			assert.equal(refreshCalls(), 1);
+			assert.deepEqual(requests, []);
+		},
+		{ invalidRefreshResponse: true },
+	);
+});
+
 test("an observational acceptance read does not require a durable refresh quarantine", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, refreshCalls }) => {
 		const runtime = {
@@ -2001,7 +2078,9 @@ test("capabilities does not retry an authentication rejection or rotate a still-
 				nextRequestId: () => "narnia:retry:001",
 			});
 			assert.equal(payload.error.kind, "authentication_failed");
-			assert.match(payload.error.next_action, /ceal session refresh/u);
+			assert.equal(payload.session_refresh, "none");
+			assert.match(payload.error.next_action, /No additional refresh|HTTP 401/u);
+			assert.doesNotMatch(payload.error.next_action, /ceal session refresh/u);
 			assert.equal(refreshCalls(), 0);
 			assert.deepEqual(
 				requests.map((item) => item.authorization),
@@ -3936,6 +4015,7 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 			{ readSecret: async () => token },
 		);
 		assert.equal(payload.status, "available");
+		assert.equal(payload.session_refresh, "none");
 		assert.equal(payload.live_gateway_checked, true);
 		assert.equal(payload.proof_level, "host_decision");
 		assert.equal(payload.gateway.profile_ref, "profile:narnia");
@@ -4263,6 +4343,57 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 	);
 });
 
+test("target selector refusal preserves the capability preflight refresh outcome", async () => {
+	const selector = `https://www.notion.so/${"a".repeat(32)}`;
+	const navigation = {
+		target_selector: "opaque_catalog_target",
+		url_target_selector: "unsupported",
+		required_argument_source: {
+			argument: "ref",
+			handle_kind: "document",
+			issued_by: ["resource.resolve"],
+		},
+	};
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, newAccessToken, requests, refreshCalls }) => {
+			let current = storedSession(endpoint, {
+				expiresAt: "2020-01-01T00:00:00.000Z",
+				refreshToken: oldRefreshToken,
+			});
+			const payload = await yamlRun(
+				["capabilities", "targets", "--capability", "notion.page.get", "--profile", "profile:narnia", "--match", selector],
+				2,
+				{
+					readStoredSession: async () => current,
+					writeStoredSession: async (session) => {
+						current = session;
+					},
+					now: () => Date.parse("2026-07-13T00:00:00.000Z"),
+				},
+			);
+			assert.equal(payload.schema_version, "ceal.error.v1");
+			assert.equal(payload.error.kind, "selector_not_supported");
+			assert.equal(payload.session_refresh, "refreshed");
+			assert.equal(refreshCalls(), 1);
+			assert.deepEqual(
+				requests.map((item) => item.authorization),
+				[`Bearer ${newAccessToken}`, `Bearer ${newAccessToken}`],
+			);
+		},
+		{
+			discoveryFactory: (request) => {
+				const discovery = discoveryResponse(request).value;
+				return success(request, {
+					...discovery,
+					capabilities: [{ ...discovery.capabilities[0], capability_id: "notion.page.get", navigation }],
+					targets: [],
+					target_catalog: { target_count: 0, returned_count: 0, complete: true },
+				});
+			},
+		},
+	);
+});
+
 test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {
 	let selectedCatalog: CealGatewayTargetCatalog = {
 		target_count: 1,
@@ -4493,7 +4624,7 @@ test("capabilities probes live and populates the discovery cache when cold", asy
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(refreshCalls, 0, "the current observe-mode catalog path does not refresh the session");
+		assert.equal(refreshCalls, 0, "a locally current session does not need preflight refresh");
 		const entry = cache.entry();
 		assert.ok(entry, "cold probe must populate the cache");
 		assert.deepEqual(entry.key, {
@@ -4532,7 +4663,7 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 			requests.map((item) => item.body.operation),
 			["handshake"],
 		);
-		assert.equal(refreshCalls, 0, "the current observe-mode catalog path does not refresh the session");
+		assert.equal(refreshCalls, 0, "a locally current session does not need preflight refresh");
 		// The served empty catalog is the cached value; request count proves no live probe.
 		assert.equal(payload.target_catalog.target_count, 0);
 	});
@@ -4540,17 +4671,35 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 
 test("capabilities reports HTTP reachability and protocol phases for malformed Gateway responses", async () => {
 	for (const { failureAt, expected } of [
-		{ failureAt: "handshake", expected: { status: 401, live: false, phase: "handshake", operation: "handshake", requests: ["handshake"] } },
+		{
+			failureAt: "handshake",
+			expected: {
+				kind: "authentication_failed",
+				status: 401,
+				live: false,
+				phase: "handshake",
+				operation: "handshake",
+				requests: ["handshake"],
+			},
+		},
 		{
 			failureAt: "discover",
-			expected: { status: 502, live: true, phase: "discovery", operation: "discover", requests: ["handshake", "discover"] },
+			expected: {
+				kind: "invalid_response",
+				status: 502,
+				live: true,
+				phase: "discovery",
+				operation: "discover",
+				requests: ["handshake", "discover"],
+			},
 		},
 	] as const) {
 		await withGatewayPhaseFailure(failureAt, async ({ endpoint, requests }) => {
 			const payload = await yamlRun(["capabilities"], 3, {
 				readStoredSession: async () => storedSession(endpoint),
 			});
-			assert.equal(payload.error.kind, "invalid_response", failureAt);
+			assert.equal(payload.error.kind, expected.kind, failureAt);
+			assert.equal(payload.session_refresh, "none", failureAt);
 			assert.equal(payload.live_gateway_checked, expected.live, failureAt);
 			assert.deepEqual(
 				requests.map((item) => item.body.operation),
@@ -4574,14 +4723,33 @@ test("capabilities reports HTTP reachability and protocol phases for malformed G
 				},
 				failureAt,
 			);
-			assert.match(
-				payload.error.next_action,
-				expected.phase === "discovery" ? /handshake succeeded/u : /not a valid Ceal protocol response/u,
-				failureAt,
-			);
+			assert.match(payload.error.next_action, expected.phase === "discovery" ? /handshake succeeded/u : /HTTP 401/u, failureAt);
 			assert.doesNotMatch(JSON.stringify(payload), /proxy secret|authorization|Bearer/u, failureAt);
 		});
 	}
+});
+
+test("capabilities identifies an HTTP 200 protocol-invalid discovery response without refreshing", async () => {
+	await withGateway(
+		async ({ endpoint, requests }) => {
+			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+				readStoredSession: async () => storedSession(endpoint),
+			});
+			assert.equal(payload.error.kind, "invalid_response");
+			assert.equal(payload.session_refresh, "none");
+			assert.equal(payload.live_gateway_checked, true);
+			assert.equal(payload.gateway_observation.http_status, 200);
+			assert.equal(payload.gateway_observation.response_kind, "protocol_invalid");
+			assert.equal(payload.gateway_observation.protocol_handshake_verified, true);
+			assert.match(payload.error.next_action, /HTTP 200/u);
+			assert.match(payload.error.next_action, /1\.3\.0/u);
+			assert.deepEqual(
+				requests.map((item) => item.body.operation),
+				["handshake", "discover"],
+			);
+		},
+		(body) => (body.operation === "discover" ? {} : handshakeResponse(body)),
+	);
 });
 
 test("the default discovery-cache window is the operator-measured 30 minutes", async () => {
@@ -4992,6 +5160,7 @@ type RenewingGatewayOptions = {
 	refreshDeniedCode?: string;
 	invalidRevokeResponse?: boolean;
 	rejectFirstGateway?: boolean;
+	discoveryFactory?: (body: { operation?: string; [key: string]: unknown }) => unknown;
 };
 type RenewingGatewayCallback = (input: {
 	endpoint: string;
@@ -5083,11 +5252,13 @@ async function withRenewingGateway(callback: RenewingGatewayCallback, options: R
 		const value =
 			body.operation === "handshake"
 				? handshakeResponse(body)
-				: body.operation === "discover"
-					? discoveryResponse(body)
-					: body.operation === "call"
-						? callResponse(body)
-						: readbackResponse(body);
+				: body.operation === "discover" && options.discoveryFactory
+					? options.discoveryFactory(body)
+					: body.operation === "discover"
+						? discoveryResponse(body)
+						: body.operation === "call"
+							? callResponse(body)
+							: readbackResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
