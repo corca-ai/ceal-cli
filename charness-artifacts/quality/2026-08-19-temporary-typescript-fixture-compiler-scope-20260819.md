@@ -62,6 +62,10 @@ tracing `compile()` into `test/client-artifact.test.ts`.
   duration about `1241 ms` versus `1107 ms` (`command: /usr/bin/time -p ...`).
 - `skipLibCheck` does not make source `.ts` diagnostics disappear; this slice narrows the
   fixture class while preserving source checking.
+- Worker pre-commit printed nine existing Knip configuration/tag hints (`command: npm run
+  lint:unused`); accepted as a non-blocking advisory owned by `knip.json` and deferred to
+  the next Worker quality sweep because this fixture slice changes neither ownership nor
+  the lint contract.
 
 ## Missing
 
