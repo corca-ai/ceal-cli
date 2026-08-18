@@ -1,6 +1,6 @@
 # Achieve Goal: Worker and Agent ratchet retirement and gate ports
 
-Status: draft
+Status: active
 Created: 2026-08-18
 Activation: /goal @../ceal-cli/charness-artifacts/goals/2026-08-18-worker-agent-ratchet-retirement-and-ports.md
 
@@ -9,18 +9,28 @@ activation command.
 
 ## Active Operating Frame
 
-- Current disposition: draft/backlog; no implementation slice has started. The
-  first slice is Lane A, the Worker ratchet-retirement pilot.
+- Current disposition: active; no implementation slice has started. The first
+  slice is Lane A, the Worker ratchet-retirement pilot.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
-- Activation record: before implementation, record each root, HEAD, and tree
-  identity again. Preparation identities are historical, not freeze values.
+- Activation record: verified before implementation from Gateway: Gateway
+  `/Users/ted/codes/ceal` at HEAD
+  `52353035cb6e9ca860b0e5d48c21e1ebfc73f861` tree
+  `3dbd1ee5711aa0d5f97519a6be692444997a16c8`; Worker
+  `/Users/ted/codes/ceal-cli` at HEAD
+  `51c8c7160d260b2f25390a64367fead869e840b7` tree
+  `677f7f4a9cb130ae64b27e441ec215b805498a62`; Agent
+  `/Users/ted/codes/ceal-agent` at HEAD
+  `47b68bc1e780efce8091606f9d7df8f583fcf7f0` tree
+  `62c95af716a460f7dbe8919f515cd0ca66c01f42`. Preparation identities are
+  historical, not freeze values.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: after activation, re-read the three AGENTS.md files, verify the
-  identities, remeasure Lane A, and repair the remaining raw compiler route.
+- Next action: remeasure Lane A's Worker project/file distance and remaining
+  raw compiler route, snapshot the relevant inputs, then repair the route
+  before considering ratchet deletion.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
