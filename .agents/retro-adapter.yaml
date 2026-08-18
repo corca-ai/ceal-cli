@@ -1,0 +1,8 @@
+version: 1
+repo: ceal-cli
+language: en
+output_dir: charness-artifacts/retro
+preset_id: portable-defaults
+customized_from: portable-defaults
+evidence_paths: []
+metrics_commands: []

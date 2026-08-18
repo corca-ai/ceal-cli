@@ -50,8 +50,9 @@ tracing `compile()` into `test/client-artifact.test.ts`.
 
 - The temporary program now selects `lib: ["ES2022"]`, `types: ["node"]`, and
   `skipLibCheck: true` while retaining the existing Node `typeRoots` and optional paths.
-- The production `tsconfig.build.json` path was not modified, so dependency declaration
-  checking remains enabled at its existing production boundary.
+- The production typecheck paths were not modified. Worker `tsconfig.typecheck.json`
+  retains its pre-existing `skipLibCheck: true`, so this fixture slice makes no
+  claim that production dependency declaration-file checking is enabled.
 - All four retained-path artifact tests remain green.
 
 ## Weak

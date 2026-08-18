@@ -287,8 +287,9 @@ Lane A stop rule are resolved in `## Discuss Before Activation`.
 - Fresh-eye: bounded delegated reader plus counterweight pass; primary rereads
   every load-bearing claim.
 - Gather: n/a — local owner docs and source only.
-- Release: n/a — no release surface.
+- Release: n/a — this goal changed only local source, tests, compiler/linter configs, baselines, and coordination artifacts; no package version, install manifest, signed artifact, tag, or publication surface was approved.
 - Issue closeout: n/a — #671 is an off-goal upstream follow-up.
+- Successor goal: n/a — no follow-up goal is authorized in this activation; remaining noPropertyAccessFromIndexSignature and loader-rewrite parity are named for separate approval.
 
 ## Discuss Before Activation
 
@@ -321,16 +322,16 @@ compiler replacement proof.
 
 ### Slice 2: Temporary TypeScript fixture compiler scope in Worker and Agent
 
-- Objective: Reduce ambient TypeScript library work only in temporary fixture programs that validate artifact or tools/test compilation, while preserving production declaration checking and source diagnostics.
+- Objective: Reduce ambient TypeScript library work only in temporary fixture programs that validate artifact or tools/test compilation, while leaving production tsconfigs and their existing source-diagnostics policy unchanged.
 - Why this approach: The Gateway measurement identified a large createProgram cost from unconstrained default libs and ambient packages. The sibling trace found one Worker artifact helper and one Agent tools/test lane that own temporary configs; their class does not assert declaration-file internals or arbitrary ambient packages.
 - Commits: Worker fixture commits `3cda8f22992d63c8aa164c8a0f3f12d166c96327`, `4b8eb268dba6f7306bb4771f81c5d4ab5de2eed7`, and `7f62094426c03622a63e75cc2869404ac6e00936`; Agent fixture commits `cbcf3b986825264aefda80a7fb487a93d03473cf` and `20438a0cea2b52e21b8622dc40e92def091dafe6`; no push or external boundary.
 - What changed: Worker test/artifact-workspace.ts now constrains the temporary compiler to lib ES2022, skipLibCheck, and Node types. Agent tsconfig.tools-tests.json now declares lib ES2022; its public quality test asserts lib/skipLibCheck/types/include, and src/codex-responses.ts adds an explicit type-only node:stream/web adapter for the dependency exposed by the narrower lib.
-- Alternatives rejected: Rejected a repo-wide skipLibCheck or lib change, types: [] (the fixture needs Node ambient types), lib.dom, baseline regeneration, and a new benchmark harness. Production tsconfig.build.json files and existing diagnostic baselines were not changed.
+- Alternatives rejected: Rejected a repo-wide skipLibCheck or lib change, types: [] (the fixture needs Node ambient types), lib.dom, baseline regeneration, and a new benchmark harness. Production typecheck/build configs and existing diagnostic baselines were not changed.
 - Targeted verification: Worker: npm run lint:types:raw:tools exit 0; node --test test/client-artifact.test.ts exit 0 with 4/4; git diff --check exit 0. Agent: npm run lint:types:source, npm run lint:types:tools, npm run lint:types:ts6, and npm run test:quality all exit 0; the quality suite is 9/9, both compiler lanes retain equal 279/100 diagnostic counts, and git diff --check exits 0. Agent's first narrowed-lib run was red with TS2304 for ReadableStreamReadResult; the explicit type-only import restored both lanes green. Fresh-eye round 1 plus counterweight and round 2 found no Act Before Ship blocker; Worker and Agent reviewer-boundary verifies returned ok: true, verdict: clean, drift: [].
 - Test duplication pressure: The Worker retained artifact test family was reused rather than duplicated. The Agent existing public quality-gate test was extended to pin the temporary-config contract. No baseline or ratchet was regenerated.
 - Critique: Parent-delegated fresh-eye covered fixture boundary, runtime economics, and type portability, followed by a separate counterweight and a repaired-proof round 2. The only actionable finding was wording precision in the Worker comment; it now states ES2022 and Node types rather than implying Node ambient types are absent. The Agent assertions were confirmed to read the tools/test config, not production config.
 - Off-goal findings: No Gateway source edit, push, CI watch, release, apply/restart, live readback, or issue creation. The Agent quality-adapter bootstrap conflict was preserved without migration because it is unrelated to this slice. No claim is made for compiler-only timing, other OS/Node versions, browser/DOM fixtures, CI, release, or a diagnostic-count reduction.
-- Lessons carried forward: Fixture class must be established before narrowing compiler libraries: Node-owned artifact/tools tests can use ES2022 plus explicit Node types, while production typecheck must keep its declaration-checking policy. A narrower lib is also a useful proof pressure because it exposes ambient source dependencies that should become typed adapters.
+- Lessons carried forward: Fixture class must be established before narrowing compiler libraries: Node-owned artifact/tools tests can use ES2022 plus explicit Node types, while production typecheck configuration must remain unchanged by this fixture slice. The existing production `skipLibCheck` setting is not a declaration-file checking claim; a separate compiler migration is required if that policy is to change. A narrower lib is also useful proof pressure because it exposes ambient source dependencies that should become typed adapters.
 - Metrics: Single local /usr/bin/time observations (directional, not a benchmark): Worker node --test test/client-artifact.test.ts real 1.27s before to 1.16s after, test duration about 1241ms to 1107ms; Agent npm run lint:types:tools real 2.94s before to 2.65s after repair. These include setup/orchestration and assertions, not just createProgram. Next goal slice remains D1 after this orthogonal quality slice is closed.
 
 ### Slice 3: Lane D1a — source NUL structural gate port
@@ -933,6 +934,10 @@ issue #671 as an upstream follow-up rather than a local fix claim.
   not repaired or re-pinned in this compiler slice.
 - Linux-only Worker/Agent proof, signed publication, and remote CI remain
   separately approved work.
+- Worker `tsconfig.typecheck.json:20` and Agent `tsconfig.build.json:18` already
+  carry `skipLibCheck: true` from before this fixture slice. This goal did not
+  change that production policy; turning it off would be a separate compiler
+  migration with its own source-repair and dependency-diagnostic proof.
 - `noPropertyAccessFromIndexSignature` remains a named compiler-owned successor
   candidate, not a custom ratchet.
 
@@ -952,6 +957,35 @@ result in the targeted Worker contract probe is the pre-existing Protocol
 quarantine divergence, not an exact-option diagnostic. No compiler-only timing,
 Linux-only runtime, push, release, or remote proof is claimed.
 
+Worker final local bundle: `npm run check` completed with exit 1 in
+`/tmp/ceal-proof-jobs/worker-closeout-check/result.20260819-closeout-worker2.json`;
+291/292 tests passed and the sole red is the recorded Protocol quarantine
+vendor-tree mismatch (`e93e491a...` observed versus `cfee89e...` pinned), not a
+diagnostic or fixture failure. The D1 contract repair is `c02d5b4`, and
+`node --experimental-strip-types --test test/contract/repo-gates.test.ts`
+passed 50/50; the previously red timeout test passed when run alone with its
+exact name filter. Agent final local contributor bundle passed with exit 0 in
+`/tmp/ceal-proof-jobs/agent-closeout-check-contributor/result.20260819-closeout-agent1.json`.
+The host-log result is retained at
+`charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md`;
+it reports thread-wide activity only because no goal metric window was present.
+
+Final repository identities at this verification point: Gateway
+`/Users/ted/codes/ceal` HEAD `67afbec6a42451490e9a22f0c9896c15c870eda6` tree
+`01f2389ac5e4ff9474595c4a8f1f4941eeb45e97`; Worker
+`/Users/ted/codes/ceal-cli` HEAD `c02d5b4f8119bdb13f8e81b9c1deaaa5a680f31b` tree
+`c69a4ba2a74f2d2299f09aa754a362369180ee9b`; Agent
+`/Users/ted/codes/ceal-agent` HEAD `4ea79f4e4691526a482fdff13647bac9b80d5ff2` tree
+`4fb0a11408c96d1ee6c77a1f5f6e507eb35f9698`. These identities predate the
+closeout-only Worker artifact commits and will be rebound once those artifacts
+are committed.
+
+Retro: /Users/ted/codes/ceal-cli/charness-artifacts/retro/2026-08-19-session-retro.md
+Host log probe: /Users/ted/codes/ceal-cli/charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md
+Disposition review: /Users/ted/codes/ceal-cli/charness-artifacts/critique/2026-08-19-worker-agent-ratchet-retirement-and-ports-claims-review.md
+Instance apply: not applied because this activation explicitly excludes apply/restart and live readback.
+Non-claims: no signed artifact, release tag, CI result, installed worker, runtime apply, or live provider readback is claimed; the Protocol mismatch remains an owner-tracked quarantine red.
+
 ## User Verification Instructions
 
 1. Start from Gateway `ceal` and read all three AGENTS.md files.
@@ -964,15 +998,16 @@ Linux-only runtime, push, release, or remote proof is claimed.
 
 ## Auto-Retro
 
-Retro not run — Lane A and the temporary fixture slice are closed as local
-implementation units, but the goal continues into the planned gate/compiler
-lanes. The quality artifacts record the validator correction and its disposition.
-The Worker and Agent auto-retro probes returned `state: not-established` with
-`configuration_status: adapter-missing`; I therefore chose to defer the short
-session retro to goal closeout rather than treat the missing answer as a clean
-no-retro verdict.
-Run `charness:retro` at goal closeout and disposition every surfaced
-improvement as applied or a tracked issue.
+Retro completed and persisted at
+`charness-artifacts/retro/2026-08-19-session-retro.md`. It records the first
+reviewer's invalid drift, the corrected frozen fresh-eye round, the baseline
+patch near miss, the unowned-runner selection finding, and the thread-wide
+host/telemetry non-claims. The adapter was initialized with explicit empty
+evidence and metrics lists; no hidden host metric source was invented.
+Retro dispositions: applied: the active goal and retro now carry the freeze,
+positive-key, runner-selection, and proof-job lessons; no external issue or
+plugin source edit was authorized.
+Structural follow-up: repo-local guard: charness-artifacts/goals/2026-08-18-worker-agent-ratchet-retirement-and-ports.md#claim-ledger
 
 ## Claim Ledger
 
