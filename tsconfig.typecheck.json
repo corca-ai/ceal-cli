@@ -7,6 +7,8 @@
 		"rewriteRelativeImportExtensions": true,
 		"strict": true,
 		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitReturns": true,
 		"types": ["node"],
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,

@@ -6,6 +6,8 @@
 		"moduleResolution": "NodeNext",
 		"strict": true,
 		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitReturns": true,
 		"erasableSyntaxOnly": true,
 		"types": ["node"],
 		"allowImportingTsExtensions": true,
