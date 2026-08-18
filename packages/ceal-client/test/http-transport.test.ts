@@ -363,7 +363,7 @@ test("HTTP transport identifies an incomplete discovery target page without a co
 		...response,
 		value: {
 			...response.value,
-			target_catalog: { target_count: 0, returned_count: 0, complete: false, selection_required: true },
+			target_catalog: { target_count: 0, returned_count: 0, complete: false },
 		},
 	};
 	const transport = createCealHttpTransport({
@@ -378,6 +378,34 @@ test("HTTP transport identifies an incomplete discovery target page without a co
 		assert.equal(error.response_schema_version, "ceal.gateway_discovery.v2");
 		assert.equal(error.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 		assert.doesNotMatch(error.message, /selection_required|target_count|safe-token/u);
+		return true;
+	});
+});
+
+test("HTTP transport leaves a non-empty incomplete discovery page as generic protocol invalid", async () => {
+	const discoveryRequest: DiscoverInput = {
+		request_id: "request:discover:nonempty-shape-001",
+		operation: "discover",
+		profile_ref: "profile:test",
+		body: { capability_id: "message.search" },
+	};
+	const response = discoveryResponse(discoveryRequest);
+	const nonEmptyIncompleteCatalog = {
+		...response,
+		value: {
+			...response.value,
+			target_catalog: { target_count: 1, returned_count: 1, complete: false },
+		},
+	};
+	const transport = createCealHttpTransport({
+		endpoint: "https://gateway.example.test/client",
+		accessToken: "safe-token",
+		fetchFn: async () => globalThis.Response.json(nonEmptyIncompleteCatalog),
+	});
+	await assert.rejects(createCealClient(transport).request(discoveryRequest), (error) => {
+		assert.ok(error instanceof CealHttpTransportError);
+		assert.equal(error.response_kind, "protocol_invalid");
+		assert.equal(error.response_shape_issue, undefined);
 		return true;
 	});
 });

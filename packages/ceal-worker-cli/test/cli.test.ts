@@ -4755,29 +4755,38 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 	);
 });
 
-test("capabilities identifies a stale incomplete target page without refreshing", async () => {
-	await withGateway(
-		async ({ endpoint }) => {
+test("capabilities identifies a stale incomplete target page after one refresh without retrying", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
+			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
-				readStoredSession: async () => storedSession(endpoint),
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
+					current = session;
+				},
+				now: () => Date.parse("2026-07-13T00:00:00.000Z"),
 			});
 			assert.equal(payload.error.kind, "invalid_response");
-			assert.equal(payload.session_refresh, "none");
+			assert.equal(payload.session_refresh, "refreshed");
 			assert.equal(payload.gateway_observation.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+			assert.equal(refreshCalls(), 1);
+			assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
 			assert.match(payload.error.next_action, /incomplete discovery target page/u);
 			assert.match(payload.error.next_action, /continuation cursor/u);
 			assert.doesNotMatch(payload.error.next_action, /Gateway\/proxy protocol compatibility/u);
+			assert.doesNotMatch(JSON.stringify(payload), /selection_required|target_count|safe-token/u);
 		},
-		(body) => {
-			if (body.operation === "handshake") return handshakeResponse(body);
-			const response = discoveryResponse(body);
-			return {
-				...response,
-				value: {
-					...response.value,
-					target_catalog: { target_count: 0, returned_count: 0, complete: false, selection_required: true },
-				},
-			};
+		{
+			discoveryFactory: (body) => {
+				const response = discoveryResponse(body);
+				return {
+					...response,
+					value: {
+						...response.value,
+						target_catalog: { target_count: 0, returned_count: 0, complete: false },
+					},
+				};
+			},
 		},
 	);
 });

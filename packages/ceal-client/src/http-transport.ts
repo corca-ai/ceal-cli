@@ -2,6 +2,7 @@ import {
 	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
 	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
 	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
+	CEAL_PROTOCOL_VERSION,
 	type CealGatewayRequest,
 	type CealGatewayResponseFor,
 	decodeCealClientResponse,
@@ -334,8 +335,14 @@ function responseShapeIssue(value: unknown, operation: CealGatewayRequest["opera
 	if (operation !== "discover") return undefined;
 	const response = responseRecord(value);
 	const discovery = response?.ok === true ? responseRecord(response.value) : undefined;
+	if (discovery?.schema_version !== "ceal.gateway_discovery.v2" || response?.protocol_version !== CEAL_PROTOCOL_VERSION) return undefined;
 	const catalog = responseRecord(discovery?.target_catalog);
-	if (catalog?.complete === false && catalog.next_cursor === undefined) return "discovery_target_catalog_incomplete_without_cursor";
+	if (
+		catalog?.target_count === 0
+		&& catalog.returned_count === 0
+		&& catalog.complete === false
+		&& catalog.next_cursor === undefined
+	) return "discovery_target_catalog_incomplete_without_cursor";
 	return undefined;
 }
 

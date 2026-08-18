@@ -53,6 +53,7 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 			"schema_version: ceal.capabilities.v1",
 			"ok: false",
 			"status: unavailable",
+			"failure_stage: gateway_discovery",
 			"access_token: ceal_personal_SECRET",
 			"error:",
 			"  kind: invalid_response",
@@ -76,6 +77,7 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_envelope_kind, "failure");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_error_code, "authentication_failed");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+	assert.equal(summary.failure_stage, "gateway_discovery");
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
 });
 

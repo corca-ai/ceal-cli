@@ -247,6 +247,7 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 		"session_refresh",
 		"proof_level",
 		"live_gateway_checked",
+		"failure_stage",
 		"request_ref",
 		"gateway_audit_readback",
 		"provider_state_readback",
@@ -585,12 +586,14 @@ async function main(): Promise<number> {
 		providerCallSucceeded = call.result.exit_code === 0 && receipt?.result.exit_code === 0;
 	}
 	const ok = discovery.result.exit_code === 0 && providerCallSucceeded;
+	const failureStage = discovery.result.exit_code !== 0 ? "gateway_discovery" : providerCallSucceeded ? undefined : "provider_roundtrip";
 	return emit(
 		{
 			schema_version: "ceal.source_worker_e2e.v1",
 			command: "source-worker-e2e",
 			ok,
-			status: ok ? "completed" : "gateway_or_provider_failed",
+			status: ok ? "completed" : failureStage === "gateway_discovery" ? "gateway_discovery_failed" : "provider_roundtrip_failed",
+			...(failureStage ? { failure_stage: failureStage } : {}),
 			source_worker: { ...metadata, entrypoint_sha256: sha256(WORKER_ENTRYPOINT) },
 			session: session.summary,
 			commands,
@@ -630,7 +633,8 @@ function emit(value: RecordValue, json: boolean): number {
 			"boundary_required",
 			"build_required",
 			"build_failed",
-			"gateway_or_provider_failed",
+			"gateway_discovery_failed",
+			"provider_roundtrip_failed",
 			"source_contract_failed",
 			"target_discovery_failed",
 			"target_not_returned",
