@@ -99,6 +99,7 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 	const commonPhases = [
 		"npm run lint",
 		"npm run lint:no-legacy-mjs",
+		"npm run lint:source-nul-bytes",
 		"npm run lint:types",
 		"npm run lint:unused",
 		"npm run lint:reachability",
@@ -1932,6 +1933,7 @@ test("the pre-commit hook is checked in and stays the cheap tier", () => {
 		"npm run lint",
 		"npm run lint:types",
 		"npm run lint:no-legacy-mjs",
+		"npm run lint:source-nul-bytes:staged",
 		"node test/gate-contract-lib.ts",
 		"npm run lint:shell",
 	]) {
@@ -1995,7 +1997,7 @@ test("the pre-commit hook propagates the failing gate's exit code", (context) =>
 	const bin = path.join(scratch, "bin");
 	mkdirSync(bin, { recursive: true });
 	// Two codes, not one: `npm` carries the first gate and `node` carries the
-	// fourth, so they can be failed independently.
+	// fifth, so they can be failed independently.
 	const runHook = (npmExit: number, nodeExit: number) => {
 		writeFileSync(path.join(bin, "npm"), `#!/bin/sh\nexit ${npmExit}\n`, { mode: 0o755 });
 		writeFileSync(path.join(bin, "node"), `#!/bin/sh\nexit ${nodeExit}\n`, { mode: 0o755 });
@@ -2012,7 +2014,7 @@ test("the pre-commit hook propagates the failing gate's exit code", (context) =>
 	assert.equal(first.status, 42, "the gate's own exit code must reach git");
 	assert.match(first.stderr, /COMMIT BLOCKED by biome/u, "the hook must name the gate that blocked, not just fail");
 
-	// Failing the FIRST gate proves one `run_gate` line. The tier has five, and a
+	// Failing the FIRST gate proves one `run_gate` line. The tier has six, and a
 	// later one written wrong would not be reached above, so fail a gate the hook
 	// only gets to after four others have passed.
 	const later = runHook(0, 7);

@@ -32,6 +32,14 @@ The inventory includes files present in the current worktree when they are
 tracked or non-ignored untracked, plus staged additions, renames, and copies;
 it also excludes staged deletions and worktree paths that no longer exist.
 
+`npm run lint:source-nul-bytes` scans tracked source for raw NUL bytes. A raw
+byte makes a source file invisible to recursive text searches on this host, so
+source literals must use the six-character escape instead; binary-input fixtures
+belong in data files. The regular check reads the worktree, while
+`npm run lint:source-nul-bytes:staged` reads the index and is the pre-commit
+variant so newly added source is covered before it becomes tracked. This is a
+source-integrity gate, not a diagnostic baseline or ratchet.
+
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
 

@@ -3,7 +3,7 @@
 # pre-commit hook at all, so the first signal a type error gave was at pre-push,
 # after the commit it belonged to had already been written.
 #
-# Every gate here is whole-repo rather than staged-scoped, which departs from the
+# Most gates here are whole-repo rather than staged-scoped, which departs from the
 # "cheap changed-file signal" docs/gates.md anticipated. The reason is measured
 # on the host in hand, not assumed: `biome check .` reads the whole tree in
 # ~0.45s wall and the raw TypeScript compiler answers in ~1.6s, because both run on native
@@ -18,10 +18,10 @@
 # Staying under a few seconds is what keeps it installed — a commit gate that
 # costs a minute is a commit gate people pass `--no-verify`.
 #
-# It also reads the WORKING TREE, not the index. A partially staged file is
-# judged by the version on disk, so a commit can pass here and carry content
-# that never met the gate. Pre-push and CI read the committed tree and own that
-# case; this tier buys feedback speed, not authority.
+# The whole-repo gates read the WORKING TREE, not the index. The source-NUL gate
+# is the deliberate exception: its staged variant reads the index so a new source
+# file cannot enter a commit without the check. Pre-push and CI still own the
+# committed-tree boundary; this tier buys feedback speed, not final authority.
 #
 # Installed by `npm run hooks:install`, which points core.hooksPath here.
 # Bypass deliberately and visibly with `git commit --no-verify`.
@@ -44,6 +44,7 @@ run_gate() {
 run_gate "biome" npm run lint
 run_gate "raw TypeScript compiler" npm run lint:types
 run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
+run_gate "source NUL bytes" npm run lint:source-nul-bytes:staged
 run_gate "gate contract" node test/gate-contract-lib.ts
 run_gate "shell lint" npm run lint:shell
 

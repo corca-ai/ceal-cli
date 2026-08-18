@@ -23,6 +23,7 @@
 						"npm run lint:node-modules-drift",
 						"npm run lint:reachability",
 						"npm run lint:shell",
+						"npm run lint:source-nul-bytes:staged",
 						"npm run lint:store-lock",
 						"npm run lint:types",
 						"npm run lint:unused"

@@ -9,9 +9,10 @@ activation command.
 
 ## Active Operating Frame
 
-- Current disposition: active; Lane A and the orthogonal temporary-TypeScript-fixture
-  performance slice have implementation, targeted proof, and fresh-eye review complete;
-  the two sibling commits are the immediate local closeout boundary.
+- Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
+  performance slice, and D1a source-NUL gate port have implementation, targeted proof,
+  and fresh-eye review complete. D1 remains in progress for its remaining structural
+  gates; the D1a sibling commits are the immediate local closeout boundary.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -29,8 +30,9 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: commit the Worker and Agent fixture-performance slices locally, then begin
-  D1's raw compiler-route closure; keep the A → D1 → B → C → D2 → E dependency order intact.
+- Next action: commit the Worker and Agent D1a slices locally, then continue D1 with the
+  remaining independent structural gates; keep the A → D1 → B → C → D2 → E dependency
+  order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -294,6 +296,20 @@ compiler replacement proof.
 - Lessons carried forward: Fixture class must be established before narrowing compiler libraries: Node-owned artifact/tools tests can use ES2022 plus explicit Node types, while production typecheck must keep its declaration-checking policy. A narrower lib is also a useful proof pressure because it exposes ambient source dependencies that should become typed adapters.
 - Metrics: Single local /usr/bin/time observations (directional, not a benchmark): Worker node --test test/client-artifact.test.ts real 1.27s before to 1.16s after, test duration about 1241ms to 1107ms; Agent npm run lint:types:tools real 2.94s before to 2.65s after repair. These include setup/orchestration and assertions, not just createProgram. Next goal slice remains D1 after this orthogonal quality slice is closed.
 
+### Slice 3: Lane D1a — source NUL structural gate port
+
+- Objective: Port the Gateway source-NUL structural gate to Worker and Agent with receiving-owned scripts, staged pre-commit coverage, contract reachability, and direct mutation/restore proof.
+- Why this approach: The fixed Gateway gate catches a raw source byte that makes recursive searches silently skip a file. The port is independent of explicit-any and keeps compiler/linter ownership without adding a baseline or diagnostic manager.
+- Commits: Local Worker and Agent implementation commits are pending at this record; no push or external boundary.
+- What changed: Added typed check-source-nul-bytes.ts implementations and retained-path tests in each sibling; wired normal and staged package scripts, check/lint chains, hooks, gate contracts, Worker gate docs, and Agent test-lane ownership. The receiving ports also import execFileSync, correcting the fixed Gateway source staged-mode omission.
+- Alternatives rejected: Rejected a shared cross-repo helper, a diagnostic ratchet/baseline, a fail-closed change to the Gateway source contract, and scanning unchanged tracked files from the pre-commit staged route. Normal check owns all tracked source; staged pre-commit owns changed index paths.
+- Targeted verification: Worker: source-NUL tests 4/4, repo-gates 54/54, staged and normal routes green, mutation raw NUL at scripts/check-no-legacy-mjs.ts:157 exit 1, snapshot restore hash a750859ec8c379da468686eb30c17c2fa7e980ab and routes green, check:unit proof job passed exit 0 in 41875 ms. Agent: source-NUL and gate-contract tests 11/11, quality-gates 9/9, staged and normal routes green, mutation at scripts/check-no-legacy-mjs.ts:136 exit 1, snapshot restore hash c92bdb3089f598b4312d7a06846e3dbaea815f02 and routes green, check:contributor proof job passed exit 0 in 28993 ms. Agent npm run check reached lint and quality green but its Linux runtime lane refused on macOS with linux_runtime_requires_linux.
+- Test duplication pressure: Added one focused source-integrity test family per receiving repository because the new gate owns a distinct verdict; Worker contract inventory and Agent test-lane contract prove reachability. No duplicate scripts test family remains.
+- Critique: Parent-delegated medium fresh-eye lenses covered reachability, byte/index portability, and source-of-truth scope. All three returned findings; both sibling reviewer fingerprints returned ok true, verdict clean, drift empty. Accepted Gateway-inherited staged changed-path scope and unreadable-file skip as source contract. Tracked newline-delimited Git path serialization as a follow-up if newline-bearing source paths become in-scope; no D1a code blocker remains.
+- Off-goal findings: No Gateway edit, push, CI watch, release, apply/restart, live readback, issue creation, or duplicate #671. No claim is made for Linux Agent runtime execution on this macOS host, CI, release, or live behavior.
+- Lessons carried forward: A structural gate port is incomplete until the receiving check chain, staged hook route, declarative contract, test inventory, and mutation evidence all agree. A copied checker is not enough. Read the fixed source contract before “improving” inherited behavior.
+- Metrics: Fast targeted routes were sub-second; Worker check:unit proof duration was 41875 ms and Agent check:contributor was 28993 ms. These are local gate durations, not a performance claim.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -362,10 +378,11 @@ Lane A local verification completed on 2026-08-19: all three raw TypeScript
 routes, targeted source/gate contracts, the mutation-red/restore-green proof,
 and the Worker pre-commit gate passed. The temporary fixture slice also passed
 its Worker artifact test, Agent source/tools/TS6 type lanes, Agent quality tests,
-quality-artifact validators, and round-2 boundary checks. The two fixture slice
-commits are the remaining local closeout action; the overall goal remains active
-for D1 and later compiler/linter lanes. No compiler-only timing, runtime,
-push, release, or remote proof is claimed.
+quality-artifact validators, and round-2 boundary checks. D1a source-NUL gate
+port verification passed in both sibling checkouts; the overall goal remains
+active for the remaining D1 gates and later compiler/linter lanes. No
+compiler-only timing, Linux-only runtime, push, release, or remote proof is
+claimed.
 
 ## User Verification Instructions
 
@@ -402,8 +419,14 @@ improvement as applied or a tracked issue.
 | pre-commit labels the type gate as raw compiler ownership | Worker `.githooks/pre-commit:9,45,73` | `rg -n -i "type ratchet|raw TypeScript compiler|type checks" ../ceal-cli/.githooks/pre-commit` |
 | Worker temporary artifact compiler is constrained without changing production typecheck | `../ceal-cli/test/artifact-workspace.ts:29-50`; `../ceal-cli/test/client-artifact.test.ts:14-19` | from `../ceal-cli`: run `npm run lint:types:raw:tools` and `node --test test/client-artifact.test.ts`; read the temporary config producer and retained 4-test setup |
 | Agent temporary tools/test compiler is constrained and explicitly asserted | `../ceal-agent/scripts/typecheck-tools-tests.ts:132-150`; `../ceal-agent/tsconfig.tools-tests.json:15-24`; `../ceal-agent/test/public/quality-gates.test.ts:40-45` | from `../ceal-agent`: run `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:quality`; inspect `evaluateLane()` and the quality contract |
-| Agent source dependency exposed by `lib: ["ES2022"]` is explicit and type-only | `../ceal-agent/src/codex-responses.ts:1,90-94` | from `../ceal-agent`: run `npm run lint:types:source`; remove the adapter in a disposable mutation only if a future slice names that proof |
 | fixture timing is directional end-to-end observation, not compiler-only proof | Slice 2 metrics; quality artifacts under `../ceal-cli/charness-artifacts/quality/` and `../ceal-agent/charness-artifacts/quality/` | repeat `/usr/bin/time -p` around the same commands; do not generalize one sample without a structured timing capture |
+| Gateway source-NUL contract is the fixed input for D1a | Gateway commit `3cb729ba5d6f76ff6796e60a541454ff9ebbc924`: `scripts/check-source-nul-bytes.ts:24-63` and `scripts/check-source-nul-bytes.test.ts:44-47` | `git -C /Users/ted/codes/ceal show 3cb729ba5d6f76ff6796e60a541454ff9ebbc924:scripts/check-source-nul-bytes.ts`; run both receiving source-NUL test files |
+| D1a normal and staged routes are receiving-owned and reachable | Worker/Agent package scripts, hooks, gate contracts, and test-lane contracts | from each explicit sibling root: `npm run lint:source-nul-bytes`, `npm run lint:source-nul-bytes:staged`, and the retained contract tests |
+| D1a retained-input mutation is real and restored from current snapshots | D1a quality/impl records and `/tmp/ceal-d1-worker-nul-proof.kNDgRI`, `/tmp/ceal-d1-agent-nul-proof.OV2924` | inject a raw NUL into `scripts/check-no-legacy-mjs.ts`, require `npm run lint:source-nul-bytes` exit 1, restore with the named snapshot, compare hashes, and require tracked/staged routes exit 0 |
+| D1a staged route intentionally covers changed index paths while normal route covers all tracked source | Gateway source lines `44-50`; Worker `docs/gates.md` source-NUL section; receiving checker comments | inspect the fixed Gateway source and run each receiving `:staged` route against the staged index; do not claim pre-commit scans unchanged tracked files |
+| D1a unreadable-file skip is inherited source behavior, not a fail-closed diagnostic claim | Gateway `scripts/check-source-nul-bytes.test.ts:44-47` and receiving tests | run the unreadable-file tests; keep this behavior unchanged unless a future source-contract slice explicitly changes it |
+| D1a path serialization remains a tracked follow-up, not a new port divergence | Gateway `scripts/ratchet-policy-lib.ts:55-58` and both receiving local `gitLines` helpers | inspect the three newline-delimited implementations; if newline-bearing source paths become in-scope, design one shared NUL-safe contract before changing either port |
+| Agent full Linux gate is platform-scoped on this macOS host | Agent `AGENTS.md:40-48`, `.githooks/pre-push:22-27`, and proof-job result `agent-d1-source-nul-check` | on Linux run `npm run check`; on this host run `npm run check:contributor`; read the direct result artifact |
 | compiler/linter owns source diagnostics | Worker/Agent configs and raw routes | inspect owning configs; run each declared raw typecheck/lint route and read direct exit codes |
 | noNonNullAssertion rationale is live before Lane C | `../ceal-cli/biome.json:30`, `../ceal-cli/docs/gates.md:103-107` | read both, enable the rule, rerun Biome, reread the owner doc |
 | every port is receiving-owned and reachable | source closure plus receiving package/gate contracts | inspect package/check/hook reachability; run retained-input mutation red and snapshot-restore green |
