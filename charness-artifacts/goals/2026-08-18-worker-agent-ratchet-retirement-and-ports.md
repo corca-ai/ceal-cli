@@ -11,9 +11,10 @@ activation command.
 
 - Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
-  import hard-failure gate, and Worker/Agent Secretlint gates have implementation,
-  targeted proof, and local commits. The full Gateway loader-rewrite ratchet remains
-  deliberately unported; the remaining D1 work is Agent-local duplicate detection.
+  import hard-failure gate, Worker/Agent Secretlint gates, and Agent-local duplicate
+  detector have implementation, targeted proof, and local commits. The full Gateway
+  loader-rewrite ratchet remains deliberately unported; D1 is complete and Lane B is
+  the next dependency-safe slice.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -31,7 +32,7 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: implement and prove Agent-local duplicate detection, then keep the
+- Next action: begin Lane B compiler-option measurement and source repair, keeping the
   A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
@@ -252,7 +253,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | Slice | Objective | Expected evidence | Status |
 | --- | --- | --- | --- |
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
-| D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | in progress — import hard failures and Secretlint complete; Agent duplicate pending |
+| D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | pending |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
@@ -373,8 +374,8 @@ compiler replacement proof.
 - Fresh-eye result: three unnamed parent-delegated reviewers independently rejected porting the full `loader_rewrite` ratchet, accepted a narrow hard-failure subset only after this contract revision, and recommended receiving-local secretlint plus Agent duplicate detection.
 - Boundary proof: the Gateway, Worker, and Agent reviewer windows all returned `ok: true`, `verdict: clean`, `drift: []` after reviewer delivery. The exact snapshots and re-check commands are recorded in the critique artifact.
 - Decision: rename the sibling route to `lint:import-hard-failures`; retain true unresolvable and invoked-path failures without a baseline; exclude Agent diagnostic-record JSON; defer `.js`/`.ts` loader migration to a separately proved emitted/runtime slice.
-- Next implementation: implement and prove Agent duplicate detection with local
-  scope, contract/hook/full-check reachability, and mutation/restore evidence.
+- Next implementation: begin Lane B compiler-option measurement and source repair;
+  Agent duplicate detection is closed in Slice 7.
 
 ### Slice 5: D1 — receiving-owned Secretlint gates
 
@@ -467,6 +468,58 @@ compiler replacement proof.
   is made. No push, CI watch, release, apply/restart, live readback, issue creation,
   or duplicate #671 occurred.
 
+### Slice 7: D1 — Agent-local duplicate detector
+
+- Objective: Add the final D1 structural gate in Agent with a local TypeScript
+  scope, measured threshold, real report evaluation, package/check/hook/test-lane
+  reachability, and retained-input mutation proof.
+- Why this approach: Gateway's jscpd threshold and persistent report/cache shape
+  are not portable defaults. Agent measured 44 clones across 259 selected files,
+  564 duplicated lines, and 1.05% duplication with tests excluded; the receiving
+  policy therefore pins a 1.2% threshold, `minLines: 5`, and `minTokens: 60`.
+  The policy has no baseline, count cache, store path, or intentional-pair entry.
+- Commits: Agent `ac26dcc298a4400ff46db5ff0d412f9e88f1a263`
+  (`gate: add Agent duplicate detector`); Gateway critique artifact commit
+  `67afbec6a42451490e9a22f0c9896c15c870eda6`; no push or external boundary.
+- What changed: Added `jscpd@4.2.5` with lockfile ownership, `.jscpd.json`,
+  `scripts/run-jscpd-duplicates.ts`, a real subprocess/report contract test,
+  source test-lane registration, package/lint/check/pre-commit/gate-contract
+  wiring, Knip config-driven dependency ownership, and contributor docs. The
+  runner invokes jscpd with a temporary report and non-blocking tool threshold,
+  evaluates the JSON itself, treats successful no-clone/no-report output as zero,
+  and rejects policy drift or a nonempty allowlist.
+- Repair during critique: The first fresh-eye review found that synthetic report
+  tests did not execute the actual subprocess/report route and that permissive
+  numeric parsing could admit an ineffective policy. The final test runs the
+  real local binary against a clean fixture (exit 0, no-clone report omission)
+  and a duplicate fixture (exit 1, 50% report); policy parsing now rejects
+  threshold `101` and pins the measured values. The previously omitted Agent
+  import/Secretlint contract tests were also registered in `config/test-lanes.json`
+  when the owner runner exposed the coverage mismatch.
+- Targeted verification: `npm run lint` passed; `npm run test:source --
+  test/public/check-duplicates.test.ts` passed 6/6; `npm run lint:duplicates`
+  passed at 1.05%; the Agent commit hook passed staged import, duplicate,
+  Secretlint, lockfile, source-NUL, capability, typecheck, quality, and staged
+  lint gates. Gateway critique validation passed for one artifact.
+- Mutation/restore: final source snapshot
+  `/tmp/ceal-agent-duplicate-final-proof.4kGDbp/audit-types.ts` had SHA-256
+  `b254786dcd1ca63b0cbb25eb7bcecd022db48ca169e14387136e0afacb5c6c55`. Two
+  retained duplicate blocks made plain `npm run lint:duplicates` exit 1 with
+  45 clones, 671 duplicated lines, and 1.24% (threshold 1.2%). Restoring with
+  the named snapshot matched the SHA-256, and the same route returned exit 0
+  with 44 clones, 564 duplicated lines, and 1.05%.
+- Critique: Fresh-eye satisfaction is parent-delegated. The reviewer returned
+  the two blockers above plus a non-blocking threshold-ownership concern; the
+  primary re-read the source, repaired the blockers, and reran the final route,
+  test, lint, and mutation proof. The review is recorded in Gateway
+  `charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`;
+  its validator passed and the final Agent reviewer boundary returned
+  `ok: true`, `verdict: clean`, and `drift: []` before repair edits.
+- Off-goal findings: No Gateway source edit, push, CI watch, release,
+  apply/restart, live readback, issue creation, or duplicate #671. Linux,
+  remote-CI, release, and runtime proof remain non-claims. D1 is complete;
+  Lane B is the next local slice.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -537,10 +590,10 @@ and the Worker pre-commit gate passed. The temporary fixture slice also passed
 its Worker artifact test, Agent source/tools/TS6 type lanes, Agent quality tests,
 quality-artifact validators, and round-2 boundary checks. D1a source-NUL gate
 port verification passed in both sibling checkouts. D1 import hard-failure and
-Worker/Agent Secretlint gates now have local commits, contract reachability, and
-mutation/restore evidence; Agent duplicate detection and later compiler/linter
-lanes remain. No compiler-only timing, Linux-only runtime, push, release, or
-remote proof is claimed.
+Worker/Agent Secretlint gates, and Agent duplicate detection now have local
+commits, contract reachability, and mutation/restore evidence. D1 is complete;
+the later compiler/linter lanes remain. No compiler-only timing, Linux-only
+runtime, push, release, or remote proof is claimed.
 
 ## User Verification Instructions
 
@@ -604,7 +657,7 @@ improvement as applied or a tracked issue.
 | Current import-resolution sibling probes remain red for a semantic reason, not a missing search | Gateway `scripts/check-import-resolution.ts:20-44,491-535`, `config/import-resolution-policy.json`; Worker/Agent `rewriteRelativeImportExtensions` configs and positive `.js` source imports | from Gateway: `node scripts/check-import-resolution.ts --repo-root /Users/ted/codes/ceal-cli` and `node scripts/check-import-resolution.ts --repo-root /Users/ted/codes/ceal-agent`; record Worker 170 loader-rewrite and Agent 396 loader-rewrite plus 10 baseline-only dangling references; do not regenerate either policy |
 | D1 import hard-failure route is intentionally not full Gateway loader-rewrite parity | Goal `D1 import-resolution boundary` and critique `charness-artifacts/critique/2026-08-19-d1-import-gate-port-20260819.md`; Gateway checker `scripts/check-import-resolution.ts:20-44,106-115,500-515` | from Gateway rerun the checker against both explicit sibling roots and retain loader-rewrite as excluded; from each sibling run `npm run lint:import-hard-failures` plus its contract test and final mutation proof |
 | Agent typecheck baseline JSON is diagnostic data, not an invoked path surface | Agent `config/typecheck-baseline.json`, `config/typecheck-baseline-ts6.json`; critique F2 | from Gateway: run the receiving hard-failure route with a positive control path in a package/hook/config file and inspect that baseline JSON paths do not enter the scan; never use `--write-baseline` or update-baseline routes |
-| D1 secretlint and duplicate gates are local contracts, not copied Gateway scopes | critique F3 and D1 receiving-local secret/duplicate gate contract | inspect each receiving dependency/lockfile, config, scan roots, fixture/allowlist, package/check/hook reachability; Secretlint is now proven, while Agent duplicate remains the next D1 slice |
+| D1 secretlint and duplicate gates are local contracts, not copied Gateway scopes | critique F3 and D1 receiving-local secret/duplicate gate contract | inspect each receiving dependency/lockfile, config, scan roots, fixture/allowlist, package/check/hook reachability; Worker/Agent Secretlint and Agent duplicate are proven as receiving-local gates |
 | D1 decision review is fresh-eye complete and boundary-clean | Gateway critique artifact and `/tmp/d1-decision-{gateway,worker,agent}-20260819.json` | run `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify` once per explicit root with its matching snapshot/window; require `ok: true`, `verdict: clean`, and `drift: []` |
 | Worker and Agent Secretlint are receiving-owned and reachable | Worker/Agent `scripts/run-secretlint.ts:8-139`, package scripts, `.githooks/pre-commit`, gate contracts, and contract tests | from `/Users/ted/codes/ceal-cli`: `npm run lint:secrets`, `npm run lint:secrets:staged`, `node --test test/contract/check-secretlint.test.ts`; from `/Users/ted/codes/ceal-agent`: same routes and `node --test test/public/check-secretlint.test.ts` |
 | Secretlint mutation proof is cache-independent and restored from current snapshots | Worker/Agent `test/*/check-secretlint.test.ts:69-93,65-85`; `/tmp/ceal-worker-secretlint-proof.zQMJ1y/check-no-legacy-mjs.ts`; `/tmp/ceal-agent-secretlint-proof.sNDv1L/check-no-legacy-mjs.ts` | mutate a retained source with an assembled live-shaped token, require plain `npm run lint:secrets` exit 1, restore with the named snapshot, compare the recorded SHA-256, and require the same route exit 0 |
@@ -612,3 +665,8 @@ improvement as applied or a tracked issue.
 | D1 staged import routes read the Git index and catch staged additions/deletions | Worker/Agent `scripts/check-import-hard-failures.ts:75-105,182-195` / `67-97,168-178`; staged projection tests at Worker `test/contract/check-import-hard-failures.test.ts:50-70` and Agent `test/public/check-import-hard-failures.test.ts:51-71` | run the two import contract tests; each creates a temporary Git index where working-tree content differs from the staged blob and where a target deletion is staged, requiring both failures |
 | D1 import mutation proof is final-code red/restore-green | Gateway critique `charness-artifacts/critique/2026-08-19-d1-import-hard-failures-implementation-20260819.md`; `/tmp/ceal-worker-import-hard-final-proof.MDvzrE/check-no-legacy-mjs.ts`; `/tmp/ceal-agent-import-hard-final-proof.i135aO/check-no-legacy-mjs.ts` | inject `import "./__ceal_missing_import_proof__.mjs";` into the retained script, require each plain `npm run lint:import-hard-failures` exit 1, restore from its snapshot, compare SHA-256, and require exit 0 |
 | D1 implementation boundary review and index repair are recorded honestly | Gateway critique `charness-artifacts/critique/2026-08-19-d1-import-hard-failures-implementation-20260819.md` F1-F4; Worker commit `3125684`; Agent commit `1781068` | run `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify` against `/tmp/d1-import-worker-final-20260819.json` and `/tmp/d1-import-agent-final-20260819.json`; require `ok: true`, `verdict: clean`, and `drift: []`; do not claim the host-blocked post-repair retry as a delivered review |
+| Agent duplicate policy owns a measured local scope and no portable Gateway default | Agent commit `ac26dcc298a4400ff46db5ff0d412f9e88f1a263`: `.jscpd.json`, `scripts/run-jscpd-duplicates.ts`, `CONTRIBUTING.md` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:duplicates`; require the direct result `44 clones across 259 files, 564 duplicated lines (1.05%)` below the pinned 1.2% threshold; inspect `.jscpd.json` for `src`/`scripts`, TypeScript-only scope, test exclusion, and empty allowlist |
+| Agent duplicate wrapper has real report evaluation, no persistent cache, and test-lane reachability | Agent `scripts/run-jscpd-duplicates.ts`, `test/public/check-duplicates.test.ts`, `config/test-lanes.json`, package/hook/gate contracts | from `/Users/ted/codes/ceal-agent`: run `npm run test:source -- test/public/check-duplicates.test.ts`, `npm run lint:gate-contract`, and `npm run lint`; require 6/6 contract tests, contract PASS, and lint exit 0; inspect the test's clean/no-report and duplicate/report subprocess fixtures and assert no `--store`/`--store-path` |
+| Agent duplicate gate policy fails closed on drift and retains no allowlist/baseline | Agent `scripts/run-jscpd-duplicates.ts:51-94`; `.jscpd.json`; `test/public/check-duplicates.test.ts:37-47` | from `/Users/ted/codes/ceal-agent`: run `npm run test:source -- test/public/check-duplicates.test.ts`; require the threshold-101 malformed-policy assertion and inspect that the runner rejects nonempty `allowlist`, pins 5 lines/60 tokens/1.2%, and has no baseline/update route |
+| Agent duplicate mutation proof is final-code red and snapshot-restore green | Agent commit `ac26dcc298a4400ff46db5ff0d412f9e88f1a263`; `/tmp/ceal-agent-duplicate-final-proof.4kGDbp/audit-types.ts` SHA-256 `b254786dcd1ca63b0cbb25eb7bcecd022db48ca169e14387136e0afacb5c6c55`; Slice 7 record | inject two duplicate blocks into the retained file and run `npm run lint:duplicates`, requiring exit 1 at 1.24%; restore with the named snapshot, compare SHA-256, and require the same route exit 0 at 1.05%; never restore from HEAD |
+| Agent duplicate implementation received a fresh-eye critique and repair | Gateway `charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`, commit `67afbec6a42451490e9a22f0c9896c15c870eda6`; Agent reviewer window `/tmp/d1-duplicate-agent-20260819.json` | from `/Users/ted/codes/ceal`: run `python3 scripts/validate_critique_artifacts.py --repo-root . --paths charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`; recheck the matching reviewer window with `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify --repo-root /Users/ted/codes/ceal-agent --before /tmp/d1-duplicate-agent-20260819.json --window-id d1-duplicate-agent-20260819` and record parent-attributed post-review edits rather than claiming them as reviewer drift |
