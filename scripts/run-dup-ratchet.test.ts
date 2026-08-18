@@ -21,7 +21,7 @@ try:
     source.mkdir()
     worker_scripts = root / "scripts"
     worker_scripts.mkdir()
-    release_source = ["line;\\n"] * 120
+    release_source = ["line;\\n"] * 150
     release_source[0] = "function createWorkerReleaseAssetsResult(output, schemaVersion, details) {\\n"
     release_source[1] = "schema_version: schemaVersion,\\n"
     release_source[2] = "writes_external: false,\\n"
@@ -30,7 +30,26 @@ try:
     release_source[9] = "function composeWorkerReleaseAssets(output) {\\n"
     release_source[101] = "function mergeWorkerReleaseAssetSets(output) {\\n"
     release_source[65] = "output_dir: output.directory,\\n"
+    def mark_cli_failure(lines):
+        lines[119] = 'import { renderScriptFailure } from "./lib/cli-output.ts";\\n'
+        lines[120] = "export function runCli(argv, io) {\\n"
+        lines[121] = "try {\\n"
+        lines[122] = "} catch (error) {\\n"
+        lines[123] = "renderScriptFailure(io, {\\n"
+        lines[124] = 'fallbackCode: "fallback",\\n'
+        lines[125] = 'fallbackMessage: "fallback message",\\n'
+        lines[126] = "json,\\n"
+        lines[127] = "knownError: error instanceof DomainError ? error : undefined,\\n"
+        lines[128] = 'schemaVersion: "ceal.fixture_error.v1",\\n'
+        lines[129] = "});\\n"
+        lines[130] = "return 2;\\n"
+        lines[131] = "}\\n"
+        lines[132] = "if (isMainModule(import.meta.url)) process.exitCode = runCli(argv);\\n"
+        return lines
+    mark_cli_failure(release_source)
     (worker_scripts / "build-worker-release-assets.ts").write_text("".join(release_source), encoding="utf-8")
+    (worker_scripts / "build-worker-native-artifact.ts").write_text("".join(mark_cli_failure(["line;\\n"] * 150)), encoding="utf-8")
+    (worker_scripts / "build-worker-release-package.ts").write_text("".join(["line;\\n"] * 150), encoding="utf-8")
     for name in ("validator-a.ts", "validator-b.ts", "validator-c.ts", "validator-d.ts", "validator-e.ts"):
         (source / name).write_text("function validate() {}\\n", encoding="utf-8")
     (source / "zero-a.ts").write_text("zero;\\n", encoding="utf-8")
@@ -203,13 +222,34 @@ try:
         {"file": "test/setup-a.ts", "start": 1, "end": 4},
         {"file": "test/setup-control.ts", "start": 1, "end": 3},
     ]}
+    cli_failure = {
+        "extraction_shape": "extract-method-from-block",
+        "surface": "shallow",
+        "witness": "copy-paste",
+        "scope": "prod",
+        "files": 2,
+        "dirs": 1,
+        "family_fingerprint": "cli-failure",
+        "family_member_hashes": ["cli-failure-a", "cli-failure-b"],
+        "shared": 6,
+        "removable": 6,
+        "rep_lines": 14,
+        "locations": [
+            {"file": "scripts/build-worker-native-artifact.ts", "start": 120, "end": 145},
+            {"file": "scripts/build-worker-release-assets.ts", "start": 120, "end": 145},
+        ],
+    }
+    cli_failure_control = {**cli_failure, "family_fingerprint": "cli-failure-control", "locations": [
+        {"file": "scripts/build-worker-native-artifact.ts", "start": 120, "end": 145},
+        {"file": "scripts/build-worker-release-package.ts", "start": 120, "end": 145},
+    ]}
     class Scan:
         @staticmethod
         def scan_families(repo_root, scope_paths):
             return [
                 whole, shallow, same_file_overlap, same_file_overlap_control, same_file_result_envelope, same_file_result_envelope_control, same_file_result_envelope_source_control, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
                 validator, validator_control, zero_overlap, zero_overlap_control,
-                repeated_json, repeated_json_control, small_test_setup, small_test_setup_control,
+                repeated_json, repeated_json_control, small_test_setup, small_test_setup_control, cli_failure, cli_failure_control,
             ], None, "0.20.0"
     malformed_identity = {**whole, "family_fingerprint": "malformed-identity", "family_member_hashes": [None]}
     class MalformedScan:
@@ -266,6 +306,8 @@ try:
         "repeated_json_control": module["_is_repeated_json_record_guard"](root, repeated_json_control),
         "small_test_setup": module["_is_small_test_setup_family"](root, small_test_setup),
         "small_test_setup_control": module["_is_small_test_setup_family"](root, small_test_setup_control),
+        "cli_failure": module["_is_cli_failure_renderer_family"](root, cli_failure),
+        "cli_failure_control": module["_is_cli_failure_renderer_family"](root, cli_failure_control),
         "malformed_scan": malformed_collected == [] and malformed_reason is not None and malformed_version == "0.20.0",
         "malformed_packaged_scan": raw_malformed_collected == [] and raw_malformed_reason is not None and raw_malformed_version == "0.20.0",
     }))
@@ -281,6 +323,7 @@ finally:
 		reason: null,
 		version: "0.20.0",
 		kept: [
+			"cli-failure-control",
 			"duplicate",
 			"high",
 			"near-threshold-control",
@@ -318,6 +361,8 @@ finally:
 		repeated_json_control: false,
 		small_test_setup: true,
 		small_test_setup_control: false,
+		cli_failure: true,
+		cli_failure_control: false,
 		malformed_scan: true,
 		malformed_packaged_scan: true,
 	});

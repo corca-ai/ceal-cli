@@ -15,7 +15,9 @@ import {
 	readControlSessionContract,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
 import { isObjectRecord } from "./lib/object-record.ts";
 import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
@@ -680,18 +682,15 @@ export async function runCli(argv: string[], io: Pick<Console, "log" | "error"> 
 		io.log(json ? JSON.stringify(result, null, 2) : `Prepared worker release assets in ${result.output_dir}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerReleaseAssetsError;
-		const payload = {
-			schema_version: "ceal.worker_release_assets_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_release_assets_failed",
-			message: known ? error.message : "Could not prepare worker release assets.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_release_assets_failed",
+			fallbackMessage: "Could not prepare worker release assets.",
+			json,
+			knownError: error instanceof WorkerReleaseAssetsError ? error : undefined,
+			schemaVersion: "ceal.worker_release_assets_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-	process.exitCode = await runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));

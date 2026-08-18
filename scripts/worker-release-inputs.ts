@@ -8,9 +8,11 @@ import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { sameStringArray as sameStrings } from "../packages/ceal-worker-cli/src/string-array.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { isPromiseLike } from "./lib/promise-like.ts";
 import { createJsonReader } from "./lib/read-json.ts";
@@ -950,17 +952,15 @@ export function runCli(argv: readonly string[], io: ConsoleLike = console): numb
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : "Worker release inputs are verified.");
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerReleaseInputError;
-		const payload = {
-			schema_version: "ceal.worker_release_input_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_release_input_failed",
-			message: known ? error.message : "Worker release inputs could not be verified.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_release_input_failed",
+			fallbackMessage: "Worker release inputs could not be verified.",
+			json,
+			knownError: error instanceof WorkerReleaseInputError ? error : undefined,
+			schemaVersion: "ceal.worker_release_input_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));

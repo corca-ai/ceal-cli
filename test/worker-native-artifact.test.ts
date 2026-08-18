@@ -12,6 +12,7 @@ import {
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.ts";
 import { asJsonRecord } from "../scripts/lib/json-record.ts";
+import { assertCliFailureChannels } from "./cli-failure-channels.ts";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
 import {
 	assertReleaseManifestProvenance,
@@ -224,15 +225,7 @@ test("production native build accepts only the locked archive lane", async (cont
 		() => buildWorkerNativeArtifact({ outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
 		hasCode("gateway_handoff_archive_required"),
 	);
-	const messages: string[] = [];
-	const io: Pick<Console, "log" | "error"> = {
-		log: (message: unknown) => messages.push(String(message)),
-		error: (message: unknown) => messages.push(String(message)),
-	};
-	assert.equal(await runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	const cliMessage = messages.pop();
-	assert.ok(cliMessage);
-	assert.equal(readJsonRecord(cliMessage).error_code, "invalid_argument");
+	await assertCliFailureChannels(runCli, ["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz"], "invalid_argument");
 });
 
 test("native artifact process proof kills a command tree that exceeds its deadline", async (context) => {
@@ -353,10 +346,6 @@ async function withFailureGateway(callback: (endpoint: string) => Promise<void>)
 	} finally {
 		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
-}
-
-function readJsonRecord(value: string): Record<string, unknown> {
-	return asJsonRecord(JSON.parse(value)) ?? {};
 }
 
 function readNativeManifest(value: unknown): NativeManifest {

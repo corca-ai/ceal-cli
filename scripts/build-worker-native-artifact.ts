@@ -26,7 +26,9 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
 import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
@@ -691,18 +693,15 @@ export async function runCli(argv: readonly string[], io: Pick<Console, "log" | 
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : `Built native worker artifact ${result.version} for ${result.platform}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerNativeArtifactError;
-		const payload = {
-			schema_version: "ceal.worker_native_artifact_build_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_native_artifact_build_failed",
-			message: known ? error.message : "Could not build native worker artifact.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_native_artifact_build_failed",
+			fallbackMessage: "Could not build native worker artifact.",
+			json,
+			knownError: error instanceof WorkerNativeArtifactError ? error : undefined,
+			schemaVersion: "ceal.worker_native_artifact_build_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-	process.exitCode = await runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));

@@ -17,7 +17,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
 import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
@@ -608,17 +610,15 @@ export function runCli(argv: readonly string[], io: Pick<Console, "log" | "error
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : `Built worker package ${result.version}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerReleasePackageError;
-		const payload = {
-			schema_version: "ceal.worker_release_package_build_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_package_build_failed",
-			message: known ? error.message : "Could not build worker package.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_package_build_failed",
+			fallbackMessage: "Could not build worker package.",
+			json,
+			knownError: error instanceof WorkerReleasePackageError ? error : undefined,
+			schemaVersion: "ceal.worker_release_package_build_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));

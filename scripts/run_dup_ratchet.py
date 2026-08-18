@@ -22,6 +22,14 @@ from pathlib import Path
 
 GATE = Path("scripts") / "check_dup_ratchet.py"
 _IMPORT_STATEMENT = re.compile(r"^\s*import\b(?!\s*[.(])", re.MULTILINE)
+_CLI_FAILURE_FILES = frozenset(
+    {
+        "scripts/build-worker-native-artifact.ts",
+        "scripts/build-worker-release-assets.ts",
+        "scripts/build-worker-release-package.ts",
+        "scripts/worker-release-inputs.ts",
+    }
+)
 
 
 def _load_skill_module(skill_dir: Path) -> dict:
@@ -271,6 +279,64 @@ def _is_same_file_release_result_envelope_family(repo_root: Path, family: dict) 
         and rep_lines == first_span
         and first_span >= 100
     )
+
+
+def _has_cli_failure_renderer_source_witness(repo_root: Path, location: tuple[str, int, int]) -> bool:
+    file, start, end = location
+    if file not in _CLI_FAILURE_FILES:
+        return False
+    try:
+        lines = ((repo_root.resolve() / file).resolve()).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    source = "\n".join(lines)
+    location_source = "\n".join(lines[start - 1 : end])
+    required_location_markers = (
+        "} catch (error) {",
+        "renderScriptFailure(io, {",
+        "fallbackCode:",
+        "fallbackMessage:",
+        "knownError: error instanceof",
+        "schemaVersion:",
+        "return 2;",
+    )
+    if not all(marker in location_source for marker in required_location_markers):
+        return False
+    if source.count('import { renderScriptFailure } from "./lib/cli-output.ts";') != 1:
+        return False
+    if not re.search(r"export (?:async )?function runCli\b", source):
+        return False
+    if source.count("renderScriptFailure(io, {") != 1:
+        return False
+    return "if (json) io.log(JSON.stringify(payload))" not in source
+
+
+def _is_cli_failure_renderer_family(repo_root: Path, family: dict) -> bool:
+    """Filter typed domain configuration passed to one CLI failure renderer."""
+    if (
+        family.get("extraction_shape") != "extract-method-from-block"
+        or family.get("surface") != "shallow"
+        or family.get("witness") not in {"copy-paste", "connected"}
+    ):
+        return False
+    data = _shared_family_data(repo_root, family)
+    if data is None or family.get("scope") != "prod" or family.get("files") != 2 or family.get("dirs") != 1:
+        return False
+    shared, locations = data
+    if len(locations) != 2 or len({file for file, _start, _end in locations}) != 2:
+        return False
+    if not all(file in _CLI_FAILURE_FILES for file, _start, _end in locations):
+        return False
+    spans = [end - start + 1 for _file, start, end in locations]
+    if not 10 <= min(spans) <= max(spans) <= 32 or not 6 <= shared <= 16:
+        return False
+    removable = family.get("removable")
+    metrics = family.get("metrics")
+    if removable is None and isinstance(metrics, dict):
+        removable = metrics.get("removable")
+    if not isinstance(removable, int) or isinstance(removable, bool) or removable != shared:
+        return False
+    return all(_has_cli_failure_renderer_source_witness(repo_root, location) for location in locations)
 
 
 def _is_import_header_span(repo_root: Path, file: str, start: int, end: int) -> bool:
@@ -533,6 +599,7 @@ def _collect_code_families(repo_root: Path, module: dict, scope_paths: list[str]
                 or _is_low_overlap_shallow_family(repo_root, family)
                 or _is_same_file_boundary_overlap_family(repo_root, family)
                 or _is_same_file_release_result_envelope_family(repo_root, family)
+                or _is_cli_failure_renderer_family(repo_root, family)
                 or _is_import_header_family(repo_root, family)
             or _is_similar_helper_family(repo_root, family, kind="validator")
             or _is_similar_helper_family(repo_root, family, kind="zero_overlap")

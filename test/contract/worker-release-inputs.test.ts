@@ -18,6 +18,7 @@ import {
 	withWorkerReleaseDevelopmentInputs,
 	withWorkerReleaseDevelopmentInputsAsync,
 } from "../../scripts/worker-release-inputs.ts";
+import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
 import {
 	createProtocolArtifactFixture,
@@ -371,13 +372,9 @@ test("worker release inventory rejects Gateway and legacy composite paths", (con
 	);
 });
 
-test("release CLI rejects raw handoff arguments and requires the reviewed archive lane", () => {
-	const messages: string[] = [];
-	const io = { log: (message: string) => messages.push(message), error: (message: string) => messages.push(message) };
-	assert.equal(runCli(["--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	assert.equal(JSON.parse(popMessage(messages)).error_code, "invalid_argument");
-	assert.equal(runCli(["--json"], io), 2);
-	assert.equal(JSON.parse(popMessage(messages)).error_code, "gateway_handoff_archive_required");
+test("release CLI rejects raw handoff arguments and requires the reviewed archive lane", async () => {
+	await assertCliFailureChannels(runCli, ["--protocol-tarball", "/tmp/protocol.tgz"], "invalid_argument");
+	await assertCliFailureChannels(runCli, [], "gateway_handoff_archive_required");
 });
 
 function handoffFixture(context: TestContext): HandoffFixture {
@@ -485,11 +482,6 @@ function writeHandoffManifest(fixture: HandoffFixture): void {
 
 function rest({ protocolTarball: _protocolTarball, ...fixture }: HandoffFixture): Omit<HandoffFixture, "protocolTarball"> {
 	return fixture;
-}
-function popMessage(messages: string[]): string {
-	const message = messages.pop();
-	if (message === undefined) throw new Error("expected CLI message");
-	return message;
 }
 function hasCode(code: string): (error: unknown) => boolean {
 	return (error: unknown) => error instanceof WorkerReleaseInputError && error.code === code;

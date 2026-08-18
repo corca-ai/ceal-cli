@@ -12,6 +12,7 @@ import {
 } from "../scripts/build-worker-release-package.ts";
 import { asJsonRecord } from "../scripts/lib/json-record.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
+import { assertCliFailureChannels } from "./cli-failure-channels.ts";
 import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.ts";
 
@@ -195,7 +196,7 @@ test("npm pack metadata requires a non-empty version", () => {
 	);
 });
 
-test("production package build accepts only the locked archive lane", (context) => {
+test("production package build accepts only the locked archive lane", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-package-boundary-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	assert.throws(
@@ -203,15 +204,7 @@ test("production package build accepts only the locked archive lane", (context) 
 			buildWorkerReleasePackage({ repoRoot: ROOT, outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
 		(error) => error instanceof WorkerReleasePackageError && error.code === "gateway_handoff_archive_required",
 	);
-	const messages: string[] = [];
-	const io: Pick<Console, "log" | "error"> = {
-		log: (message: unknown) => messages.push(String(message)),
-		error: (message: unknown) => messages.push(String(message)),
-	};
-	assert.equal(runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	const cliMessage = messages.pop();
-	if (cliMessage === undefined) throw new Error("expected CLI error message");
-	assert.equal(readJsonRecord(cliMessage).error_code, "invalid_argument");
+	await assertCliFailureChannels(runCli, ["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz"], "invalid_argument");
 });
 
 function readJsonRecord(value: string): Record<string, unknown> {

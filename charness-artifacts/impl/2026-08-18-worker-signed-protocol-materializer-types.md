@@ -53,6 +53,11 @@ Date: 2026-08-18
   temporary-directory construction is also one output-directory owner used by
   rollback backup and by the release-assets, native-artifact, and
   release-package staging composers.
+- The four Worker release CLI entrypoints now share the typed
+  `renderScriptFailure` output owner. It owns the JSON/text channel choice and
+  failure-envelope construction while each caller keeps its error class,
+  schema, fallback code/message, and exit path. All four entrypoints also
+  reuse the existing `isMainModule` predicate.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
@@ -83,6 +88,9 @@ detector groups them as one shallow family.
   and test/contract/worker-release-assets.test.ts.
 - Output replacement contract: scripts/lib/output-directory.ts and the forced
   publish rollback test in test/contract/worker-release-assets.test.ts.
+- CLI failure output and entrypoint contract: scripts/lib/cli-output.ts,
+  scripts/lib/is-main-module.ts, the four Worker release scripts, and the
+  script-lib/release-assets CLI tests.
 - Repo-build scratch wiring: test/repo-build.ts and
   test/contract/repo-build.test.ts.
 - Transport cleanup behavior: packages/ceal-worker-cli/src/private-worker-transport.ts
@@ -166,6 +174,31 @@ detector groups them as one shallow family.
 - The duplicate adapter contract passed 1/1 after the result-owner extraction,
   and its exact result-envelope positive/negative controls remain in
   scripts/run-dup-ratchet.test.ts.
+- The final CLI output/entrypoint focused proof passed 63/63 at
+  /tmp/ceal-proof-jobs/worker-cli-output-focused/result.20260818-worker-cli-output-focused-03.json
+  (exit_code=0), including the typed helper's JSON/text channel contract and
+  direct release/native/package/input CLI wiring.
+- The final CLI output tools and tests TypeScript ratchets passed with
+  exit_code 0 at
+  /tmp/ceal-proof-jobs/worker-cli-output-types-tools/result.20260818-worker-cli-output-types-tools-03.json
+  and
+  /tmp/ceal-proof-jobs/worker-cli-output-types-tests/result.20260818-worker-cli-output-types-tests-03.json.
+  Both retain the repository's existing `error TS` positive controls and
+  contain no `baseline_reduction_required` failure; this is ratchet stability,
+  not a claim that every changed test path is diagnostic-free.
+- The final CLI output duplicate gate passed with
+  `fixable_ceiling=0 <= floor_F=0` at
+  /tmp/ceal-proof-jobs/worker-cli-output-duplication/result.20260818-worker-cli-output-duplication-07.json;
+  its adapter contract, Ruff check, and lint also passed. Attempt `-06`
+  exposed a test-helper overlap and was repaired by making the renderer test
+  reuse the shared channel assertion; no baseline or intentional overlay
+  changed.
+- The latest raw historical recount reports 126 families at
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-19.json
+  (tool version 0.20.0); former `8c5ae173bd9d0063`, `126a9b71a039844c`, and
+  `d40055414bbcc395` remain absent, raw detector-only
+  `25dbc057a594dfa0` remains present once under the source-backed gate rule,
+  and positive control `a3048e1b0c675c4a` remains present once.
 - npm run lint, ruff check scripts/run_dup_ratchet.py, and git diff --check:
   passed.
 - Verification level: local Worker source, contract, duplicate-gate, and
@@ -226,6 +259,28 @@ detector groups them as one shallow family.
   the corrected source witness classifies that current raw overlap as
   detector-only, with a metadata/source negative control retained in the adapter
   contract. The failed attempt is evidence of precision repair, not a bypass.
+- The historical CLI failure family `2d1bc747f9b700cb` was resolved by moving
+  the common failure envelope/channel policy into `scripts/lib/cli-output.ts`
+  and reusing `isMainModule`; domain-specific error identity and fallback
+  values remain local. The resulting detector re-segmentation is filtered only
+  when the adapter proves the four named files import and call that owner from
+  a `runCli` catch block, with no inline renderer remaining. Positive and
+  negative source fixtures live in `scripts/run-dup-ratchet.test.ts`.
+- The first two CLI-owner gate attempts exposed detector re-segmentation
+  families (`worker-cli-output-duplication-01` and `-02`); the third exposed
+  four connected 10-line sub-spans (`-03`). The source witness was widened
+  structurally to cover the actual `connected`/`copy-paste` shapes, after which
+  adapter, Ruff, and duplicate gate `-05` passed. No baseline or intentional
+  overlay was changed.
+- Final fresh-eye follow-up found no commit blocker after the shared
+  `assertCliFailureChannels` helper was wired into all four actual `runCli`
+  tests. The current contract intentionally proves exact text fallback values
+  at the renderer-owner test while proving channel separation and non-empty
+  text at each domain entrypoint; exact domain text is not duplicated in four
+  wiring tests. The reviewer also flagged the source witness's lexical
+  limitation and its omission of an `isMainModule` structural check; accepted
+  for this bounded source-backed, fail-closed rule and tracked for a future
+  detector-strengthening slice.
 - The repeated timer/listener cleanup in the buffered and streaming transport
   paths is now owned by `clearUnixSocketCleanup` at
   `packages/ceal-worker-cli/src/private-worker-transport.ts:244-251`.
@@ -340,9 +395,9 @@ change. No user-facing CLI, release, or runtime behavior changed.
 
 Continue the historical Worker queue with one coherent owner family at a time,
 starting with the next current candidate after positive-control family
-`a3048e1b0c675c4a`, while preserving the exact `8c5ae173bd9d0063` and
-`126a9b71a039844c` zero-hit controls. Recount the three-repository gates before
-moving to Agent work.
+`a3048e1b0c675c4a`, while preserving the exact `8c5ae173bd9d0063`,
+`126a9b71a039844c`, and `d40055414bbcc395` zero-hit controls. Recount the
+three-repository gates before moving to Agent work.
 Keep the result-envelope detector contract source-backed: if the helper
 declaration, envelope markers, or canonical owner line moves, update its adapter
 fixture and rerun the raw/gate positive controls in the same slice. Do not widen

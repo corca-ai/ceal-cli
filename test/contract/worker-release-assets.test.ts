@@ -16,6 +16,7 @@ import {
 	composeWorkerReleaseAssets,
 	mergeWorkerReleaseAssetSets,
 	parsePublishedWorkerReleaseInventory,
+	runCli,
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.ts";
 import {
@@ -26,6 +27,7 @@ import {
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "../../scripts/lib/output-directory.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
+import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.ts";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
@@ -95,6 +97,10 @@ test("the installer's allowlist accepts every platform the release matrix builds
 			assert.match(asset, INSTALLER_ALLOWLIST, `install-ceal.sh would reject ${asset}, which ceal-release.yml builds`);
 		}
 	}
+});
+
+test("release assets CLI renders failures through the declared output channels", async () => {
+	await assertCliFailureChannels(runCli, ["compose"], "invalid_output");
 });
 
 test("composed worker release assets match the installer's signed inventory contract", async (context) => {
