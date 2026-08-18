@@ -12,11 +12,10 @@ activation command.
 - Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
-  detector, and the Lane B `noImplicitOverride`, control-flow, unused-check, and
-  `noUncheckedIndexedAccess` slices across Worker and Agent have implementation,
-  targeted proof, and local commits. The full Gateway loader-rewrite ratchet remains
-  deliberately unported; completing `exactOptionalPropertyTypes` is the next
-  dependency-safe compiler work.
+  detector, and all seven Lane B compiler-option slices across Worker and Agent have
+  implementation, targeted proof, and local commits. The full Gateway loader-rewrite
+  ratchet remains deliberately unported; Lane C `noNonNullAssertion` and
+  `no-explicit-any` is next.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -34,8 +33,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: continue Lane B with `exactOptionalPropertyTypes`, keeping the
-  A → D1 → B → C → D2 → E dependency order intact.
+- Next action: continue with Lane C `noNonNullAssertion` and `no-explicit-any`,
+  keeping the A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -256,7 +255,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | --- | --- | --- | --- |
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
-| B | Enable seven measured compiler options | config diff, source repairs, raw proof | in progress — six options complete; exactOptionalPropertyTypes remains |
+| B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
@@ -669,27 +668,63 @@ compiler replacement proof.
 - Off-goal findings: No Gateway source edit, push, CI watch, release,
   apply/restart, live readback, issue creation, or duplicate #671.
 
-### Slice 12: Lane B — exactOptionalPropertyTypes inventory
+### Slice 12: Lane B — exactOptionalPropertyTypes
 
-- Objective: Measure the remaining `exactOptionalPropertyTypes` migration in
-  every raw Worker/Agent compiler owner before editing, then repair source and
-  test/tool object shapes without adding diagnostic debt.
+- Objective: Measure the `exactOptionalPropertyTypes` migration in every raw
+  Worker/Agent compiler owner, then repair source and test/tool object shapes
+  without adding diagnostic debt.
 - Raw inventory: Worker package, tools, and inherited test projects produced
   9, 36, and 7 TypeScript diagnostics respectively from explicit
   `npm exec --no -- tsc -p ... --pretty false --exactOptionalPropertyTypes`
   probes. The Worker tools result includes one ambient `@types/node` TS2320
-  diagnostic; it is recorded rather than hidden. Agent source produced 99
+  diagnostic; it was recorded rather than hidden. Agent source produced 99
   diagnostics from the same explicit probe. Agent generated tools/test has no
   separate saved per-option pre-edit log because its config is materialized by
-  `scripts/typecheck-tools-tests.ts`; its evidence will be limited to the
+  `scripts/typecheck-tools-tests.ts`; its proof is therefore limited to the
   actual post-enable route and unchanged baseline decision.
 - Probe logs: `/tmp/ceal-worker-laneb-exact-package.log`,
   `/tmp/ceal-worker-laneb-exact-tools.log`,
   `/tmp/ceal-worker-laneb-exact-tests.log`, and
   `/tmp/ceal-agent-laneb-exact-source.log`.
-- Disposition: proceed with a bounded config/source repair slice; do not use a
-  baseline regeneration or update route. Exact-option implementation is not
-  claimed complete by this inventory record.
+- Worker implementation: commit `53b2c4a` (`typecheck: enforce Worker exact
+  optional properties`) enables the option in `tsconfig.typecheck.json:15` and
+  `tsconfig.tools.json:14`. The tools/test config keeps its already-local
+  `skipLibCheck` at `tsconfig.tools.json:17`; this was needed for the
+  dependency-only `@types/node` TS2320 found by the inventory, while the
+  package config was not changed to add a new skip. Source, scripts, and test
+  fixtures use guards, conditional object spreads, and explicit `| undefined`
+  adapter types. `test/contract/typecheck-source-gate.test.ts:60` asserts the
+  package option. No baseline file changed.
+- Agent implementation: commit `283b0c9` (`typecheck: enforce Agent exact
+  optional properties`) enables the option in `tsconfig.build.json:14` and
+  `tsconfig.tools-tests.json:28`, with contract assertions at
+  `test/public/quality-gates.test.ts:50,78`. Source, generated-tool, and test
+  repairs use guards, conditional object spreads, and typed optional adapters.
+  No baseline file changed and no baseline/update route was used.
+- Targeted verification: Worker `npm run lint:types` and
+  `npm run lint:types:ts6` exited 0; `npm run lint` and the staged commit hook
+  exited 0 after a bounded Biome formatting repair. Worker exact-related tests
+  passed: client transport 16/16 and Worker CLI/device/attachment 180/180.
+  Agent `npm run lint`, `npm run lint:types:ts6`, and `npm run test:contributor`
+  exited 0; its tools route reported `source_behavior: 279 diagnostics in 22
+  files; equal` and `immutable_artifact: 100 diagnostics in 14 files; equal`
+  under both TS7 and TS6. The Agent portable source test selection remains
+  171/171 from Slice 11.
+- Critical disposition: the additional Worker contract probe
+  `node --test test/contract/protocol-vendor-pin.test.ts
+  test/contract/typecheck-source-gate.test.ts` exited 1 with 23/24 passing;
+  only the pre-existing protocol vendor divergence failed. The exact slice
+  changed that test only by widening three fixture option fields to
+  `string | undefined`; it did not change the vendored tree, pin, or lock.
+  `protocol-vendor-pin.json:7-19` and `docs/protocol-quarantine.md:3-17`
+  explicitly record the divergence and refuse shipment, so this is tracked as
+  off-goal protocol debt, not retried or repaired in this compiler slice.
+- Alternatives rejected: no diagnostic baseline regeneration, update/min-merge
+  route, suppression, non-null assertion, or broad `skipLibCheck` change was
+  used. No dedicated exact-option mutation-red/restore-green proof is claimed;
+  the raw compiler RED inventory and post-repair raw/TS6 GREEN routes are the
+  evidence for this compiler-option slice. Lane A's required deletion proof is
+  unchanged and complete.
 
 ## Context Sources
 
@@ -748,6 +783,12 @@ issue #671 as an upstream follow-up rather than a local fix claim.
 
 - `corca-ai/charness#671` — upstream portability defect: reject host-specific
   absolute paths in portable goal artifacts; do not duplicate or close it here.
+- Worker contract probe `node --test test/contract/protocol-vendor-pin.test.ts
+  test/contract/typecheck-source-gate.test.ts` remains red at the existing
+  vendored Protocol/pin divergence (`e93e491a...` observed versus the recorded
+  `cfee89e...`). The pin and `docs/protocol-quarantine.md` already name the
+  owner and shipment refusal; disposition is tracked with that Protocol owner,
+  not repaired or re-pinned in this compiler slice.
 - Linux-only Worker/Agent proof, signed publication, and remote CI remain
   separately approved work.
 - `noPropertyAccessFromIndexSignature` remains a named compiler-owned successor
@@ -763,8 +804,11 @@ quality-artifact validators, and round-2 boundary checks. D1a source-NUL gate
 port verification passed in both sibling checkouts. D1 import hard-failure and
 Worker/Agent Secretlint gates, and Agent duplicate detection now have local
 commits, contract reachability, and mutation/restore evidence. D1 is complete;
-the later compiler/linter lanes remain. No compiler-only timing, Linux-only
-runtime, push, release, or remote proof is claimed.
+the later compiler/linter lanes remain. Lane B exact optional verification is
+recorded in Slice 12 with Worker `53b2c4a` and Agent `283b0c9`; the only red
+result in the targeted Worker contract probe is the pre-existing Protocol
+quarantine divergence, not an exact-option diagnostic. No compiler-only timing,
+Linux-only runtime, push, release, or remote proof is claimed.
 
 ## User Verification Instructions
 
@@ -849,4 +893,6 @@ improvement as applied or a tracked issue.
 | Lane B `noUncheckedIndexedAccess` pre-edit diagnostics are the source-repair inventory, not a baseline input | Worker raw configs and pre-edit logs `/tmp/ceal-worker-laneb-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tools.json-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tests.json-noUncheckedIndexedAccess.log`; Agent source `tsconfig.build.json` and `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` and has no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: run the three explicit `npm exec --no -- tsc -p ... --pretty false --noUncheckedIndexedAccess` probes; from `/Users/ted/codes/ceal-agent`: the source pre-edit probe is represented by `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`, while generated tools/test diagnostics are established only by the actual `npm run lint:types:tools` route after enabling the option; require diagnostics to be repaired in source/configs, never recorded as baseline debt |
 | Worker `noUncheckedIndexedAccess` is compiler-owned across package, tools, and inherited test routes | Worker commit `a8b3b96`; `tsconfig.typecheck.json:8-19`, `tsconfig.tools.json:7-20`, `tsconfig.tests.json:2-15`, `test/contract/typecheck-source-gate.test.ts`, and `test/required.ts` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and `node --test test/contract/typecheck-source-gate.test.ts`; require direct exit 0, 7/7 contract tests, no baseline/update route, and a clean post-commit tree |
 | Agent `noUncheckedIndexedAccess` is compiler-owned across source and generated tools/test routes | Agent commit `5bcc8a852b9b3950c66f85cd669fde405cf7bb67`; `tsconfig.build.json:7-18`, `tsconfig.tools-tests.json:22-27`, `test/public/quality-gates.test.ts:43-54,70-80`, and `scripts/typecheck-tools-tests.ts:124-149` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, `npm run lint`, and `npm exec --no -- biome check .`; require source exit 0, TS7 and TS6 tools/test summaries `279/22 equal` and `100/14 equal`, no baseline/update route, the explicit portable proof `node scripts/run-test-lanes.ts --source-only test/public/agent-capability-tool.test.ts test/public/agent-model-file-boundary.test.ts test/public/bound-installed-worker-verifier.test.ts test/public/capability-serving-entrypoint.test.ts test/public/check-duplicates.test.ts test/public/check-import-hard-failures.test.ts test/public/check-secretlint.test.ts test/public/gate-contract.test.ts test/public/inherited-capability-control-session-adapter.test.ts test/public/inherited-ingress-message-session.test.ts test/public/inherited-runner-turn-request.test.ts test/public/inherited-v4-injected-e2e-harness.test.ts test/public/quality-gates.test.ts test/public/quality-timing-advisory.test.ts` at 171/171, and a clean post-commit tree; `npm run test:source` is host-blocked by `linux_runtime_requires_linux` on macOS |
-| Lane B `exactOptionalPropertyTypes` pre-edit diagnostics are an inventory, not baseline input | Worker raw projects and `/tmp/ceal-worker-laneb-exact-{package,tools,tests}.log`; Agent `tsconfig.build.json` and `/tmp/ceal-agent-laneb-exact-source.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` with no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: rerun `npm exec --no -- tsc -p tsconfig.typecheck.json --pretty false --exactOptionalPropertyTypes`, the same command with `tsconfig.tools.json`, and the same command with `tsconfig.tests.json`; from `/Users/ted/codes/ceal-agent`: rerun `npm exec --no -- tsc -p tsconfig.build.json --noEmit --pretty false --exactOptionalPropertyTypes`; record direct exits and diagnostics before enabling the option, never regenerate either baseline |
+| Lane B `exactOptionalPropertyTypes` is compiler-owned in every Worker/Agent raw owner | Worker commit `53b2c4a`; `tsconfig.typecheck.json:9-20`, `tsconfig.tools.json:8-18`, and `test/contract/typecheck-source-gate.test.ts:54-60`; Agent commit `283b0c9`; `tsconfig.build.json:8-18`, `tsconfig.tools-tests.json:22-28`, and `test/public/quality-gates.test.ts:43-54,71-78` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types`, `npm run lint:types:ts6`, and `npm run lint`; from `/Users/ted/codes/ceal-agent`: run `npm run lint`, `npm run lint:types:ts6`, `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:contributor`; require direct exit 0, the TS7/TS6 unchanged diagnostic summaries, and no baseline/update route |
+| Lane B `exactOptionalPropertyTypes` pre-edit diagnostics remain an inventory, not baseline input | Worker raw projects and `/tmp/ceal-worker-laneb-exact-{package,tools,tests}.log`; Agent `tsconfig.build.json` and `/tmp/ceal-agent-laneb-exact-source.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` with no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: rerun `npm exec --no -- tsc -p tsconfig.typecheck.json --pretty false --exactOptionalPropertyTypes`, the same command with `tsconfig.tools.json` and `tsconfig.tests.json`; from `/Users/ted/codes/ceal-agent`: rerun `npm exec --no -- tsc -p tsconfig.build.json --noEmit --pretty false --exactOptionalPropertyTypes`; record direct exits and diagnostics before enabling the option, never regenerate either baseline |
+| Worker protocol vendor contract is pre-existing off-goal debt, not exact-option fallout | Worker `protocol-vendor-pin.json:7-19`, `docs/protocol-quarantine.md:3-17`, and `test/contract/protocol-vendor-pin.test.ts:130-135`; exact diff only widens fixture option fields | from `/Users/ted/codes/ceal-cli`: run `node --test test/contract/protocol-vendor-pin.test.ts test/contract/typecheck-source-gate.test.ts`; classify only the `e93e491a...` versus `cfee89e...` vendor-tree mismatch as the known red, do not re-pin or regenerate it in this goal |
