@@ -31,7 +31,7 @@ source-diagnostics scope; it must not imply that existing production
 <!-- allowed enums: bin: act-before-ship | bundle-anyway | over-worry | valid-but-defer; evidence: strong | moderate | weak | contested; action: fix | file-issue | document | defer -->
 
 - F1 | bin: act-before-ship | evidence: strong | ref: frozen goal Slice 2 and Worker/Agent production tsconfig owners | action: fix | note: round 1 found that “preserving production declaration checking” was too strong because both existing production configs already have `skipLibCheck: true`; the goal and quality artifacts were narrowed to unchanged production configs/source diagnostics, and the pre-existing policy was recorded as a separate compiler-migration finding.
-- F2 | bin: act-before-ship | evidence: strong | ref: frozen goal Final Verification and Worker checkout state | action: fix | note: round 1 found closeout artifacts dirty and identities provisional; the Worker and Agent closeout artifacts were committed before the final review round and identities will be rebound to those commits.
+- F2 | bin: act-before-ship | evidence: strong | ref: frozen goal Final Verification and Worker checkout state | action: fix | note: round 1 found closeout artifacts dirty and identities provisional; the source/evidence roots are now explicitly rebound to Worker `ae4a955` and Agent `0fff321`, while the lifecycle-only Worker artifact commit is kept separate from that historical proof identity.
 
 ## Reviewer Tier Evidence
 
@@ -44,10 +44,12 @@ source-diagnostics scope; it must not imply that existing production
 - Frozen round-1 inputs: goal, retro, host evidence, adapter, and Gateway/
   Worker/Agent HEAD/tree identities were fingerprinted under
   `/tmp/ceal-final-claims-freeze.k0wPdb/`.
-- Delivery state: findings-received
+- Delivery state: findings-received; follow-up review pending
 - Round-1 delivery: verdict `blocker`; the reviewer also
   confirmed the frozen input was not drifted and rechecked the Worker/Agent
-  source claims listed in the goal.
+  source claims listed in the goal. Its stale-current-identity finding is
+  addressed by the historical substantive-proof wording above; a second
+  review must verify that distinction against a new frozen input.
 - External application state: n/a — repository-only review; no push, CI watch,
   release, apply/restart, live readback, or issue operation.
 - Application state: n/a — repository-only read-only review.
@@ -57,7 +59,7 @@ source-diagnostics scope; it must not imply that existing production
 parent-delegated
 
 Round 1 is complete as a blocker-finding review. A second review is required
-after the wording repair and closeout commits, against a new frozen goal and
+after this wording repair and closeout commit, against a new frozen goal and
 the new Worker/Agent identities; the goal may not be marked complete before it
 returns a clean verdict or an explicitly recorded blocker.
 
@@ -65,7 +67,7 @@ returns a clean verdict or an explicitly recorded blocker.
 
 The round-1 snapshot SHA values are recorded in the session transcript and the
 active goal. The follow-up round will record its exact snapshot SHA values here
-before the lifecycle status flips.
+before the lifecycle status flips. No clean follow-up verdict is claimed yet.
 
 ## Boundary Ownership
 

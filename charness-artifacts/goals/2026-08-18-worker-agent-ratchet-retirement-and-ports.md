@@ -971,15 +971,19 @@ The host-log result is retained at
 `charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md`;
 it reports thread-wide activity only because no goal metric window was present.
 
-Final repository identities after the closeout artifact commits: Gateway
-`/Users/ted/codes/ceal` HEAD `67afbec6a42451490e9a22f0c9896c15c870eda6` tree
+Substantive-proof boundary identities, frozen before the lifecycle-only
+closeout artifact commits: Gateway `/Users/ted/codes/ceal` HEAD
+`67afbec6a42451490e9a22f0c9896c15c870eda6` tree
 `01f2389ac5e4ff9474595c4a8f1f4941eeb45e97`; Worker
-`/Users/ted/codes/ceal-cli` HEAD `27618458e998148350ddebfcff9038556aad6a9c` tree
-`bc15bde1bcc49d367846a40011e70fa265b9269d`; Agent
+`/Users/ted/codes/ceal-cli` HEAD
+`ae4a955e7b371cee4ed778254688646861623377` tree
+`44ca6df30cfa445b686fa1b258fdd11db4e32008`; Agent
 `/Users/ted/codes/ceal-agent` HEAD `0fff321111c8fd3953b54e7bd32da309b08bcc1c` tree
-`27f5fc5b558712d1ba2b6911816b151c4c77b6cd`. The three checkouts were clean
-immediately after those commits; the goal and claims-review updates are the
-remaining Worker-owned closeout artifact changes.
+`27f5fc5b558712d1ba2b6911816b151c4c77b6cd`. These are the source/evidence
+roots for the completed implementation and proof, not a claim that the
+Worker-owned lifecycle artifact commit can contain its own future hash. The
+final review must verify these historical identities and the clean current
+roots separately.
 
 Retro: /Users/ted/codes/ceal-cli/charness-artifacts/retro/2026-08-19-session-retro.md
 Host log probe: /Users/ted/codes/ceal-cli/charness-artifacts/quality/2026-08-19-worker-agent-ratchet-retirement-and-ports-host-log-probe.md
