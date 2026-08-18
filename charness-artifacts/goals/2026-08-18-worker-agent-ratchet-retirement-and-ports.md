@@ -1005,10 +1005,11 @@ Non-claims: no signed artifact, release tag, CI result, installed worker, runtim
 
 Retro completed and persisted at
 `charness-artifacts/retro/2026-08-19-session-retro.md`. It records the first
-reviewer's invalid drift, the corrected frozen fresh-eye round, the baseline
-patch near miss, the unowned-runner selection finding, and the thread-wide
-host/telemetry non-claims. The adapter was initialized with explicit empty
-evidence and metrics lists; no hidden host metric source was invented.
+reviewer's invalid drift, the corrected proof-identity wording, the pending
+follow-up frozen fresh-eye review, the baseline patch near miss, the
+unowned-runner selection finding, and the thread-wide host/telemetry
+non-claims. The adapter was initialized with explicit empty evidence and
+metrics lists; no hidden host metric source was invented.
 Retro dispositions: applied: the active goal and retro now carry the freeze,
 positive-key, runner-selection, and proof-job lessons; no external issue or
 plugin source edit was authorized.
