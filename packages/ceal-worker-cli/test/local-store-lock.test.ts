@@ -18,10 +18,10 @@ import type { LocalStoreLockOptions } from "../src/local-store-lock.js";
 // edit to any of these paths would have had nothing to fail against.
 
 class TestUnsafe extends Error {
-	name = "TestUnsafe";
+	override name = "TestUnsafe";
 }
 class TestBusy extends Error {
-	name = "TestBusy";
+	override name = "TestBusy";
 }
 
 test("Darwin refuses a visible directory path after the opened directory is renamed", { skip: process.platform !== "darwin" }, () => {

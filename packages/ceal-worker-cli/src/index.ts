@@ -92,7 +92,7 @@ type CatalogProvenance = { source: "live_discovery" } | { source: "cached_discov
 // invocation happened. Keep a failed renewal distinct from a transport loss
 // after a call was actually dispatched.
 class CealKnownPreProviderCallError extends Error {
-	constructor(readonly cause: unknown) {
+	constructor(override readonly cause: unknown) {
 		super("The Gateway rejected the call before provider execution.");
 	}
 }
