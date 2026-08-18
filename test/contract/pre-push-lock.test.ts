@@ -90,7 +90,11 @@ function createFixture(context) {
 		`#!/bin/sh\nprintf '%s\\n' "$*" >>"$CEAL_FAKE_NPM_INVOCATIONS"\nif [ ! -e "$CEAL_FAKE_NPM_STARTED" ]; then\n  printf 'started\\n' >"$CEAL_FAKE_NPM_STARTED"\n  while [ ! -e "$CEAL_FAKE_NPM_RELEASE" ]; do sleep 0.05; done\nfi\n`,
 	);
 	chmodSync(path.join(root, "bin", "npm"), 0o755);
-	writeFileSync(path.join(root, "bin", "node"), "#!/bin/sh\nexit 0\n");
+	// The tag branch now asks `gate-attestation.ts verify` whether the full gate
+	// can be skipped, and a stub that answered 0 to everything would take that
+	// skip — leaving this suite proving the lock around `npm run lint:shell`
+	// instead of around the long gate the lock exists for.
+	writeFileSync(path.join(root, "bin", "node"), '#!/bin/sh\ncase "$*" in *gate-attestation*) exit 1 ;; esac\nexit 0\n');
 	chmodSync(path.join(root, "bin", "node"), 0o755);
 	assert.equal(spawnSync("git", ["init", "-q"], { cwd: root }).status, 0);
 	assert.equal(spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root }).status, 0);

@@ -47,6 +47,42 @@ There is no third suite any more. `test:legacy-compatibility` audited the frozen
 belongs to `test:contract` or `test:release`, and `repo-gates.test.ts` fails if
 one belongs to neither.
 
+### A Suite's Tier Is Its Directory
+
+Three directories, three globs, and placing a file is the entire declaration:
+
+- `test/` root → `test:release`
+- `test/contract/` → the contract tier's artifact lane (plain `node --test`)
+- `test/source/` → the contract tier's source-authoritative lane, which runs
+  through `test/run-source-tests.ts`
+
+Plus `packages/ceal-protocol/test/*.test.ts`, which the source lane globs because
+that workspace is the one with no root-reached suite of its own — `coverage`
+reaches `ceal-client` and `ceal-worker-cli` and stops there. One explicit entry
+survives: `ceal-worker-cli`'s attachment-stream carrier, one file among ~28 in a
+directory the contract tier does not otherwise own.
+
+The lanes used to be two hand-written path lists — one in `package.json` and a
+second copy in `repo-gates.test.ts` — with a gate that asserted only that the
+copies agreed. That proved nothing about the tree, and it hid a real defect:
+`packages/ceal-protocol/test/leased-consumer-source-import.test.ts` was in
+neither list and no root gate ran it. What the gate checks now is the tree:
+every globbed token matches at least one file, every explicitly named path
+exists, no file is claimed by two tiers, `test/` holds exactly those three
+directories, and every `*.test.ts` in the repository has exactly one owner —
+either a glob suite the root chain provably reaches (BOTH halves read: the root
+call AND the package script, which is what tells `ceal-protocol` apart from
+`ceal-client`) or an explicit tier entry.
+
+The property the lists were protecting still holds, and it is worth naming
+because a glob is what broke it before: a suite must be PLACED, not swept in. A
+glob over `test/` once pulled the frozen `cealctl` and dual-release proofs back
+into the worker gate. Placement-by-directory keeps the deliberate choice — you
+pick a lane — and the closed set of three directories is asserted, so a fourth
+one cannot appear and be globbed by nobody. What it does not keep: a file
+misplaced into an existing lane now runs there silently, where a list would have
+gone red. That trade was made deliberately.
+
 The signed Gateway Protocol source materializer is an explicit operator entry:
 `npm run materialize:gateway-protocol-source -- <tag> <commit> <protocol-tree> <output-directory>`.
 Declaring it in the root manifest keeps production reachability honest; a
@@ -537,6 +573,59 @@ gates therefore run from `.githooks/pre-push` instead:
 Both skip loudly rather than failing when their tool is absent. A gate that
 no-ops silently while counted as part of the gate is the failure being avoided;
 saying "skipped, and here is what went unchecked" is not.
+
+## The Receipt A Green Gate Leaves Behind
+
+One worker release used to pay for `npm run check` seven times: once in the
+pre-push hook, twice in `check.yml`, twice in a release dry run, twice in the
+real tag run. Six of those seven prove the same commit. Re-proving an unchanged
+tree is a repeat, not evidence — but a green gate used to leave nothing behind,
+so no later site could ask whether the answer was already known.
+
+Now it does. `postcheck` in `package.json` runs
+`node scripts/gate-attestation.ts record`, so the receipt is written BY the gate
+rather than by a step beside it: there is no arrangement where a receipt exists
+and the gate did not run to completion. The record is
+`.charness/quality/gate-attestation.json` and it binds
+
+- `commit` and `tree` — the whole tree of HEAD, unscoped, because a scoped hash
+  needs a list of what does not matter and that list goes stale silently
+- `profile` and `jobs` — which gate, and its resolved `&&` chain
+- `runner_identity` — `ceal-v0.66.0` burned on a break that appears on macOS and
+  not on Linux, so a green ubuntu gate is not evidence about a macOS runner
+- `node_version` — what the runner resolved, beside the source assertion that
+  `.nvmrc` and the release lane agree
+- `pass_fail_env` — today `CEAL_REQUIRE_PLATFORM_PROOFS`, which turns a correct
+  skip into a hard failure, so the same command with it off is a weaker proof
+- `install_fingerprint` — the tree carries the lock, which is what the install
+  was asked for, not what is on disk
+
+Comparison is exact equality on every field, and a dirty checkout earns no
+receipt at all. There is no TTL: age carries no information a field does not
+already have, and an expiry would turn a correct reuse into a re-run for a
+reason invisible in a diff.
+
+Three consumers, and they fail in opposite directions on purpose:
+
+- `.githooks/pre-push` asks `gate-attestation.ts verify` before spending the
+  full gate on a tag push, and runs it on any refusal.
+- `check.yml` runs `gate-attestation.ts publish` after a green gate and uploads
+  the receipt as an artifact NAMED for the record's digest. It fails loudly: a
+  CI checkout is clean by construction, so a receipt that does not describe it
+  is a defect in the script.
+- `ceal-release.yml`'s build job runs `scripts/resolve-gate-attestation.ts`,
+  which asks the Actions API whether a successful `check.yml` run for this exact
+  head SHA carries that artifact name. The name IS the comparison — one
+  differing field is a different digest, so it misses — which costs no artifact
+  download and no zip reader on the runner. It never exits non-zero: a missing
+  token, an API outage and a genuinely absent receipt all mean "run the gate",
+  because failing the job on a lookup error would trade a saved gate for a
+  burned tag. When it does answer `reuse=true`, the skipped `npm run check` is
+  replaced by `npm run build`, since the gate was also that leg's build.
+
+`record` is the one that must never fail: it runs inside a gate that has just
+passed, so a full disk or an unwritable `.charness/` costs a later re-run rather
+than reddening a green gate — the same rule the pre-push timing log learned.
 
 ## The Docs Graph Gate, And Why It Is Standalone
 

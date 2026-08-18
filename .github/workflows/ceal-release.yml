@@ -53,6 +53,10 @@ jobs:
   build:
     permissions:
       contents: read
+      # Read-only, and only so this job can ask whether `check.yml` already
+      # proved this exact commit. It cannot write a run, cancel one, or reach
+      # anything the release publishes.
+      actions: read
     # A tag cannot be reused, so a wedged release job is worse than a failed
     # one: holding a runner for the 6-hour default means the burned tag is
     # discovered hours after the cause stopped being obvious. These bounds are
@@ -120,11 +124,36 @@ jobs:
       # runs its own `tsc` (scripts/build-worker-release-package.ts), then
       # builds the SEA and runs its native smoke test. A leg that skips the gate
       # still compiles, links, and executes its own binary.
-      - name: Build and test source
+      # `check.yml` runs the same gate on `ubuntu-24.04` and `macos-15` for every
+      # push to main, so by the time a tag is cut this commit has usually already
+      # been proved on the very runner identity this leg is about to prove it on
+      # again. This asks. It compares the whole record — tree, gate profile and
+      # phase list, runner identity, resolved Node, platform-proof requirement,
+      # installed dependency set — and any difference at all, including a lookup
+      # that fails or a token that is absent, answers `reuse=false`, which runs
+      # the gate. There is no path through this step that skips the gate on a
+      # question it could not answer.
+      - name: Ask whether this commit already passed the gate on this runner
+        id: gate-attestation
         if: matrix.validate_source == '1'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.platform == 'linux-amd64' && '1' || '0' }}
+        run: node scripts/resolve-gate-attestation.ts >> "$GITHUB_OUTPUT"
+      - name: Build and test source
+        if: matrix.validate_source == '1' && steps.gate-attestation.outputs.reuse != 'true'
         run: npm run check
         env:
           CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.platform == 'linux-amd64' && '1' || '0' }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+      # The gate is also this leg's build: `npm run check` runs `npm run build`,
+      # and the composition below reads `dist/`. Reusing the proof does not reuse
+      # the artifacts — nothing is carried over from the attesting run — so the
+      # skip has to put the build back.
+      - name: Build from the attested source without re-proving it
+        if: matrix.validate_source == '1' && steps.gate-attestation.outputs.reuse == 'true'
+        run: npm run build
       # The one proof the paragraph above cannot hand a skipped leg. Everything
       # it argues is architecture-independent — lint, unit, contract — is about
       # the SOURCE, and this tier is not: `verifyGatewayProtocolConsumer` proves

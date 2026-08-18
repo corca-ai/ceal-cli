@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
+import { PASS_FAIL_ENV_KEYS, RUNNER_IDENTITY_ENV } from "../../scripts/lib/gate-attestation.ts";
 import {
 	collectViolations,
 	deriveWorkflows,
@@ -23,80 +24,62 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
-const WORKER_CONTRACT_TESTS = [
-	"packages/ceal-protocol/test/conformance.test.ts",
-	"packages/ceal-protocol/test/device-enrollment.test.ts",
-	"packages/ceal-protocol/test/enrollment.test.ts",
-	"packages/ceal-protocol/test/gateway-proof-claims.test.ts",
-	"packages/ceal-protocol/test/gateway-write-identity.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-attachment-stream.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-capability-catalog.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-control-v4.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-control.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-disposition-control.test.ts",
-	"packages/ceal-protocol/test/leased-consumer-file-upload.test.ts",
-	"packages/ceal-protocol/test/personal-client-session.test.ts",
-	"packages/ceal-protocol/test/protocol-negotiation.test.ts",
-	"packages/ceal-protocol/test/result-materialization.test.ts",
-	"packages/ceal-protocol/test/wire-boundary-response.test.ts",
-	"packages/ceal-protocol/test/wire-boundary.test.ts",
-	"packages/ceal-worker-cli/test/leased-consumer-attachment-stream-carrier.test.ts",
-	"test/check-docs-graph.test.ts",
-	"test/contract/gateway-handoff-bootstrap.test.ts",
-	"test/contract/gateway-leased-consumer-call-handoff.test.ts",
-	"test/contract/leased-consumer-control-conformance-projection.test.ts",
-	"test/contract/no-legacy-mjs.test.ts",
-	"test/contract/legacy-mjs-conversion.test.ts",
-	"test/contract/one-fact-one-home.test.ts",
-	"test/contract/pre-push-lock.test.ts",
-	"test/contract/prewarm-offline-consumer-cache.test.ts",
-	"test/contract/probe-surface.test.ts",
-	"test/contract/production-reachability.test.ts",
-	"test/contract/protocol-vendor-pin.test.ts",
-	"test/contract/repo-build.test.ts",
-	"test/contract/repo-gates.test.ts",
-	"test/contract/safe-output-path.test.ts",
-	"test/contract/script-lib.test.ts",
-	"test/contract/source-loader.test.ts",
-	"test/contract/typecheck-source-gate.test.ts",
-	"test/contract/typecheck-ratchet.test.ts",
-	"test/contract/worker-acceptance-packet.test.ts",
-	"test/contract/worker-gateway-handoff-archive.test.ts",
-	"test/contract/worker-guide-contract.test.ts",
-	"test/contract/worker-release-assets.test.ts",
-	"test/contract/worker-release-inputs.test.ts",
-];
-const WORKER_RELEASE_TESTS = [
-	"test/client-artifact.test.ts",
-	"test/gateway-protocol-consumer.test.ts",
-	"test/npm-pack-metadata.test.ts",
-	"test/package-bin.test.ts",
-	"test/release-process-supervisor.test.ts",
-	"test/worker-native-artifact.test.ts",
-	"test/worker-release-installer.test.ts",
-	"test/worker-release-package.test.ts",
-];
+// The worker tier inventories used to be restated here as two hand-written
+// arrays and asserted deep-equal to the npm scripts that actually run them. That
+// assertion proved only that two copies agreed: it added no fact about the tree,
+// and it made every new suite a two-file edit whose second half existed solely to
+// keep the first half green. The npm script is the one home now, and this file
+// derives from it — which is also what lets the ownership gate below say
+// something the copy never could, namely that every declared path exists and
+// every suite on disk has exactly one owner.
+//
+// The property the copy was protecting is NOT the copy. It is that a file added
+// under test/ must be PLACED, not swept in — a glob once pulled frozen `cealctl`
+// and legacy dual-release proofs back into the worker gate. That property lives
+// in the exhaustiveness assertion, and it survives untouched.
+function workerTierFiles(scripts: Record<string, string>, tier: string) {
+	return testFilesIn(tier === "test:contract" ? scripts["test:contract:built"] : scripts[tier]);
+}
 
-function testFilesIn(script) {
+/**
+ * One suite token as the shell would expand it. A stale glob is the release
+ * lane's own version of calling a ghost — `sh` passes an unmatched pattern
+ * through verbatim and the runner dies on a filename nobody wrote — so an
+ * expansion that finds nothing is a failure here rather than a surprise there.
+ */
+function expandSuiteToken(token: string) {
+	if (!token.includes("*")) return [token];
+	const directory = path.dirname(token);
+	const pattern = new RegExp(`^${path.basename(token).replaceAll(".", "\\.").replaceAll("*", "[^/]*")}$`, "u");
+	const matched = readdirSync(path.join(ROOT, directory))
+		.filter((name) => pattern.test(name))
+		.map((name) => `${directory}/${name}`)
+		.sort();
+	assert.ok(matched.length > 0, `${token} matches no file; a lane is globbing a directory that no longer holds suites`);
+	return matched;
+}
+
+function testFilesIn(script: string | undefined) {
 	return (script ?? "")
 		.split(/\s+/u)
-		.filter((token) => token.endsWith(".test.mjs") || token.endsWith(".test.ts"))
+		.filter((token: string) => token.endsWith(".test.mjs") || token.endsWith(".test.ts"))
+		.flatMap(expandSuiteToken)
 		.sort();
 }
 
 const CONTRACT_LANE_DELIMITER = " && node --test ";
-const PROJECTION_TEST = "test/contract/leased-consumer-control-conformance-projection.test.ts";
+const PROJECTION_TEST = "test/source/leased-consumer-control-conformance-projection.test.ts";
 
-function assertSourceLaneTestOwnership(script, testFile) {
+function assertSourceLaneTestOwnership(script: string, testFile: string) {
 	const segments = script.split(CONTRACT_LANE_DELIMITER);
 	assert.equal(segments.length, 2, "test:contract must have exactly one source/artifact lane delimiter");
-	const occurrences = testFilesIn(script).filter((file) => file === testFile);
+	const occurrences = testFilesIn(script).filter((file: string) => file === testFile);
 	assert.equal(occurrences.length, 1, `${testFile} must be registered exactly once`);
 	assert.ok(testFilesIn(segments[0]).includes(testFile), `${testFile} must execute through the source-test runner`);
 	assert.ok(!testFilesIn(segments[1]).includes(testFile), `${testFile} must not execute through plain node`);
 }
 
-function assertContractGateScriptShape(scripts) {
+function assertContractGateScriptShape(scripts: Record<string, string>) {
 	assert.equal(
 		scripts["test:contract"],
 		"npm run build && npm run test:contract:built",
@@ -105,7 +88,6 @@ function assertContractGateScriptShape(scripts) {
 	const built = scripts["test:contract:built"];
 	assert.equal((built.match(/\bnpm run build\b/gu) ?? []).length, 0, "the internal contract lane must not build");
 	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
-	assert.deepEqual(testFilesIn(built), [...WORKER_CONTRACT_TESTS].sort(), "the built lane must own the complete contract inventory once");
 	const commonPhases = [
 		"npm run lint",
 		"npm run lint:no-legacy-mjs",
@@ -169,6 +151,24 @@ function filesUnder(directory, matches) {
 	return found;
 }
 
+/**
+ * Workspaces whose own suite the root gate reaches AND whose suite is a glob, so
+ * a file added there is swept in rather than needing a worker-tier entry.
+ *
+ * Both halves are read, not assumed. `ceal-protocol` is exactly why: it has a
+ * `test` script, that script does glob, and nothing in the root chain calls it —
+ * so it is not an owner, and its files have to be named explicitly. Reading only
+ * the root call, or only the package script, would have called it owned.
+ */
+function globOwnedWorkspaces(scripts: Record<string, string>) {
+	const owners = new Set();
+	for (const [, workspace, script] of scripts.coverage.matchAll(/--prefix packages\/([\w-]+) run ([\w:-]+)/gu)) {
+		const packaged = JSON.parse(read(path.join("packages", workspace, "package.json")));
+		if (/(?:^|\s)test\/\*\.test\.ts(?:\s|$)/u.test(packaged.scripts?.[script] ?? "")) owners.add(workspace);
+	}
+	return owners;
+}
+
 // Two tests read the coverage runner: the one that checks how scripts/ is
 // measured, and the one that resolves `npm test` down to the two tiers. Naming
 // the path once means a rename cannot leave one of them reading a stale file.
@@ -193,7 +193,18 @@ function checkedWorkflowPaths() {
 // `run:` — to export one env var, say — then made one of them vacuous and the
 // other fail claiming the lane does not run the gate at all. One line-wise
 // predicate, so the two can no longer disagree about what they are looking at.
-function runsFinalGate(step) {
+type WorkflowStep = {
+	readonly name?: string;
+	readonly id?: string;
+	readonly run?: string;
+	readonly uses?: string;
+	readonly if?: string;
+	readonly with?: Record<string, unknown>;
+	readonly env?: Record<string, string>;
+};
+type WorkflowJob = { readonly steps?: WorkflowStep[]; readonly permissions?: Record<string, string>; readonly if?: string };
+
+function runsFinalGate(step: WorkflowStep) {
 	return (step.run ?? "").split("\n").some((line) => line.trim() === "npm run check");
 }
 
@@ -394,7 +405,10 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	for (const publicSurface of ["Protocol", "client", "worker", "executable"]) {
 		assert.match(artifactProof, new RegExp(publicSurface, "iu"), `artifact lane must name the ${publicSurface} proof purpose`);
 	}
-	assert.ok(WORKER_RELEASE_TESTS.includes("test/client-artifact.test.ts"));
+	assert.ok(
+		workerTierFiles(manifest.scripts, "test:release").includes("test/client-artifact.test.ts"),
+		"the isolated-artifact proof belongs to the release tier, not the contract tier",
+	);
 });
 
 // The third target. `scripts/` is the release lane's production code and was the
@@ -1533,6 +1547,92 @@ test("the release lane still validates its source on the platforms that can prov
 	assert.match(compile, /tsconfig\.build\.json/u, "composition must still run its own compiler for the legs that skip the gate");
 });
 
+// The gate receipt is what lets the release lane skip a gate `check.yml` already
+// ran, and every way it can go wrong is quiet. A receipt written under the wrong
+// runner identity does not fail anything — it just never matches, so the saving
+// silently stops and nobody is told. A pass/fail environment variable added to a
+// gate step but not to the record is worse: two runs that prove different things
+// digest the same, and the release lane skips a proof it never had. Neither is
+// visible in a run log, so both are asserted here.
+test("every step that runs the gate records the receipt the release lane will compare", () => {
+	const declared = new Set([RUNNER_IDENTITY_ENV, ...PASS_FAIL_ENV_KEYS]);
+	let gateSteps = 0;
+	for (const workflowPath of workflowPaths()) {
+		for (const [jobName, job] of Object.entries(parse(read(workflowPath)).jobs as Record<string, WorkflowJob>)) {
+			for (const step of (job.steps ?? []).filter(runsFinalGate)) {
+				gateSteps += 1;
+				const where = `${workflowPath}:${jobName}`;
+				assert.match(
+					String(step.env?.[RUNNER_IDENTITY_ENV]),
+					/matrix\./u,
+					`${where} must take the receipt's runner identity from the matrix; a hardcoded or absent one makes the two lanes disagree about the same machine`,
+				);
+				for (const key of Object.keys(step.env ?? {})) {
+					assert.ok(
+						declared.has(key),
+						`${where} sets ${key} on the gate step, so either it cannot change what the gate proves — in which case move it off this step — or it belongs in PASS_FAIL_ENV_KEYS`,
+					);
+				}
+			}
+		}
+	}
+	assert.ok(gateSteps >= 3, `only ${gateSteps} gate steps found; this check would be near-vacuous`);
+});
+
+test("the check lane uploads a receipt from every leg that earns one", () => {
+	const workflow = parse(read(".github/workflows/check.yml"));
+	const gateJobs = Object.entries(workflow.jobs as Record<string, WorkflowJob>).filter(([, job]) => (job.steps ?? []).some(runsFinalGate));
+	assert.ok(gateJobs.length >= 2, "both gate legs must still exist to earn receipts");
+	for (const [name, job] of gateJobs) {
+		const upload = (job.steps ?? []).find((step: WorkflowStep) => String(step.uses ?? "").startsWith("actions/upload-artifact"));
+		assert.ok(upload?.with, `'${name}' runs the gate but preserves no receipt, so the release lane can never reuse this runner's proof`);
+		const uploaded = upload.with;
+		// The receipt lives under `.charness/`, which this action skips by default.
+		// Without the flag the upload succeeds and publishes nothing: a green step
+		// and an artifact that does not exist.
+		assert.equal(uploaded["include-hidden-files"], true, `'${name}' would upload an empty artifact`);
+		assert.equal(uploaded["if-no-files-found"], "error", `'${name}' must fail rather than publish a receipt-shaped absence`);
+		assert.match(
+			String(uploaded.name),
+			/steps\.\w[\w-]*\.outputs\.artifact_name/u,
+			"the artifact name must be the digest the script computed",
+		);
+	}
+});
+
+// Both halves of the reuse branch, because a skipped step reports success: an
+// `if` that never runs the gate and an `if` that never builds both look green
+// until a tag is cut from a binary nothing compiled.
+test("the release lane's gate reuse is one decision with both outcomes wired", () => {
+	const workflow = parse(read(".github/workflows/ceal-release.yml"));
+	const build = workflow.jobs.build;
+	assert.deepEqual(
+		[build.permissions.contents, build.permissions.actions],
+		["read", "read"],
+		"without actions: read the lookup can only ever answer lookup_failed, and the saving disappears with no failure to notice",
+	);
+	const lookup = (build.steps ?? []).find((step: WorkflowStep) => /resolve-gate-attestation\.ts/u.test(step.run ?? ""));
+	assert.ok(lookup?.id, "the lookup step must carry an id for the branches below to read");
+	const verdict = `steps.${lookup.id}.outputs.reuse`;
+
+	const gate = (build.steps ?? []).find(runsFinalGate);
+	assert.ok(String(gate.if).includes(`${verdict} != 'true'`), "the gate must run whenever the lookup did not positively answer 'reuse'");
+	const reusing = (build.steps ?? []).filter((step: WorkflowStep) => String(step.if ?? "").includes(`${verdict} == 'true'`));
+	assert.equal(reusing.length, 1, "exactly one step may stand in for the skipped gate");
+	assert.equal(
+		reusing[0].run.trim(),
+		"npm run build",
+		"the gate is also this leg's build, and the composition below reads dist/, so the skip has to put the build back",
+	);
+	for (const step of [lookup, gate, reusing[0]]) {
+		assert.match(
+			String(step.if),
+			/matrix\.validate_source == '1'/u,
+			"the leg that deliberately skips the gate builds through its own step, and must not be handed a second one",
+		);
+	}
+});
+
 // A range in engines.node would let the check lane resolve a different major
 // than the release lane builds on, and a green check would stop predicting a
 // green release. One pin, asserted equal across both lanes.
@@ -1682,18 +1782,12 @@ test("the hook installer reports unset, installs, and confirms", (context) => {
 });
 
 // A glob once put frozen `cealctl` and legacy dual-release proofs back into the
-// worker pre-push/CI gate. Both suites stay explicit inventories so that a file
-// added under test/ has to be placed deliberately rather than swept in.
-test("every test file under test/ belongs to one explicit worker suite", () => {
+// worker pre-push/CI gate. The two worker tiers stay explicit inventories so that
+// a suite has to be placed deliberately rather than swept in.
+test("every test file in this repository has exactly one owner that the gate reaches", () => {
 	const scripts = manifest.scripts;
 	assertContractGateScriptShape(scripts);
-	// Which files each suite runs is the claim; the argument order and spacing of
-	// the `node --test` line are not. Exact equality made a reporter flag or a
-	// reordering fail as if a suite had lost coverage.
-	for (const [suite, declared] of [
-		["test:contract", WORKER_CONTRACT_TESTS],
-		["test:release", WORKER_RELEASE_TESTS],
-	]) {
+	for (const suite of ["test:contract", "test:release"]) {
 		const suiteScript = suite === "test:contract" ? scripts["test:contract:built"] : scripts[suite];
 		// The file set is the claim, but both lanes still have to use the Node test
 		// runner. Contract behavior begins in the source-authoritative wrapper;
@@ -1706,7 +1800,6 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 			assert.match(suiteScript, /^node --test /u, `${suite} must run through the node test runner`);
 		}
 		assert.doesNotMatch(suiteScript, /--test-name-pattern|--test-skip-pattern/u);
-		assert.deepEqual(testFilesIn(suiteScript), [...declared].sort());
 	}
 	assert.match(scripts["check:unit"], /npm run test:contract:built/u);
 	// `npm test` no longer names the two tiers itself: it goes through
@@ -1745,26 +1838,70 @@ test("every test file under test/ belongs to one explicit worker suite", () => {
 	// file now belongs to a worker suite or to nothing.
 	assert.equal(scripts["test:legacy-compatibility"], undefined, "the legacy compatibility suite must not come back");
 
-	const declared = [...WORKER_CONTRACT_TESTS, ...WORKER_RELEASE_TESTS].filter((file) => file.startsWith("test/")).sort();
-	const actual = [
-		...readdirSync(path.join(ROOT, "test", "contract"))
-			.filter((name) => name.endsWith(".test.ts"))
-			.map((name) => `test/contract/${name}`),
-		...readdirSync(path.join(ROOT, "test"))
-			.filter((name) => name.endsWith(".test.ts"))
-			.map((name) => `test/${name}`),
-	].sort();
-	assertTestInventoryCoverage(declared, actual);
+	const declared = [...workerTierFiles(scripts, "test:contract"), ...workerTierFiles(scripts, "test:release")];
+	assert.deepEqual(
+		declared.filter((file, index) => declared.indexOf(file) !== index),
+		[],
+		"a suite named by two tiers is proved twice and owned by neither",
+	);
+	for (const file of declared) {
+		assert.ok(
+			existsSync(path.join(ROOT, file)),
+			`${file} is named by a worker tier but is not on disk; a rename left the gate calling a ghost`,
+		);
+	}
+
+	// The population, and who is allowed to own each part of it. This used to walk
+	// `test/` only, and `packages/` was left to an assumption nobody had written
+	// down — which was false for `ceal-protocol`, whose own `test` script no root
+	// chain calls. `leased-consumer-source-import.test.ts` sat there passing in no
+	// gate at all until this walk was widened.
+	const globOwners = globOwnedWorkspaces(scripts);
+	const explicitOnly = filesUnder("test", (name: string) => name.endsWith(".test.ts"));
+	const packaged = readdirSync(path.join(ROOT, "packages"), { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.flatMap((entry) =>
+			filesUnder(path.join("packages", entry.name, "test"), (name: string) => name.endsWith(".test.ts")).map((file: string) => [
+				entry.name,
+				file,
+			]),
+		);
+	assert.ok(packaged.length > 0 && explicitOnly.length > 0, "the suite walk found nothing; it is not reaching the tree");
+
+	assertTestInventoryCoverage(
+		declared.filter((file) => file.startsWith("test/")),
+		explicitOnly,
+	);
 	// Mutation proof: a newly added TypeScript suite must fail the same ownership
 	// contract as a newly added MJS suite, rather than relying on a human to notice
 	// that the explicit inventory was not updated.
-	assert.throws(() => assertTestInventoryCoverage(declared, [...actual, "test/unregistered.test.ts"]));
+	assert.throws(() =>
+		assertTestInventoryCoverage(
+			declared.filter((file) => file.startsWith("test/")),
+			[...explicitOnly, "test/unregistered.test.ts"],
+		),
+	);
 
-	// Any other directory under test/ would be declared by neither inventory.
+	// A package suite has an owner either way; what must never happen is neither.
+	// `ceal-worker-cli`'s attachment-stream carrier is deliberately in both — its
+	// root-cwd contract run and its package-cwd coverage run are different
+	// environments — so being glob-owned does not forbid an explicit entry.
+	for (const [workspace, file] of packaged) {
+		assert.ok(
+			globOwners.has(workspace) || declared.includes(file),
+			`${file} runs in no gate: ${workspace} has no root-reached glob suite, so the file must be named by a worker tier`,
+		);
+	}
+
+	// Placement IS the declaration now, so the set of places a suite can be placed
+	// is the thing that has to stay closed. `test/` root is the release tier,
+	// `test/contract/` the artifact lane, `test/source/` the source-authoritative
+	// lane; a fourth directory would be globbed by nobody and run nowhere.
 	const directories = readdirSync(path.join(ROOT, "test"), { withFileTypes: true })
 		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name);
-	assert.deepEqual(directories, ["contract"], "a new test/ subdirectory needs an explicit suite inventory entry");
+		.map((entry) => entry.name)
+		.sort();
+	assert.deepEqual(directories, ["contract", "source"], "a new test/ subdirectory is globbed by no lane, so its suites would run nowhere");
 });
 
 test("projection conformance cannot move or duplicate outside the source-test lane", () => {
@@ -1801,8 +1938,16 @@ test("contract gate ownership rejects build and inventory mutations", () => {
 		};
 		assert.throws(() => assertContractGateScriptShape(typecheckBeforeBuild), /must build before typecheck/u);
 	}
-	const omittedTest = { ...scripts, "test:contract:built": scripts["test:contract:built"].replace(` ${PROJECTION_TEST}`, "") };
-	assert.throws(() => assertContractGateScriptShape(omittedTest), /exactly once|complete contract inventory/u);
+	// The lanes are globs now, so "drop this suite from the inventory" is no longer
+	// a word deleted from a list — it is the lane that covers it losing its glob.
+	// Same claim, expressed against what the script actually says today.
+	const omittedLane = { ...scripts, "test:contract:built": scripts["test:contract:built"].replace(" test/source/*.test.ts", "") };
+	assert.throws(() => assertContractGateScriptShape(omittedLane), /registered exactly once|source-test runner/u);
+	const staleGlob = {
+		...scripts,
+		"test:contract:built": scripts["test:contract:built"].replace("test/source/*.test.ts", "scripts/*.test.ts"),
+	};
+	assert.throws(() => assertContractGateScriptShape(staleGlob), /matches no file/u);
 });
 
 // A "the contract suite stays small enough to run on every push" test lived here

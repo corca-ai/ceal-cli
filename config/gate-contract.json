@@ -17,6 +17,7 @@
 					"name": ".githooks/pre-push",
 					"gate_commands": [
 						"node scripts/check-dup-ratchet.ts",
+						"node scripts/gate-attestation.ts verify",
 						"npm run check",
 						"npm run check:unit",
 						"npm run lint:shell"
@@ -52,6 +53,7 @@
 					"gate_commands": [
 						"node scripts/build-worker-release-assets.ts compose --out \"$RUNNER_TEMP/$output\" --gateway-handoff-archive \"$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE\" --version \"$version\" --platform \"$PLATFORM\" --json",
 						"node scripts/prewarm-offline-consumer-cache.ts",
+						"node scripts/resolve-gate-attestation.ts",
 						"npm run build",
 						"npm run check",
 						"npm run test:release"
@@ -102,6 +104,7 @@
 						"ubuntu-24.04"
 					],
 					"gate_commands": [
+						"node scripts/gate-attestation.ts publish",
 						"node scripts/prewarm-offline-consumer-cache.ts",
 						"npm run check"
 					]
@@ -112,6 +115,7 @@
 						"macos-15"
 					],
 					"gate_commands": [
+						"node scripts/gate-attestation.ts publish",
 						"node scripts/prewarm-offline-consumer-cache.ts",
 						"npm run check"
 					]

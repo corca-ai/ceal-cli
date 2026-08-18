@@ -41,6 +41,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
+import { isMainModule } from "../scripts/lib/is-main-module.ts";
+
 export const GATE_CONTRACT_SCHEMA = "ceal.gate_contract.v1";
 export const GATE_CONTRACT_PATH = "config/gate-contract.json";
 
@@ -368,6 +370,6 @@ export function main(argv: readonly string[] = process.argv.slice(2), repoRoot: 
 	return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
 	process.exitCode = main();
 }

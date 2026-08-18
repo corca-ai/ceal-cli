@@ -113,8 +113,26 @@ while read -r local_ref _local_sha _remote_ref _remote_sha; do
 	esac
 done
 
+# A tag push pays the full gate, and it is also the push most likely to follow a
+# full gate the maintainer already ran on this exact tree — `npm run check`
+# leaves a receipt behind through `postcheck`, so ask for it before spending
+# another ~640s re-proving the same source on the same host. The receipt is
+# refused for a dirty checkout, a different tree, a different gate, a different
+# host, or a different pass/fail environment, so the only case this can skip is
+# the one where the answer is already known. `verify` says why on stderr when it
+# refuses, which is what a maintainer needs when the skip they expected does not
+# happen.
+#
+# The reuse gets its own timing label rather than a zero under the gate's own:
+# the consumer has no outcome filter, and a run of skips would otherwise read as
+# a gate that got dramatically faster.
 if [ "$tagged" -eq 1 ]; then
-	run_phase "tag push, full gate" npm run check
+	if node scripts/gate-attestation.ts verify; then
+		echo "pre-push: tag push, full gate — reusing this tree's attested green gate" >&2
+		record_timing "tag push, full gate (attested reuse)" 0
+	else
+		run_phase "tag push, full gate" npm run check
+	fi
 else
 	run_phase "iteration gate" npm run check:unit
 fi

@@ -120,306 +120,306 @@
 			"note": "writeCallGatewayFailure renders a decoded Gateway refusal with typed denial/retry policy; writeCallUnavailable classifies pre-issue session failures and post-issue transport uncertainty, conditionally emits a receipt, and applies write-only replay caution. Their common result-schema/error-envelope shape is the public type they implement, while a shared writer would parameterize every meaningful branch. Receipt construction and Gateway identity are already centralized, so no duplicated fact remains."
 		},
 		{
-      "surface": "code",
-      "id": "6eb36b7028824c4b",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the materialized-guide verification and boundary-specific filesystem traversal family reviewed at dfb806c62157194d. The new permissionMode owner changed the runtime member's tokens, not the ownership decision: signed-guide verification, guide-state parent admission, and generic release-source enumeration retain different inventories, mode policies, symlink treatment, and failure classes."
-    },
-    {
-      "surface": "code",
-      "id": "bfc4c34f2224075a",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the build-time skill collector versus runtime exact materialized-guide verifier reviewed at 94d117266d9477ea. The collector constructs a portable deterministic source bundle; the runtime verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. Sharing the traversal would merge opposite anomaly policies."
-    },
-    {
-      "surface": "code",
-      "id": "a65fd5dcda4e5280",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at cfc87d95f6cb4b33, 9111f25a708e0c00, and 1d37623e5019a67e. Composition builds one platform's unsigned candidate; merge reconciles platform handoffs and now independently rebinds the canonical embedded guide before signing. Their shared output publication already lives in scripts/lib/output-directory.mjs, while combining the remaining bodies would merge producer and reconciler trust decisions behind callbacks."
-    },
-    {
-      "surface": "code",
-      "id": "07485297e1542615",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the release-asset composer versus native-artifact builder family reviewed at 416cfcf08f3ed0ae and 401c404aa5ef00fd. The two members publish different artifact schemas across different trust boundaries; their common safe-output publication already lives in scripts/lib/output-directory.mjs, and combining the remaining bodies would hide composition and executable-building policy behind callbacks."
-    },
-    {
-      "surface": "code",
-      "id": "43301d525a461c33",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "ES module import-header overlap between independently runnable release scripts. This is the import-scaffolding class already reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0, not a duplicated implementation fact."
-    },
-    {
-      "surface": "code",
-      "id": "4a027b206a818841",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder family reviewed at 56e6161f8a085070, d3d10b19e3927fba, and 4e437a213994e8b8. One proves an isolated packed install while the other stages a hermetic release package; sharing their orchestration would erase the proof distinction."
-    },
-    {
-      "surface": "code",
-      "id": "75e91ff6508bc229",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the independent native and package release-output assertions reviewed at bdcc97715c0ed28c and ed49982afe11137e. The inventories intentionally differ because the native artifact exposes the legacy compatibility bridge while the package artifact carries the canonical embedded tar; a shared expected list would conflate those contracts."
-    },
-    {
-      "surface": "code",
-      "id": "8eae3607d8cf4786",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the CEAL_AGENT_GUIDE_HOSTS consumers reviewed at f30187c77acbf7e4 and 04e6fe40984b7b6a. The table is already the one home; detection, type narrowing, path resolution, row lookup, and state rendering are distinct consumers rather than duplicate host declarations."
-    },
-    {
-      "surface": "code",
-      "id": "94d117266d9477ea",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "The build-time skill source collector and runtime materialized-guide verifier both walk directories but enforce opposite trust contracts. The collector constructs a portable deterministic inventory; the verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. A callback traversal would merge their anomaly policies rather than create one fact owner."
-    },
-    {
-      "surface": "code",
-      "id": "c118db9cf39510f0",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Import-block overlap between an installer test and the native release builder. This is the non-extractable executable/test scaffolding class reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0."
-    },
-    {
-      "surface": "code",
-      "id": "c5e71256aff1cc5b",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of the native/package materializeOutput pair reviewed at 454f7c4c56066d18, 6df6b80781ef0564, and e076bb930a4d6684. Executable and package artifacts deliberately have different modes, manifests, assets, and smoke evidence; their common output publication tail is already shared."
-    },
-    {
-      "surface": "code",
-      "id": "cc524d5d6b6ab5fd",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Normal guide inspection and guide-integrity failure share the public response schema but not their derivation. Normal inspection dispatches to the integrity failure when exact verification fails, so routing both through one state constructor would invite recursion or weaken the fail-closed projection."
-    },
-    {
-      "surface": "code",
-      "id": "cda8e71ff1cff6b0",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Three adjacent fixture-path declarations in independent contract and installer tests. The paths name different fixture schemas and lifecycles; extracting variable declarations would couple the test tiers without removing an implementation of a shared fact."
-    },
-    {
-      "surface": "code",
-      "id": "cfc87d95f6cb4b33",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at 9111f25a708e0c00 and 1d37623e5019a67e. Composition produces one platform candidate while merge reconciles unsigned platform handoffs before signing; their remaining bodies own different trust decisions."
-    },
-    {
-      "surface": "code",
-      "id": "de82628d582ec1c9",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "The worker runtime now owns its SHA-256 shape predicate in sha256.ts, while independently runnable release scripts retain local boundary predicates. This is the cross-runtime primitive class reviewed for SHA helpers at 40e06511f93f62bc and 2c4224859ea718e0; making release scripts import built worker dist would add a build-order dependency without centralizing mutable policy."
-    },
-    {
-      "surface": "code",
-      "id": "dfb806c62157194d",
-      "class": "intentional",
-      "reviewed_at": "2026-08-12",
-      "note": "Detector clustering across materialized signed-guide verification, guide-state directory safety, and generic release-source enumeration. Their expected inventories, permitted modes, symlink rules, and typed failures are boundary-specific; a shared traversal callback would combine distinct security policies."
-    },
-    {
-      "surface": "code",
-      "id": "a6a63e638a33a9a5",
-      "class": "intentional",
-      "reviewed_at": "2026-08-11",
-      "note": "Re-key of the composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets family already reviewed at 1d37623e5019a67e. The new merge ship guard changed one member's content, but the ownership decision is unchanged: composition builds one platform's unsigned candidate while merge reconciles platform-composed build handoffs before signing, and their shared output publication already lives in output-directory.mjs. Combining their remaining bodies would hide two trust boundaries behind callbacks."
-    },
-    {
-      "surface": "code",
-      "id": "e16f0d93af7ec761",
-      "class": "intentional",
-      "reviewed_at": "2026-08-11",
-      "note": "Re-key of the native and package builder calls to the shared output-directory guard reviewed at 81ed10bf66f9701b. Each caller supplies its own marker and subject; the implementation fact is already extracted, and wrapping the two invocations would only move those differing arguments into another helper."
-    },
-    {
-      "surface": "code",
-      "id": "f30187c77acbf7e4",
-      "class": "intentional",
-      "reviewed_at": "2026-08-11",
-      "note": "Re-key of the agent-guide host-table consumers reviewed at 04e6fe40984b7b6a. The source edit narrowed register provenance and regrouped the same host detection, type narrowing, row lookup, registration map, and projection members. CEAL_AGENT_GUIDE_HOSTS is already their one shared fact; combining the consumers would merge path resolution, mutation, and rendering."
-    },
-    {
-      "surface": "code",
-      "id": "1d37623e5019a67e",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "composeWorkerReleaseAssets and mergeWorkerReleaseAssetSets are independent producer and reconciler boundaries in one release module. Their shared staging/error-envelope shape is already factored through output-directory helpers; combining the remaining bodies would put build and merge trust decisions behind callbacks."
-    },
-    {
-      "surface": "code",
-      "id": "1e9f0b30d6eae2f6",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Re-key of the already reviewed Codex inventory lstat-or-mark-partial family. Extraction was previously falsified because it replaced this local pair with a wider cross-module family; both walkers must independently consume and mark their shared budget."
-    },
-    {
-      "surface": "code",
-      "id": "32a0d0bcede949f0",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "ES module import-header overlap between a production bootstrap and a release test fixture. Import declarations are not an extractable implementation fact."
-    },
-    {
-      "surface": "code",
-      "id": "4afb27a3e3668b84",
-      "class": "intentional",
-      "reviewed_at": "2026-08-11",
-      "note": "ES module import-header overlap between the enrollment and personal-session public clients. Their shared HTTP exchange and status/body policy already live in session-http-client.ts; extracting import declarations would add an indirection without removing another implementation of a fact."
-    },
-    {
-      "surface": "code",
-      "id": "349d44928d03b33c",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Two test fixtures write placeholder signature and certificate sidecars. The repeated two-line data setup belongs to independent bootstrap and installer proofs; a shared fixture would couple contract and release tiers."
-    },
-    {
-      "surface": "code",
-      "id": "351b6fb800672617",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Two bootstrap cases declare similar dependency seams but deliberately differ in download observation and mutation. Factoring their few common fixture lines would hide which dependency each refusal controls."
-    },
-    {
-      "surface": "code",
-      "id": "3c7e99843e566e72",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Detector clustering across an HTTP error switch, session recovery branches, and an observer sentinel. The members share control-flow tokens but represent unrelated domains and no repeated fact."
-    },
-    {
-      "surface": "code",
-      "id": "401c404aa5ef00fd",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Broad detector overlap between release-asset composition and native-artifact construction. They share the repo's release-script frame but own different artifact schemas and trust boundaries; common output publication is already extracted."
-    },
-    {
-      "surface": "code",
-      "id": "44711d148bf378c8",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Broad token clustering combines two bounded audit walkers with unrelated local-store guard functions. The previously tested walker extraction increased cross-module duplication, and the filesystem members enforce distinct optional/present path contracts."
-    },
-    {
-      "surface": "code",
-      "id": "4e437a213994e8b8",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Whole-file detector artifact over the Protocol consumer verifier and worker package builder. One proves a real offline install while the other deliberately stages a hermetic package; sharing their orchestration would erase that proof distinction."
-    },
-    {
-      "surface": "code",
-      "id": "621f35cd113d9341",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Standalone-script CLI tails share the ordinary runCli return and import.meta main guard. This is executable-module boilerplate, not shared release policy."
-    },
-    {
-      "surface": "code",
-      "id": "65ddc5cd82a22b7c",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "removeOwnedFile independently opens its parent descriptor and the anchored child descriptor. Their matching ENOENT classification is required at two different race boundaries; merging them would parameterize the flags and resource semantics inside the security primitive."
-    },
-    {
-      "surface": "code",
-      "id": "66c8ea48562daff1",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Subset detector artifact between a transport error switch and Gateway-issued-session disposition text. The codes and recovery lifecycles are unrelated."
-    },
-    {
-      "surface": "code",
-      "id": "6e9d7666e7bbc8c4",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "withCealTiming and withCealTimingSync intentionally mirror outcome recording across Promise and immediate execution. A shared wrapper would either make synchronous timing asynchronous or finish before a Promise settles, which would corrupt the measurement."
-    },
-    {
-      "surface": "code",
-      "id": "7dcdd70e2daa5f84",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Three release boundaries validate regular non-symlink inputs while preserving their own typed error class and operator message. A generic callback-based checker would move each boundary's classification one argument away to save a short guard."
-    },
-    {
-      "surface": "code",
-      "id": "81ed10bf66f9701b",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Native, composed-asset, and package builders call the shared output-directory guard with their own marker and subject. The detector is reporting the shared-home invocation, not a second implementation."
-    },
-    {
-      "surface": "code",
-      "id": "9d81ae8c9d6354e8",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Import and root-resolution headers in two standalone release scripts. This is the same non-extractable executable-module boilerplate class already reviewed for other scripts."
-    },
-    {
-      "surface": "code",
-      "id": "ba2176416cd336c6",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Three-line local sha256 helpers across standalone scripts and fixtures. Each file must remain independently runnable, and extracting this primitive would add a shared import to many unrelated proof boundaries without removing a drifting policy."
-    },
-    {
-      "surface": "code",
-      "id": "dc8aef3bc2f65421",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Re-key of the already reviewed hook-installer idempotence test. The second install and check are the property under test; hiding them in a helper would remove the visible before/after assertion rather than remove duplicate production logic."
-    },
-    {
-      "surface": "code",
-      "id": "e076bb930a4d6684",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Native executable and packed-package materializers share a staging skeleton but publish different schemas, modes, assets, and smoke evidence. The safe output publication tail is already in one shared helper; the remainder is the artifact distinction."
-    },
-    {
-      "surface": "code",
-      "id": "e6cef3ff6d37c423",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Native and package release tests stage parallel but intentionally separate real-artifact fixtures. Combining them would couple two release proofs whose different builders and manifests are exactly what the tests compare."
-    },
-    {
-      "surface": "code",
-      "id": "eaac296845719b64",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "A ternary choosing a local repair message clustered with a ternary choosing unknown-outcome caution. The matching syntax carries unrelated decisions and no shared vocabulary."
-    },
-    {
-      "surface": "code",
-      "id": "f9a0289403048d7c",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Tag and SHA-256 validators share the small validate-string-or-fail idiom but own different grammars, error classes, and messages in separate public bootstrap and release-input boundaries."
-    },
-    {
-      "surface": "code",
-      "id": "fee08553988df21f",
-      "class": "intentional",
-      "reviewed_at": "2026-08-09",
-      "note": "Re-key of the reviewed session-store versus discovery-cache factory family. The session store fails closed around credential modes and locking; the cache is advisory and degrades to a live probe, so a shared factory would merge two deliberately different safety contracts."
-    },
+			"surface": "code",
+			"id": "6eb36b7028824c4b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the materialized-guide verification and boundary-specific filesystem traversal family reviewed at dfb806c62157194d. The new permissionMode owner changed the runtime member's tokens, not the ownership decision: signed-guide verification, guide-state parent admission, and generic release-source enumeration retain different inventories, mode policies, symlink treatment, and failure classes."
+		},
+		{
+			"surface": "code",
+			"id": "bfc4c34f2224075a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the build-time skill collector versus runtime exact materialized-guide verifier reviewed at 94d117266d9477ea. The collector constructs a portable deterministic source bundle; the runtime verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. Sharing the traversal would merge opposite anomaly policies."
+		},
+		{
+			"surface": "code",
+			"id": "a65fd5dcda4e5280",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at cfc87d95f6cb4b33, 9111f25a708e0c00, and 1d37623e5019a67e. Composition builds one platform's unsigned candidate; merge reconciles platform handoffs and now independently rebinds the canonical embedded guide before signing. Their shared output publication already lives in scripts/lib/output-directory.mjs, while combining the remaining bodies would merge producer and reconciler trust decisions behind callbacks."
+		},
+		{
+			"surface": "code",
+			"id": "07485297e1542615",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the release-asset composer versus native-artifact builder family reviewed at 416cfcf08f3ed0ae and 401c404aa5ef00fd. The two members publish different artifact schemas across different trust boundaries; their common safe-output publication already lives in scripts/lib/output-directory.mjs, and combining the remaining bodies would hide composition and executable-building policy behind callbacks."
+		},
+		{
+			"surface": "code",
+			"id": "43301d525a461c33",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "ES module import-header overlap between independently runnable release scripts. This is the import-scaffolding class already reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0, not a duplicated implementation fact."
+		},
+		{
+			"surface": "code",
+			"id": "4a027b206a818841",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the whole-file Protocol consumer verifier versus release-package builder family reviewed at 56e6161f8a085070, d3d10b19e3927fba, and 4e437a213994e8b8. One proves an isolated packed install while the other stages a hermetic release package; sharing their orchestration would erase the proof distinction."
+		},
+		{
+			"surface": "code",
+			"id": "75e91ff6508bc229",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the independent native and package release-output assertions reviewed at bdcc97715c0ed28c and ed49982afe11137e. The inventories intentionally differ because the native artifact exposes the legacy compatibility bridge while the package artifact carries the canonical embedded tar; a shared expected list would conflate those contracts."
+		},
+		{
+			"surface": "code",
+			"id": "8eae3607d8cf4786",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the CEAL_AGENT_GUIDE_HOSTS consumers reviewed at f30187c77acbf7e4 and 04e6fe40984b7b6a. The table is already the one home; detection, type narrowing, path resolution, row lookup, and state rendering are distinct consumers rather than duplicate host declarations."
+		},
+		{
+			"surface": "code",
+			"id": "94d117266d9477ea",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "The build-time skill source collector and runtime materialized-guide verifier both walk directories but enforce opposite trust contracts. The collector constructs a portable deterministic inventory; the verifier rejects extra, missing, linked, or mode-drifted entries against the signed inventory. A callback traversal would merge their anomaly policies rather than create one fact owner."
+		},
+		{
+			"surface": "code",
+			"id": "c118db9cf39510f0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Import-block overlap between an installer test and the native release builder. This is the non-extractable executable/test scaffolding class reviewed at 4780b88c7f4655b5 and 32a0d0bcede949f0."
+		},
+		{
+			"surface": "code",
+			"id": "c5e71256aff1cc5b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of the native/package materializeOutput pair reviewed at 454f7c4c56066d18, 6df6b80781ef0564, and e076bb930a4d6684. Executable and package artifacts deliberately have different modes, manifests, assets, and smoke evidence; their common output publication tail is already shared."
+		},
+		{
+			"surface": "code",
+			"id": "cc524d5d6b6ab5fd",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Normal guide inspection and guide-integrity failure share the public response schema but not their derivation. Normal inspection dispatches to the integrity failure when exact verification fails, so routing both through one state constructor would invite recursion or weaken the fail-closed projection."
+		},
+		{
+			"surface": "code",
+			"id": "cda8e71ff1cff6b0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Three adjacent fixture-path declarations in independent contract and installer tests. The paths name different fixture schemas and lifecycles; extracting variable declarations would couple the test tiers without removing an implementation of a shared fact."
+		},
+		{
+			"surface": "code",
+			"id": "cfc87d95f6cb4b33",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Re-key of composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets reviewed at 9111f25a708e0c00 and 1d37623e5019a67e. Composition produces one platform candidate while merge reconciles unsigned platform handoffs before signing; their remaining bodies own different trust decisions."
+		},
+		{
+			"surface": "code",
+			"id": "de82628d582ec1c9",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "The worker runtime now owns its SHA-256 shape predicate in sha256.ts, while independently runnable release scripts retain local boundary predicates. This is the cross-runtime primitive class reviewed for SHA helpers at 40e06511f93f62bc and 2c4224859ea718e0; making release scripts import built worker dist would add a build-order dependency without centralizing mutable policy."
+		},
+		{
+			"surface": "code",
+			"id": "dfb806c62157194d",
+			"class": "intentional",
+			"reviewed_at": "2026-08-12",
+			"note": "Detector clustering across materialized signed-guide verification, guide-state directory safety, and generic release-source enumeration. Their expected inventories, permitted modes, symlink rules, and typed failures are boundary-specific; a shared traversal callback would combine distinct security policies."
+		},
+		{
+			"surface": "code",
+			"id": "a6a63e638a33a9a5",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the composeWorkerReleaseAssets versus mergeWorkerReleaseAssetSets family already reviewed at 1d37623e5019a67e. The new merge ship guard changed one member's content, but the ownership decision is unchanged: composition builds one platform's unsigned candidate while merge reconciles platform-composed build handoffs before signing, and their shared output publication already lives in output-directory.mjs. Combining their remaining bodies would hide two trust boundaries behind callbacks."
+		},
+		{
+			"surface": "code",
+			"id": "e16f0d93af7ec761",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the native and package builder calls to the shared output-directory guard reviewed at 81ed10bf66f9701b. Each caller supplies its own marker and subject; the implementation fact is already extracted, and wrapping the two invocations would only move those differing arguments into another helper."
+		},
+		{
+			"surface": "code",
+			"id": "f30187c77acbf7e4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "Re-key of the agent-guide host-table consumers reviewed at 04e6fe40984b7b6a. The source edit narrowed register provenance and regrouped the same host detection, type narrowing, row lookup, registration map, and projection members. CEAL_AGENT_GUIDE_HOSTS is already their one shared fact; combining the consumers would merge path resolution, mutation, and rendering."
+		},
+		{
+			"surface": "code",
+			"id": "1d37623e5019a67e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "composeWorkerReleaseAssets and mergeWorkerReleaseAssetSets are independent producer and reconciler boundaries in one release module. Their shared staging/error-envelope shape is already factored through output-directory helpers; combining the remaining bodies would put build and merge trust decisions behind callbacks."
+		},
+		{
+			"surface": "code",
+			"id": "1e9f0b30d6eae2f6",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of the already reviewed Codex inventory lstat-or-mark-partial family. Extraction was previously falsified because it replaced this local pair with a wider cross-module family; both walkers must independently consume and mark their shared budget."
+		},
+		{
+			"surface": "code",
+			"id": "32a0d0bcede949f0",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "ES module import-header overlap between a production bootstrap and a release test fixture. Import declarations are not an extractable implementation fact."
+		},
+		{
+			"surface": "code",
+			"id": "4afb27a3e3668b84",
+			"class": "intentional",
+			"reviewed_at": "2026-08-11",
+			"note": "ES module import-header overlap between the enrollment and personal-session public clients. Their shared HTTP exchange and status/body policy already live in session-http-client.ts; extracting import declarations would add an indirection without removing another implementation of a fact."
+		},
+		{
+			"surface": "code",
+			"id": "349d44928d03b33c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Two test fixtures write placeholder signature and certificate sidecars. The repeated two-line data setup belongs to independent bootstrap and installer proofs; a shared fixture would couple contract and release tiers."
+		},
+		{
+			"surface": "code",
+			"id": "351b6fb800672617",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Two bootstrap cases declare similar dependency seams but deliberately differ in download observation and mutation. Factoring their few common fixture lines would hide which dependency each refusal controls."
+		},
+		{
+			"surface": "code",
+			"id": "3c7e99843e566e72",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Detector clustering across an HTTP error switch, session recovery branches, and an observer sentinel. The members share control-flow tokens but represent unrelated domains and no repeated fact."
+		},
+		{
+			"surface": "code",
+			"id": "401c404aa5ef00fd",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Broad detector overlap between release-asset composition and native-artifact construction. They share the repo's release-script frame but own different artifact schemas and trust boundaries; common output publication is already extracted."
+		},
+		{
+			"surface": "code",
+			"id": "44711d148bf378c8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Broad token clustering combines two bounded audit walkers with unrelated local-store guard functions. The previously tested walker extraction increased cross-module duplication, and the filesystem members enforce distinct optional/present path contracts."
+		},
+		{
+			"surface": "code",
+			"id": "4e437a213994e8b8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Whole-file detector artifact over the Protocol consumer verifier and worker package builder. One proves a real offline install while the other deliberately stages a hermetic package; sharing their orchestration would erase that proof distinction."
+		},
+		{
+			"surface": "code",
+			"id": "621f35cd113d9341",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Standalone-script CLI tails share the ordinary runCli return and import.meta main guard. This is executable-module boilerplate, not shared release policy."
+		},
+		{
+			"surface": "code",
+			"id": "65ddc5cd82a22b7c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "removeOwnedFile independently opens its parent descriptor and the anchored child descriptor. Their matching ENOENT classification is required at two different race boundaries; merging them would parameterize the flags and resource semantics inside the security primitive."
+		},
+		{
+			"surface": "code",
+			"id": "66c8ea48562daff1",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Subset detector artifact between a transport error switch and Gateway-issued-session disposition text. The codes and recovery lifecycles are unrelated."
+		},
+		{
+			"surface": "code",
+			"id": "6e9d7666e7bbc8c4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "withCealTiming and withCealTimingSync intentionally mirror outcome recording across Promise and immediate execution. A shared wrapper would either make synchronous timing asynchronous or finish before a Promise settles, which would corrupt the measurement."
+		},
+		{
+			"surface": "code",
+			"id": "7dcdd70e2daa5f84",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Three release boundaries validate regular non-symlink inputs while preserving their own typed error class and operator message. A generic callback-based checker would move each boundary's classification one argument away to save a short guard."
+		},
+		{
+			"surface": "code",
+			"id": "81ed10bf66f9701b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Native, composed-asset, and package builders call the shared output-directory guard with their own marker and subject. The detector is reporting the shared-home invocation, not a second implementation."
+		},
+		{
+			"surface": "code",
+			"id": "9d81ae8c9d6354e8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Import and root-resolution headers in two standalone release scripts. This is the same non-extractable executable-module boilerplate class already reviewed for other scripts."
+		},
+		{
+			"surface": "code",
+			"id": "ba2176416cd336c6",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Three-line local sha256 helpers across standalone scripts and fixtures. Each file must remain independently runnable, and extracting this primitive would add a shared import to many unrelated proof boundaries without removing a drifting policy."
+		},
+		{
+			"surface": "code",
+			"id": "dc8aef3bc2f65421",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of the already reviewed hook-installer idempotence test. The second install and check are the property under test; hiding them in a helper would remove the visible before/after assertion rather than remove duplicate production logic."
+		},
+		{
+			"surface": "code",
+			"id": "e076bb930a4d6684",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Native executable and packed-package materializers share a staging skeleton but publish different schemas, modes, assets, and smoke evidence. The safe output publication tail is already in one shared helper; the remainder is the artifact distinction."
+		},
+		{
+			"surface": "code",
+			"id": "e6cef3ff6d37c423",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Native and package release tests stage parallel but intentionally separate real-artifact fixtures. Combining them would couple two release proofs whose different builders and manifests are exactly what the tests compare."
+		},
+		{
+			"surface": "code",
+			"id": "eaac296845719b64",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "A ternary choosing a local repair message clustered with a ternary choosing unknown-outcome caution. The matching syntax carries unrelated decisions and no shared vocabulary."
+		},
+		{
+			"surface": "code",
+			"id": "f9a0289403048d7c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Tag and SHA-256 validators share the small validate-string-or-fail idiom but own different grammars, error classes, and messages in separate public bootstrap and release-input boundaries."
+		},
+		{
+			"surface": "code",
+			"id": "fee08553988df21f",
+			"class": "intentional",
+			"reviewed_at": "2026-08-09",
+			"note": "Re-key of the reviewed session-store versus discovery-cache factory family. The session store fails closed around credential modes and locking; the cache is advisory and degrades to a live probe, so a shared factory would merge two deliberately different safety contracts."
+		},
 		{
 			"surface": "code",
 			"id": "04c7c82dc0fc3ac7",
@@ -1238,6 +1238,41 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-18",
 			"note": "The pan-repo isRecord type-guard idiom, 21 members spanning packages/ceal-worker-cli/src, scripts/, and test/. A three-line typeof-object/non-null/non-array narrowing that every JSON-boundary owner declares locally. Accepted because the FAMILY is cross-tree -- packages/ cannot import from scripts/ or test/ -- so no single owner can hold it; the ratchet reports every member but test/gate-contract-lib.ts as untouched, which is the citation for the family predating that file. DEBT, owner Worker: the ~10 members under scripts/ COULD share one guard module, and claiming otherwise would be false (the same claim was written and corrected in corca-ai/ceal this session). Recorded, not argued away."
+		},
+		{
+			"surface": "code",
+			"id": "064ab8a004f1fa4a",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Cross-tree pair: scripts/lib/gate-attestation.ts holds the gate-receipt field comparator, packages/ceal-client/src/device-adoption-client.ts holds a client decode guard. The shared material is the shape every field-by-field validator has -- iterate declared keys, compare, push a named difference. packages/ cannot import from scripts/ (a published package would gain a dependency on this repository's tooling tree), so there is no home that both could reach. Same standing reason as the isRecord family accepted at S1."
+		},
+		{
+			"surface": "code",
+			"id": "1ab5bbbd3892d96b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Two resolver suites in test/contract/gate-attestation.test.ts that share the fake-fetch route table shape. They assert different contracts -- one that a matching receipt is found on a green run, the other that the script's stdout is exactly the three key=value lines a workflow reads -- and the shared lines are the fixture call the cliFixture/fakeFetch helpers already own. Merging them would fuse two claims into one test, which is the failure this suite exists to avoid."
+		},
+		{
+			"surface": "code",
+			"id": "79899c9f00e2218d",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Three CLI verb suites in test/contract/gate-attestation.test.ts. They look alike because the surface is uniform -- attestationMain(argv, io) with an asserted exit code -- and each states a separate refusal: reuse stops when the source moves, publish fails where record stays quiet, an unknown verb is not guessed. The repeated preamble was already extracted into cliFixture this session; what remains is the assertions themselves, which is what the tests ARE."
+		},
+		{
+			"surface": "code",
+			"id": "a70ee3fec1da8cbe",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Fourth re-key of the same already-reviewed whole-file pair (f7c1d7bcf80fe9c3, b0f4fcbcd202f0ef, and the third recorded below): repo-gates.test.ts against legacy-mjs-conversion.test.ts. Re-keyed twice over this session -- repo-gates grew the gate-receipt and suite-ownership assertions, and legacy-mjs-conversion MOVED to test/source/ when the tier lanes became directories. Ownership is unchanged: repo-gates owns gate inventory, legacy-mjs-conversion owns converter policy, and the only shared material is ordinary Node test scaffolding. The standing DEBT also stands: at 2158 lines repo-gates re-keys on every growth, and splitting its gate-contract block into its own contract-lane file is the eventual answer."
+		},
+		{
+			"surface": "code",
+			"id": "c4cd6cc422bda08b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Re-key of the whole-file overlap between two independent hook/build fixtures: repo-build.test.ts (dist mutex) and pre-push-lock.test.ts (pre-push lock). Re-keyed because pre-push-lock.test.ts gained a stub-node case this session -- the hook's tag branch now asks gate-attestation.ts whether the full gate can be skipped, and a stub answering 0 to everything would have left that suite proving the lock around lint:shell instead of around the long gate. Both files spawn processes and assert lock/journal behavior, which is the shared shape; neither owns the other's resource."
 		}
 	],
 	"fixable_ceiling": 0,

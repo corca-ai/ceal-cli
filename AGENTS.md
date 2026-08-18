@@ -26,8 +26,14 @@ history or full rationale.
 
 ## Gates
 
-- Use `npm run check:unit` while iterating and `npm run check` at closeout. Every
-  `test/` file belongs to `test:contract` or `test:release`; the repo gate checks this.
+- Use `npm run check:unit` while iterating and `npm run check` at closeout. A
+  suite's tier is its DIRECTORY: `test/` root is `test:release`, `test/contract/`
+  is the contract tier's artifact lane, `test/source/` is its source-authoritative
+  lane, and each is globbed. Placing a file is the whole declaration; the repo
+  gate fails if any `*.test.ts` anywhere has no owner, or has two.
+- A green `npm run check` writes a receipt through `postcheck`. A tag push and
+  the release lane both reuse it instead of re-proving an unchanged tree; every
+  field must match or the gate runs again. See [docs/gates.md](docs/gates.md).
 - Measure gates on the current host. The pre-push hook records samples in
   `.charness/quality/command-timing.jsonl`; otherwise time the command yourself.
   Put reproduction commands, not stale measurements, in prose.

@@ -179,10 +179,40 @@ jobs:
       # The hook installer is proven inside this gate by
       # test/contract/repo-gates.test.ts, against a throwaway clone rather than
       # this checkout, so there is no separate CI step re-proving the same seam.
+      #
+      # CEAL_GATE_RUNNER_IDENTITY belongs on THIS step and not on a later one:
+      # `npm run check` writes its own receipt through `postcheck`, so the
+      # identity has to be in scope while the gate runs, not while something
+      # beside it runs.
       - name: Run the full gate
         run: npm run check
         env:
           CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+
+      # The receipt this run earned, so the release lane does not re-prove the
+      # same tree on the same runner. Its NAME is the digest of the record, which
+      # is what lets a consumer compare every field — tree, profile, runner,
+      # Node, platform-proof requirement, installed dependency set — by asking
+      # whether one artifact exists, with nothing to download and no zip to read.
+      - name: Name the gate attestation this run earned
+        id: attestation
+        run: node scripts/gate-attestation.ts publish >> "$GITHUB_OUTPUT"
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+
+      # include-hidden-files because the receipt lives under `.charness/`, which
+      # this action skips by default — without it the upload succeeds and
+      # publishes nothing, which is the failure that looks like success.
+      - name: Preserve the gate attestation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.attestation.outputs.artifact_name }}
+          path: ${{ steps.attestation.outputs.attestation_path }}
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
 
   # The release lane builds on macOS too, so before a macOS leg existed a
   # macOS-only break first appeared in a tagged run — which is how `ceal-v0.66.0`
@@ -230,3 +260,20 @@ jobs:
         run: npm run check
         env:
           CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+
+      - name: Name the gate attestation this run earned
+        id: attestation
+        run: node scripts/gate-attestation.ts publish >> "$GITHUB_OUTPUT"
+        env:
+          CEAL_REQUIRE_PLATFORM_PROOFS: ${{ matrix.require_platform_proofs }}
+          CEAL_GATE_RUNNER_IDENTITY: ${{ matrix.runner }}
+
+      - name: Preserve the gate attestation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.attestation.outputs.artifact_name }}
+          path: ${{ steps.attestation.outputs.attestation_path }}
+          retention-days: 30
+          if-no-files-found: error
+          include-hidden-files: true
