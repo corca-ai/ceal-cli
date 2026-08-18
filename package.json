@@ -38,6 +38,7 @@
 		"lint:types:ts6": "tsc6 -p tsconfig.typecheck.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tools.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-ts6.tsbuildinfo && tsc6 -p tsconfig.tests.json --pretty false --tsBuildInfoFile node_modules/.cache/ceal-tests-typecheck-ts6.tsbuildinfo",
 		"lint:types:watch": "tsc -p tsconfig.typecheck.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-typecheck-watch.tsbuildinfo",
 		"lint:types:tools:watch": "tsc -p tsconfig.tools.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-watch.tsbuildinfo",
+		"lint:node-modules-drift": "node scripts/check-node-modules-drift.ts",
 		"lint:no-legacy-mjs": "node scripts/check-no-legacy-mjs.ts",
 		"convert:legacy-mjs": "node scripts/convert-legacy-mjs.ts",
 		"write:no-legacy-mjs-baseline": "node scripts/check-no-legacy-mjs.ts --write-baseline",
