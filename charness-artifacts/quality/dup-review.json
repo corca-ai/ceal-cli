@@ -2,6 +2,13 @@
 	"entries": [
 		{
 			"surface": "code",
+			"id": "f7c1d7bcf80fe9c3",
+			"class": "intentional",
+			"reviewed_at": "2026-08-18",
+			"note": "Re-key of the already-reviewed whole-file overlap between independent contract-test modules. repo-gates owns package gate inventory and ordering; legacy-mjs-conversion owns converter policy and transaction proof. Their shared material is ordinary Node test/process/filesystem scaffolding, with no shared semantic fixture or production fact owner, so extraction would couple unrelated contracts rather than remove duplication."
+		},
+		{
+			"surface": "code",
 			"id": "b0f4fcbcd202f0ef",
 			"class": "intentional",
 			"reviewed_at": "2026-08-17",

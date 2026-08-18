@@ -47,6 +47,12 @@ import {
 } from "./command-definitions.js";
 import { commandRecovery, findCealCommand, runCealStaticCommand, writeCliError as writeError } from "./command-surface.js";
 import { type CealDiscoveryCacheKey, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "./discovery-cache.js";
+import {
+	type CealGatewayObservation,
+	type CealGatewayObservationPhase,
+	gatewayTransportObservation,
+	typedGatewayObservation,
+} from "./gateway-diagnostics.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeYaml } from "./output.js";
@@ -553,10 +559,12 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 			? await resolveStoredGatewayAccess(io, runtime, selection.profileRef)
 			: await resolveGatewayAccess(effectiveOptions, io, runtime);
 	if (!resolved.ok) return resolved.exitCode;
+	let gatewayPhase: CealGatewayObservationPhase = "handshake";
 	try {
 		const route = selection.kind === "targets" ? "ceal capabilities targets" : "ceal capabilities";
 		const { client, handshake } = await requestCapabilityHandshake(resolved.value, runtime, "observe");
-		if (!handshake.ok) return writeCapabilitiesGatewayFailure(handshake, resolved.value, route, io);
+		if (!handshake.ok) return writeCapabilitiesGatewayFailure(handshake, resolved.value, route, io, "handshake");
+		gatewayPhase = "discovery";
 		// The catalog case is the cacheable one: its live handshake stays the auth
 		// gate while the expensive discovery probe is served from the client cache
 		// when warm. The targets case is a live paged query and is never cached.
@@ -571,7 +579,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 				body: selection.body,
 			}),
 		);
-		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io);
+		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io, "discovery");
 		const selectorRefusal = unsupportedTargetSelector(discovery.value.capabilities, selection);
 		if (selectorRefusal) {
 			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction);
@@ -579,8 +587,16 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
-		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
-		return writeGatewayUnavailable(reason, io);
+		const requestId = `${resolved.value.requestId}:${gatewayPhase === "handshake" ? "handshake" : "discover"}`;
+		return writeGatewayUnavailable(
+			error,
+			io,
+			gatewayTransportObservation(error, {
+				phase: gatewayPhase,
+				operation: gatewayPhase === "handshake" ? "handshake" : "discover",
+				requestId,
+			}),
+		);
 	}
 }
 
@@ -627,7 +643,7 @@ async function serveCapabilityCatalog(
 			body: {},
 		}),
 	);
-	if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, access, "ceal capabilities", io);
+	if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, access, "ceal capabilities", io, "discovery");
 	// Cache writes are advisory: a failure just means the next call probes live.
 	if (runtime.saveDiscoveryCache) {
 		await runtime
@@ -1619,30 +1635,11 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 }
 
 function writeCapabilitiesUnavailable(io: CealCliIo): number {
-	writeYaml(io.stdout, {
-		schema_version: "ceal.capabilities.v1",
-		command: "ceal",
-		ok: false,
-		status: "unavailable",
-		gateway_required: true,
-		credential_context: CREDENTIAL_CONTEXT,
-		capabilities: [] as readonly never[],
-		proof_level: "surface",
-		live_gateway_checked: false,
-		claims_allowed: [] as readonly never[],
-		non_claims: ["No live Gateway discovery, authorization, provider action, or audit readback was reached."],
-		// This is the most-hit failure state on this surface — fresh install, no
-		// session, logged out — so it owes the same `ok`/`error.kind` shape as
-		// every other failure. It previously answered `ok: false` with no error
-		// object and exit 0, which is the exact "failure that looks like success"
-		// this release exists to remove.
-		error: {
-			kind: "client_session_unavailable",
-			message: "No Gateway-issued client session is configured for this client.",
-			next_action: commandRecovery("session"),
-		},
+	return writeGatewayUnavailable("client_session_unavailable", io, undefined, {
+		message: "No Gateway-issued client session is configured for this client.",
+		nextAction: commandRecovery("session"),
+		nonClaims: ["No live Gateway discovery, authorization, provider action, or audit readback was reached."],
 	});
-	return 3;
 }
 
 type ParsedGatewayOptions = { ok: true; endpoint: string; profileRef: string; requestId: string } | { ok: false; message: string };
@@ -1663,12 +1660,19 @@ function invalidGatewayOptions(): ParsedGatewayOptions {
 	return { ok: false, message: "Invalid capabilities Gateway options." };
 }
 
-function writeCapabilitiesGatewayFailure(response: { error: unknown }, access: GatewayAccess, route: string, io: CealCliIo): number {
+function writeCapabilitiesGatewayFailure(
+	response: { error: unknown; request_id?: unknown },
+	access: GatewayAccess,
+	route: string,
+	io: CealCliIo,
+	phase: CealGatewayObservationPhase,
+): number {
 	const failure = classifyGatewayFailure(response.error);
 	return writeGatewayFailure(
 		response,
 		io,
 		failure.code === "authentication_failed" && access.storedSession ? explicitSessionRefreshNextAction(route) : undefined,
+		typedGatewayObservation(phase, response),
 	);
 }
 
@@ -1676,7 +1680,18 @@ function explicitSessionRefreshNextAction(route: string): string {
 	return `Run 'ceal session refresh', then retry '${route}'.`;
 }
 
-function writeGatewayFailure(response: { error: unknown }, io: CealCliIo, nextAction?: string): number {
+type GatewayUnavailableDetails = {
+	message?: string;
+	nextAction?: string;
+	nonClaims?: readonly string[];
+};
+
+function writeGatewayFailure(
+	response: { error: unknown; request_id?: unknown },
+	io: CealCliIo,
+	nextAction?: string,
+	observation?: CealGatewayObservation,
+): number {
 	const failure = classifyGatewayFailure(response.error);
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
@@ -1687,20 +1702,35 @@ function writeGatewayFailure(response: { error: unknown }, io: CealCliIo, nextAc
 		credential_context: CREDENTIAL_CONTEXT,
 		capabilities: [],
 		proof_level: "host_decision",
-		live_gateway_checked: true,
+		live_gateway_checked: observation?.protocol_handshake_verified ?? true,
 		claims_allowed: [failure.denial ? "gateway_denial" : "gateway_rejection"],
 		// `kind` is the one error key on every Ceal surface. This surface published
 		// `code` first, and a caller that read only `kind` therefore saw discovery
 		// failures as no error at all — a 36-call sweep lost 16 calls and reported
 		// none of them (ceal-cli#2). `code` is gone rather than carried alongside:
 		// one key, no reader left guessing which one a given surface speaks.
-		error: { kind: failure.code, message: failure.message, next_action: nextAction ?? failure.nextAction },
+		error: {
+			kind: failure.code,
+			message: failure.message,
+			next_action: nextAction ?? failure.nextAction,
+			// The YAML surface rejects aliases/shared references. Keep the two
+			// public placements value-equal without handing the renderer one
+			// object through both paths.
+			...(observation ? { diagnostics: { ...observation } } : {}),
+		},
+		...(observation ? { gateway_observation: { ...observation } } : {}),
 		non_claims: ["No provider action or production audit custody was reached."],
 	});
 	return 3;
 }
 
-function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
+function writeGatewayUnavailable(
+	reason: string | unknown,
+	io: CealCliIo,
+	observation?: CealGatewayObservation,
+	details: GatewayUnavailableDetails = {},
+): number {
+	const code = reason instanceof CealHttpTransportError ? reason.code : typeof reason === "string" ? reason : "request_failed";
 	writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
@@ -1710,15 +1740,27 @@ function writeGatewayUnavailable(reason: string, io: CealCliIo): number {
 		credential_context: CREDENTIAL_CONTEXT,
 		capabilities: [],
 		proof_level: "surface",
-		live_gateway_checked: false,
-		claims_allowed: [],
+		live_gateway_checked: observation?.protocol_handshake_verified ?? false,
+		claims_allowed: observation?.protocol_handshake_verified ? ["gateway_handshake"] : [],
+		...(observation ? { gateway_observation: { ...observation } } : {}),
+		...(details.nonClaims !== undefined ? { non_claims: details.nonClaims } : {}),
 		error: {
-			kind: reason,
-			message: "The Gateway capability request could not be completed.",
-			next_action: "Check network reachability, TLS, and the Gateway-issued client session, then retry.",
+			kind: code,
+			message: details.message ?? "The Gateway capability request could not be completed.",
+			next_action: details.nextAction ?? gatewayUnavailableNextAction(observation),
+			...(observation ? { diagnostics: { ...observation } } : {}),
 		},
 	});
 	return 3;
+}
+
+function gatewayUnavailableNextAction(observation: CealGatewayObservation | undefined): string {
+	if (!observation) return "Check network reachability, TLS, and the Gateway-issued client session, then retry.";
+	if (observation.phase === "discovery" && observation.protocol_handshake_verified)
+		return "The Gateway handshake succeeded, but capability discovery did not return a valid Ceal response. Check the Gateway discovery route and protocol version, then retry; capability access is unproven.";
+	if (observation.http_response_received)
+		return "The Gateway answered the handshake, but its response was not a valid Ceal protocol response. Check the Gateway route or proxy and retry; do not infer capability availability from this response.";
+	return "No HTTP response was received from the Gateway. Check network reachability and TLS, then retry.";
 }
 
 // `nextAction` defaults to the top-level help, but a refusal that already knows

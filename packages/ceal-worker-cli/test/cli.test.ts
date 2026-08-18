@@ -4131,6 +4131,16 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 			assert.equal(payload.status, "unavailable");
 			assert.equal(payload.proof_level, "host_decision");
 			assert.equal(payload.error.kind, "internal_error");
+			assert.deepEqual(payload.gateway_observation, {
+				phase: "handshake",
+				operation: "handshake",
+				network_reached: true,
+				http_response_received: true,
+				protocol_handshake_verified: false,
+				discovery_verified: false,
+				request_id: "narnia:failure:001:handshake",
+				response_kind: "typed_gateway_error",
+			});
 			assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 		},
 		(request) => ({
@@ -4257,8 +4267,13 @@ test("YAML renderer rejects non-plain scalars, objects, cycles, and aliases", ()
 test("capabilities probes live and populates the discovery cache when cold", async () => {
 	await withGateway(async ({ endpoint, requests }) => {
 		const cache = inMemoryDiscoveryCache();
+		let refreshCalls = 0;
 		const payload = await yamlRun(["capabilities"], 0, {
 			readStoredSession: async () => storedSession(endpoint),
+			createClientSessionClient: () => {
+				refreshCalls += 1;
+				throw new Error("unexpected session refresh");
+			},
 			now: () => Date.parse("2026-07-18T12:00:00.000Z"),
 			...cache.runtime,
 		});
@@ -4269,6 +4284,7 @@ test("capabilities probes live and populates the discovery cache when cold", asy
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
+		assert.equal(refreshCalls, 0, "the current observe-mode catalog path does not refresh the session");
 		const entry = cache.entry();
 		assert.ok(entry, "cold probe must populate the cache");
 		assert.deepEqual(entry.key, {
@@ -4286,8 +4302,13 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 	await withGateway(async ({ endpoint, requests }) => {
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const cache = inMemoryDiscoveryCache(cachedEntry(endpoint, now - 60_000));
+		let refreshCalls = 0;
 		const payload = await yamlRun(["capabilities"], 0, {
 			readStoredSession: async () => storedSession(endpoint),
+			createClientSessionClient: () => {
+				refreshCalls += 1;
+				throw new Error("unexpected session refresh");
+			},
 			now: () => now,
 			...cache.runtime,
 		});
@@ -4302,9 +4323,56 @@ test("capabilities serves a warm discovery cache without a live discovery probe"
 			requests.map((item) => item.body.operation),
 			["handshake"],
 		);
+		assert.equal(refreshCalls, 0, "the current observe-mode catalog path does not refresh the session");
 		// The served empty catalog is the cached value; request count proves no live probe.
 		assert.equal(payload.target_catalog.target_count, 0);
 	});
+});
+
+test("capabilities reports HTTP reachability and protocol phases for malformed Gateway responses", async () => {
+	for (const { failureAt, expected } of [
+		{ failureAt: "handshake", expected: { status: 401, live: false, phase: "handshake", operation: "handshake", requests: ["handshake"] } },
+		{
+			failureAt: "discover",
+			expected: { status: 502, live: true, phase: "discovery", operation: "discover", requests: ["handshake", "discover"] },
+		},
+	] as const) {
+		await withGatewayPhaseFailure(failureAt, async ({ endpoint, requests }) => {
+			const payload = await yamlRun(["capabilities"], 3, {
+				readStoredSession: async () => storedSession(endpoint),
+			});
+			assert.equal(payload.error.kind, "invalid_response", failureAt);
+			assert.equal(payload.live_gateway_checked, expected.live, failureAt);
+			assert.deepEqual(
+				requests.map((item) => item.body.operation),
+				expected.requests,
+				failureAt,
+			);
+			assert.deepEqual(payload.gateway_observation, payload.error.diagnostics, failureAt);
+			assert.deepEqual(
+				payload.gateway_observation,
+				{
+					phase: expected.phase,
+					operation: expected.operation,
+					network_reached: true,
+					http_response_received: true,
+					protocol_handshake_verified: expected.phase === "discovery",
+					discovery_verified: false,
+					request_id: `ceal:capabilities:${expected.operation}`,
+					http_status: expected.status,
+					response_content_type: "text/plain",
+					response_kind: "content_type_invalid",
+				},
+				failureAt,
+			);
+			assert.match(
+				payload.error.next_action,
+				expected.phase === "discovery" ? /handshake succeeded/u : /not a valid Ceal protocol response/u,
+				failureAt,
+			);
+			assert.doesNotMatch(JSON.stringify(payload), /proxy secret|authorization|Bearer/u, failureAt);
+		});
+	}
 });
 
 test("the default discovery-cache window is the operator-measured 30 minutes", async () => {
@@ -4517,6 +4585,42 @@ async function withGateway(callback, responseFactory = null) {
 		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, requests });
 	} finally {
 		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	}
+}
+
+type GatewayPhaseFailure = "handshake" | "discover";
+type GatewayPhaseFailureRequest = {
+	authorization: string | undefined;
+	body: { operation?: string; [key: string]: unknown };
+};
+type GatewayPhaseFailureCallback = (input: { endpoint: string; requests: GatewayPhaseFailureRequest[] }) => Promise<void>;
+
+async function withGatewayPhaseFailure(failureAt: GatewayPhaseFailure, callback: GatewayPhaseFailureCallback): Promise<void> {
+	const requests: GatewayPhaseFailureRequest[] = [];
+	const server = createServer(async (request, response) => {
+		const chunks = [];
+		for await (const chunk of request) chunks.push(chunk);
+		const body: { operation?: string; [key: string]: unknown } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		requests.push({ authorization: request.headers.authorization, body });
+		if (body.operation === failureAt) {
+			response.writeHead(failureAt === "handshake" ? 401 : 502, { "content-type": "text/plain" });
+			response.end(failureAt === "handshake" ? "proxy unauthorized" : "discovery proxy failure");
+			return;
+		}
+		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify(value));
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	try {
+		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, requests });
+	} finally {
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 }
 

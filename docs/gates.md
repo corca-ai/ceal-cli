@@ -252,6 +252,14 @@ acceptance fails on an exact divergent fixture before resolving an installed
 binary. This keeps downstream contract branches observable without adding a
 production bypass or claiming that the live checkout is shippable.
 
+Feedback timing is intentionally asymmetric today: this clone has no checked-in
+`.githooks/pre-commit`; `npm run hooks:install` installs only `.githooks/pre-push`,
+and that hook runs `npm run check:unit` for ordinary pushes. Because
+`check:unit` owns `npm run lint:types`, a TypeScript error first appears at
+pre-push unless an operator runs the type gate directly. A future fast
+pre-commit check may improve the feedback loop, but it must remain a cheap
+changed-file signal and must not replace the full pre-push/CI gate.
+
 `npm run check:protocol-dev` is the narrower Protocol/client path. It runs the
 client suite plus `verify-protocol-vendor-pin.mjs --development`, which reports
 the live pin without the shippability assertion and stamps its own output

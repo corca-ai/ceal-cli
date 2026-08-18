@@ -241,6 +241,12 @@ makes the hatch safe and it neutralizes local state only. It is what a route
 capability whose own effect is `read`, and may renew the session before that
 already-write-capable operation.
 
+When a capability request receives an unusable Gateway response, the failure
+also carries bounded `gateway_observation` and `error.diagnostics` fields. They
+identify the operation/request id, HTTP status and content type when available,
+classify the response shape, and distinguish handshake from discovery proof;
+response bodies, bearer tokens, and refresh credentials are never rendered.
+
 A stored session belongs to one adopted host. Do not copy its one-time refresh
 credential to another machine: replay detection intentionally revokes the
 session family. Adopt each host separately so credential rotation and recovery

@@ -23,15 +23,38 @@ export type CealHttpTransportErrorCode =
 	| "response_too_large"
 	| "invalid_response";
 
+/** Bounded response-shape facts safe for an operator-facing diagnostic. */
+export type CealHttpResponseKind =
+	| "content_type_invalid"
+	| "body_malformed"
+	| "protocol_invalid"
+	| "unexpected_success_status"
+	| "response_too_large";
+
+export interface CealHttpTransportErrorDetails {
+	request_id?: string | null;
+	operation?: CealGatewayRequest["operation"] | null;
+	response_content_type?: string | null;
+	response_kind?: CealHttpResponseKind | null;
+}
+
 export class CealHttpTransportError extends Error {
 	override readonly name = "CealHttpTransportError";
 	readonly code: CealHttpTransportErrorCode;
 	readonly http_status: number | null;
+	readonly request_id: string | null;
+	readonly operation: CealGatewayRequest["operation"] | null;
+	readonly response_content_type: string | null;
+	readonly response_kind: CealHttpResponseKind | null;
 
-	constructor(code: CealHttpTransportErrorCode, http_status: number | null = null) {
+	constructor(code: CealHttpTransportErrorCode, http_status: number | null = null, details: CealHttpTransportErrorDetails = {}) {
 		super(transportErrorMessage(code));
 		this.code = code;
 		this.http_status = http_status;
+		this.request_id = details.request_id ?? null;
+		this.operation = details.operation ?? null;
+		this.response_content_type = details.response_content_type ?? null;
+		this.response_kind = details.response_kind ?? null;
 	}
 }
 
@@ -128,14 +151,28 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 					signal: controller.signal,
 				});
 				const response = await raceRequestDeadline(pendingResponse, timeout);
-				const bytes = await raceRequestDeadline(readBoundedResponse(response, maxResponseBytes), timeout);
-				const decoded = decodeResponse<R>(bytes, response.headers.get("content-type"), wireRequest, response.status);
-				if (!response.ok && decoded.ok) throw new CealHttpTransportError("invalid_response", response.status);
+				const responseContentType = response.headers.get("content-type");
+				const bytes = await raceRequestDeadline(readBoundedResponse(response, maxResponseBytes, wireRequest, responseContentType), timeout);
+				const decoded = decodeResponse<R>(bytes, responseContentType, wireRequest, response.status);
+				if (!response.ok && decoded.ok)
+					throw new CealHttpTransportError("invalid_response", response.status, {
+						request_id: wireRequest.request_id,
+						operation: wireRequest.operation,
+						response_content_type: responseContentType,
+						response_kind: "unexpected_success_status",
+					});
 				return decoded;
 			} catch (error) {
 				if (error instanceof CealHttpTransportError) throw error;
-				if (controller.signal.aborted) throw new CealHttpTransportError("request_timeout");
-				throw new CealHttpTransportError("request_failed");
+				if (controller.signal.aborted)
+					throw new CealHttpTransportError("request_timeout", null, {
+						request_id: wireRequest.request_id,
+						operation: wireRequest.operation,
+					});
+				throw new CealHttpTransportError("request_failed", null, {
+					request_id: wireRequest.request_id,
+					operation: wireRequest.operation,
+				});
 			} finally {
 				if (timeoutId !== undefined) clearTimeout(timeoutId);
 			}
@@ -143,16 +180,31 @@ export function createCealHttpTransport(options: CreateCealHttpTransportOptions)
 	};
 }
 
-function readBoundedResponse(response: Response, maximum: number): Promise<Uint8Array> {
+function readBoundedResponse(
+	response: Response,
+	maximum: number,
+	request: CealGatewayRequest,
+	contentType: string | null,
+): Promise<Uint8Array> {
 	return readBoundedResponseBody(
 		response,
 		maximum,
 		"safe_integer",
 		() => {
-			throw new CealHttpTransportError("invalid_response", response.status);
+			throw new CealHttpTransportError("invalid_response", response.status, {
+				request_id: request.request_id,
+				operation: request.operation,
+				response_content_type: contentType,
+				response_kind: "body_malformed",
+			});
 		},
 		() => {
-			throw new CealHttpTransportError("response_too_large", response.status);
+			throw new CealHttpTransportError("response_too_large", response.status, {
+				request_id: request.request_id,
+				operation: request.operation,
+				response_content_type: contentType,
+				response_kind: "response_too_large",
+			});
 		},
 	);
 }
@@ -164,16 +216,39 @@ function decodeResponse<R extends CealGatewayRequest>(
 	status: number,
 ): CealGatewayResponseFor<R> {
 	if (!acceptsJsonMediaType(contentType, true)) {
-		throw new CealHttpTransportError("invalid_response", status);
+		throw new CealHttpTransportError("invalid_response", status, {
+			request_id: request.request_id,
+			operation: request.operation,
+			response_content_type: contentType,
+			response_kind: "content_type_invalid",
+		});
 	}
 	let value: unknown;
 	try {
 		const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 		value = JSON.parse(text);
+	} catch {
+		throw invalidResponseError(request, status, contentType, "body_malformed");
+	}
+	try {
 		return decodeCealClientResponse<R>(value, request);
 	} catch {
-		throw new CealHttpTransportError("invalid_response", status);
+		throw invalidResponseError(request, status, contentType, "protocol_invalid");
 	}
+}
+
+function invalidResponseError(
+	request: Readonly<CealGatewayRequest>,
+	status: number,
+	contentType: string | null,
+	responseKind: CealHttpResponseKind,
+): CealHttpTransportError {
+	return new CealHttpTransportError("invalid_response", status, {
+		request_id: request.request_id,
+		operation: request.operation,
+		response_content_type: contentType,
+		response_kind: responseKind,
+	});
 }
 
 function validateAccessToken(value: string): string {

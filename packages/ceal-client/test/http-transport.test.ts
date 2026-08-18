@@ -259,6 +259,56 @@ test("HTTP transport refuses a non-2xx response whose body claims success", asyn
 	assert.equal((await createCealClient(ok).request(request)).ok, true);
 });
 
+test("HTTP transport preserves bounded response diagnostics without retaining the response body", async () => {
+	const cases = [
+		{
+			label: "non-json 401",
+			response: () => new globalThis.Response("proxy unauthorized", { status: 401, headers: { "content-type": "text/plain" } }),
+			status: 401,
+			contentType: "text/plain",
+			kind: "content_type_invalid",
+		},
+		{
+			label: "malformed json",
+			response: () => new globalThis.Response("{not-json", { status: 502, headers: { "content-type": "application/json" } }),
+			status: 502,
+			contentType: "application/json",
+			kind: "body_malformed",
+		},
+		{
+			label: "protocol schema mismatch",
+			response: () => globalThis.Response.json({ ok: true, request_id: "request:wrong", protocol_version: "1.3.0", value: {} }),
+			status: 200,
+			contentType: "application/json",
+			kind: "protocol_invalid",
+		},
+		{
+			label: "unexpected success status",
+			response: () => globalThis.Response.json(handshakeResponse(request), { status: 502 }),
+			status: 502,
+			contentType: "application/json",
+			kind: "unexpected_success_status",
+		},
+	];
+	for (const item of cases) {
+		const transport = createCealHttpTransport({
+			endpoint: "https://gateway.example.test/client",
+			accessToken: "safe-token",
+			fetchFn: async () => item.response(),
+		});
+		await assert.rejects(createCealClient(transport).request(request), (error) => {
+			assert.ok(error instanceof CealHttpTransportError, item.label);
+			assert.equal(error.http_status, item.status, item.label);
+			assert.equal(error.request_id, request.request_id, item.label);
+			assert.equal(error.operation, request.operation, item.label);
+			assert.equal(error.response_content_type, item.contentType, item.label);
+			assert.equal(error.response_kind, item.kind, item.label);
+			assert.doesNotMatch(error.message, /proxy unauthorized|safe-token/u, item.label);
+			return true;
+		});
+	}
+});
+
 // The declared-length branch had no test on either side of the refactor that
 // moved it into request-bounds.ts, so nothing would have said if its two codes
 // swapped. They are different answers to the caller: `invalid_response` means the
