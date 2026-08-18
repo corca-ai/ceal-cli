@@ -9,10 +9,12 @@ import { parse } from "yaml";
 
 import {
 	collectViolations,
+	deriveWorkflows,
 	extractGateCommands,
 	fullGateInvocationSites,
 	fullGateViolations,
 	GATE_CONTRACT_SCHEMA,
+	main as gateContractMain,
 	hookRunnerViolations,
 	readContract,
 	writeDerivedContract,
@@ -1823,7 +1825,7 @@ test("the committed gate contract describes this repository's hook and CI tiers"
 	assert.deepEqual(
 		collectViolations(ROOT, declared),
 		[],
-		"regenerate with `node test/gate-contract-lib.ts` and review the diff; do not edit the file to match a change you did not intend",
+		"regenerate with `node test/gate-contract-lib.ts --write` and review the diff; do not edit the file to match a change you did not intend",
 	);
 });
 
@@ -1831,7 +1833,17 @@ test("the committed gate contract describes this repository's hook and CI tiers"
 // pay for `npm run check` seven times: once locally, twice in check.yml, and
 // twice per lane in the release workflow's dry run and tag run. The sites are
 // asserted by name rather than counted, so removing one is a deliberate edit
-// here and adding an eighth cannot pass unnoticed.
+// here and adding a fifth cannot pass unnoticed.
+//
+// A SITE IS NOT A RUN, in both directions, and the difference is the whole of
+// what SC1 measures:
+//   - `.githooks/pre-push` declares `npm run check` but reaches it only on a
+//     TAG push; a branch push runs `check:unit` instead. One site, zero runs
+//     for ordinary work.
+//   - `ceal-release.yml:build` declares it once and runs it on two of three
+//     matrix legs (`if: matrix.validate_source == '1'`). One site, two runs.
+// So the site list is an upper bound on an ordinary push and a lower bound on a
+// release, and the two numbers must never be conflated when SC1 is measured.
 test("the full gate is invoked at exactly the sites the release loop accounts for", () => {
 	assert.deepEqual(fullGateInvocationSites(readContract(ROOT)), [
 		"pre-push/.githooks/pre-push",
@@ -1839,6 +1851,14 @@ test("the full gate is invoked at exactly the sites the release loop accounts fo
 		".github/workflows/check.yml:check",
 		".github/workflows/check.yml:check-native",
 	]);
+	// The two conditions the site list cannot see, asserted against their own
+	// source so this comment cannot quietly stop being true.
+	assert.match(read(".githooks/pre-push"), /if \[ "\$tagged" -eq 1 \]/u, "the pre-push full gate is tag-only");
+	assert.match(
+		read(".github/workflows/ceal-release.yml"),
+		/if: matrix\.validate_source == '1'/u,
+		"the release gate runs on a subset of legs",
+	);
 });
 
 // The extractor decides what the contract can see, so its blind spots are the
@@ -1854,8 +1874,58 @@ test("gate commands are read out of shell text, and prose about them is not", ()
 	assert.deepEqual(extractGateCommands("CEAL_X=1 node scripts/run-pre-push.ts >> log"), ["node scripts/run-pre-push.ts"]);
 	assert.deepEqual(extractGateCommands("node -e 'process.exit(0)'"), [], "an inline program names no script, so it names no gate");
 	assert.deepEqual(extractGateCommands("npm run lint && npm test\nnpm run lint"), ["npm run lint", "npm test"]);
+	// A command substitution is still a command. Reading only the bare `node`
+	// token dropped these, because `status="$(node` is one word.
+	assert.deepEqual(extractGateCommands('status="$(node scripts/publish.ts put --key "$k")"'), ['node scripts/publish.ts put --key "$k"']);
+	assert.deepEqual(extractGateCommands("out=`npm run build`"), ["npm run build"]);
+	// A nested substitution ends the read where it opens; the dangling quote is
+	// trimmed so the identity does not carry punctuation the source did not mean.
+	assert.deepEqual(extractGateCommands('x="$(node scripts/p.ts --file "$(realpath "$s")")"'), ["node scripts/p.ts --file"]);
 	// Positive control: lines the extractor is meant to pass over entirely.
 	assert.deepEqual(extractGateCommands("set -eu\ncurl -sSf https://example.invalid -o out"), []);
+});
+
+// Runner identity is what S3's attestation compares, and in this repository it
+// comes entirely from matrix tables — `check.yml` and `ceal-release.yml` both
+// spell `runs-on` as an expression. An unresolved expression would make every
+// gate job look like it had no runner at all.
+test("a workflow's runners resolve through both matrix spellings", (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-gate-runners-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	mkdirSync(path.join(scratch, ".github", "workflows"), { recursive: true });
+	writeFileSync(
+		path.join(scratch, ".github", "workflows", "a.yml"),
+		[
+			"on: [pull_request]",
+			"jobs:",
+			"  listed:",
+			"    strategy:",
+			"      matrix:",
+			"        runner: [ubuntu-24.04, macos-15]",
+			"    runs-on: ${{ matrix.runner }}",
+			"  included:",
+			"    strategy:",
+			"      matrix:",
+			"        include:",
+			"          - runner: ubuntu-24.04-arm",
+			"    runs-on: ${{ matrix.runner }}",
+			"  plain:",
+			"    runs-on: ubuntu-latest",
+			"    steps:",
+			"      - run: npm run check",
+			"",
+		].join("\n"),
+	);
+	const [workflow] = deriveWorkflows(scratch);
+	assert.deepEqual(workflow.triggers, ["pull_request"], "a list-form `on:` must not be read as string indices");
+	assert.deepEqual(
+		workflow.jobs.map((job) => [job.id, job.runners]),
+		[
+			["included", ["ubuntu-24.04-arm"]],
+			["listed", ["macos-15", "ubuntu-24.04"]],
+			["plain", ["ubuntu-latest"]],
+		],
+	);
 });
 
 // A contract that only ever agrees with itself proves nothing, so the drift it
@@ -1885,6 +1955,8 @@ test("the gate contract goes red when a CI job or a hook command drifts", (conte
 	);
 	writeDerivedContract(scratch);
 	assert.deepEqual(collectViolations(scratch), [], "the contract must be green against the tree it was derived from");
+	// The nonzero exit is what makes this a gate rather than a report.
+	assert.equal(gateContractMain([], scratch), 0, "a green gate must exit zero");
 
 	// Mutation 1: a CI job disappears.
 	const original = readFileSync(workflow, "utf8");
@@ -1894,6 +1966,7 @@ test("the gate contract goes red when a CI job or a hook command drifts", (conte
 		["workflows[path .github/workflows/check.yml].jobs: declares id scope, which this repository no longer has"],
 		"removing a CI job must name that job, not the neighbours its removal shifted",
 	);
+	assert.equal(gateContractMain([], scratch), 1, "a red gate must exit nonzero, or a caller reads it as a pass");
 	writeFileSync(workflow, original);
 	assert.deepEqual(collectViolations(scratch), []);
 
@@ -1921,6 +1994,14 @@ test("the declared hook runner is an exclusivity claim", () => {
 		/must be "githooks"/u,
 	);
 	assert.match(hookRunnerViolations(ROOT, { hook_runner: { kind: "githooks", config_path: "absent" } }).join("\n"), /does not exist/u);
+	// Every hand-authored field is checked against its own authority, or it is
+	// the unguarded second source of truth the module header disclaims.
+	assert.match(
+		hookRunnerViolations(ROOT, { hook_runner: { kind: "githooks", config_path: ".githooks", install_command: "npm run renamed" } }).join(
+			"\n",
+		),
+		/install_command names npm run renamed/u,
+	);
 });
 
 // A renamed gate entrypoint is how a tier quietly stops being anybody's gate.

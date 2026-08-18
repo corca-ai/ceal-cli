@@ -18,15 +18,23 @@
 //
 // The check lives in `repo-gates.test.ts` rather than in a lint of its own,
 // because that file is already this repository's home for "what the gates are";
-// this module is the derivation it calls, and running this file is the
-// maintainer's regeneration path.
+// this module is the derivation it calls. Running it directly CHECKS and prints
+// the readback; `--write` is the maintainer's regeneration path.
 //
 // Deliberate limits of the command extractor, stated so a reader does not
-// mistake it for a shell parser: it skips whole-line `#` comments and segments
-// whose head is `echo`/`printf`, splits on `&&`, `||`, `;`, and `|`, and reads
+// mistake it for a shell parser. It skips whole-line `#` comments and segments
+// whose head is `echo`/`printf`; it splits on `&&`, `||`, `;`, `|`, and on the
+// `$(`/`)` and backtick boundaries of a command substitution; and it reads
 // `npm run <script>`, `npm test`, and `node <...> <script-file>` invocations.
-// A `node -e` inline program carries no script file and is therefore not a gate
-// command here. Environment prefixes and redirections are dropped.
+// Environment prefixes and redirections are dropped. What it does NOT see, and
+// what a reader must not take an empty `gate_commands` to mean is absent:
+//   - `uses:` steps. A job whose whole body is a marketplace or composite
+//     action reads here as `gate_commands: []`, which means "nothing this
+//     extractor reads", not "this job proves nothing".
+//   - `npm exec` / `npx` invocations, which AGENTS.md sanctions as a
+//     first-class command form.
+//   - `node -e` inline programs, which carry no script file to name.
+//   - bare shell scripts (`bash x.sh`, `./x.sh`).
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -42,7 +50,7 @@ export type WorkflowJob = { readonly id: string; readonly runners: readonly stri
 export type WorkflowTier = { readonly path: string; readonly triggers: readonly string[]; readonly jobs: readonly WorkflowJob[] };
 export type GateContract = {
 	readonly schema?: string;
-	readonly hook_runner?: { readonly kind?: string; readonly config_path?: string };
+	readonly hook_runner?: { readonly kind?: string; readonly config_path?: string; readonly install_command?: string };
 	readonly full_gate_commands?: readonly string[];
 	readonly hook_tiers?: readonly HookTier[];
 	readonly workflows?: readonly WorkflowTier[];
@@ -53,12 +61,22 @@ const HOOK_DIRECTORY = ".githooks";
 const WORKFLOW_DIRECTORY = ".github/workflows";
 const SCRIPT_FILE = /\.(?:ts|mts|cts|mjs|cjs|js)$/u;
 const REDIRECTION = /^\d?[<>]/u;
-const SHELL_SEGMENT = /&&|\|\||;|\|/u;
+// `$(`, `)`, and a backtick end a segment as surely as `&&` does. Without them
+// `status="$(node scripts/x.ts put …)"` tokenizes with `status="$(node` as one
+// word, so the invocation is silently dropped.
+const SHELL_SEGMENT = /&&|\|\||;|\||\$\(|\)|`/u;
 const QUIET_HEADS = new Set(["echo", "printf"]);
 
+/**
+ * Drop the redirection tail so `node x.ts >> log` and `node x.ts` are one
+ * identity, then drop a trailing bare quote — the residue of cutting at a
+ * nested `$(`, as in `--file "$(realpath "$source")"`.
+ */
 function joinInvocation(tokens: readonly string[]): string {
 	const end = tokens.findIndex((token) => REDIRECTION.test(token));
-	return (end < 0 ? tokens : tokens.slice(0, end)).join(" ");
+	const kept = [...(end < 0 ? tokens : tokens.slice(0, end))];
+	while (kept.length > 0 && /^["']+$/u.test(kept[kept.length - 1])) kept.pop();
+	return kept.join(" ");
 }
 
 function segmentInvocation(segment: string): string | null {
@@ -105,7 +123,11 @@ function read(repoRoot: string, relative: string): string {
 export function deriveHookTiers(repoRoot: string): HookTier[] {
 	const directory = path.join(repoRoot, HOOK_DIRECTORY);
 	if (!existsSync(directory)) return [];
-	return readdirSync(directory)
+	// Files only. A subdirectory would make `readFileSync` throw EISDIR from a
+	// gate whose message could not explain it.
+	return readdirSync(directory, { withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => entry.name)
 		.sort()
 		.map((name) => ({
 			id: name,
@@ -244,28 +266,42 @@ export function hookRunnerViolations(repoRoot: string, declared: GateContract): 
 			);
 		}
 	}
+	// Every other hand-authored field is checked against its own authority. An
+	// unchecked one is the second-source-of-truth shape the header disclaims.
+	if (runner.install_command !== undefined) {
+		violations.push(...resolvableCommandViolations(repoRoot, [runner.install_command], "hook_runner.install_command"));
+	}
 	return violations;
 }
 
 /**
- * A full-gate command that no longer resolves is how a renamed entrypoint
- * quietly stops being anybody's gate. Both spellings are checked against their
- * own authority: an npm script against package.json, a script path against disk.
+ * A declared command resolves against its own authority: an npm script against
+ * package.json, a script path against disk. A command that no longer resolves
+ * is how a renamed entrypoint quietly stops being anybody's gate.
  */
-export function fullGateViolations(repoRoot: string, declared: GateContract): string[] {
-	const commands = declared.full_gate_commands ?? [];
-	if (commands.length === 0) return ["full_gate_commands must name at least one command"];
+function resolvableCommandViolations(repoRoot: string, commands: readonly string[], field: string): string[] {
 	const scripts = (JSON.parse(read(repoRoot, "package.json")).scripts ?? {}) as Record<string, string>;
 	return commands.flatMap((command) => {
 		const npmRun = /^npm run ([\w:-]+)/u.exec(command);
-		if (npmRun) return npmRun[1] in scripts ? [] : [`full_gate_commands names ${command}, but package.json has no ${npmRun[1]} script`];
+		if (npmRun) return npmRun[1] in scripts ? [] : [`${field} names ${command}, but package.json has no ${npmRun[1]} script`];
 		const nodeScript = command.split(/\s+/u).find((token) => SCRIPT_FILE.test(token));
 		if (nodeScript && existsSync(path.join(repoRoot, nodeScript))) return [];
-		return [`full_gate_commands names ${command}, which resolves to no package script and no file on disk`];
+		return [`${field} names ${command}, which resolves to no package script and no file on disk`];
 	});
 }
 
-/** Where each declared full-gate command is invoked; the release-cost readback. */
+export function fullGateViolations(repoRoot: string, declared: GateContract): string[] {
+	const commands = declared.full_gate_commands ?? [];
+	if (commands.length === 0) return ["full_gate_commands must name at least one command"];
+	return resolvableCommandViolations(repoRoot, commands, "full_gate_commands");
+}
+
+/**
+ * Where each declared full-gate command is invoked; the release-cost readback.
+ * A SITE is not a RUN: a site whose invocation sits behind a matrix or shell
+ * condition runs fewer times than once per site, and a site inside a matrix
+ * without a condition runs more. See the spec's Fixed Decisions.
+ */
 export function fullGateInvocationSites(contract: GateContract): string[] {
 	const commands = new Set(contract.full_gate_commands ?? []);
 	const sites: string[] = [];
@@ -301,7 +337,37 @@ export function collectViolations(repoRoot: string = REPO_ROOT, declared: GateCo
 	return violations;
 }
 
+/**
+ * Checks by default; writes only when asked. The first version wrote on a bare
+ * invocation, which meant the natural probe — "run this and show me what it
+ * says" — silently reconciled the contract to whatever the tree happened to
+ * contain, at exactly the moment someone was investigating a red gate.
+ */
+export function main(argv: readonly string[] = process.argv.slice(2), repoRoot: string = REPO_ROOT): number {
+	if (argv.includes("--write")) {
+		writeDerivedContract(repoRoot);
+		console.log(`gate contract: rewrote the derived sections of ${GATE_CONTRACT_PATH}`);
+		return 0;
+	}
+	const declared = readContract(repoRoot);
+	const violations = collectViolations(repoRoot, declared);
+	if (violations.length > 0) {
+		console.error(`gate contract: FAIL — ${GATE_CONTRACT_PATH} no longer describes this repository's gate tiers.`);
+		console.error(
+			"Re-derive with `node test/gate-contract-lib.ts --write` and review the diff; do not edit the file to match a change you did not intend.",
+		);
+		for (const violation of violations) console.error(`  ${violation}`);
+		return 1;
+	}
+	const sites = fullGateInvocationSites(declared);
+	console.log(`gate contract: PASS — ${(declared.hook_tiers ?? []).length} hook tier(s), ${(declared.workflows ?? []).length} workflow(s).`);
+	console.log(
+		`  full gate (${(declared.full_gate_commands ?? []).join(", ")}) is invoked at ${sites.length} declared site(s): ${sites.join(", ") || "none"}`,
+	);
+	console.log("  a site is not a run: a conditional invocation runs less often, an unconditional matrix job more.");
+	return 0;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	writeDerivedContract();
-	console.log(`gate contract: rewrote the derived sections of ${GATE_CONTRACT_PATH}`);
+	process.exitCode = main();
 }
