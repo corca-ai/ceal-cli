@@ -1,0 +1,129 @@
+{
+	"schema": "ceal.gate_contract.v1",
+	"repo": "corca-ai/ceal-cli",
+	"hook_runner": {
+		"kind": "githooks",
+		"config_path": ".githooks",
+		"install_command": "npm run hooks:install"
+	},
+	"full_gate_commands": [
+		"npm run check"
+	],
+	"hook_tiers": [
+		{
+			"id": "pre-push",
+			"commands": [
+				{
+					"name": ".githooks/pre-push",
+					"gate_commands": [
+						"node scripts/check-dup-ratchet.ts",
+						"npm run check",
+						"npm run check:unit",
+						"npm run lint:shell"
+					]
+				}
+			]
+		}
+	],
+	"workflows": [
+		{
+			"path": ".github/workflows/ceal-release.yml",
+			"triggers": [
+				"push",
+				"workflow_dispatch"
+			],
+			"jobs": [
+				{
+					"id": "assemble",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": [
+						"node scripts/build-worker-release-assets.ts merge --out \"$RUNNER_TEMP/dist\" --input \"$PWD/handoff/linux-arm64\" --input \"$PWD/handoff/linux-amd64\" --input \"$PWD/handoff/darwin-arm64\" --json"
+					]
+				},
+				{
+					"id": "build",
+					"runners": [
+						"macos-15",
+						"ubuntu-24.04",
+						"ubuntu-24.04-arm"
+					],
+					"gate_commands": [
+						"node scripts/build-worker-release-assets.ts compose --out \"$RUNNER_TEMP/$output\" --gateway-handoff-archive \"$RUNNER_TEMP/gateway-handoff/$HANDOFF_ARCHIVE\" --version \"$version\" --platform \"$PLATFORM\" --json",
+						"node scripts/prewarm-offline-consumer-cache.ts",
+						"npm run build",
+						"npm run check",
+						"npm run test:release"
+					]
+				},
+				{
+					"id": "sign-and-publish",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": []
+				}
+			]
+		},
+		{
+			"path": ".github/workflows/ceal-worker-stable-rollback.yml",
+			"triggers": [
+				"workflow_dispatch"
+			],
+			"jobs": [
+				{
+					"id": "activate",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": []
+				},
+				{
+					"id": "verify",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": []
+				}
+			]
+		},
+		{
+			"path": ".github/workflows/check.yml",
+			"triggers": [
+				"pull_request",
+				"push",
+				"workflow_dispatch"
+			],
+			"jobs": [
+				{
+					"id": "check",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": [
+						"node scripts/prewarm-offline-consumer-cache.ts",
+						"npm run check"
+					]
+				},
+				{
+					"id": "check-native",
+					"runners": [
+						"macos-15"
+					],
+					"gate_commands": [
+						"node scripts/prewarm-offline-consumer-cache.ts",
+						"npm run check"
+					]
+				},
+				{
+					"id": "scope",
+					"runners": [
+						"ubuntu-24.04"
+					],
+					"gate_commands": []
+				}
+			]
+		}
+	]
+}

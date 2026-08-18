@@ -7,6 +7,17 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
+import {
+	collectViolations,
+	extractGateCommands,
+	fullGateInvocationSites,
+	fullGateViolations,
+	GATE_CONTRACT_SCHEMA,
+	hookRunnerViolations,
+	readContract,
+	writeDerivedContract,
+} from "../gate-contract-lib.ts";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
@@ -1798,3 +1809,124 @@ test("contract gate ownership rejects build and inventory mutations", () => {
 // by its own comment it could not measure the runtime it was about. The rule it
 // meant to carry belongs to CLAUDE.md, which already says to time a gate with
 // `time npm run check` on the host in hand rather than trust a recorded figure.
+
+// --- Gate-tier contract (three-repo release loop S1, corca-ai/ceal#717) ------
+//
+// `config/gate-contract.json` is the one declarative statement of which proof
+// tiers this repository has. It lives here rather than behind a lint of its own
+// because this file is already where "what the gates are" is asserted, and a
+// second entry point would be a second answer to the same question.
+
+test("the committed gate contract describes this repository's hook and CI tiers", () => {
+	const declared = readContract(ROOT);
+	assert.equal(declared.schema, GATE_CONTRACT_SCHEMA);
+	assert.deepEqual(
+		collectViolations(ROOT, declared),
+		[],
+		"regenerate with `node test/gate-contract-lib.ts` and review the diff; do not edit the file to match a change you did not intend",
+	);
+});
+
+// The number this whole three-repo effort exists to reduce. One release used to
+// pay for `npm run check` seven times: once locally, twice in check.yml, and
+// twice per lane in the release workflow's dry run and tag run. The sites are
+// asserted by name rather than counted, so removing one is a deliberate edit
+// here and adding an eighth cannot pass unnoticed.
+test("the full gate is invoked at exactly the sites the release loop accounts for", () => {
+	assert.deepEqual(fullGateInvocationSites(readContract(ROOT)), [
+		"pre-push/.githooks/pre-push",
+		".github/workflows/ceal-release.yml:build",
+		".github/workflows/check.yml:check",
+		".github/workflows/check.yml:check-native",
+	]);
+});
+
+// The extractor decides what the contract can see, so its blind spots are the
+// contract's. Each case is a shape one of the three repositories actually
+// writes: a hook that explains itself in comments, a hook that echoes the
+// command it is about to run, and this repository's `run_phase` wrapper.
+test("gate commands are read out of shell text, and prose about them is not", () => {
+	assert.deepEqual(extractGateCommands("# rerun npm run check to see it again\nnpm run check:unit"), ["npm run check:unit"]);
+	assert.deepEqual(extractGateCommands('echo "running the type gate (npm run lint)" >&2\nnpm run lint'), ["npm run lint"]);
+	assert.deepEqual(extractGateCommands('run_phase "tag push, full gate" npm run check'), ["npm run check"]);
+	assert.deepEqual(extractGateCommands("npm run check -- --profile ci"), ["npm run check -- --profile ci"]);
+	assert.deepEqual(extractGateCommands("node scripts/a.ts \\\n  --flag value"), ["node scripts/a.ts --flag value"]);
+	assert.deepEqual(extractGateCommands("CEAL_X=1 node scripts/run-pre-push.ts >> log"), ["node scripts/run-pre-push.ts"]);
+	assert.deepEqual(extractGateCommands("node -e 'process.exit(0)'"), [], "an inline program names no script, so it names no gate");
+	assert.deepEqual(extractGateCommands("npm run lint && npm test\nnpm run lint"), ["npm run lint", "npm test"]);
+	// Positive control: lines the extractor is meant to pass over entirely.
+	assert.deepEqual(extractGateCommands("set -eu\ncurl -sSf https://example.invalid -o out"), []);
+});
+
+// A contract that only ever agrees with itself proves nothing, so the drift it
+// is supposed to catch is exercised against a throwaway repository rather than
+// demonstrated once by hand and written up.
+test("the gate contract goes red when a CI job or a hook command drifts", (context) => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-gate-contract-"));
+	context.after(() => rmSync(scratch, { recursive: true, force: true }));
+	mkdirSync(path.join(scratch, ".github", "workflows"), { recursive: true });
+	mkdirSync(path.join(scratch, ".githooks"), { recursive: true });
+	mkdirSync(path.join(scratch, "config"), { recursive: true });
+	writeFileSync(path.join(scratch, "package.json"), JSON.stringify({ scripts: { check: "true" } }));
+	writeFileSync(path.join(scratch, ".githooks", "pre-push"), "#!/bin/sh\nnpm run check\n");
+	const workflow = path.join(scratch, ".github", "workflows", "check.yml");
+	writeFileSync(
+		workflow,
+		"on: [push]\njobs:\n  gate:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: npm run check\n  scope:\n    runs-on: ubuntu-24.04\n    steps: []\n",
+	);
+	writeFileSync(
+		path.join(scratch, "config", "gate-contract.json"),
+		JSON.stringify({
+			schema: GATE_CONTRACT_SCHEMA,
+			repo: "scratch",
+			hook_runner: { kind: "githooks", config_path: ".githooks" },
+			full_gate_commands: ["npm run check"],
+		}),
+	);
+	writeDerivedContract(scratch);
+	assert.deepEqual(collectViolations(scratch), [], "the contract must be green against the tree it was derived from");
+
+	// Mutation 1: a CI job disappears.
+	const original = readFileSync(workflow, "utf8");
+	writeFileSync(workflow, original.replace("  scope:\n    runs-on: ubuntu-24.04\n    steps: []\n", ""));
+	assert.deepEqual(
+		collectViolations(scratch),
+		["workflows[path .github/workflows/check.yml].jobs: declares id scope, which this repository no longer has"],
+		"removing a CI job must name that job, not the neighbours its removal shifted",
+	);
+	writeFileSync(workflow, original);
+	assert.deepEqual(collectViolations(scratch), []);
+
+	// Mutation 2: a hook grows a command.
+	writeFileSync(path.join(scratch, ".githooks", "pre-push"), "#!/bin/sh\nnpm run check\nnpm run lint:shell\n");
+	assert.deepEqual(collectViolations(scratch), [
+		"hook_tiers[id pre-push].commands[name .githooks/pre-push].gate_commands: this repository has npm run lint:shell, which the contract does not declare",
+	]);
+
+	// Mutation 3: the runner identity changes, which the attestation work reads.
+	writeFileSync(path.join(scratch, ".githooks", "pre-push"), "#!/bin/sh\nnpm run check\n");
+	writeFileSync(workflow, original.replace("  gate:\n    runs-on: ubuntu-24.04", "  gate:\n    runs-on: macos-15"));
+	assert.deepEqual(collectViolations(scratch), [
+		"workflows[path .github/workflows/check.yml].jobs[id gate].runners: declares ubuntu-24.04, which this repository no longer has",
+		"workflows[path .github/workflows/check.yml].jobs[id gate].runners: this repository has macos-15, which the contract does not declare",
+	]);
+});
+
+// A second installed hook mechanism is the drift the contract cannot describe:
+// it would report one of them and stay green about the other.
+test("the declared hook runner is an exclusivity claim", () => {
+	assert.deepEqual(hookRunnerViolations(ROOT, readContract(ROOT)), []);
+	assert.match(
+		hookRunnerViolations(ROOT, { hook_runner: { kind: "lefthook", config_path: ".githooks" } }).join("\n"),
+		/must be "githooks"/u,
+	);
+	assert.match(hookRunnerViolations(ROOT, { hook_runner: { kind: "githooks", config_path: "absent" } }).join("\n"), /does not exist/u);
+});
+
+// A renamed gate entrypoint is how a tier quietly stops being anybody's gate.
+test("a full-gate command that resolves to nothing is a failure, not a comment", () => {
+	assert.deepEqual(fullGateViolations(ROOT, readContract(ROOT)), []);
+	assert.match(fullGateViolations(ROOT, { full_gate_commands: ["npm run renamed"] }).join("\n"), /no renamed script/u);
+	assert.match(fullGateViolations(ROOT, { full_gate_commands: ["node gone.ts"] }).join("\n"), /no file on disk/u);
+	assert.deepEqual(fullGateViolations(ROOT, {}), ["full_gate_commands must name at least one command"]);
+});
