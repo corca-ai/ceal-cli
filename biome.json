@@ -30,6 +30,7 @@
 				"useTemplate": "off"
 			},
 			"suspicious": {
+				"noExplicitAny": "error",
 				"noTemplateCurlyInString": "off"
 			}
 		}

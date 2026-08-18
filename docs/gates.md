@@ -152,6 +152,10 @@ enabled: indexed and map reads use an explicit guard or a runtime-checked
 optional access instead of a compile-only assertion. Check here before
 re-enabling either remaining rule:
 
+`suspicious/noExplicitAny` is enabled at error level. It is a native Biome
+diagnostic in the same `npm run lint` route; explicit `any` must be replaced by
+the actual shape, `unknown` plus a guard, or a typed adapter at the boundary.
+
 - `useTemplate` — every hit is `.join("\n") + "\n"`, which a template literal
   makes worse, not better.
 - `noTemplateCurlyInString` — every hit is `${...}` inside a *shell* script
