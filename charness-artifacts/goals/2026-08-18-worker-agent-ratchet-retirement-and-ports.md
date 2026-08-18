@@ -12,11 +12,11 @@ activation command.
 - Current disposition: active; Lane A, the orthogonal temporary-TypeScript-fixture
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
-  detector, and the Lane B `noImplicitOverride`, control-flow, and unused-check
-  slices plus the Worker half of `noUncheckedIndexedAccess` have implementation,
+  detector, and the Lane B `noImplicitOverride`, control-flow, unused-check, and
+  `noUncheckedIndexedAccess` slices across Worker and Agent have implementation,
   targeted proof, and local commits. The full Gateway loader-rewrite ratchet remains
-  deliberately unported; completing Agent `noUncheckedIndexedAccess` and then
-  `exactOptionalPropertyTypes` are the next dependency-safe work.
+  deliberately unported; completing `exactOptionalPropertyTypes` is the next
+  dependency-safe compiler work.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -34,7 +34,7 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: continue Lane B with the remaining two compiler options, keeping the
+- Next action: continue Lane B with `exactOptionalPropertyTypes`, keeping the
   A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
@@ -256,7 +256,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | --- | --- | --- | --- |
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
-| B | Enable seven measured compiler options | config diff, source repairs, raw proof | in progress — five options complete; noUncheckedIndexedAccess and exactOptionalPropertyTypes remain |
+| B | Enable seven measured compiler options | config diff, source repairs, raw proof | in progress — six options complete; exactOptionalPropertyTypes remains |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
@@ -621,6 +621,45 @@ compiler replacement proof.
   `noUncheckedIndexedAccess` and both projects' `exactOptionalPropertyTypes` remain
   incomplete.
 
+### Slice 11: Lane B — Agent noUncheckedIndexedAccess
+
+- Objective: Enable `noUncheckedIndexedAccess` in the Agent source and generated
+  tools/test compiler routes, then repair the resulting diagnostics without
+  changing either diagnostic baseline.
+- Why this approach: The saved source pre-edit probe contained 73 diagnostics in
+  `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`. The generated tools/test
+  route is materialized by `scripts/typecheck-tools-tests.ts`, and no separate
+  per-option pre-edit log was saved; therefore the durable claim is limited to the
+  actual post-enable route and its unchanged baseline decision. Repairs use
+  guards, typed adapters, and a small ingress-context helper; no non-null
+  assertion, `any`, baseline update, or suppression was introduced.
+- Commit: Agent `5bcc8a852b9b3950c66f85cd669fde405cf7bb67` (`typecheck: enforce
+  Agent indexed access checks`); no push or external boundary.
+- What changed: Added `noUncheckedIndexedAccess` to `tsconfig.build.json` and
+  `tsconfig.tools-tests.json`, asserted both declarations in
+  `test/public/quality-gates.test.ts`, and repaired source/script/test indexed
+  reads with explicit guards or typed adapters. The existing paid diagnostic
+  entries remain represented in the tools/test summaries; no baseline JSON was
+  regenerated or reduced.
+- Targeted verification: `npm run lint:types:source` exited 0;
+  `npm run lint:types:tools` reported `source_behavior: 279 diagnostics in 22
+  files; equal` and `immutable_artifact: 100 diagnostics in 14 files; equal`;
+  `npm run lint`, `npm exec --no -- biome check .`, and the Agent commit hook
+  exited 0. The explicit portable source test selection passed 171/171 tests
+  with zero failures. Plain `npm run test:source` stops on this macOS host at
+  the runner's `linux_runtime_requires_linux` prerequisite before executing
+  tests; Linux runtime proof remains a non-claim.
+- Structural cleanup: The first post-repair ESLint run left one 242-line
+  `createInheritedIngressMessageSession` warning. The retry extracted the
+  coherent `createIngressCreateContext` typed adapter, then reran ESLint,
+  source typecheck, Biome, and the full lint bundle successfully; no metric-only
+  line deletion was used.
+- Alternatives rejected: No indexed non-null assertions, `any` escape hatch,
+  ratchet/baseline regeneration, or platform bypass. `exactOptionalPropertyTypes`
+  remains the next Lane B slice.
+- Off-goal findings: No Gateway source edit, push, CI watch, release,
+  apply/restart, live readback, issue creation, or duplicate #671.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -773,8 +812,9 @@ improvement as applied or a tracked issue.
 | Agent duplicate implementation received a fresh-eye critique and repair | Gateway `charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`, commit `67afbec6a42451490e9a22f0c9896c15c870eda6`; Agent reviewer window `/tmp/d1-duplicate-agent-20260819.json` | from `/Users/ted/codes/ceal`: run `python3 scripts/validate_critique_artifacts.py --repo-root . --paths charness-artifacts/critique/2026-08-19-d1-agent-duplicate-implementation-20260819.md`; recheck the matching reviewer window with `python3 /Users/ted/.codex/plugins/cache/local/charness/6.2.0/shared/scripts/reviewer_boundary_fingerprint.py verify --repo-root /Users/ted/codes/ceal-agent --before /tmp/d1-duplicate-agent-20260819.json --window-id d1-duplicate-agent-20260819` and record parent-attributed post-review edits rather than claiming them as reviewer drift |
 | Lane B Worker raw typecheck ownership is three explicit root projects | Worker `/Users/ted/codes/ceal-cli/package.json:29-39`, `tsconfig.typecheck.json:2-23`, `tsconfig.tools.json:2-20`, and `tsconfig.tests.json:2-15` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, and `npm run lint:types:raw:tests`; inspect each command's `-p` config before changing compiler options |
 | Lane B Agent raw typecheck ownership is the build project plus generated tools/test configs | Agent `/Users/ted/codes/ceal-agent/package.json:56-63`, `tsconfig.build.json:2-25`, `tsconfig.tools-tests.json:2-24`, and `scripts/typecheck-tools-tests.ts:126-145` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source` and `npm run lint:types:tools`; inspect `typecheck-tools-tests.ts` generated config and its `extends` target before changing compiler options |
-| Lane B remaining two options are absent from the owning raw configs, while strict/skipLibCheck and the four committed option groups are present | Worker and Agent tsconfig sources above; positive controls `strict`, `skipLibCheck`, `noImplicitOverride`, control-flow, and unused-check entries | from Gateway: run `rg -n '"(noUncheckedIndexedAccess|exactOptionalPropertyTypes)"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json` and a positive-control `rg -n '"(strict|skipLibCheck|noImplicitOverride|noFallthroughCasesInSwitch|noImplicitReturns|noUnusedLocals|noUnusedParameters)"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json`; re-run after each committed option set |
+| Lane B `exactOptionalPropertyTypes` remains absent from the owning raw configs, while strict/skipLibCheck, noUncheckedIndexedAccess, and the other committed option groups are present | Worker and Agent tsconfig sources above; positive controls `strict`, `skipLibCheck`, `noUncheckedIndexedAccess`, `noImplicitOverride`, control-flow, and unused-check entries | from Gateway: run `rg -n '"exactOptionalPropertyTypes"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json` and a positive-control `rg -n '"(strict|skipLibCheck|noUncheckedIndexedAccess|noImplicitOverride|noFallthroughCasesInSwitch|noImplicitReturns|noUnusedLocals|noUnusedParameters)"' /Users/ted/codes/ceal-cli/tsconfig*.json /Users/ted/codes/ceal-agent/tsconfig*.json`; re-run after the exact-option slice |
 | Lane B noImplicitOverride is compiler-owned in every raw Worker/Agent route | Worker/Agent `tsconfig.typecheck.json`, `tsconfig.tools.json`, `tsconfig.build.json`, and `tsconfig.tools-tests.json`; Worker/Agent contract tests | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline update route |
 | Lane B control-flow and unused options are compiler-owned in every raw Worker/Agent route | Worker and Agent tsconfig sources, raw route scripts, and the committed Slice 9 source repairs | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline/update route |
 | Lane B `noUncheckedIndexedAccess` pre-edit diagnostics are the source-repair inventory, not a baseline input | Worker raw configs and pre-edit logs `/tmp/ceal-worker-laneb-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tools.json-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tests.json-noUncheckedIndexedAccess.log`; Agent source `tsconfig.build.json` and `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` and has no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: run the three explicit `npm exec --no -- tsc -p ... --pretty false --noUncheckedIndexedAccess` probes; from `/Users/ted/codes/ceal-agent`: the source pre-edit probe is represented by `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`, while generated tools/test diagnostics are established only by the actual `npm run lint:types:tools` route after enabling the option; require diagnostics to be repaired in source/configs, never recorded as baseline debt |
 | Worker `noUncheckedIndexedAccess` is compiler-owned across package, tools, and inherited test routes | Worker commit `a8b3b96`; `tsconfig.typecheck.json:8-19`, `tsconfig.tools.json:7-20`, `tsconfig.tests.json:2-15`, `test/contract/typecheck-source-gate.test.ts`, and `test/required.ts` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and `node --test test/contract/typecheck-source-gate.test.ts`; require direct exit 0, 7/7 contract tests, no baseline/update route, and a clean post-commit tree |
+| Agent `noUncheckedIndexedAccess` is compiler-owned across source and generated tools/test routes | Agent commit `5bcc8a852b9b3950c66f85cd669fde405cf7bb67`; `tsconfig.build.json:7-18`, `tsconfig.tools-tests.json:22-27`, `test/public/quality-gates.test.ts:43-54,70-80`, and `scripts/typecheck-tools-tests.ts:124-149` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint`, and `npm exec --no -- biome check .`; require source exit 0, tools/test summaries `279/22 equal` and `100/14 equal`, no baseline/update route, the explicit portable proof `node scripts/run-test-lanes.ts --source-only test/public/agent-capability-tool.test.ts test/public/agent-model-file-boundary.test.ts test/public/bound-installed-worker-verifier.test.ts test/public/capability-serving-entrypoint.test.ts test/public/check-duplicates.test.ts test/public/check-import-hard-failures.test.ts test/public/check-secretlint.test.ts test/public/gate-contract.test.ts test/public/inherited-capability-control-session-adapter.test.ts test/public/inherited-ingress-message-session.test.ts test/public/inherited-runner-turn-request.test.ts test/public/inherited-v4-injected-e2e-harness.test.ts test/public/quality-gates.test.ts test/public/quality-timing-advisory.test.ts` at 171/171, and a clean post-commit tree; `npm run test:source` is host-blocked by `linux_runtime_requires_linux` on macOS |
