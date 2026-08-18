@@ -256,7 +256,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
-| C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
+| C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | in progress — inventory captured; Worker has 17 assertions and Agent has 9 explicit-any diagnostics |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
 | Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | pending |
@@ -733,6 +733,29 @@ compiler replacement proof.
   Protocol-quarantine claims. No source or baseline mutation was made by the
   review.
 
+### Slice 13: Lane C — disabled lint-rule inventory
+
+- Objective: Measure the disabled Worker `noNonNullAssertion` and Agent source
+  `@typescript-eslint/no-explicit-any` rules before enabling either, then repair
+  the source with guards, typed adapters, or explicit unknown boundaries. Do
+  not use lint ignores, assertions, or a diagnostic baseline.
+- Worker inventory: the existing `npm run lint` route is green with
+  `biome.json:30` set to `noNonNullAssertion: "off"`. The read-only override
+  `npm exec --no -- biome check --only=style/noNonNullAssertion
+  --error-on-warnings .` exited 1 with 17 findings across 7 files; the full
+  output is retained at `/tmp/ceal-worker-lanec-noNonNullAssertion.log`.
+- Agent inventory: the existing `npm run lint:eslint` route is green with
+  `eslint.config.ts:36` setting source `@typescript-eslint/no-explicit-any` to
+  `off`; scripts/tests already own the rule as an error at `eslint.config.ts:50`.
+  The read-only override `npm exec --no -- eslint src --rule
+  '@typescript-eslint/no-explicit-any:error' --max-warnings 0` exited 1 with 9
+  findings in `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`,
+  and `src/tools/runtime.ts`; the captured output is at
+  `/tmp/ceal-agent-lanec-no-explicit-any-final.log`.
+- Disposition: inventory is complete and implementation is next. The exact
+  findings are compiler/linter-owned source work; no ignore, baseline, or
+  count-only exception is authorized.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -904,3 +927,5 @@ improvement as applied or a tracked issue.
 | Lane B `exactOptionalPropertyTypes` pre-edit diagnostics remain an inventory, not baseline input | Worker raw projects and `/tmp/ceal-worker-laneb-exact-{package,tools,tests}.log`; Agent `tsconfig.build.json` and `/tmp/ceal-agent-laneb-exact-source.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` with no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: rerun `npm exec --no -- tsc -p tsconfig.typecheck.json --pretty false --exactOptionalPropertyTypes`, the same command with `tsconfig.tools.json` and `tsconfig.tests.json`; from `/Users/ted/codes/ceal-agent`: rerun `npm exec --no -- tsc -p tsconfig.build.json --noEmit --pretty false --exactOptionalPropertyTypes`; record direct exits and diagnostics before enabling the option, never regenerate either baseline |
 | Worker protocol vendor contract is pre-existing off-goal debt, not exact-option fallout | Worker `protocol-vendor-pin.json:7-19`, `docs/protocol-quarantine.md:3-17`, and `test/contract/protocol-vendor-pin.test.ts:130-135`; exact diff only widens fixture option fields | from `/Users/ted/codes/ceal-cli`: run `node --test test/contract/protocol-vendor-pin.test.ts test/contract/typecheck-source-gate.test.ts`; classify only the `e93e491a...` versus `cfee89e...` vendor-tree mismatch as the known red, do not re-pin or regenerate it in this goal |
 | Lane B exact-option cross-surface review found no blocker and corrected one evidence wording issue | bounded fresh-eye review notification for frozen Worker `53b2c4a`, Agent `283b0c9`, and goal `ef34329`; primary re-read of Worker parent diff and Agent exact helpers | re-run the exact raw/TS6/lint commands in the compiler-owned row above; inspect `git diff 53b2c4a^ 53b2c4a -- tsconfig.typecheck.json tsconfig.tools.json` and the Agent parent diff; require no baseline paths in either commit |
+| Lane C Worker noNonNullAssertion inventory is the disabled-rule source census | Worker `biome.json:25-34`; `/tmp/ceal-worker-lanec-noNonNullAssertion.log` records 17 findings across 7 files | from `/Users/ted/codes/ceal-cli`: run `npm exec --no -- biome check --only=style/noNonNullAssertion --error-on-warnings .`; require direct exit 1 before enabling and rerun the same command after source repair with exit 0 |
+| Lane C Agent source no-explicit-any inventory is the disabled-rule source census | Agent `eslint.config.ts:30-40`; `/tmp/ceal-agent-lanec-no-explicit-any-final.log` records 9 findings in 3 files; positive control `eslint.config.ts:47-50` keeps scripts/tests on the rule | from `/Users/ted/codes/ceal-agent`: run `npm exec --no -- eslint src --rule '@typescript-eslint/no-explicit-any:error' --max-warnings 0`; require direct exit 1 before enabling and rerun the owned `npm run lint:eslint` route after source repair with exit 0 |
