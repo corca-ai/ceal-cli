@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { secretlintRunGroups, secretlintTargetFiles, syntheticSecretlintConfig } from "../../scripts/run-secretlint.ts";
@@ -22,6 +25,20 @@ test("Worker secretlint scope is tracked source and docs, not local artifacts", 
 		files.some((file) => file.startsWith("node_modules/")),
 		false,
 	);
+});
+
+test("Worker staged projection sees staged additions but not unstaged files", () => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-worker-secretlint-staged-"));
+	try {
+		mkdirSync(path.join(scratch, "scripts"));
+		writeFileSync(path.join(scratch, "scripts/staged.ts"), "export const staged = true;\n");
+		writeFileSync(path.join(scratch, "scripts/unstaged.ts"), "export const unstaged = true;\n");
+		execFileSync("git", ["-C", scratch, "init", "-q"]);
+		execFileSync("git", ["-C", scratch, "add", "scripts/staged.ts"]);
+		assert.deepEqual(secretlintTargetFiles({ repoRoot: scratch, staged: true }), ["scripts/staged.ts"]);
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
 });
 
 test("Worker synthetic Slack fixture is isolated from the standard run", () => {
@@ -47,4 +64,30 @@ test("Worker package, check, hook, and declarative contract expose secretlint", 
 	const hookTiers = contract.hook_tiers as Array<{ commands: Array<{ gate_commands: string[] }> }>;
 	const preCommitCommands = hookTiers[0]?.commands[0]?.gate_commands ?? [];
 	assert.ok(preCommitCommands.includes("npm run lint:secrets:staged"));
+});
+
+test("Worker rules reject a live-shaped GitHub token in an isolated file", () => {
+	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-worker-secretlint-live-"));
+	const file = path.join(scratch, "input.txt");
+	try {
+		writeFileSync(file, `const token = ${JSON.stringify(["ghp", "0".repeat(36)].join("_"))};\n`);
+		const result = spawnSync(
+			process.execPath,
+			[
+				path.resolve(ROOT, "node_modules/secretlint/bin/secretlint.js"),
+				"--no-color",
+				"--format",
+				"compact",
+				"--no-glob",
+				"--secretlintrc",
+				path.resolve(ROOT, ".secretlintrc.json"),
+				file,
+			],
+			{ cwd: ROOT, encoding: "utf8" },
+		);
+		assert.equal(result.error, undefined);
+		assert.notEqual(result.status, 0, `${result.stdout}${result.stderr}`);
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
 });

@@ -47,6 +47,7 @@ run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
 run_gate "source NUL bytes" npm run lint:source-nul-bytes:staged
 run_gate "markdown" npm run lint:markdown:staged
 run_gate "secrets" npm run lint:secrets:staged
+run_gate "import hard failures" npm run lint:import-hard-failures:staged
 run_gate "gate contract" node test/gate-contract-lib.ts
 run_gate "shell lint" npm run lint:shell
 
