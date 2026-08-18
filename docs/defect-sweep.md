@@ -248,7 +248,7 @@ its sibling.
 
 Start the enumeration from the tree's own record of what it has learned:
 
-```
+```sh
 rg -n "cannot desync|one table|second copy|derive from|hand-copy" \
   packages/ceal-worker-cli/src packages/ceal-client/src scripts test AGENTS.md docs
 rg -n "charness-artifacts/debug" --files-with-matches docs

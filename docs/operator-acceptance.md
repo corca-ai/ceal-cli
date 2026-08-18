@@ -52,7 +52,7 @@ read-only ceiling probe.
 
 Read the ceiling back yourself, in a throwaway HOME that cannot touch real state:
 
-```
+```sh
 npm run build
 npm run probe -- ceal commands
 npm run probe -- ceal session status   # expect status: unconfigured, exit 0
@@ -105,7 +105,7 @@ The worker release lane fires on `ceal-v*.*.*` and drives
 configured before release and must own the release-origin identity and credential.
 This is one-time environment configuration, not a per-release digest entry:
 
-```
+```sh
 gh variable list -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_ACCOUNT_ID
 gh secret list   -R corca-ai/ceal-cli --env ceal-cli-release # expect CEAL_ENV_CLOUDFLARE_API_TOKEN
 ```
@@ -120,7 +120,7 @@ a gate failure. A green `npm run check` already means the protocol bytes this
 repository tests against are the bytes a release would ship from the locked
 handoff archive. To read it directly, offline and with no Gateway session:
 
-```
+```sh
 node scripts/verify-protocol-vendor-pin.ts   # exit 0 only when shippable
 ```
 
@@ -147,7 +147,7 @@ source change to publish by itself. Before spending a tag, inspect the
 Environment's deployment policy and repository tag policy rather than trusting
 the workflow comment:
 
-```
+```sh
 gh api repos/corca-ai/ceal-cli/environments/ceal-cli-release --jq '{protection_rules, deployment_branch_policy}'
 gh api repos/corca-ai/ceal-cli/rulesets --paginate
 gh api repos/corca-ai/ceal-cli/environments/ceal-cli-release/variables --jq '.variables[].name'
@@ -168,7 +168,7 @@ identity.
 You also need push and tag rights on `corca-ai/ceal-cli`. Verify without
 spending anything:
 
-```
+```sh
 gh api repos/corca-ai/ceal-cli --jq '.permissions'
 ```
 

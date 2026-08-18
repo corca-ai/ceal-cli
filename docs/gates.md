@@ -40,6 +40,22 @@ belong in data files. The regular check reads the worktree, while
 variant so newly added source is covered before it becomes tracked. This is a
 source-integrity gate, not a diagnostic baseline or ratchet.
 
+`npm run lint:markdown` is the Worker-owned full Markdown gate. It reads tracked
+and non-ignored untracked `.md` files, excluding `charness-artifacts/`,
+`.charness/`, `.cautilus/`, and `.pytest_cache/`, and runs the checked-in
+`.markdownlint-cli2.jsonc` policy through the pinned `markdownlint-cli2` binary.
+`npm run lint:markdown:staged` uses the same local scope over added, copied,
+modified, or renamed Markdown in the index and is the pre-commit route. Both
+routes fail closed when the local dependency or policy is missing; `check` and
+`check:unit` own the full route, while `.githooks/pre-commit` owns the staged
+route.
+
+This is intentionally a markdownlint-only receiving contract. Gateway's
+`scripts/check-markdown.sh` also invokes the Charness authoring preflight, but
+that wrapper delegates to upstream-owned packaged Charness source absent from
+this checkout. Copying that helper would create an unowned compatibility tree,
+so this Worker gate does not claim to reproduce that advisory surface.
+
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
 
@@ -770,7 +786,6 @@ produce that silence — both checked with a planted export:
   one.
 
 Either mechanism alone would have hidden both guards slice 2 deleted by hand.
-
 
 ## Production Reachability Under `scripts/`
 

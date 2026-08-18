@@ -346,17 +346,14 @@ while :; do sleep 1; done
 `,
 	);
 	chmodSync(npm, 0o755);
-	const previousPath = process.env.PATH;
-	process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
-	try {
-		const isolated = await import(`${pathToFileURL(modulePath).href}?build-timeout=${Date.now()}`);
-		assert.throws(
-			() => isolated.withBuiltPackages(["packages/fixture"], () => assert.fail("timed-out build reached its reader")),
-			/timed out/u,
-		);
-	} finally {
-		process.env.PATH = previousPath;
-	}
+	const isolated = await import(`${pathToFileURL(modulePath).href}?build-timeout=${Date.now()}`);
+	assert.throws(
+		() =>
+			isolated.withBuiltPackages(["packages/fixture"], () => assert.fail("timed-out build reached its reader"), {
+				buildEnv: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+			}),
+		/timed out/u,
+	);
 	assert.equal(readFileSync(termMarker, "utf8"), "held", "the dist lock was not held when timeout cleanup began");
 	assert.equal(existsSync(lock), false, "the dist lock remained after the failed build settled");
 	for (const pidPath of [leaderPid, descendantPid]) {

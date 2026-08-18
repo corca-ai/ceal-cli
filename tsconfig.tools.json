@@ -16,6 +16,6 @@
 		"incremental": true,
 		"tsBuildInfoFile": "./node_modules/.cache/ceal-tools-typecheck.tsbuildinfo"
 	},
-	"include": ["scripts/**/*.ts", "test/**/*.ts"],
+	"include": ["scripts/**/*.ts", "test/**/*.ts", "types/**/*.d.ts"],
 	"exclude": ["dist", "node_modules"]
 }

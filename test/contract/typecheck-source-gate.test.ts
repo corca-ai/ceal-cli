@@ -126,7 +126,7 @@ test("tools typecheck is strict, source-only, and owns tracked tool TypeScript",
 	assert.equal(toolsTypecheckConfig.compilerOptions.moduleResolution, "NodeNext");
 	assert.equal(toolsTypecheckConfig.compilerOptions.allowImportingTsExtensions, true);
 	assert.deepEqual(toolsTypecheckConfig.compilerOptions.types, ["node"]);
-	assert.deepEqual(toolsTypecheckConfig.include, ["scripts/**/*.ts", "test/**/*.ts"]);
+	assert.deepEqual(toolsTypecheckConfig.include, ["scripts/**/*.ts", "test/**/*.ts", "types/**/*.d.ts"]);
 });
 
 test("the source gate is terminating, source-only, and independent of checkout artifacts", () => {

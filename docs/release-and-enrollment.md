@@ -35,7 +35,7 @@ is never recorded as the producer commit.
 
 The repo-owned bootstrap is:
 
-```
+```sh
 npm run bootstrap:gateway-handoff -- --tag gateway-protocol-handoff-v<version>
 ```
 
@@ -85,7 +85,7 @@ an update failure.
 
 Then:
 
-```
+```sh
 npm ci → npm run check → commit the version slice → push main
 → confirm origin/main is that commit and its check.yml run is green
 → dry-run the release lane → tag → watch
@@ -119,7 +119,7 @@ earlier, and no `check.yml` leg is arm64, so nothing else could have caught it.
 To move the stable pointer back to a previously published, known-good worker
 tag, run the rollback workflow with the literal confirmation:
 
-```
+```sh
 gh workflow run ceal-worker-stable-rollback.yml --ref main \
   -f tag=ceal-v<known-good-version> \
   -f confirmation=ROLLBACK
@@ -130,7 +130,7 @@ binds the verified bootstrap and pointer to the same rollback run before the
 release-origin update. No per-release environment variable entry is part of
 rollback. After the run, read the public pointer back and confirm its tag:
 
-```
+```sh
 curl --fail --silent --show-error \
   https://ceal.borca.ai/releases/worker/stable/ceal-worker-stable-release.json
 ```
@@ -142,7 +142,7 @@ adoption. It does not copy an operator-visible enrollment code through chat or
 email. The employee supplies the published Gateway URL and the mailbox that
 received the invitation:
 
-```
+```sh
 ceal session adopt --gateway <https-url> --email <employee-email>
 ```
 
@@ -179,7 +179,7 @@ Ask the Gateway owner to issue the worker enrollment code through its canonical
 operator procedure. This repository neither owns nor documents `cealctl`,
 Gateway-host paths, host names, subjects, or operator sessions. Then locally:
 
-```
+```sh
 ceal session enroll --gateway <https-url> --code-stdin
 ```
 

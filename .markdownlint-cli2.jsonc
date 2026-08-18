@@ -1,0 +1,8 @@
+{
+	// Keep the markdownlint policy local to the Worker checkout. Line length is
+	// not this repository's documentation policy; the other default rules remain
+	// enabled so a new document does not need a baseline entry to become green.
+	"config": {
+		"MD013": false
+	}
+}

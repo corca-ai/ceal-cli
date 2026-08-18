@@ -21,6 +21,7 @@ import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 
 type BuildRunner = (packagePath: string) => void;
 type DistReader<Result> = () => Result;
+type BuildOptions = { readonly buildEnv?: NodeJS.ProcessEnv };
 type LockGeneration = ReturnType<typeof statSync>;
 type Owner = { pid: number; marker: string };
 type LockHandle = { marker: string; generation: LockGeneration };
@@ -94,9 +95,11 @@ const OWNER_WRITE_GRACE_MS = 2_000;
 // every listed package is built. `read` must finish everything it does with
 // `dist` before returning — copying out or packing is fine, holding a path to
 // come back to later is not.
-export function withBuiltPackages<Result>(packagePaths: readonly string[], read: DistReader<Result>): Result {
+
+export function withBuiltPackages<Result>(packagePaths: readonly string[], read: DistReader<Result>, options: BuildOptions = {}): Result {
+	const build = options.buildEnv === undefined ? runNpmBuild : (packagePath: string) => runNpmBuild(packagePath, options.buildEnv);
 	return withDistLock(() => {
-		for (const packagePath of packagePaths) ensurePackageBuilt(packagePath);
+		for (const packagePath of packagePaths) ensurePackageBuilt(packagePath, build);
 		return read();
 	});
 }
@@ -112,7 +115,7 @@ export function ensurePackageBuilt(packagePath: string, build: BuildRunner = run
 	return true;
 }
 
-function runNpmBuild(packagePath: string): void {
+function runNpmBuild(packagePath: string, baseEnv: NodeJS.ProcessEnv = process.env): void {
 	const packageRoot = path.join(REPO_ROOT, packagePath);
 	const cache = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-tsbuildinfo", `${path.basename(packagePath)}.tsbuildinfo`);
 	// TypeScript trusts an incremental record even if somebody removed its emitted
@@ -120,14 +123,15 @@ function runNpmBuild(packagePath: string): void {
 	// fail-closed signal that the cache must go with it.
 	if (!existsSync(path.join(packageRoot, "dist"))) rmSync(cache, { force: true });
 	mkdirSync(path.dirname(cache), { recursive: true });
+	const buildEnv = toolchainEnv(baseEnv);
 	const result = spawnSync(process.execPath, [BUILD_SUPERVISOR], {
 		encoding: "utf8",
-		env: toolchainEnv(),
+		env: buildEnv,
 		input: JSON.stringify({
 			command: "npm",
 			args: ["run", "build", "--", "--incremental", "--tsBuildInfoFile", cache],
 			cwd: packageRoot,
-			env: toolchainEnv(),
+			env: buildEnv,
 			timeoutMs: BUILD_TIMEOUT_MS,
 			terminationGraceMs: BUILD_TERMINATION_GRACE_MS,
 			postKillReportMs: BUILD_POST_KILL_REPORT_MS,

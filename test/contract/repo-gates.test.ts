@@ -100,6 +100,7 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 		"npm run lint",
 		"npm run lint:no-legacy-mjs",
 		"npm run lint:source-nul-bytes",
+		"npm run lint:markdown",
 		"npm run lint:types",
 		"npm run lint:unused",
 		"npm run lint:reachability",
@@ -1934,6 +1935,7 @@ test("the pre-commit hook is checked in and stays the cheap tier", () => {
 		"npm run lint:types",
 		"npm run lint:no-legacy-mjs",
 		"npm run lint:source-nul-bytes:staged",
+		"npm run lint:markdown:staged",
 		"node test/gate-contract-lib.ts",
 		"npm run lint:shell",
 	]) {

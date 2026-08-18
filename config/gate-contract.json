@@ -19,6 +19,7 @@
 						"node test/gate-contract-lib.ts",
 						"npm run lint",
 						"npm run lint:duplicate-literal",
+						"npm run lint:markdown:staged",
 						"npm run lint:no-legacy-mjs",
 						"npm run lint:node-modules-drift",
 						"npm run lint:reachability",

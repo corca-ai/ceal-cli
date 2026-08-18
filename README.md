@@ -355,8 +355,6 @@ do not authenticate a sender, and do not establish release readiness. This
 local archive consumer does not download Actions artifacts or claim cosign
 verification; the release workflow re-verifies the archive digest against the
 lock before building.
-
-
 The package command makes an isolated packed `ceal` consumer candidate; the
 native command builds one host-native `ceal` executable from that internal
 packed consumer (on macOS the Mach-O signature is removed before SEA

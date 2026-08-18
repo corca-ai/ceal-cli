@@ -29,7 +29,7 @@ omitting a capability.
 For every discovered capability:
 
 | Capability | Effect | Target(s) | Contract/readiness | Probe | Outcome | Proof | Cost |
-|---|---|---|---|---|---|---|---|
+|------------|--------|-----------|--------------------|-------|---------|-------|------|
 
 Include absent writes and safety-skipped writes as rows; an unexecuted row is
 not a failure and must not be presented as provider denial.
