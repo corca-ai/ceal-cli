@@ -147,11 +147,11 @@ test-only import is not evidence that an operator path can reach the command.
 `lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
 style being introduced.
 
-Three rules are disabled for reasons JSON cannot carry. Check here before
-re-enabling one:
+Two rules remain disabled for reasons JSON cannot carry. `noNonNullAssertion` is
+enabled: indexed and map reads use an explicit guard or a runtime-checked
+optional access instead of a compile-only assertion. Check here before
+re-enabling either remaining rule:
 
-- `noNonNullAssertion` — `options[index]!` after an explicit bounds check is the
-  idiom throughout this tree.
 - `useTemplate` — every hit is `.join("\n") + "\n"`, which a template literal
   makes worse, not better.
 - `noTemplateCurlyInString` — every hit is `${...}` inside a *shell* script

@@ -215,7 +215,10 @@ function compareVersions(left: string, right: string): number {
 	const leftParts = left.split(".").map(Number);
 	const rightParts = right.split(".").map(Number);
 	for (let index = 0; index < 3; index += 1) {
-		if (leftParts[index] !== rightParts[index]) return leftParts[index]! - rightParts[index]!;
+		const leftPart = leftParts[index];
+		const rightPart = rightParts[index];
+		if (leftPart === undefined || rightPart === undefined) throw new Error("invalid_version_parts");
+		if (leftPart !== rightPart) return leftPart - rightPart;
 	}
 	return 0;
 }

@@ -56,7 +56,9 @@ function findVerifiedInstaller(generationDirectory: string, inventory: string): 
 		}
 	});
 	if (candidates.length !== 1) throw new Error("installer_digest_mismatch");
-	return candidates[0]!;
+	const installerPath = candidates[0];
+	if (installerPath === undefined) throw new Error("installer_digest_mismatch");
+	return installerPath;
 }
 
 function isManagedWorkerGeneration(

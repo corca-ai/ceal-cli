@@ -73,7 +73,8 @@ function assertPortableGuidePath(value: string): void {
 		if (components[0] !== "SKILL.md") throw new Error("invalid_guide_bundle");
 		return;
 	}
-	if (!SUPPORTED_ROOTS.has(components[0]!)) throw new Error("invalid_guide_bundle");
+	const root = components[0];
+	if (root === undefined || !SUPPORTED_ROOTS.has(root)) throw new Error("invalid_guide_bundle");
 }
 
 function readString(bytes: Uint8Array): string {

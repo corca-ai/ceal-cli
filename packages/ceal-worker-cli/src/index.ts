@@ -794,7 +794,10 @@ function isSafeTargetMatch(value: string): boolean {
 	return Buffer.byteLength(value, "utf8") >= 1 && Buffer.byteLength(value, "utf8") <= 2048 && !hasControlCharacter(value);
 }
 function hasControlCharacter(value: string): boolean {
-	return [...value].some((character) => character.codePointAt(0)! <= 0x1f || character.codePointAt(0) === 0x7f);
+	return [...value].some((character) => {
+		const codePoint = character.codePointAt(0);
+		return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+	});
 }
 function parseTargetPageLimit(value: string): number | undefined {
 	return /^(?:[1-9]|[1-5][0-9]|6[0-4])$/u.test(value) ? Number(value) : undefined;
@@ -1589,11 +1592,10 @@ function parseReceiptOptions(options: readonly string[]): { requestRef: string; 
 }
 
 function parseReceiptShowOptions(rest: readonly string[]): { requestRef: string; profileRef?: string } | null {
-	if (!isSafeRequestRef(rest[0])) return null;
+	const requestRef = rest[0];
+	if (!isSafeRequestRef(requestRef)) return null;
 	const profile = extractProfileOption(rest.slice(1));
-	return profile && profile.remaining.length === 0
-		? { requestRef: rest[0]!, ...(profile.value ? { profileRef: profile.value } : {}) }
-		: null;
+	return profile && profile.remaining.length === 0 ? { requestRef, ...(profile.value ? { profileRef: profile.value } : {}) } : null;
 }
 
 function storedProfileOption(options: readonly string[]): string | null {
@@ -1606,8 +1608,9 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 	let value: string | undefined;
 	for (let index = 0; index < options.length; index += 1) {
 		const option = options[index];
+		if (option === undefined) return null;
 		if (option !== "--profile") {
-			remaining.push(option!);
+			remaining.push(option);
 			continue;
 		}
 		const candidate = options[index + 1];

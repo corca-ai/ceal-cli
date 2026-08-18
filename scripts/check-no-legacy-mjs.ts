@@ -67,7 +67,13 @@ export function readPolicy(policyPath: string): string[] {
 		assertPath(file, `policy files[${index}]`);
 	});
 	if (new Set(files).size !== files.length) throw new Error("policy files contain duplicates");
-	if (files.some((file, index) => index > 0 && files[index - 1]! >= file)) throw new Error("policy files must be strictly sorted");
+	if (
+		files.some((file, index) => {
+			const previous = files[index - 1];
+			return index > 0 && previous !== undefined && previous >= file;
+		})
+	)
+		throw new Error("policy files must be strictly sorted");
 	if (files.some((file) => !file.endsWith(".mjs"))) throw new Error("policy files must be .mjs paths");
 	return files;
 }
@@ -124,7 +130,8 @@ export function parseArgs(args: string[]): { write: boolean; repoRoot: string; p
 	let policyPath: string | undefined;
 	const seen = new Set<string>();
 	for (let index = 0; index < args.length; index += 1) {
-		const arg = args[index]!;
+		const arg = args[index];
+		if (arg === undefined) throw new Error("argument_missing");
 		if (arg === "--write-baseline") {
 			if (seen.has(arg)) throw new Error(`duplicate flag: ${arg}`);
 			seen.add(arg);

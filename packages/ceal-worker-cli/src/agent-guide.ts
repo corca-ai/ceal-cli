@@ -76,10 +76,12 @@ export function detectCealAgentGuideHost(environment: Record<string, string | un
 	// running and advise registering it — reinstating the reported bug one level
 	// down. Ambiguity degrades to "undetected", which stays silent.
 	const present = CEAL_AGENT_GUIDE_HOSTS.filter((host) => host.runningMarkers.some((marker) => environment[marker]));
-	return present.length === 1 ? present[0]!.agent : undefined;
+	return present.length === 1 ? present[0]?.agent : undefined;
 }
 
-const DEFAULT_AGENT_GUIDE_HOST = CEAL_AGENT_GUIDE_HOSTS[0]!.agent;
+const defaultAgentGuideHost = CEAL_AGENT_GUIDE_HOSTS.at(0);
+if (defaultAgentGuideHost === undefined) throw new Error("agent_guide_hosts_empty");
+const DEFAULT_AGENT_GUIDE_HOST = defaultAgentGuideHost.agent;
 
 /** Each host's state-root override, keyed the same way the table declares them. */
 export type CealAgentHostOverrides = Partial<Record<CealAgentGuideHost, string | undefined>>;
@@ -231,7 +233,8 @@ export function createCealAgentGuideStore(
 		run: (agent: CealAgentGuideHost, registrationPath: string) => CealAgentGuideState,
 	): CealAgentGuideState => {
 		const target = isCealAgentGuideHost(agent) ? agent : defaultAgent;
-		const host = resolved.get(target)!;
+		const host = resolved.get(target);
+		if (host === undefined) throw new Error("agent_guide_host_unresolved");
 		if (!host.registrationPath) return hostUnresolvedState(target, guidePath, host.rejectedOverride, resolved);
 		return run(target, host.registrationPath);
 	};
@@ -259,7 +262,9 @@ export function createCealAgentGuideStore(
 }
 
 function hostRow(agent: CealAgentGuideHost): (typeof CEAL_AGENT_GUIDE_HOSTS)[number] {
-	return CEAL_AGENT_GUIDE_HOSTS.find((host) => host.agent === agent)!;
+	const row = CEAL_AGENT_GUIDE_HOSTS.find((host) => host.agent === agent);
+	if (row === undefined) throw new Error("agent_guide_host_unknown");
+	return row;
 }
 
 // The missing guide asset is shared by every host, but the answer still names
@@ -361,7 +366,8 @@ function inspectRegistration(
 			return guideIntegrityFailure(guidePath, agent, resolved);
 		}
 	}
-	const registered = resolved.get(agent)?.registrationPath ? registrationMatches(guidePath, resolved.get(agent)!.registrationPath!) : false;
+	const registrationPath = resolved.get(agent)?.registrationPath;
+	const registered = registrationPath === undefined ? false : registrationMatches(guidePath, registrationPath);
 	return {
 		status: "available",
 		agent,

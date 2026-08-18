@@ -21,7 +21,8 @@ export function parseNamedOptions(
 	const flags = new Set<string>();
 	const operands: string[] = [];
 	for (let index = 0; index < options.length; index += 1) {
-		const option = options[index]!;
+		const option = options[index];
+		if (option === undefined) return null;
 		const outcome = consumeNamedOption(option, options[index + 1], valueOptions, flagOptions, values, flags);
 		if (outcome === "invalid") return null;
 		if (outcome === "flag") continue;
@@ -49,7 +50,8 @@ export function unknownNamedOption(
 	flagOptions: ReadonlySet<string>,
 ): string | null {
 	for (let index = 0; index < options.length; index += 1) {
-		const option = options[index]!;
+		const option = options[index];
+		if (option === undefined) return null;
 		if (flagOptions.has(option)) continue;
 		if (valueOptions.has(option)) {
 			// Skip the value so a value that itself looks like an option is not
