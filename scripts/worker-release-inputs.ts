@@ -16,6 +16,7 @@ import { isPromiseLike } from "./lib/promise-like.ts";
 import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
 import {
+	type ArchiveLock,
 	consumeLockedGatewayHandoffArchive,
 	consumeLockedGatewayHandoffArchiveSync,
 	WorkerGatewayHandoffArchiveError,
@@ -153,16 +154,6 @@ type Resolution = {
 	trust_anchor: TrustAnchor;
 	forbidden_release_inputs: string[];
 	non_claims: string[];
-};
-type ArchiveLock = {
-	filename: string;
-	gateway_repository: string;
-	gateway_commit: string;
-	gateway_tag: string;
-	actions_run_id: number;
-	origin: string;
-	archive_filename: string;
-	archive_sha256: string;
 };
 type ArchiveResult = { resolution: Resolution; rawInputs: RawInputs; lock: ArchiveLock };
 type SyncInputValue = { inputs: Resolution; rawInputs: RawInputs };

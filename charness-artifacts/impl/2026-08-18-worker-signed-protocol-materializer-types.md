@@ -25,6 +25,9 @@ Date: 2026-08-18
   route-specific validation remains in its owning validator. Entrypoint
   detection is also one script-library owner used by the two previously
   reported CLI wrappers.
+- The historical `ArchiveLock` type family now uses the existing export from
+  `worker-gateway-handoff-archive.ts`; native-artifact and release-input
+  consumers no longer redeclare that eight-field contract.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
@@ -62,6 +65,10 @@ detector groups them as one shallow family.
   /tmp/ceal-proof-jobs/worker-sha256-focused/result.20260818-worker-sha256-focused-01.json
   (exit_code: 0), covering release-process supervision, release inputs/assets,
   handoff bootstrap/call, package build, and native artifact behavior.
+- The current historical ratchet-shaped scan passed with 132 families after
+  the ArchiveLock owner extraction, exact result
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-06.json
+  (tool version 0.20.0). This is a measured reduction, not historical closure.
 - Focused retained-path source tests: 109/109 passed, including release
   helpers, package/carrier/cache/spool behavior, handoff contracts, and
   native/package build contracts. The exact proof result is
@@ -88,6 +95,8 @@ detector groups them as one shallow family.
   and entrypoint-guard families were resolved by owner extraction. The
   shallow detector margin is now an explicit 8:1 rule with a 13/108 positive
   boundary and 14/108 retained control; it is not a baseline exemption.
+- Historical family 02290b95d0fcd055 was resolved by importing the existing
+  `ArchiveLock` type owner; no new type or runtime dependency was introduced.
 - Whole-file and large shallow families are filtered only when the adapter
   proves the exact detector shape, valid distinct locations, complete/large
   spans, distinct non-partial boundaries, and a low-overlap margin.
@@ -149,7 +158,7 @@ change. No user-facing CLI, release, or runtime behavior changed.
 ## Next Slice
 
 Continue the historical Worker queue with one coherent owner family at a time,
-starting with the next source-level owner review after a fresh family recount.
+starting with the next source-level owner review after the 132-family recount.
 Recount the three-repository gates before moving to Agent work. Do not push,
 tag, publish, or apply a runtime from this local quality lane.
 

@@ -32,6 +32,7 @@ import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-dir
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import type { ArchiveLock } from "./worker-gateway-handoff-archive.ts";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync } from "./worker-release-inputs.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,16 +61,6 @@ type ResolverInput = Parameters<typeof withWorkerReleaseInputsAsync>[1] extends 
 type NativeInputValue = ResolverInput;
 type NativeInputs = NativeInputValue extends { inputs: infer Inputs } ? Inputs : never;
 type RawInputs = NativeInputValue extends { rawInputs: infer Inputs } ? Inputs : never;
-type ArchiveLock = {
-	filename: string;
-	gateway_repository: string;
-	gateway_commit: string;
-	gateway_tag: string;
-	actions_run_id: number;
-	origin: string;
-	archive_filename: string;
-	archive_sha256: string;
-};
 type GuideFile = { path: string; bytes: number; sha256: string; mode: number };
 type GuideBundle = { bytes: Buffer; files: GuideFile[]; sha256: string };
 type NativeSmoke = {
