@@ -309,10 +309,17 @@ the Git index, and the working tree:
 The frozen package suite is part of `test:contract`. One owner test imports
 `scripts/test-support/base64url.mjs`, which sits outside the pinned package
 subtree in the Gateway repository. This repository copies that test-only helper
-at the same path; `protocol-vendor-pin.json` records its owner blob and
-`protocol-vendor-pin.test.ts` hashes the local file against it. The helper is
-not production or release input, but leaving it unbound would make the exact
-frozen suite silently depend on a second freehand implementation.
+at the same path; `protocol-vendor-pin.json` records its owner blob and the
+release-tier `test/protocol-vendor-pin.test.ts` hashes the local file against it.
+The helper is not production or release input, but leaving it unbound would
+make the exact frozen suite silently depend on a second freehand implementation.
+
+The contract-tier `test/contract/protocol-vendor-pin.test.ts` uses synthetic
+lock and quarantine inputs for validator/error-branch coverage. The release-tier
+`test/protocol-vendor-pin.test.ts` owns the four assertions that read the real
+checkout, Git tree/index, pin, lock, or helper blob. That placement keeps live
+repository binding out of `check:unit` while retaining it in `test:release` and
+the full `test:tiers` path.
 
 *source* against *vendored* is the drift check, and it fails on a committed edit
 (the recorded tree stops matching `HEAD:packages/ceal-protocol`) and on an
@@ -341,12 +348,12 @@ keep a dead declaration alive by aiming it at `README.md`.
 
 Development motion survives in two scopes. `npm run check:unit` remains the
 ordinary iteration gate: contract behavior that must reach past the ship guard
-runs against one shared scratch Git repository whose vendored tree, pin, and
-lock are genuinely converged. Separate guard-reachability tests prove the
-release-input chokepoint fails on a pin error before inspecting arguments and
-acceptance fails on an exact divergent fixture before resolving an installed
-binary. This keeps downstream contract branches observable without adding a
-production bypass or claiming that the live checkout is shippable.
+uses synthetic/injected inputs, while the live checkout binding stays in the
+release tier. Separate guard-reachability tests prove the release-input
+chokepoint fails on a pin error before inspecting arguments and acceptance fails
+on an exact divergent fixture before resolving an installed binary. This keeps
+downstream contract branches observable without adding a production bypass or
+claiming that the live checkout is shippable.
 
 Feedback timing used to be asymmetric: there was no `.githooks/pre-commit`, so a
 TypeScript error first appeared at pre-push, after the commit that carried it had
@@ -379,7 +386,7 @@ both an unset `core.hooksPath` and a hook whose executable bit is missing — gi
 skips a hook it cannot execute and announces it only under `advice.ignoredHook`.
 
 `npm run check:protocol-dev` is the narrower Protocol/client path. It runs the
-client suite plus `verify-protocol-vendor-pin.mjs --development`, which reports
+client suite plus `verify-protocol-vendor-pin.ts --development`, which reports
 the live pin without the shippability assertion and stamps its own output
 `proof_level: development_only` with the non-claim spelled out. Neither
 development command is release or installed-worker proof, and no release,
@@ -409,9 +416,9 @@ that nothing then called. Reproduced on 2026-08-08.
 same input walks past it and fails on the next argument check instead. The
 acceptance suite has the sibling proof: its deliberately divergent scratch pin
 must fail before an absent binary is resolved. Two distinguishable outcomes are
-all a falsification needs. The divergence verdicts stay in
-`protocol-vendor-pin.test.ts`, which owns them properly, while the shared
-converged fixture owns the repeated contract setup.
+all a falsification needs. The injected divergence verdicts stay in
+`test/contract/protocol-vendor-pin.test.ts`, while the real checkout-binding
+positives live in `test/protocol-vendor-pin.test.ts` and remain release-owned.
 
 The source-shape gate in `repo-gates.test.ts` stays, because it still catches the
 easy case in `worker-acceptance-packet.ts`. Do not treat it as the guard's

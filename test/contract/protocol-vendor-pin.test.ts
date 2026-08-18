@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import {
 	assertShippableProtocolVendorPin,
@@ -11,7 +10,6 @@ import {
 	validateProtocolVendorPin,
 } from "../../scripts/verify-protocol-vendor-pin.ts";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 type ValidationOptions = Parameters<typeof validateProtocolVendorPin>[0];
 type ProtocolVendorPinFixture = {
 	schema_version: string;
@@ -41,12 +39,6 @@ function isGatewayHandoffLock(value: unknown): value is GatewayHandoffLock {
 	);
 }
 
-function readJson<T>(filePath: string, isValue: (value: unknown) => value is T): T {
-	const value: unknown = JSON.parse(readFileSync(filePath, "utf8"));
-	if (!isValue(value)) throw new TypeError(`invalid JSON fixture: ${filePath}`);
-	return value;
-}
-
 function clone<T>(value: T, isValue: (candidate: unknown) => candidate is T): T {
 	const cloned: unknown = JSON.parse(JSON.stringify(value));
 	if (!isValue(cloned)) throw new TypeError("invalid cloned JSON fixture");
@@ -61,7 +53,17 @@ function isProtocolVendorPinError(error: unknown): error is InstanceType<typeof 
 	return error instanceof ProtocolVendorPinError;
 }
 
-const LOCK = readJson(path.join(ROOT, "gateway-protocol-handoff-lock.json"), isGatewayHandoffLock);
+const FIXTURE_ROOT = mkdtempSync(path.join(tmpdir(), "ceal-protocol-vendor-pin-"));
+mkdirSync(path.join(FIXTURE_ROOT, "docs"), { recursive: true });
+writeFileSync(path.join(FIXTURE_ROOT, "docs", "protocol-quarantine.md"), "synthetic fixture quarantine\n");
+test.after(() => rmSync(FIXTURE_ROOT, { recursive: true, force: true }));
+
+const LOCK: GatewayHandoffLock = Object.freeze({
+	gateway: {
+		commit: "c".repeat(40),
+		protocol_tree: "d".repeat(40),
+	},
+});
 
 // Every divergence-shaped case below runs off this local fixture rather than off
 // the repository's real protocol-vendor-pin.json, and that is the point. The
@@ -86,8 +88,8 @@ const DIVERGED: Readonly<ProtocolVendorPinFixture> = Object.freeze({
 		protocol_tree: LOCK.gateway.protocol_tree,
 		reason: "fixture divergence",
 		disposition_owner: "vinc",
-		// A real tracked file, because the gate requires one stable quarantine
-		// record rather than dated cross-repository correspondence.
+		// A synthetic file at the exact owner path, because the gate requires one
+		// stable quarantine record rather than dated cross-repository correspondence.
 		disposition_request: "docs/protocol-quarantine.md",
 	},
 	non_claims: ["fixture"],
@@ -95,12 +97,13 @@ const DIVERGED: Readonly<ProtocolVendorPinFixture> = Object.freeze({
 
 function validateFixture(overrides: ValidationOptions = {}) {
 	return validateProtocolVendorPin({
-		repoRoot: ROOT,
+		repoRoot: FIXTURE_ROOT,
 		pin: DIVERGED,
 		lock: LOCK,
 		vendoredTree: DIVERGED.source.tree,
 		vendoredDirty: [],
 		vendoredHidden: [],
+		requestTracked: true,
 		...overrides,
 	});
 }
@@ -124,26 +127,6 @@ function expectPass(overrides: ValidationOptions = {}) {
 	return validateFixture(overrides);
 }
 
-// The check that actually binds this repository: no injection, no fixture. If
-// someone edits or re-syncs packages/ceal-protocol without moving the pin, this
-// is the assertion that goes red.
-test("the vendored protocol copy matches its recorded Gateway source", () => {
-	const result = validateProtocolVendorPin({ repoRoot: ROOT });
-	assert.equal(result.vendored.tree, result.source.tree);
-	assert.equal(result.shipped.gateway_commit, LOCK.gateway.commit);
-});
-
-test("the frozen Protocol suite's out-of-subtree helper matches its recorded owner blob", () => {
-	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
-	assert.deepEqual(pin.test_support, {
-		source_path: "scripts/test-support/base64url.mjs",
-		vendored_path: "scripts/test-support/base64url.mjs",
-		blob: "76ed97276986f2416e7bed997f774b6b14fe8951",
-	});
-	const observed = execFileSync("git", ["hash-object", pin.test_support.vendored_path], { cwd: ROOT, encoding: "utf8" }).trim();
-	assert.equal(observed, pin.test_support.blob);
-});
-
 // The converged end state has to stay green, or this suite argues against the
 // disposition it is waiting for.
 test("a pin whose proof and shipped trees have converged passes as agreed", () => {
@@ -164,7 +147,7 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 	assert.equal(result.diverged, false);
 	assert.equal(
 		assertShippableProtocolVendorPin({
-			repoRoot: ROOT,
+			repoRoot: FIXTURE_ROOT,
 			pin: converged,
 			lock: LOCK,
 			vendoredTree: converged.source.tree,
@@ -172,23 +155,6 @@ test("a pin whose proof and shipped trees have converged passes as agreed", () =
 			vendoredHidden: [],
 		}).diverged,
 		false,
-	);
-});
-
-// Moving to the protocol-only handoff left `gateway-handoff-lock.json` sitting in
-// the root, tracked and read by nothing: every gate was green, because a gate
-// that only reads the lock the pin names cannot notice a second one. It was not
-// harmless — `docs/macos-worker-runbook.md` told an operator to verify a download
-// against `archive.sha256` in that file, and the file still answered, with the
-// digest of a Protocol no release lane binds any more. A superseded lock is a
-// working procedure pointing at the wrong bytes.
-test("the repository root carries exactly the one protocol handoff lock the pin names", () => {
-	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
-	const locks = readdirSync(ROOT).filter((name) => /handoff-lock\.json$/u.test(name));
-	assert.deepEqual(
-		locks.filter((name) => name.includes("protocol")).sort(),
-		[pin.shipped.lock_file],
-		"a protocol handoff lock the pin does not name is a stale procedure input, not a spare copy",
 	);
 });
 
@@ -305,20 +271,6 @@ test("a pin missing its schema, identities, or non-claims is rejected", () => {
 	}
 });
 
-// The live pin's own consistency, kept separate from the divergence-shaped cases
-// above so this is the only assertion that has to change when the disposition
-// lands. It states what must hold whichever way that goes.
-test("the repository's own pin agrees with the lock it was written about", () => {
-	const pin = JSON.parse(readFileSync(path.join(ROOT, "protocol-vendor-pin.json"), "utf8"));
-	assert.equal(pin.shipped.lock_file, "gateway-protocol-handoff-lock.json");
-	assert.equal(pin.shipped.gateway_commit, LOCK.gateway.commit, "the pin must be written about the lock this repository actually carries");
-	assert.equal(
-		pin.shipped.status === "diverged",
-		pin.shipped.protocol_tree !== pin.source.tree,
-		"the declared status and the recorded trees must agree",
-	);
-});
-
 // Fatality lives here, in the fixture tier, for the reason the header gives.
 test("a diverged pin is refused as a release input, however well declared", () => {
 	// DIVERGED is a complete, correctly declared divergence: reason, owner, and a
@@ -328,12 +280,13 @@ test("a diverged pin is refused as a release input, however well declared", () =
 	assert.throws(
 		() =>
 			assertShippableProtocolVendorPin({
-				repoRoot: ROOT,
+				repoRoot: FIXTURE_ROOT,
 				pin: DIVERGED,
 				lock: LOCK,
 				vendoredTree: DIVERGED.source.tree,
 				vendoredDirty: [],
 				vendoredHidden: [],
+				requestTracked: true,
 			}),
 		(error) => {
 			if (!isProtocolVendorPinError(error)) return false;
@@ -371,12 +324,13 @@ test("an identical subtree under a different Gateway commit is a divergence, not
 		vendoredTree: identicalSubtree.source.tree,
 		vendoredDirty: [],
 		vendoredHidden: [],
+		requestTracked: true,
 	};
 	// It is a well-formed pin: `validateProtocolVendorPin` accepts it and reports
 	// the divergence rather than rejecting the shape.
-	assert.equal(validateProtocolVendorPin({ repoRoot: ROOT, ...injected }).diverged, true);
+	assert.equal(validateProtocolVendorPin({ repoRoot: FIXTURE_ROOT, ...injected }).diverged, true);
 	assert.throws(
-		() => assertShippableProtocolVendorPin({ repoRoot: ROOT, ...injected }),
+		() => assertShippableProtocolVendorPin({ repoRoot: FIXTURE_ROOT, ...injected }),
 		(error) => {
 			if (!isProtocolVendorPinError(error)) return false;
 			assert.equal(error.code, "proof_shipment_protocol_divergence");

@@ -106,11 +106,12 @@ separately approved boundaries.
 - `npm run check:unit` is the aggregate development iteration gate. Its one
   checkout build is followed by the internal `test:contract:built` lane, while
   package behavior tests and `npm run check:protocol-dev` provide no-build
-  source feedback. Separate reachability tests prove the production ship guards
-  refuse divergence before reading release inputs or an installed binary. None
-  of these local source/emitted checks is installed-worker, release, or live-
-  serving proof; the full gate, release builders, packing, and acceptance stay
-  blocked on the live diverged pin.
+  source feedback. The live Protocol vendor-pin checkout assertions belong to
+  the root `test:release` tier, not `check:unit`; separate reachability tests
+  prove the production ship guards refuse divergence before reading release
+  inputs or an installed binary. None of these local source/emitted checks is
+  installed-worker, release, or live-serving proof; the full gate, release
+  builders, packing, and acceptance stay blocked on the live diverged pin.
 - Final-gate quality work made audit deadlines deterministic in tests without
   changing the production bound, removed discarded V8 coverage from receipt
   process-gate children, separated their exact exclusion oracle from production
