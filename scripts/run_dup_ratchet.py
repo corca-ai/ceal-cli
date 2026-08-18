@@ -141,6 +141,31 @@ def _is_low_overlap_shallow_family(repo_root: Path, family: dict) -> bool:
     return minimum_span >= 100 and shared * 8 < minimum_span
 
 
+def _is_same_file_boundary_overlap_family(repo_root: Path, family: dict) -> bool:
+    """Filter a detector span that crosses into the next same-file helper."""
+    data = _matching_family_data(repo_root, family, extraction_shape="extract-method-from-block", surface="default", witness="copy-paste")
+    if data is None:
+        return False
+    shared, locations = data
+    if len(locations) != 2 or len({file for file, _start, _end in locations}) != 1:
+        return False
+    first, second = sorted(locations, key=lambda location: (location[1], location[2]))
+    if not (first[1] < second[1] <= first[2] < second[2]):
+        return False
+    overlap = first[2] - second[1] + 1
+    metrics = family.get("metrics")
+    removable = family.get("removable")
+    rep_lines = family.get("rep_lines")
+    if rep_lines is None and isinstance(metrics, dict):
+        rep_lines = metrics.get("rep_lines")
+    if not isinstance(removable, (int, float)) or isinstance(removable, bool):
+        return False
+    if not isinstance(rep_lines, int) or isinstance(rep_lines, bool):
+        return False
+    first_span = first[2] - first[1] + 1
+    return overlap <= 8 and first_span >= 50 and shared >= overlap and removable == shared and rep_lines == first_span
+
+
 def _is_import_header_span(repo_root: Path, file: str, start: int, end: int) -> bool:
     try:
         lines = (repo_root.resolve() / file).read_text(encoding="utf-8").splitlines()
@@ -396,10 +421,11 @@ def _collect_code_families(repo_root: Path, module: dict, scope_paths: list[str]
     families = [
         family
         for family in families
-        if not (
-            _is_low_overlap_whole_file_family(repo_root, family)
-            or _is_low_overlap_shallow_family(repo_root, family)
-            or _is_import_header_family(repo_root, family)
+            if not (
+                _is_low_overlap_whole_file_family(repo_root, family)
+                or _is_low_overlap_shallow_family(repo_root, family)
+                or _is_same_file_boundary_overlap_family(repo_root, family)
+                or _is_import_header_family(repo_root, family)
             or _is_similar_helper_family(repo_root, family, kind="validator")
             or _is_similar_helper_family(repo_root, family, kind="zero_overlap")
             or _is_repeated_json_record_guard(repo_root, family)

@@ -31,6 +31,13 @@ Date: 2026-08-18
 - The historical `readJson` family now has one `scripts/lib/read-json.ts`
   reader factory. It owns file decoding and JSON parsing while each caller keeps
   its domain-specific error class, code, and invalid-input message.
+- The historical Gateway Protocol fixture provenance shape now has one
+  `test/protocol-artifact-provenance.ts` owner. Its callback boundary keeps the
+  synthetic tarball fixture and the built-package snapshot distinct while
+  sharing only producer scope, marker, and provenance sidecar writes.
+- Buffered and streaming Unix-socket transport paths now share one cleanup owner
+  for timer and abort-listener release; response lifecycle and close/finally
+  behavior remain in their respective transport functions.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
@@ -50,6 +57,11 @@ detector groups them as one shallow family.
 - Retained-path behavior: test/contract/worker-release-inputs.test.ts, the
   release-helper contract, and the Worker package/carrier tests.
 - JSON reader contract: test/contract/read-json.test.ts.
+- Protocol fixture provenance: test/protocol-artifact-provenance.ts,
+  test/contract/worker-release-inputs.test.ts, and
+  test/worker-release-package-fixture.ts.
+- Transport cleanup behavior: packages/ceal-worker-cli/src/private-worker-transport.ts
+  and its leased-consumer transport tests.
 - Duplicate adapter: scripts/run_dup_ratchet.py and
   scripts/run-dup-ratchet.test.ts.
 - Worker-owned gate: scripts/check-dup-ratchet.ts and
@@ -70,7 +82,7 @@ detector groups them as one shallow family.
   (exit_code: 0; it includes the direct SHA-256 owner contract), covering
   release-helper, release-process supervision, release inputs/assets, handoff
   bootstrap/call, package build, and native artifact behavior.
-- The current historical ratchet-shaped scan passed with 132 families after
+- The earlier ArchiveLock-slice historical ratchet-shaped scan passed with 132 families after
   the ArchiveLock owner extraction, exact result
   /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-07.json
   (tool version 0.20.0). This was the previous slice's measured count, not
@@ -81,20 +93,23 @@ detector groups them as one shallow family.
   handoff archive/bootstrap/call, package, and native-artifact paths.
 - The current Worker TypeScript tools ratchet passed with exit_code 0 and no
   `baseline_reduction_required` output at
-  /tmp/ceal-proof-jobs/worker-lint-types-read-json/result.20260818-worker-lint-types-read-json-04.json.
+  /tmp/ceal-proof-jobs/worker-lint-types-read-json/result.20260818-worker-lint-types-read-json-05.json;
+  the log still contains `error TS` diagnostics as a positive control, so this
+  is not a claim that the remaining type baseline is empty.
 - The current historical ratchet-shaped scan passed with 132 families at
-  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-10.json
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-11.json
   (tool version 0.20.0). The count is not monotonic when a test contract changes
   detector family boundaries; it is a measured inventory, not historical closure.
-- The exact former readJson family fingerprint `45c5c21929a78b64` has zero
-  current matches, while the same scan returned the positive-control family
-  `d95ac33768d18b97`; the control proof is recorded at
-  /tmp/ceal-proof-jobs/worker-read-json-family-control/result.20260818-worker-read-json-family-control-02.json.
-- The current historical candidate payload identifies the next test fixture
-  family `d95ac33768d18b97`, the exact `isRecord` family
-  `8c5ae173bd9d0063`, and the remaining release/import/helper families; exact
-  payload result:
-  /tmp/ceal-proof-jobs/worker-historical-candidates/result.20260818-worker-historical-candidates-04.json.
+- The exact former Protocol provenance fixture fingerprint
+  `d95ac33768d18b97` has zero current matches, while the same scan returns the
+  positive-control `isRecord` family `8c5ae173bd9d0063` at three locations; the
+  control payload is recorded at
+  /tmp/ceal-proof-jobs/worker-provenance-family-control/result.20260818-worker-provenance-family-control-01.json.
+- The current Protocol provenance focused proof passed 51/52 tests with one
+  skipped test and no failures at
+  /tmp/ceal-proof-jobs/worker-provenance-focused/result.20260818-worker-provenance-focused-02.json.
+- The current Unix-socket transport focused proof passed 27/27 tests at
+  /tmp/ceal-proof-jobs/worker-transport-focused/result.20260818-worker-transport-focused-01.json.
 - Focused retained-path source tests: 109/109 passed, including release
   helpers, package/carrier/cache/spool behavior, handoff contracts, and
   native/package build contracts. The exact proof result is
@@ -103,10 +118,11 @@ detector groups them as one shallow family.
   test/run-source-tests.ts invocation recorded in the goal Claim Ledger.
 - node --test scripts/run-dup-ratchet.test.ts: passed with positive and
   negative controls for whole-file, shallow, import-header, helper-detector,
-  zero-overlap, repeated-JSON-guard, and small-test-setup rules.
+  zero-overlap, repeated-JSON-guard, small-test-setup, and same-file transport
+  boundary rules, including both removable-metric and non-overlap controls.
 - npm run check:duplication: passed through the Worker proof route with
   fixable_ceiling=0 <= floor_F=0, exact result
-  /tmp/ceal-proof-jobs/worker-dup-read-json/result.20260818-worker-dup-read-json-07.json
+  /tmp/ceal-proof-jobs/worker-dup-provenance/result.20260818-worker-dup-provenance-09.json
   (exit_code: 0). The adapter contract also passes its positive, negative,
   and packaged-scan malformed-input controls.
 - npm run lint, ruff check scripts/run_dup_ratchet.py, and git diff --check:
@@ -132,6 +148,18 @@ detector groups them as one shallow family.
   was not edited.
 - Historical family 02290b95d0fcd055 was resolved by importing the existing
   `ArchiveLock` type owner; no new type or runtime dependency was introduced.
+- Historical family d95ac33768d18b97 was resolved by sharing only the Protocol
+  fixture provenance/marker/sidecar owner; the synthetic and built-package pack
+  callbacks remain separate. The current scan has zero matches for that exact
+  fingerprint, with `8c5ae173bd9d0063` retained as a positive control.
+- The repeated timer/listener cleanup in the buffered and streaming transport
+  paths is now owned by `clearUnixSocketCleanup` at
+  `packages/ceal-worker-cli/src/private-worker-transport.ts:244-251`.
+- Family 75c41de299d5412b was a detector-only same-file span crossing the
+  streaming transport into `boundedResponseStream`; it is filtered only by the
+  exact overlap/shape/metric contract at `scripts/run_dup_ratchet.py:144-166`.
+  The adapter test keeps both a removable-metric mismatch and a non-overlap
+  geometry control visible.
 - Whole-file and large shallow families are filtered only when the adapter
   proves the exact detector shape, valid distinct locations, complete/large
   spans, distinct non-partial boundaries, and a low-overlap margin.
@@ -192,6 +220,13 @@ applied.
   The bounded duplicate-precision reviewer then re-read the factory and four
   callers, found no blocker or fragile threshold, and confirmed the current
   duplicate gate and former-family control. Both reviews are complete.
+- Protocol fixture, transport, and detector fresh-eye: Avicenna re-read the
+  frozen current source and found no blocker. It confirmed that the provenance
+  helper shares only the marker/sidecar shape, that synthetic and built-package
+  pack paths remain separate, and that `clearUnixSocketCleanup` preserves the
+  existing timer/listener and stream close/finally lifecycle. It also confirmed
+  the adapter's fail-closed identity checks and precise same-file boundary
+  conditions. The suggested non-overlap geometry control was added and passed.
 
 ## Deliberately Not Doing
 
@@ -213,9 +248,10 @@ change. No user-facing CLI, release, or runtime behavior changed.
 ## Next Slice
 
 Continue the historical Worker queue with one coherent owner family at a time,
-starting with the next source-level owner review after the 132-family recount.
-Recount the three-repository gates before moving to Agent work. Do not push,
-tag, publish, or apply a runtime from this local quality lane.
+starting with the exact `isRecord` family `8c5ae173bd9d0063` confirmed by the
+current positive-control scan, followed by the remaining release/helper/type
+families. Recount the three-repository gates before moving to Agent work.
+Do not push, tag, publish, or apply a runtime from this local quality lane.
 
 ## Completion Categories
 

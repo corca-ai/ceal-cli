@@ -34,6 +34,7 @@ try:
     (test_root / "setup-control.ts").write_text("fs.mkdirSync(root);\\nwriteFixture();\\ncloseFixture();\\n", encoding="utf-8")
     (source / "a.ts").write_text("import { a } from \\"a\\";\\n" + "line;\\n" * 199, encoding="utf-8")
     (source / "b.ts").write_text("import { b } from \\"b\\";\\n" + "line;\\n" * 199, encoding="utf-8")
+    (source / "same-file.ts").write_text("line;\\n" * 120, encoding="utf-8")
     whole = {
         "extraction_shape": "extract-method-from-block",
         "surface": "shallow",
@@ -55,6 +56,27 @@ try:
         ],
         "shared": 9,
     }
+    same_file_overlap = {
+        "extraction_shape": "extract-method-from-block",
+        "surface": "default",
+        "witness": "copy-paste",
+        "scope": "prod",
+        "family_fingerprint": "same-file-overlap",
+        "family_member_hashes": ["same-file-overlap"],
+        "shared": 8,
+        "removable": 8,
+        "rep_lines": 93,
+        "metrics": {"dup_lines": 64, "removable": 8, "rep_lines": 93},
+        "locations": [
+            {"file": "src/same-file.ts", "start": 1, "end": 93},
+            {"file": "src/same-file.ts", "start": 89, "end": 120},
+        ],
+    }
+    same_file_overlap_control = {**same_file_overlap, "family_fingerprint": "same-file-overlap-control", "removable": 7, "metrics": {"dup_lines": 64, "removable": 7, "rep_lines": 93}}
+    same_file_overlap_geometry_control = {**same_file_overlap, "family_fingerprint": "same-file-overlap-geometry-control", "locations": [
+        {"file": "src/same-file.ts", "start": 1, "end": 93},
+        {"file": "src/same-file.ts", "start": 94, "end": 120},
+    ]}
     near_threshold = {
         **shallow,
         "family_fingerprint": "near-threshold",
@@ -147,7 +169,7 @@ try:
         @staticmethod
         def scan_families(repo_root, scope_paths):
             return [
-                whole, shallow, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
+                whole, shallow, same_file_overlap, same_file_overlap_control, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
                 validator, validator_control, zero_overlap, zero_overlap_control,
                 repeated_json, repeated_json_control, small_test_setup, small_test_setup_control,
             ], None, "0.20.0"
@@ -185,6 +207,9 @@ try:
         "whole": module["_is_low_overlap_whole_file_family"](root, whole),
         "whole_partial": module["_is_low_overlap_whole_file_family"](root, partial),
         "shallow": module["_is_low_overlap_shallow_family"](root, shallow),
+        "same_file_overlap": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap),
+        "same_file_overlap_control": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap_control),
+        "same_file_overlap_geometry_control": module["_is_same_file_boundary_overlap_family"](root, same_file_overlap_geometry_control),
         "near_threshold": module["_is_low_overlap_shallow_family"](root, near_threshold),
         "near_threshold_control": module["_is_low_overlap_shallow_family"](root, near_threshold_control),
         "imports": module["_is_import_header_family"](root, import_family),
@@ -220,6 +245,7 @@ finally:
 			"near-threshold-control",
 			"partial",
 			"repeated-json-control",
+			"same-file-overlap-control",
 			"shape",
 			"small-test-setup-control",
 			"validator-control",
@@ -228,6 +254,9 @@ finally:
 		whole: true,
 		whole_partial: false,
 		shallow: true,
+		same_file_overlap: true,
+		same_file_overlap_control: false,
+		same_file_overlap_geometry_control: false,
 		near_threshold: true,
 		near_threshold_control: false,
 		imports: true,

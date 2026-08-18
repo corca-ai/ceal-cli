@@ -19,6 +19,12 @@ import {
 	withWorkerReleaseDevelopmentInputsAsync,
 } from "../../scripts/worker-release-inputs.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
+import {
+	createProtocolArtifactFixture,
+	PROTOCOL_HANDOFF_MARKER_CONTENTS,
+	PROTOCOL_HANDOFF_MARKER_NAME,
+	type ProtocolArtifactProvenance,
+} from "../protocol-artifact-provenance.ts";
 import { type ReleasePackageRecordInput, releasePackageRecord } from "../release-package-record.ts";
 import { scratchDir } from "../scratch-dir.ts";
 
@@ -44,13 +50,7 @@ type HandoffFixture = {
 	handoffManifest: string;
 	protocol: PackedPackage;
 	producer: Producer;
-	provenance: {
-		schema_version: string;
-		proof_level: "local_state";
-		writes_external: false;
-		source: Omit<Producer, "scoped_paths_clean"> & { package_path: string };
-		artifact: { package: string; version: string; filename: string; sha256: string; npm_integrity: string; exports: string[] };
-	};
+	provenance: ProtocolArtifactProvenance;
 	control: ControlConformance;
 	expectedHandoffSha256?: string;
 };
@@ -80,9 +80,6 @@ function resolveContractInputs(options: ContractInputOptions) {
 // future artifact consumption fail here for a reason that has nothing to do with
 // the code under test.
 const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages/ceal-protocol/package.json"), "utf8")).version;
-const MARKER_NAME = ".ceal-protocol-handoff-owner";
-const MARKER_CONTENTS = "ceal.gateway_protocol_handoff.v1\n";
-
 test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context: TestContext) => {
 	const scratch = scratchDir(context, "ceal-signed-protocol-source-mutation-");
 	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
@@ -188,10 +185,10 @@ test("worker release inventory accepts the v3 through v6 Gateway control conform
 
 test("worker release inventory rejects stale sidecars, an unbound control conformance, and source fallback", (context: TestContext) => {
 	const fixture = handoffFixture(context);
-	const marker = path.join(fixture.root, MARKER_NAME);
+	const marker = path.join(fixture.root, PROTOCOL_HANDOFF_MARKER_NAME);
 	writeFileSync(marker, "unexpected\n");
 	assert.throws(() => resolveContractInputs(fixture), hasCode("handoff_marker_mismatch"));
-	writeFileSync(marker, MARKER_CONTENTS);
+	writeFileSync(marker, PROTOCOL_HANDOFF_MARKER_CONTENTS);
 
 	// The control conformance is a Gateway-owned member this repository does not
 	// interpret. Not interpreting it is not the same as not binding it: bytes the
@@ -385,37 +382,13 @@ test("release CLI rejects raw handoff arguments and requires the reviewed archiv
 
 function handoffFixture(context: TestContext): HandoffFixture {
 	const root = scratchDir(context, "ceal-worker-release-inputs-");
-	const protocol = packedPackage(root, {
-		name: "@corca-ai/ceal-protocol",
-		exports: { ".": "./dist/index.js", "./conformance": "./dist/conformance.js" },
-		files: { "dist/index.js": "export const protocol = '1.3.0';\n", "dist/conformance.js": "export const conformance = true;\n" },
-	});
-	const producer: Producer = {
-		...CONTRACT_REPO.gateway,
-		scoped_paths_clean: true,
-	};
-	writeFileSync(path.join(root, MARKER_NAME), MARKER_CONTENTS);
-	const provenance: HandoffFixture["provenance"] = {
-		schema_version: "ceal.gateway_protocol_artifact.v1",
-		proof_level: "local_state",
-		writes_external: false,
-		source: {
-			repository: producer.repository,
-			commit: producer.commit,
-			tree: producer.tree,
-			protocol_tree: producer.protocol_tree,
-			package_path: "packages/ceal-protocol",
-		},
-		artifact: {
-			package: protocol.name,
-			version: protocol.version,
-			filename: protocol.filename,
-			sha256: protocol.sha256,
-			npm_integrity: protocol.integrity,
-			exports: protocol.declared_exports,
-		},
-	};
-	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
+	const { producer, protocol, provenance, protocolProvenance } = createProtocolArtifactFixture(root, CONTRACT_REPO.gateway, () =>
+		packedPackage(root, {
+			name: "@corca-ai/ceal-protocol",
+			exports: { ".": "./dist/index.js", "./conformance": "./dist/conformance.js" },
+			files: { "dist/index.js": "export const protocol = '1.3.0';\n", "dist/conformance.js": "export const conformance = true;\n" },
+		}),
+	);
 	const controlConformance = path.join(root, "gateway-leased-consumer-control-conformance.json");
 	const handoffManifest = path.join(root, "gateway-protocol-handoff.json");
 	const fixture: HandoffFixture = {

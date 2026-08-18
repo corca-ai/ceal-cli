@@ -8,6 +8,7 @@ import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
+import { createProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
 import { releasePackageRecord } from "./release-package-record.ts";
 import { withBuiltPackages } from "./repo-build.ts";
 
@@ -23,34 +24,9 @@ export function packedProtocolFixture(context) {
 	// from the fixture's owned `packages/ceal-client` source themselves.
 	const fixtureRepo = withBuiltPackages(["packages/ceal-protocol"], () => createProtocolRepoFixture({ releaseBuild: true }));
 	context.after(fixtureRepo.cleanup);
-	const protocol = packPackage(root, fixtureRepo.root, "packages/ceal-protocol", [".", "./conformance"]);
-	const producer = {
-		...fixtureRepo.gateway,
-		scoped_paths_clean: true,
-	};
-	writeFileSync(path.join(root, ".ceal-protocol-handoff-owner"), "ceal.gateway_protocol_handoff.v1\n");
-	const provenance = {
-		schema_version: "ceal.gateway_protocol_artifact.v1",
-		proof_level: "local_state",
-		writes_external: false,
-		source: {
-			repository: producer.repository,
-			commit: producer.commit,
-			tree: producer.tree,
-			protocol_tree: producer.protocol_tree,
-			package_path: "packages/ceal-protocol",
-		},
-		artifact: {
-			package: protocol.name,
-			version: protocol.version,
-			filename: protocol.filename,
-			sha256: protocol.sha256,
-			npm_integrity: protocol.integrity,
-			exports: protocol.declared_exports,
-		},
-	};
-	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
-	writeFileSync(protocolProvenance, `${JSON.stringify(provenance)}\n`);
+	const { producer, protocol, provenance, protocolProvenance } = createProtocolArtifactFixture(root, fixtureRepo.gateway, () =>
+		packPackage(root, fixtureRepo.root, "packages/ceal-protocol", [".", "./conformance"]),
+	);
 	const controlConformance = path.join(root, "gateway-leased-consumer-control-conformance.json");
 	writeFileSync(
 		controlConformance,
