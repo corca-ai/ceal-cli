@@ -13,9 +13,10 @@ activation command.
   performance slice, D1a source-NUL gate port, Worker Markdown gate, D1 receiving-local
   import hard-failure gate, Worker/Agent Secretlint gates, Agent-local duplicate
   detector, and all seven Lane B compiler-option slices across Worker and Agent have
-  implementation, targeted proof, and local commits. Lane C and D2 native
-  explicit-any enforcement are implemented and locally proven; the full Gateway
-  loader-rewrite ratchet remains deliberately unported.
+  implementation, targeted proof, and local commits. Lane C, D2 native
+  explicit-any enforcement, and E's paid-zero baseline cleanup are implemented
+  and locally proven; the full Gateway loader-rewrite ratchet remains deliberately
+  unported.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -33,8 +34,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: complete E's zero-entry baseline cleanup, keeping the A → D1 →
-  B → C → D2 → E dependency order intact.
+- Next action: enter closeout, keeping the A → D1 → B → C → D2 → E dependency
+  order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -258,8 +259,8 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
 | D2 | Close explicit-any port | receiving closure and mutation/restore | completed — native Worker/Agent lint ownership and mutation/restore proof |
-| E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | in progress — zero-entry inventory captured; baseline edit and post-edit proof pending |
-| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | pending |
+| E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | completed — 273 zero-valued entries removed; positive keys/counts and TS7/TS6 lanes preserved |
+| Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | in progress |
 
 Order is A → D1 → B → C → D2 → E. If Lane A fails, dependent
 implementation stops with a falsifiable Slice Log reason; no second deletion
@@ -842,10 +843,30 @@ compiler replacement proof.
   controls are `scripts/inventory-dual-implementation.ts::TS7006` in
   source-behavior and `scripts/service-runtime-resolution-target.ts::TS2322`
   in immutable-artifact for both compiler baselines.
-- Disposition before edit: the zero-key inventory is the only authorized
-  removal set. The exact keys will be recorded in Agent-owned quality evidence;
-  non-zero key sets and counts will be compared before and after, then TS7,
-  TS6, quality-contract, and baseline-boundary tests will be rerun.
+- Evidence: Agent quality artifact
+  `charness-artifacts/quality/2026-08-19-agent-typecheck-baseline-zero-entry-inventory-20260819.md`
+  (commit `aa687b9`) records all 273 exact zero-valued keys. Agent commit
+  `4ea79f4` removes only those keys from both baselines; the pre/post comparison
+  found `bad_removed=0`, `changed=0`, and every current histogram has zero
+  zero-valued entries. Positive diagnostics remain TS7/TS6
+  `source_behavior=279` and `immutable_artifact=100`.
+- Proof: pre-edit proof-job results
+  `/tmp/ceal-proof-jobs/agent-lane-e-tools-pre/result.20260819-e-ts7-pre1.json`
+  and `/tmp/ceal-proof-jobs/agent-lane-e-ts6-pre/result.20260819-e-ts6-pre1.json`,
+  and post-edit results
+  `/tmp/ceal-proof-jobs/agent-lane-e-tools-post/result.20260819-e-ts7-post1.json`
+  and `/tmp/ceal-proof-jobs/agent-lane-e-ts6-post/result.20260819-e-ts6-post1.json`,
+  all report exit 0 with both lanes `equal` at `279/22` and `100/14`.
+  `npm run test:quality` passed 9/9; the direct baseline implementation suite
+  `node --experimental-strip-types --test scripts/typecheck-tools-tests.test.ts`
+  passed 17/17. No update/min-merge route was run.
+- Finding disposition: an initial attempt to pass the unowned
+  `scripts/typecheck-tools-tests.test.ts` through `run-test-lanes.ts` returned
+  `source_test_not_owned`. This was a wrong runner selection, not a baseline
+  failure; the repo's direct Node strip-types route above is the valid 17-test
+  proof, and no test-lane ownership change was added to this slice.
+- Disposition: E is complete. Closeout remains local-only; no external-boundary
+  action is implied.
 
 ## Context Sources
 
@@ -1024,4 +1045,5 @@ improvement as applied or a tracked issue.
 | Lane C Agent source no-explicit-any is linter-owned after typed-adapter repair | Agent commit `332c5f5`; `eslint.config.ts:30-50`, `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`, and `src/tools/runtime.ts` | from `/Users/ted/codes/ceal-agent`: run the direct ESLint override plus `npm run lint:eslint`, `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:contributor`; require direct exit 0, unchanged TS7/TS6 summaries, and no baseline path in the commit |
 | Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: run `git -C /Users/ted/codes/ceal-cli show 099e1e8 --` and `git -C /Users/ted/codes/ceal-agent show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
 | D2 native explicit-any ownership is receiving-local with mutation proof | Worker commit `3c63f36` (`biome.json`, `docs/gates.md`, source contract); Agent commit `0abdfcc` (quality contract); snapshots `/tmp/ceal-worker-d2-explicit-any-proof.gvkhYP` and `/tmp/ceal-agent-d2-explicit-any-proof.ltamLX` | from the explicit roots: run Worker `npm exec --no -- biome check --only=suspicious/noExplicitAny --error-on-warnings .` and Agent `npm run lint:eslint`; require the recorded red mutation, snapshot SHA equality, restored green result, and no Gateway ratchet/baseline path |
-| E zero-entry inventory is current raw-checker debt and positive entries are paid | Agent `config/typecheck-baseline.json`, `config/typecheck-baseline-ts6.json`, `scripts/typecheck-tools-tests.ts:124-149`; pre-edit inventory is TS7 `105/74` and `31/40` zero/positive by lane, TS6 `106/73` and `31/40`, with paid totals `279/100` | from `/Users/ted/codes/ceal-agent`: run the read-only baseline histogram inventory with positive controls, then `npm run lint:types:tools`, `npm run lint:types:ts6`, `npm run test:quality`, and the baseline-boundary tests; before edit require only zero-valued keys in the removal set, no update/min-merge route, and exact removed-key evidence |
+| E removed only current zero-valued baseline entries and preserved paid diagnostics | Agent evidence commit `aa687b9`; baseline commit `4ea79f4`; `config/typecheck-baseline.json`, `config/typecheck-baseline-ts6.json`, and `scripts/typecheck-tools-tests.ts:124-149` | from `/Users/ted/codes/ceal-agent`: read the exact-key evidence, compare both baselines to `git -C /Users/ted/codes/ceal-agent show 4ea79f4^:<path>`, read the two post-edit proof-job result artifacts, run `npm run test:quality`, and run `node --experimental-strip-types --test scripts/typecheck-tools-tests.test.ts`; require `bad_removed=0`, `changed=0`, post-edit `equal` at `279/22` and `100/14`, and no update/min-merge route |
+| E runner-selection finding is dispositioned without widening test ownership | Agent `config/test-lanes.json`, `scripts/run-test-lanes.ts:226-250`, and `scripts/typecheck-tools-tests.test.ts` | the failed trial `node scripts/run-test-lanes.ts --source-only scripts/typecheck-tools-tests.test.ts ...` returned `source_test_not_owned`; recheck with `node --experimental-strip-types --test scripts/typecheck-tools-tests.test.ts` and require 17/17, without adding the script test to a lane |
