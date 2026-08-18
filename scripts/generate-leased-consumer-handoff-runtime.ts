@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { isStringArray } from "./lib/string-array.ts";
+import { isStringMap } from "./lib/string-map.ts";
+import { writeIfChanged } from "./lib/write-if-changed.ts";
 import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-consumer-call-handoff.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,6 +25,11 @@ const CONTROL_SESSION_CONTRACT_OUTPUT_PATH = "packages/ceal-worker-cli/src/gener
 type JsonRecord = Record<string, unknown>;
 type JsonDecoder = (value: unknown) => unknown;
 type ContractBytes = { bytes: Buffer; value: JsonRecord; sha256: string };
+type ContractEnvelope = JsonRecord & {
+	schema_version: string;
+	argv: string[];
+	non_claims: string[];
+};
 type CarrierContract = JsonRecord & {
 	schema_version: string;
 	argv: string[];
@@ -72,55 +83,42 @@ type ProjectionContract = JsonRecord & {
 	gateway_protocol_handoff?: JsonRecord;
 };
 
-function isRecord(value: unknown): value is JsonRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((entry): entry is string => typeof entry === "string");
-}
-
-function isStringMap(value: unknown): value is Record<string, string> {
-	return isRecord(value) && Object.values(value).every((entry): entry is string => typeof entry === "string");
+function isContractEnvelope(value: unknown): value is ContractEnvelope {
+	return isJsonRecord(value) && typeof value.schema_version === "string" && isStringArray(value.argv) && isStringArray(value.non_claims);
 }
 
 function isHandoffLock(value: unknown): value is HandoffLock {
 	return (
-		isRecord(value) &&
-		isRecord(value.archive) &&
+		isJsonRecord(value) &&
+		isJsonRecord(value.archive) &&
 		typeof value.archive.control_routes_sha256 === "string" &&
 		typeof value.archive.sha256 === "string" &&
-		isRecord(value.protocol) &&
+		isJsonRecord(value.protocol) &&
 		typeof value.protocol.version === "string" &&
-		isRecord(value.gateway) &&
+		isJsonRecord(value.gateway) &&
 		typeof value.gateway.tag === "string" &&
 		/^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u.test(value.gateway.tag) &&
-		typeof value.gateway.commit === "string" &&
-		/^[a-f0-9]{40}$/u.test(value.gateway.commit) &&
-		typeof value.gateway.protocol_tree === "string" &&
-		/^[a-f0-9]{40}$/u.test(value.gateway.protocol_tree) &&
-		/^[a-f0-9]{64}$/u.test(value.archive.sha256)
+		isGitObject(value.gateway.commit) &&
+		isGitObject(value.gateway.protocol_tree) &&
+		isLowercaseHexDigest(value.archive.sha256, 64)
 	);
 }
 
 function isProjectionContract(value: unknown): value is ProjectionContract {
-	return isRecord(value) && isRecord(value.agent_ipc) && isRecord(value.gateway) && isStringMap(value.gateway.routes);
+	return isJsonRecord(value) && isJsonRecord(value.agent_ipc) && isJsonRecord(value.gateway) && isStringMap(value.gateway.routes);
 }
 
 function isDecoderOptions(value: unknown): value is { decodeRequest: JsonDecoder; decodeResponse: JsonDecoder } {
-	return isRecord(value) && typeof value.decodeRequest === "function" && typeof value.decodeResponse === "function";
+	return isJsonRecord(value) && typeof value.decodeRequest === "function" && typeof value.decodeResponse === "function";
 }
 
 function isCarrierContract(value: unknown): value is CarrierContract {
 	if (
-		!isRecord(value) ||
-		typeof value.schema_version !== "string" ||
-		!isStringArray(value.argv) ||
-		!isRecord(value.stdin) ||
-		!isRecord(value.service_channel) ||
-		!isRecord(value.service_call) ||
-		!isRecord(value.result) ||
-		!isStringArray(value.non_claims)
+		!isContractEnvelope(value) ||
+		!isJsonRecord(value.stdin) ||
+		!isJsonRecord(value.service_channel) ||
+		!isJsonRecord(value.service_call) ||
+		!isJsonRecord(value.result)
 	)
 		return false;
 	return (
@@ -139,15 +137,12 @@ function isCarrierContract(value: unknown): value is CarrierContract {
 
 function isControlSessionContract(value: unknown): value is ControlSessionContract {
 	if (
-		!isRecord(value) ||
-		typeof value.schema_version !== "string" ||
-		!isStringArray(value.argv) ||
-		!isRecord(value.protected_session) ||
-		!isRecord(value.notification_channel) ||
-		!isRecord(value.agent_ipc) ||
-		!isRecord(value.gateway) ||
-		!isRecord(value.gateway_protocol_handoff) ||
-		!isStringArray(value.non_claims)
+		!isContractEnvelope(value) ||
+		!isJsonRecord(value.protected_session) ||
+		!isJsonRecord(value.notification_channel) ||
+		!isJsonRecord(value.agent_ipc) ||
+		!isJsonRecord(value.gateway) ||
+		!isJsonRecord(value.gateway_protocol_handoff)
 	)
 		return false;
 	const bounds = value.gateway.operation_deadline_bounds_ms;
@@ -166,10 +161,10 @@ function isControlSessionContract(value: unknown): value is ControlSessionContra
 		typeof value.agent_ipc.maximum_frame_bytes === "number" &&
 		typeof value.agent_ipc.serial === "boolean" &&
 		typeof value.gateway.transport === "string" &&
-		isRecord(bounds) &&
+		isJsonRecord(bounds) &&
 		typeof bounds.minimum === "number" &&
 		typeof bounds.maximum === "number" &&
-		isRecord(value.gateway.routes) &&
+		isJsonRecord(value.gateway.routes) &&
 		Object.values(value.gateway.routes).every((route): route is string => typeof route === "string") &&
 		typeof value.gateway_protocol_handoff.lock_file === "string" &&
 		typeof value.gateway_protocol_handoff.gateway_tag === "string" &&
@@ -181,16 +176,16 @@ function isControlSessionContract(value: unknown): value is ControlSessionContra
 
 function isConformance(value: unknown): value is Conformance {
 	return (
-		isRecord(value) &&
+		isJsonRecord(value) &&
 		Array.isArray(value.operations) &&
 		value.operations.every(
 			(entry): entry is ConformanceOperation =>
-				isRecord(entry) &&
+				isJsonRecord(entry) &&
 				typeof entry.operation === "string" &&
 				typeof entry.path === "string" &&
-				isRecord(entry.request) &&
+				isJsonRecord(entry.request) &&
 				typeof entry.request.schema_version === "string" &&
-				isRecord(entry.response) &&
+				isJsonRecord(entry.response) &&
 				typeof entry.response.schema_version === "string",
 		)
 	);
@@ -406,7 +401,7 @@ export function projectVerifiedControlConformanceRoutes(bytes: Uint8Array, optio
 		} catch {
 			throw new Error("invalid_control_conformance");
 		}
-		if (!isRecord(request) || !isRecord(response) || request.operation !== entry.operation || response.operation !== entry.operation)
+		if (!isJsonRecord(request) || !isJsonRecord(response) || request.operation !== entry.operation || response.operation !== entry.operation)
 			throw new Error("invalid_control_conformance");
 		routes[entry.operation] = entry.path;
 	}
@@ -424,12 +419,12 @@ export function controlSessionContractFromVerifiedConformance(
 	decoders: unknown,
 	options: unknown = {},
 ): ProjectionContract {
-	if (!isProjectionContract(contract) || !isDecoderOptions(decoders) || !isRecord(options))
+	if (!isProjectionContract(contract) || !isDecoderOptions(decoders) || !isJsonRecord(options))
 		throw new Error("invalid_control_session_contract");
 	const materialize = options.materialize === true;
 	let handoff: JsonRecord | undefined;
 	if (options.handoff !== undefined) {
-		if (!isRecord(options.handoff)) throw new Error("invalid_control_session_contract");
+		if (!isJsonRecord(options.handoff)) throw new Error("invalid_control_session_contract");
 		handoff = options.handoff;
 	}
 	const routes = projectVerifiedControlConformanceRoutes(conformanceBytes, decoders);
@@ -486,7 +481,7 @@ function readProtocolPackageVersion(repoRoot: string): string {
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(path.join(repoRoot, PROTOCOL_MANIFEST_PATH), "utf8"));
 		if (
-			!isRecord(parsed) ||
+			!isJsonRecord(parsed) ||
 			parsed.name !== "@corca-ai/ceal-protocol" ||
 			typeof parsed.version !== "string" ||
 			!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(parsed.version)
@@ -512,19 +507,19 @@ function parseConformance(bytes: Uint8Array): Conformance {
 function controlSessionHandoff(
 	handoff: unknown,
 ): JsonRecord & { lock_file: string; gateway_tag: string; gateway_commit: string; protocol_tree: string; archive_sha256: string } {
-	const gatewayTag = isRecord(handoff) && typeof handoff.gateway_tag === "string" ? handoff.gateway_tag : undefined;
-	const gatewayCommit = isRecord(handoff) && typeof handoff.gateway_commit === "string" ? handoff.gateway_commit : undefined;
-	const protocolTree = isRecord(handoff) && typeof handoff.protocol_tree === "string" ? handoff.protocol_tree : undefined;
-	const archiveSha256 = isRecord(handoff) && typeof handoff.archive_sha256 === "string" ? handoff.archive_sha256 : undefined;
+	const gatewayTag = isJsonRecord(handoff) && typeof handoff.gateway_tag === "string" ? handoff.gateway_tag : undefined;
+	const gatewayCommit = isJsonRecord(handoff) && typeof handoff.gateway_commit === "string" ? handoff.gateway_commit : undefined;
+	const protocolTree = isJsonRecord(handoff) && typeof handoff.protocol_tree === "string" ? handoff.protocol_tree : undefined;
+	const archiveSha256 = isJsonRecord(handoff) && typeof handoff.archive_sha256 === "string" ? handoff.archive_sha256 : undefined;
 	if (
 		gatewayTag === undefined ||
 		gatewayCommit === undefined ||
 		protocolTree === undefined ||
 		archiveSha256 === undefined ||
 		!/^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u.test(gatewayTag) ||
-		!/^[a-f0-9]{40}$/u.test(gatewayCommit) ||
-		!/^[a-f0-9]{40}$/u.test(protocolTree) ||
-		!/^[a-f0-9]{64}$/u.test(archiveSha256)
+		!isGitObject(gatewayCommit) ||
+		!isGitObject(protocolTree) ||
+		!isLowercaseHexDigest(archiveSha256, 64)
 	)
 		throw new Error("invalid_control_session_contract");
 	return {
@@ -553,7 +548,7 @@ export function contractModule<T extends JsonRecord>(
 		`export const ${constPrefix}_CONTRACT_JSON = ${JSON.stringify(contract.bytes.toString("utf8"))} as const;`,
 		`export const ${constPrefix}_CONTRACT_SHA256 = ${JSON.stringify(contract.sha256)} as const;`,
 	];
-	const gateway = isRecord(contract.value.gateway) ? contract.value.gateway : undefined;
+	const gateway = isJsonRecord(contract.value.gateway) ? contract.value.gateway : undefined;
 	if (gateway && isStringMap(gateway.routes)) {
 		lines.push(`export const ${constPrefix}_ROUTES_SHA256 = ${JSON.stringify(sha256ControlRoutes(gateway.routes))} as const;`);
 	}
@@ -563,18 +558,6 @@ export function contractModule<T extends JsonRecord>(
 // Write only on change, so a regeneration that produces identical bytes does not
 // touch the file and make a clean tree look dirty. Returns whether it wrote,
 // which is what the result's `changed` is the disjunction of.
-function writeIfChanged(file: string, rendered: string): boolean {
-	let prior: string | null = null;
-	try {
-		prior = readFileSync(file, "utf8");
-	} catch {
-		prior = null;
-	}
-	if (prior === rendered) return false;
-	writeFileSync(file, rendered);
-	return true;
-}
-
 /**
  * A native artifact is bundled from the checked-in generated source, not from
  * the workspace contract JSON. Refuse source drift before that generated

@@ -18,9 +18,43 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.ts";
-import { countRegisteredGuideHosts, createCealAgentGuideStore, detectCealAgentGuideHost } from "../dist/agent-guide.js";
+import {
+	type CealAgentGuideHost,
+	type CealAgentGuideState,
+	type CealAgentGuideStore,
+	countRegisteredGuideHosts,
+	createCealAgentGuideStore as createCealAgentGuideStoreRaw,
+	detectCealAgentGuideHost,
+} from "../dist/agent-guide.js";
 import { decodeCealGuideBundle } from "../dist/guide-bundle.js";
 import { sha256 } from "../dist/sha256.js";
+
+type GuideHostState = NonNullable<CealAgentGuideState["hosts"]>[number];
+type EmbeddedGuideFixture = ReturnType<typeof embeddedGuideFixture>;
+type FixtureMutation = (root: string, fixture: EmbeddedGuideFixture) => void;
+type TarHeaderOptions = { name?: string; type?: number; mode?: number };
+
+function createCealAgentGuideStore(...args: Parameters<typeof createCealAgentGuideStoreRaw>): CealAgentGuideStore {
+	const store = createCealAgentGuideStoreRaw(...args);
+	assert.ok(store);
+	return store;
+}
+
+function requireHosts(state: CealAgentGuideState): readonly GuideHostState[] {
+	assert.ok(state.hosts);
+	return state.hosts;
+}
+
+function requireHost(state: CealAgentGuideState, agent: CealAgentGuideHost): GuideHostState {
+	const host = requireHosts(state).find((entry) => entry.agent === agent);
+	assert.ok(host);
+	return host;
+}
+
+function requireString(value: string | undefined): string {
+	assert.ok(value);
+	return value;
+}
 
 test("Codex guide registration follows the role current pointer across releases", () => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-agent-guide-")));
@@ -45,7 +79,7 @@ test("Codex guide registration follows the role current pointer across releases"
 			],
 		});
 		const registeredResult = store.register();
-		assert.equal(registeredResult.hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(requireHost(registeredResult, "codex").registered, true);
 		assert.equal("agent_source" in registeredResult, false);
 		const registration = path.join(codexHome, "skills", "ceal-guide");
 		assert.equal(lstatSync(registration).isSymbolicLink(), true);
@@ -54,7 +88,7 @@ test("Codex guide registration follows the role current pointer across releases"
 		createRelease(state, "second");
 		rmSync(path.join(state, "current"));
 		symlinkSync("releases/second", path.join(state, "current"));
-		assert.equal(store.inspect().hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(requireHost(store.inspect(), "codex").registered, true);
 		assert.match(readFile(path.join(registration, "SKILL.md")), /release: second/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -77,8 +111,7 @@ test("a concurrent registration that created the requested link is reported as s
 			if (!injected && args[1] === registration) {
 				injected = true;
 				originalSymlinkSync(...args);
-				const error = new Error("simulated concurrent EEXIST");
-				error.code = "EEXIST";
+				const error = Object.assign(new Error("simulated concurrent EEXIST"), { code: "EEXIST" });
 				throw error;
 			}
 			return originalSymlinkSync(...args);
@@ -87,7 +120,7 @@ test("a concurrent registration that created the requested link is reported as s
 		const result = store.register("codex");
 		assert.equal(injected, true);
 		assert.equal(result.status, "available");
-		assert.equal(result.hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(requireHost(result, "codex").registered, true);
 		assert.equal(realpathSync(registration), realpathSync(path.join(state, "current", "guide")));
 	} finally {
 		fs.symlinkSync = originalSymlinkSync;
@@ -129,15 +162,12 @@ test("each agent host registers independently and status reports both", () => {
 		const store = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, claudeConfig);
 		assert.ok(store);
 		// No CODEX_HOME override: the Codex root still derives from HOME.
-		assert.equal(
-			store.inspect("codex").hosts.find((host) => host.agent === "codex").registration_path,
-			path.join(root, ".codex", "skills", "ceal-guide"),
-		);
+		assert.equal(requireHost(store.inspect("codex"), "codex").registration_path, path.join(root, ".codex", "skills", "ceal-guide"));
 		const claudeRegistration = path.join(claudeConfig, "skills", "ceal-guide");
 		const registered = store.register("claude");
 		assert.equal(registered.status, "available");
 		assert.equal(registered.agent, "claude");
-		assert.equal(registered.hosts.find((host) => host.agent === "claude").registration_path, claudeRegistration);
+		assert.equal(requireHost(registered, "claude").registration_path, claudeRegistration);
 		assert.equal(lstatSync(claudeRegistration).isSymbolicLink(), true);
 		assert.equal(readlinkSync(claudeRegistration), guidePath);
 		assert.match(readFile(path.join(claudeRegistration, "SKILL.md")), /release: first/u);
@@ -152,12 +182,16 @@ test("each agent host registers independently and status reports both", () => {
 		// asserts the derivation against a real store rather than an injected
 		// number, which is how the wrong count survived a passing suite.
 		assert.equal(countRegisteredGuideHosts(store.inspect()), 1);
-		assert.equal(store.inspect().hosts.filter((host) => host.registration_path).length, 2, "and the paths it must not count are present");
+		assert.equal(
+			requireHosts(store.inspect()).filter((host) => host.registration_path).length,
+			2,
+			"and the paths it must not count are present",
+		);
 		// There is no top-level per-host reading left to mistake for the whole answer.
 		assert.equal("registered" in store.inspect(), false);
-		assert.equal(store.register("codex").hosts.find((host) => host.agent === "codex").registered, true);
+		assert.equal(requireHost(store.register("codex"), "codex").registered, true);
 		assert.deepEqual(
-			store.inspect().hosts.map((host) => host.registered),
+			requireHosts(store.inspect()).map((host) => host.registered),
 			[true, true],
 		);
 		// Re-registering an already-linked host is idempotent, not a conflict.
@@ -184,16 +218,13 @@ test("guide registration refuses to replace an existing Claude Code skill direct
 		assert.equal(lstatSync(path.join(root, ".claude", "skills", "ceal-guide")).isDirectory(), true);
 		// A reader that treats `hosts` as the per-host truth must not see the
 		// refusing path reported as "staged", which reads as ready to link.
-		assert.deepEqual(
-			result.hosts.find((host) => host.agent === "claude"),
-			{
-				agent: "claude",
-				status: "unavailable",
-				registration_path: path.join(root, ".claude", "skills", "ceal-guide"),
-				registered: false,
-			},
-		);
-		assert.equal(result.hosts.find((host) => host.agent === "codex").status, "staged");
+		assert.deepEqual(requireHost(result, "claude"), {
+			agent: "claude",
+			status: "unavailable",
+			registration_path: path.join(root, ".claude", "skills", "ceal-guide"),
+			registered: false,
+		});
+		assert.equal(requireHost(result, "codex").status, "staged");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -212,8 +243,8 @@ test("an unresolvable agent host reports the variable that would resolve it", ()
 		const result = store.register("claude");
 		assert.equal(result.status, "unavailable");
 		assert.equal(result.error?.kind, "registration_failed");
-		assert.match(result.error?.next_action, /CLAUDE_CONFIG_DIR/u);
-		assert.equal(result.registration_path, undefined);
+		assert.match(requireString(result.error?.next_action), /CLAUDE_CONFIG_DIR/u);
+		assert.equal(requireHost(result, "claude").registration_path, undefined);
 		// The resolvable host is unaffected and stays the default projection.
 		assert.equal(store.inspect().agent, "codex");
 		// Every advertised host stays in `hosts`: dropping the unresolved one would
@@ -242,16 +273,13 @@ test("a non-absolute or list-shaped host directory is refused, not guessed", () 
 			const result = store.register("claude");
 			assert.equal(result.status, "unavailable", override);
 			assert.equal(result.error?.kind, "registration_failed");
-			assert.match(result.error?.next_action, /Set CLAUDE_CONFIG_DIR to one absolute directory path/u);
-			assert.equal(result.hosts.find((host) => host.agent === "claude").registration_path, undefined);
+			assert.match(requireString(result.error?.next_action), /Set CLAUDE_CONFIG_DIR to one absolute directory path/u);
+			assert.equal(requireHost(result, "claude").registration_path, undefined);
 			assert.equal(existsSync(path.join(process.cwd(), ".claude")), false, "no skill tree under the working directory");
 		}
 		// An empty override is no override: the HOME default still applies.
 		const empty = createCealAgentGuideStore(path.join(release, "ceal-linux-arm64"), root, undefined, "");
-		assert.equal(
-			empty.inspect("claude").hosts.find((host) => host.agent === "claude").registration_path,
-			path.join(root, ".claude", "skills", "ceal-guide"),
-		);
+		assert.equal(requireHost(empty.inspect("claude"), "claude").registration_path, path.join(root, ".claude", "skills", "ceal-guide"));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -271,12 +299,12 @@ test("the default projection stays the Codex host even when only Claude resolves
 		const status = store.inspect();
 		assert.equal(status.agent, "codex");
 		assert.equal(status.status, "unavailable");
-		assert.match(status.error?.next_action, /CODEX_HOME/u);
+		assert.match(requireString(status.error?.next_action), /CODEX_HOME/u);
 		assert.deepEqual(
-			status.hosts.map((host) => host.status),
+			requireHosts(status).map((host) => host.status),
 			["unresolved", "staged"],
 		);
-		assert.equal(store.register("claude").hosts.find((host) => host.agent === "claude").registered, true);
+		assert.equal(requireHost(store.register("claude"), "claude").registered, true);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -316,7 +344,7 @@ test("a missing guide asset answers as the requested host", () => {
 	try {
 		const store = createCealAgentGuideStore(path.join(root, "ceal-linux-arm64"), root, undefined, undefined);
 		assert.ok(store);
-		for (const agent of ["codex", "claude"]) {
+		for (const agent of ["codex", "claude"] satisfies readonly CealAgentGuideHost[]) {
 			const state = store.register(agent);
 			assert.equal(state.status, "unavailable");
 			assert.equal(state.agent, agent);
@@ -350,12 +378,12 @@ test("a skills directory linked to nothing names the missing target", () => {
 		assert.equal(result.status, "unavailable");
 		assert.equal(result.error?.kind, "registration_failed");
 		assert.match(result.error?.message, new RegExp(`${missing.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}', which does not exist`, "u"));
-		assert.match(result.error?.next_action, /Create that directory, or set CLAUDE_CONFIG_DIR/u);
-		assert.doesNotMatch(result.error?.next_action, /existing skill directory/u);
+		assert.match(requireString(result.error?.next_action), /Create that directory, or set CLAUDE_CONFIG_DIR/u);
+		assert.doesNotMatch(requireString(result.error?.next_action), /existing skill directory/u);
 		// Once the target exists, the same command succeeds through the link.
 		mkdirSync(missing, { recursive: true });
 		const retried = store.register("claude");
-		assert.equal(retried.hosts.find((host) => host.agent === "claude").registered, true);
+		assert.equal(requireHost(retried, "claude").registered, true);
 		assert.equal(realpathSync(path.join(missing, "ceal-guide")), realpathSync(path.join(state, "current", "guide")));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -387,7 +415,7 @@ test("the projection names the running host when the environment identifies it",
 		// The host that is running answers first, and says so.
 		assert.equal(status.agent, "claude");
 		assert.equal(status.agent_source, "detected");
-		assert.equal(status.hosts.find((host) => host.agent === "claude").registered, true);
+		assert.equal(requireHost(status, "claude").registered, true);
 
 		// With no detection the fallback is unchanged, and marked as a fallback.
 		const undetected = createCealAgentGuideStore(binary, root, undefined, undefined, undefined);
@@ -408,8 +436,8 @@ test("an installed guide without a resolvable host reports the missing configura
 		assert.ok(store);
 		const status = store.inspect();
 		assert.equal(status.error?.kind, "registration_failed");
-		assert.match(status.error?.next_action, /Set HOME or CODEX_HOME/u);
-		assert.doesNotMatch(status.error?.next_action, /Reinstall/u);
+		assert.match(requireString(status.error?.next_action), /Set HOME or CODEX_HOME/u);
+		assert.doesNotMatch(requireString(status.error?.next_action), /Reinstall/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -419,7 +447,7 @@ test("a missing guide remains unavailable without advising reinstall when no hos
 	const store = createCealAgentGuideStore("/nonexistent/ceal", undefined, undefined, undefined);
 	assert.ok(store);
 	assert.equal(store.inspect().error?.kind, "guide_unavailable");
-	assert.doesNotMatch(store.inspect().error?.next_action, /reinstall/u);
+	assert.doesNotMatch(requireString(store.inspect().error?.next_action), /reinstall/u);
 });
 
 test("embedded guide status is read-only and explicit registration materializes the complete directory", () => {
@@ -439,15 +467,15 @@ test("embedded guide status is read-only and explicit registration materializes 
 		assert.equal(before.materialized, false);
 		assert.equal(before.update_safe, false);
 		assert.equal("guide_path" in before, false);
-		assert.match(before.next_action, /ceal guide register codex/u);
+		assert.match(requireString(before.next_action), /ceal guide register codex/u);
 		assert.equal(existsSync(path.join(fixture.worker, "guides")), false, "status must not stage guide state");
 
 		const registered = store.register("codex");
 		assert.equal(registered.status, "available");
 		assert.equal(registered.materialized, true);
-		assert.equal(registered.hosts.find((host) => host.agent === "codex").registered, true);
-		assert.equal(registered.hosts.find((host) => host.agent === "claude").registered, false);
-		assert.match(readFile(path.join(registered.guide_path, "references", "workflow.md")), /complete directory/u);
+		assert.equal(requireHost(registered, "codex").registered, true);
+		assert.equal(requireHost(registered, "claude").registered, false);
+		assert.match(readFile(path.join(requireString(registered.guide_path), "references", "workflow.md")), /complete directory/u);
 		assert.equal(existsSync(path.join(fixture.claudeHome, "skills", "ceal-guide")), false);
 	} finally {
 		fixture.cleanup();
@@ -466,7 +494,7 @@ test("embedded registration conflict writes no guide state and leaves another ho
 			fixture.bundle.bytes,
 		);
 		const claude = store.register("claude");
-		const claudeTarget = realpathSync(claude.guide_path);
+		const claudeTarget = realpathSync(requireString(claude.guide_path));
 		const codexRegistration = path.join(fixture.codexHome, "skills", "ceal-guide");
 		mkdirSync(codexRegistration, { recursive: true });
 		writeFileSync(path.join(codexRegistration, "foreign"), "owned elsewhere\n");
@@ -579,7 +607,7 @@ test("embedded guide status refuses content, mode, and symlink drift after regis
 				symlinkSync(foreign, file);
 			},
 		],
-	]) {
+	] satisfies Array<[string, FixtureMutation]>) {
 		const fixture = embeddedGuideFixture();
 		try {
 			const store = createCealAgentGuideStore(
@@ -591,12 +619,12 @@ test("embedded guide status refuses content, mode, and symlink drift after regis
 				fixture.bundle.bytes,
 			);
 			const registered = store.register("codex");
-			mutate(registered.guide_path, fixture);
+			mutate(requireString(registered.guide_path), fixture);
 
 			const status = store.inspect("codex");
 			assert.equal(status.status, "unavailable", label);
 			assert.equal(status.materialized, false, label);
-			assert.equal(status.hosts.find((host) => host.agent === "codex").registered, false, label);
+			assert.equal(requireHost(status, "codex").registered, false, label);
 			assert.equal(status.error?.kind, "registration_failed", label);
 			assert.match(status.error?.message, /does not match the signed guide/u, label);
 		} finally {
@@ -617,7 +645,7 @@ test("embedded registration refuses a special-mode ownership marker", () => {
 			fixture.bundle.bytes,
 		);
 		const registered = store.register("codex");
-		const marker = path.join(fixture.worker, "guides", "ownership", path.basename(registered.guide_path));
+		const marker = path.join(fixture.worker, "guides", "ownership", path.basename(requireString(registered.guide_path)));
 		chmodSync(marker, 0o4600);
 
 		const result = store.register("claude");
@@ -645,7 +673,7 @@ test("embedded guide decoder refuses traversal, duplicate paths, links, and dama
 			(bytes) => {
 				bytes[0] ^= 1;
 			},
-		]) {
+		] satisfies Array<(bytes: Buffer) => void>) {
 			const hostile = Buffer.from(fixture.bundle.bytes);
 			mutate(hostile);
 			assert.throws(() => decodeCealGuideBundle(hostile), /invalid_guide_bundle/u);
@@ -655,7 +683,7 @@ test("embedded guide decoder refuses traversal, duplicate paths, links, and dama
 	}
 });
 
-function createRelease(state, name) {
+function createRelease(state: string, name: string): string {
 	const release = path.join(state, "releases", name);
 	mkdirSync(path.join(release, "guide"), { recursive: true });
 	writeFileSync(path.join(release, "ceal-linux-arm64"), "binary\n");
@@ -696,12 +724,12 @@ function embeddedGuideFixture() {
 	};
 }
 
-function readFile(file) {
+function readFile(file: string): string {
 	assert.equal(existsSync(file), true);
 	return readFileSync(file, "utf8");
 }
 
-function rewriteTarHeader(bytes, member, { name, type, mode } = {}) {
+function rewriteTarHeader(bytes: Buffer, member: string, { name, type, mode }: TarHeaderOptions = {}): void {
 	for (let offset = 0; offset + 512 <= bytes.length; ) {
 		const header = bytes.subarray(offset, offset + 512);
 		const observed = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
@@ -717,7 +745,7 @@ function rewriteTarHeader(bytes, member, { name, type, mode } = {}) {
 			}
 			header.fill(0x20, 148, 156);
 			const checksum = header
-				.reduce((sum, byte) => sum + byte, 0)
+				.reduce((sum: number, byte: number) => sum + byte, 0)
 				.toString(8)
 				.padStart(6, "0");
 			header.write(checksum, 148, 6, "ascii");

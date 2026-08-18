@@ -43,7 +43,7 @@ while :; do sleep 1; done
 	assert.equal(processAlive(descendant), false, `descendant pid ${descendant} survived the process-group escalation`);
 });
 
-async function waitUntil(predicate, timeoutMs = 1_000) {
+async function waitUntil(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!predicate()) {
 		if (Date.now() >= deadline) throw new Error("timed-out descendant remained alive after the group-kill deadline");
@@ -51,16 +51,16 @@ async function waitUntil(predicate, timeoutMs = 1_000) {
 	}
 }
 
-function processAlive(pid) {
+function processAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
 	} catch (error) {
-		return error.code === "EPERM";
+		return error instanceof Error && "code" in error && error.code === "EPERM";
 	}
 }
 
-function killIfAlive(pid) {
+function killIfAlive(pid: number): void {
 	if (!Number.isInteger(pid) || pid <= 0 || !processAlive(pid)) return;
 	try {
 		process.kill(pid, "SIGKILL");

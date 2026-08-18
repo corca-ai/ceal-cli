@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import {
 	assertShippableProtocolVendorPin,
 	ProtocolVendorPinError,
@@ -11,7 +12,56 @@ import {
 } from "../../scripts/verify-protocol-vendor-pin.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+type ValidationOptions = Parameters<typeof validateProtocolVendorPin>[0];
+type ProtocolVendorPinFixture = {
+	schema_version: string;
+	vendored_path: string;
+	source: { repository: string; package_path: string; commit: string; tree: string };
+	shipped: {
+		lock_file: string;
+		status: string;
+		gateway_commit: string;
+		protocol_tree: string;
+		reason?: string;
+		disposition_owner?: string;
+		disposition_request?: string;
+	};
+	non_claims: string[];
+};
+type GatewayHandoffLock = { gateway: { commit: string; protocol_tree: string } };
+type DivergenceField = "reason" | "disposition_owner" | "disposition_request";
+const DIVERGENCE_FIELDS: readonly DivergenceField[] = ["reason", "disposition_owner", "disposition_request"];
+
+function isGatewayHandoffLock(value: unknown): value is GatewayHandoffLock {
+	return (
+		isJsonRecord(value) &&
+		isJsonRecord(value.gateway) &&
+		typeof value.gateway.commit === "string" &&
+		typeof value.gateway.protocol_tree === "string"
+	);
+}
+
+function readJson<T>(filePath: string, isValue: (value: unknown) => value is T): T {
+	const value: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+	if (!isValue(value)) throw new TypeError(`invalid JSON fixture: ${filePath}`);
+	return value;
+}
+
+function clone<T>(value: T, isValue: (candidate: unknown) => candidate is T): T {
+	const cloned: unknown = JSON.parse(JSON.stringify(value));
+	if (!isValue(cloned)) throw new TypeError("invalid cloned JSON fixture");
+	return cloned;
+}
+
+function isProtocolVendorPin(value: unknown): value is ProtocolVendorPinFixture {
+	return isJsonRecord(value) && isJsonRecord(value.source) && isJsonRecord(value.shipped) && Array.isArray(value.non_claims);
+}
+
+function isProtocolVendorPinError(error: unknown): error is InstanceType<typeof ProtocolVendorPinError> {
+	return error instanceof ProtocolVendorPinError;
+}
+
+const LOCK = readJson(path.join(ROOT, "gateway-protocol-handoff-lock.json"), isGatewayHandoffLock);
 
 // Every divergence-shaped case below runs off this local fixture rather than off
 // the repository's real protocol-vendor-pin.json, and that is the point. The
@@ -20,7 +70,7 @@ const LOCK = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-l
 // the day the divergence is resolved, for a reason that has nothing to do with
 // the code. A gate that punishes the fix it exists to ask for teaches the next
 // maintainer to delete assertions instead of reading them.
-const DIVERGED = Object.freeze({
+const DIVERGED: Readonly<ProtocolVendorPinFixture> = Object.freeze({
 	schema_version: "ceal.protocol_vendor_pin.v1",
 	vendored_path: "packages/ceal-protocol",
 	source: {
@@ -43,31 +93,7 @@ const DIVERGED = Object.freeze({
 	non_claims: ["fixture"],
 });
 
-function clone(value) {
-	return JSON.parse(JSON.stringify(value));
-}
-
-function expectCode(code, overrides, label = "") {
-	assert.throws(
-		() =>
-			validateProtocolVendorPin({
-				repoRoot: ROOT,
-				pin: DIVERGED,
-				lock: LOCK,
-				vendoredTree: DIVERGED.source.tree,
-				vendoredDirty: [],
-				vendoredHidden: [],
-				...overrides,
-			}),
-		(error) => {
-			assert.ok(error instanceof ProtocolVendorPinError, `expected a ProtocolVendorPinError, got ${error?.name}`);
-			assert.equal(error.code, code, `${label} expected ${code}, got ${error.code}: ${error.message}`);
-			return true;
-		},
-	);
-}
-
-function expectPass(overrides) {
+function validateFixture(overrides: ValidationOptions = {}) {
 	return validateProtocolVendorPin({
 		repoRoot: ROOT,
 		pin: DIVERGED,
@@ -77,6 +103,25 @@ function expectPass(overrides) {
 		vendoredHidden: [],
 		...overrides,
 	});
+}
+
+function expectCode(code: string, overrides: ValidationOptions = {}, label = "") {
+	assert.throws(
+		() => validateFixture(overrides),
+		(error) => {
+			assert.ok(
+				isProtocolVendorPinError(error),
+				`expected a ProtocolVendorPinError, got ${error instanceof Error ? error.name : typeof error}`,
+			);
+			if (!isProtocolVendorPinError(error)) return false;
+			assert.equal(error.code, code, `${label} expected ${code}, got ${error.code}: ${error.message}`);
+			return true;
+		},
+	);
+}
+
+function expectPass(overrides: ValidationOptions = {}) {
+	return validateFixture(overrides);
 }
 
 // The check that actually binds this repository: no injection, no fixture. If
@@ -102,7 +147,7 @@ test("the frozen Protocol suite's out-of-subtree helper matches its recorded own
 // The converged end state has to stay green, or this suite argues against the
 // disposition it is waiting for.
 test("a pin whose proof and shipped trees have converged passes as agreed", () => {
-	const converged = clone(DIVERGED);
+	const converged = clone(DIVERGED, isProtocolVendorPin);
 	converged.shipped.status = "agreed";
 	// The lock carries the shipped protocol subtree now, so a converged fixture
 	// converges on the lock's value rather than on an arbitrary one.
@@ -173,7 +218,7 @@ test("a vendored file Git was told to stop watching fails", () => {
 // facts. A lock bump means the shipped side moved, so the declaration was made
 // about a state that no longer exists and has to be re-examined.
 test("a Gateway handoff lock that moved past the pin fails", () => {
-	const moved = clone(LOCK);
+	const moved = clone(LOCK, isGatewayHandoffLock);
 	moved.gateway.commit = "1".repeat(40);
 	expectCode("shipped_lock_mismatch", { lock: moved });
 });
@@ -182,11 +227,11 @@ test("a Gateway handoff lock that moved past the pin fails", () => {
 // real divergence, and a false `diverged` keeps an answered question open and
 // trains maintainers to ignore the declaration.
 test("a status that contradicts the recorded trees fails in both directions", () => {
-	const claimsAgreement = clone(DIVERGED);
+	const claimsAgreement = clone(DIVERGED, isProtocolVendorPin);
 	claimsAgreement.shipped.status = "agreed";
 	expectCode("undeclared_divergence", { pin: claimsAgreement });
 
-	const claimsDivergence = clone(DIVERGED);
+	const claimsDivergence = clone(DIVERGED, isProtocolVendorPin);
 	claimsDivergence.source.tree = LOCK.gateway.protocol_tree;
 	claimsDivergence.shipped.protocol_tree = claimsDivergence.source.tree;
 	claimsDivergence.source.commit = LOCK.gateway.commit;
@@ -199,7 +244,7 @@ test("a status that contradicts the recorded trees fails in both directions", ()
 // declares it and the lock records it, so the pin no longer gets the last word on
 // that field.
 test("a shipped protocol subtree the lock does not bind is refused", () => {
-	const forged = clone(DIVERGED);
+	const forged = clone(DIVERGED, isProtocolVendorPin);
 	forged.shipped.protocol_tree = "f".repeat(40);
 	expectCode("shipped_lock_mismatch", { pin: forged });
 });
@@ -213,7 +258,7 @@ test("a divergence must point at the tracked Protocol quarantine record", () => 
 		["README.md", "an unrelated file"],
 		["protocol-vendor-pin.json", "the pin pointing at itself"],
 	]) {
-		const orphaned = clone(DIVERGED);
+		const orphaned = clone(DIVERGED, isProtocolVendorPin);
 		orphaned.shipped.disposition_request = request;
 		expectCode("stale_divergence_record", { pin: orphaned }, label);
 	}
@@ -226,8 +271,8 @@ test("a divergence must point at the tracked Protocol quarantine record", () => 
 // The declared divergence must name who owes the answer and why, or "diverged"
 // degrades into a permanent silent exemption.
 test("a divergence missing its reason, owner, or request is not a declaration", () => {
-	for (const field of ["reason", "disposition_owner", "disposition_request"]) {
-		const incomplete = clone(DIVERGED);
+	for (const field of DIVERGENCE_FIELDS) {
+		const incomplete = clone(DIVERGED, isProtocolVendorPin);
 		delete incomplete.shipped[field];
 		expectCode("invalid_protocol_vendor_pin", { pin: incomplete });
 	}
@@ -235,26 +280,26 @@ test("a divergence missing its reason, owner, or request is not a declaration", 
 
 test("a pin missing its schema, identities, or non-claims is rejected", () => {
 	for (const mutate of [
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.schema_version = "ceal.protocol_vendor_pin.v0";
 		},
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.source.commit = "not-a-git-object";
 		},
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.source.repository = "corca-ai/ceal-cli";
 		},
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.shipped.protocol_tree = "short";
 		},
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.shipped.status = "unknown";
 		},
-		(pin) => {
+		(pin: ProtocolVendorPinFixture) => {
 			pin.non_claims = [];
 		},
 	]) {
-		const broken = clone(DIVERGED);
+		const broken = clone(DIVERGED, isProtocolVendorPin);
 		mutate(broken);
 		expectCode("invalid_protocol_vendor_pin", { pin: broken, vendoredTree: broken.source.tree });
 	}
@@ -291,6 +336,7 @@ test("a diverged pin is refused as a release input, however well declared", () =
 				vendoredHidden: [],
 			}),
 		(error) => {
+			if (!isProtocolVendorPinError(error)) return false;
 			assert.equal(error.code, "proof_shipment_protocol_divergence");
 			// The owner decision requires the failure to name both immutable
 			// identities, so a reader can tell which side has to move.
@@ -304,7 +350,7 @@ test("a diverged pin is refused as a release input, however well declared", () =
 // A pin that recorded converged commits alongside two different trees would be
 // carrying two answers, and the gate would silently use one of them.
 test("a pin whose commits and trees disagree about convergence is rejected", () => {
-	const contradictory = clone(DIVERGED);
+	const contradictory = clone(DIVERGED, isProtocolVendorPin);
 	contradictory.source.commit = LOCK.gateway.commit;
 	expectCode("invalid_protocol_vendor_pin", { pin: contradictory, vendoredTree: contradictory.source.tree });
 });
@@ -316,7 +362,7 @@ test("a pin whose commits and trees disagree about convergence is rejected", () 
 // pin. Otherwise the only way to a green gate is to write a false `source.commit`,
 // which is the one field the whole verdict rests on.
 test("an identical subtree under a different Gateway commit is a divergence, not a lying pin", () => {
-	const identicalSubtree = clone(DIVERGED);
+	const identicalSubtree = clone(DIVERGED, isProtocolVendorPin);
 	identicalSubtree.source.tree = LOCK.gateway.protocol_tree;
 	identicalSubtree.shipped.protocol_tree = identicalSubtree.source.tree;
 	const injected = {
@@ -332,6 +378,7 @@ test("an identical subtree under a different Gateway commit is a divergence, not
 	assert.throws(
 		() => assertShippableProtocolVendorPin({ repoRoot: ROOT, ...injected }),
 		(error) => {
+			if (!isProtocolVendorPinError(error)) return false;
 			assert.equal(error.code, "proof_shipment_protocol_divergence");
 			return true;
 		},

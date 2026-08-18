@@ -36,6 +36,7 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 
 	if (acceptanceCli) {
 		copy("scripts", root);
+		copy("packages/ceal-worker-cli/src/json-record.ts", root);
 		copy("packages/ceal-worker-cli/dist", root);
 	}
 

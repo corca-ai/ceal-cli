@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { fstatSync } from "node:fs";
+import { isPlainJsonRecord as plainRecord, sameCanonicalJson } from "./canonical-json.js";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
 	LEASED_CONSUMER_CARRIER_CONTRACT_SHA256,
@@ -10,6 +11,7 @@ import {
 	GATEWAY_LEASED_CONSUMER_HANDOFF_LOCK_JSON,
 	GATEWAY_LEASED_CONSUMER_HANDOFF_SHA256,
 } from "./generated/leased-consumer-handoff.js";
+import { sameObjectKeys } from "./object-keys.js";
 import {
 	closeReadable,
 	concatBytes,
@@ -140,7 +142,7 @@ export async function runLeasedConsumerCarrier(
 			const responseBytes = await sendCarrierRequestBeforeDeadline(channel, request, handoff, runtime);
 			if (responseBytes === null) return localFailure("service_call_failed");
 			const decoded = parseStrictJson(responseBytes);
-			if (!sameJson(decoded, handoff.unavailableBody)) return localFailure("service_call_failed");
+			if (!sameCanonicalJson(decoded, handoff.unavailableBody)) return localFailure("service_call_failed");
 			return localFailure("leased_consumer_call_unavailable");
 		} catch {
 			return localFailure("service_call_failed");
@@ -214,7 +216,7 @@ function createFd4Channel(): { readonly read: () => Promise<Uint8Array>; readonl
 function parseCarrierRequest(bytes: Uint8Array, handoff: CarrierHandoff): JsonRecord {
 	if (bytes.byteLength > MAX_REQUEST_BYTES) throw new Error("request_too_large");
 	const value = parseStrictJson(bytes);
-	if (!plainRecord(value) || !sameKeys(value, handoff.requestKeys)) throw new Error("invalid_request");
+	if (!plainRecord(value) || !sameObjectKeys(value, handoff.requestKeys)) throw new Error("invalid_request");
 	const template = handoff.requestTemplate;
 	for (const key of handoff.requestKeys) {
 		if (key === "lease_fence") {
@@ -284,12 +286,12 @@ function parseServiceChannel(bytes: Uint8Array, requiredPath: string, validateUr
 	if (!plainRecord(value) || typeof value.schema_version !== "string" || !CHANNEL_SCHEMAS.includes(value.schema_version))
 		throw new Error("invalid_channel");
 	if (value.schema_version === "ceal.leased_consumer_service_channel.v1") {
-		if (!sameKeys(value, ["schema_version", "service_call_url", "service_credential"]) || typeof value.service_call_url !== "string")
+		if (!sameObjectKeys(value, ["schema_version", "service_call_url", "service_credential"]) || typeof value.service_call_url !== "string")
 			throw new Error("invalid_channel");
 		return { kind: "https", url: validateUrl(value.service_call_url, requiredPath), credential: validCredential(value.service_credential) };
 	}
 	if (
-		!sameKeys(value, ["schema_version", "service_credential", "socket_path", "transport"]) ||
+		!sameObjectKeys(value, ["schema_version", "service_credential", "socket_path", "transport"]) ||
 		value.transport !== "unix_socket" ||
 		typeof value.socket_path !== "string"
 	)
@@ -389,17 +391,17 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 	const value = parseStrictJson(bytes);
 	if (
 		!plainRecord(value) ||
-		!sameKeys(value, ["argv", "non_claims", "result", "schema_version", "service_call", "service_channel", "stdin"]) ||
+		!sameObjectKeys(value, ["argv", "non_claims", "result", "schema_version", "service_call", "service_channel", "stdin"]) ||
 		value.schema_version !== "ceal.worker_private_leased_consumer_carrier_contract.v2" ||
 		!Array.isArray(value.argv) ||
 		value.argv.length !== 1 ||
 		value.argv[0] !== LEASED_CONSUMER_CARRIER_ENTRYPOINT_ARGV ||
 		!plainRecord(value.stdin) ||
-		!sameKeys(value.stdin, ["maximum_bytes", "schema_version"]) ||
+		!sameObjectKeys(value.stdin, ["maximum_bytes", "schema_version"]) ||
 		value.stdin.schema_version !== "ceal.gateway_leased_consumer_call_request.v1" ||
 		!Number.isSafeInteger(value.stdin.maximum_bytes) ||
 		!plainRecord(value.service_channel) ||
-		!sameKeys(value.service_channel, ["child_fd", "deadline_ms", "maximum_bytes", "schema_versions"]) ||
+		!sameObjectKeys(value.service_channel, ["child_fd", "deadline_ms", "maximum_bytes", "schema_versions"]) ||
 		value.service_channel.child_fd !== 4 ||
 		!Array.isArray(value.service_channel.schema_versions) ||
 		value.service_channel.schema_versions.length !== 2 ||
@@ -408,11 +410,11 @@ function verifyEmbeddedCarrierContract(): CarrierContract {
 		!Number.isSafeInteger(value.service_channel.maximum_bytes) ||
 		!Number.isSafeInteger(value.service_channel.deadline_ms) ||
 		!plainRecord(value.service_call) ||
-		!sameKeys(value.service_call, ["deadline_ms"]) ||
+		!sameObjectKeys(value.service_call, ["deadline_ms"]) ||
 		!Number.isSafeInteger(value.service_call.deadline_ms) ||
 		(value.service_call.deadline_ms as number) < 1 ||
 		!plainRecord(value.result) ||
-		!sameKeys(value.result, ["allowed_error_codes", "maximum_bytes", "schema_version"]) ||
+		!sameObjectKeys(value.result, ["allowed_error_codes", "maximum_bytes", "schema_version"]) ||
 		typeof value.result.schema_version !== "string" ||
 		!Number.isSafeInteger(value.result.maximum_bytes) ||
 		!Array.isArray(value.result.allowed_error_codes) ||
@@ -460,10 +462,6 @@ async function readBoundedWebResponse(response: globalThis.Response, maximum: nu
 	}
 }
 
-function plainRecord(value: unknown): value is JsonRecord {
-	return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-}
-
 function plainJson(value: unknown, depth = 0): boolean {
 	if (depth > 32 || value === null || typeof value === "string" || typeof value === "boolean") return depth <= 32;
 	if (typeof value === "number") return Number.isFinite(value);
@@ -471,27 +469,8 @@ function plainJson(value: unknown, depth = 0): boolean {
 	return plainRecord(value) && Object.keys(value).length <= 1024 && Object.values(value).every((item) => plainJson(item, depth + 1));
 }
 
-function sameKeys(value: JsonRecord, expected: readonly string[]): boolean {
-	const actual = Object.keys(value).sort();
-	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
 function sameStringSet(left: readonly unknown[], right: readonly unknown[]): boolean {
 	return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]);
-}
-
-function sameJson(left: unknown, right: unknown): boolean {
-	return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
-}
-
-function canonicalJson(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(canonicalJson);
-	if (!plainRecord(value)) return value;
-	return Object.fromEntries(
-		Object.keys(value)
-			.sort()
-			.map((key) => [key, canonicalJson(value[key])]),
-	);
 }
 
 function hasControlCharacter(value: string): boolean {

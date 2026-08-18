@@ -53,6 +53,7 @@ import {
 	gatewayTransportObservation,
 	typedGatewayObservation,
 } from "./gateway-diagnostics.js";
+import { isJsonRecord } from "./json-record.js";
 import { parseNamedOptions, unknownNamedOption } from "./named-options.js";
 import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeYaml } from "./output.js";
@@ -1087,11 +1088,15 @@ function unsupportedTargetSelector(
 function capabilityNavigation(capability: CealGatewayDiscoveryCapability | undefined): CapabilityNavigation | null {
 	if (!capability) return null;
 	const navigation = (capability as CealGatewayDiscoveryCapability & { navigation?: unknown }).navigation;
-	if (!plainRecord(navigation) || navigation.url_target_selector !== "unsupported" || navigation.target_selector !== "opaque_catalog_target")
+	if (
+		!isJsonRecord(navigation) ||
+		navigation.url_target_selector !== "unsupported" ||
+		navigation.target_selector !== "opaque_catalog_target"
+	)
 		return null;
 	const source = navigation.required_argument_source;
 	if (
-		!plainRecord(source) ||
+		!isJsonRecord(source) ||
 		typeof source.argument !== "string" ||
 		typeof source.handle_kind !== "string" ||
 		!Array.isArray(source.issued_by)
@@ -1113,10 +1118,6 @@ function isAbsoluteWebUrl(value: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function plainRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** @testOnly Exercises the catalog-navigation refusal seam. */

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { withBuiltPackages } from "./repo-build.ts";
@@ -59,8 +59,4 @@ export function makeGatewayProtocolFixture() {
 	const provenance = path.join(output, "gateway-protocol-provenance.json");
 	writeFileSync(provenance, `${JSON.stringify(proof)}\n`);
 	return { root, tarball, provenance, proof };
-}
-
-function sha256(bytes) {
-	return createHash("sha256").update(bytes).digest("hex");
 }

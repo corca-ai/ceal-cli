@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
 import { assertGatewayHandoffArchiveInventory, extractGatewayHandoffArchive } from "./worker-gateway-handoff-archive.ts";
 import { validateGatewayHandoffPacketFiles } from "./worker-release-inputs.ts";
 
@@ -16,10 +18,8 @@ const REPOSITORY = "corca-ai/ceal";
 const WORKFLOW_PATH = ".github/workflows/gateway-protocol-handoff-release.yml";
 const OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const TAG_PATTERN = /^gateway-protocol-handoff-v(\d+\.\d+\.\d+)$/u;
-const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 
-type JsonRecord = Record<string, unknown>;
 type BootstrapOptions = { repoRoot?: string; tag?: string };
 type SignatureInput = {
 	archive: string;
@@ -106,7 +106,7 @@ export function bootstrapGatewayProtocolHandoff(options: BootstrapOptions = {}, 
 		const archiveSha256 = sha256(readFileSync(archive));
 		assertChecksumFile(path.join(downloadDirectory, "SHA256SUMS"), archiveName, archiveSha256);
 		const remoteCommit = (dependencies.resolveRemoteTag ?? resolveRemoteTag)(tag);
-		if (!GIT_OBJECT_ID.test(remoteCommit)) fail("gateway_tag_unverified", "Gateway handoff tag did not resolve to one immutable commit.");
+		if (!isGitObject(remoteCommit)) fail("gateway_tag_unverified", "Gateway handoff tag did not resolve to one immutable commit.");
 		const certificateIdentity = `https://github.com/${REPOSITORY}/${WORKFLOW_PATH}@refs/tags/${tag}`;
 		const signature = (dependencies.verifySignature ?? verifySignature)({
 			archive,
@@ -250,7 +250,7 @@ export function resolveRemoteTag(tag: string, run?: RemoteTagRunner): string {
 	const refs = new Map();
 	for (const line of lines) {
 		const [objectId, ref, extra] = line.split(/\s+/u);
-		if (extra || !GIT_OBJECT_ID.test(objectId) || refs.has(ref)) {
+		if (extra || !isGitObject(objectId) || refs.has(ref)) {
 			fail("gateway_tag_unverified", "Gateway handoff tag response is invalid.");
 		}
 		refs.set(ref, objectId);
@@ -353,10 +353,6 @@ function requireRegularFile(file: string, code: string): string {
 	return file;
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
-
 function controlRoutesDigest(file: string): string {
 	let value: unknown;
 	try {
@@ -364,12 +360,17 @@ function controlRoutesDigest(file: string): string {
 	} catch {
 		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance is invalid.");
 	}
-	if (!isRecord(value) || !Array.isArray(value.operations) || value.operations.length !== 7) {
+	if (!isJsonRecord(value) || !Array.isArray(value.operations) || value.operations.length !== 7) {
 		fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has no exact route projection.");
 	}
 	const routes: Record<string, string> = {};
 	for (const entry of value.operations) {
-		if (!isRecord(entry) || typeof entry.operation !== "string" || typeof entry.path !== "string" || Object.hasOwn(routes, entry.operation)) {
+		if (
+			!isJsonRecord(entry) ||
+			typeof entry.operation !== "string" ||
+			typeof entry.path !== "string" ||
+			Object.hasOwn(routes, entry.operation)
+		) {
 			fail("gateway_handoff_identity_mismatch", "Signed Gateway control conformance has an invalid route projection.");
 		}
 		routes[entry.operation] = entry.path;
@@ -380,10 +381,6 @@ function controlRoutesDigest(file: string): string {
 function fail(code: string, message: string): never {
 	throw new GatewayProtocolHandoffBootstrapError(code, message);
 }
-function isRecord(value: unknown): value is JsonRecord {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 export function runCli(argv: readonly string[], io: Pick<Console, "log" | "error"> = console): number {
 	const tagIndex = argv.indexOf("--tag");
 	if (argv.length !== 2 || tagIndex !== 0) {

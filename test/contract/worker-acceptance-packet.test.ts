@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -13,6 +13,7 @@ import {
 	readInstalledReleaseFacts,
 } from "../../packages/ceal-worker-cli/dist/acceptance-record.js";
 import { sha256 } from "../../packages/ceal-worker-cli/dist/sha256.js";
+import { isJsonRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import {
 	buildAcceptancePacket,
 	inspectInstalledRelease,
@@ -37,11 +38,63 @@ test.after(() => {
 	DIVERGED_REPO.cleanup();
 });
 
-function buildContractAcceptancePacket(options) {
+type JsonRecord = Record<string, unknown>;
+
+interface FixtureProducer extends JsonRecord {
+	repository: string;
+	commit: string;
+	tree: string;
+}
+
+interface FixtureProtocol extends JsonRecord {
+	package: string;
+	version: string;
+	sha256: string;
+	producer: FixtureProducer;
+}
+
+interface FixtureManifest extends JsonRecord {
+	schema_version: string;
+	artifact_state: string;
+	version: string;
+	platform: string;
+	artifact: { name: string; sha256: string };
+	protocol?: FixtureProtocol;
+}
+
+interface StageInstallOptions {
+	manifest?: Partial<FixtureManifest> & { artifact?: { name: string; sha256: string }; protocol?: FixtureProtocol };
+	sums?: string;
+	digest?: string;
+	binaryBytes?: string;
+	generationDigest?: string;
+	commandLink?: boolean;
+}
+
+interface StubBinaryOptions {
+	discoveryStatus?: number;
+}
+
+interface StageInstallResult {
+	directory: string;
+	binary: string;
+	manifest: FixtureManifest;
+}
+
+type AcceptancePacketShape = Parameters<typeof sanitizedAcceptanceRecord>[0];
+type AcceptancePacketFixture = AcceptancePacketShape &
+	JsonRecord & {
+		installed_client: AcceptancePacketShape["installed_client"] & JsonRecord;
+		guide: AcceptancePacketShape["guide"] & JsonRecord;
+		gateway_session: AcceptancePacketShape["gateway_session"] & JsonRecord;
+		bounded_capability_call: (NonNullable<AcceptancePacketShape["bounded_capability_call"]> & JsonRecord) | null;
+	};
+
+function buildContractAcceptancePacket(options: Parameters<typeof buildAcceptancePacket>[0] = {}) {
 	return buildAcceptancePacket({ ...options, repoRoot: CONTRACT_REPO.root });
 }
 
-function buildMessageSearchAcceptancePacket(binary) {
+function buildMessageSearchAcceptancePacket(binary: string) {
 	return buildContractAcceptancePacket({
 		binary,
 		capability: "message.search",
@@ -52,9 +105,9 @@ const BINARY_BYTES = "#!/bin/sh\nexit 0\n";
 const INSTALLER_BYTES = "#!/bin/sh\nexit 0\n";
 
 function stageInstall(
-	root,
-	{ manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES, generationDigest, commandLink = true } = {},
-) {
+	root: string,
+	{ manifest: overrides = {}, sums, digest, binaryBytes = BINARY_BYTES, generationDigest, commandLink = true }: StageInstallOptions = {},
+): StageInstallResult {
 	const worker = path.join(root, "install", ".ceal-cli", "worker");
 	const actual = digest ?? sha256(binaryBytes);
 	const installerDigest = sha256(INSTALLER_BYTES);
@@ -90,8 +143,14 @@ function stageInstall(
 	return { directory, binary, manifest };
 }
 
-function code(expected) {
-	return (error) => error instanceof WorkerAcceptanceError && error.code === expected;
+function code(expected: string) {
+	return (error: unknown): boolean => error instanceof WorkerAcceptanceError && error.code === expected;
+}
+
+function parseJsonRecord(text: string): JsonRecord {
+	const value: unknown = JSON.parse(text);
+	if (!isJsonRecord(value)) throw new Error("Expected a JSON object.");
+	return value;
 }
 
 // The command's central claim is that it describes an installed release. A
@@ -171,6 +230,7 @@ test("a protocol input named by version alone, or by a source path, is refused",
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { manifest } = stageInstall(root);
 	assert.equal(verifyProtocolProvenance(manifest, { repoRoot: root }).producer.commit, "c".repeat(40));
+	assert.ok(manifest.protocol);
 
 	for (const missing of ["commit", "tree", "repository"]) {
 		const producer = { ...manifest.protocol.producer };
@@ -221,7 +281,7 @@ test("a release manifest of an unknown schema is refused before any field is rea
 // with a regex, deliberately not a parser, so the fixture has to be text rather
 // than a structure. `$1 $2` because the packet distinguishes `guide status` from
 // `receipt show`, and a stub keyed on `$1` alone would let those two collapse.
-function stubBinary({ discoveryStatus = 0 } = {}) {
+function stubBinary({ discoveryStatus = 0 }: StubBinaryOptions = {}): string {
 	return `#!/bin/sh
 case "$1 $2" in
   "version ") echo "version: 0.66.1"; echo "protocol_version: 0.65.0" ;;
@@ -257,8 +317,14 @@ exit 0
 // The real lock, read rather than restated: `buildAcceptancePacket` compares the
 // manifest's producer against the repo's own lock, so a hand-copied commit here
 // would be a fixture agreeing with itself.
-function lockedProducer(repoRoot = CONTRACT_REPO.root) {
-	const gateway = JSON.parse(readFileSync(path.join(repoRoot, "gateway-protocol-handoff-lock.json"), "utf8")).gateway;
+
+function lockedProducer(repoRoot = CONTRACT_REPO.root): FixtureProducer {
+	const lock = parseJsonRecord(readFileSync(path.join(repoRoot, "gateway-protocol-handoff-lock.json"), "utf8"));
+	if (!isJsonRecord(lock.gateway)) throw new Error("Expected a Gateway lock record.");
+	const gateway = lock.gateway;
+	if (typeof gateway.repository !== "string" || typeof gateway.commit !== "string" || typeof gateway.tree !== "string") {
+		throw new Error("Gateway lock is missing producer identity.");
+	}
 	return { repository: gateway.repository, commit: gateway.commit, tree: gateway.tree };
 }
 
@@ -266,7 +332,7 @@ function lockedProducer(repoRoot = CONTRACT_REPO.root) {
 // that answers, and a producer the repo's lock agrees with. `stageInstall` stays
 // the low-level fixture because the refusal tests above need to break exactly
 // one of those two properties at a time.
-function stageWorkingInstall(root, options = {}, repoRoot = CONTRACT_REPO.root) {
+function stageWorkingInstall(root: string, options: StubBinaryOptions = {}, repoRoot = CONTRACT_REPO.root): StageInstallResult {
 	return stageInstall(root, {
 		binaryBytes: stubBinary(options),
 		manifest: {
@@ -325,20 +391,23 @@ test("a bounded call adds the provider row and its receipt readback, and drops t
 	const root = scratchDir(context, "ceal-acceptance-");
 	const { binary } = stageWorkingInstall(root);
 	const packet = await buildMessageSearchAcceptancePacket(binary);
-
-	assert.equal(packet.bounded_capability_call.capability, "message.search");
-	assert.equal(packet.bounded_capability_call.status, "completed");
-	assert.equal(packet.bounded_capability_call.evidence, "receipt");
-	assert.equal(packet.bounded_capability_call.request_ref, "request:fixture");
+	assert.ok(packet.bounded_capability_call);
+	const boundedCall = packet.bounded_capability_call;
+	assert.equal(boundedCall.capability, "message.search");
+	assert.equal(boundedCall.status, "completed");
+	assert.equal(boundedCall.evidence, "receipt");
+	assert.equal(boundedCall.request_ref, "request:fixture");
 	// The receipt is a SECOND invocation keyed on the request_ref the call
 	// returned. Without it the packet would be quoting the call's own report of
 	// itself, which is the substitution this row exists to avoid.
-	assert.equal(packet.bounded_capability_call.receipt.readback_status, "readback_complete");
-	assert.equal(packet.bounded_capability_call.receipt.gateway_audit_readback, "verified");
-	assert.equal(packet.bounded_capability_call.receipt.provider_state_readback, "not_established");
-	assert.equal(packet.bounded_capability_call.receipt.authorization, "granted");
-	assert.equal(packet.bounded_capability_call.receipt.gateway_elapsed_ms, 42);
-	assert.deepEqual(packet.bounded_capability_call.receipt.audit_refs, ["audit:one", "audit:two"]);
+	assert.ok(boundedCall.receipt);
+	const receipt = boundedCall.receipt;
+	assert.equal(receipt.readback_status, "readback_complete");
+	assert.equal(receipt.gateway_audit_readback, "verified");
+	assert.equal(receipt.provider_state_readback, "not_established");
+	assert.equal(receipt.authorization, "granted");
+	assert.equal(receipt.gateway_elapsed_ms, 42);
+	assert.deepEqual(receipt.audit_refs, ["audit:one", "audit:two"]);
 	assert.ok(!packet.non_claims.some((claim) => claim.startsWith("provider_execution_not_reached:")));
 });
 
@@ -398,7 +467,8 @@ test("installed command execution refuses a child that ignores TERM and a child 
 	chmodSync(signaled, 0o755);
 	await assert.rejects(
 		() => runInstalledCommand(signaled, ["call", "message.search"], { postExitDrainMs: 5 }),
-		(error) => code("installed_binary_failed")(error) && /provider outcome may be unknown/u.test(error.message),
+		(error: unknown) =>
+			code("installed_binary_failed")(error) && error instanceof Error && /provider outcome may be unknown/u.test(error.message),
 	);
 	await assert.rejects(
 		() => runInstalledCommand(path.join(root, "missing"), ["version"], { postExitDrainMs: 5 }),
@@ -436,11 +506,13 @@ printf '{"home":"%s","oidc":"%s","github":"%s","cloudflare":"%s"}' "$HOME" "\${A
 // The CLI entry, run as the process it really is. `parseArgs` and `render` have
 // no other caller, and exporting them to reach in-process would prove a surface
 // no operator uses. The child inherits NODE_V8_COVERAGE, so this counts.
-function runCli(args, options = {}) {
+type CliOptions = Omit<SpawnSyncOptionsWithStringEncoding, "encoding">;
+
+function runCli(args: readonly string[], options: CliOptions = {}): SpawnSyncReturns<string> {
 	return runCliAt(path.join(CONTRACT_REPO.root, "scripts", "worker-acceptance-packet.ts"), args, options);
 }
 
-function runCliAt(script, args, options = {}) {
+function runCliAt(script: string, args: readonly string[], options: CliOptions = {}): SpawnSyncReturns<string> {
 	return spawnSync(process.execPath, [script, ...args], {
 		encoding: "utf8",
 		...options,
@@ -478,13 +550,13 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 
 	const json = runCli(["--binary", binary, "--json"]);
 	assert.equal(json.status, 0, json.stderr);
-	assert.equal(JSON.parse(json.stdout).schema_version, "ceal.worker_acceptance_packet.v1");
+	assert.equal(parseJsonRecord(json.stdout).schema_version, "ceal.worker_acceptance_packet.v1");
 
 	// --sanitized implies --json: the external record exists to be written to a
 	// file another lane reads by digest, not to be eyeballed.
 	const sanitized = runCli(["--binary", binary, "--sanitized"]);
 	assert.equal(sanitized.status, 0, sanitized.stderr);
-	const record = JSON.parse(sanitized.stdout);
+	const record = parseJsonRecord(sanitized.stdout);
 	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	assert.doesNotMatch(sanitized.stdout, new RegExp(root.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 	assert.equal(record.bounded_capability_call, null);
@@ -502,17 +574,21 @@ test("the CLI renders a human packet, emits JSON on request, and refuses malform
 		`target:${"a".repeat(64)}`,
 	]);
 	assert.equal(sanitizedCall.status, 0, sanitizedCall.stderr);
-	const calledRecord = JSON.parse(sanitizedCall.stdout);
+	const calledRecord = parseJsonRecord(sanitizedCall.stdout);
+	if (!isJsonRecord(calledRecord.bounded_capability_call) || !isJsonRecord(calledRecord.bounded_capability_call.receipt)) {
+		throw new Error("Expected a bounded capability call with a receipt.");
+	}
 	assert.equal(calledRecord.bounded_capability_call.request_ref, "request:fixture");
 	assert.deepEqual(calledRecord.bounded_capability_call.receipt.audit_refs, ["audit:one", "audit:two"]);
 	assert.doesNotMatch(sanitizedCall.stdout, new RegExp(root.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 
-	for (const [argv, expected] of [
+	const malformedArgv: ReadonlyArray<readonly [readonly string[], string]> = [
 		[["--nope"], "unknown_argument"],
 		[["--binary"], "missing_argument_value"],
 		[["--capability", "message.search"], "incomplete_call_request"],
 		[["--target", "target:x"], "incomplete_call_request"],
-	]) {
+	];
+	for (const [argv, expected] of malformedArgv) {
 		const refused = runCli(argv);
 		assert.notEqual(refused.status, 0, `${argv.join(" ")} must be refused`);
 		assert.match(refused.stderr + refused.stdout, new RegExp(expected, "u"));
@@ -529,6 +605,7 @@ test("a call with no request_ref leaves the receipt unclaimed", async (context) 
 		manifest: { protocol: { package: "@corca-ai/ceal-protocol", version: "0.65.0", sha256: "a".repeat(64), producer: lockedProducer() } },
 	});
 	const packet = await buildMessageSearchAcceptancePacket(binary);
+	assert.ok(packet.bounded_capability_call);
 	assert.equal(packet.bounded_capability_call.status, "refused");
 	assert.equal(packet.bounded_capability_call.request_ref, null);
 	assert.equal(packet.bounded_capability_call.receipt, null);
@@ -538,7 +615,7 @@ test("a call with no request_ref leaves the receipt unclaimed", async (context) 
 // Built by hand rather than by running the command: the projection is what is
 // under test, and requiring an installed release to test it would mean the
 // leak-prevention had no gate at all on a machine without one.
-function packetFixture() {
+function packetFixture(): AcceptancePacketFixture {
 	return {
 		schema_version: "ceal.worker_acceptance_packet.v1",
 		installed_client: {
@@ -603,7 +680,9 @@ test("the sanitized record omits every host-local path and keeps the Gateway's o
 	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	// The packet's own non-claims travel, plus one naming the omission.
 	assert.equal(record.non_claims[0], "fixture non-claim");
-	assert.match(record.non_claims.at(-1), /sanitized projection/u);
+	const lastNonClaim = record.non_claims.at(-1);
+	assert.ok(lastNonClaim);
+	assert.match(lastNonClaim, /sanitized projection/u);
 });
 
 // An allow-list is only an allow-list if a new packet field does not ride along.
@@ -656,16 +735,20 @@ test("the checkout emitter answers the record schema with exactly its declared k
 		},
 	};
 	const record = sanitizedAcceptanceRecord(packet);
-	const sorted = (value) => [...value].sort();
+	assert.ok(record.bounded_capability_call);
+	const boundedCall = record.bounded_capability_call;
+	assert.ok(boundedCall.receipt);
+	const receipt = boundedCall.receipt;
+	const sorted = (value: readonly string[]): string[] => [...value].sort();
 	assert.deepEqual(Object.keys(record).sort(), sorted(CEAL_ACCEPTANCE_TOP_LEVEL_KEYS));
 	assert.deepEqual(Object.keys(record.guide).sort(), sorted(CEAL_ACCEPTANCE_GUIDE_KEYS));
 	assert.deepEqual(Object.keys(record.gateway_session).sort(), sorted(CEAL_ACCEPTANCE_SESSION_KEYS));
-	assert.deepEqual(Object.keys(record.bounded_capability_call).sort(), sorted(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS));
-	assert.deepEqual(Object.keys(record.bounded_capability_call.receipt).sort(), sorted(CEAL_ACCEPTANCE_RECEIPT_KEYS));
+	assert.deepEqual(Object.keys(boundedCall).sort(), sorted(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS));
+	assert.deepEqual(Object.keys(receipt).sort(), sorted(CEAL_ACCEPTANCE_RECEIPT_KEYS));
 	assert.doesNotMatch(JSON.stringify(record), /membership_ref|subject_ref|operator_home|raw_access_token|registered_hosts|"events"/u);
 	// Positive control: the evidence each row exists to carry did survive.
-	assert.equal(record.bounded_capability_call.request_ref, "ceal:fixture:call");
-	assert.deepEqual(record.bounded_capability_call.receipt.audit_refs, ["gateway-audit:fixture"]);
+	assert.equal(boundedCall.request_ref, "ceal:fixture:call");
+	assert.deepEqual(receipt.audit_refs, ["gateway-audit:fixture"]);
 	// The shipped guide tells a reader to branch on `ok`; both emitters answer it.
 	assert.equal(record.ok, true);
 	assert.equal(record.command, "ceal");
@@ -685,7 +768,10 @@ test("the checkout emitter keeps every declared receipt key when readback report
 		request_ref: "ceal:fixture:call",
 		receipt: { exit_code: 3, elapsed_ms: 4 },
 	};
-	const receipt = sanitizedAcceptanceRecord(packet).bounded_capability_call.receipt;
+	const boundedCall = sanitizedAcceptanceRecord(packet).bounded_capability_call;
+	assert.ok(boundedCall);
+	assert.ok(boundedCall.receipt);
+	const receipt = boundedCall.receipt;
 	assert.deepEqual(Object.keys(receipt).sort(), [...CEAL_ACCEPTANCE_RECEIPT_KEYS].sort());
 	for (const key of CEAL_ACCEPTANCE_RECEIPT_KEYS) {
 		if (key !== "exit_code" && key !== "elapsed_ms") assert.equal(receipt[key], null, `${key} must remain explicit`);
@@ -761,13 +847,24 @@ test("both emitters answer the record schema with the same key sets", async () =
 		},
 	};
 	const checkout = sanitizedAcceptanceRecord(packet);
+	assert.ok(installed.bounded_capability_call);
+	assert.ok(checkout.bounded_capability_call);
+	assert.ok(isJsonRecord(installed.bounded_capability_call));
+	const installedCall = installed.bounded_capability_call;
+	const checkoutCall = checkout.bounded_capability_call;
+	assert.ok(isJsonRecord(installedCall.receipt));
+	assert.ok(checkoutCall.receipt);
+	const installedReceipt = installedCall.receipt;
+	const checkoutReceipt = checkoutCall.receipt;
+	assert.ok(isJsonRecord(installed.guide));
+	assert.ok(isJsonRecord(installed.gateway_session));
 	assert.equal(installed.schema_version, checkout.schema_version);
-	const keys = (value) => Object.keys(value).sort();
+	const keys = (value: object): string[] => Object.keys(value).sort();
 	assert.deepEqual(keys(installed), keys(checkout));
 	assert.deepEqual(keys(installed.guide), keys(checkout.guide));
 	assert.deepEqual(keys(installed.gateway_session), keys(checkout.gateway_session));
-	assert.deepEqual(keys(installed.bounded_capability_call), keys(checkout.bounded_capability_call));
-	assert.deepEqual(keys(installed.bounded_capability_call.receipt), keys(checkout.bounded_capability_call.receipt));
+	assert.deepEqual(keys(installedCall), keys(checkoutCall));
+	assert.deepEqual(keys(installedReceipt), keys(checkoutReceipt));
 	// `emitted_by` is the key that must NOT agree in value; it is what tells the
 	// two documents apart for a reader holding both.
 	assert.notEqual(installed.emitted_by, checkout.emitted_by);
@@ -780,8 +877,9 @@ test("both emitters answer the record schema with the same key sets", async () =
 // second place: an identity ref can only arrive inside a key nobody declared.
 test("no bounded-call key admits a Gateway identity ref", () => {
 	const forbidden = ["membership_ref", "subject_ref", "registration_ref", "client_ref", "grant_snapshot", "events"];
+	const boundedCallKeys: readonly string[] = CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS;
 	for (const name of forbidden) {
-		assert.equal(CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS.includes(name), false, `${name} is declared on the bounded-call row`);
+		assert.equal(boundedCallKeys.includes(name), false, `${name} is declared on the bounded-call row`);
 		assert.equal(CEAL_ACCEPTANCE_RECEIPT_KEYS.includes(name), false, `${name} is declared on the receipt row`);
 	}
 	// Positive control: the lists are not empty and do declare what they should.

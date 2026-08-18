@@ -33,10 +33,19 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { exitWith } from "./lib/exit-with.ts";
+import { isObjectRecord } from "./lib/object-record.ts";
+import { isStringArray } from "./lib/string-array.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = ".c8rc.scripts.json";
 const TIERS = "test:tiers";
+
+type CoverageConfig = {
+	readonly "temp-directory": string;
+	readonly "reports-dir": string;
+	readonly extension: readonly string[];
+	readonly exclude: readonly string[];
+};
 
 // Where the floor is enforced. It has to include `PLATFORM_PROOF_PLATFORM` from
 // `test/platform-proof.ts` — the host carrying the full proof set, and so the
@@ -62,7 +71,7 @@ const TIERS = "test:tiers";
 // the binding platform the last time both were.
 const MEASURED_PLATFORMS = Object.freeze(["linux-arm64", "linux-x64"]);
 
-function runTiers(prefix) {
+function runTiers(prefix: readonly string[]) {
 	const argv = [...prefix, "npm", "run", TIERS];
 	return spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit" });
 }
@@ -83,17 +92,33 @@ if (!MEASURED_PLATFORMS.includes(host)) {
 if (!existsSync(path.join(ROOT, CONFIG))) {
 	exitWith("coverage-scripts", `${CONFIG} is missing; the floor it carries is what makes this a gate rather than a report`, 2);
 }
-// Read rather than restated. These used to be named here and in the config
-// independently, which is one edit away from this deleting a directory the run
-// never wrote and leaving 100MB of profiles behind under the real one.
-const config = JSON.parse(readFileSync(path.join(ROOT, CONFIG), "utf8"));
+function isCoverageConfig(value: unknown): value is CoverageConfig {
+	return (
+		isObjectRecord(value) &&
+		typeof value["temp-directory"] === "string" &&
+		typeof value["reports-dir"] === "string" &&
+		isStringArray(value.extension) &&
+		isStringArray(value.exclude)
+	);
+}
+
+const parsedConfig: unknown = JSON.parse(readFileSync(path.join(ROOT, CONFIG), "utf8"));
+const parsedTemporary = isObjectRecord(parsedConfig) ? parsedConfig["temp-directory"] : undefined;
+const parsedReports = isObjectRecord(parsedConfig) ? parsedConfig["reports-dir"] : undefined;
+if (typeof parsedTemporary !== "string" || typeof parsedReports !== "string") {
+	exitWith("coverage-scripts", `${CONFIG} must declare both temp-directory and reports-dir`, 2);
+}
+if (!isCoverageConfig(parsedConfig)) {
+	exitWith("coverage-scripts", `${CONFIG} must declare extension and exclude arrays`, 2);
+}
+const config = parsedConfig;
 const temporary = config["temp-directory"];
 const reports = config["reports-dir"];
-if (!temporary || !reports) exitWith("coverage-scripts", `${CONFIG} must declare both temp-directory and reports-dir`, 2);
 
 /** Every script the config claims to measure — the report has to name all of them. */
 function measurableScripts() {
-	return readdirSync(path.join(ROOT, "scripts"), { recursive: true })
+	const entries: string[] = readdirSync(path.join(ROOT, "scripts"), { recursive: true, encoding: "utf8" });
+	return entries
 		.map((name) => `scripts/${name}`.replaceAll(path.sep, "/"))
 		.filter((name) => config.extension.some((suffix) => name.endsWith(suffix)) && !config.exclude.includes(name));
 }

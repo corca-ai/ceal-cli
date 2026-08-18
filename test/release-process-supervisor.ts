@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { type BoundedProcessOptions, runBoundedProcess } from "../packages/ceal-worker-cli/src/bounded-process.ts";
+import { isMainModule } from "../scripts/lib/is-main-module.ts";
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
 	const payload = parsePayload(JSON.parse(readFileSync(0, "utf8")));
 	const result = await runBoundedProcess(payload.command, payload.args, payload.bounds);
 	process.stdout.write(JSON.stringify(result));

@@ -241,6 +241,15 @@ export interface UnixSocketErrorNames {
 	readonly requestFailed: string;
 }
 
+function clearUnixSocketCleanup(
+	deadline: ReturnType<typeof setTimeout> | undefined,
+	signal: AbortSignal | undefined,
+	abortRequest: () => void,
+): void {
+	if (deadline) clearTimeout(deadline);
+	signal?.removeEventListener("abort", abortRequest);
+}
+
 /**
  * One fixed-route POST over a Unix socket, bounded by its caller's deadline and
  * abort. The socket is destroyed on every losing path, so no branch leaves a
@@ -266,8 +275,7 @@ export function postUnixSocket(
 		const finish = (action: () => void) => {
 			if (settled) return;
 			settled = true;
-			if (deadline) clearTimeout(deadline);
-			input.signal?.removeEventListener("abort", abortRequest);
+			clearUnixSocketCleanup(deadline, input.signal, abortRequest);
 			action();
 		};
 		const abortRequest = () => {
@@ -353,8 +361,7 @@ export function postUnixSocketStream(
 		const cleanup = () => {
 			if (cleaned) return;
 			cleaned = true;
-			if (deadline) clearTimeout(deadline);
-			input.signal?.removeEventListener("abort", abortRequest);
+			clearUnixSocketCleanup(deadline, input.signal, abortRequest);
 		};
 		const close = () => {
 			response?.destroy();

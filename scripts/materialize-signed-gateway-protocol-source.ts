@@ -1,17 +1,34 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import { type ExecFileSyncOptions, execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isGitObject } from "./lib/git-object.ts";
 
 const ORIGIN = "https://github.com/corca-ai/ceal.git";
 const TAG = /^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u;
-const OID = /^[a-f0-9]{40}$/u;
 
-export function materializeSignedGatewayProtocolSource({ tag, commit, protocolTree, outputDirectory }, dependencies = {}) {
-	if (!TAG.test(tag ?? "") || !OID.test(commit ?? "") || !OID.test(protocolTree ?? "") || !path.isAbsolute(outputDirectory ?? ""))
+type SignedGatewayProtocolSourceInput = {
+	readonly tag: string;
+	readonly commit: string;
+	readonly protocolTree: string;
+	readonly outputDirectory: string;
+};
+
+type ExecFileSyncRunner = (file: string, args: string[], options?: ExecFileSyncOptions) => string | Buffer;
+
+type SignedGatewayProtocolSourceDependencies = {
+	readonly git?: ExecFileSyncRunner;
+	readonly archive?: ExecFileSyncRunner;
+};
+
+export function materializeSignedGatewayProtocolSource(
+	{ tag, commit, protocolTree, outputDirectory }: SignedGatewayProtocolSourceInput,
+	dependencies: SignedGatewayProtocolSourceDependencies = {},
+) {
+	if (!TAG.test(tag ?? "") || !isGitObject(commit) || !isGitObject(protocolTree) || !path.isAbsolute(outputDirectory ?? ""))
 		throw new Error("invalid_signed_protocol_source_input");
 	if (existsSync(outputDirectory)) throw new Error("signed_protocol_source_output_exists");
 	const git = dependencies.git ?? execFileSync;
@@ -62,7 +79,7 @@ export function materializeSignedGatewayProtocolSource({ tag, commit, protocolTr
 	}
 }
 
-function assertRegularTree(root) {
+function assertRegularTree(root: string): void {
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
 		const target = path.join(root, entry.name);
 		if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile()) || lstatSync(target).isSymbolicLink())

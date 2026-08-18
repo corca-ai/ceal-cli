@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TAG_UPDATE = `refs/tags/ceal-v0.77.0 ${"a".repeat(40)} refs/tags/ceal-v0.77.0 ${"0".repeat(40)}\n`;
 
-test("a concurrent pre-push is refused before it starts another gate", async (context) => {
+test("a concurrent pre-push is refused before it starts another gate", async (context: TestContext) => {
 	const fixture = createFixture(context);
 	const first = spawn("sh", [".githooks/pre-push"], {
 		cwd: fixture.root,
@@ -47,12 +47,14 @@ test("a concurrent pre-push is refused before it starts another gate", async (co
 	assert.equal(third.status, 0, third.stderr);
 });
 
-for (const [signal, expectedExit] of [
+const signalExitCases: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
 	["SIGHUP", 129],
 	["SIGINT", 130],
 	["SIGTERM", 143],
-]) {
-	test(`${signal} preserves its shell exit status and releases the lock`, async (context) => {
+];
+
+for (const [signal, expectedExit] of signalExitCases) {
+	test(`${signal} preserves its shell exit status and releases the lock`, async (context: TestContext) => {
 		const fixture = createFixture(context);
 		const child = spawn("sh", [".githooks/pre-push"], {
 			cwd: fixture.root,
@@ -72,7 +74,7 @@ for (const [signal, expectedExit] of [
 	});
 }
 
-function createFixture(context) {
+function createFixture(context: TestContext) {
 	const scratch = mkdtempSync(path.join(tmpdir(), "ceal-pre-push-lock-"));
 	const root = path.join(scratch, "main");
 	const linked = path.join(scratch, "linked");
@@ -120,7 +122,7 @@ function createFixture(context) {
 	};
 }
 
-async function waitForFile(file) {
+async function waitForFile(file: string) {
 	const deadline = Date.now() + 5_000;
 	while (!existsSync(file)) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting for ${file}`);
@@ -128,13 +130,13 @@ async function waitForFile(file) {
 	}
 }
 
-function collect(child) {
+function collect(child: ChildProcessWithoutNullStreams): Promise<{ code: number | null; stderr: string }> {
 	let stderr = "";
 	child.stderr.setEncoding("utf8");
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk;
 	});
-	return new Promise((resolve, reject) => {
+	return new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", (code) => resolve({ code, stderr }));
 	});

@@ -4,17 +4,20 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { renderScriptFailure } from "../../scripts/lib/cli-output.ts";
 import { codedErrorClass } from "../../scripts/lib/coded-error.ts";
-import { parseScriptArgs } from "../../scripts/lib/parse-script-args.ts";
+import { isObjectRecord } from "../../scripts/lib/object-record.ts";
+import { parseScriptArgs, type ScriptArgSpec } from "../../scripts/lib/parse-script-args.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
 import { toolchainEnv } from "../../scripts/lib/toolchain-env.ts";
 import { GatewayProtocolConsumerError } from "../../scripts/verify-gateway-protocol-consumer.ts";
+import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 
-function thrower() {
+const ScriptArgumentError = codedErrorClass("ScriptArgumentError");
+
+function thrower(): ScriptArgSpec["fail"] {
 	return (code, message) => {
-		const error = new Error(message);
-		error.code = code;
-		throw error;
+		throw new ScriptArgumentError(code, message);
 	};
 }
 
@@ -26,9 +29,38 @@ const SPEC = {
 	unknownMessage: "unexpected argument",
 };
 
-function parse(argv, overrides = {}) {
+function parse(argv: readonly string[], overrides: Partial<ScriptArgSpec> = {}) {
 	return parseScriptArgs(argv, { fail: thrower(), ...SPEC, ...overrides });
 }
+
+test("generic object record guard preserves non-null object semantics", () => {
+	assert.equal(isObjectRecord({}), true);
+	assert.equal(isObjectRecord([]), true);
+	assert.equal(isObjectRecord(null), false);
+	assert.equal(isObjectRecord("record"), false);
+	assert.equal(
+		isObjectRecord(() => undefined),
+		false,
+	);
+});
+
+test("CLI failure rendering keeps JSON and text channels separate", async () => {
+	await assertCliFailureChannels(
+		(argv, io) => {
+			renderScriptFailure(io, {
+				fallbackCode: "fixture_fallback",
+				fallbackMessage: "fixture fallback",
+				json: argv.includes("--json"),
+				knownError: argv.includes("--json") ? { code: "fixture_failed", message: "fixture failed" } : undefined,
+				schemaVersion: "ceal.fixture_error.v1",
+			});
+			return 2;
+		},
+		[],
+		"fixture_failed",
+		"fixture fallback",
+	);
+});
 
 test("help short-circuits and still reports the defaults", () => {
 	for (const flag of ["--help", "-h"]) {
@@ -57,7 +89,7 @@ test("flags, values, and --json are collected regardless of order", () => {
 test("a value option with no value is refused", () => {
 	assert.throws(
 		() => parse(["--out"]),
-		(error) => error.code === "invalid_argument" && error.message === "option requires a value",
+		(error) => isObjectRecord(error) && error.code === "invalid_argument" && error.message === "option requires a value",
 	);
 	// The following token IS consumed as the value when present, which is the
 	// documented grammar: `--out --force` sets outputDirectory to "--force".
@@ -68,7 +100,7 @@ test("an unrecognized argument is refused rather than ignored", () => {
 	for (const argv of [["--nope"], ["stray"], ["--out", "/tmp/a", "--nope"]]) {
 		assert.throws(
 			() => parse(argv),
-			(error) => error.code === "invalid_argument" && error.message === "unexpected argument",
+			(error) => isObjectRecord(error) && error.code === "invalid_argument" && error.message === "unexpected argument",
 		);
 	}
 });
@@ -78,7 +110,7 @@ test("prototype keys are not declared options", () => {
 	for (const hostile of ["__proto__", "constructor", "toString"]) {
 		assert.throws(
 			() => parse([hostile]),
-			(error) => error.code === "invalid_argument",
+			(error) => isObjectRecord(error) && error.code === "invalid_argument",
 		);
 	}
 });
@@ -101,19 +133,24 @@ test("a coded error keeps its name, code, and instanceof", () => {
 	assert.equal(error.message, "boom");
 	assert.ok(error instanceof Alpha);
 	assert.ok(error instanceof Error);
+	const stack = error.stack;
 	assert.ok(!(error instanceof Beta), "distinct classes must not be interchangeable");
 	assert.equal(Alpha.name, "AlphaError", "the class itself must be named for readable stacks");
-	assert.match(error.stack.split("\n")[0], /^AlphaError: boom$/u);
+	if (typeof stack !== "string") throw new TypeError("expected a stack trace");
+	assert.match(stack.split("\n")[0], /^AlphaError: boom$/u);
 });
 
 test("declared extra fields are assigned and default to null", () => {
 	const WithWorkspace = codedErrorClass("WorkspaceError", ["workspace"]);
-	assert.equal(new WithWorkspace("command_failed", "boom", "/tmp/ws").workspace, "/tmp/ws");
-	assert.equal(new WithWorkspace("command_failed", "boom").workspace, null);
+	const withWorkspace = new WithWorkspace("command_failed", "boom", "/tmp/ws");
+	const withoutWorkspace = new WithWorkspace("command_failed", "boom");
+	assert.equal(isObjectRecord(withWorkspace) && withWorkspace.workspace, "/tmp/ws");
+	assert.equal(isObjectRecord(withoutWorkspace) && withoutWorkspace.workspace, null);
 });
 
 test("consumer error workspace remains writable for the keep-workspace fallback", () => {
 	const error = new GatewayProtocolConsumerError("worker_smoke_failed", "boom");
+	if (!isObjectRecord(error)) throw new TypeError("expected a record error");
 	error.workspace ??= "/tmp/kept-consumer-workspace";
 	assert.equal(error.workspace, "/tmp/kept-consumer-workspace");
 });

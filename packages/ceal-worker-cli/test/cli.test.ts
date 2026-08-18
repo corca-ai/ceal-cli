@@ -9,10 +9,20 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath, URL } from "node:url";
+import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
+import type { CealGatewayDiscoveryCapability, CealGatewayTargetCatalog } from "@corca-ai/ceal-protocol";
 import { parseAllDocuments } from "yaml";
-import { buildAcceptanceRecord, readInstalledReleaseFacts } from "../dist/acceptance-record.js";
-import { isCealAgentGuideHost } from "../dist/agent-guide.js";
+import {
+	buildAcceptanceRecord,
+	type CealAcceptanceRecordParts,
+	type CealInstalledReleaseReading,
+	readInstalledReleaseFacts,
+} from "../dist/acceptance-record.js";
+import { type CealAgentGuideHost, type CealAgentGuideState, isCealAgentGuideHost } from "../dist/agent-guide.js";
 import { classifyGatewayFailure, writeCallCompleted, writeCallGatewayFailure } from "../dist/call-result-output.js";
+import type { CealStableUpdateProgressStage } from "../dist/cli-runtime.js";
+import type { CealDiscoveryCacheEntry } from "../dist/discovery-cache.js";
+import type { CealCommandRuntime } from "../dist/index.js";
 import {
 	CEAL_COMMANDS,
 	CEAL_SUBCOMMANDS,
@@ -24,9 +34,11 @@ import {
 	splitSubcommandRoute,
 	subcommandRouteKey,
 } from "../dist/index.js";
-import { CealSessionStoreError } from "../dist/profile-store.js";
+import { type CealSessionStore, CealSessionStoreError, type CealStoredSession } from "../dist/profile-store.js";
+import type { CealReceiptSpoolEntry } from "../dist/receipt-spool.js";
 import { createCealSessionCapability } from "../dist/session-capability.js";
-import { CEAL_TIMING_STAGES, createCealTimingRecorder } from "../dist/timing.js";
+import type { CealCommandName, CealSubcommandHandlers } from "../dist/subcommands.js";
+import { CEAL_TIMING_STAGES, type CealTimingStage, createCealTimingRecorder } from "../dist/timing.js";
 import { deferredVoid } from "./deferred-test-support.ts";
 
 // The version the worker introduces itself to the Gateway with is derived from
@@ -38,7 +50,7 @@ const WORKER_PACKAGE_VERSION = JSON.parse(readFileSync(new URL("../package.json"
 // reads as a pass. `readdirSync` was not recursive, which made the first
 // `src/` subdirectory a silent hole; the file count is asserted for the same
 // reason, because an empty scan would satisfy every sweep trivially.
-function workerSource() {
+function workerSource(): string {
 	const entries = readdirSync(new URL("../src", import.meta.url), { recursive: true }).filter((entry) => String(entry).endsWith(".ts"));
 	assert.ok(entries.length > 10, `only ${entries.length} source files scanned; the sweep is not reaching src/`);
 	return entries.map((entry) => readFileSync(new URL(`../src/${entry}`, import.meta.url), "utf8")).join("\n");
@@ -48,8 +60,8 @@ function workerSource() {
 // first `}`. Three of the emitted error objects interpolate a template, whose `}`
 // closed the old regex early — so the sweep read a prefix, and a `code` key after
 // an interpolation would have passed unseen.
-function errorObjectBodies(source) {
-	const bodies = [];
+function errorObjectBodies(source: string): string[] {
+	const bodies: string[] = [];
 	for (const match of source.matchAll(/error:\s*\{/gu)) {
 		let depth = 1;
 		let index = match.index + match[0].length;
@@ -66,11 +78,11 @@ function errorObjectBodies(source) {
 }
 
 // Read the child routes a parent leaf advertises, bounded to its own block.
-function advertisedSubcommands(help) {
+function advertisedSubcommands(help: string): string[] {
 	const lines = help.split("\n");
 	const start = lines.indexOf("Subcommands:");
 	if (start < 0) return [];
-	const rows = [];
+	const rows: string[] = [];
 	for (const line of lines.slice(start + 1)) {
 		if (line === "") break;
 		const match = /^ {2}([a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)*)\s{2,}\S/u.exec(line);
@@ -79,14 +91,14 @@ function advertisedSubcommands(help) {
 	return rows;
 }
 
-async function run(args, runtime = {}) {
+async function run(args: readonly string[], runtime: TestRuntime = {}): Promise<{ code: number; stdout: string; stderr: string }> {
 	let stdout = "";
 	let stderr = "";
 	const code = await runCealCommand(
 		args,
 		{
 			stdout: {
-				write: (chunk) => {
+				write: (chunk: string) => {
 					stdout += String(chunk);
 				},
 			},
@@ -101,7 +113,22 @@ async function run(args, runtime = {}) {
 	return { code, stdout, stderr };
 }
 
-function prepareRuntime(runtime) {
+type TestRuntime = CealCommandRuntime & {
+	readStoredSession?: () => Promise<CealStoredSession | null>;
+	writeStoredSession?: (session: CealStoredSession) => Promise<void>;
+	deleteStoredSession?: () => Promise<void>;
+	runWithLockedSession?: CealSessionStore["withStateLock"];
+	removeDiscoveryCache?: () => Promise<void>;
+	removeReceiptSpool?: () => Promise<void>;
+	createClientSessionClient?: (options: { endpoint: string }) => CealPersonalClientSessionClient;
+};
+
+function requireStoredSession(value: CealStoredSession | null): CealStoredSession {
+	assert.ok(value);
+	return value;
+}
+
+function prepareRuntime(runtime: TestRuntime): CealCommandRuntime {
 	const {
 		readStoredSession,
 		writeStoredSession,
@@ -123,14 +150,14 @@ function prepareRuntime(runtime) {
 	const lockedStore = {
 		load,
 		save,
-		replace: async (_expectedRefreshToken, session) => save(session),
+		replace: async (_expectedRefreshToken: string, session: CealStoredSession) => save(session),
 		remove,
 	};
-	const store = {
+	const store: CealSessionStore = {
 		load,
-		save,
+		save: async (session) => save(session),
 		remove,
-		withStateLock: runWithLockedSession ?? ((action) => action(lockedStore)),
+		withStateLock: runWithLockedSession ?? (async (action) => action(lockedStore)),
 	};
 	return {
 		...commandRuntime,
@@ -145,7 +172,77 @@ function prepareRuntime(runtime) {
 	};
 }
 
-async function yamlRun(args, expectedCode = 0, runtime = {}) {
+type YamlValue = ReturnType<ReturnType<typeof parseAllDocuments>[number]["toJS"]>;
+
+type FixtureRequestBody = {
+	operation?: string;
+	request_id?: string;
+	capability_id?: string;
+	target_ref?: string;
+	arguments?: Record<string, string | number>;
+	purpose?: string;
+	match?: string;
+	cursor?: string;
+	limit?: number;
+	client?: { name: string; version: string };
+	[key: string]: unknown;
+};
+type FixtureRequest = {
+	request_id: string;
+	profile_ref: string;
+	operation: string;
+	body: FixtureRequestBody;
+	code?: string;
+	refresh_token?: string;
+	[key: string]: unknown;
+};
+type FixtureSuccessResponse = {
+	ok: true;
+	request_id: string;
+	protocol_version: string;
+	proof_ref_or_unavailable?: string;
+	value: Record<string, unknown>;
+	[key: string]: unknown;
+};
+type FixtureFailureResponse = {
+	ok: false;
+	request_id: string;
+	protocol_version: string;
+	error: Record<string, unknown>;
+	[key: string]: unknown;
+};
+type FixtureResponse = FixtureSuccessResponse | FixtureFailureResponse;
+
+function isFixtureRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertFixtureRecord(value: unknown, label: string): asserts value is Record<string, unknown> {
+	if (!isFixtureRecord(value)) throw new Error(`${label} is not a record`);
+}
+
+function fixtureRecord(value: unknown, label: string): Record<string, unknown> {
+	assertFixtureRecord(value, label);
+	return value;
+}
+
+function fixtureRecordField(value: Record<string, unknown>, key: string): Record<string, unknown> {
+	return fixtureRecord(value[key], `fixture field ${key}`);
+}
+
+function fixtureRecordArrayField(value: Record<string, unknown>, key: string): Record<string, unknown>[] {
+	const items = value[key];
+	if (!Array.isArray(items)) throw new Error(`fixture field ${key} is not an array`);
+	const records: Record<string, unknown>[] = [];
+	for (const item of items) records.push(fixtureRecord(item, `fixture field ${key} item`));
+	return records;
+}
+
+function isCealCommandName(value: string): value is CealCommandName {
+	return CEAL_COMMANDS.some((command) => command.name === value);
+}
+
+async function yamlRun(args: readonly string[], expectedCode = 0, runtime: TestRuntime = {}): Promise<YamlValue> {
 	const result = await run(args, runtime);
 	assert.equal(result.code, expectedCode, `${result.stderr}\n${result.stdout}`);
 	assert.equal(result.stderr, "");
@@ -256,11 +353,22 @@ test("route acceptance is derived from the declaration", async () => {
 test("dispatch selects the handler the route itself declares", () => {
 	for (const parent of new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent))) {
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent);
-		const defaults = declared.filter((subcommand) => subcommand.default === true);
+		const defaults = declared.filter((subcommand) => "default" in subcommand && subcommand.default === true);
 		assert.ok(defaults.length <= 1, `${parent} declares more than one default route`);
 		// A total table whose handlers are distinguishable only by which route they
 		// were registered under: a fallthrough would return a sibling's key.
-		const handlers = Object.fromEntries(declared.map((subcommand) => [subcommandRouteKey(subcommand), () => subcommandRouteKey(subcommand)]));
+		const handlers: CealSubcommandHandlers<CealCommandName, () => string> = {
+			status: () => "status",
+			"register codex": () => "register codex",
+			"register claude": () => "register claude",
+			refresh: () => "refresh",
+			enroll: () => "enroll",
+			adopt: () => "adopt",
+			logout: () => "logout",
+			targets: () => "targets",
+			show: () => "show",
+			emit: () => "emit",
+		};
 		for (const subcommand of declared) {
 			const key = subcommandRouteKey(subcommand);
 			const resolved = resolveSubcommandRoute(parent, [...subcommand.route, "--flag", "value"], handlers);
@@ -279,7 +387,14 @@ test("dispatch selects the handler the route itself declares", () => {
 	}
 	// A declared route whose handler is missing fails closed as undeclared instead
 	// of throwing, so the worst case is an argument refusal rather than a crash.
-	assert.equal(resolveSubcommandRoute("session", ["logout"], {}), undefined);
+	const emptySessionHandlers: CealSubcommandHandlers<"session", undefined> = {
+		status: undefined,
+		refresh: undefined,
+		enroll: undefined,
+		adopt: undefined,
+		logout: undefined,
+	};
+	assert.equal(resolveSubcommandRoute("session", ["logout"], emptySessionHandlers), undefined);
 });
 
 // The type-level totality above is not a complete gate, which is why this one
@@ -308,7 +423,7 @@ test("no source file reaches into a declaration table by position", () => {
 
 test("every declared route has a handler in the runner that serves it", () => {
 	const dispatched = dispatchedRouteKeys();
-	const parents = new Set(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent));
+	const parents = new Set<CealCommandName>(CEAL_SUBCOMMANDS.map((subcommand) => subcommand.parent));
 	for (const parent of parents) {
 		const declared = CEAL_SUBCOMMANDS.filter((subcommand) => subcommand.parent === parent)
 			.map((subcommand) => subcommandRouteKey(subcommand))
@@ -322,6 +437,7 @@ test("every declared route has a handler in the runner that serves it", () => {
 	// And no runner dispatches a parent that declares nothing, which would be a
 	// handler for a route no help advertises.
 	for (const parent of Object.keys(dispatched)) {
+		if (!isCealCommandName(parent)) throw new Error(`${parent} has a dispatch table but declares no route`);
 		assert.ok(parents.has(parent), `${parent} has a dispatch table but declares no route`);
 	}
 });
@@ -387,7 +503,8 @@ test("declared result schemas exist in the emitting package", () => {
 	const source = workerSource();
 	const emitted = new Set([...source.matchAll(/schema_version: "([a-z0-9_.]+)"/gu)].map((match) => match[1]));
 	for (const definition of [...CEAL_COMMANDS, ...CEAL_SUBCOMMANDS]) {
-		assert.ok(emitted.has(definition.result_schema), `${definition.name ?? definition.route.join(" ")}: ${definition.result_schema}`);
+		const label = "name" in definition ? definition.name : definition.route.join(" ");
+		assert.ok(emitted.has(definition.result_schema), `${label}: ${definition.result_schema}`);
 	}
 });
 
@@ -475,27 +592,27 @@ test("a malformed known route points at the nearest help that can correct it", a
 
 test("observational routes declare a read-only effect and keep session rotation explicit", () => {
 	for (const name of ["receipt", "acceptance"]) {
-		assert.equal(CEAL_COMMANDS.find((command) => command.name === name).effect, "read_only", name);
+		const command = CEAL_COMMANDS.find((entry) => entry.name === name);
+		assert.ok(command);
+		assert.equal(command.effect, "read_only", name);
 	}
-	assert.equal(CEAL_COMMANDS.find((command) => command.name === "capabilities").effect, "read_only");
+	const capabilities = CEAL_COMMANDS.find((command) => command.name === "capabilities");
+	assert.ok(capabilities);
+	assert.equal(capabilities.effect, "read_only");
 	for (const [parent, route] of [
 		["receipt", "show"],
 		["acceptance", "emit"],
 	]) {
-		assert.equal(
-			CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === parent && subcommand.route.join(" ") === route).effect,
-			"read_only",
-			`${parent} ${route}`,
-		);
+		const subcommand = CEAL_SUBCOMMANDS.find((entry) => entry.parent === parent && entry.route.join(" ") === route);
+		assert.ok(subcommand);
+		assert.equal(subcommand.effect, "read_only", `${parent} ${route}`);
 	}
-	assert.equal(
-		CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "capabilities" && subcommand.route.join(" ") === "targets").effect,
-		"read_only",
-	);
-	assert.equal(
-		CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "refresh").effect,
-		"remote_write",
-	);
+	const targets = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "capabilities" && subcommand.route.join(" ") === "targets");
+	assert.ok(targets);
+	assert.equal(targets.effect, "read_only");
+	const refresh = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "refresh");
+	assert.ok(refresh);
+	assert.equal(refresh.effect, "remote_write");
 });
 
 test("session recovery strings point at the probe-safe status leaf", () => {
@@ -523,7 +640,7 @@ test("every public command emits one YAML document without a format flag", async
 						: [command.name];
 		// The observer intentionally serves until closed; close it right after
 		// its single serving document is written.
-		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
+		const runtime: TestRuntime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
 		// `acceptance` joins the failing set for the same reason `capabilities`
 		// is in it: with no Gateway session there is nothing live to evidence, so
 		// the honest answer is its own schema with ok:false rather than a record.
@@ -573,22 +690,25 @@ test("commands YAML is the machine-readable discovery surface", async () => {
 	const payload = await yamlRun(["commands"]);
 	assert.equal(payload.schema_version, "ceal.commands.v1");
 	assert.deepEqual(
-		payload.commands.map((command) => command.name),
+		payload.commands.map((command: { name: string }) => command.name),
 		["version", "commands", "update", "session", "guide", "capabilities", "call", "receipt", "observe", "acceptance"],
 	);
-	assert.equal(payload.commands.find((command) => command.name === "observe").lifecycle, "until_interrupted");
+	const observe = payload.commands.find((command: { name: string }) => command.name === "observe");
+	assert.ok(observe);
+	assert.equal(observe.lifecycle, "until_interrupted");
 	// An agent that parses this document instead of prose help must see the same
 	// route depth the help surface advertises.
 	assert.deepEqual(
-		payload.subcommands.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
+		payload.subcommands.map((subcommand: { parent: string; route: string[] }) => [subcommand.parent, ...subcommand.route].join(" ")),
 		CEAL_SUBCOMMANDS.map((subcommand) => [subcommand.parent, ...subcommand.route].join(" ")),
 	);
 	for (const subcommand of payload.subcommands) {
-		for (const field of ["usage", "effect", "evidence", "result_schema", "recovery"]) {
+		for (const field of ["usage", "effect", "evidence", "result_schema", "recovery"] as const) {
 			assert.match(subcommand[field], /\S/u, `${subcommand.route.join(" ")}.${field}`);
 		}
 	}
-	const call = payload.commands.find((command) => command.name === "call");
+	const call = payload.commands.find((command: { name: string }) => command.name === "call");
+	assert.ok(call);
 	assert.equal(call.description, "Invoke a capability and read back its Gateway audit event.");
 	assert.doesNotMatch(call.description, /approved/iu);
 });
@@ -653,11 +773,11 @@ test("update is option-free, stable-only, and keeps child execution behind one Y
 });
 
 test("update reports bounded stable progress only to an interactive stderr surface", async () => {
-	const stages = [];
+	const stages: string[] = [];
 	const interactive = await run(["update"], {
 		isOutputTerminal: () => true,
 		runStableUpdate: async ({ onProgress } = {}) => {
-			for (const stage of ["check", "download_install", "verify", "installed_readback"]) {
+			for (const stage of ["check", "download_install", "verify", "installed_readback"] satisfies readonly CealStableUpdateProgressStage[]) {
 				stages.push(stage);
 				onProgress?.(stage);
 			}
@@ -690,7 +810,8 @@ test("update reports bounded stable progress only to an interactive stderr surfa
 		isOutputTerminal: () => true,
 		timing: createCealTimingRecorder({ write: (chunk) => (timingOutput += chunk) }),
 		runStableUpdate: async ({ onProgress } = {}) => {
-			for (const stage of ["check", "download_install", "verify", "installed_readback"]) onProgress?.(stage);
+			for (const stage of ["check", "download_install", "verify", "installed_readback"] satisfies readonly CealStableUpdateProgressStage[])
+				onProgress?.(stage);
 			return { status: "updated" };
 		},
 	});
@@ -730,18 +851,17 @@ test("guide status and per-host registration expose one update-safe local skill 
 	};
 	mkdirSync(guidePath, { recursive: true });
 	writeFileSync(path.join(guidePath, "SKILL.md"), "name: ceal-guide\n");
-	const registered = { codex: false, claude: false };
+	const registered: Record<"codex" | "claude", boolean> = { codex: false, claude: false };
+	const guideHosts: readonly CealAgentGuideHost[] = ["codex", "claude"];
 	// The store's own contract: the top-level fields project one host and `hosts`
 	// carries every host, so this stub mirrors that shape rather than inventing one.
-	const inspect = (agent = "codex") => ({
-		status: registered[agent] ? "registered" : "staged",
+	const inspect = (agent: CealAgentGuideHost = "codex"): CealAgentGuideState => ({
+		status: "available",
 		agent,
 		guide_id: "ceal-guide",
 		guide_path: guidePath,
-		registration_path: registrationPaths[agent],
 		update_safe: true,
-		registered: registered[agent],
-		hosts: Object.keys(registered).map((host) => ({
+		hosts: guideHosts.map((host) => ({
 			agent: host,
 			status: registered[host] ? "registered" : "staged",
 			registration_path: registrationPaths[host],
@@ -750,42 +870,52 @@ test("guide status and per-host registration expose one update-safe local skill 
 	});
 	try {
 		const status = await yamlRun(["guide", "status"], 0, { inspectAgentGuide: inspect });
-		assert.equal(status.status, "staged");
-		assert.equal(status.registered, false);
-		assert.equal(status.effect, "read_only");
+		const statusRecord = fixtureRecord(status, "guide status");
+		assert.equal(statusRecord.status, "available");
+		assert.equal(statusRecord.effect, "read_only");
 		// A Codex-only reader of ceal.guide.v1 keeps reading the same top-level
 		// fields it always did, while `hosts` names every supported host.
-		assert.equal(status.agent, "codex");
+		assert.equal(statusRecord.agent, "codex");
 		assert.deepEqual(
-			status.hosts.map((host) => host.agent),
+			fixtureRecordArrayField(statusRecord, "hosts").map((host) => host.agent),
 			["codex", "claude"],
 		);
+		const codexStatus = fixtureRecordArrayField(statusRecord, "hosts").find((host) => host.agent === "codex");
+		if (!codexStatus) throw new Error("guide status omitted the codex host");
+		assert.equal(codexStatus.status, "staged");
+		assert.equal(codexStatus.registered, false);
 		// No caveat is needed: there is no top-level per-host projection to misread.
 		assert.equal("non_claims" in status, false);
 		// The declared route token is what selects the host; the dispatcher passes
 		// it through instead of registering a host of its own choosing.
-		for (const agent of ["codex", "claude"]) {
+		for (const agent of ["codex", "claude"] as const) {
 			const result = await yamlRun(["guide", "register", agent], 0, {
-				registerAgentGuide: (requested) => {
+				registerAgentGuide: (requested: "codex" | "claude" = "codex") => {
 					registered[requested] = true;
 					return inspect(requested);
 				},
 			});
-			assert.equal(result.status, "registered");
-			assert.equal(result.action, "register");
-			assert.equal(result.agent, agent);
-			assert.equal(result.registration_path, registrationPaths[agent]);
-			assert.equal(result.effect, "local_write");
-			assert.equal(result.update_safe, true);
-			assert.equal("agent_source" in result, false);
+			const resultRecord = fixtureRecord(result, `guide register ${agent}`);
+			assert.equal(resultRecord.status, "available");
+			assert.equal(resultRecord.action, "register");
+			assert.equal(resultRecord.agent, agent);
+			assert.equal(resultRecord.effect, "local_write");
+			assert.equal(resultRecord.update_safe, true);
+			const registeredHost = fixtureRecordArrayField(resultRecord, "hosts").find((host) => host.agent === agent);
+			if (!registeredHost) throw new Error(`guide register ${agent} omitted its host`);
+			assert.equal(registeredHost.registration_path, registrationPaths[agent]);
+			assert.equal(registeredHost.status, "registered");
+			assert.equal(registeredHost.registered, true);
+			assert.equal("agent_source" in resultRecord, false);
 		}
 		// With no store at all, a register route still answers as that host.
 		const unavailable = await yamlRun(["guide", "register", "claude"], 3);
-		assert.equal(unavailable.agent, "claude");
-		assert.equal(unavailable.action, "register");
-		assert.equal(unavailable.effect, "local_write");
-		assert.equal("agent_source" in unavailable, false);
-		assert.equal(unavailable.error.kind, "guide_unavailable");
+		const unavailableRecord = fixtureRecord(unavailable, "unavailable guide register");
+		assert.equal(unavailableRecord.agent, "claude");
+		assert.equal(unavailableRecord.action, "register");
+		assert.equal(unavailableRecord.effect, "local_write");
+		assert.equal("agent_source" in unavailableRecord, false);
+		assert.equal(fixtureRecordField(unavailableRecord, "error").kind, "guide_unavailable");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -855,14 +985,19 @@ test("a rejected capabilities option names the option and its own route's help",
 });
 
 test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
-	const guide = (registered, agentSource) => () => ({
-		status: "available",
-		agent: "claude",
-		agent_source: agentSource,
-		guide_id: "ceal-guide",
-		update_safe: true,
-		hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
-	});
+	const guide =
+		(registered: boolean, agentSource: "detected" | "default"): (() => CealAgentGuideState) =>
+		() => {
+			const state: CealAgentGuideState = {
+				status: "available",
+				agent: "claude",
+				agent_source: agentSource,
+				guide_id: "ceal-guide",
+				update_safe: true,
+				hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
+			};
+			return state;
+		};
 	await withGateway(async ({ endpoint }) => {
 		const unregistered = await yamlRun(["capabilities"], 0, {
 			readStoredSession: async () => storedSession(endpoint),
@@ -872,7 +1007,7 @@ test("capabilities points an unregistered running host at the guide, and stays s
 		assert.match(unregistered.agent_guide.next_action, /ceal guide register claude/u);
 
 		// Registered, undetected host, and a missing guide asset each stay silent.
-		const missingAsset = () => ({
+		const missingAsset = (): CealAgentGuideState => ({
 			status: "unavailable",
 			agent: "claude",
 			agent_source: "detected",
@@ -931,7 +1066,8 @@ test("every command answers one success predicate that agrees with its exit code
 					: command.name === "observe"
 						? ["observe", "--port", "0"]
 						: [command.name];
-		const runtime = command.name === "observe" ? { onObserverListening: (handle) => void handle.close() } : {};
+		const runtime: TestRuntime =
+			command.name === "observe" ? { onObserverListening: (handle: { url: string; close: () => Promise<void> }) => void handle.close() } : {};
 		const { code, stdout } = await run(args, runtime);
 		const payload = parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 		assert.equal(typeof payload.ok, "boolean", `${command.name} must carry ok`);
@@ -956,14 +1092,14 @@ test("every command answers one success predicate that agrees with its exit code
 });
 
 test("session lifecycle capability is all-or-none and owns the locked mutation interval", async () => {
-	let stored = null;
+	let stored: CealStoredSession | null = null;
 	let lockEntries = 0;
 	const lockedStore = {
 		load: async () => stored,
-		save: async (session) => {
+		save: async (session: CealStoredSession) => {
 			stored = session;
 		},
-		replace: async (_expectedRefreshToken, session) => {
+		replace: async (_expectedRefreshToken: string, session: CealStoredSession) => {
 			stored = session;
 		},
 		remove: async () => {
@@ -1006,7 +1142,7 @@ test("worker source exposes one semantic session capability and no raw session h
 
 test("session enrollment exchanges stdin once, stores the credential, and never renders it", async () => {
 	await withEnrollmentGateway(async ({ endpoint, token }) => {
-		let stored = null;
+		let stored: CealStoredSession | null = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint], 0, {
 			readSecret: async () => "E".repeat(48),
 			readStoredSession: async () => null,
@@ -1017,8 +1153,9 @@ test("session enrollment exchanges stdin once, stores the credential, and never 
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.session_replacement, "first_session");
 		assert.equal(payload.raw_token_visible, false);
-		assert.equal(stored.accessToken, token);
-		assert.match(stored.refreshToken, /^ceal_refresh_/u);
+		const storedValue = requireStoredSession(stored);
+		assert.equal(storedValue.accessToken, token);
+		assert.match(storedValue.refreshToken, /^ceal_refresh_/u);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(token, "u"));
 	});
 });
@@ -1083,8 +1220,8 @@ test("a replacement enrollment save failure reports both session dispositions", 
 // and that a deliberate replacement leaves nothing of the identity it displaced.
 test("enrolling the identity this host already holds is the documented recovery, needs no flag, and keeps its history", async () => {
 	await withEnrollmentGateway(async ({ endpoint, revoked }) => {
-		let stored = null;
-		const cleared = [];
+		let stored: CealStoredSession | null = null;
+		const cleared: string[] = [];
 		// Exactly the state `NOT_RENEWABLE` sends an operator to re-enroll from,
 		// and with a different registration and client ref, because a replacement
 		// code mints new ones for the same subject.
@@ -1100,8 +1237,12 @@ test("enrolling the identity this host already holds is the documented recovery,
 			writeStoredSession: async (session) => {
 				stored = session;
 			},
-			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
-			removeReceiptSpool: async () => cleared.push("receipt-spool"),
+			removeDiscoveryCache: async () => {
+				cleared.push("discovery-cache");
+			},
+			removeReceiptSpool: async () => {
+				cleared.push("receipt-spool");
+			},
 		});
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.session_replacement, "same_identity");
@@ -1112,7 +1253,8 @@ test("enrolling the identity this host already holds is the documented recovery,
 		// revoke, and it would otherwise stay usable until its TTL.
 		assert.deepEqual(revoked, [`ceal_refresh_${"O".repeat(43)}`]);
 		assert.equal(payload.previous_session_revoked, "revoked");
-		assert.equal(stored.subjectRef, "subject:hwidong");
+		const storedValue = requireStoredSession(stored);
+		assert.equal(storedValue.subjectRef, "subject:hwidong");
 	});
 });
 
@@ -1190,8 +1332,8 @@ test("enrollment preflight keeps an unspent code and reports only the local stor
 
 test("--force replaces a different identity, revoking it first and clearing the local state it produced", async () => {
 	await withEnrollmentGateway(async ({ endpoint, revoked }) => {
-		let stored = null;
-		const cleared = [];
+		let stored: CealStoredSession | null = null;
+		const cleared: string[] = [];
 		const outgoing = `ceal_refresh_${"O".repeat(43)}`;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
 			readSecret: async () => "E".repeat(48),
@@ -1199,8 +1341,12 @@ test("--force replaces a different identity, revoking it first and clearing the 
 			writeStoredSession: async (session) => {
 				stored = session;
 			},
-			removeDiscoveryCache: async () => cleared.push("discovery-cache"),
-			removeReceiptSpool: async () => cleared.push("receipt-spool"),
+			removeDiscoveryCache: async () => {
+				cleared.push("discovery-cache");
+			},
+			removeReceiptSpool: async () => {
+				cleared.push("receipt-spool");
+			},
 		});
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.session_replacement, "replaced");
@@ -1211,13 +1357,14 @@ test("--force replaces a different identity, revoking it first and clearing the 
 		// across a substitution renders two subjects' history as one — the failure
 		// the logout path already fixed once.
 		assert.deepEqual(cleared.sort(), ["discovery-cache", "receipt-spool"]);
-		assert.equal(stored.subjectRef, "subject:hwidong");
+		const storedValue = requireStoredSession(stored);
+		assert.equal(storedValue.subjectRef, "subject:hwidong");
 	});
 });
 
 test("a replacement reports advisory cleanup failure without undoing its stored session", async () => {
 	await withEnrollmentGateway(async ({ endpoint }) => {
-		let stored = null;
+		let stored: CealStoredSession | null = null;
 		const payload = await yamlRun(["session", "enroll", "--code-stdin", "--gateway", endpoint, "--force"], 0, {
 			readSecret: async () => "E".repeat(48),
 			readStoredSession: async () => storedSession(endpoint, { subjectRef: "subject:someone-else" }),
@@ -1231,7 +1378,8 @@ test("a replacement reports advisory cleanup failure without undoing its stored 
 		});
 		assert.equal(payload.status, "enrolled");
 		assert.equal(payload.local_derived_state_cleared, false);
-		assert.equal(stored.subjectRef, "subject:hwidong");
+		const storedValue = requireStoredSession(stored);
+		assert.equal(storedValue.subjectRef, "subject:hwidong");
 	});
 });
 
@@ -1252,7 +1400,7 @@ test("acceptance argument failures use the argument exit class", async () => {
 test("a replacement whose displaced credential the Gateway will not honor still proceeds and says so", async () => {
 	await withEnrollmentGateway(
 		async ({ endpoint }) => {
-			let stored = null;
+			let stored: CealStoredSession | null = null;
 			// The worst case the recovery text names: an `outcome_unknown` session
 			// whose refresh token may already have rotated server-side. Refusing to
 			// replace it because its dead credential cannot be revoked would strand
@@ -1271,7 +1419,8 @@ test("a replacement whose displaced credential the Gateway will not honor still 
 			});
 			assert.equal(payload.session_replacement, "replaced");
 			assert.equal(payload.previous_session_revoked, "already_unusable");
-			assert.equal(stored.subjectRef, "subject:hwidong");
+			const storedValue = requireStoredSession(stored);
+			assert.equal(storedValue.subjectRef, "subject:hwidong");
 		},
 		{ revokeDeniedCode: "refresh_replayed" },
 	);
@@ -1299,7 +1448,7 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 	await withEnrollmentGateway(async ({ endpoint, token }) => {
 		let prompted = 0;
 		let readStdin = 0;
-		let stored = null;
+		let stored: CealStoredSession | null = null;
 		const result = await run(["session", "enroll", "--gateway", endpoint], {
 			isInteractiveTerminal: () => true,
 			readStoredSession: async () => null,
@@ -1318,7 +1467,8 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 		assert.equal(result.code, 0);
 		assert.equal(prompted, 1);
 		assert.equal(readStdin, 0);
-		assert.equal(stored.accessToken, token);
+		const storedValue = requireStoredSession(stored);
+		assert.equal(storedValue.accessToken, token);
 		assert.doesNotMatch(`${result.stdout}${result.stderr}`, /E{48}|must-not-be-read/u);
 
 		let consumed = false;
@@ -1358,9 +1508,9 @@ test("terminal enrollment uses a hidden prompt by default and pipe input require
 test("rejected operator-activation-shaped material cannot create a worker session or appear in recovery output", async () => {
 	const code = `celn_${"A".repeat(40)}`;
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
-		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		assert.equal(request.url, "/gateway/client/enroll");
 		assert.equal(body.code, code);
 		response.writeHead(200, { "content-type": "application/json" });
@@ -1376,7 +1526,7 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 			}),
 		);
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
@@ -1396,13 +1546,13 @@ test("rejected operator-activation-shaped material cannot create a worker sessio
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(code, "u"));
 		assert.match(payload.error.next_action, /organization administrator/u);
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 });
 
 test("session refresh explicitly rotates an expiring stored session once and persists the rotation", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, newRefreshToken }) => {
-		let saved = null;
+		let saved: CealStoredSession | null = null;
 		const payload = await yamlRun(["session", "refresh"], 0, {
 			readStoredSession: async () =>
 				storedSession(endpoint, {
@@ -1417,8 +1567,9 @@ test("session refresh explicitly rotates an expiring stored session once and per
 		});
 		assert.equal(payload.schema_version, "ceal.session_refresh.v1");
 		assert.equal(payload.status, "refreshed");
-		assert.equal(saved.accessToken, newAccessToken);
-		assert.equal(saved.refreshToken, newRefreshToken);
+		const savedValue = requireStoredSession(saved);
+		assert.equal(savedValue.accessToken, newAccessToken);
+		assert.equal(savedValue.refreshToken, newRefreshToken);
 		assert.doesNotMatch(JSON.stringify(payload), new RegExp(oldRefreshToken, "u"));
 	});
 });
@@ -1473,10 +1624,11 @@ test("capabilities authentication failure names the explicit session refresh act
 });
 
 test("receipt and acceptance observation never retry auth or rotate a stale stored session", async () => {
-	for (const [name, args, operation, extra] of [
+	const observations: readonly [string, readonly string[], string, TestRuntime][] = [
 		["receipt", ["receipt", "show", "narnia:call:1:call"], "readback", {}],
 		["acceptance", ["acceptance", "emit"], "handshake", { readInstalledReleaseFacts: installedReleaseReading }],
-	]) {
+	];
+	for (const [name, args, operation, extra] of observations) {
 		await withRenewingGateway(
 			async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
 				const payload = await yamlRun(args, 3, {
@@ -1529,7 +1681,7 @@ test("session refresh fails closed for malformed absolute refresh expiry before 
 // enrollment code for a session the Gateway would have renewed.
 test("an explicit session refresh still lets the Gateway answer past a host clock expiry", async () => {
 	await withRenewingGateway(async ({ endpoint, refreshCalls, newAccessToken, oldRefreshToken }) => {
-		let saved = null;
+		let saved: CealStoredSession | null = null;
 		const payload = await yamlRun(["session", "refresh"], 0, {
 			readStoredSession: async () =>
 				storedSession(endpoint, {
@@ -1546,7 +1698,8 @@ test("an explicit session refresh still lets the Gateway answer past a host cloc
 		});
 		assert.equal(payload.status, "refreshed");
 		assert.equal(refreshCalls(), 1, "the Gateway must be asked rather than pre-empted by this machine's clock");
-		assert.equal(saved.accessToken, newAccessToken);
+		const savedValue = requireStoredSession(saved);
+		assert.equal(savedValue.accessToken, newAccessToken);
 	});
 });
 
@@ -1586,10 +1739,12 @@ test("session status classifies an unreadable store as a local session failure",
 });
 
 test("generic no-session recovery presents both approved setup routes", async () => {
-	const recovery = CEAL_COMMANDS.find((command) => command.name === "session").recovery;
-	const statusRecovery = CEAL_SUBCOMMANDS.find(
-		(subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "status",
-	).recovery;
+	const sessionCommand = CEAL_COMMANDS.find((command) => command.name === "session");
+	assert.ok(sessionCommand);
+	const recovery = sessionCommand.recovery;
+	const statusCommand = CEAL_SUBCOMMANDS.find((subcommand) => subcommand.parent === "session" && subcommand.route.join(" ") === "status");
+	assert.ok(statusCommand);
+	const statusRecovery = statusCommand.recovery;
 	assert.match(recovery, /ceal session enroll --help/u);
 	assert.match(recovery, /ceal session adopt --help/u);
 	assert.ok(statusRecovery.startsWith(recovery));
@@ -1625,7 +1780,7 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const runtime = {
 				readStoredSession: async () => current,
-				writeStoredSession: async (session) => {
+				writeStoredSession: async (session: CealStoredSession) => {
 					current = session;
 				},
 			};
@@ -1859,7 +2014,7 @@ test("capabilities does not retry an authentication rejection or rotate a still-
 
 test("session logout revokes the server session before removing every session-derived store", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, revoked }) => {
-		const cleared = [];
+		const cleared: string[] = [];
 		const payload = await yamlRun(["session", "logout"], 0, {
 			readStoredSession: async () => storedSession(endpoint, { refreshToken: oldRefreshToken }),
 			deleteStoredSession: async () => {
@@ -1881,7 +2036,9 @@ test("session logout revokes the server session before removing every session-de
 		assert.equal(payload.server_session_revoked, true);
 		assert.equal(payload.server_session_disposition, "revoked");
 		assert.equal(payload.local_derived_state_cleared, true);
-		assert.equal(payload.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
+		const sessionCommand = CEAL_COMMANDS.find((command) => command.name === "session");
+		assert.ok(sessionCommand);
+		assert.equal(payload.next_action, sessionCommand.recovery);
 		assert.deepEqual(revoked, [oldRefreshToken]);
 		assert.deepEqual(cleared.sort(), ["discovery_cache", "receipt_spool", "session"]);
 	});
@@ -1969,22 +2126,28 @@ test("call invokes one granted capability and independently reads back its audit
 			requests.map((item) => item.body.operation),
 			["call", "readback"],
 		);
-		assert.equal(requests[0].body.body.arguments.query, "launch");
-		assert.equal(requests[0].body.body.purpose, "Invoke capability 'message.search' for the current task.");
-		assert.doesNotMatch(requests[0].body.body.purpose, /approved/iu);
+		const firstRequest = requests[0];
+		assert.ok(firstRequest);
+		const firstArguments = firstRequest.body.body.arguments;
+		assert.ok(firstArguments);
+		assert.equal(firstArguments.query, "launch");
+		assert.equal(firstRequest.body.body.purpose, "Invoke capability 'message.search' for the current task.");
+		assert.doesNotMatch(firstRequest.body.body.purpose, /approved/iu);
 	});
 });
 
 test("call spools an allowlisted receipt projection and a spool failure never changes the result", async () => {
 	await withGateway(async ({ endpoint }) => {
-		const spooled = [];
+		const spooled: CealReceiptSpoolEntry[] = [];
 		const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
 			readStoredSession: async () => storedSession(endpoint),
 			nextRequestId: (() => {
 				let id = 0;
 				return () => `narnia:spool:${++id}`;
 			})(),
-			recordReceiptSpool: (_identity, entry) => spooled.push(entry),
+			recordReceiptSpool: (_identity: string, entry: CealReceiptSpoolEntry): void => {
+				spooled.push(entry);
+			},
 			now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 		});
 		assert.equal(payload.status, "completed");
@@ -2015,17 +2178,21 @@ test("call spools an allowlisted receipt projection and a spool failure never ch
 });
 
 test("a pre-issue call failure is not spooled while an issued unknown-outcome failure is", async () => {
-	const spooled = [];
+	const spoolState: { entries: CealReceiptSpoolEntry[] } = { entries: [] };
 	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
-		recordReceiptSpool: (_identity, entry) => spooled.push(entry),
+		recordReceiptSpool: (_identity: string, entry: CealReceiptSpoolEntry): void => {
+			spoolState.entries.push(entry);
+		},
 	});
-	assert.deepEqual(spooled, []);
+	assert.deepEqual(spoolState.entries, []);
 	await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, {
 		readStoredSession: async () => storedSession("http://127.0.0.1:9"),
-		recordReceiptSpool: (_identity, entry) => spooled.push(entry),
+		recordReceiptSpool: (_identity: string, entry: CealReceiptSpoolEntry): void => {
+			spoolState.entries.push(entry);
+		},
 		now: () => Date.parse("2026-07-24T12:00:00.000Z"),
 	});
-	assert.deepEqual(spooled, [
+	assert.deepEqual(spoolState.entries, [
 		{
 			recordedAt: Date.parse("2026-07-24T12:00:00.000Z"),
 			requestRef: "ceal:call:call",
@@ -2121,7 +2288,11 @@ test("a legacy readback without negotiated timing omits the timing block instead
 		},
 		(request) => {
 			const response = policyDeniedReadbackResponse(request);
-			delete response.value.events[0].gateway_elapsed_ms;
+			assert.ok(response.ok);
+			const events = fixtureRecordArrayField(response.value, "events");
+			const firstEvent = events[0];
+			assert.ok(firstEvent);
+			delete firstEvent.gateway_elapsed_ms;
 			return response;
 		},
 	);
@@ -2139,7 +2310,11 @@ test("a decoder-legal invalid call-detail timing is omitted, not rendered", asyn
 		},
 		(request) => {
 			const response = readbackResponse(request);
-			response.value.events[0].call.gateway_elapsed_ms = 42.5;
+			assert.ok(response.ok);
+			const events = fixtureRecordArrayField(response.value, "events");
+			const firstEvent = events[0];
+			assert.ok(firstEvent);
+			fixtureRecordField(firstEvent, "call").gateway_elapsed_ms = 42.5;
 			return response;
 		},
 	);
@@ -2156,7 +2331,11 @@ test("event-level Gateway timing stays authoritative over successful call-detail
 		},
 		(request) => {
 			const response = readbackResponse(request);
-			response.value.events[0].gateway_elapsed_ms = 57;
+			assert.ok(response.ok);
+			const events = fixtureRecordArrayField(response.value, "events");
+			const firstEvent = events[0];
+			assert.ok(firstEvent);
+			firstEvent.gateway_elapsed_ms = 57;
 			return response;
 		},
 	);
@@ -2211,10 +2390,10 @@ test("call refuses to claim completion when audit readback has no verified event
 					stdout += String(chunk);
 				},
 			},
-			stderr: { write() {} },
 		},
 		null,
 		{
+			ok: true,
 			capabilityId: "file.search",
 			targetRef: "target:workspace",
 			arguments: {},
@@ -2235,7 +2414,7 @@ test("call refuses to claim completion when audit readback has no verified event
 // The envelope used to copy `data` alone, and the guide tells an agent to report
 // completion once audit evidence is present — which a replay carries.
 test("a served call result carries the cache and redaction provenance a reader needs to tell a replay from a live read", () => {
-	const render = (extra) => {
+	const render = (extra: Record<string, unknown>) => {
 		let stdout = "";
 		writeCallCompleted(
 			{
@@ -2255,14 +2434,13 @@ test("a served call result carries the cache and redaction provenance a reader n
 			"request:1",
 			{
 				stdout: {
-					write: (chunk) => {
+					write: (chunk: string) => {
 						stdout += String(chunk);
 					},
 				},
-				stderr: { write() {} },
 			},
 			null,
-			{ capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search" },
+			{ ok: true, capabilityId: "file.search", targetRef: "target:workspace", arguments: {}, purpose: "Search" },
 		);
 		return parseAllDocuments(stdout, { uniqueKeys: true })[0].toJS();
 	};
@@ -2305,11 +2483,10 @@ test("every call result names the issuing instance and the profile it used", asy
 	let stdout = "";
 	const io = {
 		stdout: {
-			write: (chunk) => {
+			write: (chunk: string) => {
 				stdout += String(chunk);
 			},
 		},
-		stderr: { write() {} },
 	};
 	writeCallCompleted(
 		{
@@ -2330,6 +2507,7 @@ test("every call result names the issuing instance and the profile it used", asy
 		session,
 		{
 			// The per-call override, not the session default, is what answered.
+			ok: true,
 			capabilityId: "message.get",
 			targetRef: "target:t",
 			arguments: {},
@@ -2381,10 +2559,10 @@ test("compatibility result data passes through without a client-side message pro
 					stdout += String(chunk);
 				},
 			},
-			stderr: { write() {} },
 		},
 		null,
 		{
+			ok: true,
 			capabilityId: "message.get",
 			targetRef: "target:team-inbox",
 			arguments: {},
@@ -2451,10 +2629,10 @@ test("compatibility result data passes through without a client-side write proje
 					stdout += String(chunk);
 				},
 			},
-			stderr: { write() {} },
 		},
 		null,
 		{
+			ok: true,
 			capabilityId: "message.create",
 			targetRef: "target:team-inbox",
 			arguments: {},
@@ -2689,7 +2867,7 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "e5beac7823d5aebbb1b60a93df0cab493e35c313fe0f86e318a77b9e6dbe3554";
 const ANNOUNCEMENT_POLICY_ABSENT = "scope not declared by the Gateway";
 
-function announcementPolicyFixtureCase(name) {
+function announcementPolicyFixtureCase(name: string) {
 	const bytes = readFileSync(new URL("./fixtures/gateway-announcement-policy-discovery.v1.json", import.meta.url));
 	assert.equal(
 		createHash("sha256").update(bytes).digest("hex"),
@@ -2697,7 +2875,7 @@ function announcementPolicyFixtureCase(name) {
 		"the pinned announcement-policy fixture no longer matches the bytes the Gateway lane handed over",
 	);
 	const fixture = JSON.parse(bytes.toString("utf8"));
-	const found = fixture.cases.find((item) => item.name === name);
+	const found = fixture.cases.find((item: { name: string }) => item.name === name);
 	assert.ok(found, `fixture case ${name} is missing`);
 	return found;
 }
@@ -2705,7 +2883,7 @@ function announcementPolicyFixtureCase(name) {
 // Serve the fixture's capability rows verbatim through the ordinary discovery
 // path, so what is under test is this client's rendering of Gateway-authored
 // bytes rather than a locally invented policy shape.
-async function renderFixtureCapabilities(caseName, args) {
+async function renderFixtureCapabilities(caseName: string, args: readonly string[]): Promise<Awaited<ReturnType<typeof yamlRun>>> {
 	const capabilities = announcementPolicyFixtureCase(caseName).response.value.capabilities;
 	let payload: Awaited<ReturnType<typeof yamlRun>>;
 	await withGateway(
@@ -3388,7 +3566,7 @@ test("compatibility link data passes through and unsafe input is left to the Gat
 test("call preserves one request identity across authentication refresh and final audit readback", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, newAccessToken, requests }) => {
-			let saved = null;
+			let saved: CealStoredSession | null = null;
 			const payload = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 0, {
 				readStoredSession: async () =>
 					storedSession(endpoint, {
@@ -3405,7 +3583,8 @@ test("call preserves one request identity across authentication refresh and fina
 			});
 			assert.equal(payload.status, "completed");
 			assert.equal(payload.capability, "message.search");
-			assert.equal(saved.accessToken, newAccessToken);
+			const savedValue = requireStoredSession(saved);
+			assert.equal(savedValue.accessToken, newAccessToken);
 			assert.deepEqual(
 				requests.map((item) => item.body.operation),
 				["call", "call", "readback"],
@@ -3604,15 +3783,16 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-bin-refresh-lock-"));
 	const firstRefresh = `ceal_refresh_${"R".repeat(43)}`;
 	const secondRefresh = `ceal_refresh_${"S".repeat(43)}`;
-	const refreshRequests = [];
+	const refreshRequests: string[] = [];
 	const firstRefreshObserved = deferredVoid();
 	const firstRefreshRelease = deferredVoid();
 	let currentRefresh = firstRefresh;
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
-		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		if (request.url === "/gateway/client/refresh") {
+			assert.ok(typeof body.refresh_token === "string");
 			refreshRequests.push(body.refresh_token);
 			if (body.refresh_token !== currentRefresh)
 				return response.end(
@@ -3630,9 +3810,9 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		response.writeHead(200, { "content-type": "application/json" });
 		return response.end(JSON.stringify(value));
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(0, "127.0.0.1", resolve);
+		server.listen(0, "127.0.0.1", () => resolve());
 	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("test server address unavailable");
@@ -3672,7 +3852,7 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		assert.match(readFileSync(sessionPath, "utf8"), new RegExp(secondRefresh, "u"));
 	} finally {
 		firstRefreshRelease.resolve();
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 		rmSync(home, { recursive: true, force: true });
 	}
 });
@@ -3693,7 +3873,9 @@ test("capabilities reports an honest Gateway-required unavailable surface withou
 	// reinstall the binary for a year — the source read `CEAL_COMMANDS[2]`, which
 	// meant `session` until `update` was inserted above it. Deriving the expected
 	// text from the table is what makes a future reordering fail here.
-	assert.equal(payload.error.next_action, CEAL_COMMANDS.find((command) => command.name === "session").recovery);
+	const sessionCommand = CEAL_COMMANDS.find((command) => command.name === "session");
+	assert.ok(sessionCommand);
+	assert.equal(payload.error.next_action, sessionCommand.recovery);
 	assert.match(payload.error.next_action, /ceal session enroll --help/u);
 	assert.match(payload.error.next_action, /ceal session adopt --help/u);
 	assert.equal(Object.hasOwn(payload, "next_actions"), false);
@@ -3754,7 +3936,7 @@ test("capabilities performs outbound handshake and discovery with a stdin-only t
 		assert.equal(payload.gateway.profile_ref, "profile:narnia");
 		assert.equal(payload.gateway.membership_ref, "membership:narnia");
 		assert.deepEqual(
-			payload.capabilities.map((item) => item.capability_id),
+			payload.capabilities.map((item: { capability_id: string }) => item.capability_id),
 			["message.search"],
 		);
 		assert.deepEqual(payload.targets, []);
@@ -3784,7 +3966,7 @@ test("capabilities defaults to a concise catalog that omits each per-capability 
 		// The concise rows keep everything an agent needs to *select* a capability
 		// (id, label, effect, target requirement) but drop the input grammar body.
 		assert.deepEqual(
-			payload.capabilities.map((item) => item.capability_id),
+			payload.capabilities.map((item: { capability_id: string }) => item.capability_id),
 			["message.search"],
 		);
 		for (const capability of payload.capabilities) {
@@ -3817,7 +3999,7 @@ test("capabilities --detail restores each capability's full input contract", asy
 		);
 		assert.equal(payload.status, "available");
 		assert.deepEqual(
-			payload.capabilities.map((item) => item.capability_id),
+			payload.capabilities.map((item: { capability_id: string }) => item.capability_id),
 			["message.search"],
 		);
 		const [capability] = payload.capabilities;
@@ -3833,9 +4015,10 @@ test("capabilities negotiates and surfaces the eligible-Profile catalog for --pr
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
 		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
 	];
-	const responseFactory = (body) => {
+	const responseFactory = (body: FixtureRequest): FixtureResponse => {
 		if (body.operation !== "handshake") return discoveryResponse(body);
 		const base = handshakeResponse(body);
+		assert.ok(base.ok);
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint, requests }) => {
@@ -3860,9 +4043,10 @@ test("capabilities names profile_selection_required with the catalog when more t
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
 		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
 	];
-	const responseFactory = (body) => {
+	const responseFactory = (body: FixtureRequest): FixtureResponse => {
 		if (body.operation !== "handshake") return discoveryResponse(body);
 		const base = handshakeResponse(body);
+		assert.ok(base.ok);
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint }) => {
@@ -3882,9 +4066,10 @@ test("capabilities names profile_selection_required with the catalog when more t
 
 test("capabilities omits profile_selection when a single eligible Profile becomes active automatically", async () => {
 	const eligible = [{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" }];
-	const responseFactory = (body) => {
+	const responseFactory = (body: FixtureRequest): FixtureResponse => {
 		if (body.operation !== "handshake") return discoveryResponse(body);
 		const base = handshakeResponse(body);
+		assert.ok(base.ok);
 		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
 	};
 	await withGateway(async ({ endpoint }) => {
@@ -3960,7 +4145,7 @@ test("target queries keep their exact request shape and render signed target met
 
 test("a URL target match without a navigation declaration preserves the Gateway catalog result", async () => {
 	const selector = `https://www.notion.so/${"a".repeat(32)}`;
-	const responseFactory = (request) =>
+	const responseFactory = (request: FixtureRequest): FixtureResponse =>
 		request.operation === "handshake"
 			? handshakeResponse(request)
 			: success(request, {
@@ -4003,8 +4188,13 @@ test("a URL target match without a navigation declaration preserves the Gateway 
 });
 
 test("catalog navigation refuses a URL selector with the exact provider-neutral resolver workflow", () => {
-	const capability = {
+	const capability: CealGatewayDiscoveryCapability = {
 		capability_id: "notion.page.get",
+		label: "Read one Notion page",
+		effect: "read",
+		target_requirement: "required",
+		input_contract: { schema_version: "ceal.notion_page_get_input.v1" },
+		evidence_requirement: "gateway_audit",
 		navigation: {
 			target_selector: "opaque_catalog_target",
 			url_target_selector: "unsupported",
@@ -4015,7 +4205,7 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 			},
 		},
 	};
-	const selection = {
+	const selection: Parameters<typeof classifyUnsupportedTargetSelector>[1] = {
 		kind: "targets",
 		profileRef: "profile:narnia",
 		body: { capability_id: "notion.page.get", match: `https://www.notion.so/${"a".repeat(32)}` },
@@ -4027,7 +4217,9 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 		nextAction:
 			"Run 'ceal capabilities targets --capability notion.page.get --profile profile:narnia --limit 64' without --match to select its opaque target. Then run 'ceal capabilities targets --capability resource.resolve --profile profile:narnia --limit 64' and use one returned target with 'ceal call resource.resolve --target <target-ref> url=<URL>'; pass the returned document ref as 'ref=<document-ref>' when calling 'notion.page.get'.",
 	});
-	assert.equal(refusal.nextAction.includes(selection.body.match), false, "the rejected URL must not be echoed");
+	const selectedMatch = selection.body.match;
+	assert.ok(selectedMatch);
+	assert.equal(refusal.nextAction.includes(selectedMatch), false, "the rejected URL must not be echoed");
 	assert.equal(
 		classifyUnsupportedTargetSelector([capability], { ...selection, body: { ...selection.body, match: "shared workspace" } }),
 		null,
@@ -4036,6 +4228,7 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 	const unrelated = classifyUnsupportedTargetSelector([{ ...capability, capability_id: "other.page.get" }], selection);
 	assert.equal(unrelated, null, "navigation from another capability must not control this selection");
 	const missingResolver = structuredClone(capability);
+	assert.ok(missingResolver.navigation);
 	missingResolver.navigation.required_argument_source.issued_by = ["notion.search"];
 	assert.deepEqual(classifyUnsupportedTargetSelector([missingResolver], selection), {
 		message:
@@ -4044,10 +4237,11 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 			"Run 'ceal capabilities targets --capability notion.search --profile profile:narnia --limit 64', call that capability with its declared arguments, and pass the returned document ref as 'ref=<document-ref>' when calling 'notion.page.get'.",
 	});
 	const malformed = structuredClone(capability);
+	assert.ok(malformed.navigation);
 	malformed.navigation.required_argument_source.issued_by = [];
 	assert.equal(classifyUnsupportedTargetSelector([malformed], selection), null, "malformed metadata cannot invent a refusal");
 	assert.equal(
-		classifyUnsupportedTargetSelector([{ capability_id: "resource.resolve" }], {
+		classifyUnsupportedTargetSelector([{ ...capability, capability_id: "resource.resolve", navigation: undefined }], {
 			...selection,
 			body: { ...selection.body, capability_id: "resource.resolve" },
 		}),
@@ -4057,15 +4251,17 @@ test("catalog navigation refuses a URL selector with the exact provider-neutral 
 });
 
 test("target recovery preserves a selected Profile and never hides a continuation behind empty-page advice", async () => {
-	let selectedCatalog = {
+	let selectedCatalog: CealGatewayTargetCatalog = {
 		target_count: 1,
 		returned_count: 1,
 		complete: false,
 		next_cursor: `cursor:${"a".repeat(48)}`,
 	};
-	const responseFactory = (request) => {
+	const responseFactory = (request: FixtureRequest): FixtureResponse => {
 		if (request.operation === "handshake") return handshakeResponse(request);
-		const discovery = discoveryResponse(request).value;
+		const discoveryResponseValue = discoveryResponse(request);
+		assert.ok(discoveryResponseValue.ok);
+		const discovery = discoveryResponseValue.value;
 		return success(request, {
 			...discovery,
 			targets: selectedCatalog.target_count === 0 ? [] : discovery.targets,
@@ -4082,7 +4278,7 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 			`Run 'ceal capabilities targets --capability message.search --profile profile:narnia --cursor ${selectedCatalog.next_cursor}'.`,
 		);
 
-		selectedCatalog = { target_count: 0, returned_count: 0, complete: true };
+		selectedCatalog = { target_count: 0, returned_count: 0, complete: true, next_cursor: undefined };
 		const matchedEmpty = await yamlRun(args, 0, runtime);
 		assert.match(matchedEmpty.next_action, /response alone does not prove the capability has no authorized targets/u);
 		assert.match(matchedEmpty.next_action, /--profile profile:narnia --limit 64/u);
@@ -4256,7 +4452,7 @@ test("library execution is deterministic, dependency-injected, and does not assi
 
 test("YAML renderer rejects non-plain scalars, objects, cycles, and aliases", () => {
 	const shared = { value: 1 };
-	const cyclic = {};
+	const cyclic: { self?: unknown } = {};
 	cyclic.self = cyclic;
 	for (const value of [undefined, Number.NaN, 1n, new Date(), new Map(), { nested: undefined }, [shared, shared], cyclic]) {
 		assert.throws(() => renderPlainYamlDocument(value), TypeError);
@@ -4429,8 +4625,10 @@ test("capabilities re-probes when the cached entry is past its freshness window"
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(cache.entry().cachedAt, now, "stale re-probe refreshes the cache stamp");
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "cache now holds the live value");
+		const refreshed = cache.entry();
+		assert.ok(refreshed);
+		assert.equal(refreshed.cachedAt, now, "stale re-probe refreshes the cache stamp");
+		assert.equal(fixtureRecordField(refreshed.discovery, "target_catalog").target_count, 0, "cache now holds the live value");
 	});
 });
 
@@ -4467,7 +4665,9 @@ test("capabilities --fresh bypasses a warm cache and probes live", async () => {
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "--fresh refreshes the cache");
+		const refreshed = cache.entry();
+		assert.ok(refreshed);
+		assert.equal(fixtureRecordField(refreshed.discovery, "target_catalog").target_count, 0, "--fresh refreshes the cache");
 	});
 });
 
@@ -4506,11 +4706,20 @@ test("capabilities degrades to a live probe when a fresh cache entry has a malfo
 			requests.map((item) => item.body.operation),
 			["handshake", "discover"],
 		);
-		assert.equal(cache.entry().discovery.target_catalog.target_count, 0, "the live discovery replaces the malformed cache value");
+		const refreshed = cache.entry();
+		assert.ok(refreshed);
+		assert.equal(
+			fixtureRecordField(refreshed.discovery, "target_catalog").target_count,
+			0,
+			"the live discovery replaces the malformed cache value",
+		);
 	});
 });
 
-function inMemoryDiscoveryCache(initial = null) {
+function inMemoryDiscoveryCache(initial: CealDiscoveryCacheEntry | null = null): {
+	entry: () => CealDiscoveryCacheEntry | null;
+	runtime: TestRuntime;
+} {
 	let current = initial;
 	return {
 		entry: () => current,
@@ -4526,7 +4735,7 @@ function inMemoryDiscoveryCache(initial = null) {
 	};
 }
 
-function cachedEntry(endpoint, cachedAt) {
+function cachedEntry(endpoint: string, cachedAt: number): CealDiscoveryCacheEntry {
 	return {
 		key: { gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.3.0" },
 		cachedAt,
@@ -4556,13 +4765,20 @@ function cachedEntry(endpoint, cachedAt) {
 	};
 }
 
-async function withGateway(callback, responseFactory = null) {
-	const requests = [];
+type GatewayRequestLog = { authorization: string | undefined; profiles: string | undefined; body: FixtureRequest };
+type GatewayCallback = (input: { endpoint: string; requests: GatewayRequestLog[] }) => Promise<void>;
+
+async function withGateway(
+	callback: GatewayCallback,
+	responseFactory: ((body: FixtureRequest) => FixtureResponse) | null = null,
+): Promise<void> {
+	const requests: GatewayRequestLog[] = [];
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
-		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		requests.push({ authorization: request.headers.authorization, profiles: request.headers["x-ceal-profiles"], body });
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const profiles = request.headers["x-ceal-profiles"];
+		requests.push({ authorization: request.headers.authorization, profiles: Array.isArray(profiles) ? profiles.join(",") : profiles, body });
 		const value = responseFactory
 			? responseFactory(body)
 			: body.operation === "handshake"
@@ -4575,7 +4791,7 @@ async function withGateway(callback, responseFactory = null) {
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
@@ -4584,7 +4800,7 @@ async function withGateway(callback, responseFactory = null) {
 	try {
 		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, requests });
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 }
 
@@ -4600,7 +4816,7 @@ async function withGatewayPhaseFailure(failureAt: GatewayPhaseFailure, callback:
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
-		const body: { operation?: string; [key: string]: unknown } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		requests.push({ authorization: request.headers.authorization, body });
 		if (body.operation === failureAt) {
 			response.writeHead(failureAt === "handshake" ? 401 : 502, { "content-type": "text/plain" });
@@ -4624,7 +4840,12 @@ async function withGatewayPhaseFailure(failureAt: GatewayPhaseFailure, callback:
 	}
 }
 
-async function runBin(args, stdin, env = {}, onStderr = () => {}) {
+async function runBin(
+	args: readonly string[],
+	stdin: string,
+	env: NodeJS.ProcessEnv = {},
+	onStderr: (output: string) => void = (): void => {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 	// Never let the real binary touch the developer's actual home: the CLI
 	// persists session/discovery state under $HOME/.ceal, so an un-overridden
@@ -4647,7 +4868,7 @@ async function runBin(args, stdin, env = {}, onStderr = () => {}) {
 	});
 	child.stdin.end(stdin);
 	try {
-		const code = await new Promise((resolve, reject) => {
+		const code = await new Promise<number>((resolve, reject) => {
 			child.once("error", reject);
 			child.once("close", resolve);
 		});
@@ -4657,7 +4878,7 @@ async function runBin(args, stdin, env = {}, onStderr = () => {}) {
 	}
 }
 
-async function runBinWithoutHome(args) {
+async function runBinWithoutHome(args: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> {
 	const bin = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 	const { HOME: _omittedHome, ...environmentWithoutHome } = process.env;
 	const child = spawn(process.execPath, [bin, ...args], {
@@ -4674,29 +4895,36 @@ async function runBinWithoutHome(args) {
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk;
 	});
-	const code = await new Promise((resolve, reject) => {
+	const code = await new Promise<number>((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", resolve);
 	});
 	return { code, stdout, stderr };
 }
 
-async function withEnrollmentGateway(callback, options = {}) {
+type EnrollmentGatewayOptions = {
+	identities?: readonly Record<string, unknown>[];
+	revokeDeniedCode?: string;
+};
+type EnrollmentGatewayCallback = (input: { endpoint: string; token: string; refreshToken: string; revoked: string[] }) => Promise<void>;
+
+async function withEnrollmentGateway(callback: EnrollmentGatewayCallback, options: EnrollmentGatewayOptions = {}): Promise<void> {
 	const token = `ceal_personal_${"T".repeat(43)}`;
 	const refreshToken = `ceal_refresh_${"R".repeat(43)}`;
 	// The same server answers revocation, so an enrollment that ends a session —
 	// the one it refuses to keep, or the one it replaces — is proven against a
 	// real socket rather than an injected stub.
-	const revoked = [];
+	const revoked: string[] = [];
 	// One entry per enrollment exchange, so a test can make the second one buy a
 	// different identity than the first.
 	const identities = options.identities ?? [];
 	let exchanges = 0;
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
-		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		if (request.url === "/gateway/client/revoke") {
+			assert.ok(typeof body.refresh_token === "string");
 			revoked.push(body.refresh_token);
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(
@@ -4733,7 +4961,7 @@ async function withEnrollmentGateway(callback, options = {}) {
 			}),
 		);
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
@@ -4742,22 +4970,38 @@ async function withEnrollmentGateway(callback, options = {}) {
 	try {
 		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, token, refreshToken, revoked });
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 }
 
-async function withRenewingGateway(callback, options = {}) {
+type RenewingGatewayOptions = {
+	invalidRefreshResponse?: boolean;
+	refreshDeniedCode?: string;
+	invalidRevokeResponse?: boolean;
+	rejectFirstGateway?: boolean;
+};
+type RenewingGatewayCallback = (input: {
+	endpoint: string;
+	oldRefreshToken: string;
+	newAccessToken: string;
+	newRefreshToken: string;
+	requests: GatewayRequestLog[];
+	revoked: string[];
+	refreshCalls: () => number;
+}) => Promise<void>;
+
+async function withRenewingGateway(callback: RenewingGatewayCallback, options: RenewingGatewayOptions = {}): Promise<void> {
 	const oldRefreshToken = `ceal_refresh_${"O".repeat(43)}`;
 	const newRefreshToken = `ceal_refresh_${"N".repeat(43)}`;
 	const newAccessToken = `ceal_personal_${"N".repeat(43)}`;
-	const requests = [];
-	const revoked = [];
+	const requests: GatewayRequestLog[] = [];
+	const revoked: string[] = [];
 	let refreshCallCount = 0;
 	let gatewayRejected = false;
 	const server = createServer(async (request, response) => {
-		const chunks = [];
-		for await (const chunk of request) chunks.push(chunk);
-		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		if (request.url === "/gateway/client/refresh") {
 			refreshCallCount += 1;
 			assert.equal(body.refresh_token, oldRefreshToken);
@@ -4798,6 +5042,7 @@ async function withRenewingGateway(callback, options = {}) {
 			return;
 		}
 		if (request.url === "/gateway/client/revoke") {
+			assert.ok(typeof body.refresh_token === "string");
 			revoked.push(body.refresh_token);
 			if (options.invalidRevokeResponse) {
 				response.writeHead(500, { "content-type": "text/plain" });
@@ -4808,7 +5053,7 @@ async function withRenewingGateway(callback, options = {}) {
 			response.end(JSON.stringify({ schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }));
 			return;
 		}
-		requests.push({ authorization: request.headers.authorization, body });
+		requests.push({ authorization: request.headers.authorization, profiles: undefined, body });
 		if (options.rejectFirstGateway && !gatewayRejected) {
 			gatewayRejected = true;
 			response.writeHead(401, { "content-type": "application/json" });
@@ -4833,7 +5078,7 @@ async function withRenewingGateway(callback, options = {}) {
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
 	});
-	await new Promise((resolve, reject) => {
+	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
@@ -4850,11 +5095,11 @@ async function withRenewingGateway(callback, options = {}) {
 			refreshCalls: () => refreshCallCount,
 		});
 	} finally {
-		await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 	}
 }
 
-function installedReleaseReading() {
+function installedReleaseReading(_binaryPath: string): CealInstalledReleaseReading {
 	return {
 		ok: true,
 		facts: {
@@ -4869,7 +5114,7 @@ function installedReleaseReading() {
 	};
 }
 
-function storedSession(endpoint, overrides = {}) {
+function storedSession(endpoint: string, overrides: Partial<CealStoredSession> = {}): CealStoredSession {
 	return {
 		gatewayEndpoint: endpoint,
 		profileRef: "profile:narnia",
@@ -4887,7 +5132,7 @@ function storedSession(endpoint, overrides = {}) {
 	};
 }
 
-function serializeStoredSession(session) {
+function serializeStoredSession(session: CealStoredSession): Record<string, unknown> {
 	return {
 		schema_version: "ceal.client_session_store.v1",
 		gateway_endpoint: session.gatewayEndpoint,
@@ -4905,7 +5150,7 @@ function serializeStoredSession(session) {
 	};
 }
 
-function rotatedClientSession(refreshToken) {
+function rotatedClientSession(refreshToken: string): Record<string, unknown> {
 	return {
 		schema_version: "ceal.client_refresh_result.v1",
 		ok: true,
@@ -4923,7 +5168,7 @@ function rotatedClientSession(refreshToken) {
 	};
 }
 
-async function waitForTestSignal(signal, message) {
+async function waitForTestSignal(signal: Promise<unknown>, message: string): Promise<void> {
 	let timer: NodeJS.Timeout | undefined;
 	try {
 		await Promise.race([
@@ -4937,18 +5182,18 @@ async function waitForTestSignal(signal, message) {
 	}
 }
 
-function parseYaml(stdout) {
+function parseYaml(stdout: string): YamlValue {
 	const documents = parseAllDocuments(stdout, { uniqueKeys: true });
 	assert.equal(documents.length, 1);
 	assert.deepEqual(documents[0].errors, []);
 	return documents[0].toJS();
 }
 
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function handshakeResponse(request) {
+function handshakeResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_handshake.v1",
 		negotiated_protocol_version: "1.3.0",
@@ -4965,7 +5210,7 @@ function handshakeResponse(request) {
 	});
 }
 
-function discoveryResponse(request) {
+function discoveryResponse(request: FixtureRequest): FixtureResponse {
 	const selected = request.body.capability_id === "message.search";
 	return success(request, {
 		schema_version: "ceal.gateway_discovery.v2",
@@ -5008,7 +5253,7 @@ function discoveryResponse(request) {
 	});
 }
 
-function callResponse(request) {
+function callResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_call_result.v1",
 		capability_id: "message.search",
@@ -5038,7 +5283,7 @@ function callResponse(request) {
 	});
 }
 
-function readbackResponse(request) {
+function readbackResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_audit_readback.v1",
 		request_id: request.body.request_id,
@@ -5089,7 +5334,7 @@ function readbackResponse(request) {
 
 // Mirrors the applied Gateway's pre-provider policy denial: no call detail or
 // grant snapshot exists, so the negotiated handling time rides on the event.
-function policyDeniedReadbackResponse(request) {
+function policyDeniedReadbackResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_audit_readback.v1",
 		request_id: request.body.request_id,
@@ -5120,7 +5365,7 @@ function policyDeniedReadbackResponse(request) {
 	});
 }
 
-function continuationFailureResponse(request) {
+function continuationFailureResponse(request: FixtureRequest): FixtureResponse {
 	return {
 		ok: false,
 		request_id: request.request_id,
@@ -5133,7 +5378,7 @@ function continuationFailureResponse(request) {
 	};
 }
 
-function invalidArgumentsFailureResponse(request) {
+function invalidArgumentsFailureResponse(request: FixtureRequest): FixtureResponse {
 	return {
 		ok: false,
 		request_id: request.request_id,
@@ -5146,7 +5391,7 @@ function invalidArgumentsFailureResponse(request) {
 	};
 }
 
-function failedReadbackResponse(request) {
+function failedReadbackResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_audit_readback.v1",
 		request_id: request.body.request_id,
@@ -5183,9 +5428,11 @@ function failedReadbackResponse(request) {
 	});
 }
 
-function connectorFailureReadbackResponse(request) {
+function connectorFailureReadbackResponse(request: FixtureRequest): FixtureResponse {
 	const response = failedReadbackResponse(request);
-	const event = response.value.events[0];
+	assert.ok(response.ok);
+	const [event] = fixtureRecordArrayField(response.value, "events");
+	assert.ok(event);
 	event.policy_decision = "not_evaluated";
 	event.error_code = "connector_unavailable";
 	delete event.grant_snapshot;
@@ -5218,7 +5465,7 @@ function matureSearchCoverage() {
 	};
 }
 
-function success(request, value) {
+function success(request: FixtureRequest, value: Record<string, unknown>): FixtureResponse {
 	return {
 		ok: true,
 		request_id: request.request_id,
@@ -5236,14 +5483,16 @@ test("a receipt this client cannot project is counted, not passed over", async (
 	// up short with nothing marking the gap. A Gateway that adds a status token
 	// or lengthens a ref would trigger it on every call.
 	await withGateway(async ({ endpoint }) => {
-		const spooled = [];
+		const spooled: CealReceiptSpoolEntry[] = [];
 		let drops = 0;
 		const runtime = {
 			readStoredSession: async () => storedSession(endpoint),
 			// Not a safe-ref: spaces and a slash are outside the spool's grammar,
 			// so the receipt is real and the projection still refuses it.
 			nextRequestId: () => "narnia opaque/1",
-			recordReceiptSpool: (_identity, entry) => spooled.push(entry),
+			recordReceiptSpool: (_identity: string, entry: CealReceiptSpoolEntry): void => {
+				spooled.push(entry);
+			},
 			recordReceiptSpoolDrop: () => {
 				drops += 1;
 			},
@@ -5350,7 +5599,14 @@ test("--timing preserves one-result stdout and emits only fixed secret-free phas
 			assert.equal(parseAllDocuments(result.stdout, { uniqueKeys: true }).length, 1);
 			const events = timingEvents(result.stderr);
 			const stages = new Set(events.map((event) => event.stage));
-			for (const stage of ["cli_bootstrap", "runtime_import", "session_load", "gateway_handshake", "gateway_discovery"]) {
+			const expectedStages: readonly CealTimingStage[] = [
+				"cli_bootstrap",
+				"runtime_import",
+				"session_load",
+				"gateway_handshake",
+				"gateway_discovery",
+			];
+			for (const stage of expectedStages) {
 				assert.ok(stages.has(stage), `missing ${stage}: ${result.stderr}`);
 			}
 			for (const event of events) {
@@ -5367,7 +5623,8 @@ test("--timing preserves one-result stdout and emits only fixed secret-free phas
 			const call = await runBin(["--timing", "call", "message.search", "--target", "target:team-inbox", "query=launch"], "", { HOME: home });
 			assert.equal(call.code, 0, call.stderr);
 			const callStages = new Set(timingEvents(call.stderr).map((event) => event.stage));
-			for (const stage of ["session_load", "gateway_call", "gateway_readback", "receipt_spool_append"]) {
+			const expectedCallStages: readonly CealTimingStage[] = ["session_load", "gateway_call", "gateway_readback", "receipt_spool_append"];
+			for (const stage of expectedCallStages) {
 				assert.ok(callStages.has(stage), `missing ${stage}: ${call.stderr}`);
 			}
 		} finally {
@@ -5428,11 +5685,20 @@ test("private entrypoints fail closed on malformed carrier input and absent cont
 	assert.equal(control.stdout, "");
 });
 
-function timingEvents(stderr) {
+type TimingEvent = {
+	schema_version: "ceal.timing.v1";
+	event: "start" | "finish";
+	sequence: number;
+	stage: CealTimingStage;
+	outcome?: "ok" | "error";
+	elapsed_ms?: number;
+};
+
+function timingEvents(stderr: string): TimingEvent[] {
 	const events = stderr
 		.split("\n")
 		.filter(Boolean)
-		.map((line) => JSON.parse(line));
+		.map((line): TimingEvent => JSON.parse(line));
 	assert.ok(events.length >= 2, "a timed command emits at least one start/finish pair");
 	for (const event of events) {
 		assert.equal(event.schema_version, "ceal.timing.v1");
@@ -5454,8 +5720,21 @@ function timingEvents(stderr) {
 // that reason, and these drive the builder directly: requiring an installed
 // release to test the leak-prevention would mean no gate at all on a machine
 // without one.
-function acceptanceParts(overrides = {}) {
-	return {
+type AcceptancePartsFixture = {
+	release: CealAcceptanceRecordParts["release"] & Record<string, unknown>;
+	reportedVersion: CealAcceptanceRecordParts["reportedVersion"];
+	clientProtocolVersion: CealAcceptanceRecordParts["clientProtocolVersion"];
+	guide: CealAcceptanceRecordParts["guide"] & Record<string, unknown>;
+	session: CealAcceptanceRecordParts["session"] & Record<string, unknown>;
+	boundedCall: CealAcceptanceRecordParts["boundedCall"];
+};
+
+function acceptanceParts(overrides: Record<string, unknown> = {}): AcceptancePartsFixture {
+	return acceptancePartsBase(overrides);
+}
+
+function acceptancePartsBase(overrides: Record<string, unknown> = {}): AcceptancePartsFixture {
+	const base: AcceptancePartsFixture = {
 		release: {
 			platform: "linux-amd64",
 			release_version: "0.68.0",
@@ -5478,8 +5757,8 @@ function acceptanceParts(overrides = {}) {
 			elapsed_ms: 1234,
 		},
 		boundedCall: null,
-		...overrides,
 	};
+	return { ...base, ...overrides };
 }
 
 test("the emitted acceptance record never carries a host path, however the parts arrive", () => {
@@ -5493,10 +5772,13 @@ test("the emitted acceptance record never carries a host path, however the parts
 	const serialized = JSON.stringify(record);
 	assert.doesNotMatch(serialized, /\/home\/someone|binary_path|registered_hosts|access_token|secret/u);
 	// The evidence it exists to carry survives.
-	assert.equal(record.installed_client.artifact_sha256, "a".repeat(64));
-	assert.equal(record.installed_client.digest_agreement, "binary_bytes_manifest_and_sha256sums_agree");
-	assert.equal(record.guide.registered_host_count, 2);
-	assert.equal(record.gateway_session.instance_ref, "instance:ceal-prod");
+	const installedClient = fixtureRecordField(record, "installed_client");
+	const guide = fixtureRecordField(record, "guide");
+	const gatewaySession = fixtureRecordField(record, "gateway_session");
+	assert.equal(installedClient.artifact_sha256, "a".repeat(64));
+	assert.equal(installedClient.digest_agreement, "binary_bytes_manifest_and_sha256sums_agree");
+	assert.equal(guide.registered_host_count, 2);
+	assert.equal(gatewaySession.instance_ref, "instance:ceal-prod");
 	assert.equal(record.schema_version, "ceal.worker_acceptance_result.v2");
 	assert.equal(record.emitted_by, "installed_client");
 });
@@ -5516,7 +5798,9 @@ test("the emitted acceptance record answers the success predicate its own refusa
 
 test("the record states what it did not do, including that it called no provider", () => {
 	const withoutCall = buildAcceptanceRecord(acceptanceParts());
-	const claims = withoutCall.non_claims.join("\n");
+	const claimsValue = withoutCall.non_claims;
+	assert.ok(Array.isArray(claimsValue));
+	const claims = claimsValue.join("\n");
 	assert.match(claims, /performed no provider call/u);
 	assert.match(claims, /provider_execution_not_reached/u);
 	// An installed host carries no handoff lock, so the producer tuple is the
@@ -5550,8 +5834,10 @@ test("the record states what it did not do, including that it called no provider
 			},
 		}),
 	);
-	assert.doesNotMatch(withCall.non_claims.join("\n"), /provider_execution_not_reached/u);
-	assert.match(withCall.non_claims.join("\n"), /performed no provider call/u);
+	const withCallClaims = withCall.non_claims;
+	assert.ok(Array.isArray(withCallClaims));
+	assert.doesNotMatch(withCallClaims.join("\n"), /provider_execution_not_reached/u);
+	assert.match(withCallClaims.join("\n"), /performed no provider call/u);
 });
 
 // A legacy acceptance record carried `membership_ref` and `subject_ref` because
@@ -5588,12 +5874,14 @@ test("a bounded-call field the builder was never told to emit does not travel", 
 	const serialized = JSON.stringify(record);
 	assert.doesNotMatch(serialized, /membership_ref|subject_ref|"events"/u);
 	// Positive control: the evidence the row exists to carry did survive.
-	assert.equal(record.bounded_capability_call.request_ref, "ceal:x:call");
-	assert.deepEqual(record.bounded_capability_call.receipt.audit_refs, ["gateway-audit:one"]);
-	assert.equal(record.bounded_capability_call.receipt.gateway_elapsed_ms, 7);
+	const boundedCall = fixtureRecordField(record, "bounded_capability_call");
+	const receipt = fixtureRecordField(boundedCall, "receipt");
+	assert.equal(boundedCall.request_ref, "ceal:x:call");
+	assert.deepEqual(receipt.audit_refs, ["gateway-audit:one"]);
+	assert.equal(receipt.gateway_elapsed_ms, 7);
 	// Every declared key is present even when the caller omitted it, so the two
 	// emitters answer one schema with one key set.
-	assert.equal(record.bounded_capability_call.receipt.exit_code, null);
+	assert.equal(receipt.exit_code, null);
 });
 
 test("a build tree is refused as an installed release rather than described as one", () => {

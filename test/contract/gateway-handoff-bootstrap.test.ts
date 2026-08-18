@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
+import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
 	bootstrapGatewayProtocolHandoff,
 	GatewayProtocolHandoffBootstrapError,
@@ -129,8 +129,4 @@ function publicFixture(context: TestContext) {
 		tag,
 		version,
 	};
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }

@@ -501,6 +501,15 @@
       ]
     },
     {
+      "fingerprint": "755ccf52f83da810",
+      "member_hashes": [
+        "8e682506729a3e79",
+        "ad6650f60fc903cb",
+        "c2dff4596db0059e",
+        "c9068d480978d541"
+      ]
+    },
+    {
       "fingerprint": "75e91ff6508bc229",
       "member_hashes": [
         "2b9da24ea8e3ca81",
@@ -555,15 +564,6 @@
       "member_hashes": [
         "cfdb7bf1756b54be",
         "d9321129ef088886"
-      ]
-    },
-    {
-      "fingerprint": "884165f097f91195",
-      "member_hashes": [
-        "8c4a3a9679359e3b",
-        "c2dff4596db0059e",
-        "c9068d480978d541",
-        "f2783297d0104401"
       ]
     },
     {

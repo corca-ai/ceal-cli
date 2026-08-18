@@ -19,5 +19,6 @@ import { fileURLToPath } from "node:url";
  * @returns true when the caller should behave as a command rather than a module
  */
 export function isMainModule(moduleUrl: string): boolean {
-	return Boolean(process.argv[1]) && path.resolve(String(process.argv[1])) === fileURLToPath(moduleUrl);
+	const entrypoint = process.argv[1];
+	return entrypoint !== undefined && path.resolve(entrypoint) === fileURLToPath(moduleUrl);
 }

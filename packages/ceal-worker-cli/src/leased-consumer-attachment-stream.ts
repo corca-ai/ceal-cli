@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { type FileHandle, lstat, mkdir, open, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -15,7 +14,9 @@ import {
 	decodeCealLeasedConsumerAttachmentStreamRecord,
 	CealLeasedConsumerAttachmentStreamError as ProtocolAttachmentStreamError,
 } from "@corca-ai/ceal-protocol";
+import { isJsonRecord } from "./json-record.js";
 import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { sha256 } from "./sha256.js";
 
 /** @testOnly */
 export const CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA = "ceal.agent.attachment_materialization.v1" as const;
@@ -264,7 +265,7 @@ async function writeCreateOnly(filePath: string, bytes: Uint8Array): Promise<voi
 export function assertLeasedConsumerAttachmentStreamBinding(
 	binding: unknown,
 ): asserts binding is CealAgentAttachmentMaterializationBinding {
-	if (!isRecord(binding)) fail("invalid_expected_binding");
+	if (!isJsonRecord(binding)) fail("invalid_expected_binding");
 	const actual = Object.keys(binding).sort();
 	const expected = [...BINDING_KEYS].sort();
 	if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) fail("invalid_expected_binding");
@@ -284,18 +285,11 @@ function sameBinding(
 	return BINDING_KEYS.every((key) => left[key] === right[key]);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 	return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 }
 function fail(code: string): never {
 	throw new LeasedConsumerAttachmentStreamError(code);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function positiveInteger(value: unknown): value is number {

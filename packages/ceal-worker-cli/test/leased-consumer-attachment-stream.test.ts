@@ -3,13 +3,38 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_SAFETY_LIMITS } from "@corca-ai/ceal-protocol";
+import {
+	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_SAFETY_LIMITS,
+	type CealLeasedConsumerAttachmentStreamManifest,
+} from "@corca-ai/ceal-protocol";
 import {
 	CEAL_AGENT_ATTACHMENT_HANDOFF_MANIFEST_NAME,
 	CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA,
 	receiveLeasedConsumerAttachmentStream,
 } from "../dist/leased-consumer-attachment-stream.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.ts";
+
+type TestManifest = ReturnType<typeof completeManifest>;
+type TestPayload = readonly [slot: number, bytes: Uint8Array];
+type MutationResult = {
+	manifest: TestManifest;
+	expected_binding?: typeof binding;
+	payloads?: readonly TestPayload[];
+	terminal_manifest_sha256?: string;
+	omit_terminal?: boolean;
+};
+type Mutation = (manifest: TestManifest) => MutationResult;
+type RejectionCase = readonly [name: string, mutate: Mutation, code: string];
+
+function hasErrorCode(error: unknown, code: string): boolean {
+	return error instanceof Error && "code" in error && error.code === code;
+}
+
+function isMaterializedAttachment(
+	attachment: CealLeasedConsumerAttachmentStreamManifest["attachments"][number],
+): attachment is Extract<CealLeasedConsumerAttachmentStreamManifest["attachments"][number], { status: "materialized" }> {
+	return attachment.status === "materialized";
+}
 
 test("Worker verifies a chunked complete-set stream and writes an Agent-shaped handoff last", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "ceal-worker-attachment-handoff-"));
@@ -36,8 +61,13 @@ test("Worker verifies a chunked complete-set stream and writes an Agent-shaped h
 			[2, "unread"],
 		],
 	);
-	assert.equal(output.manifest.attachments[0].relative_path, "attachments/0.bin");
-	assert.equal("relative_path" in output.manifest.attachments[2], false);
+	const firstAttachment = output.manifest.attachments[0];
+	const unreadAttachment = output.manifest.attachments[2];
+	assert.ok(firstAttachment);
+	assert.ok(unreadAttachment);
+	assert.ok(isMaterializedAttachment(firstAttachment));
+	assert.equal(firstAttachment.relative_path, "attachments/0.bin");
+	assert.equal("relative_path" in unreadAttachment, false);
 	assert.equal(JSON.stringify(output.manifest).includes("source:"), false);
 	assert.equal(JSON.stringify(output.manifest).includes("provider"), false);
 	assert.deepEqual(await readFile(join(output.handoff_root, "attachments/0.bin")), image);
@@ -48,7 +78,7 @@ test("Worker verifies a chunked complete-set stream and writes an Agent-shaped h
 });
 
 test("Worker rejects binding, ordering, digest, terminal, truncation, and budget drift before leaving a usable handoff", async () => {
-	const cases = [
+	const cases: readonly RejectionCase[] = [
 		["binding", (manifest) => ({ manifest, expected_binding: { ...binding, lease_fence: 99 } }), "attachment_binding_mismatch"],
 		[
 			"reordered",
@@ -97,7 +127,7 @@ test("Worker rejects binding, ordering, digest, terminal, truncation, and budget
 					return created;
 				},
 			}),
-			(error) => error?.code === code,
+			(error) => hasErrorCode(error, code),
 		);
 		if (created !== undefined) await assert.rejects(stat(created), { code: "ENOENT" });
 	}
@@ -118,7 +148,7 @@ test("Worker rejects binding, ordering, digest, terminal, truncation, and budget
 				return mkdtemp(join(tmpdir(), "ceal-worker-attachment-over-budget-"));
 			},
 		}),
-		(error) => error?.code === "attachment_stream_over_budget",
+		(error) => hasErrorCode(error, "attachment_stream_over_budget"),
 	);
 	assert.equal(rootCalls, 0);
 });
@@ -152,8 +182,9 @@ test("Worker removes a fresh handoff root when an attachment or final manifest w
 							}
 						: undefined,
 			}),
-			(error) => error?.code === "handoff_write_failed",
+			(error) => hasErrorCode(error, "handoff_write_failed"),
 		);
+		assert.ok(created);
 		await assert.rejects(stat(created), { code: "ENOENT" });
 	}
 });

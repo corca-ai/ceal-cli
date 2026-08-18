@@ -47,6 +47,11 @@ function safeRef(prefix: string, tailBudget: number): RegExp {
 /** References, codes and identifiers that cross the store or the CLI surface. */
 export const CEAL_SAFE_REF = safeRef("", 127);
 
+/** Whether an unknown value is one canonical Worker safe reference. */
+export function isCealSafeRef(value: unknown): value is string {
+	return typeof value === "string" && CEAL_SAFE_REF.test(value);
+}
+
 /** Gateway error codes, bound to the frozen Protocol's `SAFE_CODE` declaration. */
 // biome-ignore lint/complexity/useRegexLiterals: the source form prevents an unrelated grammar census from treating this bound Protocol mirror as a third local fact.
 export const CEAL_SAFE_GATEWAY_CODE = new RegExp("^[a-z][a-z0-9_]{0,63}$", "u");

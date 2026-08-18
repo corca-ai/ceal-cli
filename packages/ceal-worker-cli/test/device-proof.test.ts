@@ -51,12 +51,14 @@ test("every generated pair is distinct", () => {
 
 test("malformed key material and empty payloads are refused by name", () => {
 	const payload = Buffer.from("x", "utf8");
-	for (const [code, act] of [
+	const malformedKey = (value: unknown): unknown => Reflect.apply(signCealDeviceProof, undefined, [value, payload]);
+	const cases: Array<[string, () => unknown]> = [
 		["device_proof_invalid_key", () => signCealDeviceProof(new Uint8Array(31), payload)],
-		["device_proof_invalid_key", () => signCealDeviceProof("not bytes", payload)],
+		["device_proof_invalid_key", () => malformedKey("not bytes")],
 		["device_proof_invalid_payload", () => signCealDeviceProof(generateCealDeviceProofKeyPair().privateKey, new Uint8Array(0))],
-	]) {
-		assert.throws(act, (error) => error instanceof CealDeviceProofError && error.code === code);
+	];
+	for (const [code, act] of cases) {
+		assert.throws(act, (error: unknown) => error instanceof CealDeviceProofError && error.code === code);
 	}
 	// Verification answers false rather than throwing: it is asked about
 	// attacker-supplied bytes, and a thrown error there is a control-flow signal

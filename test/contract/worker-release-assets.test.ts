@@ -16,6 +16,7 @@ import {
 	composeWorkerReleaseAssets,
 	mergeWorkerReleaseAssetSets,
 	parsePublishedWorkerReleaseInventory,
+	runCli,
 	WorkerReleaseAssetsError,
 } from "../../scripts/build-worker-release-assets.ts";
 import {
@@ -24,8 +25,9 @@ import {
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
-import { inspectOutputDirectory } from "../../scripts/lib/output-directory.ts";
+import { inspectOutputDirectory, publishOutputDirectory } from "../../scripts/lib/output-directory.ts";
 import { createSkillDirectoryBundle } from "../../scripts/lib/skill-directory-bundle.ts";
+import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { runFixtureGit } from "../converged-protocol-repo-fixture.ts";
 
 const CARRIER_CONTRACT_PATH = path.join(REPO_ROOT, "packages", "ceal-worker-cli", "leased-consumer-carrier-contract.json");
@@ -95,6 +97,10 @@ test("the installer's allowlist accepts every platform the release matrix builds
 			assert.match(asset, INSTALLER_ALLOWLIST, `install-ceal.sh would reject ${asset}, which ceal-release.yml builds`);
 		}
 	}
+});
+
+test("release assets CLI renders failures through the declared output channels", async () => {
+	await assertCliFailureChannels(runCli, ["compose"], "invalid_output");
 });
 
 test("composed worker release assets match the installer's signed inventory contract", async (context) => {
@@ -204,6 +210,18 @@ test("output directory refuses a relative path before resolving it", () => {
 			}),
 		/invalid_output/u,
 	);
+});
+
+test("forced publish restores the marked output when staging rename fails", (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-output-publish-restore-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const output = path.join(root, "assets");
+	mkdirSync(output);
+	writeFileSync(path.join(output, ".ceal-worker-release-assets"), "marker\n");
+	writeFileSync(path.join(output, "previous.txt"), "previous\n");
+	assert.throws(() => publishOutputDirectory(path.join(root, "missing-staging"), { directory: output, force: true }), /ENOENT/u);
+	assert.equal(readFileSync(path.join(output, "previous.txt"), "utf8"), "previous\n");
+	assert.deepEqual(readdirSync(root), ["assets"]);
 });
 
 test("compose preserves a coded native-builder error", async (context) => {

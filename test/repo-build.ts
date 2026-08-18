@@ -16,6 +16,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isObjectRecord } from "../scripts/lib/object-record.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 
 type BuildRunner = (packagePath: string) => void;
@@ -39,12 +40,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
 function isSupervisorResult(value: unknown): value is SupervisorResult {
-	if (!isRecord(value)) return false;
+	if (!isObjectRecord(value)) return false;
 	const result = value;
 	return (
 		Object.keys(result).length === RESULT_KEYS.length &&

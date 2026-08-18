@@ -3,6 +3,7 @@ import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { assertDirectoryIfPresent, assertFile, prepareDirectory, removeOwnedFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
+import { isCealSafeEndpoint } from "./safe-endpoint.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
@@ -249,7 +250,7 @@ function validateSession(value: CandidateSession): void {
 function validateBaseSession(value: CandidateSession): void {
 	const valid =
 		typeof value.gatewayEndpoint === "string" &&
-		safeEndpoint(value.gatewayEndpoint) &&
+		isCealSafeEndpoint(value.gatewayEndpoint) &&
 		typeof value.accessToken === "string" &&
 		/^ceal_personal_[A-Za-z0-9_-]{43}$/u.test(value.accessToken) &&
 		typeof value.expiresAt === "string" &&
@@ -273,22 +274,6 @@ function validateSessionReferences(value: CandidateSession): void {
 		if (typeof value[key] !== "string" || !CEAL_SAFE_REF.test(value[key])) {
 			throw new CealSessionStoreError("invalid_store");
 		}
-	}
-}
-
-function safeEndpoint(value: string): boolean {
-	try {
-		const endpoint = new URL(value);
-		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-		return (
-			!endpoint.username &&
-			!endpoint.password &&
-			!endpoint.search &&
-			!endpoint.hash &&
-			(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")))
-		);
-	} catch {
-		return false;
 	}
 }
 

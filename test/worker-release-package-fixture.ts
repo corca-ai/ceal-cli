@@ -3,15 +3,33 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { SuiteContext, TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
+import { createProtocolArtifactFixture, type ProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
+import { type ReleasePackageRecordInput, releasePackageRecord } from "./release-package-record.ts";
 import { withBuiltPackages } from "./repo-build.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export function packedProtocolFixture(context) {
+type PackedPackage = ReleasePackageRecordInput & { tarball: string; shasum: string };
+type PackedProtocolFixture = Pick<ProtocolArtifactFixture<PackedPackage>, "provenance"> & {
+	root: string;
+	repoRoot: string;
+	protocolTarball: string;
+	protocolProvenance: string;
+	controlConformance: string;
+	handoffManifest: string;
+	expectedHandoffSha256: string;
+};
+
+type FixtureCleanupContext = TestContext | SuiteContext;
+
+export function packedProtocolFixture(context: FixtureCleanupContext): PackedProtocolFixture {
+	if (!("after" in context)) throw new TypeError("packed protocol fixtures require a test context");
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-release-package-test-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	// Snapshot the shared Protocol `dist` into the converged fixture while the
@@ -21,34 +39,9 @@ export function packedProtocolFixture(context) {
 	// from the fixture's owned `packages/ceal-client` source themselves.
 	const fixtureRepo = withBuiltPackages(["packages/ceal-protocol"], () => createProtocolRepoFixture({ releaseBuild: true }));
 	context.after(fixtureRepo.cleanup);
-	const protocol = packPackage(root, fixtureRepo.root, "packages/ceal-protocol", [".", "./conformance"]);
-	const producer = {
-		...fixtureRepo.gateway,
-		scoped_paths_clean: true,
-	};
-	writeFileSync(path.join(root, ".ceal-protocol-handoff-owner"), "ceal.gateway_protocol_handoff.v1\n");
-	const provenance = {
-		schema_version: "ceal.gateway_protocol_artifact.v1",
-		proof_level: "local_state",
-		writes_external: false,
-		source: {
-			repository: producer.repository,
-			commit: producer.commit,
-			tree: producer.tree,
-			protocol_tree: producer.protocol_tree,
-			package_path: "packages/ceal-protocol",
-		},
-		artifact: {
-			package: protocol.name,
-			version: protocol.version,
-			filename: protocol.filename,
-			sha256: protocol.sha256,
-			npm_integrity: protocol.integrity,
-			exports: protocol.declared_exports,
-		},
-	};
-	const protocolProvenance = path.join(root, "gateway-protocol-provenance.json");
-	writeFileSync(protocolProvenance, `${JSON.stringify(provenance)}\n`);
+	const { producer, protocol, provenance, protocolProvenance } = createProtocolArtifactFixture(root, fixtureRepo.gateway, () =>
+		packPackage(root, fixtureRepo.root, "packages/ceal-protocol", [".", "./conformance"]),
+	);
 	const controlConformance = path.join(root, "gateway-leased-consumer-control-conformance.json");
 	writeFileSync(
 		controlConformance,
@@ -74,7 +67,7 @@ export function packedProtocolFixture(context) {
 			proof_level: "local_state",
 			writes_external: false,
 			producer,
-			protocol: record(protocol),
+			protocol: releasePackageRecord(protocol),
 			protocol_provenance: { filename: path.basename(protocolProvenance), bytes: sidecar.length, sha256: sha256(sidecar) },
 			control_conformance: { filename: path.basename(controlConformance), bytes: controlBytes.length, sha256: sha256(controlBytes) },
 		})}\n`,
@@ -91,7 +84,7 @@ export function packedProtocolFixture(context) {
 	};
 }
 
-function packPackage(root, repoRoot, sourcePath, declaredExports) {
+function packPackage(root: string, repoRoot: string, sourcePath: string, declaredExports: string[]): PackedPackage {
 	const packageDirectory = path.join(repoRoot, sourcePath);
 	// This reads only the fixture-owned `dist` snapshot. Its caller copied that
 	// snapshot while holding the workspace build lock.
@@ -123,20 +116,4 @@ function packPackage(root, repoRoot, sourcePath, declaredExports) {
 		bytes: bytes.length,
 		declared_exports: declaredExports,
 	};
-}
-
-function record(item) {
-	return {
-		package: item.name,
-		version: item.version,
-		filename: item.filename,
-		bytes: item.bytes,
-		sha256: item.sha256,
-		integrity: item.integrity,
-		exports: item.declared_exports,
-	};
-}
-
-function sha256(bytes) {
-	return createHash("sha256").update(bytes).digest("hex");
 }

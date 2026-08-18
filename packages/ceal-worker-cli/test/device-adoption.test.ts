@@ -1,16 +1,28 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import type { CealDeviceAdoptionClient, CealPersonalClientSessionClient } from "@corca-ai/ceal";
 import {
 	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
 	CEAL_DEVICE_ENROLLMENT_FEATURE,
+	type CealClientRefreshResponse,
+	type CealClientRevokeResponse,
+	type CealClientSessionFailure,
+	type CealDeviceEnrollmentChallenge,
+	type CealDeviceEnrollmentDeliveryBinding,
+	type CealDeviceEnrollmentPollRequest,
+	type CealDeviceEnrollmentPollResponse,
+	type CealDeviceEnrollmentStartRequest,
+	type CealDeviceEnrollmentStartResult,
 	deviceEnrollmentHpkeAssociatedData,
 	deviceEnrollmentHpkeInfo,
 	deviceEnrollmentProofPayload,
 } from "@corca-ai/ceal-protocol";
+import type { CealCliIo, CealCommandRuntime } from "../dist/cli-runtime.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";
 import { sealCealHpkeMessage } from "../dist/hpke.js";
 import { runCealCommand } from "../dist/index.js";
+import type { CealStoredSession } from "../dist/profile-store.js";
 import { CealSessionStoreError } from "../dist/profile-store.js";
 import { createCealSessionCapability } from "../dist/session-capability.js";
 
@@ -48,6 +60,8 @@ test("the challenge is signed under the proof key the Gateway was given", async 
 	const world = createWorld();
 	assert.equal(await run(world), 0);
 	const signed = world.gateway.polls.at(0);
+	assert.ok(world.gateway.start);
+	assert.ok(signed);
 	assert.ok(
 		verifyCealDeviceProof(
 			Buffer.from(world.gateway.start.proof_public_key, "base64url"),
@@ -62,6 +76,8 @@ test("the challenge is signed under the proof key the Gateway was given", async 
 test("both fingerprints are shown before the verification URL, and nothing secret is", async () => {
 	const world = createWorld();
 	assert.equal(await run(world), 0);
+	assert.ok(world.gateway.start);
+	assert.ok(world.gateway.polls.at(0));
 	const shown = world.stderrText();
 
 	const proofFingerprint = fingerprint(world.gateway.start.proof_public_key);
@@ -77,10 +93,12 @@ test("both fingerprints are shown before the verification URL, and nothing secre
 	// Redaction: the submitted address, the nonce, the signature, the raw keys,
 	// and every token stay out of what a terminal or a captured log sees.
 	const everything = shown + world.stdoutText();
+	const poll = world.gateway.polls.at(0);
+	assert.ok(poll);
 	for (const secret of [
 		EMAIL,
 		world.gateway.challenge().nonce,
-		world.gateway.polls.at(0).signature,
+		poll.signature,
 		world.gateway.start.proof_public_key,
 		world.gateway.start.recipient_public_key,
 		"ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
@@ -120,7 +138,9 @@ test("waiting is paced only by the Gateway, and only a monotonic local safety ca
 test("a later-device approval wait is explicitly negotiated, Gateway-paced, and announced once", async () => {
 	const world = createWorld({ approvalRequiredPolls: 2, retryAfterMs: 4_000 });
 	assert.equal(await run(world), 0);
-	assert.deepEqual(world.gateway.start.client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE]);
+	const start = world.gateway.start;
+	assert.ok(start);
+	assert.deepEqual(start.client.features, [CEAL_DEVICE_ENROLLMENT_FEATURE, CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE]);
 	assert.deepEqual(world.slept, [4_000, 4_000]);
 	assert.equal((world.stderrText().match(/Waiting for operator approval/gu) ?? []).length, 1);
 	assert.equal(world.result().status, "adopted");
@@ -183,7 +203,8 @@ test("a malformed poll response stays terminal, because retrying returns the sam
 });
 
 test("typed start availability failures stay distinct and never write a session", async () => {
-	for (const kind of ["adoption_not_available", "gateway_unavailable", "rate_limited"]) {
+	const failureCodes: AdoptionFailureCode[] = ["adoption_not_available", "gateway_unavailable", "rate_limited"];
+	for (const kind of failureCodes) {
 		const world = createWorld({ startFailureCode: kind });
 		assert.equal(await run(world), 3);
 		assert.equal(world.result().error.kind, kind);
@@ -192,7 +213,8 @@ test("typed start availability failures stay distinct and never write a session"
 });
 
 test("start-only failure codes received during poll remain malformed and never write a session", async () => {
-	for (const code of ["adoption_not_available", "gateway_unavailable", "rate_limited"]) {
+	const failureCodes: AdoptionFailureCode[] = ["adoption_not_available", "gateway_unavailable", "rate_limited"];
+	for (const code of failureCodes) {
 		const world = createWorld({ transientPollFailures: 1, transientPollCode: code });
 		assert.equal(await run(world), 3);
 		assert.equal(world.result().error.kind, "malformed_response");
@@ -203,7 +225,7 @@ test("start-only failure codes received during poll remain malformed and never w
 // Each of these is a distinguishable, fail-closed outcome. The assertion that
 // matters in every one is the same: no session was written.
 test("every tampered delivery fails closed with its own error kind", async () => {
-	const cases = [
+	const cases: Array<[string, TestOptions]> = [
 		["start_binding_mismatch", { tamperStart: (start) => ({ ...start, gateway_origin: "https://attacker.example.test" }) }],
 		["start_binding_mismatch", { tamperStart: (start) => ({ ...start, recipient_key_sha256: "c".repeat(64) }) }],
 		["start_binding_mismatch", { tamperStart: (start) => ({ ...start, proof_key_sha256: "d".repeat(64) }) }],
@@ -305,6 +327,8 @@ test("a second run adopts as a new transaction rather than resuming the first", 
 	await run(first);
 	const second = createWorld({ pendingPolls: 1 });
 	await run(second);
+	assert.ok(first.gateway.start);
+	assert.ok(second.gateway.start);
 	assert.notEqual(first.gateway.start.recipient_public_key, second.gateway.start.recipient_public_key);
 	assert.notEqual(first.gateway.start.proof_public_key, second.gateway.start.proof_public_key);
 });
@@ -329,7 +353,9 @@ test("re-adopting the identity this host already holds needs no flag and keeps i
 		["ceal_refresh_previous"],
 	);
 	assert.equal(result.previous_session_revoked, "revoked");
-	assert.equal(world.storedSession().accessToken, "ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A");
+	const stored = world.storedSession();
+	assert.ok(stored);
+	assert.equal(stored.accessToken, "ceal_personal_QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A");
 });
 
 test("adopting over a different identity is refused by name, keeps the stored session, and ends the one it refused", async () => {
@@ -346,7 +372,9 @@ test("adopting over a different identity is refused by name, keeps the stored se
 	assert.match(result.error.next_action, /approve replacement/u);
 	assert.doesNotMatch(result.error.next_action, /replacement code/u);
 	assert.equal(world.saved.length, 0);
-	assert.equal(world.storedSession().subjectRef, "subject:someone-else", "the identity this host holds is the one it keeps");
+	const stored = world.storedSession();
+	assert.ok(stored);
+	assert.equal(stored.subjectRef, "subject:someone-else", "the identity this host holds is the one it keeps");
 	// The refusal happens after the Gateway has issued a session, so the refusal
 	// owns ending it; leaving it live is the orphan this guard exists to prevent.
 	assert.deepEqual(
@@ -372,7 +400,9 @@ test("--force replaces a different identity, revoking it first and clearing what
 	// The receipt spool carries no identity discriminator, so a spool kept across
 	// a substitution renders two subjects' history as one.
 	assert.deepEqual(world.removedStores.sort(), ["discovery-cache", "receipt-spool"]);
-	assert.equal(world.storedSession().subjectRef, "subject:employee");
+	const stored = world.storedSession();
+	assert.ok(stored);
+	assert.equal(stored.subjectRef, "subject:employee");
 });
 
 test("a session store this host cannot read stops the adoption before the employee is asked for anything", async () => {
@@ -383,7 +413,7 @@ test("a session store this host cannot read stops the adoption before the employ
 	assert.equal(world.stderrText(), "", "and the employee is shown no verification URL");
 });
 
-function storedSession(overrides = {}) {
+function storedSession(overrides: Partial<CealStoredSession> = {}): CealStoredSession {
 	return {
 		gatewayEndpoint: GATEWAY,
 		profileRef: "profile:work",
@@ -401,7 +431,122 @@ function storedSession(overrides = {}) {
 	};
 }
 
-function run(world, extraOptions = []) {
+interface TestOptions {
+	pendingPolls?: number;
+	approvalRequiredPolls?: number;
+	retryAfterMs?: number;
+	localWallClock?: number;
+	transientPollFailures?: number;
+	transientPollCode?:
+		| "invalid_configuration"
+		| "request_timeout"
+		| "request_failed"
+		| "invalid_response"
+		| "adoption_not_available"
+		| "gateway_unavailable"
+		| "rate_limited";
+	startFailureCode?:
+		| "invalid_configuration"
+		| "request_timeout"
+		| "request_failed"
+		| "invalid_response"
+		| "adoption_not_available"
+		| "gateway_unavailable"
+		| "rate_limited";
+	malformedStart?: boolean;
+	failWith?: "recovery_required" | "unsupported_feature" | "expired";
+	tamperStart?: (start: CealDeviceEnrollmentStartResult) => CealDeviceEnrollmentStartResult;
+	tamperBinding?: (binding: CealDeviceEnrollmentDeliveryBinding) => CealDeviceEnrollmentDeliveryBinding;
+	tamperCiphertext?: boolean;
+	tamperAadAfterSealing?: boolean;
+	tamperPayload?: (payload: EnrollmentPayload) => EnrollmentPayload;
+	storedSession?: CealStoredSession;
+	saveFails?: boolean;
+	loadFails?: boolean;
+	revokeDeniedCode?: CealClientSessionFailure["error"]["code"];
+}
+
+type AdoptionFailureCode = NonNullable<TestOptions["startFailureCode"]>;
+
+interface TestRuntime extends CealCommandRuntime {
+	readStoredSession: () => Promise<CealStoredSession | null>;
+	writeStoredSession: (session: CealStoredSession) => Promise<void>;
+	runWithLockedSession?: <T>(action: (store: LockedStore) => Promise<T>) => Promise<T>;
+	removeDiscoveryCache: () => Promise<void>;
+	removeReceiptSpool: () => Promise<void>;
+	createClientSessionClient: (options: { endpoint: string }) => CealPersonalClientSessionClient;
+}
+
+interface LockedStore {
+	load: () => Promise<CealStoredSession | null>;
+	save: (session: CealStoredSession) => Promise<void>;
+	replace: (expectedRefreshToken: string, session: CealStoredSession) => Promise<void>;
+	remove: () => Promise<void>;
+}
+
+interface GatewayState {
+	start: CealDeviceEnrollmentStartRequest | null;
+	startCount: number;
+	polls: CealDeviceEnrollmentPollRequest[];
+	visitedUrls: string[];
+	calledRoutes: Record<string, boolean>;
+	browserSessionUrl: string;
+	challenge: () => CealDeviceEnrollmentChallenge;
+	client: CealDeviceAdoptionClient;
+}
+
+interface World {
+	io: CealCliIo;
+	saved: CealStoredSession[];
+	slept: number[];
+	revoked: Array<{ endpoint: string; refreshToken: string }>;
+	removedStores: string[];
+	storedSession: () => CealStoredSession | null;
+	readSecretCalls: number;
+	gateway: GatewayState;
+	stdoutText: () => string;
+	stderrText: () => string;
+	result: () => TestResult;
+	runtime: TestRuntime;
+}
+
+interface TestResult {
+	[key: string]: ParsedValue;
+	ok: boolean;
+	status: string;
+	enrollment_kind: string;
+	sealed_delivery_verified: boolean;
+	subject_ref: string;
+	raw_token_visible: boolean;
+	non_claims: string[];
+	session_replacement: string;
+	local_derived_state_cleared: boolean;
+	previous_session_revoked: string;
+	issued_session_revoked: string;
+	session_written: boolean;
+	changed_bindings: string[];
+	error: { kind: string; next_action: string; message: string };
+}
+
+type ParsedValue = string | number | boolean | null | ParsedValue[] | { [key: string]: ParsedValue };
+
+interface EnrollmentPayload {
+	schema_version: "ceal.enrollment_result.v1";
+	ok: true;
+	profile_ref: string;
+	membership_ref: string;
+	registration_ref: string;
+	client_ref: string;
+	subject_ref: string;
+	instance_ref: string;
+	access_token: string;
+	expires_at: string;
+	refresh_token: string;
+	refresh_token_idle_expires_at: string;
+	refresh_token_absolute_expires_at: string;
+}
+
+function run(world: World, extraOptions: string[] = []) {
 	return runCealCommand(
 		["session", "adopt", "--gateway", GATEWAY, "--email", EMAIL, ...extraOptions],
 		world.io,
@@ -409,7 +554,7 @@ function run(world, extraOptions = []) {
 	);
 }
 
-function prepareRuntime(runtime) {
+function prepareRuntime(runtime: TestRuntime): CealCommandRuntime {
 	const {
 		readStoredSession,
 		writeStoredSession,
@@ -421,11 +566,11 @@ function prepareRuntime(runtime) {
 	} = runtime;
 	const load = readStoredSession;
 	const save = writeStoredSession;
-	const remove = async () => {};
-	const lockedStore = {
+	const remove = async (): Promise<void> => {};
+	const lockedStore: LockedStore = {
 		load,
 		save,
-		replace: async (_expectedRefreshToken, session) => save(session),
+		replace: async (_expectedRefreshToken: string, session: CealStoredSession) => save(session),
 		remove,
 	};
 	return {
@@ -446,24 +591,24 @@ function prepareRuntime(runtime) {
 	};
 }
 
-function fingerprint(publicKey) {
+function fingerprint(publicKey: string) {
 	return createHash("sha256").update(Buffer.from(publicKey, "base64url")).digest("hex");
 }
 
-function createWorld(options = {}) {
-	const stdout = [];
-	const stderr = [];
-	const saved = [];
-	const slept = [];
-	const revoked = [];
-	const removedStores = [];
+function createWorld(options: TestOptions = {}): World {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	const saved: CealStoredSession[] = [];
+	const slept: number[] = [];
+	const revoked: Array<{ endpoint: string; refreshToken: string }> = [];
+	const removedStores: string[] = [];
 	let stored = options.storedSession ?? null;
 	let clock = options.localWallClock ?? NOW;
 	let monotonicClock = 0;
 	const gateway = createGateway(options);
 
 	return {
-		io: { stdout: { write: (chunk) => stdout.push(chunk) }, stderr: { write: (chunk) => stderr.push(chunk) } },
+		io: { stdout: { write: (chunk: string) => stdout.push(chunk) }, stderr: { write: (chunk: string) => stderr.push(chunk) } },
 		saved,
 		slept,
 		revoked,
@@ -475,11 +620,11 @@ function createWorld(options = {}) {
 		stderrText: () => stderr.join(""),
 		result: () => parseYamlish(stdout.join("")),
 		runtime: {
-			readStoredSession: async () => {
+			readStoredSession: async (): Promise<CealStoredSession | null> => {
 				if (options.loadFails) throw new Error("unreadable store");
 				return stored;
 			},
-			writeStoredSession: async (session) => {
+			writeStoredSession: async (session: CealStoredSession) => {
 				if (options.saveFails) throw new Error("read-only store");
 				stored = session;
 				saved.push(session);
@@ -494,12 +639,20 @@ function createWorld(options = {}) {
 			// identity replacement performs has no loopback server to reach. The
 			// transport itself is proven against a real socket in `@corca-ai/ceal`;
 			// what this seam proves is which credential this command decides to end.
-			createClientSessionClient: ({ endpoint }) => ({
-				revoke: async (refreshToken) => {
+			createClientSessionClient: ({ endpoint }: { endpoint: string }): CealPersonalClientSessionClient => ({
+				refresh: async (_refreshToken: string): Promise<CealClientRefreshResponse> => {
+					throw new Error("refresh is not part of the adoption test seam");
+				},
+				revoke: async (refreshToken: string): Promise<CealClientRevokeResponse> => {
 					revoked.push({ endpoint, refreshToken });
-					return options.revokeDeniedCode
-						? { ok: false, error: { code: options.revokeDeniedCode, message: "denied", next_action: "none" } }
-						: { ok: true, schema_version: "ceal.client_session_revoke_result.v1" };
+					if (options.revokeDeniedCode) {
+						return {
+							ok: false,
+							schema_version: "ceal.client_revoke_result.v1",
+							error: { code: options.revokeDeniedCode, message: "denied", next_action: "none" },
+						};
+					}
+					return { ok: true, schema_version: "ceal.client_revoke_result.v1", revoked: true };
 				},
 			}),
 			readSecret: async () => {
@@ -507,7 +660,7 @@ function createWorld(options = {}) {
 			},
 			now: () => clock,
 			monotonicNow: () => monotonicClock,
-			sleep: async (ms) => {
+			sleep: async (ms: number) => {
 				slept.push(ms);
 				clock += ms;
 				monotonicClock += ms;
@@ -517,12 +670,12 @@ function createWorld(options = {}) {
 	};
 }
 
-function createGateway(options) {
+function createGateway(options: TestOptions): GatewayState {
 	const pendingPolls = options.pendingPolls ?? 0;
 	const approvalRequiredPolls = options.approvalRequiredPolls ?? 0;
 	const retryAfterMs = options.retryAfterMs ?? 1_000;
 	const browserSessionUrl = `${ORIGIN}/adopt/verify/${encodeURIComponent("adoption:1")}`;
-	const state = {
+	const state: Omit<GatewayState, "client"> = {
 		start: null,
 		startCount: 0,
 		polls: [],
@@ -543,15 +696,16 @@ function createGateway(options) {
 	let remaining = pendingPolls;
 	let approvalRemaining = approvalRequiredPolls;
 	let transientFailures = options.transientPollFailures ?? 0;
+	let gateway: GatewayState;
 
-	state.client = {
-		async start(request) {
-			state.calledRoutes.start = true;
-			state.startCount += 1;
-			state.start = request;
+	const client: CealDeviceAdoptionClient = {
+		async start(request: CealDeviceEnrollmentStartRequest): Promise<CealDeviceEnrollmentStartResult> {
+			gateway.calledRoutes.start = true;
+			gateway.startCount += 1;
+			gateway.start = request;
 			if (options.startFailureCode) throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError(options.startFailureCode);
 			if (options.malformedStart) throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError("invalid_response");
-			const result = {
+			const result: CealDeviceEnrollmentStartResult = {
 				schema_version: "ceal.device_enrollment_start_result.v1",
 				status: "pending",
 				transaction_ref: "adoption:1",
@@ -565,9 +719,9 @@ function createGateway(options) {
 			};
 			return options.tamperStart ? options.tamperStart(result) : result;
 		},
-		async poll(request) {
-			state.calledRoutes.poll = true;
-			state.polls.push(request);
+		async poll(request: CealDeviceEnrollmentPollRequest): Promise<CealDeviceEnrollmentPollResponse> {
+			gateway.calledRoutes.poll = true;
+			gateway.polls.push(request);
 			if (transientFailures > 0) {
 				transientFailures -= 1;
 				throw new (await import("@corca-ai/ceal")).CealDeviceAdoptionClientError(options.transientPollCode ?? "request_timeout");
@@ -581,15 +735,17 @@ function createGateway(options) {
 				return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "approval_required", retry_after_ms: retryAfterMs };
 			}
 			if (options.failWith) return { schema_version: "ceal.device_enrollment_poll_result.v1", status: "failed", code: options.failWith };
-			return sealed(state, options);
+			return sealed(gateway, options);
 		},
 	};
-	return state;
+	gateway = { ...state, client };
+	return gateway;
 }
 
-function sealed(state, options) {
+function sealed(state: Omit<GatewayState, "client">, options: TestOptions): CealDeviceEnrollmentPollResponse {
+	assert.ok(state.start);
 	const payload = options.tamperPayload ? options.tamperPayload(enrollmentPayload()) : enrollmentPayload();
-	const binding = {
+	const binding: CealDeviceEnrollmentDeliveryBinding = {
 		gateway_origin: ORIGIN,
 		protocol_version: "1.3.0",
 		feature: "device_enrollment_sealed_v1",
@@ -635,7 +791,7 @@ function sealed(state, options) {
 	};
 }
 
-function enrollmentPayload() {
+function enrollmentPayload(): EnrollmentPayload {
 	return {
 		schema_version: "ceal.enrollment_result.v1",
 		ok: true,
@@ -656,9 +812,26 @@ function enrollmentPayload() {
 // The commands emit one plain YAML document with no anchors, aliases, or block
 // scalars, so this reads what the CLI actually printed rather than pulling in a
 // parser that would accept shapes the renderer never produces.
-function parseYamlish(text) {
-	const root = {};
-	const stack = [{ indent: -1, node: root }];
+type ParseNode = { [key: string]: ParsedValue };
+
+function parseYamlish(text: string): TestResult {
+	const root: TestResult = {
+		ok: false,
+		status: "",
+		enrollment_kind: "",
+		sealed_delivery_verified: false,
+		subject_ref: "",
+		raw_token_visible: false,
+		non_claims: [],
+		session_replacement: "",
+		local_derived_state_cleared: false,
+		previous_session_revoked: "",
+		issued_session_revoked: "",
+		session_written: false,
+		changed_bindings: [],
+		error: { kind: "", next_action: "", message: "" },
+	};
+	const stack: Array<{ indent: number; node: ParseNode }> = [{ indent: -1, node: root }];
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
 		const indent = line.length - line.trimStart().length;
@@ -674,17 +847,18 @@ function parseYamlish(text) {
 		const key = trimmed.slice(0, separator);
 		const value = trimmed.slice(separator + 1).trim();
 		if (value === "") {
-			const node = {};
+			const node: { [key: string]: ParsedValue } = {};
 			parent[key] = node;
 			stack.push({ indent, node });
 			continue;
 		}
 		parent[key] = scalar(value);
 	}
-	return materialize(root);
+	materialize(root);
+	return root;
 }
 
-function scalar(value) {
+function scalar(value: string): string | number | boolean | null {
 	const unquoted = value.replace(/^"(.*)"$/su, "$1");
 	if (unquoted === "true") return true;
 	if (unquoted === "false") return false;
@@ -693,10 +867,20 @@ function scalar(value) {
 	return unquoted;
 }
 
-function materialize(node) {
+function materialize(node: ParseNode): void {
+	for (const [key, value] of Object.entries(node)) {
+		if (isParsedRecord(value)) node[key] = materializeRecord(value);
+	}
+}
+
+function materializeRecord(node: { [key: string]: ParsedValue }): ParsedValue {
 	if (Array.isArray(node.__list)) return node.__list;
 	for (const [key, value] of Object.entries(node)) {
-		if (value && typeof value === "object") node[key] = materialize(value);
+		if (isParsedRecord(value)) node[key] = materializeRecord(value);
 	}
 	return node;
+}
+
+function isParsedRecord(value: ParsedValue): value is { [key: string]: ParsedValue } {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }

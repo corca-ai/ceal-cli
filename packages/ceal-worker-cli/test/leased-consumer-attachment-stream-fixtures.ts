@@ -5,10 +5,19 @@ import {
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_FRAME_SCHEMA,
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAGIC,
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_SAFETY_LIMITS,
+	type CealLeasedConsumerAttachmentStreamBinding,
+	type CealLeasedConsumerAttachmentStreamManifest,
 	encodeCealLeasedConsumerAttachmentStreamRecord,
 } from "@corca-ai/ceal-protocol";
 
-export const binding = {
+type ManifestOverrides = Partial<CealLeasedConsumerAttachmentStreamManifest["limits"]>;
+type AttachmentPayload = readonly [slot: number, bytes: Uint8Array];
+type StreamOptions = ManifestOverrides & {
+	omit_terminal?: boolean;
+	terminal_manifest_sha256?: string;
+};
+
+export const binding: CealLeasedConsumerAttachmentStreamBinding = {
 	event_ref: "event:attachment-1",
 	event_revision: 2,
 	normalized_projection_revision: 3,
@@ -22,7 +31,7 @@ export const binding = {
 export const image = Buffer.from([0, 1, 255, 2]);
 export const document = Buffer.from("pdf bytes\n");
 
-export function completeManifest(overrides = {}) {
+export function completeManifest(overrides: ManifestOverrides = {}): CealLeasedConsumerAttachmentStreamManifest {
 	return {
 		schema_version: "ceal.leased_consumer_attachment_stream_manifest.v1",
 		binding,
@@ -65,7 +74,11 @@ export function completeManifest(overrides = {}) {
 	};
 }
 
-export function streamBytes(manifest, payloads, options = {}) {
+export function streamBytes(
+	manifest: CealLeasedConsumerAttachmentStreamManifest,
+	payloads: readonly AttachmentPayload[],
+	options: StreamOptions = {},
+): Buffer {
 	const manifestSha256 = attachmentStreamManifestSha256(manifest);
 	const records = [
 		Buffer.from(CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAGIC),
@@ -100,7 +113,7 @@ export function streamBytes(manifest, payloads, options = {}) {
 	return Buffer.concat(records);
 }
 
-export async function* chunked(bytes) {
+export async function* chunked(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
 	const sizes = [1, 2, 7, 3, 19, 5, 11];
 	let offset = 0;
 	let index = 0;
@@ -112,6 +125,6 @@ export async function* chunked(bytes) {
 	}
 }
 
-export function digest(bytes) {
+export function digest(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }

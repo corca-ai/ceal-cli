@@ -20,6 +20,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isStringMap } from "./lib/string-map.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONSUMER_MANIFESTS = ["packages/ceal-client/package.json", "packages/ceal-worker-cli/package.json"];
@@ -45,24 +47,16 @@ type PackageIndex = Map<string, Map<string, PackageRecord>>;
 // `--offline` install exactly like a required one. No package in today's closure
 // declares one, which is precisely why omitting it would go unnoticed until a new
 // transitive arrived.
-function isRecord(value: unknown): value is JsonRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringMap(value: unknown): value is Record<string, string> {
-	return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
-}
-
 function isPackageName(value: unknown): value is string {
 	return typeof value === "string" && value.length <= 214 && NPM_PACKAGE_NAME.test(value);
 }
 
 function isPackageRecord(value: unknown): value is PackageRecord {
-	return isRecord(value) && typeof value.version === "string" && (value.name === undefined || isPackageName(value.name));
+	return isJsonRecord(value) && typeof value.version === "string" && (value.name === undefined || isPackageName(value.name));
 }
 
 function isLockfile(value: unknown): value is Lockfile {
-	return isRecord(value) && isRecord(value.packages);
+	return isJsonRecord(value) && isJsonRecord(value.packages);
 }
 
 function validateDependencyFields(record: JsonRecord, context: string): void {
@@ -93,7 +87,7 @@ function dependencyNames(record: JsonRecord): string[] {
  * load-bearing.
  */
 export function lockPackages(lock: Lockfile): PackageIndex {
-	if (!isRecord(lock) || !isRecord(lock.packages)) throw new TypeError("package-lock.json must contain a packages object");
+	if (!isJsonRecord(lock) || !isJsonRecord(lock.packages)) throw new TypeError("package-lock.json must contain a packages object");
 	const byName: PackageIndex = new Map();
 	for (const [location, value] of Object.entries(lock.packages)) {
 		const marker = location.lastIndexOf("node_modules/");
@@ -146,7 +140,7 @@ export class UnpinnedDependencyError extends Error {
 export function consumerDependencyClosure(byName: PackageIndex, manifests: readonly Manifest[]) {
 	const queue: string[] = [];
 	for (const manifest of manifests) {
-		if (!isRecord(manifest)) throw new TypeError("consumer manifest must be an object");
+		if (!isJsonRecord(manifest)) throw new TypeError("consumer manifest must be an object");
 		for (const name of dependencyNames(manifest)) {
 			if (!name.startsWith(OWNED_SCOPE)) queue.push(name);
 		}
@@ -192,7 +186,7 @@ export function readConsumerClosure(root = ROOT) {
 	if (!isLockfile(lockValue)) throw new TypeError("package-lock.json must contain a packages object");
 	const manifests: Manifest[] = CONSUMER_MANIFESTS.map((relative) => {
 		const value: unknown = JSON.parse(readFileSync(path.join(root, relative), "utf8"));
-		if (!isRecord(value)) throw new TypeError(`${relative} must contain a manifest object`);
+		if (!isJsonRecord(value)) throw new TypeError(`${relative} must contain a manifest object`);
 		return value;
 	});
 	return consumerDependencyClosure(lockPackages(lockValue), manifests);

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	cpSync,
 	existsSync,
@@ -18,9 +17,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
 import { type NpmPackMetadata, parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import { isStringArray } from "./lib/string-array.ts";
 import { toolchainEnv } from "./lib/toolchain-env.ts";
 
 type PackageManifest = {
@@ -98,20 +101,14 @@ type SpawnResult = SpawnSyncReturns<string>;
 function property(value: object, key: string): unknown {
 	return Object.hasOwn(value, key) ? Reflect.get(value, key) : undefined;
 }
-function isObject(value: unknown): value is object {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 function isString(value: unknown): value is string {
 	return typeof value === "string";
 }
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every(isString);
-}
 function objectProperty(value: unknown, key: string): unknown {
-	return isObject(value) ? property(value, key) : undefined;
+	return isJsonRecord(value) ? property(value, key) : undefined;
 }
 function packageManifest(value: unknown): PackageManifest {
-	return isObject(value) ? value : {};
+	return isJsonRecord(value) ? value : {};
 }
 function objectString(value: unknown, key: string): string | undefined {
 	const item = objectProperty(value, key);
@@ -119,7 +116,7 @@ function objectString(value: unknown, key: string): string | undefined {
 }
 function objectObject(value: unknown, key: string): object | undefined {
 	const item = objectProperty(value, key);
-	return isObject(item) ? item : undefined;
+	return isJsonRecord(item) ? item : undefined;
 }
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -306,8 +303,8 @@ function isProtocolProvenance(value: unknown): value is ProtocolProvenance {
 	return (
 		objectString(value, "schema_version") === "ceal.gateway_protocol_artifact.v1" &&
 		objectString(source ?? {}, "repository") === GATEWAY_REPOSITORY &&
-		isGitRef(objectString(source ?? {}, "commit")) &&
-		isGitRef(objectString(source ?? {}, "tree")) &&
+		isGitObject(objectString(source ?? {}, "commit")) &&
+		isGitObject(objectString(source ?? {}, "tree")) &&
 		objectString(source ?? {}, "package_path") === "packages/ceal-protocol" &&
 		objectString(artifact ?? {}, "package") === PROTOCOL_NAME &&
 		isVersion(objectString(artifact ?? {}, "version")) &&
@@ -462,7 +459,7 @@ export function decodeB1Result(value: unknown): B1Result {
 		"undeclared_capability_sequence",
 	];
 	if (
-		!isObject(value) ||
+		!isJsonRecord(value) ||
 		Object.keys(value).length !== keys.length ||
 		!keys.every((key) => Object.hasOwn(value, key)) ||
 		objectString(value, "decode_generation") !== "additive-v1" ||
@@ -684,7 +681,7 @@ function assertNoProtocolFallbackSource(root: string): void {
 	for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
 		const rawDependencies = objectProperty(manifest, field);
 		if (rawDependencies === undefined) continue;
-		if (!isObject(rawDependencies)) {
+		if (!isJsonRecord(rawDependencies)) {
 			throw new GatewayProtocolConsumerError("source_fallback", `Worker package ${field} must be an object.`);
 		}
 		for (const name of Object.keys(rawDependencies)) {
@@ -890,12 +887,6 @@ function filePathFromResolution(value: string): string {
 	return fileURLToPath(value);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
-function isGitRef(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
-}
 function isVersion(value: unknown): value is string {
 	return typeof value === "string" && /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u.test(value);
 }

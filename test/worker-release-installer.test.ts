@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	copyFileSync,
@@ -20,6 +19,7 @@ import process from "node:process";
 import test, { type TestFn } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { sha256 as digest } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.ts";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
 import { requireHostTools } from "./host-tools.ts";
@@ -853,7 +853,4 @@ function writeSignatureSidecars(release: string, names: string[]): void {
 function writeTool(file: string, body: string): void {
 	writeFileSync(file, `#!/usr/bin/env sh\nset -eu\n${body}\n`);
 	chmodSync(file, 0o755);
-}
-function digest(bytes: string | Buffer): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }

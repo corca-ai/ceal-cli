@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
+import { isJsonRecord as isRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 as digest } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
 	GatewayLeasedConsumerCallHandoffError,
 	verifyGatewayLeasedConsumerCallHandoff,
@@ -17,9 +18,6 @@ type HandoffDocument = Record<string, unknown> & {
 	vectors: Array<Record<string, unknown> & { id: string; request_body: Record<string, unknown> & { runner_ref?: string } }>;
 };
 type HandoffLock = Record<string, unknown> & { handoff: Record<string, unknown> & { vector_ids: string[] } };
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 function isHandoffDocument(value: unknown): value is HandoffDocument {
 	return (
 		isRecord(value) &&
@@ -47,7 +45,6 @@ function parseLock(value: unknown): HandoffLock {
 	if (!isHandoffLock(value)) throw new Error("invalid_fixture");
 	return value;
 }
-const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 
 test("leased-consumer carrier consumes only the SHA-locked Gateway handoff", async (t) => {
 	const fixture = await handoffFixture(t);

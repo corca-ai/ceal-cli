@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	cpSync,
 	existsSync,
@@ -17,11 +16,18 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
+import { asJsonRecord } from "./lib/json-record.ts";
 import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
-import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { resolvePackageBin } from "./lib/package-bin.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { createJsonReader } from "./lib/read-json.ts";
+import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
+import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { toolchainEnv } from "./lib/toolchain-env.ts";
 import { PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH } from "./project-staged-worker-control-session.ts";
@@ -35,7 +41,6 @@ const NOTICE_FILENAME = "THIRD_PARTY_NOTICES.txt";
 // bytes that can enter the staged package, while allowing npm's workspace
 // `.bin` links to exist in the checkout that supplies them.
 const OMITTED_OWNED_PACKAGE_DIRECTORIES = Object.freeze(["dist", "node_modules"]);
-type JsonRecord = Record<string, unknown>;
 type ReleaseOptions = {
 	repoRoot?: string;
 	outputDirectory?: string;
@@ -111,7 +116,7 @@ function buildWorkerReleasePackageWithInputs(options: ReleaseOptions, dependenci
 						controlConformance: rawInputs.controlConformance,
 						dependencies,
 					});
-					const version = resolveVersion(repoRoot, inputs);
+					const version = resolveMatchingWorkerClientVersion(repoRoot, [inputs.worker, inputs.client], readJson, fail);
 					materializeOutput({ output, repoRoot, inputs, version, packed });
 					return {
 						schema_version: "ceal.worker_release_package_build.v1",
@@ -260,12 +265,12 @@ function stageRuntimeDependencies(repoRoot: string, dependencyRoot: string): voi
 		mkdirSync(path.dirname(destination), { recursive: true, mode: 0o755 });
 		cpSync(source, destination, { recursive: true, dereference: false });
 		staged.add(name);
-		const packageJson = asRecord(readJsonFile(path.join(source, "package.json")));
+		const packageJson = asJsonRecord(readJsonFile(path.join(source, "package.json")));
 		if (!packageJson) fail("missing_build_dependency", "Staged build dependency metadata is invalid.");
 		const rawDependencies = packageJson.dependencies;
-		if (rawDependencies !== undefined && !asRecord(rawDependencies))
+		if (rawDependencies !== undefined && !asJsonRecord(rawDependencies))
 			fail("missing_build_dependency", "Staged build dependency metadata has malformed dependencies.");
-		for (const [dependency, version] of Object.entries(asRecord(rawDependencies) ?? {})) {
+		for (const [dependency, version] of Object.entries(asJsonRecord(rawDependencies) ?? {})) {
 			assertPackageName(dependency, "missing_build_dependency");
 			if (typeof version !== "string" || version.length === 0)
 				fail("missing_build_dependency", "Staged build dependency metadata has malformed dependency versions.");
@@ -390,14 +395,10 @@ function resolveTypeScriptCompiler(dependencyRoot: string): string {
 	}
 }
 
-function asRecord(value: unknown): JsonRecord | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
-}
-
 // `execFileSync` attaches the captured streams and the terminating signal to the
 // thrown error; a stubbed compiler may attach neither, so every part is optional.
 function compilerDiagnosis(error: unknown): string {
-	const record = asRecord(error);
+	const record = asJsonRecord(error);
 	if (!record) return "";
 	const streams = [record.stdout, record.stderr]
 		.map((stream) => (stream === undefined || stream === null ? "" : String(stream).trim()))
@@ -522,7 +523,7 @@ function materializeOutput({
 	version: string;
 	packed: ReturnType<typeof prepareWorkerReleaseConsumer>;
 }): void {
-	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-package-`));
+	const staging = createSiblingTemporaryDirectory(output.directory, "ceal-worker-package");
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker release package output\n", { mode: 0o644 });
 		const artifactPath = path.join(staging, packed.worker.name);
@@ -567,25 +568,8 @@ function materializeOutput({
 	}
 }
 
-function resolveVersion(repoRoot: string, inputs: ReleaseInputs): string {
-	// The worker release versions independently of the pinned Gateway Protocol
-	// artifact: worker and client move together, while the exact protocol pin
-	// is enforced against the supplied artifact by the release-input resolver.
-	const versions = [inputs.worker, inputs.client].map((entry) => {
-		const packageJson = asRecord(readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory"));
-		return packageJson?.version;
-	});
-	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
-		fail("version_mismatch", "Worker and client package versions must match exactly.");
-	}
-	const version = versions[0];
-	if (typeof version !== "string") fail("version_mismatch", "Worker and client package versions must match exactly.");
-	return version;
-}
-
 function assertRegularTree(root: string, code: string, omittedDirectories: readonly string[] = []): void {
-	if (!existsSync(root) || !lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink())
-		fail(code, "Worker package input directory is unsafe.");
+	if (!isRegularNonSymlinkDirectory(root)) fail(code, "Worker package input directory is unsafe.");
 	for (const name of readdirSync(root)) {
 		if (omittedDirectories.includes(name)) continue;
 		const entry = path.join(root, name);
@@ -595,20 +579,11 @@ function assertRegularTree(root: string, code: string, omittedDirectories: reado
 	}
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Worker package input JSON is invalid.");
-	}
-}
-
-function sha256(bytes: string | Buffer): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerReleasePackageError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Worker package input JSON is invalid.");
 
 function parseArgs(argv: readonly string[]): ReturnType<typeof parseScriptArgs> {
 	return parseScriptArgs(argv, {
@@ -635,17 +610,15 @@ export function runCli(argv: readonly string[], io: Pick<Console, "log" | "error
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : `Built worker package ${result.version}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerReleasePackageError;
-		const payload = {
-			schema_version: "ceal.worker_release_package_build_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_package_build_failed",
-			message: known ? error.message : "Could not build worker package.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_package_build_failed",
+			fallbackMessage: "Could not build worker package.",
+			json,
+			knownError: error instanceof WorkerReleasePackageError ? error : undefined,
+			schemaVersion: "ceal.worker_release_package_build_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = runCli(process.argv.slice(2));

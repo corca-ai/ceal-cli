@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	copyFileSync,
@@ -20,16 +19,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.ts";
 import {
 	verifyEmbeddedCarrierContractSource,
 	verifyEmbeddedControlSessionContractSource,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
-import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
+import { asJsonRecord } from "./lib/json-record.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { createJsonReader } from "./lib/read-json.ts";
+import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import type { ArchiveLock } from "./worker-gateway-handoff-archive.ts";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync } from "./worker-release-inputs.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -58,16 +64,6 @@ type ResolverInput = Parameters<typeof withWorkerReleaseInputsAsync>[1] extends 
 type NativeInputValue = ResolverInput;
 type NativeInputs = NativeInputValue extends { inputs: infer Inputs } ? Inputs : never;
 type RawInputs = NativeInputValue extends { rawInputs: infer Inputs } ? Inputs : never;
-type ArchiveLock = {
-	filename: string;
-	gateway_repository: string;
-	gateway_commit: string;
-	gateway_tag: string;
-	actions_run_id: number;
-	origin: string;
-	archive_filename: string;
-	archive_sha256: string;
-};
 type GuideFile = { path: string; bytes: number; sha256: string; mode: number };
 type GuideBundle = { bytes: Buffer; files: GuideFile[]; sha256: string };
 type NativeSmoke = {
@@ -229,7 +225,7 @@ async function buildWorkerNativeArtifactWithInputs(
 						dependencies,
 					});
 					if (packed.controlSessionContract) privateControlSessionContract = packed.controlSessionContract;
-					const version = resolveVersion(repoRoot, inputs);
+					const version = resolveMatchingWorkerClientVersion(repoRoot, [inputs.worker, inputs.client], readJson, fail);
 					const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
 					const artifact = await buildNativeArtifact({
 						stage,
@@ -469,13 +465,13 @@ function smokeArtifact({ artifactPath, version, guide }: { artifactPath: string;
 			},
 		});
 	try {
-		const identity = asRecord(parse(run(["version"])));
-		const commands = asRecord(parse(run(["commands"])));
+		const identity = asJsonRecord(parse(run(["version"])));
+		const commands = asJsonRecord(parse(run(["commands"])));
 		const help = run(["--help"]);
-		const guideStatus = asRecord(parse(run(["guide", "status"])));
-		const guideRegistration = asRecord(parse(run(["guide", "register", "codex"])));
+		const guideStatus = asJsonRecord(parse(run(["guide", "status"])));
+		const guideRegistration = asJsonRecord(parse(run(["guide", "register", "codex"])));
 		const names = Array.isArray(commands?.commands)
-			? commands.commands.map((entry) => asRecord(entry)?.name).filter((entry): entry is string => typeof entry === "string")
+			? commands.commands.map((entry) => asJsonRecord(entry)?.name).filter((entry): entry is string => typeof entry === "string")
 			: [];
 		if (
 			identity?.command !== "ceal" ||
@@ -533,15 +529,11 @@ function prepareManagedSmokeInstall(artifactPath: string, home: string, version:
 	return path.join(install, "ceal");
 }
 
-function asRecord(value: unknown): JsonRecord | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
-}
-
 function findRegisteredCodexHost(value: JsonRecord | undefined): boolean {
 	const hosts = value?.hosts;
 	if (!Array.isArray(hosts)) return false;
 	return hosts.some((host) => {
-		const record = asRecord(host);
+		const record = asJsonRecord(host);
 		return record?.agent === "codex" && record.registered === true;
 	});
 }
@@ -571,7 +563,7 @@ function materializeOutput({
 	privateControlSessionContract: unknown;
 	privateCarrierHandoff: unknown;
 }): OutputManifest {
-	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-native-`));
+	const staging = createSiblingTemporaryDirectory(output.directory, "ceal-worker-native");
 	try {
 		writeFileSync(path.join(staging, MARKER), "ceal worker native artifact output\n", { mode: 0o644 });
 		copyFileSync(artifact.path, path.join(staging, artifact.name));
@@ -628,20 +620,6 @@ function materializeOutput({
 	}
 }
 
-function resolveVersion(repoRoot: string, inputs: NativeInputs): string {
-	// Worker and client version together; the exact protocol pin against the
-	// supplied artifact is enforced by the release-input resolver.
-	const versions = [inputs.worker, inputs.client].map(
-		(entry) => asRecord(readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory"))?.version,
-	);
-	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
-		fail("version_mismatch", "Worker and client package versions must match exactly.");
-	}
-	const version = versions[0];
-	if (typeof version !== "string") fail("version_mismatch", "Worker and client package versions must match exactly.");
-	return version;
-}
-
 function resolvePlatform(value: string | undefined, dependencies: NativeDependencies): string {
 	const current = (dependencies.currentPlatform ?? currentPlatform)();
 	if (!/^(?:linux|darwin)-(?:arm64|amd64)$/u.test(current))
@@ -665,20 +643,11 @@ function resolvePostjectCli() {
 	fail("postject_unavailable", "postject is required to build native worker artifacts.");
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Worker native artifact input JSON is invalid.");
-	}
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerNativeArtifactError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Worker native artifact input JSON is invalid.");
 
 function parseArgs(argv: readonly string[]): { help: boolean; json: boolean; options: NativeOptions } {
 	const parsed = parseScriptArgs(argv, {
@@ -724,18 +693,15 @@ export async function runCli(argv: readonly string[], io: Pick<Console, "log" | 
 		io.log(parsed.json ? JSON.stringify(result, null, 2) : `Built native worker artifact ${result.version} for ${result.platform}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerNativeArtifactError;
-		const payload = {
-			schema_version: "ceal.worker_native_artifact_build_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_native_artifact_build_failed",
-			message: known ? error.message : "Could not build native worker artifact.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_native_artifact_build_failed",
+			fallbackMessage: "Could not build native worker artifact.",
+			json,
+			knownError: error instanceof WorkerNativeArtifactError ? error : undefined,
+			schemaVersion: "ceal.worker_native_artifact_build_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-	process.exitCode = await runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));

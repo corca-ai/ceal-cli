@@ -3,16 +3,17 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { CealDiscoveryCacheEntry, CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { CealDiscoveryCacheStoreError, createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 
-const KEY = {
+const KEY: CealDiscoveryCacheKey = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
 	profileRef: "profile:narnia",
 	membershipRef: "membership:narnia",
 	negotiatedProtocolVersion: "1.3.0",
 };
 
-function entry(overrides = {}) {
+function entry(overrides: Partial<CealDiscoveryCacheEntry> = {}): CealDiscoveryCacheEntry {
 	return {
 		key: KEY,
 		cachedAt: Date.parse("2026-07-18T12:00:00.000Z"),
@@ -171,16 +172,16 @@ test("discoveryCacheEntryUsable enforces key match and freshness", () => {
 	);
 });
 
-function cacheFile(home) {
+function cacheFile(home: string): string {
 	mkdirSync(path.join(home, ".ceal"), { recursive: true, mode: 0o700 });
 	return path.join(home, ".ceal", "client-discovery-cache.json");
 }
 
-function hasCode(code) {
-	return (error) => error instanceof CealDiscoveryCacheStoreError && error.code === code;
+function hasCode(code: CealDiscoveryCacheStoreError["code"]): (error: unknown) => boolean {
+	return (error: unknown) => error instanceof CealDiscoveryCacheStoreError && error.code === code;
 }
 
-async function withHome(callback) {
+async function withHome(callback: (home: string) => void | Promise<void>): Promise<void> {
 	const home = mkdtempSync(path.join(tmpdir(), "ceal-discovery-cache-"));
 	try {
 		await callback(home);

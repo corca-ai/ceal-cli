@@ -4,20 +4,24 @@
 // the locked Gateway handoff archive lane, and merges per-platform sets into
 // the one signed release inventory that install-ceal.sh consumes.
 
-import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import type { buildWorkerNativeArtifact } from "./build-worker-native-artifact.ts";
 import {
 	readCarrierContract,
 	readControlSessionContract,
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
-import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
+import { isObjectRecord } from "./lib/object-record.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
+import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
 import { resolveWorkerReleaseGuideInput } from "./worker-release-inputs.ts";
@@ -42,6 +46,42 @@ const HISTORICAL_RELEASE_PLATFORMS = Object.freeze(["linux-arm64", "linux-amd64"
 
 type AssetEntry = { bytes: Buffer; digest: string; mode: number };
 type AssetInventory = Array<[string, string]>;
+type OutputDirectory = ReturnType<typeof inspectOutputDirectory>;
+type WorkerReleaseAssetsResultBase = {
+	schema_version: string;
+	ok: true;
+	proof_level: "local_state";
+	writes_external: false;
+	output_dir: string;
+};
+
+function createWorkerReleaseAssetsResult<T extends Record<string, unknown>>(
+	output: OutputDirectory,
+	schemaVersion: string,
+	details: T,
+): WorkerReleaseAssetsResultBase & T {
+	return {
+		schema_version: schemaVersion,
+		ok: true,
+		proof_level: "local_state",
+		writes_external: false,
+		output_dir: output.directory,
+		...details,
+	};
+}
+
+function stageAndPublishWorkerReleaseAssets(output: OutputDirectory, populate: (staging: string) => void): void {
+	const staging = createSiblingTemporaryDirectory(output.directory, "ceal-worker-assets");
+	try {
+		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
+		populate(staging);
+		writeChecksumInventory(staging);
+		publishOutputDirectory(staging, output);
+	} catch (error) {
+		rmSync(staging, { recursive: true, force: true });
+		throw error;
+	}
+}
 type AssetDirectory = string;
 type ContractSource = { bytes: Buffer; sha256: string; value: unknown };
 type ContractDescriptor = { contract: unknown; sha256: string };
@@ -218,26 +258,14 @@ export async function composeWorkerReleaseAssets(options: ComposeOptions = {}, d
 		};
 		const manifestName = `ceal-worker-release-manifest-${native.platform}.json`;
 		const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
-		const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-assets-`));
-		try {
-			writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
+		stageAndPublishWorkerReleaseAssets(output, (staging) => {
 			writeFileSync(path.join(staging, binaryName), binary, { mode: 0o755 });
 			writeFileSync(path.join(staging, GUIDE_ASSET), compatibilityGuide, { mode: 0o644 });
 			writeFileSync(path.join(staging, NOTICE_NAME), notices, { mode: 0o644 });
 			writeFileSync(path.join(staging, INSTALLER_NAME), installer, { mode: 0o755 });
 			writeFileSync(path.join(staging, manifestName), manifestBytes, { mode: 0o644 });
-			writeChecksumInventory(staging);
-			publishOutputDirectory(staging, output);
-		} catch (error) {
-			rmSync(staging, { recursive: true, force: true });
-			throw error;
-		}
-		return {
-			schema_version: "ceal.worker_release_assets_build.v1",
-			ok: true,
-			proof_level: "local_state",
-			writes_external: false,
-			output_dir: output.directory,
+		});
+		return createWorkerReleaseAssetsResult(output, "ceal.worker_release_assets_build.v1", {
 			version: native.version,
 			platform: native.platform,
 			assets: {
@@ -249,10 +277,10 @@ export async function composeWorkerReleaseAssets(options: ComposeOptions = {}, d
 				third_party_notices: { name: NOTICE_NAME, sha256: sha256(notices) },
 			},
 			non_claims: manifest.non_claims,
-		};
+		});
 	} catch (error) {
 		if (error instanceof WorkerReleaseAssetsError) throw error;
-		if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string")
+		if (isObjectRecord(error) && typeof error.code === "string" && typeof error.message === "string")
 			throw new WorkerReleaseAssetsError(error.code, error.message);
 		throw new WorkerReleaseAssetsError("worker_release_assets_failed", "Could not compose worker release assets.");
 	} finally {
@@ -386,27 +414,15 @@ export function mergeWorkerReleaseAssetSets(options: MergeOptions = {}) {
 			fail: (code: string, message: string) => fail(`merge_${code}`, `${message} (${platform})`),
 		});
 	}
-	const staging = mkdtempSync(path.join(path.dirname(output.directory), `.${path.basename(output.directory)}.ceal-worker-merge-`));
-	try {
-		writeFileSync(path.join(staging, MARKER), "ceal worker release assets output\n", { mode: 0o644 });
+	stageAndPublishWorkerReleaseAssets(output, (staging) => {
 		for (const [name, entry] of shared) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
 		for (const entries of platforms.values())
 			for (const [name, entry] of entries) writeFileSync(path.join(staging, name), entry.bytes, { mode: entry.mode });
-		writeChecksumInventory(staging);
-		publishOutputDirectory(staging, output);
-	} catch (error) {
-		rmSync(staging, { recursive: true, force: true });
-		throw error;
-	}
-	return {
-		schema_version: "ceal.worker_release_assets_merge.v1",
-		ok: true,
-		proof_level: "local_state",
-		writes_external: false,
-		output_dir: output.directory,
+	});
+	return createWorkerReleaseAssetsResult(output, "ceal.worker_release_assets_merge.v1", {
 		platforms: [...platforms.keys()].sort(),
 		entry_count: 3 + 2 * platforms.size,
-	};
+	});
 }
 
 function embeddedGuideIdentity(bytes: Buffer, sourceGuide: GuideBundle): void {
@@ -448,7 +464,7 @@ function clientProvenanceIdentity(bytes: Buffer, expectedVersion: string): strin
 }
 
 function requireClientProvenance(value: unknown, expectedVersion: string, code: string) {
-	if (!isRecord(value)) fail(code, "Worker release assets require exact packed client package provenance.");
+	if (!isObjectRecord(value)) fail(code, "Worker release assets require exact packed client package provenance.");
 	if (
 		value?.package !== "@corca-ai/ceal" ||
 		value.version !== expectedVersion ||
@@ -469,12 +485,9 @@ function requireClientProvenance(value: unknown, expectedVersion: string, code: 
 	};
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
 function contractDescriptor(value: unknown, code: string, message: string): ContractDescriptor {
-	if (!isRecord(value) || typeof value.sha256 !== "string" || !("contract" in value) || value.contract === undefined) fail(code, message);
+	if (!isObjectRecord(value) || typeof value.sha256 !== "string" || !("contract" in value) || value.contract === undefined)
+		fail(code, message);
 	return { contract: value.contract, sha256: value.sha256 };
 }
 
@@ -599,8 +612,7 @@ function requireAssetDirectory(value: unknown): AssetDirectory {
 	if (typeof value !== "string" || !path.isAbsolute(value))
 		fail("merge_inputs_required", "Merged worker asset inputs must be absolute directories.");
 	const directory = path.resolve(value);
-	if (!existsSync(directory) || !lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
+	if (!isRegularNonSymlinkDirectory(directory)) fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
 	if (!existsSync(path.join(directory, MARKER)))
 		fail("merge_inputs_required", "Merged worker asset input is not a marked composed asset set.");
 	return directory;
@@ -612,9 +624,6 @@ function readStagedFile(file: string, code: string): Buffer {
 	return readFileSync(file);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerReleaseAssetsError(code, message);
 }
@@ -673,18 +682,15 @@ export async function runCli(argv: string[], io: Pick<Console, "log" | "error"> 
 		io.log(json ? JSON.stringify(result, null, 2) : `Prepared worker release assets in ${result.output_dir}.`);
 		return 0;
 	} catch (error) {
-		const known = error instanceof WorkerReleaseAssetsError;
-		const payload = {
-			schema_version: "ceal.worker_release_assets_error.v1",
-			ok: false,
-			error_code: known ? error.code : "worker_release_assets_failed",
-			message: known ? error.message : "Could not prepare worker release assets.",
-		};
-		if (json) io.log(JSON.stringify(payload));
-		else io.error(payload.message);
+		renderScriptFailure(io, {
+			fallbackCode: "worker_release_assets_failed",
+			fallbackMessage: "Could not prepare worker release assets.",
+			json,
+			knownError: error instanceof WorkerReleaseAssetsError ? error : undefined,
+			schemaVersion: "ceal.worker_release_assets_error.v1",
+		});
 		return 2;
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-	process.exitCode = await runCli(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = await runCli(process.argv.slice(2));

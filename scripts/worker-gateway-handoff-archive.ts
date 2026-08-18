@@ -1,9 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { isPromiseLike } from "./lib/promise-like.ts";
+import { createJsonReader } from "./lib/read-json.ts";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const LOCK_SCHEMA_V1 = "ceal.worker_gateway_protocol_handoff_lock.v1";
@@ -198,7 +203,7 @@ function prepareLockedGatewayHandoffArchive<R extends ArchiveResolution>(
 
 function validateLock(value: unknown): ValidatedLock {
 	if (
-		!isRecord(value) ||
+		!isJsonRecord(value) ||
 		typeof value.schema_version !== "string" ||
 		![LOCK_SCHEMA_V1, LOCK_SCHEMA_V2].includes(value.schema_version) ||
 		value.status !== "locked"
@@ -207,10 +212,10 @@ function validateLock(value: unknown): ValidatedLock {
 	}
 	const gateway = value.gateway;
 	const archive = value.archive;
-	if (!isRecord(gateway) || !isRecord(archive))
+	if (!isJsonRecord(gateway) || !isJsonRecord(archive))
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid immutable producer identity.");
 	if (
-		!isRecord(gateway) ||
+		!isJsonRecord(gateway) ||
 		gateway.repository !== "corca-ai/ceal" ||
 		gateway.workflow_path !== ".github/workflows/gateway-protocol-handoff-release.yml" ||
 		!isGitObject(gateway.commit) ||
@@ -227,11 +232,11 @@ function validateLock(value: unknown): ValidatedLock {
 	}
 	const version = gateway.tag.slice("gateway-protocol-handoff-v".length);
 	if (
-		!isRecord(archive) ||
+		!isJsonRecord(archive) ||
 		archive.filename !== `ceal-gateway-protocol-handoff-${version}.tar.gz` ||
-		!isSha256(archive.sha256) ||
-		!isSha256(archive.handoff_manifest_sha256) ||
-		(archive.control_routes_sha256 !== undefined && !isSha256(archive.control_routes_sha256))
+		!isLowercaseHexDigest(archive.sha256, 64) ||
+		!isLowercaseHexDigest(archive.handoff_manifest_sha256, 64) ||
+		(archive.control_routes_sha256 !== undefined && !isLowercaseHexDigest(archive.control_routes_sha256, 64))
 	) {
 		fail("invalid_gateway_handoff_lock", "Gateway handoff lock has an invalid archive binding.");
 	}
@@ -244,7 +249,7 @@ function validateLock(value: unknown): ValidatedLock {
 	// digest in `archive.sha256` is the anchor that touches bytes.
 	const signature = value.reviewed_signature;
 	if (
-		!isRecord(signature) ||
+		!isJsonRecord(signature) ||
 		signature.certificate_identity !== `https://github.com/corca-ai/ceal/${gateway.workflow_path}@refs/tags/${gateway.tag}` ||
 		signature.oidc_issuer !== "https://token.actions.githubusercontent.com" ||
 		(value.schema_version === LOCK_SCHEMA_V2 && signature.workflow_sha !== gateway.commit) ||
@@ -281,12 +286,12 @@ function validateLock(value: unknown): ValidatedLock {
 
 function requireProtocolBinding(value: unknown): ProtocolBinding {
 	if (
-		!isRecord(value) ||
+		!isJsonRecord(value) ||
 		value.package !== "@corca-ai/ceal-protocol" ||
 		typeof value.version !== "string" ||
 		!/^\d+\.\d+\.\d+$/u.test(value.version) ||
 		value.filename !== `corca-ai-ceal-protocol-${value.version}.tgz` ||
-		!isSha256(value.sha256)
+		!isLowercaseHexDigest(value.sha256, 64)
 	) {
 		fail(
 			"invalid_gateway_handoff_lock",
@@ -394,17 +399,6 @@ function assertNoSymlinkAncestor(target: string, code: string): void {
 	}
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Gateway handoff lock JSON is invalid.");
-	}
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 function requireStringField(record: JsonRecord, key: string): string {
 	const value = record[key];
 	if (typeof value !== "string") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid text field.");
@@ -415,18 +409,8 @@ function requireNumberField(record: JsonRecord, key: string): number {
 	if (typeof value !== "number") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid numeric field.");
 	return value;
 }
-function isGitObject(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
-}
-function isSha256(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-}
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-	return value !== null && (typeof value === "object" || typeof value === "function") && "then" in value && typeof value.then === "function";
-}
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerGatewayHandoffArchiveError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Gateway handoff lock JSON is invalid.");

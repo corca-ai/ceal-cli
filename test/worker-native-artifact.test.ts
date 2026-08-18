@@ -11,6 +11,8 @@ import {
 	runCli,
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.ts";
+import { asJsonRecord } from "../scripts/lib/json-record.ts";
+import { assertCliFailureChannels } from "./cli-failure-channels.ts";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
 import {
 	assertReleaseManifestProvenance,
@@ -223,15 +225,7 @@ test("production native build accepts only the locked archive lane", async (cont
 		() => buildWorkerNativeArtifact({ outputDirectory: path.join(root, "release-only"), protocolTarball: "/tmp/protocol.tgz" }),
 		hasCode("gateway_handoff_archive_required"),
 	);
-	const messages: string[] = [];
-	const io: Pick<Console, "log" | "error"> = {
-		log: (message: unknown) => messages.push(String(message)),
-		error: (message: unknown) => messages.push(String(message)),
-	};
-	assert.equal(await runCli(["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz", "--json"], io), 2);
-	const cliMessage = messages.pop();
-	assert.ok(cliMessage);
-	assert.equal(readJsonRecord(cliMessage).error_code, "invalid_argument");
+	await assertCliFailureChannels(runCli, ["--out", path.join(root, "cli"), "--protocol-tarball", "/tmp/protocol.tgz"], "invalid_argument");
 });
 
 test("native artifact process proof kills a command tree that exceeds its deadline", async (context) => {
@@ -354,22 +348,18 @@ async function withFailureGateway(callback: (endpoint: string) => Promise<void>)
 	}
 }
 
-function readJsonRecord(value: string): Record<string, unknown> {
-	return asRecord(JSON.parse(value)) ?? {};
-}
-
 function readNativeManifest(value: unknown): NativeManifest {
-	const record = asRecord(value);
-	const artifact = asRecord(record?.artifact);
+	const record = asJsonRecord(value);
+	const artifact = asJsonRecord(record?.artifact);
 	const client = record?.client;
-	const protocol = asRecord(record?.protocol);
-	const handoff = asRecord(record?.handoff);
-	const nativeSmoke = asRecord(record?.native_smoke);
-	const guide = asRecord(record?.guide);
-	const compatibilityGuide = asRecord(record?.compatibility_guide);
+	const protocol = asJsonRecord(record?.protocol);
+	const handoff = asJsonRecord(record?.handoff);
+	const nativeSmoke = asJsonRecord(record?.native_smoke);
+	const guide = asJsonRecord(record?.guide);
+	const compatibilityGuide = asJsonRecord(record?.compatibility_guide);
 	const files = Array.isArray(guide?.files)
 		? guide.files.map((file) => {
-				const entry = asRecord(file);
+				const entry = asJsonRecord(file);
 				if (!entry || typeof entry.path !== "string") throw new Error("invalid native manifest guide file");
 				return { path: entry.path };
 			})
@@ -399,8 +389,4 @@ function readNativeManifest(value: unknown): NativeManifest {
 		guide: { name: guide.name, sha256: guide.sha256, files },
 		compatibility_guide: { name: compatibilityGuide.name },
 	};
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }

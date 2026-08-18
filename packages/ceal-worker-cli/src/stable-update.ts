@@ -70,7 +70,7 @@ export function createCealStableUpdateRunner(
 	// `maxWaitMs` that way: the real bounds are minutes, and a test that had to
 	// wait them out would not be run. `bin.ts` takes the defaults.
 	overrides: Partial<CealStableUpdateDeadlines> = {},
-): () => Promise<CealStableUpdateResult> {
+): (options?: CealStableUpdateOptions) => Promise<CealStableUpdateResult> {
 	const deadlines = { ...DEFAULT_DEADLINES, ...overrides };
 	const detectedGuideHost = detectCealAgentGuideHost(environment);
 	return async (options: CealStableUpdateOptions = {}) => {

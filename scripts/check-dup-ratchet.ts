@@ -27,9 +27,11 @@ import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { exitWith } from "./lib/exit-with.ts";
 
 const GATE = path.join("scripts", "check_dup_ratchet.py");
+const ADAPTER = path.join(path.dirname(fileURLToPath(import.meta.url)), "run_dup_ratchet.py");
 
 function isQualitySkill(candidate: string | null | undefined): boolean {
 	return candidate !== undefined && candidate !== null && existsSync(path.join(candidate, GATE));
@@ -88,7 +90,7 @@ if (spawnSync("nose", ["--version"], { stdio: "ignore" }).status !== 0) {
 	skip("`nose` is not installed; the clone detector is unavailable");
 }
 
-const result = spawnSync("python3", [path.join(skillDir, GATE), "--repo-root", "."], {
+const result = spawnSync("python3", [ADAPTER, "--repo-root", ".", "--skill-dir", skillDir, ...process.argv.slice(2)], {
 	stdio: "inherit",
 });
 if (result.error) skip(`could not run the ratchet (${result.error.message})`);

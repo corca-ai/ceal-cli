@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 
 const BLOCK_SIZE = 512;
 const ROOT_ENTRIES = new Set(["SKILL.md", "agents", "assets", "references", "scripts"]);
@@ -85,8 +85,4 @@ function writeOctal(buffer: Buffer, offset: number, width: number, value: number
 	if (encoded.length >= width) throw new Error("skill bundle value exceeds ustar field");
 	buffer.write(encoded, offset, width - 1, "ascii");
 	buffer[offset + width - 1] = 0;
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }

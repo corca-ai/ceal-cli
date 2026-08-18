@@ -11,11 +11,25 @@ const candidateAvailable =
 	typeof protocol.decodeCealLeasedConsumerNotificationControlRequest === "function" &&
 	typeof protocol.decodeCealLeasedConsumerNotificationControlResponse === "function";
 
+type JsonRecord = Record<string, unknown>;
+interface V5Operation {
+	operation: string;
+	path: string;
+	request: JsonRecord;
+	response: JsonRecord;
+}
+interface V5Fixture {
+	protected_session: { service_credential: string };
+	operations: V5Operation[];
+	notification_transport: { fixture: JsonRecord };
+}
+
 test("Gateway-packed v5 drives FD5 forwarding and all six fixed worker routes", { skip: !fixturePath || !candidateAvailable }, async () => {
-	const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+	assert.ok(fixturePath);
+	const fixture: V5Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 	const encoder = new TextEncoder();
 	const decoder = new TextDecoder();
-	const calls = [];
+	const calls: Array<{ path: string; credential: string }> = [];
 	const control = await openLeasedConsumerControlSession({
 		readProtectedSession: async () => encoder.encode(JSON.stringify(fixture.protected_session)),
 		closeProtectedSession: async () => {},
@@ -39,12 +53,14 @@ test("Gateway-packed v5 drives FD5 forwarding and all six fixed worker routes", 
 		yield encoder.encode(`${JSON.stringify(fixture.notification_transport.fixture)}\n`);
 		await notificationsClosed.promise;
 	}
-	const output = [];
+	const output: JsonRecord[] = [];
 	assert.equal(
 		await runLeasedConsumerControlTransport(
 			agentInput(),
 			control,
-			(frame) => output.push(JSON.parse(decoder.decode(frame))),
+			(frame) => {
+				output.push(JSON.parse(decoder.decode(frame)));
+			},
 			{ stream: notificationInput(), close: async () => notificationsClosed.resolve() },
 			async () => {},
 		),
@@ -69,19 +85,28 @@ test("Gateway-packed v5 drives FD5 forwarding and all six fixed worker routes", 
 test("Gateway-packed v5 decoder rejects malformed notification authority fields before Agent output", {
 	skip: !fixturePath || !candidateAvailable,
 }, async () => {
-	const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+	assert.ok(fixturePath);
+	const fixture: V5Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 	for (const mutate of [
-		(value) => (value.kind = "stop_requested"),
-		(value) => delete value.lease_ref,
-		(value) => (value.provider_user_id = "U-private"),
-		(value) => (value.notification_sequence = 0),
+		(value: JsonRecord) => {
+			value.kind = "stop_requested";
+		},
+		(value: JsonRecord) => {
+			delete value.lease_ref;
+		},
+		(value: JsonRecord) => {
+			value.provider_user_id = "U-private";
+		},
+		(value: JsonRecord) => {
+			value.notification_sequence = 0;
+		},
 	]) {
 		const invalid = structuredClone(fixture.notification_transport.fixture);
 		mutate(invalid);
 		async function* input() {
 			yield new TextEncoder().encode(`${JSON.stringify(invalid)}\n`);
 		}
-		const output = [];
+		const output: Uint8Array[] = [];
 		const agentClosed = deferredVoid();
 		async function* agentInput() {
 			await agentClosed.promise;
@@ -91,7 +116,9 @@ test("Gateway-packed v5 decoder rejects malformed notification authority fields 
 			await runLeasedConsumerControlTransport(
 				agentInput(),
 				{ dispatch: async () => assert.fail("no Agent frame expected") },
-				(frame) => output.push(frame),
+				(frame) => {
+					output.push(frame);
+				},
 				{ stream: input(), close: async () => {} },
 				async () => agentClosed.resolve(),
 			),

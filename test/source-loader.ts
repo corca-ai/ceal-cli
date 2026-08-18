@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { registerHooks } from "node:module";
+import { type LoadHookSync, type ResolveHookSync, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { transformSync } from "esbuild";
@@ -35,7 +35,7 @@ function isEditablePackageSource(url: string): boolean {
 	});
 }
 
-function packageSource(packageName, relativeSource = "index.ts") {
+function packageSource(packageName: string, relativeSource = "index.ts"): string | null {
 	const packageDirectory = PACKAGES.get(packageName);
 	if (!packageDirectory) return null;
 	const source = join(REPO_ROOT, "packages", packageDirectory, "src", relativeSource);
@@ -43,21 +43,21 @@ function packageSource(packageName, relativeSource = "index.ts") {
 	return pathToFileURL(source).href;
 }
 
-function mappedWorkspaceUrl(url) {
+function mappedWorkspaceUrl(url: string): string | null {
 	if (!url.startsWith("file:")) return null;
 	const file = fileURLToPath(url);
 	const source = resolveWorkspaceSourceAuthority(file, { repoRoot: REPO_ROOT });
 	return source === file ? null : pathToFileURL(source).href;
 }
 
-function relativeTypeScriptUrl(specifier, parentURL) {
+function relativeTypeScriptUrl(specifier: string, parentURL: string | undefined): string | null {
 	if (!parentURL?.startsWith("file:") || !specifier.startsWith(".") || !specifier.endsWith(".js")) return null;
 	const candidate = fileURLToPath(new URL(specifier, parentURL));
 	const source = resolveWorkspaceSourceAuthority(candidate, { repoRoot: REPO_ROOT });
 	return source === candidate ? null : pathToFileURL(source).href;
 }
 
-export function resolveSourceTestSpecifier(specifier, parentURL) {
+export function resolveSourceTestSpecifier(specifier: string, parentURL: string | undefined): string | null {
 	if (PACKAGES.has(specifier)) return packageSource(specifier);
 	for (const [packageName] of PACKAGES) {
 		if (!specifier.startsWith(`${packageName}/`)) continue;
@@ -70,26 +70,27 @@ export function resolveSourceTestSpecifier(specifier, parentURL) {
 	return null;
 }
 
-registerHooks({
-	resolve(specifier, context, nextResolve) {
-		const source = resolveSourceTestSpecifier(specifier, context.parentURL);
-		if (source) return { url: source, shortCircuit: true };
-		const resolved = nextResolve(specifier, context);
-		if (mappedWorkspaceUrl(resolved.url)) {
-			throw new Error(`source-test lane resolved through checkout dist: ${resolved.url}`);
-		}
-		return resolved;
-	},
-	load(url, context, nextLoad) {
-		if (!isEditablePackageSource(url)) return nextLoad(url, context);
-		const source = readFileSync(fileURLToPath(url), "utf8");
-		const transformed = transformSync(source, {
-			format: "esm",
-			loader: "ts",
-			sourcemap: "inline",
-			sourcefile: fileURLToPath(url),
-			target: "node22",
-		});
-		return { format: "module", source: transformed.code, shortCircuit: true };
-	},
-});
+const resolveSourceTest: ResolveHookSync = (specifier, context, nextResolve) => {
+	const source = resolveSourceTestSpecifier(specifier, context.parentURL);
+	if (source) return { url: source, shortCircuit: true };
+	const resolved = nextResolve(specifier, context);
+	if (mappedWorkspaceUrl(resolved.url)) {
+		throw new Error(`source-test lane resolved through checkout dist: ${resolved.url}`);
+	}
+	return resolved;
+};
+
+const loadSourceTest: LoadHookSync = (url, context, nextLoad) => {
+	if (!isEditablePackageSource(url)) return nextLoad(url, context);
+	const source = readFileSync(fileURLToPath(url), "utf8");
+	const transformed = transformSync(source, {
+		format: "esm",
+		loader: "ts",
+		sourcemap: "inline",
+		sourcefile: fileURLToPath(url),
+		target: "node22",
+	});
+	return { format: "module", source: transformed.code, shortCircuit: true };
+};
+
+registerHooks({ resolve: resolveSourceTest, load: loadSourceTest });

@@ -525,6 +525,8 @@ function injectedRepoBuild(root: string, anchor?: string, replacement?: string, 
 	if (anchor) assert.ok(source.includes(anchor), `repo-build injection anchor missing: ${anchor}`);
 	const toolchainImport = new URL("../../scripts/lib/toolchain-env.ts", import.meta.url).href;
 	source = source.replace('from "../scripts/lib/toolchain-env.ts"', `from ${JSON.stringify(toolchainImport)}`);
+	const objectRecordImport = new URL("../../scripts/lib/object-record.ts", import.meta.url).href;
+	source = source.replace('from "../scripts/lib/object-record.ts"', `from ${JSON.stringify(objectRecordImport)}`);
 	const waitTimeoutAnchor = "const WAIT_TIMEOUT_MS = 600_000;";
 	assert.ok(source.includes(waitTimeoutAnchor), "repo-build wait-timeout injection anchor missing");
 	source = source.replace(waitTimeoutAnchor, `const WAIT_TIMEOUT_MS = ${options.waitTimeoutMs ?? 20};`);
@@ -536,7 +538,13 @@ function injectedRepoBuild(root: string, anchor?: string, replacement?: string, 
 	if (anchor && replacement !== undefined) source = source.replace(anchor, replacement);
 	const modulePath = path.join(directory, "repo-build.ts");
 	writeFileSync(modulePath, source);
-	writeFileSync(path.join(directory, "repo-build-supervisor.ts"), readFileSync(path.join(REPO_ROOT, "test", "repo-build-supervisor.ts")));
+	const supervisorImport = new URL("../../packages/ceal-worker-cli/src/json-record.ts", import.meta.url).href;
+	let supervisorSource = readFileSync(SUPERVISOR, "utf8");
+	supervisorSource = supervisorSource.replace(
+		'import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";',
+		`import { isJsonRecord as isRecord } from ${JSON.stringify(supervisorImport)};`,
+	);
+	writeFileSync(path.join(directory, "repo-build-supervisor.ts"), supervisorSource);
 	return modulePath;
 }
 

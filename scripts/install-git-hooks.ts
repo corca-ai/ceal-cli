@@ -16,7 +16,7 @@ const RELATIVE_HOOKS_DIR = ".githooks";
 const BLAME_IGNORE_FILE = ".git-blame-ignore-revs";
 const checkOnly = process.argv.includes("--check");
 
-function git(args) {
+function git(args: readonly string[]) {
 	return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
 }
 
