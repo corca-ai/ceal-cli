@@ -55,6 +55,16 @@ try:
         ],
         "shared": 9,
     }
+    near_threshold = {
+        **shallow,
+        "family_fingerprint": "near-threshold",
+        "locations": [
+            {"file": "src/a.ts", "start": 1, "end": 108},
+            {"file": "src/b.ts", "start": 1, "end": 108},
+        ],
+        "shared": 13,
+    }
+    near_threshold_control = {**near_threshold, "family_fingerprint": "near-threshold-control", "shared": 14}
     import_family = {
         **whole,
         "family_fingerprint": "imports",
@@ -137,7 +147,7 @@ try:
         @staticmethod
         def scan_families(repo_root, scope_paths):
             return [
-                whole, shallow, import_family, high_overlap, wrong_shape, partial, duplicate_location,
+                whole, shallow, near_threshold, near_threshold_control, import_family, high_overlap, wrong_shape, partial, duplicate_location,
                 validator, validator_control, zero_overlap, zero_overlap_control,
                 repeated_json, repeated_json_control, small_test_setup, small_test_setup_control,
             ], None, "0.20.0"
@@ -157,6 +167,8 @@ try:
         "whole": module["_is_low_overlap_whole_file_family"](root, whole),
         "whole_partial": module["_is_low_overlap_whole_file_family"](root, partial),
         "shallow": module["_is_low_overlap_shallow_family"](root, shallow),
+        "near_threshold": module["_is_low_overlap_shallow_family"](root, near_threshold),
+        "near_threshold_control": module["_is_low_overlap_shallow_family"](root, near_threshold_control),
         "imports": module["_is_import_header_family"](root, import_family),
         "high_overlap": module["_is_low_overlap_shallow_family"](root, high_overlap),
         "wrong_shape": module["_is_low_overlap_shallow_family"](root, wrong_shape),
@@ -186,6 +198,7 @@ finally:
 		kept: [
 			"duplicate",
 			"high",
+			"near-threshold-control",
 			"partial",
 			"repeated-json-control",
 			"shape",
@@ -196,6 +209,8 @@ finally:
 		whole: true,
 		whole_partial: false,
 		shallow: true,
+		near_threshold: true,
+		near_threshold_control: false,
 		imports: true,
 		high_overlap: false,
 		wrong_shape: false,

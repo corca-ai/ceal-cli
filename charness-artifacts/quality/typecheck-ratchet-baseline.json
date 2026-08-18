@@ -24,7 +24,6 @@
         "test/contract/source-loader.test.ts",
         "test/contract/worker-acceptance-packet.test.ts",
         "test/contract/worker-guide-contract.test.ts",
-        "test/gateway-protocol-fixture.ts",
         "test/source-loader.ts",
         "test/worker-release-package-fixture.ts"
       ],
@@ -103,14 +102,11 @@
           "TS7006": 7,
           "TS7053": 1
         },
-        "test/gateway-protocol-fixture.ts": {
-          "TS7006": 1
-        },
         "test/source-loader.ts": {
           "TS7006": 6
         },
         "test/worker-release-package-fixture.ts": {
-          "TS7006": 7
+          "TS7006": 5
         }
       }
     },

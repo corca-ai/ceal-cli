@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
+import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
 	type ArchiveResolution,
 	consumeLockedGatewayHandoffArchiveSync,
@@ -403,9 +403,6 @@ function removeProperty(record: Record<string, unknown>, key: string): void {
 	Reflect.deleteProperty(record, key);
 }
 
-function sha256(value: Uint8Array): string {
-	return createHash("sha256").update(value).digest("hex");
-}
 function hasArchiveCode(code: string): (error: unknown) => boolean {
 	return (error: unknown) => error instanceof WorkerGatewayHandoffArchiveError && error.code === code;
 }

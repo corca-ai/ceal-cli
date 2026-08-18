@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	cpSync,
 	existsSync,
@@ -19,6 +18,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { type NpmPackMetadata, parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
@@ -889,9 +889,6 @@ function filePathFromResolution(value: string): string {
 	return fileURLToPath(value);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function isVersion(value: unknown): value is string {
 	return typeof value === "string" && /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u.test(value);
 }

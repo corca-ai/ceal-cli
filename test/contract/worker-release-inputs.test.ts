@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import { materializeSignedGatewayProtocolSource } from "../../scripts/materialize-signed-gateway-protocol-source.ts";
 import {
 	type AsyncArchiveConsumer,
@@ -18,6 +19,7 @@ import {
 	withWorkerReleaseDevelopmentInputsAsync,
 } from "../../scripts/worker-release-inputs.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
+import { type ReleasePackageRecordInput, releasePackageRecord } from "../release-package-record.ts";
 import { scratchDir } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -27,16 +29,7 @@ test.after(() => CONTRACT_REPO.cleanup());
 type ContractInputOptions = Parameters<typeof resolveWorkerReleaseDevelopmentInputs>[0];
 type GitCall = string[];
 type Producer = { repository: string; commit: string; tree: string; protocol_tree: string; scoped_paths_clean: true };
-type PackedPackage = {
-	name: string;
-	version: string;
-	filename: string;
-	tarball: string;
-	sha256: string;
-	integrity: string;
-	bytes: number;
-	declared_exports: string[];
-};
+type PackedPackage = ReleasePackageRecordInput & { tarball: string };
 type ControlConformance = {
 	schema_version: string;
 	proof_level: "local_state";
@@ -509,7 +502,7 @@ function writeHandoffManifest(fixture: HandoffFixture): void {
 		proof_level: "local_state",
 		writes_external: false,
 		producer: fixture.producer,
-		protocol: record(fixture.protocol),
+		protocol: releasePackageRecord(fixture.protocol),
 		protocol_provenance: { filename: path.basename(fixture.protocolProvenance), bytes: sidecar.length, sha256: sha256(sidecar) },
 		control_conformance: { filename: path.basename(fixture.controlConformance), bytes: control.length, sha256: sha256(control) },
 	};
@@ -517,23 +510,8 @@ function writeHandoffManifest(fixture: HandoffFixture): void {
 	fixture.expectedHandoffSha256 = sha256(readFileSync(fixture.handoffManifest));
 }
 
-function record(item: PackedPackage) {
-	return {
-		package: item.name,
-		version: item.version,
-		filename: item.filename,
-		bytes: item.bytes,
-		sha256: item.sha256,
-		integrity: item.integrity,
-		exports: item.declared_exports,
-	};
-}
-
 function rest({ protocolTarball: _protocolTarball, ...fixture }: HandoffFixture): Omit<HandoffFixture, "protocolTarball"> {
 	return fixture;
-}
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 function popMessage(messages: string[]): string {
 	const message = messages.pop();

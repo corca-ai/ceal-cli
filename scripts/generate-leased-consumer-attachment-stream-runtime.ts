@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { hasExactObjectKeys as exact } from "../packages/ceal-worker-cli/src/object-keys.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { sameStringArray as sameArray } from "../packages/ceal-worker-cli/src/string-array.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
+import { writeIfChanged } from "./lib/write-if-changed.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HANDOFF_PATH = "vendor/gateway-leased-consumer-attachment-stream/gateway-leased-consumer-attachment-stream-conformance.json";
@@ -280,22 +282,7 @@ function validLimitSet(value: unknown, maxTotal: number): value is LimitSet {
 	);
 }
 
-function sha256(value: string | Buffer): string {
-	return createHash("sha256").update(value).digest("hex");
-}
-function writeIfChanged(file: string, rendered: string): boolean {
-	let prior: string | undefined;
-	try {
-		prior = readFileSync(file, "utf8");
-	} catch {
-		prior = undefined;
-	}
-	if (prior === rendered) return false;
-	writeFileSync(file, rendered);
-	return true;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
 	try {
 		console.log(JSON.stringify(generateLeasedConsumerAttachmentStreamRuntime(), null, 2));
 	} catch (error) {

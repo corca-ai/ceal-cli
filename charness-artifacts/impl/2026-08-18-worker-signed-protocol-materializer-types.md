@@ -16,6 +16,15 @@ Date: 2026-08-18
   references, safe endpoints, canonical JSON, ordered string arrays,
   release-version matching, regular non-symlink directories, and
   promise-like values.
+- The historical SHA-256 family now has one package owner accepting
+  `Uint8Array | string`; production scripts, the attachment-stream package,
+  and release/handoff test fixtures consume that owner instead of carrying
+  local `createHash("sha256")` helpers.
+- Generator persistence and test release-package projection each have one
+  support owner. The two contract validators share only a typed envelope guard;
+  route-specific validation remains in its owning validator. Entrypoint
+  detection is also one script-library owner used by the two previously
+  reported CLI wrappers.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
@@ -43,11 +52,16 @@ detector groups them as one shallow family.
 
 - Targeted strict TS7 and TS6 compiles for
   scripts/materialize-signed-gateway-protocol-source.ts: passed.
-- npm run lint:types:tools: passed, exact result
-  /tmp/ceal-proof-jobs/worker-lint-types-tools/result.20260818-worker-lint-types-tools-03.json
-  (exit_code: 0). Its printed diagnostics are the remaining ratcheted
-  repository baseline, not a claim that the whole tools tree is
-  diagnostic-free.
+- npm run lint:types:tools: passed after the deliberate baseline reduction for
+  two repaired fixture surfaces, exact result
+  /tmp/ceal-proof-jobs/worker-lint-types-tools-current/result.20260818-worker-lint-types-tools-current-02.json
+  (exit_code: 0; no `baseline_reduction_required` output). Its printed
+  diagnostics are the remaining ratcheted repository baseline, not a claim
+  that the whole tools tree is diagnostic-free.
+- The focused historical owner proof passed 58/58 tests, exact result
+  /tmp/ceal-proof-jobs/worker-sha256-focused/result.20260818-worker-sha256-focused-01.json
+  (exit_code: 0), covering release-process supervision, release inputs/assets,
+  handoff bootstrap/call, package build, and native artifact behavior.
 - Focused retained-path source tests: 109/109 passed, including release
   helpers, package/carrier/cache/spool behavior, handoff contracts, and
   native/package build contracts. The exact proof result is
@@ -70,6 +84,10 @@ detector groups them as one shallow family.
 - Canonical-owner extractions are covered by the 109 retained-path tests and
   the Worker duplicate gate. They are implementation debt resolved in this
   slice, not baseline suppression.
+- The SHA-256, write-if-changed, release-package-record, contract-envelope,
+  and entrypoint-guard families were resolved by owner extraction. The
+  shallow detector margin is now an explicit 8:1 rule with a 13/108 positive
+  boundary and 14/108 retained control; it is not a baseline exemption.
 - Whole-file and large shallow families are filtered only when the adapter
   proves the exact detector shape, valid distinct locations, complete/large
   spans, distinct non-partial boundaries, and a low-overlap margin.
@@ -79,7 +97,9 @@ detector groups them as one shallow family.
   filters each require their exact metadata and evidence. Non-list scan output,
   malformed family entries, invalid content identity, and missing spans remain
   gate failures rather than becoming an empty clean inventory.
-- The historical Worker scan still reports 134 families. The highest-value
+- The post-commit historical Worker scan still reports 134 families
+  (result /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-04.json).
+  The highest-value
   successor candidates include SHA-256 helper ownership
   (abc7cb50323ff928), ArchiveLock declarations (02290b95d0fcd055), readJson
   helpers (45c5c21929a78b64), and the release-assets merge helper
@@ -129,7 +149,7 @@ change. No user-facing CLI, release, or runtime behavior changed.
 ## Next Slice
 
 Continue the historical Worker queue with one coherent owner family at a time,
-starting with the SHA-256 helper family after a source-level owner review.
+starting with the next source-level owner review after a fresh family recount.
 Recount the three-repository gates before moving to Agent work. Do not push,
 tag, publish, or apply a runtime from this local quality lane.
 

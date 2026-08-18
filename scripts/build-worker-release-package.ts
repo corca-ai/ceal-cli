@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	cpSync,
 	existsSync,
@@ -17,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
 import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
@@ -584,9 +584,6 @@ function readJson(filePath: string, code: string): unknown {
 	}
 }
 
-function sha256(bytes: string | Buffer): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerReleasePackageError(code, message);
 }

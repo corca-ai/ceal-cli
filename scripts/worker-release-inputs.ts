@@ -6,6 +6,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { sameStringArray as sameStrings } from "../packages/ceal-worker-cli/src/string-array.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
@@ -936,9 +937,6 @@ function requireProvenanceSource(value: unknown, code = "invalid_protocol_proven
 	return { ...source, package_path: value.package_path };
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerReleaseInputError(code, message);
 }

@@ -126,7 +126,7 @@ def _is_low_overlap_shallow_family(repo_root: Path, family: dict) -> bool:
     The detector's shallow witness can cover two different workflows while exposing
     only a small common fragment. Keep this rule narrower than a baseline: it needs
     the exact extraction shape, shallow/copy-paste labels, distinct files, valid
-    spans, and a 10:1 span-to-shared-line margin. Any missing evidence stays visible.
+    spans, and an 8:1 span-to-shared-line margin. Any missing evidence stays visible.
     """
     data = _matching_family_data(repo_root, family, extraction_shape="extract-method-from-block", surface="shallow", witness="copy-paste")
     if data is None:
@@ -138,7 +138,7 @@ def _is_low_overlap_shallow_family(repo_root: Path, family: dict) -> bool:
     if len(starts) == 1 and next(iter(starts)) != 1:
         return False
     minimum_span = min(end - start + 1 for _file, start, end in locations)
-    return minimum_span >= 100 and shared * 10 < minimum_span
+    return minimum_span >= 100 and shared * 8 < minimum_span
 
 
 def _is_import_header_span(repo_root: Path, file: str, start: int, end: int) -> bool:

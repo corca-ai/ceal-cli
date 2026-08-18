@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
@@ -415,9 +415,6 @@ function requireNumberField(record: JsonRecord, key: string): number {
 	const value = record[key];
 	if (typeof value !== "number") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid numeric field.");
 	return value;
-}
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 function fail(code: string, message: string): never {
 	throw new WorkerGatewayHandoffArchiveError(code, message);

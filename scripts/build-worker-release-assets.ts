@@ -4,11 +4,11 @@
 // the locked Gateway handoff archive lane, and merges per-platform sets into
 // the one signed release inventory that install-ceal.sh consumes.
 
-import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import type { buildWorkerNativeArtifact } from "./build-worker-native-artifact.ts";
 import {
 	readCarrierContract,
@@ -612,9 +612,6 @@ function readStagedFile(file: string, code: string): Buffer {
 	return readFileSync(file);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerReleaseAssetsError(code, message);
 }

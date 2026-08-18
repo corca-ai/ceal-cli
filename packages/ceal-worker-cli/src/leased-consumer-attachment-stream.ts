@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { type FileHandle, lstat, mkdir, open, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -17,6 +16,7 @@ import {
 } from "@corca-ai/ceal-protocol";
 import { isJsonRecord } from "./json-record.js";
 import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { sha256 } from "./sha256.js";
 
 /** @testOnly */
 export const CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA = "ceal.agent.attachment_materialization.v1" as const;
@@ -285,9 +285,6 @@ function sameBinding(
 	return BINDING_KEYS.every((key) => left[key] === right[key]);
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 	return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 }

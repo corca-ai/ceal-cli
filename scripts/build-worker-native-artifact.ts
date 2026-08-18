@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	copyFileSync,
@@ -20,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { parse } from "yaml";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.ts";
 import {
 	verifyEmbeddedCarrierContractSource,
@@ -657,9 +657,6 @@ function readJson(filePath: string, code: string): unknown {
 	}
 }
 
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
-}
 function fail(code: string, message: string): never {
 	throw new WorkerNativeArtifactError(code, message);
 }

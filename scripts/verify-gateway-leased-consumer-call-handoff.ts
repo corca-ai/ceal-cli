@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sameCanonicalJson } from "../packages/ceal-worker-cli/src/canonical-json.ts";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 
@@ -272,9 +272,6 @@ function fail(code: HandoffErrorCode, message: string): never {
 function exactKeys(value: JsonRecord, keys: readonly string[]): boolean {
 	const actual = Object.keys(value).sort();
 	return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
-}
-function sha256(bytes: Buffer): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 function sameJson(left: unknown, right: unknown): boolean {
 	return sameCanonicalJson(left, right);

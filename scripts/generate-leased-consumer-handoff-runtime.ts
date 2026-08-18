@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 import { isStringMap } from "./lib/string-map.ts";
+import { writeIfChanged } from "./lib/write-if-changed.ts";
 import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-consumer-call-handoff.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +24,11 @@ const CONTROL_SESSION_CONTRACT_OUTPUT_PATH = "packages/ceal-worker-cli/src/gener
 type JsonRecord = Record<string, unknown>;
 type JsonDecoder = (value: unknown) => unknown;
 type ContractBytes = { bytes: Buffer; value: JsonRecord; sha256: string };
+type ContractEnvelope = JsonRecord & {
+	schema_version: string;
+	argv: string[];
+	non_claims: string[];
+};
 type CarrierContract = JsonRecord & {
 	schema_version: string;
 	argv: string[];
@@ -80,6 +86,10 @@ function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((entry): entry is string => typeof entry === "string");
 }
 
+function isContractEnvelope(value: unknown): value is ContractEnvelope {
+	return isJsonRecord(value) && typeof value.schema_version === "string" && isStringArray(value.argv) && isStringArray(value.non_claims);
+}
+
 function isHandoffLock(value: unknown): value is HandoffLock {
 	return (
 		isJsonRecord(value) &&
@@ -107,14 +117,11 @@ function isDecoderOptions(value: unknown): value is { decodeRequest: JsonDecoder
 
 function isCarrierContract(value: unknown): value is CarrierContract {
 	if (
-		!isJsonRecord(value) ||
-		typeof value.schema_version !== "string" ||
-		!isStringArray(value.argv) ||
+		!isContractEnvelope(value) ||
 		!isJsonRecord(value.stdin) ||
 		!isJsonRecord(value.service_channel) ||
 		!isJsonRecord(value.service_call) ||
-		!isJsonRecord(value.result) ||
-		!isStringArray(value.non_claims)
+		!isJsonRecord(value.result)
 	)
 		return false;
 	return (
@@ -133,15 +140,12 @@ function isCarrierContract(value: unknown): value is CarrierContract {
 
 function isControlSessionContract(value: unknown): value is ControlSessionContract {
 	if (
-		!isJsonRecord(value) ||
-		typeof value.schema_version !== "string" ||
-		!isStringArray(value.argv) ||
+		!isContractEnvelope(value) ||
 		!isJsonRecord(value.protected_session) ||
 		!isJsonRecord(value.notification_channel) ||
 		!isJsonRecord(value.agent_ipc) ||
 		!isJsonRecord(value.gateway) ||
-		!isJsonRecord(value.gateway_protocol_handoff) ||
-		!isStringArray(value.non_claims)
+		!isJsonRecord(value.gateway_protocol_handoff)
 	)
 		return false;
 	const bounds = value.gateway.operation_deadline_bounds_ms;
@@ -557,18 +561,6 @@ export function contractModule<T extends JsonRecord>(
 // Write only on change, so a regeneration that produces identical bytes does not
 // touch the file and make a clean tree look dirty. Returns whether it wrote,
 // which is what the result's `changed` is the disjunction of.
-function writeIfChanged(file: string, rendered: string): boolean {
-	let prior: string | null = null;
-	try {
-		prior = readFileSync(file, "utf8");
-	} catch {
-		prior = null;
-	}
-	if (prior === rendered) return false;
-	writeFileSync(file, rendered);
-	return true;
-}
-
 /**
  * A native artifact is bundled from the checked-in generated source, not from
  * the workspace contract JSON. Refuse source drift before that generated

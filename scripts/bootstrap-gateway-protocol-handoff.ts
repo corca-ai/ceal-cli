@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { assertGatewayHandoffArchiveInventory, extractGatewayHandoffArchive } from "./worker-gateway-handoff-archive.ts";
@@ -351,10 +351,6 @@ function requireRegularFile(file: string, code: string): string {
 	const stat = lstatSync(file);
 	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Gateway handoff bootstrap input must be a regular file.");
 	return file;
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 
 function controlRoutesDigest(file: string): string {

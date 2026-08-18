@@ -4,9 +4,11 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
+import { releasePackageRecord } from "./release-package-record.ts";
 import { withBuiltPackages } from "./repo-build.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,7 +76,7 @@ export function packedProtocolFixture(context) {
 			proof_level: "local_state",
 			writes_external: false,
 			producer,
-			protocol: record(protocol),
+			protocol: releasePackageRecord(protocol),
 			protocol_provenance: { filename: path.basename(protocolProvenance), bytes: sidecar.length, sha256: sha256(sidecar) },
 			control_conformance: { filename: path.basename(controlConformance), bytes: controlBytes.length, sha256: sha256(controlBytes) },
 		})}\n`,
@@ -123,20 +125,4 @@ function packPackage(root, repoRoot, sourcePath, declaredExports) {
 		bytes: bytes.length,
 		declared_exports: declaredExports,
 	};
-}
-
-function record(item) {
-	return {
-		package: item.name,
-		version: item.version,
-		filename: item.filename,
-		bytes: item.bytes,
-		sha256: item.sha256,
-		integrity: item.integrity,
-		exports: item.declared_exports,
-	};
-}
-
-function sha256(bytes) {
-	return createHash("sha256").update(bytes).digest("hex");
 }
