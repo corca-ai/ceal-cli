@@ -33,8 +33,8 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: continue with D2, keeping the A → D1 → B → C → D2 → E
-  dependency order intact.
+- Next action: complete D2's receiving-owned native explicit-any closure, then
+  continue with E, keeping the A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -257,7 +257,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | completed — import hard failures, Secretlint, and Agent duplicate detector proven |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | completed — all seven options are compiler-owned in Worker and Agent |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | completed — Worker 17 assertions and Agent 9 explicit-any findings repaired with guards/typed unknown boundaries; both source rules enabled |
-| D2 | Close explicit-any port | receiving closure and mutation/restore | pending |
+| D2 | Close explicit-any port | receiving closure and mutation/restore | in progress — native Worker/Agent lint ownership selected; mutation/restore proof pending |
 | E | Remove only paid Agent baseline entries | key diff, non-zero preservation, both lanes | pending |
 | Closeout | Bind local proof and non-claims | fresh-eye, identities, final gates | pending |
 
@@ -780,6 +780,18 @@ compiler replacement proof.
   `skipLibCheck` broadening was introduced. D2 may proceed; E remains blocked
   only on D2's receiving-closure and mutation/restore proof.
 
+### Slice 14: Lane D2 — explicit-any native linter closure
+
+- Objective: close the explicit-any gate in both receiving checkouts without
+  copying Gateway's scripts ratchet or creating a new baseline. Worker will
+  use Biome's native `suspicious/noExplicitAny` rule; Agent will retain its
+  existing native `@typescript-eslint/no-explicit-any` rule across
+  `src/`, `scripts/`, and `test/`.
+- Claim before implementation: the receiving configs and full routes are the
+  ownership surface, and the proof must show a live explicit-any mutation red
+  followed by snapshot-restore green in each checkout. This is recorded in the
+  Claim Ledger below before the config/contract edits.
+
 ## Context Sources
 
 1. `../ceal/AGENTS.md` — three-repository ownership, claim ledger, mutation/
@@ -956,3 +968,4 @@ improvement as applied or a tracked issue.
 | Lane C Worker noNonNullAssertion is compiler/linter-owned after source repair | Worker commit `099e1e8`; `biome.json:25-33`, `docs/gates.md`, and the seven inventoried source files | from `/Users/ted/codes/ceal-cli`: run the direct Biome override plus `npm run lint`, `npm run lint:types`, `npm run lint:types:ts6`, `npm run lint:markdown`, and the targeted 222-test source command; require direct exit 0 and inspect the commit path set |
 | Lane C Agent source no-explicit-any is linter-owned after typed-adapter repair | Agent commit `332c5f5`; `eslint.config.ts:30-50`, `src/service/runtime-artifact-state.ts`, `src/tools/index.ts`, and `src/tools/runtime.ts` | from `/Users/ted/codes/ceal-agent`: run the direct ESLint override plus `npm run lint:eslint`, `npm run lint`, `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, and `npm run test:contributor`; require direct exit 0, unchanged TS7/TS6 summaries, and no baseline path in the commit |
 | Lane C did not broaden production compiler fixture policy | Worker `test/artifact-workspace.ts:29-50`, Agent `scripts/typecheck-tools-tests.ts:132-150`, and the Lane C commit diffs | from Gateway: inspect `git show 099e1e8 --` and `git show 332c5f5 --`; require no production `tsconfig.build.json`/`tsconfig.typecheck.json` skipLibCheck change and no baseline/update command |
+| D2 native explicit-any ownership is receiving-local before implementation | Worker `biome.json` and `package.json`/`check`/hook routes; Agent `eslint.config.ts:30-50` and `package.json`/`lint`/hook routes | from `/Users/ted/codes/ceal-cli` and `/Users/ted/codes/ceal-agent`: read the native rule declarations and every route that reaches them, then prove one inserted explicit-any annotation red and the exact snapshot restore green in each checkout; do not copy Gateway `scripts/check-explicit-any.ts` or create a baseline |
