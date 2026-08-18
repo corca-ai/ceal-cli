@@ -851,6 +851,7 @@ const OBSERVER_PAGE = `<!doctype html>
   button.day:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
   .day.level-0 { border:1px solid var(--line); }
   .day.unavailable { border:1px dashed var(--muted); background:repeating-linear-gradient(135deg,transparent 0 3px,var(--line) 3px 5px); }
+  .day.partial { border:1px solid var(--warn); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 45%,transparent); }
   .day.level-1 { background:color-mix(in srgb,var(--accent) 30%,var(--soft)); }
   .day.level-2 { background:color-mix(in srgb,var(--accent) 62%,var(--soft)); }
   .day.level-3 { background:var(--accent); }
@@ -879,7 +880,7 @@ const OBSERVER_PAGE = `<!doctype html>
   .session-toolbar { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin:0 0 1rem; }
   .session-toolbar label { display:flex; align-items:center; gap:.55rem; color:var(--muted); }
   .session-card strong { font-size:1rem; color:var(--ink); }
-  .session-card.suggestion-evidence { border-color:var(--warn); box-shadow:inset 4px 0 var(--warn),var(--shadow); background:color-mix(in srgb,var(--warn) 8%,var(--panel)); }
+  .session-card.suggestion-evidence { border:2px solid var(--warn); box-shadow:inset 6px 0 var(--warn),0 0 0 4px color-mix(in srgb,var(--warn) 20%,transparent),var(--shadow); background:color-mix(in srgb,var(--warn) 14%,var(--panel)); }
   .session-meta { display:flex; justify-content:space-between; gap:.75rem; color:var(--muted); font-size:.75rem; margin:.35rem 0 .7rem; }
   .session-metrics { display:flex; flex-wrap:wrap; gap:.4rem; }
   .session-metrics span { background:var(--soft); border-radius:5px; padding:.22rem .4rem; font-size:.72rem; }
@@ -1098,18 +1099,23 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
     const metric = isAll ? "sessions" : selectedMetric;
     const coverage = isAll ? { observation_state:combinedObservationState(dashboards.map((entry) => entry.metric_coverage.sessions.observation_state)), source_refs:dashboards.flatMap((entry) => entry.metric_coverage.sessions.source_refs) } : dashboard.metric_coverage[metric];
     const dailyMaps = activeDashboards().map((entry) => ({ runtime:entry.sources[0]?.runtime || "unknown", days:new Map(entry.daily.map((day) => [day.date, day])) }));
-    const dailyValue = (date) => {
+    const dailyDatum = (date) => {
       const values = dailyMaps.map((entry) => entry.days.get(date)?.[metric] ?? null);
-      if (isAll) return values.every((value) => typeof value === "number") ? values.reduce((sum, value) => sum + value, 0) : null;
-      return values[0];
+      if (isAll) {
+        const observed = values.filter((value) => typeof value === "number");
+        if (observed.length === 0) return { value:null, partial:false };
+        return { value:observed.reduce((sum, value) => sum + value, 0), partial:observed.length !== values.length };
+      }
+      return { value:values[0], partial:false };
     };
-    const max = Math.max(1, ...calendarDates().map((date) => dailyValue(date) ?? 0));
+    const max = Math.max(1, ...calendarDates().map((date) => dailyDatum(date).value ?? 0));
     const cells = calendarDates().map((date) => {
-      const value = dailyValue(date);
+      const { value, partial } = dailyDatum(date);
       const level = value === null || value === 0 ? 0 : value / max < .34 ? 1 : value / max < .67 ? 2 : 3;
       const runtimeDetail = isAll ? " · " + dailyMaps.map((entry) => entry.runtime + " " + (entry.days.get(date)?.sessions ?? tx("unavailable", "확인 불가"))).join(" · ") : "";
-      const label = date + " · " + (value === null ? tx("unavailable", "확인 불가") : value + " " + metricUnit(metric)) + runtimeDetail;
-      return "<button type='button' class='day level-" + level + (value === null ? " unavailable" : "") + "' title='" + esc(label) + "' data-activity-date='" + esc(date) + "' aria-label='" + esc(label + tx("; filter sessions below", "; 아래 세션 필터")) + "'></button>";
+      const valueLabel = value === null ? tx("unavailable", "확인 불가") : partial ? tx("at least ", "최소 ") + value + " " + metricUnit(metric) : value + " " + metricUnit(metric);
+      const label = date + " · " + valueLabel + runtimeDetail;
+      return "<button type='button' class='day level-" + level + (value === null ? " unavailable" : partial ? " partial" : "") + "' title='" + esc(label) + "' data-activity-date='" + esc(date) + "' aria-label='" + esc(label + tx("; filter sessions below", "; 아래 세션 필터")) + "'></button>";
     }).join("");
     const identity = dashboard.identity.state === "available"
       ? "<div class='identity'><div><p class='eyebrow'>" + tx("LOCAL PROFILE", "로컬 프로필") + "</p><strong>" + esc(dashboard.identity.profile_ref) + "</strong><span class='muted'>" + tx("Instance ", "인스턴스 ") + esc(dashboard.identity.instance_ref) + "</span></div><span class='badge'>" + tx("Local profile", "로컬 프로필") + "</span></div>"
@@ -1142,7 +1148,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
       : dashboard.suggestions.length
       ? primarySuggestions + (remainingSuggestions.length ? "<details class='suggestion-more'><summary>" + remainingSuggestions.length + tx(" more suggestions", "개의 제안 더 보기") + "</summary>" + remainingSuggestions.map((entry, index) => suggestionCard(entry, index + 2)).join("") + "</details>" : "")
       : "<div class='card'><strong>" + tx("No deterministic usage suggestions", "현재 표시할 사용 제안이 없습니다") + "</strong><p class='muted'>" + tx("This is not a completeness or productivity claim.", "상태가 완전하거나 생산성이 높다는 뜻은 아닙니다.") + "</p></div>";
-    const legend = "<div class='heatmap-caption'><span>" + tx("Both runtimes use the same selected-period calendar. Each square is one date; missing daily evidence is unavailable, not zero. Intensity is relative within the selected view.", "두 런타임은 같은 선택 기간의 달력을 사용합니다. 한 칸은 날짜 하나이며, 일별 근거가 없으면 0이 아니라 확인 불가입니다. 색의 강도는 선택한 보기 안에서 비교합니다.") + "</span><div class='legend'><span>" + tx("Observed zero", "관측값 0") + "</span><span class='legend-scale'><i class='day level-0'></i><i class='day level-1'></i><i class='day level-2'></i><i class='day level-3'></i></span><span>" + tx("Higher", "높음") + "</span><i class='day unavailable'></i><span>" + tx("Unavailable", "확인 불가") + "</span></div></div>";
+    const legend = "<div class='heatmap-caption'><span>" + tx("Both runtimes use the same selected-period calendar. Each square is one date; missing daily evidence is unavailable, not zero. In All, an outlined cell is a lower bound from the available runtime. Intensity is relative within the selected view.", "두 런타임은 같은 선택 기간의 달력을 사용합니다. 한 칸은 날짜 하나이며, 일별 근거가 없으면 0이 아니라 확인 불가입니다. 전체 보기의 테두리 칸은 확인 가능한 런타임만 더한 최소값입니다. 색의 강도는 선택한 보기 안에서 비교합니다.") + "</span><div class='legend'><span>" + tx("Observed zero", "관측값 0") + "</span><span class='legend-scale'><i class='day level-0'></i><i class='day level-1'></i><i class='day level-2'></i><i class='day level-3'></i></span><span>" + tx("Higher", "높음") + "</span><i class='day partial level-1'></i><span>" + tx("Lower bound", "최소값") + "</span><i class='day unavailable'></i><span>" + tx("Unavailable", "확인 불가") + "</span></div></div>";
     return identity
       + "<div class='metric-tabs runtime-tabs' role='group' aria-label='" + tx("Runtime partition", "런타임 구분") + "'>" + runtimeAxes + "</div><p class='evidence-line'>" + tx("Codex and Claude use separate local sources and accounting semantics, so their activity fields are not expected to have the same shape or scale.", "Codex와 Claude는 서로 다른 로컬 출처와 집계 방식을 사용하므로 활동 분포의 모양과 크기가 같을 필요가 없습니다.") + "</p><section class='hero'><p class='eyebrow'>" + tx("LOCAL USAGE", "로컬 사용량") + " · " + esc(dashboard.window.start_date) + " — " + esc(dashboard.window.end_date) + "</p><h2>" + headline + "</h2><p class='hero-summary'>" + esc(metricDescription(metric)) + " " + tx("Runtime accounting stays partitioned; missing values are never treated as zero.", "런타임별 집계는 분리되며 없는 값은 0으로 간주하지 않습니다.") + "</p></section>"
       + "<div class='metric-tabs' role='group' aria-label='" + tx("Usage metric", "사용량 지표") + "'>" + axes + "</div>"
@@ -1376,7 +1382,9 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
         const sessionIndex = orderedSessions().findIndex((candidate) => candidate.runtime === runtime && candidate.session_ref === sessionRef);
         if (sessionIndex < 0) return;
         sessionPage = Math.floor(sessionIndex / sessionPageSize) + 1;
-        show("Usage", "button[data-session-runtime='" + runtime + "'][data-session-ref='" + sessionRef + "']");
+        const selector = "button[data-session-runtime='" + runtime + "'][data-session-ref='" + sessionRef + "']";
+        show("Usage", selector);
+        root.querySelector(selector)?.scrollIntoView({ behavior:"smooth", block:"center" });
         return;
       }
       if (entry.next_action.kind === "review_evidence") {

@@ -132,9 +132,10 @@ field dumps are not part of that presentation surface.
 The runtime selector also has an All view when Profile, instance, timezone, and
 selected-period bounds align. It combines runtime-scoped session records on the
 shared calendar and in one recent-first detail list, but does not sum or rank
-token and cost observations across unlike runtime contracts. A combined daily
-cell is unavailable unless both runtimes provide numeric session evidence for
-that date. Token, cost, and evidence-bound suggestion controls require an
+token and cost observations across unlike runtime contracts. When only one
+runtime supplies numeric session evidence for a date, the combined cell remains
+visible as an explicitly outlined lower bound rather than disappearing or
+treating missing evidence as zero. Token, cost, and evidence-bound suggestion controls require an
 explicit Codex or Claude selection. A suggestion that cites one session moves
 focus to the exact runtime-and-session row, marks it as suggestion evidence, and
 shows the localized rule rationale; the detail dialog opens only after the user

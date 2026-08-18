@@ -277,6 +277,8 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.getByRole("heading", { name: "109 runtime-scoped session records observed." }).waitFor();
 	assert.equal(await page.getByRole("button", { name: /Tokens Select runtime/u }).isDisabled(), true);
 	assert.equal(await page.locator("button[data-session-ref]").count(), 20);
+	assert.ok((await page.locator("button.day.level-1, button.day.level-2, button.day.level-3").count()) > 0);
+	assert.ok((await page.locator("button.day.partial").count()) > 0);
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
 	await page.getByRole("button", { name: /Agent tool calls 508/u }).waitFor();
@@ -327,6 +329,13 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	assert.equal(await referencedSession.count(), 1);
 	assert.equal(await referencedSession.getAttribute("data-session-runtime"), "codex");
 	assert.equal(await referencedSession.evaluate((element) => element.classList.contains("suggestion-evidence")), true);
+	assert.equal(
+		await referencedSession.evaluate((element) => {
+			const box = element.getBoundingClientRect();
+			return box.top >= 0 && box.bottom <= window.innerHeight;
+		}),
+		true,
+	);
 	await page.getByText("SUGGESTION EVIDENCE", { exact: true }).waitFor();
 	assert.equal(await page.getByRole("dialog").count(), 0);
 	await page.keyboard.press("Enter");
