@@ -800,10 +800,10 @@ const OBSERVER_PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ceal Workbench</title>
 <style>
-  :root { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f4f6f3; --panel:#fff; --soft:#e9eeea; --accent:#167a4c; --accent-strong:#0d5936; --warn:#8a4b08; --selected:#e2ebff; --shadow:0 12px 32px #17211b0b; }
-  @media (prefers-color-scheme:dark) { :root:not([data-mode]) { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; } }
-  :root[data-mode="dark"] { color-scheme:dark; --ink:#edf2ee; --muted:#9ba79f; --line:#303a33; --paper:#101512; --panel:#171e19; --soft:#222b25; --accent:#72d09b; --warn:#f2b765; --selected:#23354a; }
-  :root[data-mode="light"] { color-scheme:light; --ink:#17211b; --muted:#667069; --line:#d9dfda; --paper:#f5f7f4; --panel:#fff; --soft:#e9eeea; --accent:#245b3c; --warn:#8a4b08; --selected:#e2ebff; }
+  :root { color-scheme:light; --ceal-color-ink:#17211b; --ceal-color-muted:#667069; --ceal-color-line:#d9dfda; --ceal-color-page:#f4f6f3; --ceal-color-surface:#fff; --ceal-color-soft:#e9eeea; --ceal-color-accent:#176c47; --ceal-color-attention:#a85b08; --ceal-radius-control:7px; --ceal-radius-card:12px; --ceal-space-card:1rem; --ceal-shadow-card:0 12px 32px #17211b0b; --ceal-content-width:86rem; --ink:var(--ceal-color-ink); --muted:var(--ceal-color-muted); --line:var(--ceal-color-line); --paper:var(--ceal-color-page); --panel:var(--ceal-color-surface); --soft:var(--ceal-color-soft); --accent:var(--ceal-color-accent); --accent-strong:#0d5936; --warn:var(--ceal-color-attention); --selected:#e2ebff; --shadow:var(--ceal-shadow-card); }
+  @media (prefers-color-scheme:dark) { :root:not([data-mode]) { color-scheme:dark; --ceal-color-ink:#edf2ee; --ceal-color-muted:#9ba79f; --ceal-color-line:#303a33; --ceal-color-page:#101512; --ceal-color-surface:#171e19; --ceal-color-soft:#222b25; --ceal-color-accent:#72d09b; --ceal-color-attention:#f2b765; --selected:#23354a; } }
+  :root[data-mode="dark"] { color-scheme:dark; --ceal-color-ink:#edf2ee; --ceal-color-muted:#9ba79f; --ceal-color-line:#303a33; --ceal-color-page:#101512; --ceal-color-surface:#171e19; --ceal-color-soft:#222b25; --ceal-color-accent:#72d09b; --ceal-color-attention:#f2b765; --selected:#23354a; }
+  :root[data-mode="light"] { color-scheme:light; --ceal-color-ink:#17211b; --ceal-color-muted:#667069; --ceal-color-line:#d9dfda; --ceal-color-page:#f5f7f4; --ceal-color-surface:#fff; --ceal-color-soft:#e9eeea; --ceal-color-accent:#176c47; --ceal-color-attention:#a85b08; --selected:#e2ebff; }
   * { box-sizing: border-box; }
   body { background:var(--paper); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; margin:0 auto; max-width:86rem; padding:0 2rem 5rem; }
   h1 { font-size:1.15rem; letter-spacing:-.03em; margin:0; } h2 { font-size:1rem; margin:1.6rem 0 .75rem; }
@@ -820,7 +820,7 @@ const OBSERVER_PAGE = `<!doctype html>
   .warn { color:var(--warn); }
   .boundary { border:1px solid var(--line); background:var(--panel); border-radius:10px; margin:1.1rem 0 1.4rem; padding:.7rem .9rem; color:var(--muted); box-shadow:var(--shadow); }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:.65rem; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1rem; box-shadow:var(--shadow); }
+  .card, .ceal-card { background:var(--panel); border:1px solid var(--line); border-radius:var(--ceal-radius-card); padding:var(--ceal-space-card); box-shadow:var(--shadow); }
   .card, .unsupported { min-width:0; overflow-wrap:anywhere; }
   .card h3 { font-size:.82rem; margin:0 0 .35rem; color:var(--muted); }
   .attention { width:100%; color:inherit; text-align:left; font:inherit; cursor:pointer; margin-bottom:.6rem; }
@@ -906,8 +906,8 @@ const OBSERVER_PAGE = `<!doctype html>
   @media (max-width:700px) { body{padding:0 1rem 4rem}.topbar{padding:.7rem 0}.topbar nav { order:3; width:100%; overflow:auto; margin:0; } .controls{margin-left:auto}.support-grid, .session-list { grid-template-columns:1fr; } .metric-tabs { grid-template-columns:repeat(2,1fr); } .runtime-tabs{display:flex}.hero { padding-top:1.6rem; } .boundary{font-size:.78rem}.capability-row,.receipt-row{grid-template-columns:1fr}.capability-kind{justify-self:start;text-align:left} }
 </style>
 </head>
-<body>
-<header class="topbar"><h1 tabindex="-1">Ceal Workbench</h1><nav id="nav"></nav><div class="controls"><select id="language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
+<body class="ceal-shell">
+<header class="topbar ceal-shell__header"><h1 class="ceal-shell__brand" tabindex="-1">Ceal Workbench</h1><nav class="ceal-shell__navigation" id="nav"></nav><div class="controls ceal-shell__actions"><select id="language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><select id="theme" aria-label="Visual theme"><option value="developer">Developer</option><option value="editorial">Editorial</option><option value="terminal">Terminal</option></select><div class="mode" role="group" aria-label="Color appearance"><button type="button" data-mode="system" aria-pressed="true">Auto</button><button type="button" data-mode="light" aria-pressed="false">Light</button><button type="button" data-mode="dark" aria-pressed="false">Dark</button></div></div></header>
 <p class="boundary" id="boundary">Personal Ceal view. Loading this page reads the current Gateway handshake and capability catalog when a client session is available; it never calls a provider. Local evidence remains separately labeled.</p>
 <div id="root">Loading Ceal and local evidence…</div>
 <dialog id="detail" aria-labelledby="detail-title"><div class="detail-head"><h2 id="detail-title">Local evidence</h2><button id="detail-close" type="button">Close</button></div><div class="detail-body" id="detail-body"></div></dialog>
@@ -1302,6 +1302,7 @@ fetch("/api/observer/v2/state").then((r) => r.json()).then((s) => {
   };
   for (const view of VIEWS) {
     const button = document.createElement("button");
+    button.className = "ceal-navigation-item";
     button.dataset.view = view;
     button.textContent = viewLabel(view);
     button.addEventListener("click", () => show(view));

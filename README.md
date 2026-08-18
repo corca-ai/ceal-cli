@@ -130,6 +130,10 @@ keeps advisory receipt metadata separate, and **Setup & privacy** declares the l
 sources this client reads, the receipt-spool retention bounds, and the fixed
 source boundary (`gateway_contact: personal handshake and capability discovery`,
 `provider_contact: none`).
+The embedded document currently implements dependency-free semantic migration
+markers for future `ceal-ui` shell and primitive contracts; it does not yet
+import the package. The replacement map and ownership boundary are documented
+in [`docs/internal-ui-compatibility.md`](docs/internal-ui-compatibility.md).
 The JSON compatibility field exposes the Codex adapter input
 (`ceal.local_usage_dashboard.codex_input.v1`) composed from that same redacted Agent evidence,
 the local Profile/instance session, and the bounded Gateway capability catalog
