@@ -13,6 +13,7 @@ import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
 import { isPromiseLike } from "./lib/promise-like.ts";
+import { createJsonReader } from "./lib/read-json.ts";
 import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
 import {
@@ -855,14 +856,6 @@ function requireSha256(value: unknown, code: string): string {
 	return value;
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Worker release input JSON is invalid.");
-	}
-}
-
 function normalizeRelativePath(value: unknown): string {
 	if (
 		typeof value !== "string" ||
@@ -931,6 +924,8 @@ function requireProvenanceSource(value: unknown, code = "invalid_protocol_proven
 function fail(code: string, message: string): never {
 	throw new WorkerReleaseInputError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Worker release input JSON is invalid.");
 
 function parseArgs(argv: readonly string[]): { help: boolean; json: boolean; options: PathInputOptions } {
 	const parsed = parseScriptArgs(argv, {

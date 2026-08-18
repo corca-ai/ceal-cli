@@ -28,6 +28,9 @@ Date: 2026-08-18
 - The historical `ArchiveLock` type family now uses the existing export from
   `worker-gateway-handoff-archive.ts`; native-artifact and release-input
   consumers no longer redeclare that eight-field contract.
+- The historical `readJson` family now has one `scripts/lib/read-json.ts`
+  reader factory. It owns file decoding and JSON parsing while each caller keeps
+  its domain-specific error class, code, and invalid-input message.
 - The Worker duplicate-ratchet entrypoint now routes through a repository-owned
   precision adapter. It coalesces stamped content-fingerprint collisions and
   fails closed on malformed identity/span evidence before applying only bounded,
@@ -46,6 +49,7 @@ detector groups them as one shallow family.
 - Type boundary: scripts/materialize-signed-gateway-protocol-source.ts.
 - Retained-path behavior: test/contract/worker-release-inputs.test.ts, the
   release-helper contract, and the Worker package/carrier tests.
+- JSON reader contract: test/contract/read-json.test.ts.
 - Duplicate adapter: scripts/run_dup_ratchet.py and
   scripts/run-dup-ratchet.test.ts.
 - Worker-owned gate: scripts/check-dup-ratchet.ts and
@@ -69,7 +73,28 @@ detector groups them as one shallow family.
 - The current historical ratchet-shaped scan passed with 132 families after
   the ArchiveLock owner extraction, exact result
   /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-07.json
-  (tool version 0.20.0). This is a measured reduction, not historical closure.
+  (tool version 0.20.0). This was the previous slice's measured count, not
+  historical closure.
+- The current readJson owner proof passed 69/69 tests, exact result
+  /tmp/ceal-proof-jobs/worker-read-json-focused/result.20260818-worker-read-json-focused-03.json
+  (exit_code: 0), including the dedicated reader contract, release inputs,
+  handoff archive/bootstrap/call, package, and native-artifact paths.
+- The current Worker TypeScript tools ratchet passed with exit_code 0 and no
+  `baseline_reduction_required` output at
+  /tmp/ceal-proof-jobs/worker-lint-types-read-json/result.20260818-worker-lint-types-read-json-04.json.
+- The current historical ratchet-shaped scan passed with 132 families at
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-10.json
+  (tool version 0.20.0). The count is not monotonic when a test contract changes
+  detector family boundaries; it is a measured inventory, not historical closure.
+- The exact former readJson family fingerprint `45c5c21929a78b64` has zero
+  current matches, while the same scan returned the positive-control family
+  `d95ac33768d18b97`; the control proof is recorded at
+  /tmp/ceal-proof-jobs/worker-read-json-family-control/result.20260818-worker-read-json-family-control-02.json.
+- The current historical candidate payload identifies the next test fixture
+  family `d95ac33768d18b97`, the exact `isRecord` family
+  `8c5ae173bd9d0063`, and the remaining release/import/helper families; exact
+  payload result:
+  /tmp/ceal-proof-jobs/worker-historical-candidates/result.20260818-worker-historical-candidates-04.json.
 - Focused retained-path source tests: 109/109 passed, including release
   helpers, package/carrier/cache/spool behavior, handoff contracts, and
   native/package build contracts. The exact proof result is
@@ -81,7 +106,7 @@ detector groups them as one shallow family.
   zero-overlap, repeated-JSON-guard, and small-test-setup rules.
 - npm run check:duplication: passed through the Worker proof route with
   fixable_ceiling=0 <= floor_F=0, exact result
-  /tmp/ceal-proof-jobs/worker-dup-gate-current/result.20260818-worker-dup-gate-current-02.json
+  /tmp/ceal-proof-jobs/worker-dup-read-json/result.20260818-worker-dup-read-json-07.json
   (exit_code: 0). The adapter contract also passes its positive, negative,
   and packaged-scan malformed-input controls.
 - npm run lint, ruff check scripts/run_dup_ratchet.py, and git diff --check:
@@ -117,14 +142,13 @@ detector groups them as one shallow family.
   malformed family entries, invalid content identity, and missing spans remain
   gate failures rather than becoming an empty clean inventory.
 - The authoritative current historical Worker scan reports 132 families after
-  commits c6b1bc1 and 7cb0393 and the packaged-scan boundary/test follow-up
-  (result /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-07.json).
-  The highest-value
-  successor candidates include SHA-256 helper ownership
-  (abc7cb50323ff928), ArchiveLock declarations (02290b95d0fcd055), readJson
-  helpers (45c5c21929a78b64), and the release-assets merge helper
-  (f47105491fa8497c). Historical debt is therefore not claimed complete by
-  this slice.
+  the readJson owner slice and final reader contract test (result
+  /tmp/ceal-proof-jobs/worker-historical-scan-recount/result.20260818-worker-historical-scan-recount-10.json).
+  The next measured candidates include the test fixture family
+  (d95ac33768d18b97), exact `isRecord` helper ownership
+  (8c5ae173bd9d0063), and the remaining release merge/helper families recorded
+  by the current candidate payload. Historical debt is therefore not claimed
+  complete by this slice.
 
 ## Boundary Ownership
 
@@ -157,6 +181,17 @@ applied.
   SHA-256 contract test were added, then the 60-test, type-ratchet, duplicate
   gate, lint, and 132-family recount proofs were rerun. Reviewer reports were
   signals; the primary re-read the scanner and adapter source before repair.
+- ReadJson owner fresh-eye: the bounded type/runtime reviewer re-read all four
+  original implementations, their domain-specific error contracts, call sites,
+  and nearest tests; it found no retained-behavior blocker and confirmed that a
+  caller-injected failure preserves each error class, code, and message. It
+  noted that a generic `Error` test was too weak; the dedicated contract now
+  throws the actual `WorkerReleaseInputError` and checks its class, code, and
+  message. Missing-file coverage remains explicitly deferred because it enters
+  the same `readFileSync` catch path and no separate behavior branch was added.
+  The bounded duplicate-precision reviewer then re-read the factory and four
+  callers, found no blocker or fragile threshold, and confirmed the current
+  duplicate gate and former-family control. Both reviews are complete.
 
 ## Deliberately Not Doing
 

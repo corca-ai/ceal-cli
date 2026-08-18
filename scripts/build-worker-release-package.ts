@@ -23,6 +23,7 @@ import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { resolvePackageBin } from "./lib/package-bin.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { createJsonReader } from "./lib/read-json.ts";
 import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
@@ -576,17 +577,11 @@ function assertRegularTree(root: string, code: string, omittedDirectories: reado
 	}
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Worker package input JSON is invalid.");
-	}
-}
-
 function fail(code: string, message: string): never {
 	throw new WorkerReleasePackageError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Worker package input JSON is invalid.");
 
 function parseArgs(argv: readonly string[]): ReturnType<typeof parseScriptArgs> {
 	return parseScriptArgs(argv, {

@@ -1,15 +1,15 @@
 import path from "node:path";
 import { asJsonRecord } from "./json-record.ts";
+import type { JsonReader } from "./read-json.ts";
 
 export type WorkerPackageVersionInput = { readonly source_path: string };
-type ReadJson = (filePath: string, code: string) => unknown;
 type ReleaseFailure = (code: string, message: string) => never;
 
 /** Enforce the one release version shared by the Worker and client packages. */
 export function resolveMatchingWorkerClientVersion(
 	repoRoot: string,
 	inputs: readonly WorkerPackageVersionInput[],
-	readJson: ReadJson,
+	readJson: JsonReader,
 	fail: ReleaseFailure,
 ): string {
 	const versions = inputs.map(

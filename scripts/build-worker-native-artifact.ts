@@ -30,6 +30,7 @@ import { codedErrorClass } from "./lib/coded-error.ts";
 import { asJsonRecord } from "./lib/json-record.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { createJsonReader } from "./lib/read-json.ts";
 import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import type { ArchiveLock } from "./worker-gateway-handoff-archive.ts";
@@ -640,17 +641,11 @@ function resolvePostjectCli() {
 	fail("postject_unavailable", "postject is required to build native worker artifacts.");
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Worker native artifact input JSON is invalid.");
-	}
-}
-
 function fail(code: string, message: string): never {
 	throw new WorkerNativeArtifactError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Worker native artifact input JSON is invalid.");
 
 function parseArgs(argv: readonly string[]): { help: boolean; json: boolean; options: NativeOptions } {
 	const parsed = parseScriptArgs(argv, {

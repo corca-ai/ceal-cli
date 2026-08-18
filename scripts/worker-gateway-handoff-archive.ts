@@ -8,6 +8,7 @@ import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 import { isPromiseLike } from "./lib/promise-like.ts";
+import { createJsonReader } from "./lib/read-json.ts";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const LOCK_SCHEMA_V1 = "ceal.worker_gateway_protocol_handoff_lock.v1";
@@ -398,14 +399,6 @@ function assertNoSymlinkAncestor(target: string, code: string): void {
 	}
 }
 
-function readJson(filePath: string, code: string): unknown {
-	try {
-		return JSON.parse(readFileSync(filePath, "utf8"));
-	} catch {
-		fail(code, "Gateway handoff lock JSON is invalid.");
-	}
-}
-
 function requireStringField(record: JsonRecord, key: string): string {
 	const value = record[key];
 	if (typeof value !== "string") fail("invalid_gateway_handoff_lock", "Gateway handoff lock contains an invalid text field.");
@@ -419,3 +412,5 @@ function requireNumberField(record: JsonRecord, key: string): number {
 function fail(code: string, message: string): never {
 	throw new WorkerGatewayHandoffArchiveError(code, message);
 }
+
+const readJson = createJsonReader(fail, "Gateway handoff lock JSON is invalid.");
