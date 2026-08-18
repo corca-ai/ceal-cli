@@ -644,16 +644,25 @@ compiler replacement proof.
 - Targeted verification: `npm run lint:types:source` exited 0;
   `npm run lint:types:tools` reported `source_behavior: 279 diagnostics in 22
   files; equal` and `immutable_artifact: 100 diagnostics in 14 files; equal`;
-  `npm run lint`, `npm exec --no -- biome check .`, and the Agent commit hook
-  exited 0. The explicit portable source test selection passed 171/171 tests
-  with zero failures. Plain `npm run test:source` stops on this macOS host at
-  the runner's `linux_runtime_requires_linux` prerequisite before executing
-  tests; Linux runtime proof remains a non-claim.
+  `npm run lint:types:ts6` reported the same `279/22 equal` and `100/14 equal`
+  decisions; `npm run lint`, `npm exec --no -- biome check .`, and the Agent
+  commit hook exited 0. The explicit portable source test selection passed
+  171/171 tests with zero failures. Plain `npm run test:source` stops on this
+  macOS host at the runner's `linux_runtime_requires_linux` prerequisite
+  before executing tests; Linux runtime proof remains a non-claim.
 - Structural cleanup: The first post-repair ESLint run left one 242-line
   `createInheritedIngressMessageSession` warning. The retry extracted the
   coherent `createIngressCreateContext` typed adapter, then reran ESLint,
   source typecheck, Biome, and the full lint bundle successfully; no metric-only
   line deletion was used.
+- Fresh-eye disposition: A bounded read-only review flagged the existing
+  `input.control.materialization!(frame)` at moved line 167 and requested TS6
+  evidence. The parent diff shows the same assertion at parent line 176, so it
+  predates this slice and is a Lane C concern, not a newly introduced assertion;
+  the finding is dismissed with the direct parent-diff check. The TS6 evidence
+  was then run and passed as recorded above. No dedicated noUnchecked
+  mutation-red/restore-green proof was run; that is an explicit non-claim for
+  this compiler-option slice, while the Lane A deletion proof remains complete.
 - Alternatives rejected: No indexed non-null assertions, `any` escape hatch,
   ratchet/baseline regeneration, or platform bypass. `exactOptionalPropertyTypes`
   remains the next Lane B slice.
@@ -817,4 +826,4 @@ improvement as applied or a tracked issue.
 | Lane B control-flow and unused options are compiler-owned in every raw Worker/Agent route | Worker and Agent tsconfig sources, raw route scripts, and the committed Slice 9 source repairs | from `/Users/ted/codes/ceal-cli`: run all three `npm run lint:types:raw:*` routes and `node --test test/contract/typecheck-source-gate.test.ts`; from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, and `npm run test:source -- test/public/quality-gates.test.ts`; require direct exit 0 and no baseline/update route |
 | Lane B `noUncheckedIndexedAccess` pre-edit diagnostics are the source-repair inventory, not a baseline input | Worker raw configs and pre-edit logs `/tmp/ceal-worker-laneb-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tools.json-noUncheckedIndexedAccess.log`, `/tmp/ceal-worker-laneb-tsconfig.tests.json-noUncheckedIndexedAccess.log`; Agent source `tsconfig.build.json` and `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`; Agent generated tools/test ownership is `scripts/typecheck-tools-tests.ts` and has no saved per-option pre-edit log | from `/Users/ted/codes/ceal-cli`: run the three explicit `npm exec --no -- tsc -p ... --pretty false --noUncheckedIndexedAccess` probes; from `/Users/ted/codes/ceal-agent`: the source pre-edit probe is represented by `/tmp/ceal-agent-laneb-noUncheckedIndexedAccess.log`, while generated tools/test diagnostics are established only by the actual `npm run lint:types:tools` route after enabling the option; require diagnostics to be repaired in source/configs, never recorded as baseline debt |
 | Worker `noUncheckedIndexedAccess` is compiler-owned across package, tools, and inherited test routes | Worker commit `a8b3b96`; `tsconfig.typecheck.json:8-19`, `tsconfig.tools.json:7-20`, `tsconfig.tests.json:2-15`, `test/contract/typecheck-source-gate.test.ts`, and `test/required.ts` | from `/Users/ted/codes/ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and `node --test test/contract/typecheck-source-gate.test.ts`; require direct exit 0, 7/7 contract tests, no baseline/update route, and a clean post-commit tree |
-| Agent `noUncheckedIndexedAccess` is compiler-owned across source and generated tools/test routes | Agent commit `5bcc8a852b9b3950c66f85cd669fde405cf7bb67`; `tsconfig.build.json:7-18`, `tsconfig.tools-tests.json:22-27`, `test/public/quality-gates.test.ts:43-54,70-80`, and `scripts/typecheck-tools-tests.ts:124-149` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint`, and `npm exec --no -- biome check .`; require source exit 0, tools/test summaries `279/22 equal` and `100/14 equal`, no baseline/update route, the explicit portable proof `node scripts/run-test-lanes.ts --source-only test/public/agent-capability-tool.test.ts test/public/agent-model-file-boundary.test.ts test/public/bound-installed-worker-verifier.test.ts test/public/capability-serving-entrypoint.test.ts test/public/check-duplicates.test.ts test/public/check-import-hard-failures.test.ts test/public/check-secretlint.test.ts test/public/gate-contract.test.ts test/public/inherited-capability-control-session-adapter.test.ts test/public/inherited-ingress-message-session.test.ts test/public/inherited-runner-turn-request.test.ts test/public/inherited-v4-injected-e2e-harness.test.ts test/public/quality-gates.test.ts test/public/quality-timing-advisory.test.ts` at 171/171, and a clean post-commit tree; `npm run test:source` is host-blocked by `linux_runtime_requires_linux` on macOS |
+| Agent `noUncheckedIndexedAccess` is compiler-owned across source and generated tools/test routes | Agent commit `5bcc8a852b9b3950c66f85cd669fde405cf7bb67`; `tsconfig.build.json:7-18`, `tsconfig.tools-tests.json:22-27`, `test/public/quality-gates.test.ts:43-54,70-80`, and `scripts/typecheck-tools-tests.ts:124-149` | from `/Users/ted/codes/ceal-agent`: run `npm run lint:types:source`, `npm run lint:types:tools`, `npm run lint:types:ts6`, `npm run lint`, and `npm exec --no -- biome check .`; require source exit 0, TS7 and TS6 tools/test summaries `279/22 equal` and `100/14 equal`, no baseline/update route, the explicit portable proof `node scripts/run-test-lanes.ts --source-only test/public/agent-capability-tool.test.ts test/public/agent-model-file-boundary.test.ts test/public/bound-installed-worker-verifier.test.ts test/public/capability-serving-entrypoint.test.ts test/public/check-duplicates.test.ts test/public/check-import-hard-failures.test.ts test/public/check-secretlint.test.ts test/public/gate-contract.test.ts test/public/inherited-capability-control-session-adapter.test.ts test/public/inherited-ingress-message-session.test.ts test/public/inherited-runner-turn-request.test.ts test/public/inherited-v4-injected-e2e-harness.test.ts test/public/quality-gates.test.ts test/public/quality-timing-advisory.test.ts` at 171/171, and a clean post-commit tree; `npm run test:source` is host-blocked by `linux_runtime_requires_linux` on macOS |
