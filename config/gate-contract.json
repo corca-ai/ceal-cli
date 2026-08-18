@@ -23,6 +23,7 @@
 						"npm run lint:no-legacy-mjs",
 						"npm run lint:node-modules-drift",
 						"npm run lint:reachability",
+						"npm run lint:secrets:staged",
 						"npm run lint:shell",
 						"npm run lint:source-nul-bytes:staged",
 						"npm run lint:store-lock",

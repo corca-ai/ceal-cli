@@ -56,6 +56,18 @@ that wrapper delegates to upstream-owned packaged Charness source absent from
 this checkout. Copying that helper would create an unowned compatibility tree,
 so this Worker gate does not claim to reproduce that advisory surface.
 
+`npm run lint:secrets` runs the local Secretlint rules over tracked Worker
+source, scripts, tests, configuration, workflows, and contributor docs. It has
+no baseline and no success cache. The staged pre-commit route is
+`npm run lint:secrets:staged`; the only synthetic exception is the named CLI
+test fixture, which is scanned separately with one exact Slack-token pattern.
+Production source and configuration are never covered by that fixture rule.
+`CEAL_SECRETLINT_CACHE=0 npm run lint:secrets` is the cache-independent proof
+command used for retained-input mutation checks.
+The Worker Knip configuration names Secretlint and its rule packages as
+config-driven dependencies because the `.secretlintrc.json` loader owns those
+edges; they are not hidden as an unused-dependency exception.
+
 `biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
 widen its `includes` to lint code this lane may not edit.
 

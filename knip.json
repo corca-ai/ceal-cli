@@ -16,6 +16,14 @@
 	},
 	"tags": ["-testOnly"],
 	"ignoreWorkspaces": ["packages/ceal-protocol"],
-	"ignoreDependencies": ["postject", "tsx"],
+	"ignoreDependencies": [
+		"@secretlint/secretlint-rule-aws",
+		"@secretlint/secretlint-rule-openai",
+		"@secretlint/secretlint-rule-pattern",
+		"@secretlint/secretlint-rule-slack",
+		"postject",
+		"secretlint",
+		"tsx"
+	],
 	"ignoreBinaries": ["nose", "shellcheck", "mkfifo", "cosign", "openssl", "awiki"]
 }

@@ -46,6 +46,7 @@ run_gate "raw TypeScript compiler" npm run lint:types
 run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
 run_gate "source NUL bytes" npm run lint:source-nul-bytes:staged
 run_gate "markdown" npm run lint:markdown:staged
+run_gate "secrets" npm run lint:secrets:staged
 run_gate "gate contract" node test/gate-contract-lib.ts
 run_gate "shell lint" npm run lint:shell
 
