@@ -6,7 +6,7 @@
 # Every gate here is whole-repo rather than staged-scoped, which departs from the
 # "cheap changed-file signal" docs/gates.md anticipated. The reason is measured
 # on the host in hand, not assumed: `biome check .` reads the whole tree in
-# ~0.45s wall and the type ratchet answers in ~1.6s, because both run on native
+# ~0.45s wall and the raw TypeScript compiler answers in ~1.6s, because both run on native
 # engines. A staged-file selector would have to restate biome's own include set
 # and tsc's project graph to save a fraction of that — more code, a second place
 # for the file set to drift, and no measurable win. Time the gates before
@@ -42,7 +42,7 @@ run_gate() {
 }
 
 run_gate "biome" npm run lint
-run_gate "type ratchet" npm run lint:types
+run_gate "raw TypeScript compiler" npm run lint:types
 run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
 run_gate "gate contract" node test/gate-contract-lib.ts
 run_gate "shell lint" npm run lint:shell
@@ -70,7 +70,7 @@ run_gate "duplicate literal" npm run lint:duplicate-literal
 # Ported from the Gateway checkout 2026-08-18, at a measured 0.24s. A checkout
 # whose node_modules disagrees with its lockfile does not merely risk a wrong
 # answer, it produces CONFIDENT wrong answers: this repository spent a debug
-# session on type ratchets that were quietly reporting for TypeScript 5.9.3 while
+# session on type checks that were quietly reporting for TypeScript 5.9.3 while
 # package.json declared 7.0.2. Proven by mutation before landing — an installed
 # version rewritten to 0.0.0-mutant exits 1 and names the package, and the
 # restored tree exits 0.

@@ -306,7 +306,7 @@ that answer in seconds — `npm run lint`, `npm run lint:types`,
 
 It is whole-repo, not changed-file, which is a deliberate reversal of what this
 document previously anticipated and the reason is measured rather than assumed.
-`biome check .` reads the whole tree in ~0.45s wall and the type ratchet answers
+`biome check .` reads the whole tree in ~0.45s wall and the raw TypeScript compiler answers
 in ~1.6s, both on native engines; a staged-file selector would have to restate
 biome's include set and tsc's project graph to save a fraction of that, which is
 more code, a second place for the file set to drift, and no measurable win. Time

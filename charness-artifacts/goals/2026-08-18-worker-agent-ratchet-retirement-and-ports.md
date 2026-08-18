@@ -9,8 +9,9 @@ activation command.
 
 ## Active Operating Frame
 
-- Current disposition: active; no implementation slice has started. The first
-  slice is Lane A, the Worker ratchet-retirement pilot.
+- Current disposition: active; Lane A implementation, raw compiler proof,
+  mutation/restore proof, and fresh-eye review are complete; local closeout is
+  in progress.
 - Execution boundary: activate from the Gateway checkout. Treat the three
   repositories as one sibling checkout set; run every Worker/Agent command with
   explicit roots (`git -C .`, `git -C ../ceal-cli`, `git -C ../ceal-agent`).
@@ -28,9 +29,9 @@ activation command.
 - Ownership: Worker changes belong in `../ceal-cli`; Agent changes belong in
   `../ceal-agent`; Gateway is read-only input for Lane D; this control artifact
   remains Worker-owned.
-- Next action: remeasure Lane A's Worker project/file distance and remaining
-  raw compiler route, snapshot the relevant inputs, then repair the route
-  before considering ratchet deletion.
+- Next action: commit Lane A locally, then inspect and repair the user-reported
+  temporary-tsconfig fixture cost in Worker and Agent as an orthogonal quality
+  slice before D1; keep the A → D1 → B → C → D2 → E dependency order intact.
 - Enforcement: compiler/linter rules own source diagnostics; repo gates own
   structural, packaging, and cross-surface contracts. Do not add or regenerate
   a diagnostic ratchet/baseline to make a migration green.
@@ -215,7 +216,7 @@ non-claims at closeout and reopen them only under a separately approved goal.
 
 | Slice | Objective | Expected evidence | Status |
 | --- | --- | --- | --- |
-| A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | pending |
+| A | Retire Worker ratchet after raw replacement proof | raw coverage, no-consumer search, mutation red, restore green | completed |
 | D1 | Port structural gates independent of explicit-any | closure, reachability, mutation/restore | pending |
 | B | Enable seven measured compiler options | config diff, source repairs, raw proof | pending |
 | C | Enable noNonNullAssertion and no-explicit-any | lint proof, guards/adapters, docs alignment | pending |
@@ -261,10 +262,23 @@ approved work. Do not create or duplicate #671.
 
 ## Slice Log
 
-No implementation slice has started; preparation and artifact checks only. The
-Worker commit hook printed the known Lane A diagnostics while returning exit 0;
-disposition: tracked by Lane A and not treated as raw compiler replacement
-proof.
+Lane A implementation and proof are recorded in Slice 1 below. The Worker
+commit hook's historical diagnostic output was used as a lead, not treated as
+raw compiler replacement proof.
+
+### Slice 1: Lane A — retire Worker typecheck diagnostic ratchet
+
+- Objective: Replace the Worker diagnostic ratchet with direct raw TypeScript compiler ownership, repair the last tools-project source errors, and prove the deletion boundary before dependent lanes.
+- Why this approach: The active goal forbids a regenerated baseline or replacement ratchet and requires compiler-owned diagnostics plus mutation-red and snapshot-restore-green proof before deleting the manager.
+- Commits: Local Worker commit: retire Worker typecheck diagnostic ratchet; no push or external boundary.
+- What changed: Updated package.json aliases, typed test/contract/repo-gates.test.ts, source-gate contract, docs/gates.md, and .githooks/pre-commit wording; deleted scripts/check-typecheck-ratchet.ts, its baseline, and the ratchet-only contract test.
+- Alternatives rejected: Rejected baseline regeneration, a second deletion shape, a new diagnostic manager, and a deleted-file exists assertion; the retained manifest negative assertion plus raw-route/no-consumer evidence is sufficient for this boundary.
+- Targeted verification: npm run lint:types:raw:packages exit 0; raw:tools exit 0; raw:tests exit 0; npm run lint:types exit 0; node --test test/contract/typecheck-source-gate.test.ts 7/7; node --test test/contract/repo-gates.test.ts 50/50; bash .githooks/pre-commit exit 0. Mutation inserted const laneAMutationRedProof: string = 1; raw:tools exited 1 with TS2322; restored from /tmp/ceal-lane-a-closeout-snapshot.jGxPox; restore hash matched 4d6de97ed7f43a7e2cbe816c410a7f8aa6f10347f9d7fe30407f6d4e9e27ab84 and raw:tools returned 0.
+- Test duplication pressure: No new test file or duplicate test family; existing source/gate contracts were repaired and extended, and pre-commit duplicate-literal/unused/reachability checks passed with existing advisory hints only.
+- Critique: Fresh-eye satisfaction: parent-delegated; three named deletion lenses plus a separate counterweight returned findings, and all four shared-tree fingerprint verifies were clean. Cite cascade and sibling-boundary lenses found no Act Before Ship code issue. Counterweight required goal closeout records, bundled stale pre-commit wording cleanup, classified deleted-file assertion as over-worry, and classified the retired ratchet file/code/count stability contract as an intentional non-claim.
+- Off-goal findings: No push, CI watch, release, apply/restart, live readback, issue creation, or Gateway/Agent source edit. Issue #671 was not duplicated.
+- Lessons carried forward: Raw compiler routes must be proven directly before deleting a diagnostic manager; mutation restore must use the current snapshot rather than HEAD. Keep the retired ratchet's diagnostic-shape loss explicit as a non-claim. Next locally decidable slice is the user-supplied temporary-tsconfig fixture performance inventory in Worker and Agent, kept orthogonal to D1.
+- Metrics: Raw routes and targeted contracts were sub-second to low-single-digit seconds; repo-gates completed in 2.76s and pre-commit completed successfully. No broad verification-lock or external proof was run.
 
 ## Context Sources
 
@@ -330,9 +344,12 @@ issue #671 as an upstream follow-up rather than a local fix claim.
 
 ## Final Verification
 
-Preparation-only. On 2026-08-18, the default artifact check and
-`--pursue-ready` both exited 0 before this cleanup; rerun both after this edit.
-No implementation, runtime, push, release, or remote proof is claimed.
+Lane A local verification completed on 2026-08-19: all three raw TypeScript
+routes, targeted source/gate contracts, the mutation-red/restore-green proof,
+and the Worker pre-commit gate passed. The overall goal remains active; D1,
+the user-reported fixture-performance slice, later compiler/linter lanes, and
+final verification are still pending. No runtime, push, release, or remote
+proof is claimed.
 
 ## User Verification Instructions
 
@@ -346,9 +363,10 @@ No implementation, runtime, push, release, or remote proof is claimed.
 
 ## Auto-Retro
 
-Retro not run — no implementation work unit has closed. Run `charness:retro` at
-closeout and disposition every surfaced improvement as applied or a tracked
-issue.
+Retro not run — Lane A has now closed as a local implementation unit, but the
+goal continues into the fixture-performance and planned gate/compiler lanes.
+Run `charness:retro` at goal closeout and disposition every surfaced
+improvement as applied or a tracked issue.
 
 ## Claim Ledger
 
@@ -358,6 +376,9 @@ issue.
 | activation identities are current | three Git checkouts | `git -C . rev-parse HEAD`; same explicit roots; record tree identity before implementation |
 | Worker raw replacement exists | `../ceal-cli/package.json` and raw scripts | `rg -n "lint:types:raw" ../ceal-cli/package.json ../ceal-cli/scripts ../ceal-cli/test` with a positive control |
 | old ratchet has no live consumer | Worker scripts/tests/config | first hit the raw-route control, then search declared roots for ratchet names and record zero only after the control succeeds |
+| Lane A raw routes are green after ratchet deletion | Worker `package.json:29-36`, raw compiler projects, Slice 1 proof | from `../ceal-cli`: run `npm run lint:types:raw:packages`, `npm run lint:types:raw:tools`, `npm run lint:types:raw:tests`, and read each direct exit code |
+| Lane A mutation guard is real and restored without losing intended work | retained `test/contract/repo-gates.test.ts` plus `/tmp/ceal-lane-a-closeout-snapshot.jGxPox` | mutate `test/contract/repo-gates.test.ts`, require `npm run lint:types:raw:tools` nonzero, restore from the snapshot, require the same route green, and compare SHA-256 |
+| pre-commit labels the type gate as raw compiler ownership | Worker `.githooks/pre-commit:9,45,73` | `rg -n -i "type ratchet|raw TypeScript compiler|type checks" ../ceal-cli/.githooks/pre-commit` |
 | compiler/linter owns source diagnostics | Worker/Agent configs and raw routes | inspect owning configs; run each declared raw typecheck/lint route and read direct exit codes |
 | noNonNullAssertion rationale is live before Lane C | `../ceal-cli/biome.json:30`, `../ceal-cli/docs/gates.md:103-107` | read both, enable the rule, rerun Biome, reread the owner doc |
 | every port is receiving-owned and reachable | source closure plus receiving package/gate contracts | inspect package/check/hook reachability; run retained-input mutation red and snapshot-restore green |

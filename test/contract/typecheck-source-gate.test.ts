@@ -13,12 +13,6 @@ const toolsTypecheckConfigPath = path.join(ROOT, "tsconfig.tools.json");
 const toolsTypecheckConfig = JSON.parse(readFileSync(toolsTypecheckConfigPath, "utf8"));
 const testsTypecheckConfigPath = path.join(ROOT, "tsconfig.tests.json");
 const testsTypecheckConfig = JSON.parse(readFileSync(testsTypecheckConfigPath, "utf8"));
-const ratchetBaseline: {
-	version: number;
-	compiler: string;
-	projects: Record<string, { files: string[]; diagnosticsByFile: Record<string, Record<string, number>> }>;
-} = JSON.parse(readFileSync(path.join(ROOT, "charness-artifacts/quality/typecheck-ratchet-baseline.json"), "utf8"));
-
 function trackedSourceFiles() {
 	return execFileSync(
 		"git",
@@ -74,9 +68,9 @@ test("terminating and watch typecheck modes use distinct cache writers", () => {
 	const ts6CacheEntries = [
 		...ts6Terminating.matchAll(/tsc6 -p (tsconfig\.(?:typecheck|tools|tests)\.json) --pretty false --tsBuildInfoFile (\S+)/gu),
 	].map(([, config, cache]) => ({ config, cache }));
-	assert.equal(packageTerminating, "node scripts/check-typecheck-ratchet.ts --project=packages");
-	assert.equal(toolsTerminating, "node scripts/check-typecheck-ratchet.ts --project=tools");
-	assert.equal(testsTerminating, "node scripts/check-typecheck-ratchet.ts --project=tests");
+	assert.equal(packageTerminating, "npm run lint:types:raw:packages");
+	assert.equal(toolsTerminating, "npm run lint:types:raw:tools");
+	assert.equal(testsTerminating, "npm run lint:types:raw:tests");
 	assert.equal(manifest.scripts["lint:types:raw:packages"], "tsc -p tsconfig.typecheck.json --pretty false");
 	assert.equal(manifest.scripts["lint:types:raw:tools"], "tsc -p tsconfig.tools.json --pretty false");
 	assert.equal(manifest.scripts["lint:types:raw:tests"], "tsc -p tsconfig.tests.json --pretty false");
@@ -144,18 +138,13 @@ test("the source gate is terminating, source-only, and independent of checkout a
 	assert.match(manifest.scripts["check:unit"], /npm run lint:types/u);
 });
 
-test("the main type gate is a TypeScript 7 ratchet with explicit baseline writes", () => {
-	assert.equal(ratchetBaseline.version, 1);
-	assert.equal(ratchetBaseline.compiler, "typescript@7");
-	assert.deepEqual(Object.keys(ratchetBaseline.projects).sort(), ["packages", "tests", "tools"]);
-	for (const project of Object.values(ratchetBaseline.projects)) {
-		assert.deepEqual(project.files, [...project.files].sort());
-		assert.deepEqual(Object.keys(project.diagnosticsByFile), [...Object.keys(project.diagnosticsByFile)].sort());
-	}
-	assert.match(manifest.scripts["lint:types:packages"], /check-typecheck-ratchet[.]ts --project=packages/u);
+test("the main type gate delegates each owner to its raw TypeScript compiler route", () => {
+	assert.equal(manifest.scripts["lint:types:packages"], "npm run lint:types:raw:packages");
+	assert.equal(manifest.scripts["lint:types:tools"], "npm run lint:types:raw:tools");
+	assert.equal(manifest.scripts["lint:types:tests"], "npm run lint:types:raw:tests");
 	assert.equal(
 		manifest.scripts["lint:types:raw"],
 		"npm run lint:types:raw:packages && npm run lint:types:raw:tools && npm run lint:types:raw:tests",
 	);
-	assert.equal(manifest.scripts["write:typecheck-ratchet-baseline"], "node scripts/check-typecheck-ratchet.ts --write-baseline");
+	assert.doesNotMatch(JSON.stringify(manifest.scripts), /check-typecheck-ratchet|typecheck-ratchet-baseline/u);
 });
