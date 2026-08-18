@@ -382,6 +382,10 @@ push, release, or remote proof is claimed.
 Retro not run — Lane A and the temporary fixture slice are closed as local
 implementation units, but the goal continues into the planned gate/compiler
 lanes. The quality artifacts record the validator correction and its disposition.
+The Worker and Agent auto-retro probes returned `state: not-established` with
+`configuration_status: adapter-missing`; I therefore chose to defer the short
+session retro to goal closeout rather than treat the missing answer as a clean
+no-retro verdict.
 Run `charness:retro` at goal closeout and disposition every surfaced
 improvement as applied or a tracked issue.
 
