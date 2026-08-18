@@ -599,7 +599,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(html, /What this Profile can do through Ceal/u);
 	assert.match(html, /Request access/u);
 	assert.match(html, /Unavailable in this version/u);
-	assert.match(html, /role='img' aria-label=/u);
+	assert.match(html, /data-activity-date=/u);
 	assert.match(html, /aria-label="Visual theme"/u);
 	assert.match(html, /aria-label="Color appearance"/u);
 	assert.match(html, /data-mode="system"/u);

@@ -114,10 +114,15 @@ Sessions, Access, and Evidence tabs, with an in-page Korean/English selector.
 Usage switches among Sessions, Agent tool calls, Tokens, and Estimated cost
 without changing evidence semantics; its activity field explicitly defines one
 cell as one local calendar day and uses a visible relative-intensity legend.
-Sessions uses task-first rows and twenty-row pagination so a history over one
-hundred rows does not turn into one unbounded scroll. Synthetic demo task names
-are visibly labeled as synthetic; production observations never infer work
-content from timing or counts. Access uses a capability-specific list rather
+Each rendered activity date opens the returned session details for that local
+date; the UI states when daily aggregates and returned detail have different
+coverage. Sessions uses task-first rows, defaults to highest observed token use,
+offers recent/tool-call alternatives, and keeps twenty-row pagination so a
+history over one hundred rows does not turn into one unbounded scroll. Synthetic
+demo task names are visibly labeled as synthetic; production observations never
+infer work content from timing or counts. Runtime switching clears the date
+filter and explains that Codex and Claude retain separate sources, accounting
+semantics, shapes, and scales. Access uses a capability-specific list rather
 than session cards and explains effect and target requirements while keeping the
 unowned request workflow disabled. Evidence is the human-readable provenance,
 coverage, retention, and known-loss explanation for the other views; raw DTO

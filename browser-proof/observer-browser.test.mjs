@@ -117,7 +117,7 @@ test("a populated review fixture preserves density and evidence boundaries", { t
 	await page.getByRole("heading", { name: "Estimated cost · unsupported" }).waitFor();
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
 	await page.locator("button[data-metric='sessions']").click();
-	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 3);
+	assert.equal(await page.locator(".activity-grid button[data-activity-date]").count(), 3);
 	await page.getByRole("button", { name: /Estimated cost USD/u }).click();
 	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
 	await page.getByText(/observed of 3 eligible sessions/u).waitFor();
@@ -244,13 +244,40 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.getByText(/Synthetic demo data/u).waitFor();
 	await page.getByRole("heading", { name: "105 sessions observed." }).waitFor();
 	await page.getByRole("button", { name: /Agent tool calls 508/u }).waitFor();
+	await page.getByText(/separate local sources and accounting semantics/u).waitFor();
+	const activityDate = await page.locator("button[data-activity-date]").first().getAttribute("data-activity-date");
+	await page.locator("button[data-activity-date]").first().click();
+	assert.equal(await page.getByRole("button", { name: "Sessions", exact: true }).getAttribute("aria-current"), "true");
+	await page
+		.getByText(new RegExp(`${activityDate} · \\d+ returned session details`, "u"))
+		.first()
+		.waitFor();
+	await page.getByText(/not a complete count for the date/u).waitFor();
+	await page.getByRole("button", { name: "Clear date filter" }).click();
+	assert.equal(await page.locator("select[data-session-sort]").inputValue(), "tokens");
+	await page.getByText("16,080 tokens", { exact: true }).first().waitFor();
+	assert.equal(
+		await page.locator("button[data-session-ref]").first().getAttribute("data-session-ref"),
+		"22222222-2222-3333-4444-000000000114",
+	);
+	await page.locator("select[data-session-sort]").selectOption("tools");
+	assert.equal(
+		await page.locator("button[data-session-ref]").first().getAttribute("data-session-ref"),
+		"22222222-2222-3333-4444-000000000050",
+	);
+	await page.locator("select[data-session-sort]").selectOption("recent");
+	assert.equal(
+		await page.locator("button[data-session-ref]").first().getAttribute("data-session-ref"),
+		"22222222-2222-3333-4444-000000000010",
+	);
+	await page.locator("select[data-session-sort]").selectOption("tokens");
+	await page.getByRole("button", { name: "Usage", exact: true }).click();
 	await page.getByText(/highest tool-call concentration/u).waitFor();
 	await page.getByRole("button", { name: "Inspect the referenced session" }).first().focus();
 	await page.keyboard.press("Enter");
 	await page.getByRole("dialog").waitFor();
 	await page.getByText("Agent session evidence").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Sessions", exact: true }).getAttribute("aria-current"), "true");
-	await page.getByText("Page 3 of 6 · 105 of 105 eligible sessions returned").waitFor();
 	const referencedSession = page.locator("button[data-session-ref='22222222-2222-3333-4444-000000000050']");
 	assert.equal(await referencedSession.count(), 1);
 	await page.keyboard.press("Escape");
@@ -259,7 +286,7 @@ test("more than one hundred sessions use bounded pagination", { timeout: 40_000 
 	await page.getByRole("button", { name: /Tokens 924,000/u }).waitFor();
 	await page.getByRole("button", { name: /Estimated cost USD 3[.]36/u }).click();
 	await page.getByText(/Estimated locally; not billed cost/u).waitFor();
-	assert.equal(await page.locator(".activity-grid .day[role='img']").count(), 61);
+	assert.equal(await page.locator(".activity-grid button[data-activity-date]").count(), 61);
 	await page.getByText("profile:review-personal", { exact: true }).waitFor();
 	await page.getByRole("button", { name: "Claude", exact: true }).click();
 	await page.getByRole("button", { name: "Codex", exact: true }).click();
