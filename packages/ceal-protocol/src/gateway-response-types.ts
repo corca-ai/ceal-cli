@@ -1,6 +1,6 @@
 import type { CealCapabilityNavigation } from "./capability-navigation.js";
 
-export const CEAL_PROTOCOL_VERSION = "1.3.0" as const;
+export const CEAL_PROTOCOL_VERSION = "1.4.0" as const;
 
 export interface CealProtocolRange { minimum: string; maximum: string }
 export type CealClientOperation = "handshake" | "discover" | "call" | "readback";
@@ -94,7 +94,7 @@ export type CealGatewayWriteReceiptRequest = CealGatewayRequestEnvelope<"readbac
 export type CealGatewayReadbackRequest = CealGatewayAuditReadbackRequest | CealGatewayWriteReceiptRequest;
 export type CealGatewayRequest = CealGatewayHandshakeRequest | CealGatewayDiscoverRequest | CealGatewayCallRequest | CealGatewayReadbackRequest;
 
-export type CealGatewayHostNonClaim = "provider_execution_not_reached" | "production_audit_not_reached";
+export type CealGatewayHostNonClaim = "provider_execution_not_reached" | "production_audit_not_reached" | "target_authorization_not_observed";
 export type CealGatewayHostNonClaims = readonly CealGatewayHostNonClaim[];
 
 /** One Profile the authenticated subject/client may currently select. */
@@ -150,8 +150,20 @@ export interface CealGatewayHandshakeValue {
 	identity_projection?: CealGatewayScopedIdentityProjection;
 }
 
-export interface CealGatewayDiscoveryValue {
-	schema_version: "ceal.gateway_discovery.v2";
+export interface CealGatewayCapabilityIndexValue {
+	schema_version: "ceal.gateway_discovery.v3";
+	phase: "capability_index";
+	profile_ref: string;
+	membership_ref: string;
+	capabilities: CealGatewayDiscoveryCapability[];
+	host_decision: "accepted";
+	proof_level: "host_decision";
+	non_claims: CealGatewayHostNonClaims;
+}
+
+export interface CealGatewayTargetPageValue {
+	schema_version: "ceal.gateway_discovery.v3";
+	phase: "target_page";
 	profile_ref: string;
 	membership_ref: string;
 	capabilities: CealGatewayDiscoveryCapability[];
@@ -161,6 +173,8 @@ export interface CealGatewayDiscoveryValue {
 	proof_level: "host_decision";
 	non_claims: CealGatewayHostNonClaims;
 }
+
+export type CealGatewayDiscoveryValue = CealGatewayCapabilityIndexValue | CealGatewayTargetPageValue;
 
 /** Bounded metadata for a current Profile target selection. */
 export interface CealGatewayTargetCatalog {

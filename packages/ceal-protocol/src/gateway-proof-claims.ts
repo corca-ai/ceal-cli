@@ -66,7 +66,7 @@ export const CEAL_GATEWAY_PROOF_AXIS_NON_CLAIMS = Object.freeze({
 } as const);
 
 /** Canonical emission order. `non_claims` is a set; this is how it is written. */
-export const CEAL_GATEWAY_HOST_NON_CLAIM_ORDER = Object.freeze(["provider_execution_not_reached", "production_audit_not_reached"] as const);
+export const CEAL_GATEWAY_HOST_NON_CLAIM_ORDER = Object.freeze(["provider_execution_not_reached", "target_authorization_not_observed", "production_audit_not_reached"] as const);
 
 /**
  * The axis no accepted response on this boundary may claim. Kept as a named

@@ -267,7 +267,7 @@ function startRequest(): CealDeviceEnrollmentStartRequest {
 		proof_public_key: PROOF_KEY,
 		recipient_suite: "X25519",
 		recipient_public_key: RECIPIENT_KEY,
-		client: { name: "ceal", version: "0.69.0", protocol_version: "1.3.0", features: ["device_enrollment_sealed_v1"] },
+		client: { name: "ceal", version: "0.69.0", protocol_version: "1.4.0", features: ["device_enrollment_sealed_v1"] },
 	};
 }
 
@@ -289,7 +289,7 @@ function startResult() {
 			nonce: NONCE,
 			gateway_origin: "https://ceal.example.test",
 			proof_suite: "Ed25519",
-			protocol_version: "1.3.0",
+			protocol_version: "1.4.0",
 			expires_at: "2126-07-29T12:10:00.000Z",
 		},
 	};

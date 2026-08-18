@@ -661,8 +661,8 @@ test("version identifies the package, protocol, range, and credential context", 
 		command: "ceal",
 		// Drift guard: the rendered version must track the package manifest.
 		version: manifest.version,
-		protocol_version: "1.3.0",
-		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		protocol_version: "1.4.0",
+		supported_gateway_protocol_range: { minimum: "1.4.0", maximum: "1.4.0" },
 		credential_context: "gateway_issued_client_session",
 	});
 	// No literal version is asserted here: the drift guard above already pins the
@@ -2834,7 +2834,7 @@ test("target-catalog failures keep their exact code through the capabilities tar
 					: {
 							ok: false,
 							request_id: request.request_id,
-							protocol_version: "1.3.0",
+							protocol_version: "1.4.0",
 							error: {
 								code: expected.code,
 								message: "server-controlled",
@@ -2893,7 +2893,7 @@ test("an opaque resource denial classifies at the call surface and defers dispos
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						error: { code: "resource_not_available", message: "server-controlled", next_action: "server-controlled" },
 					}
 				: policyDeniedReadbackResponse(request),
@@ -2942,7 +2942,7 @@ test("a failed pre-provider call preserves its request ref and receipt exposes t
 // The Gateway lane owns this contract and shipped it as an immutable fixture; the
 // bytes are pinned here so a silent edit to the copy cannot quietly relax what
 // these four tests prove. Verified against the digest the request named.
-const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "e5beac7823d5aebbb1b60a93df0cab493e35c313fe0f86e318a77b9e6dbe3554";
+const ANNOUNCEMENT_POLICY_FIXTURE_SHA256 = "afa97a8ecdcd59455bb4013743414adae469316f5172fd4a6e026a21f0270db0";
 const ANNOUNCEMENT_POLICY_ABSENT = "scope not declared by the Gateway";
 
 function announcementPolicyFixtureCase(name: string) {
@@ -2975,7 +2975,8 @@ async function renderFixtureCapabilities(caseName: string, args: readonly string
 			body.operation === "handshake"
 				? handshakeResponse(body)
 				: success(body, {
-						schema_version: "ceal.gateway_discovery.v2",
+						schema_version: "ceal.gateway_discovery.v3",
+						phase: "target_page",
 						profile_ref: body.profile_ref,
 						membership_ref: "membership:narnia",
 						capabilities,
@@ -3102,7 +3103,7 @@ test("a throttled call renders the Gateway's wait in its error document", async 
 					: {
 							ok: false,
 							request_id: body.request_id,
-							protocol_version: "1.3.0",
+							protocol_version: "1.4.0",
 							proof_ref_or_unavailable: `audit:${body.request_id}`,
 							error: {
 								code: "rate_limited",
@@ -3274,7 +3275,7 @@ test("a direct Gateway failure renderer never reflects unsafe code, text, or pro
 		{
 			ok: false,
 			request_id: "request:direct-policy",
-			protocol_version: "1.3.0",
+			protocol_version: "1.4.0",
 			proof_ref_or_unavailable: "proof:policy:1",
 			error: {
 				code: "policy_denied",
@@ -3308,7 +3309,7 @@ test("a direct Gateway failure renderer never reflects unsafe code, text, or pro
 	const datePolicy = Object.assign(new Date(), {
 		ok: false,
 		request_id: "request:direct-policy",
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: "proof:policy:gateway",
 		error: {
 			code: "policy_denied",
@@ -3439,7 +3440,7 @@ test("a complete HTTP policy denial remains a blocked call", async () => {
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						proof_ref_or_unavailable: "proof:policy:gateway",
 						error: {
 							code: "policy_denied",
@@ -3526,7 +3527,7 @@ test("a duplicate-write refusal preserves the Gateway-issued confirmation refere
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						error: { code: "duplicate_write_refused", message, next_action: nextAction },
 					}
 				: failedReadbackResponse(request),
@@ -3550,7 +3551,7 @@ test("a duplicate-write refusal keeps its safe message when the optional action 
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						error: { code: "duplicate_write_refused", message },
 					}
 				: failedReadbackResponse(request),
@@ -3574,7 +3575,7 @@ test("a non-policy authorization refusal stays blocked on the call surface", asy
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						error: {
 							code: "target_catalog_capability_not_granted",
 							message: "The target is not granted for this capability.",
@@ -4235,7 +4236,8 @@ test("a URL target match without a navigation declaration preserves the Gateway 
 		request.operation === "handshake"
 			? handshakeResponse(request)
 			: success(request, {
-					schema_version: "ceal.gateway_discovery.v2",
+					schema_version: "ceal.gateway_discovery.v3",
+					phase: "target_page",
 					profile_ref: request.profile_ref,
 					membership_ref: "membership:narnia",
 					capabilities: [
@@ -4486,7 +4488,7 @@ test("Gateway failure output never reflects server-controlled secret text", asyn
 		(request) => ({
 			ok: false,
 			request_id: request.request_id,
-			protocol_version: "1.3.0",
+			protocol_version: "1.4.0",
 			error: { code: "internal_error", message: token, next_action: token },
 		}),
 	);
@@ -4517,7 +4519,7 @@ test("an HTTP Gateway failure missing its required message is refused before CLI
 		(request) => ({
 			ok: false,
 			request_id: request.request_id,
-			protocol_version: "1.3.0",
+			protocol_version: "1.4.0",
 			error: { code: "legacy_failure", next_action: action },
 		}),
 	);
@@ -4631,10 +4633,10 @@ test("capabilities probes live and populates the discovery cache when cold", asy
 			gatewayEndpoint: endpoint,
 			profileRef: "profile:narnia",
 			membershipRef: "membership:narnia",
-			negotiatedProtocolVersion: "1.3.0",
+			negotiatedProtocolVersion: "1.4.0",
 		});
 		assert.equal(entry.cachedAt, Date.parse("2026-07-18T12:00:00.000Z"));
-		assert.equal(entry.discovery.schema_version, "ceal.gateway_discovery.v2");
+		assert.equal(entry.discovery.schema_version, "ceal.gateway_discovery.v3");
 	});
 });
 
@@ -4745,7 +4747,7 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 			assert.equal(payload.gateway_observation.response_envelope_kind, "unknown");
 			assert.equal(payload.gateway_observation.protocol_handshake_verified, true);
 			assert.match(payload.error.next_action, /HTTP 200/u);
-			assert.match(payload.error.next_action, /1\.3\.0/u);
+			assert.match(payload.error.next_action, /1\.4\.0/u);
 			assert.deepEqual(
 				requests.map((item) => item.body.operation),
 				["handshake", "discover"],
@@ -4914,7 +4916,7 @@ test("capabilities degrades to a live probe when a fresh cache entry has a malfo
 	await withGateway(async ({ endpoint, requests }) => {
 		const now = Date.parse("2026-07-18T12:00:00.000Z");
 		const malformed = cachedEntry(endpoint, now);
-		malformed.discovery = { schema_version: "ceal.gateway_discovery.v2" };
+		malformed.discovery = { schema_version: "ceal.gateway_discovery.v3" };
 		const cache = inMemoryDiscoveryCache(malformed);
 		const payload = await yamlRun(["capabilities"], 0, {
 			readStoredSession: async () => storedSession(endpoint),
@@ -4957,10 +4959,11 @@ function inMemoryDiscoveryCache(initial: CealDiscoveryCacheEntry | null = null):
 
 function cachedEntry(endpoint: string, cachedAt: number): CealDiscoveryCacheEntry {
 	return {
-		key: { gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.3.0" },
+		key: { gatewayEndpoint: endpoint, profileRef: "profile:narnia", membershipRef: "membership:narnia", negotiatedProtocolVersion: "1.4.0" },
 		cachedAt,
 		discovery: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: "profile:narnia",
 			membership_ref: "membership:narnia",
 			capabilities: [
@@ -5282,7 +5285,7 @@ async function withRenewingGateway(callback: RenewingGatewayCallback, options: R
 				JSON.stringify({
 					ok: false,
 					request_id: body.request_id,
-					protocol_version: "1.3.0",
+					protocol_version: "1.4.0",
 					error: { code: "authentication_failed", message: "Authentication is required.", next_action: "Renew." },
 				}),
 			);
@@ -5420,8 +5423,8 @@ function escapeRegExp(value: string): string {
 function handshakeResponse(request: FixtureRequest): FixtureResponse {
 	return success(request, {
 		schema_version: "ceal.gateway_handshake.v1",
-		negotiated_protocol_version: "1.3.0",
-		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		negotiated_protocol_version: "1.4.0",
+		supported_gateway_protocol_range: { minimum: "1.4.0", maximum: "1.4.0" },
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
 		registration_ref: "registration:narnia",
@@ -5437,7 +5440,8 @@ function handshakeResponse(request: FixtureRequest): FixtureResponse {
 function discoveryResponse(request: FixtureRequest): FixtureResponse {
 	const selected = request.body.capability_id === "message.search";
 	return success(request, {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
 		capabilities: [
@@ -5593,7 +5597,7 @@ function continuationFailureResponse(request: FixtureRequest): FixtureResponse {
 	return {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		error: {
 			code: "continuation_not_available",
 			message: "server-controlled",
@@ -5606,7 +5610,7 @@ function invalidArgumentsFailureResponse(request: FixtureRequest): FixtureRespon
 	return {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		error: {
 			code: "invalid_arguments",
 			message: "server-controlled",
@@ -5693,7 +5697,7 @@ function success(request: FixtureRequest, value: Record<string, unknown>): Fixtu
 	return {
 		ok: true,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: `audit:${request.request_id}`,
 		value,
 	};
@@ -5754,7 +5758,7 @@ test("a receipt this client cannot project is counted, not passed over", async (
 				? {
 						ok: false,
 						request_id: request.request_id,
-						protocol_version: "1.3.0",
+						protocol_version: "1.4.0",
 						error: { code: "session_unavailable", message: "server-controlled", next_action: "server-controlled" },
 					}
 				: readbackResponse(request),
@@ -5969,12 +5973,12 @@ function acceptancePartsBase(overrides: Record<string, unknown> = {}): Acceptanc
 			protocol: { package: "@corca-ai/ceal-protocol", producer: { repository: "corca-ai/ceal" } },
 		},
 		reportedVersion: "0.68.0",
-		clientProtocolVersion: "1.3.0",
+		clientProtocolVersion: "1.4.0",
 		guide: { status: "available", registered_host_count: 2 },
 		session: {
 			instance_ref: "instance:ceal-prod",
 			profile_ref: "profile:work",
-			negotiated_protocol_version: "1.3.0",
+			negotiated_protocol_version: "1.4.0",
 			host_decision: "accepted",
 			catalog_source: "live_discovery",
 			capability_count: 20,

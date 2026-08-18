@@ -1048,9 +1048,13 @@ function writeCapabilitiesAvailable(
 	renewalContext: CapabilityRenewalContext,
 ): number {
 	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
-	const targets = renderCapabilityTargets(discovery.value.targets, discovery.value.capabilities);
+	const targetPage = discovery.value.phase === "target_page" ? discovery.value : undefined;
+	const targets = targetPage ? renderCapabilityTargets(targetPage.targets, targetPage.capabilities) : [];
 	const targetSelection = targetSelectionProjection(selection);
-	const nextAction = capabilityCatalogNextAction(discovery.value.target_catalog, selection);
+	const nextAction =
+		targetPage === undefined
+			? capabilityIndexNextAction(handshake.value.profile_ref)
+			: capabilityCatalogNextAction(targetPage.target_catalog, selection);
 	return writeYaml(io.stdout, {
 		schema_version: "ceal.capabilities.v1",
 		command: "ceal",
@@ -1076,10 +1080,11 @@ function writeCapabilitiesAvailable(
 		},
 		capabilities,
 		targets,
+		discovery_phase: discovery.value.phase,
 		// Tell an agent the concise rows omit the input grammar and how to get it,
 		// so a compact default never reads as "this capability has no contract".
 		...(detail ? {} : { capability_detail: "Re-run 'ceal capabilities --detail' for per-capability input_contract." }),
-		target_catalog: discovery.value.target_catalog,
+		...(targetPage ? { target_catalog: targetPage.target_catalog } : {}),
 		...(targetSelection ? { target_selection: targetSelection } : {}),
 		proof_level: discovery.value.proof_level,
 		live_gateway_checked: true,
@@ -1251,7 +1256,7 @@ function unregisteredGuideAdvisory(runtime: CealCommandContext): Record<string, 
 }
 
 function capabilityCatalogNextAction(
-	catalog: CealGatewayDiscoveryValue["target_catalog"],
+	catalog: Extract<CealGatewayDiscoveryValue, { phase: "target_page" }>["target_catalog"],
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 ): string | null {
 	const profile = selection.kind === "targets" && selection.profileRef ? ` --profile ${selection.profileRef}` : "";
@@ -1267,6 +1272,10 @@ function capabilityCatalogNextAction(
 			: "The unfiltered target catalog is complete and contains zero currently authorized targets. This is terminal for target-bound calls; do not invent a target ref or retry this page.";
 	}
 	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
+}
+
+function capabilityIndexNextAction(profileRef: string): string {
+	return `Target authorization is deferred from the capability index. Run 'ceal capabilities targets --profile ${profileRef} --capability <capability-id>' to enumerate one capability's current authorized targets.`;
 }
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {

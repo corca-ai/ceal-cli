@@ -205,6 +205,39 @@ test("bare discovery exposes callable target rows and rejects malformed paging",
 	assert.throws(() => decodeClientResponse(falseFirstPage, request), hasCode("invalid_client_response"));
 });
 
+test("bare discovery exposes a capability index phase and defers target authorization", () => {
+	const request = envelope("discover", {});
+	const fixture = discoveryResponse(request);
+	const index = structuredClone(fixture);
+	// The shared fixture is target-page-shaped; this case intentionally swaps in
+	// the v3 capability-index union member to exercise the wire decoder.
+	index.value = {
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "capability_index",
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:test-work",
+		capabilities: fixture.value.capabilities,
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "target_authorization_not_observed", "production_audit_not_reached"],
+	} as unknown as typeof index.value;
+	assert.deepEqual(decodeClientResponse(index, request), index);
+
+	for (const mutate of [
+		(value: JsonRecord) => { value.value.targets = []; },
+		(value: JsonRecord) => { value.value.target_catalog = { target_count: 0, returned_count: 0, complete: true }; },
+		(value: JsonRecord) => { value.value.phase = "target_page"; },
+	]) {
+		const invalid = structuredClone(index);
+		mutate(invalid);
+		assert.throws(() => decodeClientResponse(invalid, request), hasCode("invalid_client_response"));
+	}
+	const selectedRequest = envelope("discover", { capability_id: "message.search" });
+	const invalidSelected = structuredClone(index);
+	invalidSelected.request_id = selectedRequest.request_id;
+	assert.throws(() => decodeClientResponse(invalidSelected, selectedRequest), hasCode("invalid_client_response"));
+});
+
 // corca-ai/ceal-cli#13: an empty complete page could not say whether a selector
 // produced it, so it read as "no authorization here".
 test("the selector disclosure is an optional boolean a Gateway may not fabricate", () => {

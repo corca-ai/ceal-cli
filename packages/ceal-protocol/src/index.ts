@@ -107,12 +107,14 @@ export type {
 	CealGatewayAnnouncementScopeStatementKind,
 	CealGatewayCacheOrigin,
 	CealGatewayCallValue,
+	CealGatewayCapabilityIndexValue,
 	CealGatewayConnectorRouteFailure,
 	CealGatewayDiscoverBody,
 	CealGatewayDiscoveryCapability,
 	CealGatewayDiscoveryTarget,
 	CealGatewayDiscoveryValue,
 	CealGatewayTargetCatalog,
+	CealGatewayTargetPageValue,
 	CealGatewayEligibleProfile,
 	CealGatewayHandshakeValue,
 	CealGatewayScopedIdentityProjection, CealGatewayScopedIdentityProjectionPerson,
@@ -365,8 +367,8 @@ function validateEligibleProfiles(value: unknown): void {
 
 function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGatewayDiscoverRequest>): void {
 	const discovery = requireRecord(value);
-	retainDeclaredResponseKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "profile_ref", "proof_level", "schema_version", "target_catalog", "targets"]);
-	if (discovery.schema_version !== "ceal.gateway_discovery.v2"
+	retainDeclaredResponseKeys(discovery, ["capabilities", "host_decision", "membership_ref", "non_claims", "phase", "profile_ref", "proof_level", "schema_version", "target_catalog", "targets"], ["target_catalog", "targets"]);
+	if (discovery.schema_version !== "ceal.gateway_discovery.v3"
 		|| discovery.profile_ref !== expectedRequest.profile_ref
 		|| discovery.host_decision !== "accepted"
 		|| discovery.proof_level !== "host_decision") invalidResponse();
@@ -374,9 +376,14 @@ function validateDiscoveryValue(value: unknown, expectedRequest: Readonly<CealGa
 	if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length > 128) invalidResponse();
 	const capabilityIds = new Set<string>();
 	for (const capability of discovery.capabilities) validateDiscoveryCapability(capability, capabilityIds);
+	validateHostNonClaims(discovery.non_claims);
+	if (discovery.phase === "capability_index") {
+		if (Object.keys(expectedRequest.body).length !== 0 || "targets" in discovery || "target_catalog" in discovery) invalidResponse();
+		return;
+	}
+	if (discovery.phase !== "target_page") invalidResponse();
 	validateDiscoveryTargets(discovery.targets, capabilityIds);
 	validateTargetCatalog(discovery.target_catalog, discovery.targets, capabilityIds, expectedRequest.body);
-	validateHostNonClaims(discovery.non_claims);
 }
 
 function validateTargetCatalog(value: unknown, targets: unknown, capabilityIds: ReadonlySet<string>, request: Readonly<CealGatewayDiscoverBody>): void {

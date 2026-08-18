@@ -193,13 +193,14 @@ function cacheEntry() {
 		gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
 		profileRef: "profile:narnia",
 		membershipRef: "membership:narnia",
-		negotiatedProtocolVersion: "1.3.0",
+		negotiatedProtocolVersion: "1.4.0",
 	};
 	return {
 		key,
 		cachedAt: Date.parse("2026-07-27T00:00:00.000Z"),
 		discovery: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: key.profileRef,
 			membership_ref: key.membershipRef,
 			capabilities: [],

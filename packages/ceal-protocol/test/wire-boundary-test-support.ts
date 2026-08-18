@@ -51,7 +51,7 @@ export type ReadbackFixture = SuccessFixture<JsonRecord>;
 export function envelope(operation: GatewayTestOperation, body: JsonRecord): GatewayTestRequest {
 	return {
 		request_id: `request:${operation}:001`,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		operation,
 		profile_ref: "profile:test",
 		body,
@@ -77,7 +77,7 @@ export function responseEnvelope(request: GatewayTestRequest, body: JsonRecord):
 	return {
 		...body,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: `proof:${request.request_id}`,
 	};
 }
@@ -172,7 +172,8 @@ export function discoveryResponse(request: GatewayTestRequest): DiscoveryFixture
 	return responseEnvelope(request, {
 		ok: true,
 		value: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: request.profile_ref,
 			membership_ref: "membership:test-work",
 			capabilities: [{
@@ -267,8 +268,8 @@ export function handshakeResponse(request: GatewayTestRequest): HandshakeFixture
 		ok: true,
 		value: {
 			schema_version: "ceal.gateway_handshake.v1",
-			negotiated_protocol_version: "1.3.0",
-			supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+			negotiated_protocol_version: "1.4.0",
+			supported_gateway_protocol_range: { minimum: "1.4.0", maximum: "1.4.0" },
 			profile_ref: request.profile_ref,
 			membership_ref: "membership:test-work",
 			registration_ref: "registration:test",

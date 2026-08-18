@@ -335,7 +335,12 @@ function responseShapeIssue(value: unknown, operation: CealGatewayRequest["opera
 	if (operation !== "discover") return undefined;
 	const response = responseRecord(value);
 	const discovery = response?.ok === true ? responseRecord(response.value) : undefined;
-	if (discovery?.schema_version !== "ceal.gateway_discovery.v2" || response?.protocol_version !== CEAL_PROTOCOL_VERSION) return undefined;
+	if (
+		discovery?.schema_version !== "ceal.gateway_discovery.v3" ||
+		discovery?.phase === "capability_index" ||
+		response?.protocol_version !== CEAL_PROTOCOL_VERSION
+	)
+		return undefined;
 	const catalog = responseRecord(discovery?.target_catalog);
 	if (
 		typeof catalog?.target_count === "number"

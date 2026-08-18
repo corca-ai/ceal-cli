@@ -691,7 +691,7 @@ function createGateway(options: TestOptions): GatewayState {
 			nonce: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
 			gateway_origin: ORIGIN,
 			proof_suite: "Ed25519",
-			protocol_version: "1.3.0",
+			protocol_version: "1.4.0",
 			expires_at: new Date(NOW + 10 * 60 * 1000).toISOString(),
 		}),
 	};
@@ -749,7 +749,7 @@ function sealed(state: Omit<GatewayState, "client">, options: TestOptions): Ceal
 	const payload = options.tamperPayload ? options.tamperPayload(enrollmentPayload()) : enrollmentPayload();
 	const binding: CealDeviceEnrollmentDeliveryBinding = {
 		gateway_origin: ORIGIN,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		feature: "device_enrollment_sealed_v1",
 		transaction_ref: "adoption:1",
 		registration_ref: "registration:1",

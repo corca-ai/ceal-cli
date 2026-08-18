@@ -505,12 +505,12 @@ const request = {
 const handshake = () => ({
 	ok: true,
 	request_id: request.request_id,
-	protocol_version: "1.3.0",
+	protocol_version: "1.4.0",
 	proof_ref_or_unavailable: "proof:packed",
 	value: {
 		schema_version: "ceal.gateway_handshake.v1",
-		negotiated_protocol_version: "1.3.0",
-		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		negotiated_protocol_version: "1.4.0",
+		supported_gateway_protocol_range: { minimum: "1.4.0", maximum: "1.4.0" },
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:packed",
 		registration_ref: "registration:packed",
@@ -556,7 +556,7 @@ if (!(await refusesInvalidResponse(authority))) throw new Error("authority_key_a
 const closedEnum = {
 	ok: false,
 	request_id: request.request_id,
-	protocol_version: "1.3.0",
+	protocol_version: "1.4.0",
 	error: { code: "unavailable", message: "Gateway is unavailable.", recovery: { kind: "retry_with_new_member" } },
 };
 if (!(await refusesInvalidResponse(closedEnum))) throw new Error("closed_enum_accepted");

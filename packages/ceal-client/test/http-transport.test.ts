@@ -57,7 +57,7 @@ test("HTTP transport posts a strict request to a loopback Gateway and decodes it
 		assert.deepEqual(observed, {
 			method: "POST",
 			authorization: "Bearer gateway-issued-token",
-			body: { ...request, protocol_version: "1.3.0" },
+			body: { ...request, protocol_version: "1.4.0" },
 		});
 	} finally {
 		await close(server);
@@ -87,7 +87,7 @@ test("HTTP transport scopes strict optional audit timing negotiation to readback
 						{
 							ok: false,
 							request_id: body.request_id,
-							protocol_version: "1.3.0",
+							protocol_version: "1.4.0",
 							proof_ref_or_unavailable: `proof:${body.request_id}`,
 							error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
 						},
@@ -175,7 +175,7 @@ test("HTTP transport removes additive keys but still refuses authority keys and 
 	const closedEnum = {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		error: {
 			code: "unavailable",
 			message: "Gateway is unavailable.",
@@ -222,7 +222,7 @@ test("HTTP transport returns a valid failure envelope on non-2xx", async () => {
 	const failure = {
 		ok: false,
 		request_id: request.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		error: { code: "unauthenticated", message: "Authentication is required.", next_action: "Use a Gateway-issued profile." },
 	};
 	const transport = createCealHttpTransport({
@@ -289,29 +289,34 @@ test("HTTP transport preserves bounded response diagnostics without retaining th
 				globalThis.Response.json({
 					ok: true,
 					request_id: "request:wrong",
-					protocol_version: "1.3.0",
-					value: { schema_version: "ceal.gateway_discovery.v2" },
+					protocol_version: "1.4.0",
+					value: { schema_version: "ceal.gateway_discovery.v3" },
+					phase: "target_page",
 				}),
 			status: 200,
 			contentType: "application/json",
 			kind: "protocol_invalid",
-			protocolVersion: "1.3.0",
-			schemaVersion: "ceal.gateway_discovery.v2",
+			protocolVersion: "1.4.0",
+			schemaVersion: "ceal.gateway_discovery.v3",
 			envelopeKind: "success",
 			errorCode: undefined,
 		},
 		{
 			label: "malformed failure envelope",
-			response: () => globalThis.Response.json({
-				ok: false,
-				request_id: request.request_id,
-				protocol_version: "1.3.0",
-				error: { code: "unsafe code", message: "safe" },
-			}, { status: 502 }),
+			response: () =>
+				globalThis.Response.json(
+					{
+						ok: false,
+						request_id: request.request_id,
+						protocol_version: "1.4.0",
+						error: { code: "unsafe code", message: "safe" },
+					},
+					{ status: 502 },
+				),
 			status: 502,
 			contentType: "application/json",
 			kind: "protocol_invalid",
-			protocolVersion: "1.3.0",
+			protocolVersion: "1.4.0",
 			schemaVersion: null,
 			envelopeKind: "failure",
 			errorCode: null,
@@ -375,7 +380,7 @@ test("HTTP transport identifies an incomplete discovery target page without a co
 		assert.ok(error instanceof CealHttpTransportError);
 		assert.equal(error.response_kind, "protocol_invalid");
 		assert.equal(error.response_envelope_kind, "success");
-		assert.equal(error.response_schema_version, "ceal.gateway_discovery.v2");
+		assert.equal(error.response_schema_version, "ceal.gateway_discovery.v3");
 		assert.equal(error.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 		assert.doesNotMatch(error.message, /selection_required|target_count|safe-token/u);
 		return true;
@@ -470,7 +475,7 @@ test("HTTP transport identifies an incomplete discovery page with a null continu
 // swapped. They are different answers to the caller: `invalid_response` means the
 // header is not a length, `response_too_large` means it is one and it does not fit.
 test("HTTP transport tells a malformed content-length from an oversized one", async () => {
-	const body = { ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: {} };
+	const body = { ok: true, request_id: request.request_id, protocol_version: "1.4.0", value: {} };
 	const cases: Array<[string, string]> = [
 		["not-a-number", "invalid_response"],
 		["-5", "invalid_response"],
@@ -588,7 +593,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		},
 		{
 			code: "invalid_response",
-			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.3.0", value: {} }),
+			fetchFn: async () => globalThis.Response.json({ ok: true, request_id: "request:mismatch", protocol_version: "1.4.0", value: {} }),
 		},
 		{
 			code: "invalid_response",
@@ -597,7 +602,7 @@ test("HTTP transport bounds and validates response bytes without leaking token o
 		{
 			code: "response_too_large",
 			fetchFn: async () =>
-				globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value: { payload: token.repeat(20) } }),
+				globalThis.Response.json({ ok: true, request_id: request.request_id, protocol_version: "1.4.0", value: { payload: token.repeat(20) } }),
 			maxResponseBytes: 64,
 		},
 		{
@@ -704,8 +709,8 @@ function requireSignal(init: RequestInit | undefined): AbortSignal {
 function handshakeResponse(input: HandshakeInput) {
 	return successResponse(input, {
 		schema_version: "ceal.gateway_handshake.v1",
-		negotiated_protocol_version: "1.3.0",
-		supported_gateway_protocol_range: { minimum: "1.3.0", maximum: "1.3.0" },
+		negotiated_protocol_version: "1.4.0",
+		supported_gateway_protocol_range: { minimum: "1.4.0", maximum: "1.4.0" },
 		profile_ref: input.profile_ref,
 		membership_ref: "membership:test",
 		registration_ref: "registration:test",
@@ -721,7 +726,8 @@ function handshakeResponse(input: HandshakeInput) {
 function discoveryResponse(input: DiscoverInput) {
 	const selected = input.body.capability_id === "message.search";
 	return successResponse(input, {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: input.profile_ref,
 		membership_ref: "membership:test",
 		capabilities: [
@@ -800,7 +806,7 @@ function successResponse(input: CealGatewayRequestInput, value: Record<string, u
 	return {
 		ok: true,
 		request_id: input.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		value,
 	};
@@ -831,7 +837,7 @@ function policyDenialResponse(input: CallInput) {
 	return {
 		ok: false,
 		request_id: input.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: `proof:${input.request_id}`,
 		error: {
 			code: "policy_denied",

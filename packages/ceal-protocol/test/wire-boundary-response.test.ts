@@ -65,7 +65,7 @@ test("client failure recoveries stay closed and strip additive recovery keys", (
 	const failure: JsonRecord = {
 		ok: false,
 		request_id: handshakeRequest.request_id,
-		protocol_version: "1.3.0",
+		protocol_version: "1.4.0",
 		proof_ref_or_unavailable: { state: "unavailable", reason: "Audit is pending", owner_surface: "Gateway audit" },
 		error: { code: "incompatible_protocol", message: "The protocol is incompatible.", next_action: "Upgrade the client." },
 	};
@@ -667,13 +667,13 @@ test("client response decoder rejects malformed envelopes and audit proof drift"
 	});
 	const exact = callResponse(callRequest);
 	for (const value of [
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "bad-code", message: "No." } },
-		{ ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", policy_decision: "Leak." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.4.0", error: { code: "bad-code", message: "No." } },
+		{ ok: false, request_id: exact.request_id, protocol_version: "1.4.0", error: { code: "denied", message: "No.", next_action: "Retry.", policy_decision: "Leak." } },
 	]) assert.throws(() => decodeClientResponse(value, callRequest), hasCode("invalid_client_response"));
 
 	// The benign sibling of that authority-shaped key is removed instead, so the
 	// undeclared field cannot reach a consumer either way.
-	const additiveError = { ok: false, request_id: exact.request_id, protocol_version: "1.3.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "guidance" } };
+	const additiveError = { ok: false, request_id: exact.request_id, protocol_version: "1.4.0", error: { code: "denied", message: "No.", next_action: "Retry.", another_action: "guidance" } };
 	assert.deepEqual(decodedError(additiveError, callRequest), { code: "denied", message: "No.", next_action: "Retry." });
 
 	const handshakeRequest = envelope("handshake", { client: { name: "ceal", version: "0.65.0" } });
@@ -736,7 +736,8 @@ test("a discovery response whose catalog exceeds 512 JSON nodes still decodes in
 		input_contract: { schema_version: `ceal.probe_input_${index}.v1`, required: ["query"], query: { type: "string", max_bytes: 512 } },
 	}));
 	const value = {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: "profile:work",
 		membership_ref: "membership:alice-work",
 		host_decision: "accepted",
@@ -746,7 +747,7 @@ test("a discovery response whose catalog exceeds 512 JSON nodes still decodes in
 		targets: [],
 		target_catalog: { target_count: 0, returned_count: 0, complete: true },
 	};
-	const decoded = decodedValue<{ capabilities: unknown[] }>({ ok: true, request_id: request.request_id, protocol_version: "1.3.0", value, proof_ref_or_unavailable: "gateway-audit-request:request:node-budget:d" }, request);
+	const decoded = decodedValue<{ capabilities: unknown[] }>({ ok: true, request_id: request.request_id, protocol_version: "1.4.0", value, proof_ref_or_unavailable: "gateway-audit-request:request:node-budget:d" }, request);
 	assert.equal(decoded.capabilities.length, 40);
 });
 

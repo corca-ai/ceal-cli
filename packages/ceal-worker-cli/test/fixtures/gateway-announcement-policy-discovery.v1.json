@@ -11,7 +11,7 @@
       "name": "negotiated_github_read",
       "request": {
         "request_id": "request:fixture:announcement-policy:negotiated",
-        "protocol_version": "1.3.0",
+        "protocol_version": "1.4.0",
         "operation": "discover",
         "profile_ref": "profile:work",
         "body": {}
@@ -19,10 +19,11 @@
       "response": {
         "ok": true,
         "request_id": "request:fixture:announcement-policy:negotiated",
-        "protocol_version": "1.3.0",
+        "protocol_version": "1.4.0",
         "proof_ref_or_unavailable": "gateway-audit-request:request:fixture:announcement-policy:negotiated",
         "value": {
-          "schema_version": "ceal.gateway_discovery.v2",
+          "schema_version": "ceal.gateway_discovery.v3",
+          "phase": "target_page",
           "profile_ref": "profile:work",
           "membership_ref": "membership:fixture-work",
           "capabilities": [
@@ -73,7 +74,7 @@
       "name": "legacy_or_non_accept",
       "request": {
         "request_id": "request:fixture:announcement-policy:legacy",
-        "protocol_version": "1.3.0",
+        "protocol_version": "1.4.0",
         "operation": "discover",
         "profile_ref": "profile:work",
         "body": {}
@@ -81,10 +82,11 @@
       "response": {
         "ok": true,
         "request_id": "request:fixture:announcement-policy:legacy",
-        "protocol_version": "1.3.0",
+        "protocol_version": "1.4.0",
         "proof_ref_or_unavailable": "gateway-audit-request:request:fixture:announcement-policy:legacy",
         "value": {
-          "schema_version": "ceal.gateway_discovery.v2",
+          "schema_version": "ceal.gateway_discovery.v3",
+          "phase": "target_page",
           "profile_ref": "profile:work",
           "membership_ref": "membership:fixture-work",
           "capabilities": [

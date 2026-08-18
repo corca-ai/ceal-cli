@@ -286,6 +286,21 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 	return summary;
 }
 
+/** Help is a human/agent surface, not a YAML result document. Keep its summary
+ * typed as a surface probe instead of misclassifying valid plain-text help as
+ * a failed response parse. */
+export function summarizeHelp(stdout: string, kind: string): RecordValue {
+	const hasUsage = /^Usage:/mu.test(stdout);
+	const hasEffect = /^Effect:\s+\S+/mu.test(stdout);
+	const hasSessionEffect = /^Session effect:\s+\S+/mu.test(stdout);
+	return {
+		kind,
+		parse_status: hasUsage && hasEffect && hasSessionEffect ? "surface" : "invalid",
+		surface_kind: "help",
+		stdout_bytes: Buffer.byteLength(stdout),
+	};
+}
+
 function isRecord(value: unknown): value is RecordValue {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -356,7 +371,7 @@ async function runProcess(command: string, args: readonly string[], timeoutMs: n
 function commandSummary(result: CommandResult, kind: string): RecordValue {
 	const timing = summarizeTimingStderr(result.stderr);
 	return {
-		...summarizeYaml(result.stdout, kind),
+		...(kind === "capabilities_help" ? summarizeHelp(result.stdout, kind) : summarizeYaml(result.stdout, kind)),
 		exit_code: result.exit_code,
 		elapsed_ms: result.elapsed_ms,
 		timed_out: result.timed_out,

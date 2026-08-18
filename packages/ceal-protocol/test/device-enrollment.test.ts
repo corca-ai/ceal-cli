@@ -38,7 +38,7 @@ const RECIPIENT_KEY = requireString(recipientPublicKey.export({ format: "jwk" })
 const NONCE = "qoI8FzONCv0y1G9ZgjVzcvQGuQ6lFzP-k6XPwHWE5UQ";
 const binding: CealDeviceEnrollmentDeliveryBinding = {
 	gateway_origin: "https://ceal.example.test",
-	protocol_version: "1.3.0",
+	protocol_version: "1.4.0",
 	feature: CEAL_DEVICE_ENROLLMENT_FEATURE,
 	transaction_ref: "transaction:device-1",
 	registration_ref: "registration:device-1",
@@ -116,7 +116,7 @@ test("Ed25519 proof payload has a fixed wire encoding and verifies with the decl
 	const decoded = decodeCealDeviceEnrollmentChallenge(challenge);
 	const payload = deviceEnrollmentProofPayload(decoded);
 	assert.equal(Buffer.from(payload).toString("utf8"), JSON.stringify([
-		"ceal.device_enrollment_proof.v1", "Ed25519", "1.3.0", "https://ceal.example.test", "registration:device-1", "nonce:device-1", NONCE,
+		"ceal.device_enrollment_proof.v1", "Ed25519", "1.4.0", "https://ceal.example.test", "registration:device-1", "nonce:device-1", NONCE,
 	]));
 	const signature = sign(null, payload, proofPrivateKey);
 	assert.equal(verify(null, payload, proofPublicKey, signature), true);

@@ -10,7 +10,7 @@ const KEY: CealDiscoveryCacheKey = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
 	profileRef: "profile:narnia",
 	membershipRef: "membership:narnia",
-	negotiatedProtocolVersion: "1.3.0",
+	negotiatedProtocolVersion: "1.4.0",
 };
 
 function entry(overrides: Partial<CealDiscoveryCacheEntry> = {}): CealDiscoveryCacheEntry {
@@ -18,7 +18,8 @@ function entry(overrides: Partial<CealDiscoveryCacheEntry> = {}): CealDiscoveryC
 		key: KEY,
 		cachedAt: Date.parse("2026-07-18T12:00:00.000Z"),
 		discovery: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: KEY.profileRef,
 			membership_ref: KEY.membershipRef,
 			capabilities: [],
@@ -104,7 +105,7 @@ test("discovery cache read rejects a partial current-schema discovery value as a
 				membership_ref: KEY.membershipRef,
 				negotiated_protocol_version: KEY.negotiatedProtocolVersion,
 				cached_at: "2026-07-18T12:00:00.000Z",
-				discovery: { schema_version: "ceal.gateway_discovery.v2" },
+				discovery: { schema_version: "ceal.gateway_discovery.v3", phase: "target_page" },
 			}),
 			{ mode: 0o600 },
 		);

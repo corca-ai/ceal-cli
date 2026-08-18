@@ -4,6 +4,7 @@ import {
 	parseSourceWorkerE2eArgs,
 	sourceWorkerE2eHelp,
 	sourceWorkerE2ePlan,
+	summarizeHelp,
 	summarizeTimingStderr,
 	summarizeYaml,
 	targetRefReturned,
@@ -80,6 +81,13 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 	assert.equal(summary.failure_stage, "gateway_discovery");
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
+});
+
+test("source-worker-e2e classifies plain-text capabilities help as a surface probe", () => {
+	const summary = summarizeHelp("Usage: ceal capabilities\nEffect: read_only\nSession effect: refresh_if_needed\n", "capabilities_help");
+	assert.equal(summary.parse_status, "surface");
+	assert.equal(summary.surface_kind, "help");
+	assert.equal(summarizeHelp("not help", "capabilities_help").parse_status, "invalid");
 });
 
 test("source-worker-e2e preserves only bounded Worker finish timings from stderr", () => {

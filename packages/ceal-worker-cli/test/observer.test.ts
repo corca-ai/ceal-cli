@@ -92,11 +92,12 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
 			profileRef: "profile:observer-fixture",
 			membershipRef: "membership:observer-fixture",
-			negotiatedProtocolVersion: "1.3.0",
+			negotiatedProtocolVersion: "1.4.0",
 		},
 		cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
 		discovery: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: "profile:observer-fixture",
 			membership_ref: "membership:observer-fixture",
 			capabilities: [
@@ -456,11 +457,12 @@ test("every ~/.ceal file this client reads is named in the privacy projection", 
 			gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
 			profileRef: "profile:privacy-fixture",
 			membershipRef: "membership:privacy-fixture",
-			negotiatedProtocolVersion: "1.3.0",
+			negotiatedProtocolVersion: "1.4.0",
 		},
 		cachedAt: Date.parse("2026-07-24T00:00:00.000Z"),
 		discovery: {
-			schema_version: "ceal.gateway_discovery.v2",
+			schema_version: "ceal.gateway_discovery.v3",
+			phase: "target_page",
 			profile_ref: "profile:privacy-fixture",
 			membership_ref: "membership:privacy-fixture",
 			capabilities: [],
@@ -806,7 +808,7 @@ test("local suggestions fire deterministically and stay linked to observed evide
 					gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
 					profileRef: "profile:suggestion-fixture",
 					membershipRef: "membership:suggestion-fixture",
-					negotiatedProtocolVersion: "1.3.0",
+					negotiatedProtocolVersion: "1.4.0",
 				},
 				// Expressed relative to the shared default rather than as a literal, so
 				// this fixture stays genuinely expired when the window is retuned.
@@ -883,13 +885,13 @@ test("observer refuses to attribute another session's discovery cache to the cur
 		gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",
 		profileRef: "profile:current",
 		membershipRef: "membership:current",
-		negotiatedProtocolVersion: "1.3.0",
+		negotiatedProtocolVersion: "1.4.0",
 	});
 	const foreignKey = {
 		gatewayEndpoint: current.gatewayEndpoint,
 		profileRef: "profile:previous",
 		membershipRef: "membership:previous",
-		negotiatedProtocolVersion: "1.3.0",
+		negotiatedProtocolVersion: "1.4.0",
 	};
 	const state = materializeObserverState(
 		await buildObserverState({
@@ -923,12 +925,13 @@ test("the observer and the discovery cache agree on freshness, including a backw
 		gatewayEndpoint: "https://gateway.example.test/corca-ai/dev/api/ceal/v1",
 		profileRef: "profile:freshness",
 		membershipRef: "membership:freshness",
-		negotiatedProtocolVersion: "1.3.0",
+		negotiatedProtocolVersion: "1.4.0",
 	};
 	// A payload the store's own decoder accepts, so the only thing that can make
 	// the two answers differ below is the clock — not entry validity.
 	const discovery = {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: key.profileRef,
 		membership_ref: key.membershipRef,
 		capabilities: [],
@@ -980,10 +983,11 @@ test("the observer falls back to the SAME default window as the cli", async () =
 		gatewayEndpoint: "https://gateway.example/api/ceal/v1",
 		profileRef: "profile:work",
 		membershipRef: "membership:work",
-		negotiatedProtocolVersion: "1.3.0",
+		negotiatedProtocolVersion: "1.4.0",
 	};
 	const discovery = {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: key.profileRef,
 		membership_ref: key.membershipRef,
 		capabilities: [],
