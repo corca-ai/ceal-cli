@@ -27,8 +27,10 @@ import {
 	verifyEmbeddedGatewayLeasedConsumerHandoffSource,
 } from "./generate-leased-consumer-handoff-runtime.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { asJsonRecord } from "./lib/json-record.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync } from "./worker-release-inputs.ts";
 
@@ -229,7 +231,7 @@ async function buildWorkerNativeArtifactWithInputs(
 						dependencies,
 					});
 					if (packed.controlSessionContract) privateControlSessionContract = packed.controlSessionContract;
-					const version = resolveVersion(repoRoot, inputs);
+					const version = resolveMatchingWorkerClientVersion(repoRoot, [inputs.worker, inputs.client], readJson, fail);
 					const guide = createSkillDirectoryBundle(path.join(repoRoot, inputs.guide.source_path));
 					const artifact = await buildNativeArtifact({
 						stage,
@@ -469,13 +471,13 @@ function smokeArtifact({ artifactPath, version, guide }: { artifactPath: string;
 			},
 		});
 	try {
-		const identity = asRecord(parse(run(["version"])));
-		const commands = asRecord(parse(run(["commands"])));
+		const identity = asJsonRecord(parse(run(["version"])));
+		const commands = asJsonRecord(parse(run(["commands"])));
 		const help = run(["--help"]);
-		const guideStatus = asRecord(parse(run(["guide", "status"])));
-		const guideRegistration = asRecord(parse(run(["guide", "register", "codex"])));
+		const guideStatus = asJsonRecord(parse(run(["guide", "status"])));
+		const guideRegistration = asJsonRecord(parse(run(["guide", "register", "codex"])));
 		const names = Array.isArray(commands?.commands)
-			? commands.commands.map((entry) => asRecord(entry)?.name).filter((entry): entry is string => typeof entry === "string")
+			? commands.commands.map((entry) => asJsonRecord(entry)?.name).filter((entry): entry is string => typeof entry === "string")
 			: [];
 		if (
 			identity?.command !== "ceal" ||
@@ -533,15 +535,11 @@ function prepareManagedSmokeInstall(artifactPath: string, home: string, version:
 	return path.join(install, "ceal");
 }
 
-function asRecord(value: unknown): JsonRecord | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
-}
-
 function findRegisteredCodexHost(value: JsonRecord | undefined): boolean {
 	const hosts = value?.hosts;
 	if (!Array.isArray(hosts)) return false;
 	return hosts.some((host) => {
-		const record = asRecord(host);
+		const record = asJsonRecord(host);
 		return record?.agent === "codex" && record.registered === true;
 	});
 }
@@ -626,20 +624,6 @@ function materializeOutput({
 		rmSync(staging, { recursive: true, force: true });
 		throw error;
 	}
-}
-
-function resolveVersion(repoRoot: string, inputs: NativeInputs): string {
-	// Worker and client version together; the exact protocol pin against the
-	// supplied artifact is enforced by the release-input resolver.
-	const versions = [inputs.worker, inputs.client].map(
-		(entry) => asRecord(readJson(path.join(repoRoot, entry.source_path, "package.json"), "invalid_inventory"))?.version,
-	);
-	if (versions.some((value) => typeof value !== "string") || new Set(versions).size !== 1) {
-		fail("version_mismatch", "Worker and client package versions must match exactly.");
-	}
-	const version = versions[0];
-	if (typeof version !== "string") fail("version_mismatch", "Worker and client package versions must match exactly.");
-	return version;
 }
 
 function resolvePlatform(value: string | undefined, dependencies: NativeDependencies): string {

@@ -6,11 +6,14 @@ import {
 	type CealGatewayCallValue,
 	isCealPublicSafeText,
 } from "@corca-ai/ceal-protocol";
+import { isPlainJsonRecord as isPlainRecord } from "./canonical-json.js";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
+import { hasExactObjectKeys as hasExactOwnKeys } from "./object-keys.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { CEAL_SAFE_GATEWAY_CODE, containsCealCredential, isSafeGatewayProofRef } from "./safe-ref.js";
+import { sameStringArray as hasExactStringValues } from "./string-array.js";
 
 interface ResultIo {
 	stdout: { write(chunk: string): unknown };
@@ -356,20 +359,6 @@ function gatewayFailureRecovery(error: unknown): SafeGatewayRecovery | null {
 	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 && wait <= MAX_GATEWAY_RETRY_AFTER_MS
 		? { kind, retryAfterMs: wait }
 		: null;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-	const prototype = Object.getPrototypeOf(value);
-	return prototype === Object.prototype || prototype === null;
-}
-
-function hasExactOwnKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-	return isPlainRecord(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-}
-
-function hasExactStringValues(value: unknown, expected: readonly string[]): boolean {
-	return Array.isArray(value) && value.length === expected.length && expected.every((item, index) => value[index] === item);
 }
 
 function isSafeGatewayPolicyDenial(

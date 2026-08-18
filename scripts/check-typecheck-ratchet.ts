@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 
 export type ProjectName = "packages" | "tools" | "tests";
 
@@ -183,10 +184,6 @@ function validateProject(value: unknown, config: string, name: ProjectName): Bas
 		diagnosticsByFile[file] = diagnostics;
 	}
 	return { config, files, diagnosticsByFile };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isStringArray(value: unknown): value is string[] {

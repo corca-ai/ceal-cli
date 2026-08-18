@@ -1,9 +1,10 @@
 import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, writeSync } from "node:fs";
 import path from "node:path";
+import { isJsonRecord } from "./json-record.js";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { assertDirectoryIfPresent, prepareDirectory, removeOwnedFile, safeExistingFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
-import { CEAL_SAFE_REF } from "./safe-ref.js";
+import { isCealSafeRef } from "./safe-ref.js";
 import { validSessionIdentityDiscriminator } from "./session-identity.js";
 
 // Client-local receipt spool: the masterplan Workbench's first usage data
@@ -34,7 +35,6 @@ const SPOOL_SCHEMA_VERSION = "ceal.receipt_spool.v2";
 const DROPS_SCHEMA_VERSION = "ceal.receipt_spool_drops.v2";
 // Every spooled field must already be a bounded reference/code token, so free
 // text cannot enter the spool. The grammar itself lives in `safe-ref.ts`.
-const SAFE_REF = CEAL_SAFE_REF;
 const CALL_RESULT_SCHEMA_VERSION = "ceal.result.v2";
 const SPOOL_STATUSES = new Set(["completed", "blocked", "error"]);
 const SPOOL_EVIDENCE = new Set(["readback_verified", "not_read_back", "readback_unavailable", "outcome_unknown"]);
@@ -171,7 +171,7 @@ function emptySpoolState(drops: CealReceiptSpoolState["drops"]): CealReceiptSpoo
  * them is what lets the recorder count one and ignore the other.
  */
 export function callResultCarriesReceipt(envelope: Record<string, unknown>): boolean {
-	return envelope.schema_version === CALL_RESULT_SCHEMA_VERSION && isRecord(envelope.receipt);
+	return envelope.schema_version === CALL_RESULT_SCHEMA_VERSION && isJsonRecord(envelope.receipt);
 }
 
 /**
@@ -184,22 +184,22 @@ export function callResultCarriesReceipt(envelope: Record<string, unknown>): boo
 export function receiptSpoolEntryFromCallResult(envelope: Record<string, unknown>, recordedAt: number): CealReceiptSpoolEntry | null {
 	if (envelope.schema_version !== CALL_RESULT_SCHEMA_VERSION || !Number.isFinite(recordedAt)) return null;
 	const receipt = envelope.receipt;
-	if (!isRecord(receipt)) return null;
+	if (!isJsonRecord(receipt)) return null;
 	const requestRef = receipt.request_ref;
 	const evidence = receipt.evidence;
 	const status = envelope.status;
-	if (!safeRef(requestRef) || !isSpoolEvidence(evidence) || !isSpoolStatus(status)) return null;
-	const auditRefs = Array.isArray(receipt.audit_refs) ? receipt.audit_refs.filter(safeRef).slice(0, MAX_AUDIT_REFS) : [];
+	if (!isCealSafeRef(requestRef) || !isSpoolEvidence(evidence) || !isSpoolStatus(status)) return null;
+	const auditRefs = Array.isArray(receipt.audit_refs) ? receipt.audit_refs.filter(isCealSafeRef).slice(0, MAX_AUDIT_REFS) : [];
 	const error = envelope.error;
-	const errorKind = isRecord(error) && safeRef(error.kind) ? error.kind : undefined;
+	const errorKind = isJsonRecord(error) && isCealSafeRef(error.kind) ? error.kind : undefined;
 	return {
 		recordedAt,
 		requestRef,
 		status,
 		evidence,
 		auditRefs,
-		...(safeRef(envelope.capability) ? { capabilityId: envelope.capability } : {}),
-		...(safeRef(envelope.target) ? { targetRef: envelope.target } : {}),
+		...(isCealSafeRef(envelope.capability) ? { capabilityId: envelope.capability } : {}),
+		...(isCealSafeRef(envelope.target) ? { targetRef: envelope.target } : {}),
 		...(errorKind === undefined ? {} : { errorKind }),
 	};
 }
@@ -412,7 +412,7 @@ function readSpool(
 	} catch {
 		return null;
 	}
-	if (!isRecord(parsed) || !Array.isArray(parsed.entries)) return null;
+	if (!isJsonRecord(parsed) || !Array.isArray(parsed.entries)) return null;
 	if (parsed.schema_version === "ceal.receipt_spool.v1") return FOREIGN_SPOOL;
 	if (parsed.schema_version !== SPOOL_SCHEMA_VERSION || !validSessionIdentityDiscriminator(parsed.identity)) return null;
 	if (parsed.identity !== identity) return FOREIGN_SPOOL;
@@ -458,7 +458,7 @@ function assertIdentity(identity: string): void {
 }
 
 function parseEntry(value: unknown): CealReceiptSpoolEntry | null {
-	if (!isRecord(value) || typeof value.recorded_at !== "string") return null;
+	if (!isJsonRecord(value) || typeof value.recorded_at !== "string") return null;
 	const recordedAt = Date.parse(value.recorded_at);
 	if (!Number.isFinite(recordedAt)) return null;
 	const entry = {
@@ -466,27 +466,27 @@ function parseEntry(value: unknown): CealReceiptSpoolEntry | null {
 		requestRef: value.request_ref,
 		status: value.status,
 		evidence: value.evidence,
-		auditRefs: Array.isArray(value.audit_refs) ? value.audit_refs.filter(safeRef).slice(0, MAX_AUDIT_REFS) : [],
-		...(safeRef(value.capability_id) ? { capabilityId: value.capability_id } : {}),
-		...(safeRef(value.target_ref) ? { targetRef: value.target_ref } : {}),
-		...(safeRef(value.error_kind) ? { errorKind: value.error_kind } : {}),
+		auditRefs: Array.isArray(value.audit_refs) ? value.audit_refs.filter(isCealSafeRef).slice(0, MAX_AUDIT_REFS) : [],
+		...(isCealSafeRef(value.capability_id) ? { capabilityId: value.capability_id } : {}),
+		...(isCealSafeRef(value.target_ref) ? { targetRef: value.target_ref } : {}),
+		...(isCealSafeRef(value.error_kind) ? { errorKind: value.error_kind } : {}),
 	};
 	return isValidEntry(entry) ? entry : null;
 }
 
 function isValidEntry(value: unknown): value is CealReceiptSpoolEntry {
-	if (!isRecord(value)) return false;
+	if (!isJsonRecord(value)) return false;
 	return (
 		Number.isFinite(value.recordedAt) &&
-		safeRef(value.requestRef) &&
+		isCealSafeRef(value.requestRef) &&
 		isSpoolStatus(value.status) &&
 		isSpoolEvidence(value.evidence) &&
 		Array.isArray(value.auditRefs) &&
 		value.auditRefs.length <= MAX_AUDIT_REFS &&
-		value.auditRefs.every(safeRef) &&
-		(value.capabilityId === undefined || safeRef(value.capabilityId)) &&
-		(value.targetRef === undefined || safeRef(value.targetRef)) &&
-		(value.errorKind === undefined || safeRef(value.errorKind))
+		value.auditRefs.every(isCealSafeRef) &&
+		(value.capabilityId === undefined || isCealSafeRef(value.capabilityId)) &&
+		(value.targetRef === undefined || isCealSafeRef(value.targetRef)) &&
+		(value.errorKind === undefined || isCealSafeRef(value.errorKind))
 	);
 }
 
@@ -496,14 +496,6 @@ function isSpoolStatus(value: unknown): value is CealReceiptSpoolEntry["status"]
 
 function isSpoolEvidence(value: unknown): value is CealReceiptSpoolEntry["evidence"] {
 	return typeof value === "string" && SPOOL_EVIDENCE.has(value);
-}
-
-function safeRef(value: unknown): value is string {
-	return typeof value === "string" && SAFE_REF.test(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 // Names this store's refusal once so the shared guards can raise it without

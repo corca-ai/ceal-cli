@@ -1,9 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
+import { isJsonRecord } from "./json-record.js";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { prepareDirectory, removeOwnedFile, safeExistingFile } from "./local-store-guards.js";
-import { CEAL_SAFE_REF } from "./safe-ref.js";
+import { isCealSafeEndpoint } from "./safe-endpoint.js";
+import { isCealSafeRef } from "./safe-ref.js";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost
@@ -37,7 +39,6 @@ export const DEFAULT_DISCOVERY_CACHE_TTL_MS = 1_800_000;
 
 const CACHE_FILE = "client-discovery-cache.json";
 const CACHE_SCHEMA_VERSION = "ceal.client_discovery_cache.v1";
-const SAFE_REF = CEAL_SAFE_REF;
 const CACHED_DISCOVERY_REQUEST_ID = "cache:discovery";
 const CACHED_DISCOVERY_PROOF_REF = "cache:local";
 
@@ -154,7 +155,7 @@ function readCacheEntry(directory: string, file: string): CealDiscoveryCacheEntr
 }
 
 function parseCacheEntry(value: unknown): CealDiscoveryCacheEntry | null {
-	if (!isRecord(value) || value.schema_version !== CACHE_SCHEMA_VERSION) return null;
+	if (!isJsonRecord(value) || value.schema_version !== CACHE_SCHEMA_VERSION) return null;
 	const endpoint = value.gateway_endpoint;
 	const profile = value.profile_ref;
 	const membership = value.membership_ref;
@@ -208,12 +209,12 @@ function validateEntry(entry: CealDiscoveryCacheEntry): void {
 }
 
 function isValidCacheKey(value: unknown): value is CealDiscoveryCacheKey {
-	if (!isRecord(value)) return false;
+	if (!isJsonRecord(value)) return false;
 	return (
-		safeEndpoint(value.gatewayEndpoint) &&
-		safeRef(value.profileRef) &&
-		safeRef(value.membershipRef) &&
-		safeRef(value.negotiatedProtocolVersion)
+		isCealSafeEndpoint(value.gatewayEndpoint) &&
+		isCealSafeRef(value.profileRef) &&
+		isCealSafeRef(value.membershipRef) &&
+		isCealSafeRef(value.negotiatedProtocolVersion)
 	);
 }
 
@@ -243,31 +244,6 @@ function isValidCachedDiscovery(value: unknown, key: CealDiscoveryCacheKey): val
 	} catch {
 		return false;
 	}
-}
-
-function safeRef(value: unknown): value is string {
-	return typeof value === "string" && SAFE_REF.test(value);
-}
-
-function safeEndpoint(value: unknown): value is string {
-	if (typeof value !== "string") return false;
-	try {
-		const endpoint = new URL(value);
-		const host = endpoint.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-		return (
-			!endpoint.username &&
-			!endpoint.password &&
-			!endpoint.search &&
-			!endpoint.hash &&
-			(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && (host === "127.0.0.1" || host === "::1")))
-		);
-	} catch {
-		return false;
-	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 // Names this store's refusal once so the shared guards can raise it without

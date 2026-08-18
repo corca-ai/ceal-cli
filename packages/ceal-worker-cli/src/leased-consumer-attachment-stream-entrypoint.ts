@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CealLeasedConsumerAttachmentStreamBinding, decodeCealLeasedConsumerAttachmentStreamRequest } from "@corca-ai/ceal-protocol";
+import { isJsonRecord } from "./json-record.js";
 import { assertLeasedConsumerAttachmentStreamBinding, LeasedConsumerAttachmentStreamError } from "./leased-consumer-attachment-stream.js";
 import {
 	consumeLeasedConsumerAttachmentStream,
@@ -9,6 +10,7 @@ import {
 	LeasedConsumerAttachmentStreamCarrierError,
 	type LeasedConsumerAttachmentStreamCarrierRuntime,
 } from "./leased-consumer-attachment-stream-carrier.js";
+import { sameObjectKeys } from "./object-keys.js";
 import { readBoundedStream } from "./private-worker-transport.js";
 import { parseStrictJson } from "./strict-json.js";
 
@@ -76,7 +78,7 @@ function decodeEntrypointRequest(bytes: Uint8Array): Readonly<{
 	} catch {
 		throw new EntrypointInputError("invalid_request");
 	}
-	if (!isRecord(value) || !sameKeys(value, ENTRYPOINT_KEYS) || value.schema_version !== ENTRYPOINT_CONTRACT.stdin.schema_version)
+	if (!isJsonRecord(value) || !sameObjectKeys(value, ENTRYPOINT_KEYS) || value.schema_version !== ENTRYPOINT_CONTRACT.stdin.schema_version)
 		throw new EntrypointInputError("invalid_request");
 	let request: ReturnType<typeof decodeCealLeasedConsumerAttachmentStreamRequest>;
 	try {
@@ -128,21 +130,13 @@ export function serializeLeasedConsumerAttachmentStreamResult(value: Readonly<Re
 }
 
 async function cleanupOversizedHandoff(value: unknown): Promise<boolean> {
-	if (!isRecord(value) || typeof value.handoff_root !== "string") return false;
+	if (!isJsonRecord(value) || typeof value.handoff_root !== "string") return false;
 	try {
 		await rm(value.handoff_root, { recursive: true, force: true });
 		return true;
 	} catch {
 		return false;
 	}
-}
-
-function sameKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-	return Object.keys(value).sort().join("|") === [...expected].sort().join("|");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 class EntrypointInputError extends Error {

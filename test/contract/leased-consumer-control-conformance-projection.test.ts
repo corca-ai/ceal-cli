@@ -8,6 +8,7 @@ import {
 	decodeCealLeasedConsumerDispositionControlRequest,
 	decodeCealLeasedConsumerDispositionControlResponse,
 } from "../../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
+import { isJsonRecord as isRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import { openLeasedConsumerControlSession } from "../../packages/ceal-worker-cli/src/leased-consumer-control-session.ts";
 import {
 	controlSessionContractFromVerifiedConformance,
@@ -35,9 +36,6 @@ type Operation = JsonRecord & {
 	response: JsonRecord & { schema_version: string; operation: string };
 };
 
-function isRecord(value: unknown): value is JsonRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 function asRecord(value: unknown): JsonRecord {
 	if (!isRecord(value)) throw new Error("invalid_decoder_input");
 	return value;

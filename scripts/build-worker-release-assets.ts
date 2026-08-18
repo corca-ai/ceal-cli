@@ -18,6 +18,7 @@ import {
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
+import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
 import { resolveWorkerReleaseGuideInput } from "./worker-release-inputs.ts";
@@ -599,8 +600,7 @@ function requireAssetDirectory(value: unknown): AssetDirectory {
 	if (typeof value !== "string" || !path.isAbsolute(value))
 		fail("merge_inputs_required", "Merged worker asset inputs must be absolute directories.");
 	const directory = path.resolve(value);
-	if (!existsSync(directory) || !lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
+	if (!isRegularNonSymlinkDirectory(directory)) fail("merge_inputs_required", "Merged worker asset input is not a regular directory.");
 	if (!existsSync(path.join(directory, MARKER)))
 		fail("merge_inputs_required", "Merged worker asset input is not a marked composed asset set.");
 	return directory;

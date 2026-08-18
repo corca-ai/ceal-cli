@@ -4,6 +4,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { hasExactObjectKeys as exact } from "../packages/ceal-worker-cli/src/object-keys.ts";
+import { sameStringArray as sameArray } from "../packages/ceal-worker-cli/src/string-array.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HANDOFF_PATH = "vendor/gateway-leased-consumer-attachment-stream/gateway-leased-consumer-attachment-stream-conformance.json";
@@ -149,7 +154,7 @@ export function contractModule(bytes: Buffer, digest: string): string {
 
 function validPacket(value: unknown): value is ConformancePacket {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, [
 			"handoff",
 			"invariants",
@@ -181,24 +186,27 @@ function validPacket(value: unknown): value is ConformancePacket {
 
 function validSource(value: unknown): value is Source {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["commit", "inputs", "protocol_tree", "repository", "tree"]) &&
 		value.repository === "corca-ai/ceal" &&
-		gitObject(value.commit) &&
-		gitObject(value.tree) &&
-		gitObject(value.protocol_tree) &&
+		isGitObject(value.commit) &&
+		isGitObject(value.tree) &&
+		isGitObject(value.protocol_tree) &&
 		Array.isArray(value.inputs) &&
 		value.inputs.length === SOURCE_INPUT_PATHS.length &&
 		value.inputs.every(
 			(input: unknown, index: number) =>
-				record(input) && exact(input, ["path", "sha256"]) && input.path === SOURCE_INPUT_PATHS[index] && sha256Value(input.sha256),
+				isJsonRecord(input) &&
+				exact(input, ["path", "sha256"]) &&
+				input.path === SOURCE_INPUT_PATHS[index] &&
+				isLowercaseHexDigest(input.sha256, 64),
 		)
 	);
 }
 
 function validTransport(value: unknown): value is Transport {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["authorization", "content_type", "method", "path", "schema_version"]) &&
 		value.method === "POST" &&
 		value.path === ROUTE &&
@@ -210,7 +218,7 @@ function validTransport(value: unknown): value is Transport {
 
 function validResponse(value: unknown): value is ResponseContract {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["content_type", "frame_schema", "magic_hex", "manifest_schema", "transport_schema"]) &&
 		value.content_type === RESPONSE_CONTENT_TYPE &&
 		value.magic_hex === "4345414c41533100" &&
@@ -222,7 +230,7 @@ function validResponse(value: unknown): value is ResponseContract {
 
 function validProtectedSession(value: unknown): value is ProtectedSession {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["child_fd", "deadline_ms", "maximum_bytes", "schema_version"]) &&
 		value.child_fd === 4 &&
 		value.schema_version === PROTECTED_SESSION_SCHEMA &&
@@ -233,7 +241,7 @@ function validProtectedSession(value: unknown): value is ProtectedSession {
 
 function validDeadlineBounds(value: unknown): value is DeadlineBounds {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["maximum", "minimum"]) &&
 		value.minimum === 30000 &&
 		value.maximum === 600000 &&
@@ -243,7 +251,7 @@ function validDeadlineBounds(value: unknown): value is DeadlineBounds {
 
 function validHandoff(value: unknown): value is Handoff {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["manifest_name", "materialized_path", "schema_version", "unread_has_path"]) &&
 		value.schema_version === "ceal.agent.attachment_materialization.v1" &&
 		value.manifest_name === "manifest.json" &&
@@ -254,7 +262,7 @@ function validHandoff(value: unknown): value is Handoff {
 
 function validLimits(value: unknown): value is Limits {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["effective", "safety"]) &&
 		validLimitSet(value.effective, 838860800) &&
 		validLimitSet(value.safety, 104857600) &&
@@ -264,7 +272,7 @@ function validLimits(value: unknown): value is Limits {
 
 function validLimitSet(value: unknown, maxTotal: number): value is LimitSet {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exact(value, ["max_attachment_bytes", "max_attachment_count", "max_total_bytes"]) &&
 		value.max_attachment_count === 16 &&
 		value.max_attachment_bytes === 52428800 &&
@@ -272,21 +280,6 @@ function validLimitSet(value: unknown, maxTotal: number): value is LimitSet {
 	);
 }
 
-function sameArray(value: unknown, expected: readonly string[]): value is string[] {
-	return Array.isArray(value) && value.length === expected.length && value.every((entry, index) => entry === expected[index]);
-}
-function exact(value: unknown, keys: readonly string[]): value is JsonRecord {
-	return record(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-}
-function record(value: unknown): value is JsonRecord {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function gitObject(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
-}
-function sha256Value(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-}
 function sha256(value: string | Buffer): string {
 	return createHash("sha256").update(value).digest("hex");
 }

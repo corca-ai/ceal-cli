@@ -11,6 +11,7 @@ import {
 	runCli,
 	WorkerNativeArtifactError,
 } from "../scripts/build-worker-native-artifact.ts";
+import { asJsonRecord } from "../scripts/lib/json-record.ts";
 import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
 import {
 	assertReleaseManifestProvenance,
@@ -355,21 +356,21 @@ async function withFailureGateway(callback: (endpoint: string) => Promise<void>)
 }
 
 function readJsonRecord(value: string): Record<string, unknown> {
-	return asRecord(JSON.parse(value)) ?? {};
+	return asJsonRecord(JSON.parse(value)) ?? {};
 }
 
 function readNativeManifest(value: unknown): NativeManifest {
-	const record = asRecord(value);
-	const artifact = asRecord(record?.artifact);
+	const record = asJsonRecord(value);
+	const artifact = asJsonRecord(record?.artifact);
 	const client = record?.client;
-	const protocol = asRecord(record?.protocol);
-	const handoff = asRecord(record?.handoff);
-	const nativeSmoke = asRecord(record?.native_smoke);
-	const guide = asRecord(record?.guide);
-	const compatibilityGuide = asRecord(record?.compatibility_guide);
+	const protocol = asJsonRecord(record?.protocol);
+	const handoff = asJsonRecord(record?.handoff);
+	const nativeSmoke = asJsonRecord(record?.native_smoke);
+	const guide = asJsonRecord(record?.guide);
+	const compatibilityGuide = asJsonRecord(record?.compatibility_guide);
 	const files = Array.isArray(guide?.files)
 		? guide.files.map((file) => {
-				const entry = asRecord(file);
+				const entry = asJsonRecord(file);
 				if (!entry || typeof entry.path !== "string") throw new Error("invalid native manifest guide file");
 				return { path: entry.path };
 			})
@@ -399,8 +400,4 @@ function readNativeManifest(value: unknown): NativeManifest {
 		guide: { name: guide.name, sha256: guide.sha256, files },
 		compatibility_guide: { name: compatibilityGuide.name },
 	};
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }

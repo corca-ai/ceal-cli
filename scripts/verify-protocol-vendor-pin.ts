@@ -38,6 +38,8 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isObjectRecord } from "./lib/package-bin.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PIN_PATH = "protocol-vendor-pin.json";
@@ -301,7 +303,7 @@ export function assertShippableProtocolVendorPin(options: ValidateProtocolVendor
 }
 
 function assertPinShape(pin: unknown): asserts pin is ProtocolVendorPin {
-	if (!isRecord(pin) || pin.schema_version !== SCHEMA || pin.vendored_path !== VENDORED_PATH) {
+	if (!isObjectRecord(pin) || pin.schema_version !== SCHEMA || pin.vendored_path !== VENDORED_PATH) {
 		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin is missing or does not match its schema.");
 	}
 	const source = pin.source;
@@ -399,12 +401,6 @@ function assertRegularFile(root: string, relativePath: string, code: string): st
 	return target;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-function isGitObject(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
-}
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
 }
@@ -415,7 +411,7 @@ function isProtocolVendorPinStatus(value: unknown): value is ProtocolVendorPinSt
 
 function isProtocolVendorPinSource(value: unknown): value is ProtocolVendorPinSource {
 	return (
-		isRecord(value) &&
+		isObjectRecord(value) &&
 		value.repository === SOURCE_REPOSITORY &&
 		value.package_path === VENDORED_PATH &&
 		isGitObject(value.commit) &&
@@ -425,7 +421,7 @@ function isProtocolVendorPinSource(value: unknown): value is ProtocolVendorPinSo
 
 function isProtocolVendorPinShipped(value: unknown): value is ProtocolVendorPinShipped {
 	return (
-		isRecord(value) &&
+		isObjectRecord(value) &&
 		value.lock_file === LOCK_FILE &&
 		isProtocolVendorPinStatus(value.status) &&
 		isGitObject(value.gateway_commit) &&

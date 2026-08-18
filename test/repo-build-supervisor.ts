@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 
 type SupervisorRequest = {
 	command: string;
@@ -36,10 +37,6 @@ const REQUEST_KEYS = [
 const MAX_TIMEOUT_MS = 86_400_000;
 const MAX_GRACE_MS = 600_000;
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024 * 1024;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
 	const present = Object.keys(value);

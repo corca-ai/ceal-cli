@@ -10,6 +10,7 @@ import {
 	runCli,
 	WorkerReleasePackageError,
 } from "../scripts/build-worker-release-package.ts";
+import { asJsonRecord } from "../scripts/lib/json-record.ts";
 import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.ts";
@@ -50,7 +51,7 @@ test("worker package build stages recursive dependencies, consumes a packed Prot
 	mkdirSync(nestedPackage, { recursive: true });
 	writeFileSync(path.join(nestedPackage, "package.json"), `${JSON.stringify({ name: "ceal-release-fixture-nested", version: "1.0.0" })}\n`);
 	const compilerManifest = readJsonRecord(original);
-	compilerManifest.dependencies = { ...(asRecord(compilerManifest.dependencies) ?? {}), "ceal-release-fixture-nested": "1.0.0" };
+	compilerManifest.dependencies = { ...(asJsonRecord(compilerManifest.dependencies) ?? {}), "ceal-release-fixture-nested": "1.0.0" };
 	writeFileSync(packageJsonPath, `${JSON.stringify(compilerManifest)}\n`);
 	let compilerCalls = 0;
 	const result = buildWorkerReleasePackageFromDevelopmentInputs(
@@ -170,7 +171,7 @@ test("recursive dependency staging fails closed for traversal and missing nested
 	] as const) {
 		try {
 			const manifest = readJsonRecord(original);
-			manifest.dependencies = { ...(asRecord(manifest.dependencies) ?? {}), [dependency]: version };
+			manifest.dependencies = { ...(asJsonRecord(manifest.dependencies) ?? {}), [dependency]: version };
 			writeFileSync(packageJsonPath, `${JSON.stringify(manifest)}\n`);
 			assertMissingBuildDependency(fixture, `worker-package-${dependency.replaceAll("/", "-")}`);
 		} finally {
@@ -215,7 +216,7 @@ test("production package build accepts only the locked archive lane", (context) 
 
 function readJsonRecord(value: string): Record<string, unknown> {
 	const parsed: unknown = JSON.parse(value);
-	const record = asRecord(parsed);
+	const record = asJsonRecord(parsed);
 	if (!record) throw new Error("expected JSON object");
 	return record;
 }
@@ -229,8 +230,4 @@ function assertMissingBuildDependency(fixture: WorkerReleasePackageFixture, outp
 			}),
 		(error) => error instanceof WorkerReleasePackageError && error.code === "missing_build_dependency",
 	);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }

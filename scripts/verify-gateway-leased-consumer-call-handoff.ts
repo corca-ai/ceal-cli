@@ -4,6 +4,10 @@ import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sameCanonicalJson } from "../packages/ceal-worker-cli/src/canonical-json.ts";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 
 type JsonRecord = Record<string, unknown>;
 type HandoffErrorCode =
@@ -89,16 +93,21 @@ export function verifyGatewayLeasedConsumerCallHandoff({ repoRoot = ROOT }: { re
 }
 
 function validateLock(value: unknown): PinnedHandoff {
-	if (!record(value) || !exactKeys(value, ["schema_version", "handoff"]) || value.schema_version !== LOCK_SCHEMA || !record(value.handoff))
+	if (
+		!isJsonRecord(value) ||
+		!exactKeys(value, ["schema_version", "handoff"]) ||
+		value.schema_version !== LOCK_SCHEMA ||
+		!isJsonRecord(value.handoff)
+	)
 		fail("invalid_handoff_lock", "Gateway leased-consumer handoff lock is invalid.");
 	const handoff = value.handoff;
 	if (
 		!exactKeys(handoff, ["path", "sha256", "source_repository", "source_commit", "source_tree", "vector_ids"]) ||
 		handoff.path !== HANDOFF_PATH ||
-		!sha256Text(handoff.sha256) ||
+		!isLowercaseHexDigest(handoff.sha256, 64) ||
 		handoff.source_repository !== SOURCE_REPOSITORY ||
-		!gitIdentity(handoff.source_commit) ||
-		!gitIdentity(handoff.source_tree) ||
+		!isGitObject(handoff.source_commit) ||
+		!isGitObject(handoff.source_tree) ||
 		!orderedUniqueStrings(handoff.vector_ids)
 	) {
 		fail("invalid_handoff_lock", "Gateway leased-consumer handoff lock is invalid.");
@@ -115,7 +124,7 @@ function validateLock(value: unknown): PinnedHandoff {
 
 function validateHandoff(value: unknown, pinned: PinnedHandoff): void {
 	if (
-		!record(value) ||
+		!isJsonRecord(value) ||
 		!exactKeys(value, ["schema_version", "proof_level", "writes_external", "source", "transport", "vectors", "invariants", "non_claims"]) ||
 		value.schema_version !== HANDOFF_SCHEMA ||
 		value.proof_level !== "local_state" ||
@@ -137,7 +146,7 @@ function validateHandoff(value: unknown, pinned: PinnedHandoff): void {
 
 function validateSource(value: unknown, pinned: PinnedHandoff): void {
 	if (
-		!record(value) ||
+		!isJsonRecord(value) ||
 		!exactKeys(value, ["repository", "commit", "tree", "inputs"]) ||
 		value.repository !== pinned.source_repository ||
 		value.commit !== pinned.source_commit ||
@@ -150,7 +159,8 @@ function validateSource(value: unknown, pinned: PinnedHandoff): void {
 	const paths = value.inputs.map((item) => item?.path).sort();
 	if (
 		!value.inputs.every(
-			(item) => record(item) && exactKeys(item, ["path", "sha256"]) && safeSourcePath(item.path) && sha256Text(item.sha256),
+			(item) =>
+				isJsonRecord(item) && exactKeys(item, ["path", "sha256"]) && safeSourcePath(item.path) && isLowercaseHexDigest(item.sha256, 64),
 		) ||
 		JSON.stringify(paths) !==
 			JSON.stringify([
@@ -165,11 +175,11 @@ function validateSource(value: unknown, pinned: PinnedHandoff): void {
 
 function validateTransport(value: unknown): void {
 	if (
-		!record(value) ||
+		!isJsonRecord(value) ||
 		!exactKeys(value, ["method", "service_path", "required_headers"]) ||
 		value.method !== "POST" ||
 		value.service_path !== SERVICE_PATH ||
-		!record(value.required_headers) ||
+		!isJsonRecord(value.required_headers) ||
 		!exactKeys(value.required_headers, ["authorization", "content_type"]) ||
 		value.required_headers.authorization !== "Bearer <protected-service-credential>" ||
 		value.required_headers.content_type !== "application/json"
@@ -204,7 +214,7 @@ function validateVectors(value: unknown, expectedIds: readonly string[]): void {
 }
 
 function isHandoffVector(value: unknown): value is HandoffVector {
-	return record(value) && exactKeys(value, ["id", "request_body", "external_response"]) && typeof value.id === "string";
+	return isJsonRecord(value) && exactKeys(value, ["id", "request_body", "external_response"]) && typeof value.id === "string";
 }
 
 function isExpectedRequestId(value: string): value is ExpectedRequestId {
@@ -213,10 +223,10 @@ function isExpectedRequestId(value: string): value is ExpectedRequestId {
 
 function validResponse(value: unknown, status: number, errorCode: string): boolean {
 	return (
-		record(value) &&
+		isJsonRecord(value) &&
 		exactKeys(value, ["status", "body"]) &&
 		value.status === status &&
-		record(value.body) &&
+		isJsonRecord(value.body) &&
 		exactKeys(value.body, ["ok", "error_code"]) &&
 		value.body.ok === false &&
 		value.body.error_code === errorCode
@@ -259,9 +269,6 @@ function parseJson(bytes: Buffer, code: HandoffErrorCode): unknown {
 function fail(code: HandoffErrorCode, message: string): never {
 	throw new GatewayLeasedConsumerCallHandoffError(code, message);
 }
-function record(value: unknown): value is JsonRecord {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 function exactKeys(value: JsonRecord, keys: readonly string[]): boolean {
 	const actual = Object.keys(value).sort();
 	return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
@@ -269,23 +276,8 @@ function exactKeys(value: JsonRecord, keys: readonly string[]): boolean {
 function sha256(bytes: Buffer): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
-function sha256Text(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-}
-function gitIdentity(value: unknown): value is string {
-	return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
-}
 function sameJson(left: unknown, right: unknown): boolean {
-	return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
-}
-function canonicalJson(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(canonicalJson);
-	if (!record(value)) return value;
-	return Object.fromEntries(
-		Object.keys(value)
-			.sort()
-			.map((key) => [key, canonicalJson(value[key])]),
-	);
+	return sameCanonicalJson(left, right);
 }
 function safeSourcePath(value: unknown): value is string {
 	return typeof value === "string" && value.startsWith("scripts/agent-runtime/") && !value.includes("..") && !value.includes("\0");

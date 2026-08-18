@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { asJsonRecord } from "./json-record.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -12,7 +13,7 @@ export function resolvePackageBin(packageDirectory: string): string {
 	} catch {
 		throw new Error("Package metadata is unavailable or invalid.");
 	}
-	const record = asRecord(manifest);
+	const record = asJsonRecord(manifest);
 	const bin = record?.bin;
 	if (!record || !isObjectRecord(bin)) throw new Error("Package metadata must declare an object-form bin.");
 	const entry = Object.entries(bin).find(
@@ -61,10 +62,6 @@ function assertNoSymlinks(root: string, target: string): void {
 	if (metadata.isSymbolicLink()) throw new Error("Compiler entrypoint must not use symbolic links.");
 }
 
-function asRecord(value: unknown): JsonRecord | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
-}
-
-function isObjectRecord(value: unknown): value is JsonRecord {
-	return asRecord(value) !== undefined;
+export function isObjectRecord(value: unknown): value is JsonRecord {
+	return asJsonRecord(value) !== undefined;
 }

@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { projectAcceptanceReceipt } from "../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
@@ -247,10 +248,6 @@ interface SanitizedAcceptanceRecord<GatewayProtocolInput extends object> {
 }
 
 export const WorkerAcceptanceError = codedErrorClass("WorkerAcceptanceError");
-
-function isRecord(value: unknown): value is JsonRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isString(value: unknown): value is string {
 	return typeof value === "string";

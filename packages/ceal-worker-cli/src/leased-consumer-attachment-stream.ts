@@ -15,6 +15,7 @@ import {
 	decodeCealLeasedConsumerAttachmentStreamRecord,
 	CealLeasedConsumerAttachmentStreamError as ProtocolAttachmentStreamError,
 } from "@corca-ai/ceal-protocol";
+import { isJsonRecord } from "./json-record.js";
 import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 
 /** @testOnly */
@@ -264,7 +265,7 @@ async function writeCreateOnly(filePath: string, bytes: Uint8Array): Promise<voi
 export function assertLeasedConsumerAttachmentStreamBinding(
 	binding: unknown,
 ): asserts binding is CealAgentAttachmentMaterializationBinding {
-	if (!isRecord(binding)) fail("invalid_expected_binding");
+	if (!isJsonRecord(binding)) fail("invalid_expected_binding");
 	const actual = Object.keys(binding).sort();
 	const expected = [...BINDING_KEYS].sort();
 	if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) fail("invalid_expected_binding");
@@ -292,10 +293,6 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 function fail(code: string): never {
 	throw new LeasedConsumerAttachmentStreamError(code);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function positiveInteger(value: unknown): value is number {

@@ -13,7 +13,6 @@
         "scripts/coverage-scripts.ts",
         "scripts/install-git-hooks.ts",
         "scripts/lib/protocol-provenance.ts",
-        "scripts/materialize-signed-gateway-protocol-source.ts",
         "scripts/project-staged-worker-control-session.ts",
         "test/contract/one-fact-one-home.test.ts",
         "test/contract/pre-push-lock.test.ts",
@@ -39,11 +38,6 @@
         "scripts/lib/protocol-provenance.ts": {
           "TS7006": 1,
           "TS7031": 2
-        },
-        "scripts/materialize-signed-gateway-protocol-source.ts": {
-          "TS2339": 2,
-          "TS7006": 1,
-          "TS7031": 4
         },
         "scripts/project-staged-worker-control-session.ts": {
           "TS7031": 4,
