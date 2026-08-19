@@ -20,6 +20,8 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 		"message.create",
 		"--target",
 		"target:opaque",
+		"--cursor",
+		"cursor:page-two",
 		"--argument",
 		"text=source E2E",
 		"--allow-provider-call",
@@ -27,12 +29,14 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 	assert.equal(options.allowLiveGateway, true);
 	assert.equal(options.allowSessionRefresh, true);
 	assert.equal(options.allowProviderCall, true);
+	assert.equal(options.cursor, "cursor:page-two");
 	assert.deepEqual(options.arguments, ["text=source E2E"]);
 	const plan = sourceWorkerE2ePlan(options);
 	assert.equal(plan.status, "planned");
 	const commands = plan.commands as Array<Record<string, unknown>>;
 	assert.equal(commands.at(-3)?.effect, "read_only");
 	assert.match(String(commands.at(-3)?.command), /capabilities targets/u);
+	assert.match(String(commands.at(-3)?.command), /--cursor cursor:page-two/u);
 	assert.equal(commands.at(-2)?.effect, "remote_write");
 	assert.match(String(commands.at(-2)?.command), /returned-opaque-ref/u);
 	assert.doesNotMatch(String(commands.at(-2)?.command), /target:opaque/u);
@@ -44,6 +48,12 @@ test("source-worker-e2e rejects a provider call without its separate boundary", 
 	assert.throws(
 		() => parseSourceWorkerE2eArgs(["--allow-live-gateway", "--capability", "message.create", "--target", "target:x"]),
 		/allow-provider-call/u,
+	);
+	assert.throws(() => parseSourceWorkerE2eArgs(["--allow-live-gateway", "--cursor", "cursor:page-two"]), /--cursor requires/u);
+	assert.throws(
+		() =>
+			parseSourceWorkerE2eArgs(["--allow-live-gateway", "--capability", "message.create", "--target", "target:x", "--cursor", "not-a-cursor"]),
+		/opaque cursor/u,
 	);
 	assert.throws(() => parseSourceWorkerE2eArgs(["--allow-live-gateway", "--allow-session-refresh"]), /boundary-reason/u);
 	assert.throws(() => parseSourceWorkerE2eArgs(["--doctor", "--allow-live-gateway"]), /doctor cannot/u);

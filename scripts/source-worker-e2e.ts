@@ -15,6 +15,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { CEAL_SAFE_CURSOR } from "../packages/ceal-worker-cli/src/safe-ref.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_ENTRYPOINT = path.join(ROOT, "packages/ceal-worker-cli/dist/bin.js");
@@ -39,6 +40,7 @@ export type SourceWorkerE2eOptions = {
 	profile?: string;
 	capability?: string;
 	target?: string;
+	cursor?: string;
 	arguments: string[];
 };
 
@@ -143,6 +145,13 @@ export function parseSourceWorkerE2eArgs(args: readonly string[]): SourceWorkerE
 			index += 1;
 			continue;
 		}
+		if (arg === "--cursor") {
+			if (seen.has(arg)) throw new Error("--cursor may be supplied once");
+			seen.add(arg);
+			result.cursor = value(index, arg);
+			index += 1;
+			continue;
+		}
 		if (arg === "--argument") {
 			const operand = value(index, arg);
 			if (!operand.includes("=")) throw new Error("--argument requires key=value");
@@ -155,6 +164,10 @@ export function parseSourceWorkerE2eArgs(args: readonly string[]): SourceWorkerE
 	if (result.profile !== undefined && !SAFE_PROFILE.test(result.profile)) throw new Error("--profile must be a safe profile reference");
 	if ((result.capability === undefined) !== (result.target === undefined))
 		throw new Error("--capability and --target must be supplied together");
+	if (result.cursor !== undefined && (result.capability === undefined || result.target === undefined))
+		throw new Error("--cursor requires --capability and --target");
+	if (result.cursor !== undefined && !CEAL_SAFE_CURSOR.test(result.cursor))
+		throw new Error("--cursor must be a Gateway-issued opaque cursor");
 	if (result.explicitSessionRefresh && !result.allowSessionRefresh) throw new Error("--session-refresh requires --allow-session-refresh");
 	if (result.allowSessionRefresh && !result.boundaryReason) throw new Error("--allow-session-refresh requires --boundary-reason");
 	if (result.allowProviderCall && !result.boundaryReason) throw new Error("--allow-provider-call requires --boundary-reason");
@@ -191,6 +204,7 @@ export function sourceWorkerE2eHelp(): string {
 		"Optional provider call (always opt-in):",
 		"  --capability <id>            Capability id returned by live discovery.",
 		"  --target <target-ref>        Exact opaque target ref returned for that capability.",
+		"  --cursor <cursor-ref>        Gateway-issued cursor for the page that returned the target.",
 		"  --argument <key=value>       Repeat fields declared by that capability.",
 		"  --allow-provider-call        Permit 'ceal call' and receipt readback.",
 		"",
@@ -212,7 +226,7 @@ export function sourceWorkerE2ePlan(options: SourceWorkerE2eOptions): RecordValu
 		...(options.capability && options.target
 			? [
 					{
-						command: `ceal capabilities targets --capability ${options.capability}${profile} --limit 64`,
+						command: `ceal capabilities targets --capability ${options.capability}${profile}${options.cursor ? ` --cursor ${options.cursor}` : ""} --limit 64`,
 						effect: "read_only",
 						session_effect: "refresh_if_needed",
 					},
@@ -585,6 +599,7 @@ async function main(): Promise<number> {
 				...(options.profile ? ["--profile", options.profile] : []),
 				"--limit",
 				"64",
+				...(options.cursor ? ["--cursor", options.cursor] : []),
 				...(options.detail ? ["--detail"] : []),
 			],
 			"targets",
