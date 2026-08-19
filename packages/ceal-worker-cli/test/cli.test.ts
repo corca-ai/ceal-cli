@@ -4020,12 +4020,7 @@ test("capabilities negotiates and surfaces the eligible-Profile catalog for --pr
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
 		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
 	];
-	const responseFactory = (body: FixtureRequest): FixtureResponse => {
-		if (body.operation !== "handshake") return discoveryResponse(body);
-		const base = handshakeResponse(body);
-		assert.ok(base.ok);
-		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
-	};
+	const responseFactory = eligibleProfilesResponseFactory(eligible);
 	await withGateway(async ({ endpoint, requests }) => {
 		const payload = await yamlRun(
 			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:profiles:001", "--token-stdin"],
@@ -4049,12 +4044,7 @@ test("capabilities names profile_selection_required with the catalog when more t
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
 		{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" },
 	];
-	const responseFactory = (body: FixtureRequest): FixtureResponse => {
-		if (body.operation !== "handshake") return discoveryResponse(body);
-		const base = handshakeResponse(body);
-		assert.ok(base.ok);
-		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
-	};
+	const responseFactory = eligibleProfilesResponseFactory(eligible);
 	await withGateway(async ({ endpoint }) => {
 		const payload = await yamlRun(
 			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:selection:001", "--token-stdin"],
@@ -4072,12 +4062,7 @@ test("capabilities names profile_selection_required with the catalog when more t
 
 test("capabilities omits profile_selection when a single eligible Profile becomes active automatically", async () => {
 	const eligible = [{ profile_ref: "profile:narnia", membership_ref: "membership:narnia" }];
-	const responseFactory = (body: FixtureRequest): FixtureResponse => {
-		if (body.operation !== "handshake") return discoveryResponse(body);
-		const base = handshakeResponse(body);
-		assert.ok(base.ok);
-		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
-	};
+	const responseFactory = eligibleProfilesResponseFactory(eligible);
 	await withGateway(async ({ endpoint }) => {
 		const payload = await yamlRun(
 			["capabilities", "--endpoint", endpoint, "--profile", "profile:narnia", "--request-id", "narnia:selection:single", "--token-stdin"],
@@ -5205,6 +5190,21 @@ function parseYaml(stdout: string): YamlValue {
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+// Three capabilities tests answer the handshake with the SAME shape -- the real
+// handshake response with `eligible_profiles` swapped in, and every other
+// operation left to discovery -- and differ only in which profiles are eligible.
+// Having that closure three times meant a change to the shared shape had to be
+// made three times; the eligible set is the only thing that varies, so it is the
+// only thing passed in.
+function eligibleProfilesResponseFactory(eligible: Array<{ profile_ref: string; membership_ref: string }>) {
+	return (body: FixtureRequest): FixtureResponse => {
+		if (body.operation !== "handshake") return discoveryResponse(body);
+		const base = handshakeResponse(body);
+		assert.ok(base.ok);
+		return { ...base, value: { ...base.value, eligible_profiles: eligible } };
+	};
 }
 
 function handshakeResponse(request: FixtureRequest): FixtureResponse {

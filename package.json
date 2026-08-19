@@ -90,6 +90,7 @@
 		"esbuild": "0.28.1",
 		"eslint": "^9.39.5",
 		"eslint-plugin-simple-import-sort": "^14.0.0",
+		"eslint-plugin-sonarjs": "^4.2.0",
 		"knip": "6.32.0",
 		"markdownlint-cli2": "0.23.2",
 		"postject": "1.0.0-alpha.6",

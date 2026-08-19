@@ -1,5 +1,6 @@
 import stylistic from "@stylistic/eslint-plugin";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
+import sonarjs from "eslint-plugin-sonarjs";
 import tseslint from "typescript-eslint";
 
 // Replaces `biome check .`, which carried THREE jobs in one command: lint rules,
@@ -35,7 +36,7 @@ export default tseslint.config(
 	{
 		files: ["**/*.ts", "**/*.mjs"],
 		extends: [tseslint.configs.recommended],
-		plugins: { "@stylistic": stylistic, "simple-import-sort": simpleImportSort },
+		plugins: { "@stylistic": stylistic, "simple-import-sort": simpleImportSort, sonarjs },
 		rules: {
 			// biome `suspicious.noExplicitAny: "error"`.
 			"@typescript-eslint/no-explicit-any": "error",
@@ -57,6 +58,21 @@ export default tseslint.config(
 			// into a diff that was mostly inserted blank lines.
 			"simple-import-sort/imports": ["error", { groups: [["^\\u0000", "^"]] }],
 			"simple-import-sort/exports": "error",
+
+			// Convergence with the Gateway repo, which turned these on the same day
+			// after measuring them. They are within-file and function-granular, so
+			// they complement `lint:duplicate-literal` rather than repeating it: that
+			// gate reports a REGEX literal spelled in two owned modules, and these
+			// report an identical function body or a self-identical expression inside
+			// one file.
+			//
+			// Measured on this tree before enabling: no-identical-expressions 0,
+			// no-identical-functions 3 across 2 files. NOT enabled here:
+			// `sonarjs/no-duplicate-string`, which reports 321 across 43 files -- more
+			// than the Gateway's 165 in a smaller tree. That one needs the bulk-
+			// suppression baseline the Gateway chose, and it is its own slice.
+			"sonarjs/no-identical-functions": "error",
+			"sonarjs/no-identical-expressions": "error",
 
 			// biome `formatter` + `javascript.formatter`, transcribed.
 			"@stylistic/indent": ["error", "tab", { offsetTernaryExpressions: true }],
