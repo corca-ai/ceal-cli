@@ -32,6 +32,7 @@ export type SourceWorkerE2eOptions = {
 	plan: boolean;
 	build: boolean;
 	detail: boolean;
+	freshDiscovery: boolean;
 	json: boolean;
 	allowLiveGateway: boolean;
 	allowSessionRefresh: boolean;
@@ -63,6 +64,7 @@ export function parseSourceWorkerE2eArgs(args: readonly string[]): SourceWorkerE
 		plan: false,
 		build: false,
 		detail: false,
+		freshDiscovery: false,
 		json: false,
 		allowLiveGateway: false,
 		allowSessionRefresh: false,
@@ -96,6 +98,10 @@ export function parseSourceWorkerE2eArgs(args: readonly string[]): SourceWorkerE
 		}
 		if (arg === "--detail") {
 			result.detail = true;
+			continue;
+		}
+		if (arg === "--fresh-discovery") {
+			result.freshDiscovery = true;
 			continue;
 		}
 		if (arg === "--json") {
@@ -194,6 +200,7 @@ export function sourceWorkerE2eHelp(): string {
 		"  --plan                       Print the planned command sequence; do not run it.",
 		"  --build                      Run the repo-owned local Worker build first.",
 		"  --detail                     Include bounded command summaries and catalog counts.",
+		"  --fresh-discovery            Force the Worker catalog's existing --fresh live probe.",
 		"  --json                       Emit JSON instead of YAML.",
 		"",
 		"Live boundary:",
@@ -223,7 +230,11 @@ export function sourceWorkerE2ePlan(options: SourceWorkerE2eOptions): RecordValu
 		{ command: "ceal session status", effect: "read_only" },
 		{ command: "ceal capabilities --help", effect: "read_only" },
 		...(options.explicitSessionRefresh ? [{ command: "ceal session refresh", effect: "remote_write" }] : []),
-		{ command: `ceal capabilities${profile} --fresh --detail`, effect: "read_only", session_effect: "refresh_if_needed" },
+		{
+			command: `ceal capabilities${profile}${options.freshDiscovery ? " --fresh" : ""} --detail`,
+			effect: "read_only",
+			session_effect: "refresh_if_needed",
+		},
 		...(options.capability && options.target
 			? [
 					{
@@ -585,7 +596,7 @@ async function main(): Promise<number> {
 	const capabilityArgs = [
 		"capabilities",
 		...(options.profile ? ["--profile", options.profile] : []),
-		"--fresh",
+		...(options.freshDiscovery ? ["--fresh"] : []),
 		...(options.detail ? ["--detail"] : []),
 	];
 	const discovery = await worker(capabilityArgs, "capabilities");

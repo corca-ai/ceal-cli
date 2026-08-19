@@ -34,11 +34,12 @@ for Notion, Google, Slack, or GitHub.
 2. Run `ceal --help`, then the selected command family help and every child leaf
    help named by that help. Stop if a required leaf omits `Effect`, `Evidence`,
    `Result schema`, or `Recovery/readback`.
-3. Run `ceal capabilities --profile <profile> --fresh --detail`. Treat this
-   response, not command discovery, as the capability inventory and input
-   contract. Record every returned `capability_id`, `effect`, target requirement,
-   input contract, write contract, evidence requirement, readiness, and any
-   `non_claims`.
+3. Run `ceal capabilities --profile <profile> --fresh --detail`. This is the
+   audit's deliberate live-inventory exception: treat this response, not
+   command discovery, as the capability inventory and input contract. Do not
+   copy `--fresh` into routine discovery or provider reads. Record every
+   returned `capability_id`, `effect`, target requirement, input contract, write
+   contract, evidence requirement, readiness, and any `non_claims`.
 4. State the audit scope before calls: named source URLs, named providers,
    explicitly authorized writes, safe exclusions, and the desired report target.
    A user exclusion such as “Slack message.create was reviewed separately” is

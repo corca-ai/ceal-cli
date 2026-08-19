@@ -31,6 +31,7 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 	assert.equal(options.allowLiveGateway, true);
 	assert.equal(options.allowSessionRefresh, true);
 	assert.equal(options.allowProviderCall, true);
+	assert.equal(options.freshDiscovery, false);
 	assert.equal(options.cursor, "cursor:page-two");
 	assert.deepEqual(options.arguments, ["text=source E2E"]);
 	const plan = sourceWorkerE2ePlan(options);
@@ -43,6 +44,24 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 	assert.equal(commands.at(-2)?.effect, "remote_write");
 	assert.match(String(commands.at(-2)?.command), /returned-opaque-ref/u);
 	assert.doesNotMatch(String(commands.at(-2)?.command), /target:opaque/u);
+	const catalogCommand = commands.find(
+		(command) => String(command.command).startsWith("ceal capabilities") && !String(command.command).includes("--help"),
+	);
+	assert.equal(catalogCommand?.effect, "read_only");
+	assert.doesNotMatch(String(catalogCommand?.command), /--fresh/u);
+	const freshPlan = sourceWorkerE2ePlan({ ...options, freshDiscovery: true });
+	const freshCommands = freshPlan.commands as Array<Record<string, unknown>>;
+	assert.match(
+		String(
+			freshCommands.find((command) => String(command.command).startsWith("ceal capabilities") && !String(command.command).includes("--help"))
+				?.command,
+		),
+		/--fresh/u,
+	);
+	assert.doesNotMatch(
+		String(freshCommands.find((command) => String(command.command).includes("capabilities targets"))?.command),
+		/--fresh/u,
+	);
 	assert.equal(targetRefReturned("targets:\n  - target_ref: target:opaque\n", "target:opaque"), true);
 	assert.equal(targetRefReturned("targets: []\n", "target:opaque"), false);
 	assert.equal(nextTargetCursor("target_catalog:\n  next_cursor: cursor:page-two\n"), "cursor:page-two");
@@ -68,6 +87,11 @@ test("source-worker-e2e rejects a provider call without its separate boundary", 
 	);
 	assert.throws(() => parseSourceWorkerE2eArgs(["--allow-live-gateway", "--allow-session-refresh"]), /boundary-reason/u);
 	assert.throws(() => parseSourceWorkerE2eArgs(["--doctor", "--allow-live-gateway"]), /doctor cannot/u);
+});
+
+test("source-worker-e2e parses the deliberate fresh-discovery opt-in", () => {
+	const options = parseSourceWorkerE2eArgs(["--fresh-discovery", "--plan"]);
+	assert.equal(options.freshDiscovery, true);
 });
 
 test("source-worker-e2e summaries omit tokens and raw provider response bodies", () => {
@@ -167,5 +191,6 @@ test("source-worker-e2e help distinguishes fixture tests from the live source-bu
 	assert.match(help, /source-built Worker/u);
 	assert.match(help, /--allow-live-gateway/u);
 	assert.match(help, /--allow-provider-call/u);
+	assert.match(help, /--fresh-discovery/u);
 	assert.match(help, /ceal-tester/u);
 });

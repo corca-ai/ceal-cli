@@ -4472,7 +4472,7 @@ test("target recovery preserves a selected Profile and never hides a continuatio
 		);
 		assert.equal(
 			unfilteredEmpty.next_action,
-			"The unfiltered target catalog is complete and contains zero currently authorized targets for 'message.search'. This is terminal; do not invent a target ref or retry this page.",
+			"The unfiltered target catalog is complete and contains zero currently authorized targets for 'message.search'. This is terminal; do not invent a target ref or retry this page. If the intended target is a public Slack channel, an administrator-approved future join flow must join it, verify membership, and rerun the original call once; this current Gateway route has no approval or join action.",
 		);
 	}, responseFactory);
 });

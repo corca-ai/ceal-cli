@@ -1270,7 +1270,7 @@ function capabilityCatalogNextAction(
 	}
 	if (catalog.complete && catalog.target_count === 0) {
 		return selection.kind === "targets"
-			? `The unfiltered target catalog is complete and contains zero currently authorized targets for '${selection.body.capability_id}'. This is terminal; do not invent a target ref or retry this page.`
+			? `The unfiltered target catalog is complete and contains zero currently authorized targets for '${selection.body.capability_id}'. This is terminal; do not invent a target ref or retry this page. If the intended target is a public Slack channel, an administrator-approved future join flow must join it, verify membership, and rerun the original call once; this current Gateway route has no approval or join action.`
 			: "The unfiltered target catalog is complete and contains zero currently authorized targets. This is terminal for target-bound calls; do not invent a target ref or retry this page.";
 	}
 	return catalog.returned_count > 0 ? "Use one returned target with 'ceal call <capability-id> --target <target-ref> key=value'." : null;
