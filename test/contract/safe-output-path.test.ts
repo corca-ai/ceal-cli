@@ -1,9 +1,9 @@
+import { assertNoSymlinkComponents, type SafetyFailure } from "../../scripts/lib/safe-output-path.ts";
+import { scratchDir } from "../scratch-dir.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { assertNoSymlinkComponents, type SafetyFailure } from "../../scripts/lib/safe-output-path.ts";
-import { scratchDir } from "../scratch-dir.ts";
 
 class GuardError extends Error {
 	readonly code: Parameters<SafetyFailure>[0];

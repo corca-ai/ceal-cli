@@ -1,7 +1,7 @@
+import { renderCapabilityTargets } from "../dist/index.js";
+import type { CealGatewayDiscoveryCapability, CealGatewayDiscoveryTarget, CealGatewayRateLimitPolicy } from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { CealGatewayDiscoveryCapability, CealGatewayDiscoveryTarget, CealGatewayRateLimitPolicy } from "@corca-ai/ceal-protocol";
-import { renderCapabilityTargets } from "../dist/index.js";
 
 const capabilities: CealGatewayDiscoveryCapability[] = [
 	{

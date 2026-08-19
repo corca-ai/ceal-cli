@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import {
 	buildWorkerReleasePackage,
 	buildWorkerReleasePackageFromDevelopmentInputs,
@@ -16,6 +10,12 @@ import { assertCliFailureChannels } from "./cli-failure-channels.ts";
 import { assertReleaseGuideArchive, assertReleaseManifestProvenance, execReleaseTestProcess } from "./release-process-bounds.ts";
 import { required as requiredValue } from "./required.ts";
 import { packedProtocolFixture, ROOT } from "./worker-release-package-fixture.ts";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 let packedFixture: {
 	root: string;

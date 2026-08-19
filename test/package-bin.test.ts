@@ -1,9 +1,9 @@
+import { resolvePackageBin } from "../scripts/lib/package-bin.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolvePackageBin } from "../scripts/lib/package-bin.ts";
 
 test("package bin resolver accepts the native TypeScript tsc entrypoint", () => {
 	const root = path.resolve("node_modules", "@typescript", "native");

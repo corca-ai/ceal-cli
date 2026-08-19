@@ -1,12 +1,3 @@
-import { CealHttpTransportError, createCealClient, createCealHttpTransport } from "@corca-ai/ceal";
-import type {
-	CealGatewayAnnouncementPolicy,
-	CealGatewayAuditEvent,
-	CealGatewayCallValue,
-	CealGatewayDiscoveryCapability,
-	CealGatewayDiscoveryValue,
-	CealGatewayHandshakeValue,
-} from "@corca-ai/ceal-protocol";
 import { buildAcceptanceRecord, type CealAcceptanceBoundedCall, readInstalledReleaseFacts } from "./acceptance-record.js";
 import { type CealAgentGuideHost, countRegisteredGuideHosts, isCealAgentGuideHost } from "./agent-guide.js";
 import {
@@ -41,8 +32,8 @@ import {
 	writeClientSessionUnavailable,
 } from "./client-session.js";
 import {
-	type CealCommandDefinition,
 	CEAL_CREDENTIAL_CONTEXT as CREDENTIAL_CONTEXT,
+	type CealCommandDefinition,
 	SESSION_SETUP_NEXT_ACTION,
 } from "./command-definitions.js";
 import { commandRecovery, findCealCommand, runCealStaticCommand, writeCliError as writeError } from "./command-surface.js";
@@ -65,6 +56,15 @@ import { type CealSessionRenewalMode, requireCealCallRenewalMode, requireCealSes
 import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 import { type CealTimingSpan, type CealTimingStage, finishCealTiming, startCealTiming, withCealTiming } from "./timing.js";
 import { CEAL_PACKAGE_VERSION, CEAL_WORKER_PROTOCOL_VERSION as PROTOCOL_VERSION } from "./worker-identity.js";
+import { CealHttpTransportError, createCealClient, createCealHttpTransport } from "@corca-ai/ceal";
+import type {
+	CealGatewayAnnouncementPolicy,
+	CealGatewayAuditEvent,
+	CealGatewayCallValue,
+	CealGatewayDiscoveryCapability,
+	CealGatewayDiscoveryValue,
+	CealGatewayHandshakeValue,
+} from "@corca-ai/ceal-protocol";
 
 // Re-exported beside the route declarations because the probe guard resolves a
 // binary through this one module: it reads the routes to decide what may run,

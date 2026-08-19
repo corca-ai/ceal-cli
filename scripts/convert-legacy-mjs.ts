@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readPolicy as readValidatedPolicy, trackedLegacyMjs } from "./check-no-legacy-mjs.ts";
 import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
@@ -18,7 +19,6 @@ import {
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { readPolicy as readValidatedPolicy, trackedLegacyMjs } from "./check-no-legacy-mjs.ts";
 
 const POLICY_FILE = "config/no-legacy-mjs.json";
 type LegacyMjsPolicy = { readonly schema_version: "ceal.no_legacy_mjs.v1"; readonly files: readonly string[] };

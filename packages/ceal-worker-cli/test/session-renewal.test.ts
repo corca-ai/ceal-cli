@@ -1,7 +1,7 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import { requireCealCallRenewalMode, requireCealSessionRenewalMode } from "../dist/session-renewal.js";
 import type { CealSessionRenewalMode } from "../src/session-renewal.ts";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 test("omitting session renewal mode fails before session or renewal work", () => {
 	let sessionReads = 0;

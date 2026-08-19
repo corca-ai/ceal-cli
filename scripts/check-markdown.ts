@@ -6,14 +6,12 @@
 // therefore makes the non-equivalence explicit: it enforces markdownlint only,
 // with the same general-document exclusions and a local dependency/config.
 
+import { isMainModule } from "./lib/is-main-module.ts";
+import { main as markdownlintCli2Main } from "markdownlint-cli2";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { main as markdownlintCli2Main } from "markdownlint-cli2";
-
-import { isMainModule } from "./lib/is-main-module.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKDOWNLINT_CONFIG = ".markdownlint-cli2.jsonc";

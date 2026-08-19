@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
 	CealLeasedConsumerDispositionControlRequest,
 	CealLeasedConsumerDispositionControlResponse,
 } from "../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
 import { contractModule, controlSessionContractFromVerifiedConformance } from "./generate-leased-consumer-handoff-runtime.ts";
 import type { JsonRecord } from "./lib/json-record.ts";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH = fileURLToPath(import.meta.url);
 

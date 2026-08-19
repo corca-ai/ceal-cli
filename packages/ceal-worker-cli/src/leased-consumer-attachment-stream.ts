@@ -1,6 +1,6 @@
-import { constants as fsConstants } from "node:fs";
-import { type FileHandle, lstat, mkdir, open, readdir, rm } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isJsonRecord } from "./json-record.js";
+import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import { sha256 } from "./sha256.js";
 import {
 	attachmentStreamExceedsSafety,
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAGIC,
@@ -9,14 +9,14 @@ import {
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAX_RECORD_BYTES,
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_RECORD_PREFIX_BYTES,
 	type CealLeasedConsumerAttachmentStreamBinding,
+	CealLeasedConsumerAttachmentStreamError as ProtocolAttachmentStreamError,
 	type CealLeasedConsumerAttachmentStreamManifest,
 	type CealLeasedConsumerAttachmentStreamUnreadReason,
 	decodeCealLeasedConsumerAttachmentStreamRecord,
-	CealLeasedConsumerAttachmentStreamError as ProtocolAttachmentStreamError,
 } from "@corca-ai/ceal-protocol";
-import { isJsonRecord } from "./json-record.js";
-import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
-import { sha256 } from "./sha256.js";
+import { constants as fsConstants } from "node:fs";
+import { type FileHandle, lstat, mkdir, open, readdir, rm } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 
 /** @testOnly */
 export const CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA = "ceal.agent.attachment_materialization.v1" as const;
@@ -36,7 +36,7 @@ const BINDING_KEYS = [
 	"requester_subject_ref",
 ] as const;
 
-export interface CealAgentAttachmentMaterializationBinding extends CealLeasedConsumerAttachmentStreamBinding {}
+export type CealAgentAttachmentMaterializationBinding = CealLeasedConsumerAttachmentStreamBinding;
 
 interface AgentAttachmentBase {
 	attachment_ref: string;

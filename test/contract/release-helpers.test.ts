@@ -1,11 +1,11 @@
+import { isSha256Digest, sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
+import { isRegularNonSymlinkDirectory } from "../../scripts/lib/regular-directory.ts";
+import { resolveMatchingWorkerClientVersion } from "../../scripts/lib/release-version.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { isSha256Digest, sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
-import { isRegularNonSymlinkDirectory } from "../../scripts/lib/regular-directory.ts";
-import { resolveMatchingWorkerClientVersion } from "../../scripts/lib/release-version.ts";
 
 test("sha256 owner preserves one digest across text and byte inputs", () => {
 	const text = "ceal-worker-sha256-contract";

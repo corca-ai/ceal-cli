@@ -15,13 +15,13 @@
 // time, which left the one script whose failure surfaces as a mid-release
 // ENOTCACHED with no test at all.
 
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isStringMap } from "./lib/string-map.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
-import { isStringMap } from "./lib/string-map.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONSUMER_MANIFESTS = ["packages/ceal-client/package.json", "packages/ceal-worker-cli/package.json"];
@@ -126,7 +126,7 @@ export function packageFetchIdentity(indexName: string, record: PackageRecord): 
  * @returns array of `{ name, version }`, sorted for a stable log and diff
  */
 export class UnpinnedDependencyError extends Error {
-	readonly code: "unpinned_dependency" = "unpinned_dependency";
+	readonly code = "unpinned_dependency" as const;
 	readonly missing: string[];
 
 	constructor(missing: string[]) {

@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import test, { type TestContext } from "node:test";
 import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
 	bootstrapGatewayProtocolHandoff,
@@ -10,6 +5,11 @@ import {
 	resolveRemoteTag,
 } from "../../scripts/bootstrap-gateway-protocol-handoff.ts";
 import { packedProtocolFixture, ROOT } from "../worker-release-package-fixture.ts";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
 
 test("public bootstrap derives one lock candidate from exact signed packet identities without writing the repository", (context: TestContext) => {
 	const fixture = publicFixture(context);

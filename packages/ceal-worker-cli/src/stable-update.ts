@@ -1,11 +1,11 @@
-import { readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { parse } from "yaml";
 import { detectCealAgentGuideHost } from "./agent-guide.js";
 import { runBoundedProcess } from "./bounded-process.js";
 import type { CealStableUpdateOptions, CealStableUpdateResult, CealWorkerPlatform } from "./cli-runtime.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import { sha256 } from "./sha256.js";
+import { readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { parse } from "yaml";
 
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 

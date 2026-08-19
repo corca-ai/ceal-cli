@@ -1,9 +1,9 @@
+import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.ts";
+import { transformSync } from "esbuild";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { type LoadHookSync, type ResolveHookSync, registerHooks } from "node:module";
+import { type LoadHookSync, registerHooks,type ResolveHookSync } from "node:module";
 import { dirname, isAbsolute, join, relative as relativePath, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { transformSync } from "esbuild";
-import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.ts";
 
 const DEFAULT_REPO_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolvePath(process.env.CEAL_SOURCE_TEST_REPO_ROOT ?? DEFAULT_REPO_ROOT);

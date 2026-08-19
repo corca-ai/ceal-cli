@@ -1,5 +1,5 @@
-import { type CealHttpResponseKind, CealHttpTransportError } from "@corca-ai/ceal";
 import { CEAL_SAFE_REQUEST_ID } from "./safe-ref.js";
+import { type CealHttpResponseKind, CealHttpTransportError } from "@corca-ai/ceal";
 
 export type CealGatewayObservationPhase = "handshake" | "discovery";
 export type CealGatewayObservationOperation = "handshake" | "discover";

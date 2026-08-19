@@ -1,6 +1,6 @@
+import { parseNamedOptions, unknownNamedOption } from "../dist/named-options.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNamedOptions, unknownNamedOption } from "../dist/named-options.js";
 
 const VALUE_OPTIONS = new Set(["--target", "--profile"]);
 const FLAG_OPTIONS = new Set(["--fresh", "--detail"]);

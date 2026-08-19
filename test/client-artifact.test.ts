@@ -1,3 +1,4 @@
+import { buildIsolatedWorkspaceArtifacts, REPO_ROOT, sha256 } from "./artifact-workspace.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -7,7 +8,6 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { parse } from "yaml";
-import { buildIsolatedWorkspaceArtifacts, REPO_ROOT, sha256 } from "./artifact-workspace.ts";
 
 let artifact: ReturnType<typeof buildIsolatedWorkspaceArtifacts>;
 let checkoutBeforeArtifactBuild: string;

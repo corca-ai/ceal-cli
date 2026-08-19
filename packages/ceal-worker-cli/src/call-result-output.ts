@@ -1,11 +1,3 @@
-import {
-	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
-	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
-	CEAL_GATEWAY_RECOVERY_KINDS,
-	CEAL_PROTOCOL_VERSION,
-	type CealGatewayCallValue,
-	isCealPublicSafeText,
-} from "@corca-ai/ceal-protocol";
 import { isPlainJsonRecord as isPlainRecord } from "./canonical-json.js";
 import { classifyClientSessionFailure, isClassifiedClientSessionFailure } from "./client-session.js";
 import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
@@ -14,6 +6,14 @@ import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { CEAL_SAFE_GATEWAY_CODE, containsCealCredential, isSafeGatewayProofRef } from "./safe-ref.js";
 import { sameStringArray as hasExactStringValues } from "./string-array.js";
+import {
+	CEAL_GATEWAY_POLICY_DENIAL_MESSAGE,
+	CEAL_GATEWAY_POLICY_DENIAL_NEXT_ACTION,
+	CEAL_GATEWAY_RECOVERY_KINDS,
+	CEAL_PROTOCOL_VERSION,
+	type CealGatewayCallValue,
+	isCealPublicSafeText,
+} from "@corca-ai/ceal-protocol";
 
 interface ResultIo {
 	stdout: { write(chunk: string): unknown };

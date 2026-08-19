@@ -1,6 +1,6 @@
+import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 
 const BLOCK_SIZE = 512;
 const ROOT_ENTRIES = new Set(["SKILL.md", "agents", "assets", "references", "scripts"]);

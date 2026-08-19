@@ -1,13 +1,3 @@
-import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { createServer } from "node:http";
-import type { Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { required as requiredValue } from "../../../test/required.ts";
 import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_JSON,
@@ -23,6 +13,16 @@ import {
 } from "../dist/leased-consumer-attachment-stream-entrypoint.js";
 import { postUnixSocketStream, type UnixSocketErrorNames } from "../dist/private-worker-transport.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.ts";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const encoder = new TextEncoder();
 const request = {

@@ -1,7 +1,7 @@
+import { assertFile, type UnsafeStore } from "./local-store-guards.js";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { assertFile, type UnsafeStore } from "./local-store-guards.js";
 
 // The write half of the local-store contract, next to the shape guards that are
 // its read half: replace a file under HOME without ever exposing a partial or

@@ -1,10 +1,10 @@
 /* global process */
+import { runBoundedProcess } from "../dist/bounded-process.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runBoundedProcess } from "../dist/bounded-process.js";
 
 test("timeout kills a TERM-ignoring descendant after its leader exits on TERM", { timeout: 5_000 }, async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-bounded-process-tree-"));

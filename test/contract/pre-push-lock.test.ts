@@ -89,7 +89,7 @@ function createFixture(context: TestContext) {
 	const invocations = path.join(root, "invocations");
 	writeFileSync(
 		path.join(root, "bin", "npm"),
-		`#!/bin/sh\nprintf '%s\\n' "$*" >>"$CEAL_FAKE_NPM_INVOCATIONS"\nif [ ! -e "$CEAL_FAKE_NPM_STARTED" ]; then\n  printf 'started\\n' >"$CEAL_FAKE_NPM_STARTED"\n  while [ ! -e "$CEAL_FAKE_NPM_RELEASE" ]; do sleep 0.05; done\nfi\n`,
+		"#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$CEAL_FAKE_NPM_INVOCATIONS\"\nif [ ! -e \"$CEAL_FAKE_NPM_STARTED\" ]; then\n  printf 'started\\n' >\"$CEAL_FAKE_NPM_STARTED\"\n  while [ ! -e \"$CEAL_FAKE_NPM_RELEASE\" ]; do sleep 0.05; done\nfi\n",
 	);
 	chmodSync(path.join(root, "bin", "npm"), 0o755);
 	// The tag branch now asks `gate-attestation.ts verify` whether the full gate

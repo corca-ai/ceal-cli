@@ -1,3 +1,15 @@
+import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.ts";
+import { required as requiredValue } from "../../../test/required.ts";
+import {
+	type CealAgentGuideHost,
+	type CealAgentGuideState,
+	type CealAgentGuideStore,
+	countRegisteredGuideHosts,
+	createCealAgentGuideStore as createCealAgentGuideStoreRaw,
+	detectCealAgentGuideHost,
+} from "../dist/agent-guide.js";
+import { decodeCealGuideBundle } from "../dist/guide-bundle.js";
+import { sha256 } from "../dist/sha256.js";
 import assert from "node:assert/strict";
 import fs, {
 	chmodSync,
@@ -17,18 +29,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.ts";
-import { required as requiredValue } from "../../../test/required.ts";
-import {
-	type CealAgentGuideHost,
-	type CealAgentGuideState,
-	type CealAgentGuideStore,
-	countRegisteredGuideHosts,
-	createCealAgentGuideStore as createCealAgentGuideStoreRaw,
-	detectCealAgentGuideHost,
-} from "../dist/agent-guide.js";
-import { decodeCealGuideBundle } from "../dist/guide-bundle.js";
-import { sha256 } from "../dist/sha256.js";
 
 type GuideHostState = NonNullable<CealAgentGuideState["hosts"]>[number];
 type EmbeddedGuideFixture = ReturnType<typeof embeddedGuideFixture>;

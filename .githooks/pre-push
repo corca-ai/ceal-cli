@@ -143,6 +143,6 @@ fi
 # the gate. Here it blocks a maintainer who introduces a new clone family, and
 # says so and stands aside on a host that cannot run it.
 run_phase "duplicate ratchet" node scripts/check-dup-ratchet.ts
-# Same maintainer-local shape, same reason: `npm run lint` is biome, which sees no
+# Same maintainer-local shape, same reason: `npm run lint` is eslint, which sees no
 # shell, and the two files below are a signed release asset and this hook itself.
 run_phase "shell lint" npm run lint:shell

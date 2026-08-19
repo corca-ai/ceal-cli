@@ -1,4 +1,11 @@
 import {
+	acceptsJsonMediaType,
+	CEAL_MAX_CONFIGURED_TIMEOUT_MS,
+	raceRequestDeadline,
+	readBoundedResponseBody,
+	resolveSafeHttpEndpoint,
+} from "./request-bounds.js";
+import {
 	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
 	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
 	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
@@ -7,13 +14,6 @@ import {
 	decodeCealClientResponse,
 	decodeCealGatewayRequest,
 } from "@corca-ai/ceal-protocol";
-import {
-	acceptsJsonMediaType,
-	CEAL_MAX_CONFIGURED_TIMEOUT_MS,
-	raceRequestDeadline,
-	readBoundedResponseBody,
-	resolveSafeHttpEndpoint,
-} from "./request-bounds.js";
 
 export type CealHttpTransportErrorCode =
 	| "invalid_configuration"

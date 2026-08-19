@@ -53,7 +53,7 @@ export function isCealSafeRef(value: unknown): value is string {
 }
 
 /** Gateway error codes, bound to the frozen Protocol's `SAFE_CODE` declaration. */
-// biome-ignore lint/complexity/useRegexLiterals: the source form prevents an unrelated grammar census from treating this bound Protocol mirror as a third local fact.
+// eslint-disable-next-line prefer-regex-literals -- the source form prevents an unrelated grammar census from treating this bound Protocol mirror as a third local fact.
 export const CEAL_SAFE_GATEWAY_CODE = new RegExp("^[a-z][a-z0-9_]{0,63}$", "u");
 
 /**

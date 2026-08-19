@@ -1,6 +1,6 @@
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 
 type SupervisorRequest = {
 	command: string;

@@ -1,12 +1,11 @@
+import { secretlintRunGroups, secretlintTargetFiles, syntheticSecretlintConfig } from "../../scripts/run-secretlint.ts";
+import { required as requiredValue } from "../required.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-
-import { secretlintRunGroups, secretlintTargetFiles, syntheticSecretlintConfig } from "../../scripts/run-secretlint.ts";
-import { required as requiredValue } from "../required.ts";
 
 const ROOT = process.cwd();
 

@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
 import { asJsonRecord } from "../scripts/lib/json-record.ts";
+import assert from "node:assert/strict";
 
 type CliIo = Pick<Console, "log" | "error">;
 type CliRunner = (argv: string[], io: CliIo) => number | Promise<number>;

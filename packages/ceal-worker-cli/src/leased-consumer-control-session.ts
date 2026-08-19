@@ -1,7 +1,3 @@
-import { createHash } from "node:crypto";
-import { fstatSync } from "node:fs";
-import * as CealProtocol from "@corca-ai/ceal-protocol";
-import { CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES } from "@corca-ai/ceal-protocol";
 import {
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON,
 	LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256,
@@ -19,6 +15,10 @@ import {
 	type UnixSocketResponse,
 } from "./private-worker-transport.js";
 import { parseStrictJson } from "./strict-json.js";
+import * as CealProtocol from "@corca-ai/ceal-protocol";
+import { CEAL_LEASED_CONSUMER_CONTROL_MAX_FRAME_BYTES, CEAL_LEASED_CONSUMER_CONTROL_MAX_SESSION_BYTES } from "@corca-ai/ceal-protocol";
+import { createHash } from "node:crypto";
+import { fstatSync } from "node:fs";
 
 /**
  * The generator emits the contract text and its digest together, and the native

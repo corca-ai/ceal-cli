@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test, { type TestContext } from "node:test";
 import { isJsonRecord as isRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import { sha256 as digest } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
@@ -10,6 +5,11 @@ import {
 	verifyGatewayLeasedConsumerCallHandoff,
 } from "../../scripts/verify-gateway-leased-consumer-call-handoff.ts";
 import { required as requiredValue } from "../required.ts";
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";

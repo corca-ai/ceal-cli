@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { inspectAgentAudit, inspectAgentSessionEvents } from "./agent-audit.js";
 import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-guide.js";
 import type { CealCommandRuntime } from "./cli-runtime.js";
@@ -12,6 +11,7 @@ import { createCealSessionCapability } from "./session-capability.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { createCealStableUpdateRunner } from "./stable-update.js";
 import { type CealTimingRecorder, finishCealTiming, startCealTiming, withCealTiming, withCealTimingSync } from "./timing.js";
+import { randomUUID } from "node:crypto";
 
 export async function runPublicCli(args: readonly string[], timing?: CealTimingRecorder): Promise<number> {
 	const prepareTiming = startCealTiming(timing, "runtime_prepare");

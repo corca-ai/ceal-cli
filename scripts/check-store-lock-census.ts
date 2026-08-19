@@ -10,11 +10,11 @@
 // it is reading the modules it claims to, and a lock helper renamed out of the
 // `with…Lock` shape would otherwise empty it in silence — which is the failure
 // mode `docs/gates.md` describes as worse than an absent gate.
+import { exitWith } from "./lib/exit-with.ts";
+import { analyzeStoreLockCensus } from "./lib/store-lock-census.ts";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
-import { analyzeStoreLockCensus } from "./lib/store-lock-census.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const report = analyzeStoreLockCensus({ repoRoot: ROOT });

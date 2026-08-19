@@ -1,5 +1,3 @@
-import { fstatSync } from "node:fs";
-import { type CealLeasedConsumerControlSession, decodeCealLeasedConsumerControlSession } from "@corca-ai/ceal-protocol";
 import {
 	closeReadable,
 	onceAsync,
@@ -9,6 +7,8 @@ import {
 	type TransportTimerSeams,
 } from "./private-worker-transport.js";
 import { parseStrictJson } from "./strict-json.js";
+import { type CealLeasedConsumerControlSession, decodeCealLeasedConsumerControlSession } from "@corca-ai/ceal-protocol";
+import { fstatSync } from "node:fs";
 
 export interface ProtectedSessionContract {
 	readonly child_fd: number;

@@ -1,12 +1,3 @@
-import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import test from "node:test";
-import type { CealGatewayRequestInput } from "@corca-ai/ceal-protocol";
-import {
-	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
-	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
-	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
-} from "@corca-ai/ceal-protocol";
 import {
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,
@@ -17,6 +8,15 @@ import {
 	createCealHttpTransport,
 } from "../src/index.ts";
 import { close, listen, parseJsonRecord, readBody, serverPort } from "./client-response-test-support.ts";
+import type { CealGatewayRequestInput } from "@corca-ai/ceal-protocol";
+import {
+	ADDITIVE_NON_AUTHORITY_RESPONSE_FIELDS,
+	CEAL_GATEWAY_ADDITIVE_DECODE_GENERATION,
+	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
+} from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import test from "node:test";
 
 test("HTTP transport gives bounded Gateway capability calls a thirty-second default budget", () => {
 	assert.equal(CEAL_DEFAULT_HTTP_TIMEOUT_MS, 30_000);

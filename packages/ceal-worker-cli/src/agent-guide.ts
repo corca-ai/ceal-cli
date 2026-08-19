@@ -1,3 +1,7 @@
+import { permissionMode } from "./filesystem-mode.js";
+import { type CealGuideBundle, decodeCealGuideBundle } from "./guide-bundle.js";
+import { resolveInstalledWorkerRelease } from "./managed-worker-install.js";
+import { isSha256Digest, sha256 } from "./sha256.js";
 import {
 	chmodSync,
 	existsSync,
@@ -14,10 +18,6 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { permissionMode } from "./filesystem-mode.js";
-import { type CealGuideBundle, decodeCealGuideBundle } from "./guide-bundle.js";
-import { resolveInstalledWorkerRelease } from "./managed-worker-install.js";
-import { isSha256Digest, sha256 } from "./sha256.js";
 
 export type CealAgentGuideHost = "codex" | "claude";
 

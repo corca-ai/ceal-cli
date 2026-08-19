@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import { required as requiredValue } from "../../../test/required.ts";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "../dist/agent-audit.js";
 import {
@@ -10,6 +5,11 @@ import {
 	inspectAgentSessionEvents as inspectAgentSessionEventsWithRuntime,
 } from "../dist/agent-audit.js";
 import type { CealAgentHostOverrides } from "../dist/agent-guide.js";
+import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 type AuditAdapter = CealAgentAuditState["adapters"][number];
 type AuditSession = NonNullable<AuditAdapter["sessions"]>[number];

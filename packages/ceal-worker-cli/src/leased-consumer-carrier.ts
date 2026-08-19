@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { fstatSync } from "node:fs";
 import { isPlainJsonRecord as plainRecord, sameCanonicalJson } from "./canonical-json.js";
 import {
 	LEASED_CONSUMER_CARRIER_CONTRACT_JSON,
@@ -27,6 +25,8 @@ import {
 } from "./private-worker-transport.js";
 import { CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
 import { parseStrictJson } from "./strict-json.js";
+import { createHash } from "node:crypto";
+import { fstatSync } from "node:fs";
 
 const CARRIER_CONTRACT = verifyEmbeddedCarrierContract();
 const CHANNEL_SCHEMAS = CARRIER_CONTRACT.serviceChannelSchemas;
@@ -54,23 +54,23 @@ type JsonRecord = Record<string, unknown>;
 
 export type LeasedConsumerCarrierResult =
 	| {
-			readonly schema_version: typeof RESULT_SCHEMA;
-			readonly ok: false;
-			readonly status: "unavailable";
-			readonly error_code: "service_channel_unavailable";
-	  }
+		readonly schema_version: typeof RESULT_SCHEMA;
+		readonly ok: false;
+		readonly status: "unavailable";
+		readonly error_code: "service_channel_unavailable";
+	}
 	| {
-			readonly schema_version: typeof RESULT_SCHEMA;
-			readonly ok: false;
-			readonly status: "unavailable";
-			readonly error_code: "leased_consumer_call_unavailable";
-	  }
+		readonly schema_version: typeof RESULT_SCHEMA;
+		readonly ok: false;
+		readonly status: "unavailable";
+		readonly error_code: "leased_consumer_call_unavailable";
+	}
 	| {
-			readonly schema_version: typeof RESULT_SCHEMA;
-			readonly ok: false;
-			readonly status: "error";
-			readonly error_code: "invalid_request" | "service_call_failed";
-	  };
+		readonly schema_version: typeof RESULT_SCHEMA;
+		readonly ok: false;
+		readonly status: "error";
+		readonly error_code: "invalid_request" | "service_call_failed";
+	};
 
 export interface LeasedConsumerCarrierRuntime {
 	/** Test seam only. The shipped command reads FD 4 and closes it itself. */
@@ -482,15 +482,15 @@ function hasControlCharacter(value: string): boolean {
 
 type ServiceChannel =
 	| {
-			readonly kind: "https";
-			readonly url: URL;
-			readonly credential: string;
-	  }
+		readonly kind: "https";
+		readonly url: URL;
+		readonly credential: string;
+	}
 	| {
-			readonly kind: "unix_socket";
-			readonly socketPath: string;
-			readonly credential: string;
-	  };
+		readonly kind: "unix_socket";
+		readonly socketPath: string;
+		readonly credential: string;
+	};
 
 interface CarrierHandoff {
 	readonly method: string;

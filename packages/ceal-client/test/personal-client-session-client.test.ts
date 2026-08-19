@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
-import test from "node:test";
-import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../src/index.ts";
 import type { JsonRecord } from "./client-response-test-support.ts";
@@ -19,6 +14,11 @@ import {
 	serverPort,
 	untrustedResponseCases,
 } from "./client-response-test-support.ts";
+import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import test from "node:test";
 
 const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
 

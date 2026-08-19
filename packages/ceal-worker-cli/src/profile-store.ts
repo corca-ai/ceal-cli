@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { assertDirectoryIfPresent, assertFile, prepareDirectory, removeOwnedFile } from "./local-store-guards.js";
 import { withLocalStoreLock } from "./local-store-lock.js";
 import { isCealSafeEndpoint } from "./safe-endpoint.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 const STATE_LOCK_DIRECTORY = "client-session.lock";
 const STATE_LOCK_MAX_WAIT_MS = 30_000;

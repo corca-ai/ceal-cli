@@ -33,13 +33,13 @@
 // protocol subtree and the lock records it, so it is cross-checked below — which
 // is a comparison of two local files, not a check against the archive.
 
+import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { isObjectRecord } from "./lib/package-bin.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codedErrorClass } from "./lib/coded-error.ts";
-import { isGitObject } from "./lib/git-object.ts";
-import { isObjectRecord } from "./lib/package-bin.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PIN_PATH = "protocol-vendor-pin.json";
@@ -235,7 +235,7 @@ export function validateProtocolVendorPin({
 			// "two different trees" while `converged` compares commits, so a
 			// maintainer whose tag it blocked was sent to compare two fields that
 			// are equal in every pin this check passes.
-			`The pin claims the vendored and shipped protocol identities agree, but it records two different Gateway commits ` +
+			"The pin claims the vendored and shipped protocol identities agree, but it records two different Gateway commits " +
 				`(source.commit ${candidate.source.commit}, ${candidate.shipped.lock_file} gateway.commit ${lockedCommit}).`,
 		);
 	}

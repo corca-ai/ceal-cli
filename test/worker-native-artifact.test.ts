@@ -1,10 +1,3 @@
-import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
-import { parse } from "yaml";
 import {
 	buildWorkerNativeArtifact,
 	buildWorkerNativeArtifactFromDevelopmentInputs,
@@ -22,6 +15,13 @@ import {
 	runSyncReleaseProcess,
 } from "./release-process-bounds.ts";
 import { packedProtocolFixture } from "./worker-release-package-fixture.ts";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { parse } from "yaml";
 
 type NativeFixture = {
 	root: string;

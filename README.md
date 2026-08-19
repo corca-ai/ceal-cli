@@ -198,12 +198,12 @@ for the last run before pushing or tagging:
 ```sh
 npm run check:unit   # lint + worker build + client/worker suites + test/contract
 npm run test:release # release-artifact and native-binary suites only
-npm run lint         # biome check: lint + format + import order
+npm run lint         # eslint: lint + format + import order
 ```
 
-`npm run hooks:install` wires two hooks. `pre-commit` is the cheap tier — biome,
+`npm run hooks:install` wires two hooks. `pre-commit` is the cheap tier — eslint,
 the type ratchet, the legacy-`.mjs` ratchet, the gate-contract readback and the
-shell lint, ~3s together on a developer host and no test or build. `pre-push`
+shell lint, no test or build. `pre-push`
 runs the iteration gate, or the full gate for a tag push — a failed release tag
 cannot be reused.
 `.github/workflows/check.yml` runs the full gate on every push and pull request
@@ -211,9 +211,38 @@ to `main` that changes code; a documentation-only change runs no gate, because
 nothing its allowlist admits reaches a release input or a suite. The other
 workflows are release lanes and trigger only on tags.
 
-`npm run lint` runs `biome check .`, so formatting and import order are gated
-rather than merely suggested; `npm run lint:fix` applies every safe fix. The
-frozen packages are excluded on purpose. Formatting-only commits are listed in
+`npm run lint` runs `eslint .`, so formatting and import order are gated rather
+than merely suggested; `npm run lint:fix` applies every safe fix. `eslint.config.ts`
+is the single config; it replaced `biome.json` because the three Ceal repositories
+converge on one linter and this was the only biome user — `corca-ai/ceal` has run
+eslint since 2026-04-01 and `ceal-agent` picked it at its baseline. The split was
+chronological, not a comparison: this repository had no linter at all until
+2026-07-26 and chose biome then.
+
+Nothing was dropped in the move. `biome check` carried three jobs in one command —
+lint rules, formatting, and import organisation — and eslint core dropped
+formatting rules in v8.53, so formatting is now `@stylistic` and import order is
+`simple-import-sort`, configured as one group so imports are sorted without
+gaining blank-line separators between groups. The formatting rules are a 1:1
+transcription of the old `biome.json` settings: tab indent, double quotes, always
+semicolons, trailing commas everywhere, always-parenthesised arrow parameters. Two
+differ deliberately and each records its reason at the rule: `@stylistic/indent`
+sets `offsetTernaryExpressions: true` (470 findings without it, 65 with, the
+remainder TypeScript union-type members that `@stylistic` indents differently from
+biome), and `@stylistic/max-len` carries `tabWidth: 1` because the deleted
+`biome.json` set `indentWidth: 1` and so counted a tab as one column, where
+`@stylistic` defaults to four. The width is biome's 140 unchanged; on biome's own
+scale the tree holds no line over it. `@typescript-eslint/no-unused-vars` ignores `^_` in arguments, variables,
+and caught errors, because the `_` prefix is this tree's intentionally-unused
+marker and without it the rule reports 15 sites that are all convention. The
+`.mjs` rule denying bare `Response`, `Request`, `Headers`, `ReadableStream`,
+`WritableStream`, and `TransformStream` survives as core `no-restricted-globals`:
+this tree spells web globals through `globalThis`.
+
+`packages/ceal-protocol` and the generated worker sources are excluded on purpose,
+for the same reason `biome.json` excluded them: a lint finding in a frozen copy is
+one this lane may not act on, and "just fix the lint error" is how a frozen copy
+drifts. Formatting-only commits are listed in
 `.git-blame-ignore-revs` so `git blame` skips them, which `npm run hooks:install`
 configures for the clone.
 

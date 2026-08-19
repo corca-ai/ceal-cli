@@ -1,9 +1,9 @@
+import { openLeasedConsumerControlSession, runLeasedConsumerControlTransport } from "../dist/leased-consumer-control-session.js";
+import { deferredVoid } from "./deferred-test-support.ts";
+import * as protocol from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import * as protocol from "@corca-ai/ceal-protocol";
-import { openLeasedConsumerControlSession, runLeasedConsumerControlTransport } from "../dist/leased-consumer-control-session.js";
-import { deferredVoid } from "./deferred-test-support.ts";
 
 const fixturePath = process.env.CEAL_GATEWAY_V5_CONTROL_FIXTURE;
 const candidateAvailable =

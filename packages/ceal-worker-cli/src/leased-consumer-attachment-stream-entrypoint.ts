@@ -1,7 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type CealLeasedConsumerAttachmentStreamBinding, decodeCealLeasedConsumerAttachmentStreamRequest } from "@corca-ai/ceal-protocol";
 import { isJsonRecord } from "./json-record.js";
 import { assertLeasedConsumerAttachmentStreamBinding, LeasedConsumerAttachmentStreamError } from "./leased-consumer-attachment-stream.js";
 import {
@@ -13,6 +9,10 @@ import {
 import { sameObjectKeys } from "./object-keys.js";
 import { readBoundedStream } from "./private-worker-transport.js";
 import { parseStrictJson } from "./strict-json.js";
+import { type CealLeasedConsumerAttachmentStreamBinding, decodeCealLeasedConsumerAttachmentStreamRequest } from "@corca-ai/ceal-protocol";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const ENTRYPOINT_KEYS = ["expected_binding", "request", "schema_version"] as const;
 const ENTRYPOINT_RUNTIME_FAILURES = new Set(["session_unavailable", "transport_failed", "handoff_cleanup_failed", "handoff_write_failed"]);

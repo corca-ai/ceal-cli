@@ -1,3 +1,5 @@
+import { applyConversion, parseArgs, planConversion } from "../../scripts/convert-legacy-mjs.ts";
+import { required as requiredValue } from "../required.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -15,8 +17,6 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { applyConversion, parseArgs, planConversion } from "../../scripts/convert-legacy-mjs.ts";
-import { required as requiredValue } from "../required.ts";
 
 test("converter dry-run is bounded, policy-selected, and non-mutating", () => {
 	const policy = readFileSync("config/no-legacy-mjs.json", "utf8");

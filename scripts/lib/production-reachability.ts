@@ -17,10 +17,10 @@
 // that silently stops matching turns this gate green while claiming coverage of
 // the tree, and this repository has already shipped one guard that could not
 // fail.
+import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { resolveWorkspaceSourceAuthority } from "./workspace-source-authority.ts";
 
 /** A file is production-reachable if some entry reaches it through static imports. */
 type ImportName = { imported: string; local: string };

@@ -26,14 +26,14 @@
 // a revoked Gateway session, a consumed enrollment code, or a message posted to
 // a provider. An escape hatch whose safety argument does not cover the effect it
 // is being asked to permit is not an escape hatch.
+import { exitWith } from "./lib/exit-with.ts";
+import { isAgentHostEnvironmentVariables, isProbeModule, lookupProbeBinary, resolveProbeRoute } from "./probe-surface-contract.ts";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
-import { isAgentHostEnvironmentVariables, isProbeModule, lookupProbeBinary, resolveProbeRoute } from "./probe-surface-contract.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // `cealctl` was a second entry here until its source left this repository. The

@@ -1,9 +1,9 @@
-import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
 import type { CealSessionCapability } from "./cli-runtime.js";
 import { ensureCurrentSessionWithDependencies, runSessionLogoutWithDependencies } from "./client-session.js";
 import type { CealSessionStore } from "./profile-store.js";
 import { commitEnrolledSession } from "./session-replacement.js";
 import type { CealTimingRecorder } from "./timing.js";
+import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
 
 /** Dependencies owned by the one session lifecycle capability. */
 export interface CealSessionCapabilityDependencies {

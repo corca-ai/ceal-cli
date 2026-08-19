@@ -1,7 +1,6 @@
+import { findSourceNulBytes } from "../../scripts/check-source-nul-bytes.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import { findSourceNulBytes } from "../../scripts/check-source-nul-bytes.ts";
 
 const NUL = String.fromCharCode(0);
 

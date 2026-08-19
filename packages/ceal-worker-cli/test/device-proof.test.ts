@@ -1,8 +1,8 @@
+import { required as requiredValue } from "../../../test/required.ts";
+import { CealDeviceProofError, generateCealDeviceProofKeyPair, signCealDeviceProof, verifyCealDeviceProof } from "../dist/device-proof.js";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
-import { required as requiredValue } from "../../../test/required.ts";
-import { CealDeviceProofError, generateCealDeviceProofKeyPair, signCealDeviceProof, verifyCealDeviceProof } from "../dist/device-proof.js";
 
 // Ed25519 has published vectors too, but the property that matters for this
 // flow is narrower and is what these assert: a signature this module produces

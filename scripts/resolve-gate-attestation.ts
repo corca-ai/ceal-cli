@@ -31,19 +31,18 @@
 // point of this script can evaporate silently: if the two lanes ever stop
 // agreeing on a field, every release simply pays the gate again and no gate
 // anywhere turns red. One line in the run summary is what makes that visible.
-import { appendFileSync } from "node:fs";
-import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
-
 import {
 	ATTESTATION_ARTIFACT_PREFIX,
-	ATTESTED_PROFILE,
 	attestationArtifactName,
+	ATTESTED_PROFILE,
 	buildGateAttestation,
 	RUNNER_IDENTITY_ENV,
 } from "./lib/gate-attestation.ts";
 import { isMainModule } from "./lib/is-main-module.ts";
+import { appendFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const PREFIX = "resolve-gate-attestation";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

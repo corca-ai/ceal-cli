@@ -1,7 +1,7 @@
-import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, openSync, readSync, type Stats } from "node:fs";
-import path from "node:path";
 import { type CealAgentHostOverrides, resolveCealAgentHostRoot } from "./agent-guide.js";
 import { defaultMonotonicNow } from "./monotonic-clock.js";
+import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, openSync, readSync, type Stats } from "node:fs";
+import path from "node:path";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
 // runtimes' native transcript roots, rendered by the observer Workbench

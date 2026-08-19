@@ -1,18 +1,4 @@
-import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import process from "node:process";
-import test from "node:test";
-import { fileURLToPath, URL } from "node:url";
-import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
-import type { CealGatewayDiscoveryCapability, CealGatewayTargetCatalog } from "@corca-ai/ceal-protocol";
-import { parseAllDocuments } from "yaml";
-import { requiredCapture, required as requiredValue } from "../../../test/required.ts";
+import { required as requiredValue,requiredCapture } from "../../../test/required.ts";
 import {
 	buildAcceptanceRecord,
 	type CealAcceptanceRecordParts,
@@ -41,6 +27,20 @@ import { createCealSessionCapability } from "../dist/session-capability.js";
 import type { CealCommandName, CealSubcommandHandlers } from "../dist/subcommands.js";
 import { CEAL_TIMING_STAGES, type CealTimingStage, createCealTimingRecorder } from "../dist/timing.js";
 import { deferredVoid } from "./deferred-test-support.ts";
+import type { CealPersonalClientSessionClient } from "@corca-ai/ceal";
+import type { CealGatewayDiscoveryCapability, CealGatewayTargetCatalog } from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import process from "node:process";
+import test from "node:test";
+import { fileURLToPath, URL } from "node:url";
+import { parseAllDocuments } from "yaml";
 
 // The version the worker introduces itself to the Gateway with is derived from
 // the manifest, so asserting a literal here would reintroduce the hand-bumped
@@ -987,17 +987,17 @@ test("a rejected capabilities option names the option and its own route's help",
 test("capabilities points an unregistered running host at the guide, and stays silent otherwise", async () => {
 	const guide =
 		(registered: boolean, agentSource: "detected" | "default"): (() => CealAgentGuideState) =>
-		() => {
-			const state: CealAgentGuideState = {
-				status: "available",
-				agent: "claude",
-				agent_source: agentSource,
-				guide_id: "ceal-guide",
-				update_safe: true,
-				hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
+			() => {
+				const state: CealAgentGuideState = {
+					status: "available",
+					agent: "claude",
+					agent_source: agentSource,
+					guide_id: "ceal-guide",
+					update_safe: true,
+					hosts: [{ agent: "claude", status: registered ? "registered" : "staged", registration_path: "/tmp/c", registered }],
+				};
+				return state;
 			};
-			return state;
-		};
 	await withGateway(async ({ endpoint }) => {
 		const unregistered = await yamlRun(["capabilities"], 0, {
 			readStoredSession: async () => storedSession(endpoint),

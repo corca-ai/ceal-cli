@@ -16,9 +16,9 @@
 // error class and its own marker filename, and neither belongs to a shared
 // module.
 
+import { assertNoSymlinkComponents } from "./safe-output-path.ts";
 import { existsSync, lstatSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
-import { assertNoSymlinkComponents } from "./safe-output-path.ts";
 
 type OutputFailure = (code: string, message: string) => never;
 type OutputInspection = { directory: string; force: boolean };

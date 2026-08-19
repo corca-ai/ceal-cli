@@ -1,9 +1,5 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
@@ -11,6 +7,10 @@ import { isStringArray } from "./lib/string-array.ts";
 import { isStringMap } from "./lib/string-map.ts";
 import { writeIfChanged } from "./lib/write-if-changed.ts";
 import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-consumer-call-handoff.ts";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";

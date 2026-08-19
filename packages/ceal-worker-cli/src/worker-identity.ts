@@ -1,5 +1,5 @@
-import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
 import packageJson from "../package.json" with { type: "json" };
+import { CEAL_PROTOCOL_VERSION, CEAL_SUPPORTED_GATEWAY_PROTOCOL_RANGE } from "@corca-ai/ceal-protocol";
 
 // Read from the manifests their packages already own. The release smoke test
 // compares the rendered version against package.json, while the protocol range

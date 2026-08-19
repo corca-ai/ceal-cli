@@ -7,6 +7,33 @@
 // mutation here, and each one has to produce a named difference — a suite that
 // only checked the happy path would stay green if the comparator compared
 // nothing at all.
+import { type GateAttestationCliOptions,main as attestationMain } from "../../scripts/gate-attestation.ts";
+import {
+	ATTESTATION_ARTIFACT_PREFIX,
+	attestationArtifactName,
+	attestationDigest,
+	ATTESTED_PROFILE,
+	buildGateAttestation,
+	GATE_ATTESTATION_PATH,
+	GATE_ATTESTATION_SCHEMA,
+	type GateAttestation,
+	gateAttestationDifferences,
+	PASS_FAIL_ENV_KEYS,
+	readGateAttestationFile,
+	readGateSourceState,
+	resolveGateJobs,
+	resolveRunnerIdentity,
+	RUNNER_IDENTITY_ENV,
+	serializeGateAttestation,
+} from "../../scripts/lib/gate-attestation.ts";
+import {
+	main as resolverMain,
+	resolveAttestationReuse,
+	type ReuseLookupOptions,
+	SOURCE_WORKFLOW_FILE,
+} from "../../scripts/resolve-gate-attestation.ts";
+import { required as requiredValue } from "../required.ts";
+import { scratchTree } from "../scratch-dir.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import type { appendFileSync } from "node:fs";
@@ -14,33 +41,6 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { main as attestationMain, type GateAttestationCliOptions } from "../../scripts/gate-attestation.ts";
-import {
-	ATTESTATION_ARTIFACT_PREFIX,
-	ATTESTED_PROFILE,
-	attestationArtifactName,
-	attestationDigest,
-	buildGateAttestation,
-	GATE_ATTESTATION_PATH,
-	GATE_ATTESTATION_SCHEMA,
-	type GateAttestation,
-	gateAttestationDifferences,
-	PASS_FAIL_ENV_KEYS,
-	RUNNER_IDENTITY_ENV,
-	readGateAttestationFile,
-	readGateSourceState,
-	resolveGateJobs,
-	resolveRunnerIdentity,
-	serializeGateAttestation,
-} from "../../scripts/lib/gate-attestation.ts";
-import {
-	type ReuseLookupOptions,
-	resolveAttestationReuse,
-	main as resolverMain,
-	SOURCE_WORKFLOW_FILE,
-} from "../../scripts/resolve-gate-attestation.ts";
-import { required as requiredValue } from "../required.ts";
-import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RUNNER = "ubuntu-24.04";

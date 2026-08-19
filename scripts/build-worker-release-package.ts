@@ -1,5 +1,21 @@
 #!/usr/bin/env node
 
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { renderScriptFailure } from "./lib/cli-output.ts";
+import { codedErrorClass } from "./lib/coded-error.ts";
+import { isMainModule } from "./lib/is-main-module.ts";
+import { asJsonRecord } from "./lib/json-record.ts";
+import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
+import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
+import { resolvePackageBin } from "./lib/package-bin.ts";
+import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { createJsonReader } from "./lib/read-json.ts";
+import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
+import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
+import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import { toolchainEnv } from "./lib/toolchain-env.ts";
+import { PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH } from "./project-staged-worker-control-session.ts";
+import { withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs,WorkerReleaseInputError } from "./worker-release-inputs.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
 	cpSync,
@@ -16,22 +32,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { renderScriptFailure } from "./lib/cli-output.ts";
-import { codedErrorClass } from "./lib/coded-error.ts";
-import { isMainModule } from "./lib/is-main-module.ts";
-import { asJsonRecord } from "./lib/json-record.ts";
-import { parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
-import { createSiblingTemporaryDirectory, inspectOutputDirectory, publishOutputDirectory } from "./lib/output-directory.ts";
-import { resolvePackageBin } from "./lib/package-bin.ts";
-import { parseScriptArgs } from "./lib/parse-script-args.ts";
-import { createJsonReader } from "./lib/read-json.ts";
-import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
-import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
-import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
-import { toolchainEnv } from "./lib/toolchain-env.ts";
-import { PROJECT_STAGED_WORKER_CONTROL_SESSION_PATH } from "./project-staged-worker-control-session.ts";
-import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputs, withWorkerReleaseInputs } from "./worker-release-inputs.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-package";

@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import { required as requiredValue } from "../../../test/required.ts";
 import {
 	CealReceiptSpoolStoreError,
@@ -15,6 +9,12 @@ import {
 import { changedSessionIdentityBindings, sessionIdentityDiscriminator } from "../dist/session-identity.js";
 import type { CealStoredSession } from "../src/profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "../src/receipt-spool.js";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 const BASE_TIME = Date.parse("2026-07-24T12:00:00.000Z");
 const TEST_IDENTITY = "a".repeat(64);

@@ -1,6 +1,6 @@
+import { AWIKI_INSTALL_COMMAND, checkDocsGraph } from "../../scripts/check-docs-graph.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AWIKI_INSTALL_COMMAND, checkDocsGraph } from "../../scripts/check-docs-graph.ts";
 
 const summary = "// ok connected_graph documents=9 largest_component_ratio=1.0000 orphan_rate=0.0000 content_coverage=1.0000";
 const lintFailed = (fields: string) => `// lint_failed documents=9 ${fields} largest_component_ratio=1.0000 content_coverage=1.0000`;

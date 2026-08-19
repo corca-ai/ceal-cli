@@ -1,6 +1,6 @@
+import { permissionMode } from "./filesystem-mode.js";
 import { lstatSync, type Stats } from "node:fs";
 import path from "node:path";
-import { permissionMode } from "./filesystem-mode.js";
 
 /** Resolve child operations back to one already-open owner-only directory. */
 export function resolveAnchoredDirectory(

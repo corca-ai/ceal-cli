@@ -1,24 +1,5 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
-import {
-	chmodSync,
-	copyFileSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import * as esbuild from "esbuild";
-import { parse } from "yaml";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { prepareWorkerReleaseConsumer, WorkerReleasePackageError } from "./build-worker-release-package.ts";
 import {
@@ -36,7 +17,26 @@ import { createJsonReader } from "./lib/read-json.ts";
 import { resolveMatchingWorkerClientVersion } from "./lib/release-version.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import type { ArchiveLock } from "./worker-gateway-handoff-archive.ts";
-import { WorkerReleaseInputError, withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync } from "./worker-release-inputs.ts";
+import { withWorkerReleaseDevelopmentInputsAsync, withWorkerReleaseInputsAsync,WorkerReleaseInputError } from "./worker-release-inputs.ts";
+import * as esbuild from "esbuild";
+import { execFileSync } from "node:child_process";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRE = createRequire(import.meta.url);

@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 // found absent installs in all three sibling checkouts. Both compilers are listed
 // because the ratchets compare their outputs against each other, so a skew in
 // either silently re-baselines the other.
-export const DEFAULT_NODE_MODULES_DRIFT_ALLOWLIST = ["typescript", "@typescript/native", "@biomejs/biome", "knip"];
+export const DEFAULT_NODE_MODULES_DRIFT_ALLOWLIST = ["typescript", "@typescript/native", "eslint", "knip"];
 
 type PackageLock = { packages?: Record<string, { version?: string } | undefined> };
 type InstalledPackage = { version?: string };

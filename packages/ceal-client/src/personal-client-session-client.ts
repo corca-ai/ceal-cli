@@ -1,3 +1,6 @@
+import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
+import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
+import { CEAL_CLIENT_VERSION } from "./version.js";
 import {
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
 	CEAL_CLIENT_REVOKE_REQUEST_SCHEMA,
@@ -6,9 +9,6 @@ import {
 	decodeCealClientRefreshResponse,
 	decodeCealClientRevokeResponse,
 } from "@corca-ai/ceal-protocol";
-import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
-import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
-import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealPersonalClientSessionClient {
 	refresh(refreshToken: string): Promise<CealClientRefreshResponse>;

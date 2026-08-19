@@ -1,10 +1,10 @@
+import type { CealDiscoveryCacheEntry, CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
+import { CealDiscoveryCacheStoreError, createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { CealDiscoveryCacheEntry, CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
-import { CealDiscoveryCacheStoreError, createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 
 const KEY: CealDiscoveryCacheKey = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",

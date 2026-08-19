@@ -21,8 +21,8 @@
 // specifiers and unit conversions. A check that fires that often is switched
 // off within a week, and `docs/gates.md` spends a section on why a gate nobody
 // runs is worse than no gate.
-import ts from "typescript";
 import { forEachOwnedSource } from "./owned-package-sources.ts";
+import ts from "typescript";
 
 /**
  * How long a pattern body must be before a repeat is a shared fact rather than

@@ -4,10 +4,6 @@
 // the locked Gateway handoff archive lane, and merges per-platform sets into
 // the one signed release inventory that install-ceal.sh consumes.
 
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import type { buildWorkerNativeArtifact } from "./build-worker-native-artifact.ts";
 import {
@@ -25,6 +21,10 @@ import { isRegularNonSymlinkDirectory } from "./lib/regular-directory.ts";
 import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
 import { resolveWorkerReleaseGuideInput } from "./worker-release-inputs.ts";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MARKER = ".ceal-worker-release-assets";

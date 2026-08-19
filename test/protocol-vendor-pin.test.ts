@@ -1,10 +1,10 @@
+import { validateProtocolVendorPin } from "../scripts/verify-protocol-vendor-pin.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { validateProtocolVendorPin } from "../scripts/verify-protocol-vendor-pin.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 type GatewayHandoffLock = { gateway: { commit: string; protocol_tree: string } };

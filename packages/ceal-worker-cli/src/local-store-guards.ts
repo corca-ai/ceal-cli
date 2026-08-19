@@ -1,7 +1,7 @@
-import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, type Stats, unlinkSync } from "node:fs";
-import path from "node:path";
 import { permissionMode } from "./filesystem-mode.js";
 import { resolveAnchoredDirectory } from "./local-store-anchor.js";
+import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, type Stats, unlinkSync } from "node:fs";
+import path from "node:path";
 
 // The filesystem safety checks every local store under HOME performs before it
 // reads or writes: refuse a symlink, refuse the wrong file type, and hold the

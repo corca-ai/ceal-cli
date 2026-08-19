@@ -1,6 +1,6 @@
-import path from "node:path";
 import { asJsonRecord } from "./json-record.ts";
 import type { JsonReader } from "./read-json.ts";
+import path from "node:path";
 
 export type WorkerPackageVersionInput = { readonly source_path: string };
 type ReleaseFailure = (code: string, message: string) => never;

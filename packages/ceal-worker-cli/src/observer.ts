@@ -1,7 +1,3 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join } from "node:path";
-import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
 import {
 	AGENT_AUDIT_NON_CLAIMS,
 	type CealAgentAuditSession,
@@ -19,6 +15,10 @@ import {
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolState } from "./receipt-spool.js";
+import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
 
 // Local client observer: one loopback page over the state this client already
 // holds. Boundary (fixed): no admin surface, no provider credential, and no
