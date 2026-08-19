@@ -91,6 +91,8 @@ type CatalogProvenance = { source: "live_discovery" } | { source: "cached_discov
 
 const QUARANTINED_SESSION_REFRESH_CODES = new Set([
 	"session_renewal_unavailable",
+	"session_refresh_attempt_unknown",
+	"refresh_recovery_unavailable",
 	"refresh_expired",
 	"refresh_invalid",
 	"refresh_replayed",

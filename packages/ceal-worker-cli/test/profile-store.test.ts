@@ -50,6 +50,30 @@ test("session store durably quarantines an ambiguous one-time refresh without ch
 	});
 });
 
+test("session store persists a replayable v2 refresh attempt separately from v1 quarantine", async () => {
+	await withHome(async (home) => {
+		const store = createCealSessionStore(home);
+		const journaled: CealStoredSession = {
+			...SESSION,
+			refreshAttemptRef: `ceal_refresh_attempt_${"T".repeat(43)}`,
+			renewalBlockedReason: "outcome_unknown",
+		};
+		await store.save(journaled);
+		assert.deepEqual(await store.load(), journaled);
+		const persisted = JSON.parse(readFileSync(path.join(home, ".ceal", "client-session.json"), "utf8"));
+		assert.equal(persisted.schema_version, "ceal.client_session_store.v3");
+		assert.equal(persisted.refresh_attempt_ref, journaled.refreshAttemptRef);
+		assert.equal(persisted.renewal_blocked_reason, "outcome_unknown");
+	});
+});
+
+test("session store rejects an attempt journal without the unknown-outcome phase", async () => {
+	await withHome(async (home) => {
+		const store = createCealSessionStore(home);
+		await assert.rejects(store.save({ ...SESSION, refreshAttemptRef: `ceal_refresh_attempt_${"T".repeat(43)}` }), hasCode("invalid_store"));
+	});
+});
+
 test("session store fails closed when renewable material is incomplete", async () => {
 	await withHome(async (home) => {
 		const store = createCealSessionStore(home);

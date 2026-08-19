@@ -22,6 +22,8 @@ export interface CealStoredSession {
 	refreshToken: string;
 	refreshTokenIdleExpiresAt: string;
 	refreshTokenAbsoluteExpiresAt: string;
+	/** A v2 rotation attempt is persisted before the Gateway call and reused until commit. */
+	refreshAttemptRef?: string;
 	/** A v1 rotation is blocked locally; never resend its one-time credential. */
 	renewalBlockedReason?: "outcome_unknown" | "refresh_invalid" | "refresh_expired" | "refresh_replayed" | "refresh_revoked";
 }
@@ -148,23 +150,26 @@ async function withStateLock<T>(directory: string, action: () => Promise<T>, onA
 }
 
 /**
- * The store's two schema versions, named once. The sibling stores in this
+ * The store's three schema versions, named once. The sibling stores in this
  * directory each hold theirs at one constant (`CACHE_SCHEMA_VERSION`,
  * `SPOOL_SCHEMA_VERSION`); this one spelled its two as bare literals at five
  * sites, so a third version would have five places to find and nothing to catch
  * the one that was missed.
  *
  * `V2` is not a replacement for `V1`. A record carries V2 exactly when it holds a
- * renewal-blocked reason, so both remain current and the read path must keep
- * accepting either.
+ * renewal-blocked reason without a replayable attempt. V3 carries the durable
+ * v2 attempt journal and its `outcome_unknown` phase.
  */
 const SESSION_STORE_SCHEMA_V1 = "ceal.client_session_store.v1";
 const SESSION_STORE_SCHEMA_V2 = "ceal.client_session_store.v2";
+const SESSION_STORE_SCHEMA_V3 = "ceal.client_session_store.v3";
+const REFRESH_ATTEMPT_REF = /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u;
 
 function serializeSession(session: CealStoredSession): Record<string, unknown> {
 	const blockedReason = session.renewalBlockedReason;
+	const hasAttempt = session.refreshAttemptRef !== undefined;
 	return {
-		schema_version: blockedReason ? SESSION_STORE_SCHEMA_V2 : SESSION_STORE_SCHEMA_V1,
+		schema_version: hasAttempt ? SESSION_STORE_SCHEMA_V3 : blockedReason ? SESSION_STORE_SCHEMA_V2 : SESSION_STORE_SCHEMA_V1,
 		gateway_endpoint: session.gatewayEndpoint,
 		profile_ref: session.profileRef,
 		membership_ref: session.membershipRef,
@@ -177,6 +182,7 @@ function serializeSession(session: CealStoredSession): Record<string, unknown> {
 		refresh_token: session.refreshToken,
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
+		...(hasAttempt ? { refresh_attempt_ref: session.refreshAttemptRef } : {}),
 		...(blockedReason ? { renewal_blocked_reason: blockedReason } : {}),
 	};
 }
@@ -199,8 +205,17 @@ function parseSession(value: unknown): CealStoredSession {
 		"schema_version",
 		"subject_ref",
 	];
-	const expectedKeys = record.schema_version === SESSION_STORE_SCHEMA_V2 ? [...baseKeys, "renewal_blocked_reason"] : baseKeys;
-	if (record.schema_version !== SESSION_STORE_SCHEMA_V1 && record.schema_version !== SESSION_STORE_SCHEMA_V2)
+	const expectedKeys =
+		record.schema_version === SESSION_STORE_SCHEMA_V3
+			? [...baseKeys, "refresh_attempt_ref", "renewal_blocked_reason"]
+			: record.schema_version === SESSION_STORE_SCHEMA_V2
+				? [...baseKeys, "renewal_blocked_reason"]
+				: baseKeys;
+	if (
+		record.schema_version !== SESSION_STORE_SCHEMA_V1 &&
+		record.schema_version !== SESSION_STORE_SCHEMA_V2 &&
+		record.schema_version !== SESSION_STORE_SCHEMA_V3
+	)
 		throw new CealSessionStoreError("invalid_store");
 	if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify([...expectedKeys].sort())) {
 		throw new CealSessionStoreError("invalid_store");
@@ -218,9 +233,20 @@ function parseSession(value: unknown): CealStoredSession {
 		refreshToken: record.refresh_token,
 		refreshTokenIdleExpiresAt: record.refresh_token_idle_expires_at,
 		refreshTokenAbsoluteExpiresAt: record.refresh_token_absolute_expires_at,
+		...(record.schema_version === SESSION_STORE_SCHEMA_V3
+			? { refreshAttemptRef: record.refresh_attempt_ref, renewalBlockedReason: record.renewal_blocked_reason }
+			: {}),
 		...(record.schema_version === SESSION_STORE_SCHEMA_V2 ? { renewalBlockedReason: record.renewal_blocked_reason } : {}),
 	};
-	if (record.schema_version === SESSION_STORE_SCHEMA_V2 && !validBlockedReason(record.renewal_blocked_reason))
+	if (
+		(record.schema_version === SESSION_STORE_SCHEMA_V2 || record.schema_version === SESSION_STORE_SCHEMA_V3) &&
+		!validBlockedReason(record.renewal_blocked_reason)
+	)
+		throw new CealSessionStoreError("invalid_store");
+	if (
+		record.schema_version === SESSION_STORE_SCHEMA_V3 &&
+		(typeof record.refresh_attempt_ref !== "string" || !REFRESH_ATTEMPT_REF.test(record.refresh_attempt_ref))
+	)
 		throw new CealSessionStoreError("invalid_store");
 	validateSession(session);
 	return session as CealStoredSession;
@@ -239,12 +265,21 @@ interface CandidateSession {
 	refreshToken: unknown;
 	refreshTokenIdleExpiresAt: unknown;
 	refreshTokenAbsoluteExpiresAt: unknown;
+	refreshAttemptRef?: unknown;
+	renewalBlockedReason?: unknown;
 }
 
 function validateSession(value: CandidateSession): void {
 	validateBaseSession(value);
 	validateRefreshSession(value);
 	validateSessionReferences(value);
+	if (
+		value.refreshAttemptRef !== undefined &&
+		(typeof value.refreshAttemptRef !== "string" ||
+			!REFRESH_ATTEMPT_REF.test(value.refreshAttemptRef) ||
+			value.renewalBlockedReason !== "outcome_unknown")
+	)
+		throw new CealSessionStoreError("invalid_store");
 }
 
 function validateBaseSession(value: CandidateSession): void {

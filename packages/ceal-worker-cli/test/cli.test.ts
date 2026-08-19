@@ -1828,9 +1828,9 @@ test("generic no-session recovery presents both approved setup routes", async ()
 	assert.equal(acceptance.error.next_action, `${recovery} Then re-run 'ceal acceptance emit'.`);
 });
 
-test("ambiguous renewal response tells the employee not to replay a one-time refresh credential", async () => {
+test("ambiguous renewal response is recovered by reusing the durable refresh attempt", async () => {
 	await withRenewingGateway(
-		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+		async ({ endpoint, oldRefreshToken, newAccessToken, refreshCalls }) => {
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
 			const runtime = {
 				readStoredSession: async () => current,
@@ -1840,36 +1840,26 @@ test("ambiguous renewal response tells the employee not to replay a one-time ref
 			};
 			const refresh = await yamlRun(["session", "refresh"], 3, runtime);
 			assert.equal(refresh.schema_version, "ceal.session_refresh.v1");
-			assert.equal(refresh.error.kind, "session_renewal_unavailable");
-			assert.equal(refresh.error.retryable, false);
-			assert.match(refresh.error.message, /may already have been consumed/u);
-			assert.match(refresh.error.next_action, /Do not retry the same command/u);
-			assert.match(refresh.error.next_action, /ceal session enroll --help/u);
-			assert.match(refresh.error.next_action, /ceal session adopt --help/u);
+			assert.equal(refresh.error.kind, "session_refresh_attempt_unknown");
+			assert.equal(refresh.error.retryable, true);
+			assert.match(refresh.error.message, /same attempt may be recovered/u);
+			assert.match(refresh.error.next_action, /preserved attempt journal/u);
+			assert.match(current.refreshAttemptRef ?? "", /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u);
 			assert.equal(current.renewalBlockedReason, "outcome_unknown");
 			assert.equal(refreshCalls(), 1);
 
-			const blockedRetry = await yamlRun(["session", "refresh"], 3, runtime);
-			assert.equal(blockedRetry.error.kind, "session_renewal_unavailable");
-			assert.equal(blockedRetry.error.retryable, false);
-			assert.equal(refreshCalls(), 1, "the quarantined v1 credential must never reach the Gateway again");
-
-			const call = await yamlRun(["call", "message.search", "--target", "target:team-inbox", "query=launch"], 3, runtime);
-			assert.equal(call.error.kind, "session_renewal_unavailable");
-			assert.equal(call.error.retryable, false);
-			assert.match(call.error.next_action, /Do not retry the same command/u);
-			assert.match(call.error.next_action, /ceal session adopt --help/u);
-			assert.equal(Object.hasOwn(call, "receipt"), false);
-
-			const receipt = await yamlRun(["receipt", "show", "ceal:prior:call"], 0, runtime);
-			assert.equal(receipt.status, "verified");
-			assert.equal(refreshCalls(), 1, "receipt readback must not replay the quarantined refresh credential");
+			const recovered = await yamlRun(["session", "refresh"], 0, runtime);
+			assert.equal(recovered.status, "refreshed");
+			assert.equal(current.accessToken, newAccessToken);
+			assert.equal(current.refreshAttemptRef, undefined);
+			assert.equal(current.renewalBlockedReason, undefined);
+			assert.equal(refreshCalls(), 2, "recovery reuses the same Gateway attempt instead of creating a second rotation");
 		},
-		{ invalidRefreshResponse: true },
+		{ invalidRefreshResponse: true, recoverAfterUnknown: true },
 	);
 });
 
-test("capabilities reports a quarantined preflight refresh without contacting the Gateway", async () => {
+test("capabilities reports a response-unknown refresh without issuing a second Gateway attempt", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, refreshCalls, requests }) => {
 			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
@@ -1882,13 +1872,36 @@ test("capabilities reports a quarantined preflight refresh without contacting th
 			});
 			assert.equal(payload.schema_version, "ceal.capabilities.v1");
 			assert.equal(payload.session_refresh, "quarantined");
-			assert.equal(payload.error.kind, "session_renewal_unavailable");
+			assert.equal(payload.error.kind, "session_refresh_attempt_unknown");
+			assert.equal(payload.error.retryable, true);
 			assert.equal(payload.live_gateway_checked, false);
 			assert.equal(current.renewalBlockedReason, "outcome_unknown");
+			assert.match(current.refreshAttemptRef ?? "", /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u);
 			assert.equal(refreshCalls(), 1);
 			assert.deepEqual(requests, []);
 		},
 		{ invalidRefreshResponse: true },
+	);
+});
+
+test("capabilities quarantines a v2 refresh when the Gateway recovery key is unavailable", async () => {
+	await withRenewingGateway(
+		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+			let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
+			const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+				readStoredSession: async () => current,
+				writeStoredSession: async (session) => {
+					current = session;
+				},
+			});
+			assert.equal(payload.session_refresh, "quarantined");
+			assert.equal(payload.error.kind, "refresh_recovery_unavailable");
+			assert.equal(payload.error.retryable, true);
+			assert.equal(current.renewalBlockedReason, "outcome_unknown");
+			assert.match(current.refreshAttemptRef ?? "", /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u);
+			assert.equal(refreshCalls(), 1);
+		},
+		{ refreshDeniedCode: "refresh_recovery_unavailable" },
 	);
 });
 
@@ -1958,9 +1971,9 @@ test("typed Gateway refresh denial requires reenrollment instead of retry", asyn
 	);
 });
 
-test("separate installed invocations durably quarantine an ambiguous refresh before a second network attempt", async () => {
+test("separate installed invocations recover a dropped refresh response with the same attempt", async () => {
 	await withRenewingGateway(
-		async ({ endpoint, oldRefreshToken, refreshCalls }) => {
+		async ({ endpoint, oldRefreshToken, newRefreshToken, refreshCalls }) => {
 			const home = mkdtempSync(path.join(tmpdir(), "ceal-refresh-quarantine-"));
 			try {
 				const sessionPath = path.join(home, ".ceal", "client-session.json");
@@ -1972,20 +1985,26 @@ test("separate installed invocations durably quarantine an ambiguous refresh bef
 				);
 				const first = await runBin(["session", "refresh"], "", { HOME: home });
 				assert.equal(first.code, 3, first.stdout);
-				assert.match(first.stdout, /Do not retry the same command/u);
+				assert.match(first.stdout, /same attempt may be recovered/u);
 				const persisted = JSON.parse(readFileSync(sessionPath, "utf8"));
-				assert.equal(persisted.schema_version, "ceal.client_session_store.v2");
+				assert.equal(persisted.schema_version, "ceal.client_session_store.v3");
+				assert.match(persisted.refresh_attempt_ref, /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u);
 				assert.equal(persisted.renewal_blocked_reason, "outcome_unknown");
 				assert.equal(refreshCalls(), 1);
 
 				const second = await runBin(["session", "refresh"], "", { HOME: home });
-				assert.equal(second.code, 3, second.stdout);
-				assert.equal(refreshCalls(), 1, "the second process must not replay the quarantined token");
+				assert.equal(second.code, 0, second.stdout);
+				assert.equal(parseYaml(second.stdout).status, "refreshed");
+				const recovered = JSON.parse(readFileSync(sessionPath, "utf8"));
+				assert.equal(recovered.refresh_token, newRefreshToken);
+				assert.equal(Object.hasOwn(recovered, "refresh_attempt_ref"), false);
+				assert.equal(Object.hasOwn(recovered, "renewal_blocked_reason"), false);
+				assert.equal(refreshCalls(), 2, "the second process must recover the same attempt, not rotate again");
 			} finally {
 				rmSync(home, { recursive: true, force: true });
 			}
 		},
-		{ invalidRefreshResponse: true },
+		{ invalidRefreshResponse: true, recoverAfterUnknown: true },
 	);
 });
 
@@ -3879,17 +3898,28 @@ test("separate ceal processes serialize an in-flight single-use client refresh",
 		if (request.url === "/gateway/client/refresh") {
 			assert.ok(typeof body.refresh_token === "string");
 			refreshRequests.push(body.refresh_token);
-			if (body.refresh_token !== currentRefresh)
+			if (body.refresh_token !== currentRefresh) {
+				response.writeHead(409, { "content-type": "application/json" });
 				return response.end(
-					JSON.stringify({ schema_version: "ceal.client_refresh_result.v1", ok: false, error: { code: "refresh_replayed" } }),
+					JSON.stringify({
+						schema_version: "ceal.client_refresh_result.v2",
+						ok: false,
+						error: {
+							code: "refresh_replayed",
+							message: "Refresh token was already rotated.",
+							next_action: "Recover the recorded attempt.",
+						},
+					}),
 				);
+			}
 			if (refreshRequests.length === 1) {
 				firstRefreshObserved.resolve();
 				await firstRefreshRelease.promise;
 			}
 			currentRefresh = secondRefresh;
 			response.writeHead(200, { "content-type": "application/json" });
-			return response.end(JSON.stringify(rotatedClientSession(currentRefresh)));
+			assert.ok(typeof body.refresh_attempt_ref === "string");
+			return response.end(JSON.stringify(rotatedClientSessionV2(currentRefresh, body.refresh_attempt_ref)));
 		}
 		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
@@ -5273,6 +5303,7 @@ async function withEnrollmentGateway(callback: EnrollmentGatewayCallback, option
 
 type RenewingGatewayOptions = {
 	invalidRefreshResponse?: boolean;
+	recoverAfterUnknown?: boolean;
 	refreshDeniedCode?: string;
 	invalidRevokeResponse?: boolean;
 	rejectFirstGateway?: boolean;
@@ -5296,6 +5327,7 @@ async function withRenewingGateway(callback: RenewingGatewayCallback, options: R
 	const revoked: string[] = [];
 	let refreshCallCount = 0;
 	let gatewayRejected = false;
+	let committedRefresh: Record<string, unknown> | null = null;
 	const server = createServer(async (request, response) => {
 		const chunks: Buffer[] = [];
 		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -5303,40 +5335,57 @@ async function withRenewingGateway(callback: RenewingGatewayCallback, options: R
 		if (request.url === "/gateway/client/refresh") {
 			refreshCallCount += 1;
 			assert.equal(body.refresh_token, oldRefreshToken);
-			if (options.invalidRefreshResponse) {
-				response.writeHead(500, { "content-type": "text/plain" });
-				response.end("Gateway failure without the client JSON contract");
-				return;
-			}
+			const v2 = body.schema_version === "ceal.client_refresh_request.v2";
 			if (options.refreshDeniedCode) {
 				response.writeHead(200, { "content-type": "application/json" });
 				response.end(
 					JSON.stringify({
-						schema_version: "ceal.client_refresh_result.v1",
+						schema_version: v2 ? "ceal.client_refresh_result.v2" : "ceal.client_refresh_result.v1",
 						ok: false,
 						error: { code: options.refreshDeniedCode, message: "Gateway rejected refresh.", next_action: "Reenroll." },
 					}),
 				);
 				return;
 			}
+			const initialResult = {
+				schema_version: v2 ? "ceal.client_refresh_result.v2" : "ceal.client_refresh_result.v1",
+				ok: true,
+				profile_ref: "profile:narnia",
+				membership_ref: "membership:narnia",
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:corca",
+				access_token: newAccessToken,
+				expires_at: "2099-07-14T00:00:00.000Z",
+				refresh_token: newRefreshToken,
+				refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
+				refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+				...(v2 ? { refresh_attempt_ref: body.refresh_attempt_ref, refresh_delivery: "initial" } : {}),
+			};
+			if (options.invalidRefreshResponse && options.recoverAfterUnknown && refreshCallCount === 1) {
+				// Model the Gateway's linearization point: the rotation and its
+				// recovery record are committed before the response disappears.
+				committedRefresh = initialResult;
+				response.writeHead(500, { "content-type": "text/plain" });
+				response.end("Gateway committed the refresh, but the response was lost");
+				return;
+			}
+			if (options.invalidRefreshResponse && !(options.recoverAfterUnknown && refreshCallCount > 1)) {
+				response.writeHead(500, { "content-type": "text/plain" });
+				response.end("Gateway failure without the client JSON contract");
+				return;
+			}
+			const result =
+				options.recoverAfterUnknown && refreshCallCount > 1
+					? (() => {
+							assert.ok(committedRefresh, "the first response must commit before it is dropped");
+							assert.equal(body.refresh_attempt_ref, committedRefresh.refresh_attempt_ref, "recovery must use the original attempt");
+							return { ...committedRefresh, refresh_delivery: "recovery" };
+						})()
+					: initialResult;
 			response.writeHead(200, { "content-type": "application/json" });
-			response.end(
-				JSON.stringify({
-					schema_version: "ceal.client_refresh_result.v1",
-					ok: true,
-					profile_ref: "profile:narnia",
-					membership_ref: "membership:narnia",
-					registration_ref: "registration:narnia",
-					client_ref: "client:narnia",
-					subject_ref: "subject:hwidong",
-					instance_ref: "instance:corca",
-					access_token: newAccessToken,
-					expires_at: "2099-07-14T00:00:00.000Z",
-					refresh_token: newRefreshToken,
-					refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
-					refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
-				}),
-			);
+			response.end(JSON.stringify(result));
 			return;
 		}
 		if (request.url === "/gateway/client/revoke") {
@@ -5433,8 +5482,13 @@ function storedSession(endpoint: string, overrides: Partial<CealStoredSession> =
 }
 
 function serializeStoredSession(session: CealStoredSession): Record<string, unknown> {
+	const hasAttempt = session.refreshAttemptRef !== undefined;
 	return {
-		schema_version: "ceal.client_session_store.v1",
+		schema_version: hasAttempt
+			? "ceal.client_session_store.v3"
+			: session.renewalBlockedReason
+				? "ceal.client_session_store.v2"
+				: "ceal.client_session_store.v1",
 		gateway_endpoint: session.gatewayEndpoint,
 		profile_ref: session.profileRef,
 		membership_ref: session.membershipRef,
@@ -5447,6 +5501,8 @@ function serializeStoredSession(session: CealStoredSession): Record<string, unkn
 		refresh_token: session.refreshToken,
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
+		...(hasAttempt ? { refresh_attempt_ref: session.refreshAttemptRef } : {}),
+		...(session.renewalBlockedReason ? { renewal_blocked_reason: session.renewalBlockedReason } : {}),
 	};
 }
 
@@ -5465,6 +5521,19 @@ function rotatedClientSession(refreshToken: string): Record<string, unknown> {
 		refresh_token: refreshToken,
 		refresh_token_idle_expires_at: "2099-08-14T00:00:00.000Z",
 		refresh_token_absolute_expires_at: "2099-10-14T00:00:00.000Z",
+	};
+}
+
+function rotatedClientSessionV2(
+	refreshToken: string,
+	refreshAttemptRef: string,
+	refreshDelivery: "initial" | "recovery" = "initial",
+): Record<string, unknown> {
+	return {
+		...rotatedClientSession(refreshToken),
+		schema_version: "ceal.client_refresh_result.v2",
+		refresh_attempt_ref: refreshAttemptRef,
+		refresh_delivery: refreshDelivery,
 	};
 }
 

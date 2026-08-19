@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
-import type { CealClientRefreshResult } from "@corca-ai/ceal-protocol";
+import type { CealClientRefreshResult, CealClientRefreshResultV2 } from "@corca-ai/ceal-protocol";
 import type { CealCliIo, CealCommandContext } from "./cli-runtime.js";
 import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { adoptSession } from "./device-adoption.js";
@@ -83,13 +84,16 @@ function configuredSessionSummary(session: CealStoredSession, now: number): Reco
 		renewal_configured: true,
 		renewal_status:
 			session.renewalBlockedReason === "outcome_unknown" ? "outcome_unknown" : session.renewalBlockedReason ? "not_renewable" : "not_checked",
+		refresh_attempt_ref_present: session.refreshAttemptRef !== undefined,
 		refresh_token_idle_expires_at: session.refreshTokenIdleExpiresAt,
 		refresh_token_absolute_expires_at: session.refreshTokenAbsoluteExpiresAt,
 		raw_token_visible: false,
 		proof_level: "local_state",
-		next_action: session.renewalBlockedReason
-			? `Do not retry a session refresh. ${SESSION_REPLACEMENT_NEXT_ACTION}`
-			: "Run 'ceal capabilities' to verify live Gateway access.",
+		next_action: session.refreshAttemptRef
+			? "Run 'ceal session refresh' to recover the same Gateway rotation attempt."
+			: session.renewalBlockedReason
+				? `Do not retry a session refresh. ${SESSION_REPLACEMENT_NEXT_ACTION}`
+				: "Run 'ceal capabilities' to verify live Gateway access.",
 	};
 }
 
@@ -507,29 +511,35 @@ async function renewSession(
 	save: (session: CealStoredSession) => Promise<void>,
 ): Promise<CealStoredSession> {
 	if (!force && sessionIsCurrent(session, now)) return session;
-	if (session.renewalBlockedReason)
+	if (session.renewalBlockedReason && !session.refreshAttemptRef)
 		throw new CealClientSessionError(
 			session.renewalBlockedReason === "outcome_unknown" ? "session_renewal_unavailable" : session.renewalBlockedReason,
 		);
 	const refresh = requireRefreshContext(session);
-	// Write before send.  A v1 refresh can commit before its response reaches us;
-	// if this durable write fails, no process is allowed to send the one-time
-	// credential because it could not prove a later replay will be stopped.
+	const refreshAttemptRef = session.refreshAttemptRef ?? newRefreshAttemptRef();
+	// Write before send. This is the durable attempt journal. If the process dies
+	// after Gateway rotation, the next invocation reuses this exact attempt.
 	try {
-		await save({ ...session, renewalBlockedReason: "outcome_unknown" });
+		await save({ ...session, refreshAttemptRef, renewalBlockedReason: "outcome_unknown" });
 	} catch (error) {
 		throw new CealClientSessionError(sessionStoreFailureCode(error));
 	}
-	const response = await refreshSession(session, refresh);
+	const response = await refreshSession(session, refresh, refreshAttemptRef);
 	if (!response.ok) {
+		if (response.error.code === "refresh_recovery_unavailable") {
+			// The Gateway refused before consuming the token. Keep the attempt
+			// journal so a later Gateway with its owner key can resume it.
+			throw new CealClientSessionError("refresh_recovery_unavailable");
+		}
+		const { refreshAttemptRef: _attemptRef, ...unattempted } = session;
 		try {
-			await save({ ...session, renewalBlockedReason: response.error.code });
+			await save({ ...unattempted, renewalBlockedReason: response.error.code });
 		} catch (error) {
 			throw new CealClientSessionError(sessionStoreFailureCode(error));
 		}
 		throw new CealClientSessionError(response.error.code);
 	}
-	assertSessionBindings(session, response);
+	assertSessionBindings(session, response, refreshAttemptRef);
 	const rotated = rotatedSession(session, response);
 	await save(rotated);
 	return rotated;
@@ -556,15 +566,23 @@ function requireRefreshContext(session: CealStoredSession): string {
 	return session.refreshToken;
 }
 
-async function refreshSession(session: CealStoredSession, refreshToken: string) {
+async function refreshSession(session: CealStoredSession, refreshToken: string, refreshAttemptRef: string) {
 	try {
-		return await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).refresh(refreshToken);
+		return await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).refresh(refreshToken, refreshAttemptRef);
 	} catch (error) {
-		throw new CealClientSessionError(clientSessionTransportFailure(error, "renewal"));
+		const failure = clientSessionTransportFailure(error, "renewal");
+		throw new CealClientSessionError(failure === "session_renewal_unavailable" ? "session_refresh_attempt_unknown" : failure);
 	}
 }
 
-function assertSessionBindings(session: CealStoredSession, response: CealClientRefreshResult): void {
+function assertSessionBindings(
+	session: CealStoredSession,
+	response: CealClientRefreshResult | CealClientRefreshResultV2,
+	refreshAttemptRef: string,
+): void {
+	if (!("refresh_attempt_ref" in response) || response.refresh_attempt_ref !== refreshAttemptRef) {
+		throw new CealClientSessionError("binding_changed");
+	}
 	const bindings = [
 		[response.profile_ref, session.profileRef],
 		[response.membership_ref, session.membershipRef],
@@ -589,8 +607,8 @@ function assertSessionIdentity(current: CealStoredSession, expected: CealStoredS
 	if (bindings.some(([actual, expectedValue]) => actual !== expectedValue)) throw new CealClientSessionError("binding_changed");
 }
 
-function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult): CealStoredSession {
-	const { renewalBlockedReason: _blockedReason, ...unblocked } = session;
+function rotatedSession(session: CealStoredSession, response: CealClientRefreshResult | CealClientRefreshResultV2): CealStoredSession {
+	const { renewalBlockedReason: _blockedReason, refreshAttemptRef: _attemptRef, ...unblocked } = session;
 	return {
 		...unblocked,
 		accessToken: response.access_token,
@@ -599,6 +617,10 @@ function rotatedSession(session: CealStoredSession, response: CealClientRefreshR
 		refreshTokenIdleExpiresAt: response.refresh_token_idle_expires_at,
 		refreshTokenAbsoluteExpiresAt: response.refresh_token_absolute_expires_at,
 	};
+}
+
+function newRefreshAttemptRef(): string {
+	return `ceal_refresh_attempt_${randomBytes(32).toString("base64url")}`;
 }
 
 export function writeClientSessionUnavailable(reason: string, io: CealCliIo): number {
@@ -655,6 +677,16 @@ const CLIENT_SESSION_FAILURES: Readonly<Record<string, ClientSessionFailureDispo
 		message:
 			"The Gateway did not return a usable response while renewing the stored session; the one-time refresh credential may already have been consumed.",
 		nextAction: `Do not retry the same command. ${SESSION_REPLACEMENT_NEXT_ACTION}`,
+	},
+	session_refresh_attempt_unknown: {
+		retryable: true,
+		message: "The Gateway response was not usable after a durable refresh attempt was recorded; the same attempt may be recovered.",
+		nextAction: "Retry 'ceal session refresh' with the preserved attempt journal; it will not create a second rotation attempt.",
+	},
+	refresh_recovery_unavailable: {
+		retryable: true,
+		message: "The Gateway could not open its durable refresh-recovery key; the refresh token was not consumed.",
+		nextAction: "Keep the same attempt journal and retry 'ceal session refresh' after the Gateway recovery key is available.",
 	},
 	session_revocation_unavailable: {
 		retryable: true,

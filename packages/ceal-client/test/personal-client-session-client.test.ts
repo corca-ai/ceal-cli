@@ -21,6 +21,7 @@ import {
 } from "./client-response-test-support.ts";
 
 const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
+const ATTEMPT = `ceal_refresh_attempt_${"T".repeat(43)}`;
 
 test("personal-client session client rotates and revokes only through derived Gateway routes", async () => {
 	const requests: Array<{ url: string | undefined; decodeGeneration: string | undefined; body: JsonRecord }> = [];
@@ -60,6 +61,71 @@ test("personal-client session client rotates and revokes only through derived Ga
 		// the client package manifest.
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.deepEqual(requiredValue(requests[0], "refresh_request").body.client, { name: "ceal", version: manifest.version });
+	} finally {
+		await close(server);
+	}
+});
+
+test("personal-client session client sends and decodes the same-attempt v2 refresh contract", async () => {
+	let requestBody: JsonRecord | undefined;
+	const server = createServer(async (request, response) => {
+		requestBody = parseJsonRecord(await readBody(request));
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(
+			JSON.stringify({
+				schema_version: "ceal.client_refresh_result.v2",
+				ok: true,
+				profile_ref: "profile:work",
+				membership_ref: "membership:narnia",
+				registration_ref: "registration:narnia",
+				client_ref: "client:narnia",
+				subject_ref: "subject:hwidong",
+				instance_ref: "instance:ceal-dev",
+				access_token: `ceal_personal_${"A".repeat(43)}`,
+				expires_at: "2026-07-13T06:15:00.000Z",
+				refresh_token: `ceal_refresh_${"N".repeat(43)}`,
+				refresh_token_idle_expires_at: "2026-08-12T06:00:00.000Z",
+				refresh_token_absolute_expires_at: "2026-10-11T06:00:00.000Z",
+				refresh_attempt_ref: ATTEMPT,
+				refresh_delivery: "recovery",
+			}),
+		);
+	});
+	await listen(server);
+	try {
+		const client = createCealPersonalClientSessionClient({ endpoint: `http://127.0.0.1:${serverPort(server)}/api/ceal/v1` });
+		const refreshed = await client.refresh(REFRESH, ATTEMPT);
+		assert.equal(refreshed.ok, true);
+		assert.equal(requestBody?.schema_version, "ceal.client_refresh_request.v2");
+		assert.equal(requestBody?.refresh_attempt_ref, ATTEMPT);
+		assert.equal(requestBody?.refresh_token, REFRESH);
+		assert.equal("refresh_delivery" in refreshed ? refreshed.refresh_delivery : undefined, "recovery");
+	} finally {
+		await close(server);
+	}
+});
+
+test("a v2 refresh never falls back to the legacy response contract", async () => {
+	let requestBody: JsonRecord | undefined;
+	const server = createServer(async (request, response) => {
+		requestBody = parseJsonRecord(await readBody(request));
+		response.writeHead(403, { "content-type": "application/json" });
+		response.end(
+			JSON.stringify({
+				schema_version: "ceal.client_refresh_result.v1",
+				ok: false,
+				error: { code: "refresh_invalid", message: "Legacy Gateway response.", next_action: "Enroll again." },
+			}),
+		);
+	});
+	await listen(server);
+	try {
+		const client = createCealPersonalClientSessionClient({ endpoint: `http://127.0.0.1:${serverPort(server)}/api/ceal/v1` });
+		await assert.rejects(
+			() => client.refresh(REFRESH, ATTEMPT),
+			(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+		);
+		assert.equal(requestBody?.schema_version, "ceal.client_refresh_request.v2");
 	} finally {
 		await close(server);
 	}

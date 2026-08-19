@@ -1,9 +1,13 @@
 import {
+	CEAL_CLIENT_REFRESH_ATTEMPT_REF,
 	CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
+	CEAL_CLIENT_REFRESH_REQUEST_V2_SCHEMA,
 	CEAL_CLIENT_REVOKE_REQUEST_SCHEMA,
 	type CealClientRefreshResponse,
+	type CealClientRefreshResponseV2,
 	type CealClientRevokeResponse,
 	decodeCealClientRefreshResponse,
+	decodeCealClientRefreshResponseV2,
 	decodeCealClientRevokeResponse,
 } from "@corca-ai/ceal-protocol";
 import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
@@ -11,7 +15,7 @@ import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpo
 import { CEAL_CLIENT_VERSION } from "./version.js";
 
 export interface CealPersonalClientSessionClient {
-	refresh(refreshToken: string): Promise<CealClientRefreshResponse>;
+	refresh(refreshToken: string, refreshAttemptRef?: string): Promise<CealClientRefreshResponse | CealClientRefreshResponseV2>;
 	revoke(refreshToken: string): Promise<CealClientRevokeResponse>;
 }
 
@@ -41,18 +45,13 @@ export function createCealPersonalClientSessionClient(
 		throw new CealPersonalClientSessionError("invalid_configuration");
 	});
 	return {
-		refresh: (refreshToken) =>
-			requestSession({
+		refresh: (refreshToken, refreshAttemptRef) =>
+			refreshSession({
 				endpoint: refreshEndpoint,
 				fetchFn,
 				timeoutMs,
 				refreshToken,
-				body: {
-					schema_version: CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
-					refresh_token: refreshToken,
-					client: { name: "ceal", version: CEAL_CLIENT_VERSION },
-				},
-				decode: decodeCealClientRefreshResponse,
+				...(refreshAttemptRef === undefined ? {} : { refreshAttemptRef }),
 			}),
 		revoke: (refreshToken) =>
 			requestSession({
@@ -66,6 +65,36 @@ export function createCealPersonalClientSessionClient(
 	};
 }
 
+function refreshSession(input: {
+	endpoint: URL;
+	fetchFn: typeof globalThis.fetch;
+	timeoutMs: number;
+	refreshToken: string;
+	refreshAttemptRef?: string;
+}): Promise<CealClientRefreshResponse | CealClientRefreshResponseV2> {
+	if (input.refreshAttemptRef === undefined) {
+		return requestSession({
+			...input,
+			body: {
+				schema_version: CEAL_CLIENT_REFRESH_REQUEST_SCHEMA,
+				refresh_token: input.refreshToken,
+				client: { name: "ceal", version: CEAL_CLIENT_VERSION },
+			},
+			decode: decodeCealClientRefreshResponse,
+		});
+	}
+	return requestSession({
+		...input,
+		body: {
+			schema_version: CEAL_CLIENT_REFRESH_REQUEST_V2_SCHEMA,
+			refresh_token: input.refreshToken,
+			refresh_attempt_ref: input.refreshAttemptRef,
+			client: { name: "ceal", version: CEAL_CLIENT_VERSION },
+		},
+		decode: decodeCealClientRefreshResponseV2,
+	});
+}
+
 async function requestSession<T extends { readonly ok: boolean }>(input: {
 	endpoint: URL;
 	fetchFn: typeof globalThis.fetch;
@@ -73,8 +102,11 @@ async function requestSession<T extends { readonly ok: boolean }>(input: {
 	refreshToken: string;
 	body: Record<string, unknown>;
 	decode: (value: unknown) => T;
+	refreshAttemptRef?: string;
 }): Promise<T> {
 	if (!REFRESH_TOKEN.test(input.refreshToken)) throw new CealPersonalClientSessionError("invalid_configuration");
+	if (input.refreshAttemptRef !== undefined && !CEAL_CLIENT_REFRESH_ATTEMPT_REF.test(input.refreshAttemptRef))
+		throw new CealPersonalClientSessionError("invalid_configuration");
 	const response = await exchangeSessionJson({
 		endpoint: input.endpoint,
 		fetchFn: input.fetchFn,

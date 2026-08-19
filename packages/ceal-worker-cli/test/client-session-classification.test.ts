@@ -23,12 +23,17 @@ test("every classified reason is agreed on by both readers", () => {
 	}
 });
 
-// Only local contention and revocation transport uncertainty are retryable. An
-// unknown one-time refresh may already have committed, so retrying it can revoke
-// the whole Gateway session family.
+// Local contention, durable refresh recovery, and revocation transport
+// uncertainty are retryable. A refresh attempt is safe to retry only when the
+// attempt journal lets the Gateway distinguish recovery from a second rotation.
 test("retryable is reserved for the reasons a retry can actually clear", () => {
 	const retryable = classifiedClientSessionFailureReasons().filter((reason) => classifyClientSessionFailure(reason).retryable);
-	assert.deepEqual(retryable.sort(), ["refresh_busy", "session_revocation_unavailable"]);
+	assert.deepEqual(retryable.sort(), [
+		"refresh_busy",
+		"refresh_recovery_unavailable",
+		"session_refresh_attempt_unknown",
+		"session_revocation_unavailable",
+	]);
 });
 
 test("an unclassified reason is reported without being trusted as membership", () => {

@@ -62,3 +62,11 @@ test("personal-client session decoders reject drift and preserve stable recovery
 	assert.equal(failure.ok, false);
 	if (!failure.ok) assert.equal(failure.error.code, "refresh_replayed");
 });
+
+test("revoke response decoder does not accept refresh-only recovery failures", () => {
+	assert.throws(() => decodeCealClientRevokeResponse({
+		schema_version: "ceal.client_revoke_result.v1",
+		ok: false,
+		error: { code: "refresh_recovery_unavailable", message: "Recovery is unavailable.", next_action: "Try later." },
+	}));
+});
