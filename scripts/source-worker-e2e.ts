@@ -658,8 +658,7 @@ async function main(): Promise<number> {
 			...options.arguments,
 		];
 		const call = await worker(callArgs, "call");
-		const callValue = parseValue(call.result.stdout);
-		const requestRef = isRecord(callValue) && typeof callValue.request_ref === "string" ? callValue.request_ref : undefined;
+		const requestRef = callRequestRef(call.result.stdout);
 		const receipt = requestRef
 			? await worker(["receipt", "show", requestRef, ...(options.profile ? ["--profile", options.profile] : [])], "receipt")
 			: undefined;
@@ -711,6 +710,13 @@ export function nextTargetCursor(stdout: string): string | undefined {
 	if (!isRecord(value) || !isRecord(value.target_catalog)) return undefined;
 	const cursor = value.target_catalog.next_cursor;
 	return typeof cursor === "string" && CEAL_SAFE_CURSOR.test(cursor) ? cursor : undefined;
+}
+
+export function callRequestRef(stdout: string): string | undefined {
+	const value = parseValue(stdout);
+	if (!isRecord(value)) return undefined;
+	if (typeof value.request_ref === "string") return value.request_ref;
+	return isRecord(value.receipt) && typeof value.receipt.request_ref === "string" ? value.receipt.request_ref : undefined;
 }
 
 function emit(value: RecordValue, json: boolean): number {

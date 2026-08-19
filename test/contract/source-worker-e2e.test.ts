@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	callRequestRef,
 	nextTargetCursor,
 	parseSourceWorkerE2eArgs,
 	sourceWorkerE2eHelp,
@@ -46,6 +47,12 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 	assert.equal(targetRefReturned("targets: []\n", "target:opaque"), false);
 	assert.equal(nextTargetCursor("target_catalog:\n  next_cursor: cursor:page-two\n"), "cursor:page-two");
 	assert.equal(nextTargetCursor("target_catalog:\n  next_cursor: unsafe cursor\n"), undefined);
+});
+
+test("source-worker-e2e extracts a request ref from either call result shape", () => {
+	assert.equal(callRequestRef("request_ref: ceal:top-level:call\n"), "ceal:top-level:call");
+	assert.equal(callRequestRef("receipt:\n  request_ref: ceal:nested:call\n  status: completed\n"), "ceal:nested:call");
+	assert.equal(callRequestRef("status: completed\n"), undefined);
 });
 
 test("source-worker-e2e rejects a provider call without its separate boundary", () => {
