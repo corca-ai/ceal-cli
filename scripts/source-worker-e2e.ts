@@ -22,6 +22,7 @@ const WORKER_ENTRYPOINT = path.join(ROOT, "packages/ceal-worker-cli/dist/bin.js"
 const BUILD_TIMEOUT_MS = 120_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const MAX_CAPTURED_OUTPUT = 512 * 1024;
+const MAX_TARGET_PAGES = 16;
 const SAFE_PROFILE = /^profile:[a-z0-9][a-z0-9._-]*$/u;
 const TIMED_WORKER_COMMANDS = new Set(["capabilities", "targets", "call", "receipt", "session_refresh"]);
 
@@ -204,7 +205,7 @@ export function sourceWorkerE2eHelp(): string {
 		"Optional provider call (always opt-in):",
 		"  --capability <id>            Capability id returned by live discovery.",
 		"  --target <target-ref>        Exact opaque target ref returned for that capability.",
-		"  --cursor <cursor-ref>        Gateway-issued cursor for the page that returned the target.",
+		"  --cursor <cursor-ref>        Optional current Gateway cursor to start bounded target paging.",
 		"  --argument <key=value>       Repeat fields declared by that capability.",
 		"  --allow-provider-call        Permit 'ceal call' and receipt readback.",
 		"",
@@ -226,7 +227,7 @@ export function sourceWorkerE2ePlan(options: SourceWorkerE2eOptions): RecordValu
 		...(options.capability && options.target
 			? [
 					{
-						command: `ceal capabilities targets --capability ${options.capability}${profile}${options.cursor ? ` --cursor ${options.cursor}` : ""} --limit 64`,
+						command: `ceal capabilities targets --capability ${options.capability}${profile}${options.cursor ? ` --cursor ${options.cursor}` : ""} --limit 64 (follow up to ${MAX_TARGET_PAGES} Gateway pages)`,
 						effect: "read_only",
 						session_effect: "refresh_if_needed",
 					},
@@ -590,39 +591,47 @@ async function main(): Promise<number> {
 	const discovery = await worker(capabilityArgs, "capabilities");
 	let providerCallSucceeded = !options.capability;
 	if (options.capability && options.target && discovery.result.exit_code === 0) {
-		const targets = await worker(
-			[
-				"capabilities",
+		let targetReturned = false;
+		let targetCursor = options.cursor;
+		for (let page = 0; page < MAX_TARGET_PAGES && !targetReturned; page += 1) {
+			const targets = await worker(
+				[
+					"capabilities",
+					"targets",
+					"--capability",
+					options.capability,
+					...(options.profile ? ["--profile", options.profile] : []),
+					"--limit",
+					"64",
+					...(targetCursor ? ["--cursor", targetCursor] : []),
+					...(options.detail ? ["--detail"] : []),
+				],
 				"targets",
-				"--capability",
-				options.capability,
-				...(options.profile ? ["--profile", options.profile] : []),
-				"--limit",
-				"64",
-				...(options.cursor ? ["--cursor", options.cursor] : []),
-				...(options.detail ? ["--detail"] : []),
-			],
-			"targets",
-		);
-		if (targets.result.exit_code !== 0)
-			return emit(
-				{
-					schema_version: "ceal.source_worker_e2e.v1",
-					command: "source-worker-e2e",
-					ok: false,
-					status: "target_discovery_failed",
-					source_worker: { ...metadata, entrypoint_sha256: sha256(WORKER_ENTRYPOINT) },
-					session: session.summary,
-					commands,
-					error: {
-						kind: "target_discovery_failed",
-						next_action: "Use the returned Gateway error and re-run target discovery only after its recovery instruction is satisfied.",
-					},
-					non_claims: ["No provider call was executed because target discovery failed."],
-				},
-				options.json,
 			);
-		if (!targetRefReturned(targets.result.stdout, options.target))
+			if (targets.result.exit_code !== 0)
+				return emit(
+					{
+						schema_version: "ceal.source_worker_e2e.v1",
+						command: "source-worker-e2e",
+						ok: false,
+						status: "target_discovery_failed",
+						source_worker: { ...metadata, entrypoint_sha256: sha256(WORKER_ENTRYPOINT) },
+						session: session.summary,
+						commands,
+						error: {
+							kind: "target_discovery_failed",
+							next_action: "Use the returned Gateway error and re-run target discovery only after its recovery instruction is satisfied.",
+						},
+						non_claims: ["No provider call was executed because target discovery failed."],
+					},
+					options.json,
+				);
+			targetReturned = targetRefReturned(targets.result.stdout, options.target);
+			if (targetReturned) break;
+			targetCursor = nextTargetCursor(targets.result.stdout);
+			if (!targetCursor) break;
+		}
+		if (!targetReturned)
 			return emit(
 				{
 					schema_version: "ceal.source_worker_e2e.v1",
@@ -695,6 +704,13 @@ export function targetRefReturned(stdout: string, targetRef: string): boolean {
 	const value = parseValue(stdout);
 	if (!isRecord(value) || !Array.isArray(value.targets)) return false;
 	return value.targets.some((target) => isRecord(target) && target.target_ref === targetRef);
+}
+
+export function nextTargetCursor(stdout: string): string | undefined {
+	const value = parseValue(stdout);
+	if (!isRecord(value) || !isRecord(value.target_catalog)) return undefined;
+	const cursor = value.target_catalog.next_cursor;
+	return typeof cursor === "string" && CEAL_SAFE_CURSOR.test(cursor) ? cursor : undefined;
 }
 
 function emit(value: RecordValue, json: boolean): number {

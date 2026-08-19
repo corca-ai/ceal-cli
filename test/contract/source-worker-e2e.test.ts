@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	nextTargetCursor,
 	parseSourceWorkerE2eArgs,
 	sourceWorkerE2eHelp,
 	sourceWorkerE2ePlan,
@@ -37,11 +38,14 @@ test("source-worker-e2e keeps the live lane explicitly opt-in and records sessio
 	assert.equal(commands.at(-3)?.effect, "read_only");
 	assert.match(String(commands.at(-3)?.command), /capabilities targets/u);
 	assert.match(String(commands.at(-3)?.command), /--cursor cursor:page-two/u);
+	assert.match(String(commands.at(-3)?.command), /follow up to 16 Gateway pages/u);
 	assert.equal(commands.at(-2)?.effect, "remote_write");
 	assert.match(String(commands.at(-2)?.command), /returned-opaque-ref/u);
 	assert.doesNotMatch(String(commands.at(-2)?.command), /target:opaque/u);
 	assert.equal(targetRefReturned("targets:\n  - target_ref: target:opaque\n", "target:opaque"), true);
 	assert.equal(targetRefReturned("targets: []\n", "target:opaque"), false);
+	assert.equal(nextTargetCursor("target_catalog:\n  next_cursor: cursor:page-two\n"), "cursor:page-two");
+	assert.equal(nextTargetCursor("target_catalog:\n  next_cursor: unsafe cursor\n"), undefined);
 });
 
 test("source-worker-e2e rejects a provider call without its separate boundary", () => {
