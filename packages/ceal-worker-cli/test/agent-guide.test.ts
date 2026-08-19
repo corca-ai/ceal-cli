@@ -451,6 +451,33 @@ test("a missing guide remains unavailable without advising reinstall when no hos
 	assert.doesNotMatch(requireString(store.inspect().error?.next_action), /reinstall/u);
 });
 
+test("a source checkout guide is available but never update-safe", () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-source-guide-")));
+	const guide = path.join(root, "skills", "ceal-guide");
+	const codexHome = path.join(root, "codex");
+	mkdirSync(guide, { recursive: true });
+	writeFileSync(path.join(guide, "SKILL.md"), "---\nname: ceal-guide\n---\nsource\n");
+	try {
+		const store = createCealAgentGuideStore(process.execPath, root, codexHome, undefined, "codex", undefined, guide);
+		const before = store.inspect();
+		assert.equal(before.status, "available");
+		assert.equal(before.carrier, "source");
+		assert.equal(before.update_safe, false);
+		assert.equal(before.guide_path, guide);
+		assert.match(requireString(before.next_action), /mutable source guide/u);
+		assert.equal(existsSync(path.join(codexHome, "skills")), false);
+
+		const registered = store.register("codex");
+		assert.equal(registered.status, "available");
+		assert.equal(registered.carrier, "source");
+		assert.equal(registered.update_safe, false);
+		assert.equal(requireHost(registered, "codex").registered, true);
+		assert.equal(realpathSync(path.join(codexHome, "skills", "ceal-guide")), guide);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("embedded guide status is read-only and explicit registration materializes the complete directory", () => {
 	const fixture = embeddedGuideFixture();
 	try {

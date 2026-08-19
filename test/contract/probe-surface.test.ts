@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -24,41 +24,11 @@ function probe(args: string[]): ProbeResult {
 	return spawnSync(process.execPath, [GUARD, ...args], { encoding: "utf8", cwd: ROOT });
 }
 
-/**
- * Run the guard from a node staged in an install-shaped tree.
- *
- * The guide store derives its asset from `dirname(realpath(process.execPath))`,
- * and the guard spawns the probed binary with its own `process.execPath`. Run as
- * plain `node dist/bin.js`, every `guide register` probe therefore answers
- * `guide_unavailable` and reports no path at all — which is how this file once
- * held two isolation assertions that could not fail. Staging the executable is
- * what makes the registration path exist to be asserted about.
- */
-function withStagedRelease(run: (probe: Probe) => void): void {
-	const cache = path.join(ROOT, "node_modules", ".cache");
-	mkdirSync(cache, { recursive: true });
-	const stage = mkdtempSync(path.join(cache, "ceal-probe-release-"));
-	try {
-		const binary = path.join(stage, "releases", "probe", "ceal");
-		mkdirSync(path.dirname(binary), { recursive: true });
-		mkdirSync(path.join(stage, "current", "guide"), { recursive: true });
-		writeFileSync(path.join(stage, "current", "guide", "SKILL.md"), "name: ceal-guide\n");
-		// A hardlink keeps the staging free; a symlink cannot work at all, because
-		// the store realpaths the executable before deriving the guide root. The
-		// copy is the cross-device fallback, not the normal path.
-		try {
-			linkSync(process.execPath, binary);
-		} catch {
-			copyFileSync(process.execPath, binary);
-			chmodSync(binary, 0o755);
-		}
-		run(
-			(args: string[], environment?: NodeJS.ProcessEnv): ProbeResult =>
-				spawnSync(binary, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }),
-		);
-	} finally {
-		rmSync(stage, { recursive: true, force: true });
-	}
+function withProbeEnvironment(run: (probe: Probe) => void): void {
+	run(
+		(args: string[], environment?: NodeJS.ProcessEnv): ProbeResult =>
+			spawnSync(process.execPath, [GUARD, ...args], { encoding: "utf8", cwd: ROOT, env: { ...process.env, ...environment } }),
+	);
 }
 
 function registrationPaths(stdout: string): string[] {
@@ -178,7 +148,7 @@ test("the child's own declared effect decides, not the parent's", () => {
 test("the escape hatch is explicit and still isolated", () => {
 	const refused = probe(["ceal", "guide", "register", "codex"]);
 	assert.equal(refused.status, 2);
-	withStagedRelease((run: Probe) => {
+	withProbeEnvironment((run: Probe) => {
 		const allowed = run(["--allow-effect", "local_write", "ceal", "guide", "register", "codex"]);
 		assert.match(allowed.stderr, /effect: local_write.*throwaway HOME/u);
 		assert.match(allowed.stdout, /^schema_version: ceal\.guide\.v1$/mu);
@@ -205,7 +175,7 @@ test("an inherited agent-host override cannot aim a probed write at real state",
 	assert.ok(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.length > 0);
 	const overrides = Object.fromEntries(CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES.map((variable) => [variable, sentinel]));
 	try {
-		withStagedRelease((run: Probe) => {
+		withProbeEnvironment((run: Probe) => {
 			// Only the agent-host overrides are set. The guard also pins
 			// XDG_RUNTIME_DIR, but no guide route reads it, so including it here
 			// would assert nothing while looking like coverage — the exact shape of

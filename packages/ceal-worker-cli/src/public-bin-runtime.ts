@@ -3,7 +3,7 @@ import { inspectAgentAudit, inspectAgentSessionEvents } from "./agent-audit.js";
 import { createCealAgentGuideStore, detectCealAgentGuideHost } from "./agent-guide.js";
 import type { CealCommandRuntime } from "./cli-runtime.js";
 import { createCealDiscoveryCacheStore } from "./discovery-cache.js";
-import { readEmbeddedCealGuideBundle } from "./embedded-guide.js";
+import { readDevelopmentCealGuidePath, readEmbeddedCealGuideBundle } from "./embedded-guide.js";
 import { readHiddenTerminalEnrollmentCode } from "./hidden-terminal-input.js";
 import { runCealCommand } from "./index.js";
 import { type CealSessionStore, createCealSessionStore } from "./profile-store.js";
@@ -62,6 +62,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 		agentHostOverrides.claude,
 		detectCealAgentGuideHost(process.env),
 		readEmbeddedCealGuideBundle(),
+		readDevelopmentCealGuidePath(),
 	);
 	const runStableUpdate = createCealStableUpdateRunner(process.execPath, process.env);
 	const discoveryCacheTtlMs = parseCacheTtlOverride(process.env.CEAL_DISCOVERY_CACHE_TTL_MS);

@@ -560,8 +560,8 @@ function writeAgentGuideUnavailable(io: CealCliIo, action: "status" | "register"
 		update_safe: false,
 		error: {
 			kind: "guide_unavailable",
-			message: "The signed Ceal guide is not available from this command runtime.",
-			next_action: "Run 'ceal update', then retry 'ceal guide status'. Binary update success does not depend on guide registration.",
+			message: "The Ceal guide is not available from this command runtime.",
+			next_action: "Restore the source guide or update to a matching signed release, then retry 'ceal guide status'.",
 		},
 	});
 	return 3;
@@ -1782,13 +1782,14 @@ function writeCapabilitiesGatewayFailure(
 ): number {
 	const failure = classifyGatewayFailure(response.error);
 	const sessionRefresh = access.renewalContext.outcome;
+	const observation = typedGatewayObservation(phase, response);
 	return writeGatewayFailure(
 		response,
 		io,
 		failure.code === "authentication_failed" && access.storedSession
 			? gatewayAuthenticationFailureNextAction(route, sessionRefresh)
-			: undefined,
-		typedGatewayObservation(phase, response),
+			: gatewayProtocolMismatchNextAction(failure.code, observation),
+		observation,
 		sessionRefresh,
 	);
 }
@@ -1801,6 +1802,13 @@ function gatewayAuthenticationFailureNextAction(route: string, sessionRefresh: C
 
 function explicitSessionRefreshNextAction(route: string): string {
 	return `Run 'ceal session refresh', then retry '${route}'.`;
+}
+
+function gatewayProtocolMismatchNextAction(code: string, observation: CealGatewayObservation): string | undefined {
+	if (code !== "incompatible_protocol" && observation.response_error_code !== "incompatible_protocol") return undefined;
+	const gatewayProtocol = observation.response_protocol_version ?? "unreported";
+	const status = observation.http_status === undefined ? "" : ` (HTTP ${observation.http_status})`;
+	return `The Gateway rejected the ${observation.phase} with incompatible_protocol: it returned protocol ${gatewayProtocol}, but this worker supports only ${PROTOCOL_VERSION}${status}. This is a serving Gateway/worker protocol mismatch, not an authentication or connectivity problem. Align the serving Gateway with worker protocol ${PROTOCOL_VERSION} before retrying; do not refresh or retry this command until then, and capability access is unproven.`;
 }
 
 type GatewayUnavailableDetails = {
@@ -1894,6 +1902,11 @@ function gatewayUnavailableNextAction(
 			? "The Gateway returned HTTP 401 after the worker ensured a current session. Check the Gateway route or session binding; no additional refresh was attempted, and capability access is unproven."
 			: "The Gateway returned HTTP 401. Check the Gateway route, proxy, or session binding; automatic refresh is only attempted when local access is expired, and capability access is unproven.";
 	}
+	if (observation.response_error_code === "incompatible_protocol")
+		return (
+			gatewayProtocolMismatchNextAction("incompatible_protocol", observation) ??
+			"The Gateway and worker protocol versions are incompatible; capability access is unproven."
+		);
 	if (observation.phase === "discovery" && observation.protocol_handshake_verified) {
 		if (observation.response_shape_issue === "discovery_target_catalog_incomplete_without_cursor")
 			return "The Gateway returned an incomplete discovery target catalog without a continuation cursor. Repair the Gateway/proxy target-catalog response producer so it returns a complete page or supplies a continuation cursor, then retry; do not refresh again, and capability access is unproven.";

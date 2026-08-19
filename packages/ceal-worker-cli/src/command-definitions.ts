@@ -87,7 +87,7 @@ export const CEAL_COMMANDS: readonly CealCommandDefinition[] = [
 	},
 	{
 		name: "guide",
-		description: "Inspect or register the signed agent guide for this installed Ceal release.",
+		description: "Inspect or register the Ceal guide available to this command runtime.",
 		usage: "ceal guide [status | register codex | register claude]",
 		effect: "read_only_or_local_write",
 		evidence: "surface",

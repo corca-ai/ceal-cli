@@ -161,7 +161,7 @@ export interface CealAgentGuideState {
 	guide_id: "ceal-guide";
 	guide_path?: string;
 	update_safe: boolean;
-	carrier?: "generation" | "embedded";
+	carrier?: "generation" | "embedded" | "source";
 	materialized?: boolean;
 	next_action?: string;
 	// Whether `agent` names the host this process is running inside, or a
@@ -194,6 +194,7 @@ export function createCealAgentGuideStore(
 	claudeConfigDirectory?: string | undefined,
 	detectedHost?: CealAgentGuideHost | undefined,
 	embeddedGuideBundle?: Uint8Array | null | undefined,
+	developmentGuidePath?: string | undefined,
 ): CealAgentGuideStore | undefined {
 	// The host this process runs inside answers "you" better than a table order.
 	const defaultAgent = detectedHost ?? DEFAULT_AGENT_GUIDE_HOST;
@@ -212,6 +213,7 @@ export function createCealAgentGuideStore(
 	let guidePath: string;
 	let legacyGuidePath: string | undefined;
 	let embedded: { bundle: CealGuideBundle; stateRoot: string } | undefined;
+	let sourceGuide = false;
 	try {
 		const releaseDirectory = dirname(realpathSync(executablePath));
 		legacyGuidePath = resolve(releaseDirectory, "..", "..", "current", "guide");
@@ -221,6 +223,11 @@ export function createCealAgentGuideStore(
 			const workerState = dirname(dirname(installed.generationDirectory));
 			embedded = { bundle: decodeCealGuideBundle(embeddedGuideBundle), stateRoot: join(workerState, "guides") };
 			guidePath = join(embedded.stateRoot, "versions", embedded.bundle.sha256);
+		} else if (developmentGuidePath !== undefined) {
+			if (!isAbsolute(developmentGuidePath)) throw new Error("development_guide_path_not_absolute");
+			guidePath = realpathSync(developmentGuidePath);
+			assertGuideAvailable(guidePath);
+			sourceGuide = true;
 		} else {
 			guidePath = legacyGuidePath;
 			assertGuideAvailable(guidePath);
@@ -235,7 +242,7 @@ export function createCealAgentGuideStore(
 		const target = isCealAgentGuideHost(agent) ? agent : defaultAgent;
 		const host = resolved.get(target);
 		if (host === undefined) throw new Error("agent_guide_host_unresolved");
-		if (!host.registrationPath) return hostUnresolvedState(target, guidePath, host.rejectedOverride, resolved);
+		if (!host.registrationPath) return hostUnresolvedState(target, guidePath, host.rejectedOverride, resolved, sourceGuide);
 		return run(target, host.registrationPath);
 	};
 	const sourced = (state: CealAgentGuideState): CealAgentGuideState => ({
@@ -243,7 +250,7 @@ export function createCealAgentGuideStore(
 		agent_source: state.agent === detectedHost ? "detected" : "default",
 	});
 	return {
-		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved, embedded?.bundle))),
+		inspect: (agent) => sourced(act(agent, (target) => inspectRegistration(guidePath, target, resolved, embedded?.bundle, sourceGuide))),
 		register: (agent) =>
 			act(agent, (target, registrationPath) => {
 				if (embedded) {
@@ -256,7 +263,16 @@ export function createCealAgentGuideStore(
 						return guideMaterializationFailure(guidePath, target, resolved, embedded.bundle);
 					}
 				}
-				return registerGuide(guidePath, target, registrationPath, resolved, legacyGuidePath, embedded?.stateRoot, embedded?.bundle);
+				return registerGuide(
+					guidePath,
+					target,
+					registrationPath,
+					resolved,
+					legacyGuidePath,
+					embedded?.stateRoot,
+					embedded?.bundle,
+					sourceGuide,
+				);
 			}),
 	};
 }
@@ -304,6 +320,7 @@ function hostUnresolvedState(
 	guidePath: string,
 	rejectedOverride: boolean,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
+	sourceGuide = false,
 ): CealAgentGuideState {
 	const { label, environmentVariable } = hostRow(agent);
 	return {
@@ -312,6 +329,7 @@ function hostUnresolvedState(
 		guide_id: "ceal-guide",
 		guide_path: guidePath,
 		update_safe: false,
+		...(sourceGuide ? { carrier: "source" as const } : {}),
 		hosts: hostStates(guidePath, resolved),
 		error: {
 			kind: "registration_failed",
@@ -356,6 +374,7 @@ function inspectRegistration(
 	agent: CealAgentGuideHost,
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 	embeddedBundle?: CealGuideBundle,
+	sourceGuide = false,
 ): CealAgentGuideState {
 	const embedded = embeddedBundle !== undefined;
 	const materialized = pathEntryExists(guidePath);
@@ -373,7 +392,7 @@ function inspectRegistration(
 		agent,
 		guide_id: "ceal-guide",
 		...(!embedded || materialized ? { guide_path: guidePath } : {}),
-		update_safe: !embedded,
+		update_safe: !embedded && !sourceGuide,
 		...(embedded
 			? {
 					carrier: "embedded" as const,
@@ -384,7 +403,16 @@ function inspectRegistration(
 								next_action: `Run 'ceal guide register ${agent}' to stage and register this signed guide directory for ${hostRow(agent).label}.`,
 							}),
 				}
-			: {}),
+			: sourceGuide
+				? {
+						carrier: "source" as const,
+						...(registered
+							? {}
+							: {
+									next_action: `Run 'ceal guide register ${agent}' to link this mutable source guide for ${hostRow(agent).label}.`,
+								}),
+					}
+				: {}),
 		hosts: hostStates(guidePath, resolved),
 	};
 }
@@ -405,30 +433,33 @@ function registerGuide(
 	legacyGuidePath?: string,
 	embeddedStateRoot?: string,
 	embeddedBundle?: CealGuideBundle,
+	sourceGuide = false,
 ): CealAgentGuideState {
 	try {
 		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) {
-			if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+			if (registrationMatches(guidePath, registrationPath))
+				return inspectRegistration(guidePath, agent, resolved, embeddedBundle, sourceGuide);
 			// The signed 0.76.1 runtime registered the generation-local `current/guide`
 			// path. Preserve that link, like every other occupant: portable filesystems
 			// cannot replace it conditionally without deleting a concurrent foreign entry.
 			const managedPrevious =
 				(legacyGuidePath && registrationPointsTo(registrationPath, legacyGuidePath)) ||
 				(embeddedStateRoot && registrationPointsIntoEmbeddedState(registrationPath, embeddedStateRoot));
-			if (managedPrevious) return conflictState(guidePath, agent, resolved, embeddedBundle, registrationPath);
-			return conflictState(guidePath, agent, resolved, embeddedBundle);
+			if (managedPrevious) return conflictState(guidePath, agent, resolved, embeddedBundle, registrationPath, sourceGuide);
+			return conflictState(guidePath, agent, resolved, embeddedBundle, undefined, sourceGuide);
 		}
 		mkdirSync(dirname(registrationPath), { recursive: true, mode: 0o700 });
 		symlinkSync(guidePath, registrationPath, "dir");
-		return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+		return inspectRegistration(guidePath, agent, resolved, embeddedBundle, sourceGuide);
 	} catch {
 		// Another process can publish the same registration after the existence
 		// check and before symlinkSync. The requested final state is success even
 		// when this process lost that race; a different occupant is still the same
 		// deliberate conflict the pre-check reports.
-		if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle);
-		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath)) return conflictState(guidePath, agent, resolved, embeddedBundle);
-		const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+		if (registrationMatches(guidePath, registrationPath)) return inspectRegistration(guidePath, agent, resolved, embeddedBundle, sourceGuide);
+		if (existsSync(registrationPath) || isDanglingSymlink(registrationPath))
+			return conflictState(guidePath, agent, resolved, embeddedBundle, undefined, sourceGuide);
+		const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle, sourceGuide);
 		// Distinguish "the skills directory itself is unusable" from "something
 		// occupies the registration path". Found on a real host whose
 		// `~/.claude/skills` is a link to a directory that does not exist: the
@@ -600,8 +631,9 @@ function conflictState(
 	resolved: ReadonlyMap<CealAgentGuideHost, ResolvedGuideHost>,
 	embeddedBundle?: CealGuideBundle,
 	managedPreviousPath?: string,
+	sourceGuide = false,
 ): CealAgentGuideState {
-	const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle);
+	const inspected = inspectRegistration(guidePath, agent, resolved, embeddedBundle, sourceGuide);
 	return unavailableFromInspection(inspected, agent, {
 		kind: "registration_conflict",
 		message:

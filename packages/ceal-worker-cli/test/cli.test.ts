@@ -1579,7 +1579,7 @@ test("session refresh explicitly rotates an expiring stored session once and per
 test("capabilities renew an expired stored session once before catalog and target reads", async () => {
 	await withRenewingGateway(async ({ endpoint, oldRefreshToken, newAccessToken, requests, refreshCalls }) => {
 		let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
-		const runtime = {
+		const runtime: TestRuntime = {
 			readStoredSession: async () => current,
 			writeStoredSession: async (session) => {
 				current = session;
@@ -4384,10 +4384,15 @@ test("target selector refusal preserves the capability preflight refresh outcome
 		},
 		{
 			discoveryFactory: (request) => {
-				const discovery = discoveryResponse(request).value;
+				const response = discoveryResponse(request);
+				if (!response.ok) throw new Error("discovery_fixture_failure");
+				const discovery = response.value;
+				if (!Array.isArray(discovery.capabilities) || discovery.capabilities.length === 0)
+					throw new Error("discovery_capability_fixture_missing");
+				const capability = fixtureRecord(discovery.capabilities[0], "discovery_capability");
 				return success(request, {
 					...discovery,
-					capabilities: [{ ...discovery.capabilities[0], capability_id: "notion.page.get", navigation }],
+					capabilities: [{ ...capability, capability_id: "notion.page.get", navigation }],
 					targets: [],
 					target_catalog: { target_count: 0, returned_count: 0, complete: true },
 				});
@@ -4757,6 +4762,34 @@ test("capabilities identifies an HTTP 200 protocol-invalid discovery response wi
 	);
 });
 
+test("capabilities names the serving Gateway protocol mismatch and exposes both versions", async () => {
+	await withGatewayProtocolMismatch(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(["capabilities", "--fresh"], 3, {
+			readStoredSession: async () => storedSession(endpoint),
+		});
+		assert.equal(payload.status, "unavailable");
+		assert.equal(payload.error.kind, "invalid_response");
+		assert.equal(payload.session_refresh, "none");
+		assert.equal(payload.live_gateway_checked, false);
+		assert.equal(payload.gateway_observation.http_status, 409);
+		assert.equal(payload.gateway_observation.response_kind, "protocol_invalid");
+		assert.equal(payload.gateway_observation.response_protocol_version, "1.3.0");
+		assert.equal(payload.gateway_observation.response_error_code, "incompatible_protocol");
+		assert.equal(payload.gateway_observation.protocol_handshake_verified, false);
+		assert.match(payload.error.next_action, /serving Gateway\/worker protocol mismatch/u);
+		assert.match(payload.error.next_action, /1\.3\.0/u);
+		assert.match(payload.error.next_action, /1\.4\.0/u);
+		assert.match(payload.error.next_action, /Align the serving Gateway/u);
+		assert.doesNotMatch(payload.error.next_action, /route\/proxy failure/u);
+		assert.doesNotMatch(payload.error.next_action, /Run 'ceal session refresh'/u);
+		assert.deepEqual(
+			requests.map((item) => item.body.operation),
+			["handshake"],
+			"protocol mismatch must stop before discovery",
+		);
+	});
+});
+
 test("capabilities identifies a stale incomplete target page after one refresh without retrying", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, requests, refreshCalls }) => {
@@ -4772,7 +4805,10 @@ test("capabilities identifies a stale incomplete target page after one refresh w
 			assert.equal(payload.session_refresh, "refreshed");
 			assert.equal(payload.gateway_observation.response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
 			assert.equal(refreshCalls(), 1);
-			assert.deepEqual(requests.map((item) => item.body.operation), ["handshake", "discover"]);
+			assert.deepEqual(
+				requests.map((item) => item.body.operation),
+				["handshake", "discover"],
+			);
 			assert.match(payload.error.next_action, /incomplete discovery target catalog/u);
 			assert.match(payload.error.next_action, /continuation cursor/u);
 			assert.doesNotMatch(payload.error.next_action, /Gateway\/proxy protocol compatibility/u);
@@ -4781,6 +4817,7 @@ test("capabilities identifies a stale incomplete target page after one refresh w
 		{
 			discoveryFactory: (body) => {
 				const response = discoveryResponse(body);
+				if (!response.ok) throw new Error("discovery_fixture_failure");
 				return {
 					...response,
 					value: {
@@ -4991,10 +5028,7 @@ function cachedEntry(endpoint: string, cachedAt: number): CealDiscoveryCacheEntr
 type GatewayRequestLog = { authorization: string | undefined; profiles: string | undefined; body: FixtureRequest };
 type GatewayCallback = (input: { endpoint: string; requests: GatewayRequestLog[] }) => Promise<void>;
 
-async function withGateway(
-	callback: GatewayCallback,
-	responseFactory: ((body: FixtureRequest) => FixtureResponse) | null = null,
-): Promise<void> {
+async function withGateway(callback: GatewayCallback, responseFactory: ((body: FixtureRequest) => unknown) | null = null): Promise<void> {
 	const requests: GatewayRequestLog[] = [];
 	const server = createServer(async (request, response) => {
 		const chunks: Buffer[] = [];
@@ -5049,6 +5083,46 @@ async function withGatewayPhaseFailure(failureAt: GatewayPhaseFailure, callback:
 		const value = body.operation === "handshake" ? handshakeResponse(body) : discoveryResponse(body);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify(value));
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("test server address unavailable");
+	try {
+		await callback({ endpoint: `http://127.0.0.1:${address.port}/gateway/client`, requests });
+	} finally {
+		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	}
+}
+
+async function withGatewayProtocolMismatch(callback: GatewayCallback): Promise<void> {
+	const requests: GatewayRequestLog[] = [];
+	const server = createServer(async (request, response) => {
+		const chunks: Buffer[] = [];
+		for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		const body: FixtureRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const profiles = request.headers["x-ceal-profiles"];
+		requests.push({ authorization: request.headers.authorization, profiles: Array.isArray(profiles) ? profiles.join(",") : profiles, body });
+		if (body.operation === "handshake") {
+			response.writeHead(409, { "content-type": "application/json" });
+			response.end(
+				JSON.stringify({
+					ok: false,
+					request_id: body.request_id,
+					protocol_version: "1.3.0",
+					error: {
+						code: "incompatible_protocol",
+						message: "The serving Gateway only supports protocol 1.3.0.",
+						next_action: "Check the Gateway route or proxy and retry.",
+					},
+				}),
+			);
+			return;
+		}
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify(discoveryResponse(body)));
 	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
@@ -5202,7 +5276,7 @@ type RenewingGatewayOptions = {
 	refreshDeniedCode?: string;
 	invalidRevokeResponse?: boolean;
 	rejectFirstGateway?: boolean;
-	discoveryFactory?: (body: { operation?: string; [key: string]: unknown }) => unknown;
+	discoveryFactory?: (body: FixtureRequest) => FixtureResponse;
 };
 type RenewingGatewayCallback = (input: {
 	endpoint: string;
@@ -5808,7 +5882,11 @@ test("--timing preserves one-result stdout and emits only fixed secret-free phas
 	const staticEvents = timingEvents(staticTimed.stderr);
 	assert.deepEqual(new Set(staticEvents.map((event) => event.stage)), new Set(["cli_bootstrap"]));
 	const guideTimed = await runBin(["--timing", "guide", "status"], "");
-	assert.equal(guideTimed.code, 3);
+	assert.equal(guideTimed.code, 0, guideTimed.stderr);
+	const guideDocument = parseYaml(guideTimed.stdout);
+	assert.equal(guideDocument.status, "available");
+	assert.equal(guideDocument.carrier, "source");
+	assert.equal(guideDocument.update_safe, false);
 	const guideStages = new Set(timingEvents(guideTimed.stderr).map((event) => event.stage));
 	assert.ok(guideStages.has("runtime_prepare"));
 	assert.ok(guideStages.has("guide_inspect"));

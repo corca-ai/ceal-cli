@@ -253,6 +253,10 @@ export function summarizeYaml(stdout: string, kind: string): RecordValue {
 		"gateway_audit_readback",
 		"provider_state_readback",
 		"outcome",
+		"carrier",
+		"update_safe",
+		"materialized",
+		"guide_path",
 	])
 		if (value[key] !== undefined && isSafeSummaryValue(value[key])) summary[key] = value[key];
 	if (isRecord(value.gateway))
@@ -429,15 +433,21 @@ async function main(): Promise<number> {
 		home_mode: "current_process_HOME",
 	};
 	if (options.doctor) {
+		const guide = existsSync(WORKER_ENTRYPOINT)
+			? await runProcess(process.execPath, [WORKER_ENTRYPOINT, "guide", "status"], COMMAND_TIMEOUT_MS)
+			: undefined;
 		return emit(
 			{
 				schema_version: "ceal.source_worker_e2e_doctor.v1",
 				command: "source-worker-e2e doctor",
-				ok: existsSync(WORKER_ENTRYPOINT),
-				status: existsSync(WORKER_ENTRYPOINT) ? "ready" : "build_required",
+				ok: existsSync(WORKER_ENTRYPOINT) && guide?.exit_code === 0,
+				status: !existsSync(WORKER_ENTRYPOINT) ? "build_required" : guide?.exit_code === 0 ? "ready" : "source_guide_unavailable",
 				source_worker: metadata,
+				...(guide === undefined ? {} : { guide: commandSummary(guide, "guide") }),
 				next_action: existsSync(WORKER_ENTRYPOINT)
-					? "Run with --allow-live-gateway for an explicit live proof."
+					? guide?.exit_code === 0
+						? "Run with --allow-live-gateway for an explicit live proof."
+						: "Restore the source guide or build a matching signed Worker, then rerun this doctor."
 					: "Run npm run build:worker, then rerun this doctor.",
 			},
 			options.json,
@@ -507,11 +517,11 @@ async function main(): Promise<number> {
 			return { result, summary };
 		});
 	const version = await worker(["version"], "version");
-	await worker(["guide", "status"], "guide");
+	const guide = await worker(["guide", "status"], "guide");
 	const session = await worker(["session", "status"], "session");
 	const help = await worker(["capabilities", "--help"], "capabilities_help");
 	const autoRefreshRequired = help.result.stdout.includes("Session effect: refresh_if_needed");
-	if ([version, session, help].some((entry) => entry.result.exit_code !== 0) || !autoRefreshRequired)
+	if ([version, guide, session, help].some((entry) => entry.result.exit_code !== 0) || !autoRefreshRequired)
 		return emit(
 			{
 				schema_version: "ceal.source_worker_e2e.v1",

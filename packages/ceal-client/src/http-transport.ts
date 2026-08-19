@@ -15,6 +15,7 @@ import {
 	readBoundedResponseBody,
 	resolveSafeHttpEndpoint,
 } from "./request-bounds.js";
+import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 export type CealHttpTransportErrorCode =
 	| "invalid_configuration"
@@ -294,12 +295,16 @@ function captureResponseMetadata(value: unknown, operation: CealGatewayRequest["
 	return {
 		...(protocolVersion !== undefined
 			? { response_protocol_version: protocolVersion }
-			: record !== undefined ? { response_protocol_version: null } : {}),
+			: record !== undefined
+				? { response_protocol_version: null }
+				: {}),
 		...(schemaVersion !== undefined
 			? { response_schema_version: schemaVersion }
 			: nestedSchemaVersion !== undefined
 				? { response_schema_version: nestedSchemaVersion }
-				: record !== undefined ? { response_schema_version: null } : {}),
+				: record !== undefined
+					? { response_schema_version: null }
+					: {}),
 		...(record ? { response_envelope_kind: responseEnvelopeKind(record) } : {}),
 		...(hasError ? { response_error_code: safeResponseMetadata(record.error, ["code"]) ?? null } : {}),
 		...(shapeIssue ? { response_shape_issue: shapeIssue } : {}),
@@ -312,13 +317,13 @@ function safeResponseMetadata(value: unknown, keys: readonly string[]): string |
 	for (const key of keys) {
 		if (!Object.hasOwn(record, key)) continue;
 		const candidate = record[key];
-		return typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(candidate) ? candidate : null;
+		return typeof candidate === "string" && CEAL_SAFE_REF.test(candidate) ? candidate : null;
 	}
 	return undefined;
 }
 
 function responseRecord(value: unknown): Record<string, unknown> | undefined {
-	return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function responseValue(value: unknown): unknown {
@@ -343,13 +348,14 @@ function responseShapeIssue(value: unknown, operation: CealGatewayRequest["opera
 		return undefined;
 	const catalog = responseRecord(discovery?.target_catalog);
 	if (
-		typeof catalog?.target_count === "number"
-		&& Number.isSafeInteger(catalog.target_count)
-		&& catalog.target_count > 0
-		&& catalog.returned_count === 0
-		&& catalog.complete === false
-		&& (catalog.next_cursor === undefined || catalog.next_cursor === null)
-	) return "discovery_target_catalog_incomplete_without_cursor";
+		typeof catalog?.target_count === "number" &&
+		Number.isSafeInteger(catalog.target_count) &&
+		catalog.target_count > 0 &&
+		catalog.returned_count === 0 &&
+		catalog.complete === false &&
+		(catalog.next_cursor === undefined || catalog.next_cursor === null)
+	)
+		return "discovery_target_catalog_incomplete_without_cursor";
 	return undefined;
 }
 

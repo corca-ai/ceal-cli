@@ -78,9 +78,29 @@ test("source-worker-e2e summaries omit tokens and raw provider response bodies",
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_schema_version, null);
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_envelope_kind, "failure");
 	assert.equal((summary.gateway_observation as Record<string, unknown>).response_error_code, "authentication_failed");
-	assert.equal((summary.gateway_observation as Record<string, unknown>).response_shape_issue, "discovery_target_catalog_incomplete_without_cursor");
+	assert.equal(
+		(summary.gateway_observation as Record<string, unknown>).response_shape_issue,
+		"discovery_target_catalog_incomplete_without_cursor",
+	);
 	assert.equal(summary.failure_stage, "gateway_discovery");
 	assert.doesNotMatch(JSON.stringify(summary), /SECRET|provider-secret-body/u);
+});
+
+test("source-worker-e2e retains the local guide carrier without treating it as a release claim", () => {
+	const summary = summarizeYaml(
+		[
+			"schema_version: ceal.guide.v1",
+			"ok: true",
+			"status: available",
+			"carrier: source",
+			"update_safe: false",
+			"guide_path: /checkout/skills/ceal-guide",
+		].join("\n"),
+		"guide",
+	);
+	assert.equal(summary.carrier, "source");
+	assert.equal(summary.update_safe, false);
+	assert.equal(summary.guide_path, "/checkout/skills/ceal-guide");
 });
 
 test("source-worker-e2e classifies plain-text capabilities help as a surface probe", () => {

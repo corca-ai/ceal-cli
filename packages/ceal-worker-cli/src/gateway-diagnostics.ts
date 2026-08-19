@@ -1,5 +1,10 @@
-import { type CealHttpResponseEnvelopeKind, type CealHttpResponseKind, type CealHttpResponseShapeIssue, CealHttpTransportError } from "@corca-ai/ceal";
-import { CEAL_SAFE_REQUEST_ID } from "./safe-ref.js";
+import {
+	type CealHttpResponseEnvelopeKind,
+	type CealHttpResponseKind,
+	type CealHttpResponseShapeIssue,
+	CealHttpTransportError,
+} from "@corca-ai/ceal";
+import { CEAL_SAFE_REF, CEAL_SAFE_REQUEST_ID } from "./safe-ref.js";
 
 export type CealGatewayObservationPhase = "handshake" | "discovery";
 export type CealGatewayObservationOperation = "handshake" | "discover";
@@ -91,5 +96,5 @@ function safeContentType(value: string): string {
 }
 
 function safeMetadata(value: string | null | undefined): string | null {
-	return value === null ? null : typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value) ? value : "unavailable";
+	return value === null ? null : typeof value === "string" && CEAL_SAFE_REF.test(value) ? value : "unavailable";
 }

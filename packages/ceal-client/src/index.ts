@@ -1,6 +1,7 @@
 import type { CealGatewayRequestForInput, CealGatewayRequestInput, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
 import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
 import type { CealClientTransport } from "./http-transport.js";
+import { CEAL_SAFE_REF } from "./safe-ref.js";
 
 export type {
 	CealClientFailure,
@@ -72,7 +73,7 @@ export function createCealClient(transport: CealClientTransport): CealClient {
 }
 
 function assertRequestId(value: string): void {
-	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)) {
+	if (!CEAL_SAFE_REF.test(value)) {
 		throw new TypeError("Ceal client request_id must be a non-empty, redaction-safe identifier");
 	}
 }

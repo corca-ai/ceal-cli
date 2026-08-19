@@ -1,11 +1,11 @@
 ---
 name: ceal-guide
-description: Use when an agent needs to discover, invoke, or verify worker-facing Ceal capabilities through the installed ceal CLI.
+description: Use when an agent needs to discover, invoke, or verify worker-facing Ceal capabilities through the available ceal CLI.
 ---
 
 # Ceal Guide
 
-Use the installed binary as the source of truth. This skill owns the method for
+Use the invoked Ceal command as the source of truth. This skill owns the method for
 finding and verifying a capability, not a command list, integration catalog,
 target inventory, or deployment route.
 
@@ -62,7 +62,7 @@ opening, citing, or acting on it.
   weaken the sandbox, switch to a provider CLI, or infer that the Profile has no
   capability from a request that never reached the Gateway.
 - If `ceal --help` fails or required leaf fields are missing, stop and request
-  installation or update of the matching binary. Do not fall back to another
+  the matching source build or signed binary. Do not fall back to another
   guide, binary, or guessed command.
 
 ## References

@@ -29,15 +29,15 @@ These representative routes need nothing but a built or installed worker CLI.
 | --- | --- |
 | `ceal version` | which build is installed |
 | `ceal commands` | the declared route surface, effects included |
-| `ceal guide status` | the signed embedded guide carrier is available, and where it would register |
+| `ceal guide status` | the source or signed guide carrier is available, and where it would register |
 | `ceal session status` | whether this HOME has a configured client session |
 | `ceal observe` | the local page renders this client's cached state; serves until Ctrl-C |
 
-`ceal guide status` needs a **signed installed release**, not a session: the
-complete guide directory is embedded in the real executable and is materialized
-only by explicit registration, so a `node dist/bin.js` run from a checkout
-answers `guide_unavailable` no matter how healthy the install is. That is a
-property of the dev build, not a failure.
+`ceal guide status` needs no Gateway session. A checkout-built `node dist/bin.js`
+reports the canonical `skills/ceal-guide` as `carrier: source` with
+`update_safe: false`; that is local source proof, not signed-install proof. A
+signed native release reports its embedded carrier and remains the only release
+or installation claim.
 
 Gateway- and session-bound routes fail closed without a Gateway-issued client
 session, and failing closed is the correct answer rather than a broken one:
@@ -48,7 +48,8 @@ session, and failing closed is the correct answer rather than a broken one:
 
 Local routes are separate: `ceal update` and `ceal guide register codex|claude`
 need no Gateway session, but they are local writes and are not part of a
-read-only ceiling probe.
+read-only ceiling probe. Registering a source carrier links the mutable
+checkout guide and does not make it signed or update-safe.
 
 Read the ceiling back yourself, in a throwaway HOME that cannot touch real state:
 
