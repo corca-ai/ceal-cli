@@ -39,6 +39,21 @@ test("converter rejects non-canonical or unsafe limits", () => {
 	}
 });
 
+// Three tests build an "outside the root" directory to prove a symlink escape is
+// refused, and each repeated the same create-plus-two-rmSync teardown. The
+// duplicate ratchet reported that as its own family; extracting it is the repair
+// rather than an acceptance. Registering BOTH cleanups here also closes the
+// failure mode the copies invited: a test that adds an outside dir and forgets
+// one `rmSync` leaks a temp tree, and nothing fails.
+function outsideRoot(context: { after: (fn: () => void) => void }, root: string, prefix: string): string {
+	const outside = mkdtempSync(join(tmpdir(), prefix));
+	context.after(() => {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+	return outside;
+}
+
 function fixture(policyEntries = ["scripts/convert.mjs"]): string {
 	const root = mkdtempSync(join(tmpdir(), "ceal-agent-convert-fixture-"));
 	mkdirSync(join(root, "scripts"));
@@ -100,45 +115,33 @@ test("preflight refuses a missing later source without mutating an earlier valid
 
 test("preflight rejects a selected source symlink even when its target is inside another tree", (context) => {
 	const root = fixture();
-	const outside = mkdtempSync(join(tmpdir(), "ceal-agent-source-link-"));
+	const outside = outsideRoot(context, root, "ceal-agent-source-link-");
 	writeFileSync(join(outside, "convert.mjs"), "outside\n");
 	rmSync(join(root, "scripts/convert.mjs"));
 	symlinkSync(join(outside, "convert.mjs"), join(root, "scripts/convert.mjs"));
 	execFileSync("git", ["-C", root, "add", "-A"]);
-	context.after(() => {
-		rmSync(root, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
-	});
 	assert.throws(() => planConversion(root, "scripts", 1), /conversion_source_invalid/u);
 });
 
 test("preflight rejects a selected source whose parent directory resolves outside the root", (context) => {
 	const root = fixture(["links/convert.mjs", "scripts/convert.mjs"]);
-	const outside = mkdtempSync(join(tmpdir(), "ceal-agent-outside-"));
+	const outside = outsideRoot(context, root, "ceal-agent-outside-");
 	writeFileSync(join(outside, "convert.mjs"), "outside\n");
 	mkdirSync(join(root, "links"));
 	rmSync(join(root, "links"), { recursive: true, force: true });
 	symlinkSync(outside, join(root, "links"), "dir");
 	execFileSync("git", ["-C", root, "add", "-A"]);
-	context.after(() => {
-		rmSync(root, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
-	});
 	assert.throws(() => planConversion(root, "links", 1), /legacy_mjs_policy_drift|conversion_source_invalid|conversion_path_escape/u);
 });
 
 test("apply rechecks a reference parent realpath immediately before writing", (context) => {
 	const root = fixture();
-	const outside = mkdtempSync(join(tmpdir(), "ceal-agent-reference-outside-"));
+	const outside = outsideRoot(context, root, "ceal-agent-reference-outside-");
 	writeFileSync(join(root, "refs/reference.json"), JSON.stringify({ selected: "scripts/convert.mjs" }));
 	execFileSync("git", ["-C", root, "add", "-A"]);
 	const plan = planConversion(root, "scripts", 1);
 	rmSync(join(root, "refs"), { recursive: true, force: true });
 	symlinkSync(outside, join(root, "refs"), "dir");
-	context.after(() => {
-		rmSync(root, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
-	});
 	assert.throws(() => applyConversion(plan), /conversion_path_escape|conversion_transaction_failed/u);
 	assert.equal(existsSync(join(root, "scripts/convert.mjs")), true);
 });
